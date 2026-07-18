@@ -77,9 +77,10 @@ When enabled:
 - The HIL module can also open a **Modem shell** tab backed by the
   same WebSocket route. Its command field is persisted in the browser
   and can launch a configured tool directly, for example
-  `sudo tio /dev/ttyUSB2`. When the Card Bridge remote-rig state has
-  an SSH target, this tab defaults to `ssh -tt ... sudo tio /dev/ttyUSB2`
-  so the terminal attaches to the modem serial device on the RPi.
+  `tio /dev/ttyUSB2`. When the Card Bridge remote-rig state has an SSH
+  target, this tab defaults to `ssh -tt ... tio /dev/ttyUSB2` so the
+  terminal attaches to the modem serial device on the RPi. Configure
+  device permissions for that account; the GUI never inserts `sudo`.
 
 ---
 
@@ -178,9 +179,10 @@ The overlay is bounded:
 ## 3. HTTP and WebSocket reference
 
 All endpoints sit behind the same bearer-token auth as the rest of the
-GUI surface (`Authorization: Bearer <token>` for HTTP; query parameter
-`?t=<token>`, `Authorization` header, or `Sec-WebSocket-Protocol:
-bearer.<token>` for the WebSocket).
+GUI surface (`Authorization: Bearer <token>` for HTTP; an
+`Authorization` header for non-browser WebSocket clients, or
+`Sec-WebSocket-Protocol: yggdrasim, bearer.<token>` for browser
+WebSockets). Tokens are never placed in request URLs.
 
 ### 3.1 Capability probe
 
@@ -236,16 +238,17 @@ running. Use it for live device pickers in custom UIs.
 
 ### 3.3 WebSocket framing
 
-URL: `ws://<host>:<port>/api/host-shell?t=<token>&rows=<rows>&cols=<cols>[&command=<argv>]`
+URL: `ws://<host>:<port>/api/host-shell`
 (`wss://` when the GUI is fronted by TLS or `--tls-self-signed`).
 
-`rows` and `cols` are clamped to `[1, 500]` and `[1, 1000]`
-respectively.
-`command` is optional. When omitted, the route forks the resolved
-login shell. When present, it is parsed with POSIX shell quoting into
-an argv vector and passed directly to `execvpe`; no intermediate shell
-is used. A HIL modem-shell launch such as `sudo tio /dev/ttyUSB2`
-therefore starts `sudo` with `tio` and the device path as arguments.
+The client must send a JSON `start` frame immediately after the
+authenticated WebSocket opens. `rows` and `cols` are clamped to
+`[1, 500]` and `[1, 1000]` respectively. `command` is optional. When
+omitted, the route forks the resolved login shell. When present, it is
+parsed with POSIX shell quoting into an argv vector and passed directly
+to `execvpe`; no intermediate shell is used. A HIL modem-shell launch
+such as `tio /dev/ttyUSB2` therefore starts `tio` with the device path
+as its argument.
 
 Two frame directions, two encodings:
 
@@ -259,6 +262,9 @@ Two frame directions, two encodings:
 #### 3.3.1 Client control frames
 
 ```jsonc
+// Required first frame. Command may be an empty string for the login shell.
+{ "type": "start", "rows": 30, "cols": 120, "command": "" }
+
 // stdin pulled out as a JSON envelope. Equivalent to sending the
 // literal bytes as a binary frame; useful when the client cannot
 // generate a binary WebSocket frame.
@@ -288,10 +294,10 @@ older servers (or vice versa) interoperate without a hard break.
 // Sent once after the PTY child has been forked.
 { "event": "spawned", "pid": 12345, "shell": "/bin/bash" }
 
-// For configured launches, shell is null and command echoes the
-// parsed command source used for the child process.
+// For configured launches, shell is null. The command is deliberately
+// not echoed into responses or logs.
 { "event": "spawned", "pid": 12345, "shell": null,
-  "command": "sudo tio /dev/ttyUSB2" }
+  "configured_command": true }
 
 // Sent once after the child exits or the WS is closing.
 { "event": "exit", "status": 0 }

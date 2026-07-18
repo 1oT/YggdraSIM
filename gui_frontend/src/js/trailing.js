@@ -1860,6 +1860,8 @@
   }
 
   function openFsExplorer(opts) {
+    openFsExplorer._sequence = Number(openFsExplorer._sequence || 0) + 1;
+    var explorerId = "cc-fs-explorer-" + openFsExplorer._sequence;
     var o = opts || {};
     var mode = String(o.mode || "open");  // "open" | "folder" | "save"
     var titleText = String(o.title || (mode === "folder"
@@ -1867,6 +1869,7 @@
       : (mode === "save" ? "Save as" : "Open file")));
     var allowedExts = _fsExplorerExtractExts(o.fileTypes || []);
     var defaultSaveName = String(o.saveFilename || "");
+    var returnFocus = document.activeElement;
 
     return new Promise(function (resolve) {
       var settled = false;
@@ -1879,6 +1882,15 @@
           }
         } catch (_err) { /* noop */ }
         document.removeEventListener("keydown", onKey, true);
+        window.setTimeout(function () {
+          if (!returnFocus || !returnFocus.isConnected
+              || typeof returnFocus.focus !== "function") return;
+          try {
+            returnFocus.focus({ preventScroll: true });
+          } catch (_focusErr) {
+            returnFocus.focus();
+          }
+        }, 0);
         resolve(value || "");
       }
 
@@ -1886,7 +1898,6 @@
       overlay.className = "cc-fs-explorer-overlay";
       overlay.setAttribute("role", "dialog");
       overlay.setAttribute("aria-modal", "true");
-      overlay.setAttribute("aria-label", titleText);
       overlay.addEventListener("click", function (ev) {
         if (ev.target === overlay) settle("");
       });
@@ -1900,13 +1911,16 @@
       header.className = "cc-fs-explorer-head";
       var titleEl = document.createElement("div");
       titleEl.className = "cc-fs-explorer-title";
+      titleEl.id = explorerId + "-title";
       titleEl.textContent = titleText;
+      overlay.setAttribute("aria-labelledby", titleEl.id);
       header.appendChild(titleEl);
       var closeBtn = document.createElement("button");
       closeBtn.type = "button";
       closeBtn.className = "cc-fs-explorer-close";
       closeBtn.textContent = "\u00D7";
       closeBtn.title = "Cancel (Esc)";
+      closeBtn.setAttribute("aria-label", "Cancel file selection");
       closeBtn.addEventListener("click", function () { settle(""); });
       header.appendChild(closeBtn);
       modal.appendChild(header);
@@ -1924,6 +1938,9 @@
       pathInput.type = "text";
       pathInput.className = "cc-fs-explorer-path";
       pathInput.placeholder = "Type a path and press Enter";
+      pathInput.setAttribute("aria-label", "Current folder path");
+      pathInput.setAttribute("autocomplete", "off");
+      pathInput.spellcheck = false;
       pathRow.appendChild(pathInput);
       var goBtn = document.createElement("button");
       goBtn.type = "button";
@@ -1939,6 +1956,8 @@
 
       var sidebar = document.createElement("div");
       sidebar.className = "cc-fs-explorer-sidebar";
+      sidebar.setAttribute("role", "navigation");
+      sidebar.setAttribute("aria-label", "File location shortcuts");
       body.appendChild(sidebar);
 
       var listingHost = document.createElement("div");
@@ -1951,6 +1970,8 @@
       filterInput.type = "text";
       filterInput.className = "cc-fs-explorer-filter";
       filterInput.placeholder = "Filter visible entries\u2026";
+      filterInput.setAttribute("aria-label", "Filter files and folders");
+      filterInput.setAttribute("autocomplete", "off");
       filterRow.appendChild(filterInput);
       var hiddenToggle = document.createElement("label");
       hiddenToggle.className = "cc-fs-explorer-hidden-toggle";
@@ -1963,10 +1984,16 @@
 
       var listingEl = document.createElement("ul");
       listingEl.className = "cc-fs-explorer-list";
+      listingEl.setAttribute("role", "listbox");
+      listingEl.setAttribute("aria-label", "Files and folders");
+      listingEl.tabIndex = 0;
       listingHost.appendChild(listingEl);
 
       var statusEl = document.createElement("div");
       statusEl.className = "cc-fs-explorer-status";
+      statusEl.setAttribute("role", "status");
+      statusEl.setAttribute("aria-live", "polite");
+      statusEl.setAttribute("aria-atomic", "true");
       listingHost.appendChild(statusEl);
 
       // Footer
@@ -2006,7 +2033,61 @@
         showHidden: false,
         filterText: "",
         selected: null,
+        loadRequest: 0,
       };
+
+      function setExplorerStatus(text, stateName) {
+        var statusState = String(stateName || "ready");
+        statusEl.textContent = String(text || "");
+        statusEl.dataset.state = statusState;
+        statusEl.classList.toggle("is-error", statusState === "error");
+        listingEl.setAttribute("aria-busy", statusState === "loading" ? "true" : "false");
+      }
+
+      function visibleRows() {
+        return Array.prototype.filter.call(
+          listingEl.querySelectorAll(".cc-fs-explorer-row"),
+          function (row) { return !row.hidden; }
+        );
+      }
+
+      function selectEntry(row, entry, moveFocus) {
+        listingEl.querySelectorAll(".cc-fs-explorer-row.is-selected").forEach(function (prev) {
+          prev.classList.remove("is-selected");
+          prev.setAttribute("aria-selected", "false");
+          prev.tabIndex = -1;
+        });
+        if (!row || !entry) {
+          state.selected = null;
+          listingEl.removeAttribute("aria-activedescendant");
+          return;
+        }
+        row.classList.add("is-selected");
+        row.setAttribute("aria-selected", "true");
+        row.tabIndex = 0;
+        state.selected = entry;
+        listingEl.setAttribute("aria-activedescendant", row.id);
+        if (mode === "save" && entry.kind === "file") {
+          nameInput.value = entry.name;
+        } else if (mode === "open" && entry.kind === "file") {
+          nameInput.value = entry.name;
+        }
+        if (moveFocus && row.focus) row.focus();
+      }
+
+      function activateEntry(row) {
+        var entry = row && row._entry;
+        if (!entry) return;
+        if (entry.kind === "dir") {
+          loadPath(entry.path);
+          return;
+        }
+        if (mode === "open" && entry.kind === "file") {
+          settle(entry.path);
+          return;
+        }
+        selectEntry(row, entry, false);
+      }
 
       function applyFilter() {
         var query = state.filterText.trim().toLowerCase();
@@ -2034,7 +2115,12 @@
           row.hidden = !keep;
           if (keep) visible++;
         }
-        statusEl.textContent = visible + " visible · " + state.entries.length + " total";
+        var selectedRow = listingEl.querySelector(".cc-fs-explorer-row.is-selected");
+        if (selectedRow && selectedRow.hidden) selectEntry(null, null, false);
+        setExplorerStatus(
+          visible + " visible \u00B7 " + state.entries.length + " total",
+          "ready"
+        );
       }
 
       function renderEntries() {
@@ -2050,6 +2136,10 @@
           var li = document.createElement("li");
           li.className = "cc-fs-explorer-row";
           li.classList.add("cc-fs-explorer-row--" + entry.kind);
+          li.id = explorerId + "-entry-" + String(state.entries.indexOf(entry));
+          li.setAttribute("role", "option");
+          li.setAttribute("aria-selected", "false");
+          li.tabIndex = -1;
           li._entry = entry;
 
           var iconEl = document.createElement("span");
@@ -2076,36 +2166,25 @@
           li.appendChild(mtimeEl);
 
           li.addEventListener("click", function () {
-            var prev = listingEl.querySelector(".cc-fs-explorer-row.is-selected");
-            if (prev) prev.classList.remove("is-selected");
-            li.classList.add("is-selected");
-            state.selected = entry;
-            if (mode === "save") {
-              if (entry.kind === "file") nameInput.value = entry.name;
-            } else if (mode === "open") {
-              if (entry.kind === "file") nameInput.value = entry.name;
-            }
+            selectEntry(li, entry, false);
           });
           li.addEventListener("dblclick", function () {
-            if (entry.kind === "dir") {
-              loadPath(entry.path);
-              return;
-            }
-            if (mode === "open" && entry.kind === "file") {
-              settle(entry.path);
-            }
+            activateEntry(li);
           });
           listingEl.appendChild(li);
         });
       }
 
       async function loadPath(target) {
-        statusEl.textContent = "loading\u2026";
+        state.loadRequest += 1;
+        var requestId = state.loadRequest;
+        setExplorerStatus("Loading folder\u2026", "loading");
         try {
           var resp = await apiFetch(
             "/api/fs/browse?path=" + encodeURIComponent(target || ""),
             { method: "GET" }
           );
+          if (requestId !== state.loadRequest || settled) return;
           state.path = String(resp.path || "");
           state.parent = (resp.parent == null) ? null : String(resp.parent);
           state.sep = String(resp.separator || "/");
@@ -2115,16 +2194,18 @@
           upBtn.disabled = (state.parent == null);
           renderEntries();
           if (resp.error) {
-            statusEl.textContent = String(resp.error);
-            statusEl.classList.add("is-error");
+            setExplorerStatus(String(resp.error), "error");
           } else {
-            statusEl.classList.remove("is-error");
             applyFilter();
           }
           renderShortcuts(resp.shortcuts || [], resp.drives || []);
         } catch (err) {
-          statusEl.textContent = "browse failed: " + (err && err.message ? err.message : err);
-          statusEl.classList.add("is-error");
+          if (requestId !== state.loadRequest || settled) return;
+          setExplorerStatus(
+            "Could not browse this location: "
+              + (err && err.message ? err.message : err),
+            "error"
+          );
         }
       }
 
@@ -2168,8 +2249,8 @@
         var fname = (nameInput.value || "").trim();
         if (mode === "save") {
           if (fname.length === 0) {
-            statusEl.textContent = "Enter a filename to save.";
-            statusEl.classList.add("is-error");
+            setExplorerStatus("Enter a filename to save.", "error");
+            nameInput.focus();
             return;
           }
           settle(_fsExplorerJoin(state.path, fname, state.sep));
@@ -2184,8 +2265,29 @@
           settle(_fsExplorerJoin(state.path, fname, state.sep));
           return;
         }
-        statusEl.textContent = "Pick a file or type a name.";
-        statusEl.classList.add("is-error");
+        setExplorerStatus("Pick a file or type a name.", "error");
+        listingEl.focus();
+      }
+
+      function moveListingFocus(direction, boundary) {
+        var rows = visibleRows();
+        if (rows.length === 0) return;
+        var current = document.activeElement;
+        var index = rows.indexOf(current);
+        if (index < 0) {
+          var selectedRow = listingEl.querySelector(".cc-fs-explorer-row.is-selected");
+          index = rows.indexOf(selectedRow);
+        }
+        if (boundary === "first") {
+          index = 0;
+        } else if (boundary === "last") {
+          index = rows.length - 1;
+        } else if (index < 0) {
+          index = direction > 0 ? 0 : rows.length - 1;
+        } else {
+          index = Math.max(0, Math.min(rows.length - 1, index + direction));
+        }
+        selectEntry(rows[index], rows[index]._entry, true);
       }
 
       // Wire-up
@@ -2200,9 +2302,38 @@
         state.filterText = filterInput.value || "";
         applyFilter();
       });
+      filterInput.addEventListener("keydown", function (ev) {
+        if (ev.key !== "ArrowDown") return;
+        ev.preventDefault();
+        moveListingFocus(1, "first");
+      });
       hiddenCb.addEventListener("change", function () {
         state.showHidden = !!hiddenCb.checked;
         applyFilter();
+      });
+      listingEl.addEventListener("keydown", function (ev) {
+        var row = ev.target && ev.target.closest
+          ? ev.target.closest(".cc-fs-explorer-row")
+          : null;
+        if (ev.key === "ArrowDown") {
+          ev.preventDefault();
+          moveListingFocus(1);
+        } else if (ev.key === "ArrowUp") {
+          ev.preventDefault();
+          moveListingFocus(-1);
+        } else if (ev.key === "Home") {
+          ev.preventDefault();
+          moveListingFocus(0, "first");
+        } else if (ev.key === "End") {
+          ev.preventDefault();
+          moveListingFocus(0, "last");
+        } else if (ev.key === "Enter") {
+          ev.preventDefault();
+          if (row) activateEntry(row);
+        } else if (ev.key === " ") {
+          ev.preventDefault();
+          if (row) selectEntry(row, row._entry, false);
+        }
       });
       okBtn.addEventListener("click", commit);
       nameInput.addEventListener("keydown", function (ev) {
@@ -2214,6 +2345,37 @@
           ev.preventDefault();
           ev.stopPropagation();
           settle("");
+          return;
+        }
+        if (ev.key !== "Tab" || !overlay.isConnected) return;
+        var focusable = Array.prototype.filter.call(
+          overlay.querySelectorAll(
+            'button:not(:disabled), input:not(:disabled), select:not(:disabled), '
+              + 'textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+          ),
+          function (node) {
+            return !node.hidden
+              && node.getAttribute("aria-hidden") !== "true"
+              && (node.offsetParent !== null || node === document.activeElement);
+          }
+        );
+        if (focusable.length === 0) {
+          ev.preventDefault();
+          modal.tabIndex = -1;
+          modal.focus();
+          return;
+        }
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (!overlay.contains(document.activeElement)) {
+          ev.preventDefault();
+          first.focus();
+        } else if (ev.shiftKey && document.activeElement === first) {
+          ev.preventDefault();
+          last.focus();
+        } else if (!ev.shiftKey && document.activeElement === last) {
+          ev.preventDefault();
+          first.focus();
         }
       }
       document.addEventListener("keydown", onKey, true);
@@ -2748,7 +2910,7 @@
     if (spec.disabled) btn.disabled = true;
     var icon = document.createElement("span");
     icon.className = "ctx-menu-icon";
-    icon.textContent = spec.icon || "·";
+    ccSetActionIcon(icon, spec.icon || "action");
     var label = document.createElement("span");
     label.className = "ctx-menu-label";
     label.textContent = spec.label || "";
@@ -2796,20 +2958,20 @@
     var atr = reader && reader.atr_hex || "";
     var items = [
       {
-        icon: SCP03_ICONS.openSession,
+        icon: "open",
         label: "Open SCP03 session",
         onClick: function () { scp03StartSessionForReader(name); },
         disabled: name.length === 0,
       },
       {
-        icon: SCP03_ICONS.refreshAtr,
+        icon: "refresh",
         label: "Refresh ATR",
         onClick: function () { refreshSingleReaderAtr(name); },
         disabled: name.length === 0,
       },
       { divider: true },
       {
-        icon: SCP03_ICONS.copy,
+        icon: "copy",
         label: atr ? "Copy ATR" : "Copy reader name",
         onClick: function () { copyToClipboardSafe(atr || name); },
       },
@@ -3623,10 +3785,10 @@
     }
     var scheme = window.location.protocol === "https:" ? "wss" : "ws";
     var url = scheme + "://" + window.location.host
-      + "/api/events/apdu?t=" + encodeURIComponent(token);
+      + "/api/events/apdu";
     var sock;
     try {
-      sock = new WebSocket(url);
+      sock = new WebSocket(url, ["yggdrasim", "bearer." + token]);
     } catch (_err) {
       // Browser refused to construct the socket (e.g. CSP). Fall back
       // to silent — we don't want to spam the user about this.
@@ -4095,13 +4257,54 @@
   var docViewerState = {
     activeId: null,
     activeMarkdown: "",
+    requestId: 0,
+    returnFocus: null,
   };
 
-  function setDocViewerVisible(visible) {
+  function docViewerFocusableElements(modal) {
+    if (!modal) return [];
+    return Array.prototype.slice.call(
+      modal.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), '
+          + 'select:not([disabled]), textarea:not([disabled]), '
+          + '[tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter(function (element) {
+      return !element.hidden
+        && element.getAttribute("aria-hidden") !== "true"
+        && element.offsetParent !== null;
+    });
+  }
+
+  function setDocViewerVisible(visible, options) {
     var modal = document.getElementById("doc-modal");
     if (!modal) return;
+    options = options || {};
     modal.setAttribute("data-state", visible ? "open" : "hidden");
     modal.setAttribute("aria-hidden", visible ? "false" : "true");
+    if (visible) {
+      window.setTimeout(function () {
+        if (modal.getAttribute("data-state") !== "open") return;
+        var initial = document.getElementById("doc-modal-close")
+          || docViewerFocusableElements(modal)[0]
+          || modal;
+        if (initial && typeof initial.focus === "function") initial.focus();
+      }, 0);
+      return;
+    }
+    if (options.restoreFocus !== false) {
+      var returnFocus = docViewerState.returnFocus;
+      window.setTimeout(function () {
+        if (
+          returnFocus
+          && returnFocus.isConnected
+          && typeof returnFocus.focus === "function"
+        ) {
+          returnFocus.focus();
+        }
+      }, 0);
+    }
+    docViewerState.returnFocus = null;
   }
 
   function openGuideViewer(guideId, title) {
@@ -4109,36 +4312,57 @@
     var titleEl = document.getElementById("doc-modal-title");
     var pathEl = document.getElementById("doc-modal-path");
     var bodyEl = document.getElementById("doc-modal-body");
+    var copyBtn = document.getElementById("doc-modal-copy");
     if (!modal || !bodyEl) return;
+    if (modal.getAttribute("data-state") !== "open") {
+      var active = document.activeElement;
+      docViewerState.returnFocus = active && active !== document.body
+        ? active
+        : null;
+    }
+    var requestId = ++docViewerState.requestId;
+    docViewerState.activeId = guideId;
+    docViewerState.activeMarkdown = "";
     if (titleEl) titleEl.textContent = title || "Document";
     if (pathEl) pathEl.textContent = "loading…";
-    bodyEl.innerHTML = '<div class="cc-doc-loading">loading guide…</div>';
+    if (copyBtn) copyBtn.disabled = true;
+    bodyEl.setAttribute("aria-busy", "true");
+    bodyEl.innerHTML = '<div class="cc-doc-loading" role="status">Loading guide…</div>';
     setDocViewerVisible(true);
 
     apiFetch("/api/guides/" + encodeURIComponent(guideId))
       .then(function (resp) {
+        if (requestId !== docViewerState.requestId) return;
         if (!resp) {
-          bodyEl.innerHTML = '<div class="cc-doc-error">empty response</div>';
+          bodyEl.setAttribute("aria-busy", "false");
+          bodyEl.innerHTML = '<div class="cc-doc-error" role="alert">Empty response.</div>';
           return;
         }
         docViewerState.activeId = guideId;
         docViewerState.activeMarkdown = String(resp.markdown || "");
+        if (copyBtn) copyBtn.disabled = !docViewerState.activeMarkdown;
         if (titleEl) titleEl.textContent = resp.title || title || "Document";
         if (pathEl) pathEl.textContent = resp.path || "";
         bodyEl.innerHTML = renderMarkdownToHtml(resp.markdown || "");
+        bodyEl.setAttribute("aria-busy", "false");
         bodyEl.scrollTop = 0;
       })
       .catch(function (err) {
-        bodyEl.innerHTML = '<div class="cc-doc-error">'
+        if (requestId !== docViewerState.requestId) return;
+        bodyEl.setAttribute("aria-busy", "false");
+        bodyEl.innerHTML = '<div class="cc-doc-error" role="alert">'
           + escapeHtml("Failed to open guide: " + (err && err.message ? err.message : err))
           + "</div>";
       });
   }
 
   function closeGuideViewer() {
+    docViewerState.requestId += 1;
     setDocViewerVisible(false);
     docViewerState.activeId = null;
     docViewerState.activeMarkdown = "";
+    var copyBtn = document.getElementById("doc-modal-copy");
+    if (copyBtn) copyBtn.disabled = true;
   }
 
   function wireDocViewer() {
@@ -4157,7 +4381,11 @@
           navigator.clipboard.writeText(src).catch(function () {});
         }
         copyBtn.classList.add("is-copied");
-        setTimeout(function () { copyBtn.classList.remove("is-copied"); }, 700);
+        copyBtn.textContent = "Copied";
+        setTimeout(function () {
+          copyBtn.classList.remove("is-copied");
+          copyBtn.textContent = "Copy";
+        }, 700);
       });
     }
     modal.addEventListener("click", function (ev) {
@@ -4167,8 +4395,39 @@
       }
     });
     document.addEventListener("keydown", function (ev) {
-      if (ev.key === "Escape" && modal.getAttribute("data-state") === "open") {
+      if (modal.getAttribute("data-state") !== "open") return;
+      if (ev.key === "Escape") {
+        ev.preventDefault();
         closeGuideViewer();
+        return;
+      }
+      if (ev.key !== "Tab") return;
+      var focusable = docViewerFocusableElements(modal);
+      if (!focusable.length) {
+        ev.preventDefault();
+        modal.focus();
+        return;
+      }
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (
+        ev.shiftKey
+        && (
+          document.activeElement === first
+          || !modal.contains(document.activeElement)
+        )
+      ) {
+        ev.preventDefault();
+        last.focus();
+      } else if (
+        !ev.shiftKey
+        && (
+          document.activeElement === last
+          || !modal.contains(document.activeElement)
+        )
+      ) {
+        ev.preventDefault();
+        first.focus();
       }
     });
   }
@@ -4328,10 +4587,8 @@
     var scheme = window.location.protocol === "https:" ? "wss" : "ws";
     var rows = term.rows || 30;
     var cols = term.cols || 120;
-    var url = scheme + "://" + window.location.host + "/api/host-shell"
-      + "?t=" + encodeURIComponent(token)
-      + "&rows=" + rows + "&cols=" + cols;
-    var sock = new WebSocket(url);
+    var url = scheme + "://" + window.location.host + "/api/host-shell";
+    var sock = new WebSocket(url, ["yggdrasim", "bearer." + token]);
     sock.binaryType = "arraybuffer";
     hostShellState.socket = sock;
 
@@ -4342,6 +4599,12 @@
     setText("host-shell-status", "connecting…");
 
     sock.onopen = function () {
+      sock.send(JSON.stringify({
+        type: "start",
+        rows: rows,
+        cols: cols,
+        command: "",
+      }));
       setText("host-shell-status", "running");
       sendHostShellResize();
       if (hostShellState.decodeEnabled) {
@@ -4501,6 +4764,7 @@
     wireHostShellPanel();
     wireLiveReadersPanel();
     wireCardBridgePanel();
+    wireRemoteLabPanel();
     wireCommandCenter();
     wireReaderPane();
     wireLogDock();
@@ -4520,6 +4784,8 @@
     loadBackend();
     loadCommandCatalogue();
     loadCardBridgeStatus();
+    remoteLabRefreshSessionState();
+    remoteLabStartSessionPoll();
     scheduleHealthPoll();
     refreshReaderPane();
     // Top-bar reader strip — installs its own refresh button handler,
@@ -4552,12 +4818,23 @@
     if (!btn || !shell) return;
     function _stored() {
       try {
-        return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+        var value = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+        if (value === null) return null;
+        return value === "true";
       } catch (_err) {
-        return false;
+        return null;
       }
     }
-    function _apply(collapsed) {
+    var storedPreference = _stored();
+    var narrowViewport = window.matchMedia
+      ? window.matchMedia("(max-width: 760px)")
+      : null;
+    function _isNarrow() {
+      return narrowViewport
+        ? narrowViewport.matches
+        : window.innerWidth <= 760;
+    }
+    function _apply(collapsed, persist) {
       shell.setAttribute(
         "data-sidebar-collapsed",
         collapsed ? "true" : "false",
@@ -4571,18 +4848,41 @@
       btn.title = collapsed
         ? "Show the Command Center sidebar."
         : "Hide the Command Center sidebar. Click again to bring it back.";
-      try {
-        window.localStorage.setItem(
-          SIDEBAR_COLLAPSED_KEY,
-          collapsed ? "true" : "false",
-        );
-      } catch (_err) {}
+      btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      if (persist) {
+        storedPreference = collapsed;
+        try {
+          window.localStorage.setItem(
+            SIDEBAR_COLLAPSED_KEY,
+            collapsed ? "true" : "false",
+          );
+        } catch (_err) {}
+      }
     }
-    _apply(_stored());
+    _apply(
+      storedPreference === null ? _isNarrow() : storedPreference,
+      false,
+    );
     btn.addEventListener("click", function () {
       var currently = shell.getAttribute("data-sidebar-collapsed") === "true";
-      _apply(!currently);
+      _apply(!currently, true);
     });
+    function _syncResponsiveDefault() {
+      _apply(
+        storedPreference === null ? _isNarrow() : storedPreference,
+        false,
+      );
+    }
+    if (narrowViewport && narrowViewport.addEventListener) {
+      narrowViewport.addEventListener("change", _syncResponsiveDefault);
+    } else if (narrowViewport && narrowViewport.addListener) {
+      narrowViewport.addListener(_syncResponsiveDefault);
+    }
+    window.YggdraSimSidebar = {
+      closeOverlayAfterNavigation: function () {
+        if (_isNarrow()) _apply(true, false);
+      },
+    };
   }
 
   var TOPBAR_COLLAPSED_KEY = "yggdrasim:topbar-collapsed";

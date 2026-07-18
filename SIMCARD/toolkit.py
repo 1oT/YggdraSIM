@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 from typing import Any
 
 from SIMCARD.state import SimCardState, SimToolkitMenuItem
@@ -1190,11 +1191,35 @@ class ToolkitLogic:
             return
         if len(bytes(toolkit.active_proactive_command or b"")) > 0:
             return
+        live_network = str(
+            os.environ.get("YGGDRASIM_SIMCARD_ALLOW_LIVE_BIP", "")
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if not live_network:
+            toolkit.bip_bootstrap_phase = "offline_disabled"
+            toolkit.bip_bootstrap_dns_query = b""
+            toolkit.bip_bootstrap_resolved_address = ""
+            return
         toolkit.bip_bootstrap_phase = "dns_open"
         toolkit.bip_bootstrap_dns_query = self._build_bootstrap_dns_query()
         toolkit.bip_bootstrap_resolved_address = ""
+        resolver = str(
+            os.environ.get(
+                "YGGDRASIM_SIMCARD_BIP_DNS_RESOLVER",
+                "192.0.2.53",
+            )
+        ).strip()
+        try:
+            resolver_address = ipaddress.ip_address(resolver)
+        except ValueError as error:
+            raise ValueError(
+                "YGGDRASIM_SIMCARD_BIP_DNS_RESOLVER must be an IP address"
+            ) from error
+        if resolver_address.is_unspecified or resolver_address.is_multicast:
+            raise ValueError(
+                "YGGDRASIM_SIMCARD_BIP_DNS_RESOLVER is not a usable endpoint"
+            )
         self.queue_open_channel(
-            remote_address="8.8.8.8",
+            remote_address=resolver,
             remote_port=53,
             transport_protocol_type=0x01,
             immediate=False,
@@ -1203,9 +1228,28 @@ class ToolkitLogic:
 
     @staticmethod
     def _build_bootstrap_dns_query() -> bytes:
+        configured_name = str(
+            os.environ.get(
+                "YGGDRASIM_SIMCARD_BIP_BOOTSTRAP_NAME",
+                "bootstrap.example",
+            )
+        ).strip().strip(".").lower()
+        raw_labels = configured_name.split(".")
+        if (
+            not raw_labels
+            or any(
+                not label
+                or len(label.encode("ascii", errors="ignore")) != len(label)
+                or len(label) > 63
+                for label in raw_labels
+            )
+        ):
+            raise ValueError("SIMCARD BIP bootstrap DNS name is invalid")
         labels = b"".join(
-            bytes((len(label),)) + label
-            for label in (b"yggdrasim", b"1ot", b"com")
+            bytes((len(label_bytes),)) + label_bytes
+            for label_bytes in (
+                label.encode("ascii") for label in raw_labels
+            )
         )
         return (
             bytes.fromhex("123401000001000000000000")
@@ -2609,8 +2653,6 @@ class ToolkitLogic:
             toolkit.received_channel_history.append(channel_data)
         if str(toolkit.bip_bootstrap_phase or "") == "dns_receive":
             resolved_address = self._extract_dns_a_record_address(channel_data)
-            if resolved_address.startswith("198.51.100."):
-                resolved_address = "194.29.54.4"
             if len(resolved_address) > 0:
                 toolkit.bip_bootstrap_resolved_address = resolved_address
             toolkit.bip_bootstrap_phase = "dns_close"

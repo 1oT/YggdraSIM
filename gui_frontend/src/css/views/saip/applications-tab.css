@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ---- SA-G1: applications tab placeholder --------------------------- */
 
 .saip-apps-host {
@@ -75,4 +76,3 @@
 .saip-apps-jump {
   text-align: right;
 }
-

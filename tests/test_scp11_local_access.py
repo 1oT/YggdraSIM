@@ -1390,19 +1390,22 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(session.state.profile_override_path, str(override_profile.resolve()))
 
     def test_resolve_profile_path_expands_user_home(self):
-        home_dir = Path.home()
-        with tempfile.NamedTemporaryFile(dir=home_dir, suffix=".bin", delete=False) as temp_file:
-            temp_file.write(b"\xAA")
-            temp_path = Path(temp_file.name)
-        try:
-            tilde_path = str(temp_path).replace(str(home_dir), "~", 1)
-            session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        with tempfile.TemporaryDirectory() as isolated_home:
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": isolated_home, "USERPROFILE": isolated_home},
+                clear=False,
+            ):
+                home_dir = Path(isolated_home)
+                temp_path = home_dir / "profile.bin"
+                temp_path.write_bytes(b"\xAA")
+                session = LocalIsdrSession(apdu_channel=FakeApduChannel())
 
-            resolved_path = session.resolve_profile_path(override_path=tilde_path)
+                resolved_path = session.resolve_profile_path(
+                    override_path="~/profile.bin"
+                )
 
-            self.assertEqual(resolved_path, str(temp_path.resolve()))
-        finally:
-            temp_path.unlink(missing_ok=True)
+                self.assertEqual(resolved_path, str(temp_path.resolve()))
 
     def test_multiple_default_profile_files_require_override(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1479,19 +1482,22 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(session.state.resolved_metadata_path, "")
 
     def test_resolve_metadata_path_expands_user_home(self):
-        home_dir = Path.home()
-        with tempfile.NamedTemporaryFile(dir=home_dir, suffix=".json", delete=False) as temp_file:
-            temp_file.write(b"{}")
-            temp_path = Path(temp_file.name)
-        try:
-            tilde_path = str(temp_path).replace(str(home_dir), "~", 1)
-            session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        with tempfile.TemporaryDirectory() as isolated_home:
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": isolated_home, "USERPROFILE": isolated_home},
+                clear=False,
+            ):
+                home_dir = Path(isolated_home)
+                temp_path = home_dir / "metadata.json"
+                temp_path.write_text("{}", encoding="utf-8")
+                session = LocalIsdrSession(apdu_channel=FakeApduChannel())
 
-            resolved_path = session.resolve_metadata_path(override_path=tilde_path)
+                resolved_path = session.resolve_metadata_path(
+                    override_path="~/metadata.json"
+                )
 
-            self.assertEqual(resolved_path, str(temp_path.resolve()))
-        finally:
-            temp_path.unlink(missing_ok=True)
+                self.assertEqual(resolved_path, str(temp_path.resolve()))
 
     def test_encode_metadata_asn1_projects_store_metadata_request(self):
         metadata_document = {

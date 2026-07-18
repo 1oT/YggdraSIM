@@ -159,7 +159,7 @@ for the additional steps specific to Raspberry Pi hardware.
 The same onefile can be produced from a source checkout:
 
 ```bash
-python -m pip install -e '.[build,test,gui]'
+python -m pip install -e '.[saip,build,test,gui]'
 YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 ./dist/yggdrasim-clean --version
 ./dist/yggdrasim-gui-clean --version

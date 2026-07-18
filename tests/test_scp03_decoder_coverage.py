@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for the 25 untested public decoders in SCP03/core/decoders.py.
 
 Exercises: decode_gp_seac_arf, decode_pkcs15_acrf, decode_cert_der,
@@ -267,16 +266,16 @@ class FiveGsUacAicTests(unittest.TestCase):
         result = ContentDecoder.decode_5gs_uac_aic("")
         self.assertIsInstance(result, dict)
 
-    def test_zero_byte_returns_bits_set(self) -> None:
-        result = ContentDecoder.decode_5gs_uac_aic("00")
+    def test_zero_configuration_returns_flags_unset(self) -> None:
+        result = ContentDecoder.decode_5gs_uac_aic("00000000")
         self.assertIsInstance(result, dict)
-        self.assertEqual(result.get("Bits Set"), [])
+        self.assertFalse(result.get("Multimedia Priority Service"))
+        self.assertFalse(result.get("Mission Critical Services"))
 
-    def test_nonzero_byte_returns_bit_list(self) -> None:
-        result = ContentDecoder.decode_5gs_uac_aic("03")
-        bits = result.get("Bits Set", [])
-        self.assertIn(0, bits)
-        self.assertIn(1, bits)
+    def test_nonzero_configuration_returns_named_flags(self) -> None:
+        result = ContentDecoder.decode_5gs_uac_aic("03000000")
+        self.assertTrue(result.get("Multimedia Priority Service"))
+        self.assertTrue(result.get("Mission Critical Services"))
 
 
 class FiveGsSorCmciTests(unittest.TestCase):
@@ -285,10 +284,10 @@ class FiveGsSorCmciTests(unittest.TestCase):
         result = ContentDecoder.decode_5gs_sor_cmci("")
         self.assertIsInstance(result, dict)
 
-    def test_one_byte_returns_control_byte(self) -> None:
-        result = ContentDecoder.decode_5gs_sor_cmci("AA")
+    def test_tag_80_object_returns_parameters(self) -> None:
+        result = ContentDecoder.decode_5gs_sor_cmci("8001AA")
         self.assertIsInstance(result, dict)
-        self.assertIn("Control Byte", result)
+        self.assertEqual(result.get("Parameters"), "AA")
 
 
 # ---------------------------------------------------------------------------
@@ -381,10 +380,10 @@ class DriTests(unittest.TestCase):
         result = ContentDecoder.decode_dri("")
         self.assertIsInstance(result, dict)
 
-    def test_valid_byte_returns_dict(self) -> None:
-        result = ContentDecoder.decode_dri("01")
+    def test_valid_fixed_header_returns_dict(self) -> None:
+        result = ContentDecoder.decode_dri("01FF0000000000")
         self.assertIsInstance(result, dict)
-        self.assertIn("DRI", result)
+        self.assertTrue(result.get("Disaster Roaming Enabled"))
 
 
 if __name__ == "__main__":

@@ -1518,7 +1518,6 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
-                    editor = app.query_one("#json_editor")
                     search_input = app.query_one("#json_outline_search")
                     await pilot.pause(0.7)
 

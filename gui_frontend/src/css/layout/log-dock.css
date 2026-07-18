@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Bottom log dock (G-1) ------------------------------------------------- */
 
 .log-dock {
@@ -79,6 +80,7 @@ body.log-dock-resizing * {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 .log-dock-tab {
@@ -108,6 +110,12 @@ body.log-dock-resizing * {
   color: var(--fg);
   border-bottom-color: var(--accent);
   background: var(--bg-elev);
+}
+
+.log-dock-tab:focus-visible,
+.log-dock-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .log-dock-tab-label {
@@ -187,6 +195,11 @@ body.log-dock-resizing * {
 .log-dock-action:hover {
   color: var(--fg);
   background: var(--bg-hover);
+}
+
+.log-dock-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .log-dock-toggle {
@@ -372,11 +385,33 @@ body.log-dock-resizing * {
   color: var(--fg-dim);
   font-size: 11px;
   pointer-events: none;
-  font-style: italic;
   padding: 16px;
   text-align: center;
 }
 
 .log-dock-placeholder.is-hidden {
   display: none;
+}
+
+@media (hover: none) {
+  .log-dock-row-copy {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .log-dock-row-msg {
+    padding-right: 52px;
+  }
+}
+
+@media (max-width: 640px) {
+  .log-dock-row {
+    grid-template-columns: 62px 54px minmax(0, 1fr);
+    gap: 6px;
+    padding-inline: 8px;
+  }
+
+  .log-dock-tab {
+    padding-inline: 9px;
+  }
 }

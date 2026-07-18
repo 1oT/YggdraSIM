@@ -26,6 +26,30 @@ class Scp11PackageLayoutTests(unittest.TestCase):
         self.assertIsNotNone(PayloadBuilder)
         self.assertIsNotNone(SGP22Transport)
 
+    def test_eim_package_namespaces_share_canonical_parser_symbols(self):
+        import SCP11.eim_packages as canonical
+        import SCP11.live.eim_packages as live
+        import SCP11.relay.eim_packages as relay
+        import SCP11.test.eim_packages as compatibility
+
+        self.assertIs(live.parse_eim_package, canonical.parse_eim_package)
+        self.assertIs(relay.parse_eim_package, canonical.parse_eim_package)
+        self.assertIs(compatibility.parse_eim_package, canonical.parse_eim_package)
+        self.assertIs(compatibility, live)
+        self.assertEqual(set(relay.__all__), set(live.__all__))
+
+    def test_compatibility_exports_preserve_symbol_identity(self):
+        from SCP11.crypto_engine import CryptoEngine as RootCryptoEngine
+        from SCP11.models import EimPollRequest as RootPollRequest
+        from SCP11.relay.models import EimPollRequest as RelayPollRequest
+        from SCP11.shared.crypto_engine import CryptoEngine as SharedCryptoEngine
+        from SCP11.test.models import EimPollRequest as TestPollRequest
+        from SCP11.live.models import EimPollRequest as LivePollRequest
+
+        self.assertIs(SharedCryptoEngine, RootCryptoEngine)
+        self.assertIs(RelayPollRequest, RootPollRequest)
+        self.assertIs(TestPollRequest, LivePollRequest)
+
     def test_live_console_imports_when_hil_runtime_is_omitted(self):
         repo_root = Path(__file__).resolve().parent.parent
         script = textwrap.dedent(

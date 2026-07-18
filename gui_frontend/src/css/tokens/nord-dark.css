@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Nord Dark (default) ------------------------------------------ */
 :root,
 html[data-theme="nord-dark"] {
@@ -15,19 +16,19 @@ html[data-theme="nord-dark"] {
   --border: rgba(216, 222, 233, 0.12);
   --border-strong: rgba(216, 222, 233, 0.22);
   --fg: #eceff4;
-  --fg-dim: #9aa5b8;
+  --fg-dim: #b4bdcc;
   --accent: #88c0d0;
-  --accent-strong: #5e81ac;
+  --accent-strong: #79a5c8;
   --accent-soft: rgba(136, 192, 208, 0.16);
   --accent-fg: #2e3440;
   --accent-glow: rgba(136, 192, 208, 0.45);
-  --gradient-accent: linear-gradient(135deg, #88c0d0 0%, #81a1c1 50%, #5e81ac 100%);
-  --gradient-brand: linear-gradient(135deg, #88c0d0 0%, #b48ead 100%);
+  --gradient-accent: linear-gradient(135deg, #88c0d0 0%, #89abc6 50%, #79a5c8 100%);
+  --gradient-brand: linear-gradient(135deg, #88c0d0 0%, #b995b5 100%);
   --ok: #a3be8c;
   --ok-soft: rgba(163, 190, 140, 0.15);
   --warn: #ebcb8b;
   --warn-soft: rgba(235, 203, 139, 0.15);
-  --fail: #bf616a;
+  --fail: #f39aa3;
   --fail-soft: rgba(191, 97, 106, 0.15);
   --code-bg: #242933;
   --kbd-bg: rgba(36, 41, 51, 0.96);
@@ -80,4 +81,3 @@ html[data-theme="nord-dark"] {
     radial-gradient(circle at 80% 40%,      rgba(163, 190, 140, 0.06), transparent 50%),
     radial-gradient(circle at 20% 80%,      rgba(216, 167, 106, 0.05), transparent 46%);
 }
-

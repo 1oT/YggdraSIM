@@ -157,7 +157,6 @@ class PeInfoTests(unittest.TestCase):
     def test_pe_info_unknown_type_falls_back(self) -> None:
         # Last PE is the end sentinel — exercise the fallback for
         # registered known types.
-        from yggdrasim_common.gui_server.sessions import get_manager
         handle = self._manager.claim(self._sid)
         last = len(handle["pes"].pe_list) - 1
         result = self._actions._dispatch_pe_info(

@@ -25,6 +25,17 @@
   border-bottom: 1px solid transparent;
 }
 
+.cc-action-datasheet-trace > summary:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.cc-action-datasheet-trace > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  color: var(--fg);
+}
+
 .cc-action-datasheet-trace[open] > summary {
   border-bottom-color: var(--border);
   color: var(--fg-muted);
@@ -57,4 +68,3 @@
   font-size: 11.5px;
   line-height: 1.5;
 }
-

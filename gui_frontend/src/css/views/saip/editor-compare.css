@@ -9,6 +9,10 @@
   border-left: 3px solid #ffc850;
 }
 
+.saip-pkg-row.is-unavailable {
+  border-right: 3px solid var(--danger, #e06c75);
+}
+
 .saip-pkg-dirty-dot {
   margin-left: 6px;
   color: #ffc850;
@@ -88,6 +92,12 @@
   font-size: 11px;
   color: var(--accent);
   font-style: italic;
+}
+
+.saip-session-unavailable {
+  color: var(--danger, #e06c75);
+  font-style: normal;
+  font-weight: 600;
 }
 
 .saip-pe-row.is-dirty td {
@@ -385,9 +395,8 @@
 }
 
 /* Per-record navigator — dropdown + prev/next + keyboard (PageUp /
- * PageDown / Home / End). Mirrors the eUICC Profile Creator
- * §"File Content" record stepper so 22-record EF.ARRs / phonebooks
- * surface one record at a time instead of flooding the Data tab. */
+ * PageDown / Home / End). Keeps 22-record EF.ARRs / phonebooks to
+ * one visible record instead of flooding the Data tab. */
 
 .saip-record-nav {
   display: flex;
@@ -790,7 +799,7 @@
   margin-top: 6px;
 }
 
-/* Comprion-style structured wizards (EF.IMSI / EF.AD / EF.UST / …). */
+/* Structured file wizards (EF.IMSI / EF.AD / EF.UST / …). */
 
 .saip-wizard-card {
   border-color: var(--accent-soft, var(--border));
@@ -1617,6 +1626,7 @@
   font-size: 10px;
   padding: 3px 8px;
   border-radius: 10px;
+  min-height: 28px;
 }
 
 .saip-decoded-row-head {
@@ -1626,6 +1636,12 @@
   gap: 6px;
   justify-content: space-between;
   margin-bottom: 5px;
+}
+
+.saip-decoded-row-head[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 .saip-decoded-row-label {

@@ -1090,7 +1090,6 @@ class TestHilDispatchers:
     def test_bridge_status_wraps_errors(self, monkeypatch) -> None:
         """A missing relay must surface as ``ok=False`` with the error
         captured — never as an uncaught exception."""
-        from yggdrasim_common.gui_server.actions import hil as hil_mod
 
         def _raise():
             raise FileNotFoundError("hil_bridge_card_relay.json")
@@ -1108,7 +1107,6 @@ class TestHilDispatchers:
         assert result["raw"] == {}
 
     def test_bridge_status_returns_payload_on_success(self, monkeypatch) -> None:
-        from yggdrasim_common.gui_server.actions import hil as hil_mod
         import yggdrasim_common.hil_bridge_runtime as runtime_mod
 
         monkeypatch.setattr(
@@ -2484,29 +2482,34 @@ _needs_gui_stack = pytest.mark.skipif(
 )
 
 
-def _build_test_app(token: str = "test-token"):
-    from fastapi import FastAPI
-    from yggdrasim_common.gui_server.routes import actions as actions_routes
+class _GateWebSocket:
+    def __init__(self, *, authenticated: bool) -> None:
+        from types import SimpleNamespace
 
-    app = FastAPI()
-    app.state.gui_token = token
-    app.include_router(actions_routes.router)
-    return app
+        self.headers = (
+            {"sec-websocket-protocol": "yggdrasim, bearer.test-token"}
+            if authenticated
+            else {}
+        )
+        self.query_params = {}
+        self.app = SimpleNamespace(
+            state=SimpleNamespace(gui_token="test-token"),
+        )
+        self.close_code: int | None = None
+        self.close_reason: str | None = None
 
-
-def _make_client(token: str = "test-token"):
-    from fastapi.testclient import TestClient
-
-    return TestClient(_build_test_app(token))
+    async def close(self, code: int = 1000, reason: str | None = None) -> None:
+        self.close_code = code
+        self.close_reason = reason
 
 
 @_needs_gui_stack
 class TestCatalogueRoute:
     def test_catalogue_lists_all_bundled_specs(self) -> None:
-        with _make_client() as client:
-            resp = client.get("/api/actions")
-        assert resp.status_code == 200
-        payload = resp.json()
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+        response = actions_routes.list_actions()
+        payload = response.model_dump()
         assert payload["count"] >= 4
         flat_ids = []
         for group in payload["subsystems"].values():
@@ -2519,39 +2522,68 @@ class TestCatalogueRoute:
 @_needs_gui_stack
 class TestRunRoute:
     def test_unknown_action_returns_404(self) -> None:
-        with _make_client() as client:
-            resp = client.post("/api/actions/does.not.exist/run", json={"inputs": {}})
-        assert resp.status_code == 404
+        from fastapi import HTTPException
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(
+                actions_routes.run_action(
+                    "does.not.exist",
+                    actions_routes.RunRequest(inputs={}),
+                )
+            )
+        assert raised.value.status_code == 404
 
     def test_streaming_action_refuses_sync_run(self) -> None:
-        with _make_client() as client:
-            resp = client.post(
-                "/api/actions/scp11.download_profile/run",
-                json={"inputs": {}},
-            )
-        assert resp.status_code == 400
-        assert "streaming" in resp.json()["detail"].lower()
+        from fastapi import HTTPException
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
 
-    def test_read_selected_rejects_missing_session(self) -> None:
-        with _make_client() as client:
-            resp = client.post(
-                "/api/actions/scp03.read_selected/run",
-                json={"inputs": {"session_id": "deadbeef", "path": "MF"}},
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(
+                actions_routes.run_action(
+                    "scp11.download_profile",
+                    actions_routes.RunRequest(inputs={}),
+                )
             )
+        assert raised.value.status_code == 400
+        assert "streaming" in str(raised.value.detail).lower()
+
+    def test_read_selected_rejects_missing_session(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+        async def _invoke_inline(spec, ctx, coerced):
+            # Python 3.13 can stall while ``asyncio.run`` tears down a default
+            # executor created by ``asyncio.to_thread``.  This route contract
+            # concerns error mapping, so execute the same dispatcher inline.
+            return spec.dispatcher(ctx, **coerced)
+
+        monkeypatch.setattr(actions_routes, "_invoke_dispatcher", _invoke_inline)
+        response = asyncio.run(
+            actions_routes.run_action(
+                "scp03.read_selected",
+                actions_routes.RunRequest(
+                    inputs={"session_id": "deadbeef", "path": "MF"}
+                ),
+            )
+        )
         # The dispatcher should surface a clean 200 with ok=False rather
         # than 500, because "unknown session" is a user-input error.
-        assert resp.status_code == 200
-        body = resp.json()
+        body = response.model_dump()
         assert body["ok"] is False
         assert "deadbeef" in (body.get("error") or "")
 
     def test_validation_error_surfaces_as_422(self) -> None:
-        with _make_client() as client:
-            resp = client.post(
-                "/api/actions/scp03.read_selected/run",
-                json={"inputs": {}},  # both required fields missing
+        from fastapi import HTTPException
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(
+                actions_routes.run_action(
+                    "scp03.read_selected",
+                    actions_routes.RunRequest(inputs={}),
+                )
             )
-        assert resp.status_code == 422
+        assert raised.value.status_code == 422
 
     def test_missing_file_surfaces_without_server_traceback(self, monkeypatch) -> None:
         from yggdrasim_common.gui_server.routes import actions as actions_routes
@@ -2594,32 +2626,44 @@ class TestStreamingGate:
         # it delegates to /api/flows/download-profile. Connecting to the
         # generic streaming route should fail fast with an 'external-endpoint'
         # reason. We just assert the connection is torn down.
-        with _make_client() as client:
-            with pytest.raises(Exception):
-                with client.websocket_connect(
-                    "/api/actions/scp11.download_profile/stream?t=test-token"
-                ) as ws:
-                    ws.receive_text()
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+        websocket = _GateWebSocket(authenticated=True)
+        asyncio.run(
+            actions_routes.stream_action(
+                websocket,
+                "scp11.download_profile",
+            )
+        )
+        assert websocket.close_code == 1008
+        assert websocket.close_reason == "external-endpoint"
 
     def test_unauthenticated_ws_rejected(self) -> None:
-        with _make_client() as client:
-            with pytest.raises(Exception):
-                with client.websocket_connect(
-                    "/api/actions/eim_local.hotfolder_campaign/stream"
-                ) as ws:
-                    ws.receive_text()
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+        websocket = _GateWebSocket(authenticated=False)
+        asyncio.run(
+            actions_routes.stream_action(
+                websocket,
+                "eim_local.hotfolder_campaign",
+            )
+        )
+        assert websocket.close_code == 1008
+        assert websocket.close_reason == "auth"
 
 
 @_needs_gui_stack
 class TestSessionsRoutes:
     def test_list_sessions_is_json(self) -> None:
-        with _make_client() as client:
-            resp = client.get("/api/sessions")
-        assert resp.status_code == 200
-        body = resp.json()
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+        body = actions_routes.list_sessions().model_dump()
         assert "count" in body and "sessions" in body
 
     def test_close_unknown_session_returns_404(self) -> None:
-        with _make_client() as client:
-            resp = client.delete("/api/sessions/does-not-exist")
-        assert resp.status_code == 404
+        from fastapi import HTTPException
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+        with pytest.raises(HTTPException) as raised:
+            actions_routes.close_session("does-not-exist")
+        assert raised.value.status_code == 404

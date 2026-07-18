@@ -28,6 +28,26 @@ saip_tool = importlib.import_module("Tools.ProfilePackage.saip_tool")
 
 
 class SaipToolCachePruneTests(unittest.TestCase):
+    def test_hex_input_is_bounded_before_cache_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            source = workspace / "oversized.varder"
+            source.write_text("AA" * 32, encoding="utf-8")
+            bridge = saip_tool.SaipToolBridge.__new__(
+                saip_tool.SaipToolBridge
+            )
+            bridge.workspace_root = workspace
+
+            with (
+                mock.patch.object(saip_tool, "_MAX_PROFILE_INPUT_BYTES", 16),
+                self.assertRaisesRegex(ValueError, "16-byte limit"),
+            ):
+                bridge._prepare_input_for_tool(source)
+
+            self.assertFalse(
+                (workspace / ".profilepackage-cache").exists()
+            )
+
     def test_prune_keeps_kept_file_and_drops_older_over_count_cap(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cache_dir = Path(temp_dir)

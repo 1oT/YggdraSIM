@@ -47,6 +47,76 @@ _SMPP_STUB_MODULES = [
 _DEFAULT_PCSC_CHANNEL = object()
 
 
+_NOTIFICATION_OPERATION_BY_BIT = {
+    0: (1, "install"),
+    1: (2, "enable"),
+    2: (3, "disable"),
+    3: (4, "delete"),
+    4: (5, "rpm-enable"),
+    5: (6, "rpm-disable"),
+    6: (7, "rpm-delete"),
+    7: (8, "load-rpm-package-result"),
+}
+
+
+def _decode_notification_operation_contents(value: bytes) -> tuple[int, str]:
+    """Decode implicit ``NotificationEvent`` BIT STRING contents strictly."""
+
+    raw = bytes(value)
+    if len(raw) < 2:
+        raise ValueError(
+            "profileManagementOperation BIT STRING must contain an unused-bit "
+            "octet and event bits"
+        )
+
+    unused_bits = raw[0]
+    event_bytes = raw[1:]
+    if unused_bits > 7:
+        raise ValueError(
+            "profileManagementOperation BIT STRING unused-bit count must be 0..7"
+        )
+    if unused_bits and event_bytes[-1] & ((1 << unused_bits) - 1):
+        raise ValueError(
+            "profileManagementOperation BIT STRING has non-zero padding bits"
+        )
+
+    significant_bit_count = (len(event_bytes) * 8) - unused_bits
+    set_bits = [
+        bit_index
+        for bit_index in range(significant_bit_count)
+        if event_bytes[bit_index // 8] & (0x80 >> (bit_index % 8))
+    ]
+    if len(set_bits) != 1:
+        raise ValueError(
+            "profileManagementOperation in NotificationMetadata must set exactly one event bit"
+        )
+
+    bit_index = set_bits[0]
+    operation = _NOTIFICATION_OPERATION_BY_BIT.get(bit_index)
+    if operation is None:
+        raise ValueError(
+            f"profileManagementOperation uses unsupported event bit {bit_index}"
+        )
+    if significant_bit_count != bit_index + 1:
+        raise ValueError(
+            "profileManagementOperation BIT STRING is not canonical "
+            "(trailing zero event bits)"
+        )
+    return operation
+
+
+def _record_notification_parse_error(details: dict, error: object) -> None:
+    message = str(error).strip()
+    if len(message) == 0:
+        return
+    existing = details.get("notificationParseError")
+    if isinstance(existing, str) and len(existing) > 0:
+        if message not in existing:
+            details["notificationParseError"] = f"{existing}; {message}"
+        return
+    details["notificationParseError"] = message
+
+
 def _install_minimal_smartcard_stubs() -> None:
     try:
         from smartcard.util import toBytes as _smartcard_to_bytes  # type: ignore
@@ -3849,6 +3919,26 @@ class LocalIsdrSession:
         notification_address = details.get("notificationAddress")
         if isinstance(notification_address, str) and len(notification_address) > 0:
             lines.append(f"notificationAddress={notification_address}")
+        notification_address_raw_hex = details.get("notificationAddressRawHex")
+        if (
+            isinstance(notification_address_raw_hex, str)
+            and len(notification_address_raw_hex) > 0
+        ):
+            lines.append(
+                f"notificationAddressRawHex={notification_address_raw_hex}"
+            )
+        operation_code = details.get("profileManagementOperation")
+        operation_name = details.get("profileManagementOperationName")
+        if isinstance(operation_code, int):
+            if isinstance(operation_name, str) and len(operation_name) > 0:
+                lines.append(
+                    f"profileManagementOperation={operation_name}({operation_code})"
+                )
+            else:
+                lines.append(f"profileManagementOperation={operation_code}")
+        parse_error = details.get("notificationParseError")
+        if isinstance(parse_error, str) and len(parse_error) > 0:
+            lines.append(f"notificationParseError={parse_error}")
         return "\n".join(lines)
 
     @staticmethod
@@ -3965,21 +4055,57 @@ class LocalIsdrSession:
         details = {
             "seqNumber": None,
             "profileManagementOperation": None,
+            "profileManagementOperationName": "",
+            "notificationParseError": "",
             "notificationAddress": "",
+            "notificationAddressRawHex": "",
             "iccid": "",
         }
         offset = 0
+        operation_seen = False
         while offset < len(value):
             try:
                 field_tag, field_value, _, next_offset = self._read_tlv(value, offset)
-            except Exception:
+            except Exception as error:
+                _record_notification_parse_error(
+                    details,
+                    f"Malformed NotificationMetadata TLV at offset {offset}: {error}",
+                )
                 return details
             if field_tag == b"\x80":
                 details["seqNumber"] = int.from_bytes(field_value, "big", signed=False)
             elif field_tag == b"\x81":
-                details["profileManagementOperation"] = int.from_bytes(field_value, "big", signed=False)
+                if operation_seen:
+                    details["profileManagementOperation"] = None
+                    details["profileManagementOperationName"] = ""
+                    _record_notification_parse_error(
+                        details,
+                        "NotificationMetadata contains duplicate "
+                        "profileManagementOperation fields",
+                    )
+                else:
+                    operation_seen = True
+                    try:
+                        operation_code, operation_name = (
+                            _decode_notification_operation_contents(field_value)
+                        )
+                    except ValueError as error:
+                        _record_notification_parse_error(details, error)
+                    else:
+                        details["profileManagementOperation"] = operation_code
+                        details["profileManagementOperationName"] = operation_name
             elif field_tag == b"\x0C":
-                details["notificationAddress"] = field_value.decode("utf-8", "ignore")
+                try:
+                    details["notificationAddress"] = field_value.decode("utf-8")
+                except UnicodeDecodeError as error:
+                    details["notificationAddress"] = ""
+                    details["notificationAddressRawHex"] = (
+                        field_value.hex().upper()
+                    )
+                    _record_notification_parse_error(
+                        details,
+                        f"notificationAddress is not valid UTF-8: {error}",
+                    )
             elif field_tag == b"\x5A":
                 details["iccid"] = self._decode_bcd_digits(field_value)
             offset = next_offset
@@ -4050,7 +4176,6 @@ class LocalIsdrSession:
         return members
 
     def _send_personalization_store_data(self, payload: bytes, log_name: str, chunk_size: int = 0xFF) -> bytes:
-        total = len(payload)
         block = 0
         response = b""
         chunks = split_tlv_aware_chunks(payload, chunk_size)

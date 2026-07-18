@@ -24,12 +24,12 @@ Each of those is published in two flavors:
 ### Optional extras (orthogonal to the flavor split)
 
 These extras are independently selectable on a source install. The
-PyInstaller flavors do not bundle the GUI extras, so a frozen build cannot
-launch the Universal GUI Command Center.
+PyInstaller build produces a CLI executable and a desktop-GUI companion for
+each published flavor when the build environment includes `[gui]`.
 
 | Extra | Adds | Use when |
 | --- | --- | --- |
-| `[saip]` | upstream pySim | SAIP ASN.1 compile / transcode is required |
+| `[saip]` | Backwards-compatible no-op alias; pySim is core and commit-pinned | Older install commands |
 | `[hil]` | `pyudev`, `pyserial`, etc. | enabling the HIL bridge on a source install |
 | `[gui]` | `pywebview` | desktop Universal GUI (`--gui`) |
 | `[gui-server]` | `fastapi`, `uvicorn` | web-served Universal GUI (`--web-server`) |
@@ -37,7 +37,7 @@ launch the Universal GUI Command Center.
 | `[build]` | `pyinstaller` | building flavored launcher artifacts |
 | `[test]` | `pytest`, helpers | running the test suite |
 | `[docs]` | `mkdocs-material`, plugins | building / serving this site locally |
-| `[full]` | `[hil]` + `[saip]` | one-shot install of the HIL-capable source flavor (does **not** include `[gui]` / `[gui-server]`) |
+| `[full]` | `pyudev` plus the headless GUI-server runtime | HIL-capable Linux runtime (add `[gui]` for a source desktop window) |
 
 The active flavor is selected at build time through the
 `YGGDRASIM_FLAVOR` environment variable. The PyInstaller spec writes a
@@ -48,7 +48,7 @@ SKU even when the variable is not exported afterwards.
 External host dependencies still matter for real card workflows,
 especially PC/SC libraries, reader drivers, and optional `gpg`.
 
-For GUI-driven remote labs, install from source with combined extras:
+For GUI-driven source labs, install with combined extras:
 
 ```bash
 python -m pip install -e '.[full,gui]'

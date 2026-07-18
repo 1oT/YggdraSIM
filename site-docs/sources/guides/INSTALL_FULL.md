@@ -65,7 +65,12 @@ Pi, `scripts/install/install-raspberrypi.sh --flavor full`. Add
 `yggdrasim-gui`. Both scripts accept `--mode release` (default) or
 `--mode source`, install host prerequisites through `apt-get`, and
 refuse to run on non-Linux hosts because the HIL bridge cannot function
-there. Full flag reference lives in `scripts/install/README.md`.
+there. A normal full install tries the exact
+`osmo-remsim-client-st2` package first, then the distribution
+compatibility package, and fails before reporting success unless the
+`osmo-remsim-client-st2` executable is actually present. Use
+`--no-deps` only when those host dependencies are managed separately.
+Full flag reference lives in `scripts/install/README.md`.
 
 ```bash
 scripts/install/install-linux.sh --flavor full --with-gui
@@ -116,7 +121,7 @@ site runbook
 ## Building the full bundle yourself
 
 ```bash
-python -m pip install -e '.[full,gui]'
+python -m pip install -e '.[full,build,test,gui]'
 YGGDRASIM_FLAVOR=full python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 ./dist/yggdrasim-full --version
 ./dist/yggdrasim-gui-full --version
@@ -125,14 +130,13 @@ YGGDRASIM_FLAVOR=full python -m PyInstaller --noconfirm --clean yggdrasim_main.s
 The `[full]` extra covers:
 
 - `pyudev; sys_platform == 'linux'`
-- `pyinstaller`
-- `pytest`
+- `openpyxl` and `defusedxml` for optional SAIP spreadsheet extensions
 - `fastapi`, `uvicorn[standard]`, and `websockets` for headless
   `--web-server`
-- `pySim @ git+https://github.com/osmocom/pysim.git` (so the SAIP
-  ASN.1 compile path, the SAIP transcode TUI, and the SCP11-local /
-  eIM-local flows are all unlocked without a separate `[saip]`
-  install)
+
+`pySim` is a commit-pinned core dependency. PyInstaller and pytest are
+kept in `[build]` and `[test]`; this prevents production full-runtime
+installs from carrying development tools.
 
 Note: `[full]` by itself includes the headless web-server stack but not
 the optional desktop GUI dependency (`pywebview`). Use
@@ -142,7 +146,8 @@ split".
 
 `YGGDRASIM_FLAVOR=full` tells the spec to keep `Tools/HilBridge` and
 `yggdrasim_common.hil_bridge_runtime` in the bundle and to record the
-flavor in `yggdrasim_common/_build_flavor.py`.
+flavor/version in a generated runtime hook below `build/`, leaving the
+editable source package untouched.
 
 ## First HIL session
 

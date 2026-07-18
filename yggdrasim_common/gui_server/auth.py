@@ -40,6 +40,8 @@ __all__ = (
     "extract_bearer",
     "is_bypass_path",
     "token_id",
+    "websocket_accept_protocol",
+    "websocket_bearer",
 )
 
 
@@ -50,6 +52,7 @@ _LOGGER = logging.getLogger("yggdrasim.gui.auth")
 
 DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60.0
 DEFAULT_RATE_LIMIT_MAX_FAILURES = 5
+WEBSOCKET_APPLICATION_PROTOCOL = "yggdrasim"
 
 # Request paths that bypass the bearer check. Keep this list narrow on
 # purpose — anything that needs data out of the engine must go through
@@ -109,6 +112,32 @@ def extract_bearer(header_value: Optional[str]) -> str:
     if scheme != "bearer":
         return ""
     return value
+
+
+def websocket_bearer(websocket: Any) -> str:
+    """Extract a WebSocket bearer without putting it in the request URL."""
+    header = websocket.headers.get("authorization") or ""
+    token = extract_bearer(header)
+    if token:
+        return token
+    offered = websocket.headers.get("sec-websocket-protocol") or ""
+    for fragment in (part.strip() for part in str(offered).split(",")):
+        if fragment.lower().startswith("bearer."):
+            return fragment.split(".", 1)[1].strip()
+    return ""
+
+
+def websocket_accept_protocol(websocket: Any) -> str | None:
+    """Return the non-secret application protocol offered by the browser."""
+    offered = websocket.headers.get("sec-websocket-protocol") or ""
+    protocols = {
+        part.strip()
+        for part in str(offered).split(",")
+        if part.strip()
+    }
+    if WEBSOCKET_APPLICATION_PROTOCOL in protocols:
+        return WEBSOCKET_APPLICATION_PROTOCOL
+    return None
 
 
 def compare_tokens(expected: str, provided: str) -> bool:
@@ -260,13 +289,10 @@ def _scope_client_source(scope: dict[str, Any]) -> str:
 # delivery on the header keeps the policy in one place.
 _CSP_HEADER: bytes = (
     b"default-src 'self'; "
-    # xterm.js and some vendored bundles still hit eval-capable code paths
-    # during initialisation; without this, Chromium logs EvalError and
-    # downstream DOM wiring can fail mid-bootstrap.
-    b"script-src 'self' 'unsafe-eval'; "
+    b"script-src 'self'; "
     b"style-src 'self' 'unsafe-inline'; "
     b"img-src 'self' data:; "
-    b"connect-src 'self' ws: wss:; "
+    b"connect-src 'self'; "
     b"frame-ancestors 'none'; "
     b"base-uri 'self'; "
     b"form-action 'self'"

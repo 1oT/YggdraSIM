@@ -48,7 +48,6 @@ from yggdrasim_common.progress import progress_session
 from yggdrasim_common.terminal_output import status_print as print
 
 try:
-    from .asn1_registry import ASN1Registry
     from .crypto_engine import CryptoEngine
     from .eim_packages import (
         TYPE_EUICC_CONFIGURATION,
@@ -86,7 +85,6 @@ try:
         verify_certificate_against_ca_bundle,
     )
 except ImportError:
-    from asn1_registry import ASN1Registry
     from crypto_engine import CryptoEngine
     from eim_packages import (
         TYPE_EUICC_CONFIGURATION,

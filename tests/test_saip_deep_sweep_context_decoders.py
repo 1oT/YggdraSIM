@@ -42,7 +42,6 @@ Targets covered:
 
 from __future__ import annotations
 
-import pytest
 
 from Tools.ProfilePackage.saip_asn1_decode import (
     _decode_gbanl,

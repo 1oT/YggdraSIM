@@ -11,7 +11,6 @@ the manual documents under "Batch Validation" / "Batch Personalization".
 
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 import unittest

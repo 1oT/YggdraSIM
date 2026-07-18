@@ -31,7 +31,7 @@
       packageSeq: 1,
       packageDrawerCollapsed: false,
       // SA-G1: ribbon + top-tab shell. The ribbon is the always-visible
-      // command bar that mirrors Comprion's grouped Profile Package /
+      // command bar that is grouped around Profile Package /
       // Profile Element / File System / Variables / Validation / Help
       // groups (re-themed for our palette). The variable editor moved
       // out of the left pane into a modal launched from the ribbon, so
@@ -109,6 +109,7 @@
       packetPointerActive: false,
       packetPointerId: null,
       packetPointerReleaseTimerId: null,
+      packetHoverActive: false,
       packetPointerReleaseListenersInstalled: false,
       contextTree: [],
       liveBaselinePending: false,
@@ -161,24 +162,70 @@
     // Per-reader session context — one entry per reader pill.
     // Swapping readers saves the current context under the old
     // reader's name and restores the context for the new reader.
-    // This gives each reader its own completely independent
-    // "browser tab" experience across all subsystems.
-    readerSessions: {},  // readerName -> { activeSubsystem, activeScope, ... }
-    profileTargetCache: {},  // "subsystem\x1freader" -> [{ value, label }]
-  };
+	    // This gives each reader its own completely independent
+	    // "browser tab" experience across all subsystems.
+	    readerSessions: {},  // readerName -> { activeSubsystem, activeScope, ... }
+	    // Per-reader rig context for modules that bind a reader as part of
+	    // a bridge runtime rather than a normal card action. HIL and Remote
+	    // Bridge keep packet/status/form state here while the top-bar reader
+	    // pill is the only visible selector.
+	    rigTenants: {},      // readerName -> { hilWorkbench, cardBridge }
+	    profileTargetCache: {},  // "subsystem\x1freader" -> [{ value, label }]
+	  };
 
   var HIL_MODEM_COMMAND_KEY = "ygg.hil.modemShellCommand";
-  var HIL_MODEM_DEFAULT_COMMAND = "sudo tio /dev/ttyUSB2";
+  var HIL_MODEM_DEFAULT_COMMAND = "tio /dev/ttyUSB2";
+  var HIL_MODEM_STANDARD_COMMANDS = [
+    { id: "at", label: "AT", command: "AT" },
+    { id: "ati", label: "ATI", command: "ATI" },
+    { id: "pin", label: "SIM PIN status", command: "AT+CPIN?" },
+    { id: "imsi", label: "IMSI", command: "AT+CIMI" },
+    { id: "iccid", label: "ICCID", command: "AT+CCID" },
+    { id: "imei", label: "IMEI", command: "AT+CGSN" },
+    { id: "manufacturer", label: "Manufacturer", command: "AT+CGMI" },
+    { id: "model", label: "Model", command: "AT+CGMM" },
+    { id: "firmware", label: "Firmware", command: "AT+CGMR" },
+    { id: "creg", label: "CS registration", command: "AT+CREG?" },
+    { id: "cgreg", label: "GPRS registration", command: "AT+CGREG?" },
+    { id: "cereg", label: "EPS registration", command: "AT+CEREG?" },
+    { id: "csq", label: "Signal quality", command: "AT+CSQ" },
+    { id: "cesq", label: "Extended signal", command: "AT+CESQ" },
+    { id: "cops", label: "Current operator", command: "AT+COPS?" },
+    { id: "cops-scan", label: "Scan operators", command: "AT+COPS=?" },
+    { id: "ceer", label: "Last modem error", command: "AT+CEER" },
+    { id: "cgatt", label: "Packet attach", command: "AT+CGATT?" },
+    { id: "cgdcont", label: "PDP contexts", command: "AT+CGDCONT?" },
+    { id: "cgact", label: "PDP active", command: "AT+CGACT?" },
+    { id: "cmgf", label: "SMS mode", command: "AT+CMGF?" },
+    { id: "csca", label: "SMS center", command: "AT+CSCA?" },
+  ];
   var HIL_PACKET_FETCH_LIMIT = 5000;
-  var HIL_PACKET_RENDER_LIMIT = 750;
-  var HIL_PACKET_VIRTUAL_ROW_HEIGHT = 26;
-  var HIL_PACKET_VIRTUAL_OVERSCAN = 16;
-  var HIL_RAW_TRACE_LIMIT = 750;
-  var CC_READER_SESSION_SUBSYSTEMS = {
-    "eSIM Management": true,
-    "SCP11 Local": true,
-    "Local eIM": true,
-  };
+	  var HIL_PACKET_RENDER_LIMIT = 750;
+	  var HIL_PACKET_VIRTUAL_ROW_HEIGHT = 26;
+	  var HIL_PACKET_VIRTUAL_OVERSCAN = 16;
+	  var HIL_RAW_TRACE_LIMIT = 750;
+	  var HIL_WORKBENCH_DEFAULT_STATE = JSON.parse(JSON.stringify(commandState.hilWorkbench || {}));
+	  var HIL_WORKBENCH_RUNTIME_KEYS = {
+	    refreshTimerId: true,
+	    rawUnsubscribe: true,
+	    rawRenderTimerId: true,
+	    modemShellSocket: true,
+	    modemShellTerm: true,
+	    modemShellFitAddon: true,
+	    packetRenderTimerId: true,
+	    packetVirtualRenderTimerId: true,
+	    packetPointerReleaseTimerId: true,
+	    timerStatusTimerId: true,
+	  };
+	  var CC_READER_SESSION_SUBSYSTEMS = {
+	    "SCP03": true,
+	    "SCP80": true,
+	    "eSIM Management": true,
+	    "SCP11 Local": true,
+	    "Local eIM": true,
+	    "HIL": true,
+	    "Card Bridge": true,
+	  };
   var CC_OFFLINE_TOOLS_HIDDEN_ACTIONS = {
     "suci.status": true,
     "tool.euicc_info2.decode": true,
@@ -245,22 +292,136 @@
     return !!CC_READER_SESSION_SUBSYSTEMS[String(subsystem || "")];
   }
 
-  function ccActiveReaderName() {
-    var activeReader = "";
-    try {
-      if (commandState && commandState.readerBar) {
-        activeReader = String(commandState.readerBar.activeReader || "");
+	  function ccActiveReaderName() {
+	    var activeReader = "";
+	    try {
+	      if (commandState && commandState.readerBar) {
+	        activeReader = String(commandState.readerBar.activeReader || "");
       }
     } catch (_err) { /* commandState not bootstrapped */ }
     if (typeof readerBarCanonicalName === "function") {
       activeReader = readerBarCanonicalName(activeReader);
-    }
-    return activeReader;
-  }
+	    }
+	    return activeReader;
+	  }
 
-  function ccActionUsesReaderSession(action) {
-    var subsystem = "";
-    if (action && action.subsystem) {
+	  function ccCloneJsonSafe(value, fallback) {
+	    try {
+	      return JSON.parse(JSON.stringify(value));
+	    } catch (_err) {
+	      return fallback;
+	    }
+	  }
+
+	  function hilResetWorkbenchRuntimeState(state) {
+	    if (!state) return state;
+	    Object.keys(HIL_WORKBENCH_RUNTIME_KEYS).forEach(function (key) {
+	      if (key in state) state[key] = null;
+	    });
+	    state.inflight = false;
+	    state.startInFlight = false;
+	    state.stopInFlight = false;
+	    state.cardBridgeLaunchInFlight = false;
+	    state.modemShellMetadataLoading = false;
+	    state.modemShellRunning = false;
+	    state.packetRenderPending = false;
+	    state.packetPointerActive = false;
+	    state.packetPointerId = null;
+	    state.packetHoverActive = false;
+	    state.packetScrollRestoring = false;
+	    state.rawPendingRows = [];
+	    state.rawPendingDropCount = 0;
+	    return state;
+	  }
+
+	  function createHilWorkbenchState(snapshot) {
+	    var base = ccCloneJsonSafe(HIL_WORKBENCH_DEFAULT_STATE, {}) || {};
+	    var source = snapshot && typeof snapshot === "object" ? snapshot : {};
+	    Object.keys(base).forEach(function (key) {
+	      if (!Object.prototype.hasOwnProperty.call(source, key)) return;
+	      if (HIL_WORKBENCH_RUNTIME_KEYS[key]) return;
+	      base[key] = ccCloneJsonSafe(source[key], base[key]);
+	    });
+	    return hilResetWorkbenchRuntimeState(base);
+	  }
+
+	  function hilWorkbenchTenantSnapshot(state) {
+	    return createHilWorkbenchState(state || commandState.hilWorkbench || {});
+	  }
+
+	  function cbTenantSnapshot() {
+	    var note = $("cb-rig-note");
+	    return {
+	      history: ccCloneJsonSafe(cbState.history || [], []),
+	      lastStatus: ccCloneJsonSafe(cbState.lastStatus || null, null),
+	      globalState: String(cbState.globalState || "idle"),
+	      globalLabel: cbBridgeDisplayLabel(cbState.globalState, cbState.globalLabel),
+	      rigFields: cbRigHasRenderedFields() ? cbRigReadSettingsPayload() : null,
+	      noteText: note ? String(note.textContent || "") : "",
+	      noteError: note ? note.classList.contains("cb-rig-note-error") : false,
+	    };
+	  }
+
+	  function cbApplyTenantSnapshot(snapshot) {
+	    var tenant = snapshot && typeof snapshot === "object" ? snapshot : {};
+	    cbState.history = ccCloneJsonSafe(tenant.history || [], []);
+	    cbState.lastStatus = ccCloneJsonSafe(tenant.lastStatus || null, null);
+	    cbState.globalState = String(tenant.globalState || "idle");
+	    cbState.globalLabel = cbBridgeDisplayLabel(cbState.globalState, tenant.globalLabel);
+	    if (tenant.rigFields && cbRigHasRenderedFields()) {
+	      Object.keys(tenant.rigFields).forEach(function (id) {
+	        cbRigWriteField(id, tenant.rigFields[id]);
+	      });
+	      cbRigUpdateGuiUrl();
+	    }
+	    cbRigSyncReaderFieldsToActiveReader();
+	    cbRenderHistoryChart();
+	    if (cbState.lastStatus) {
+	      renderCardBridgeStatus(cbState.lastStatus);
+	    } else {
+	      cbSetGlobalBridgeStatus(cbState.globalState, cbState.globalLabel);
+	    }
+	    if (tenant.noteText) cbRigSetNote(tenant.noteText, !!tenant.noteError);
+	  }
+
+	  function readerBarSaveCurrentRigTenant(readerName) {
+	    var name = readerBarCanonicalName(readerName || "");
+	    if (!name) return;
+	    if (commandState.activeSubsystem === "HIL") {
+	      stopHilWorkbenchRuntime();
+	      hilStopModemShell({ dispose: true });
+	    }
+	    var tenant = commandState.rigTenants[name] || {};
+	    tenant.hilWorkbench = hilWorkbenchTenantSnapshot(commandState.hilWorkbench);
+	    tenant.cardBridge = cbTenantSnapshot();
+	    tenant._savedAt = Date.now();
+	    commandState.rigTenants[name] = tenant;
+	  }
+
+	  function readerBarRestoreRigTenant(readerName) {
+	    var name = readerBarCanonicalName(readerName || "");
+	    if (!name) return;
+	    stopHilWorkbenchRuntime();
+	    hilStopModemShell({ dispose: true });
+	    var tenant = commandState.rigTenants[name] || {};
+	    commandState.hilWorkbench = createHilWorkbenchState(tenant.hilWorkbench);
+	    cbApplyTenantSnapshot(tenant.cardBridge);
+	    hilSyncCommandCenterTraceIndicators();
+	    cbSyncCommandCenterBridgeIndicators();
+	  }
+
+	  function ccCurrentActiveViewName() {
+	    var active = document.querySelector("section.view-active[data-view]");
+	    return active ? String(active.getAttribute("data-view") || "") : "";
+	  }
+
+	  function ccIsReaderScopedInspectView(viewName) {
+	    return String(viewName || "") === "card_bridge";
+	  }
+
+	  function ccActionUsesReaderSession(action) {
+	    var subsystem = "";
+	    if (action && action.subsystem) {
       subsystem = action.subsystem;
     } else if (commandState && commandState.activeSubsystem) {
       subsystem = commandState.activeSubsystem;
@@ -268,19 +429,66 @@
     return ccSubsystemRequiresReaderSession(subsystem);
   }
 
-  function ccShouldHideReaderField(action, field) {
-    return !!(field && field.kind === "reader" && ccActionUsesReaderSession(action));
-  }
+	  function ccIsReaderIndexOverrideField(field) {
+	    var name = String(field && field.name || "").toLowerCase();
+	    return name === "reader_index" || name === "reader_idx" || name === "readerindex";
+	  }
 
-  function ccRefreshReaderSessionFormFields(readerName) {
-    var name = String(readerName || "");
-    document.querySelectorAll(".cc-form-row--reader-session").forEach(function (row) {
+	  function ccReaderSessionFieldMode(field) {
+	    if (!field) return "";
+	    var name = String(field.name || "").toLowerCase();
+	    if (ccIsReaderIndexOverrideField(field)) return "override";
+	    if (
+	      field.kind === "reader"
+	      || name === "reader"
+	      || name === "reader_name"
+	      || name === "readername"
+	    ) {
+	      return "reader";
+	    }
+	    return "";
+	  }
+
+	  function ccShouldHideReaderField(action, field) {
+	    if (!field || !ccActionUsesReaderSession(action)) return false;
+	    return ccReaderSessionFieldMode(field).length > 0;
+	  }
+
+	  function ccRefreshReaderSessionFormFields(readerName) {
+	    var name = String(readerName || "");
+	    document.querySelectorAll(".cc-form-row--reader-session").forEach(function (row) {
+      var fieldMode = row.getAttribute("data-reader-session-field") || "reader";
       var input = row.querySelector('input[type="hidden"]');
-      if (input) input.value = name;
-      var chip = row.querySelector(".cc-reader-session-chip");
-      if (chip) chip.textContent = name || "No reader selected";
-    });
-  }
+      if (input) input.value = fieldMode === "reader" ? name : "";
+	      var chip = row.querySelector(".cc-reader-session-chip");
+	      if (chip) chip.textContent = name || "No reader selected";
+	    });
+	  }
+
+	  function ccApplyActiveReaderBindingInputs(inputs) {
+	    if (!inputs) return inputs || {};
+	    var activeReader = ccActiveReaderName();
+	    if (activeReader.length === 0) return inputs;
+	    if (Object.prototype.hasOwnProperty.call(inputs, "reader")) {
+	      inputs.reader = activeReader;
+	    }
+	    if (Object.prototype.hasOwnProperty.call(inputs, "reader_name")) {
+	      inputs.reader_name = activeReader;
+	    }
+	    if (Object.prototype.hasOwnProperty.call(inputs, "readerName")) {
+	      inputs.readerName = activeReader;
+	    }
+	    if (Object.prototype.hasOwnProperty.call(inputs, "reader_index")) {
+	      inputs.reader_index = "";
+	    }
+	    if (Object.prototype.hasOwnProperty.call(inputs, "reader_idx")) {
+	      inputs.reader_idx = "";
+	    }
+	    if (Object.prototype.hasOwnProperty.call(inputs, "readerIndex")) {
+	      inputs.readerIndex = "";
+	    }
+	    return inputs;
+	  }
 
   function ccOpenInspectView(viewName, leafId) {
     if (commandState.activeSubsystem === "HIL") {
@@ -323,6 +531,8 @@
       loadLiveReaders();
     } else if (viewName === "card_bridge") {
       loadCardBridge();
+    } else if (viewName === "remote_lab") {
+      loadRemoteLab();
     }
     if (viewName !== "card_bridge") {
       cbStopAutoRefresh();
@@ -347,50 +557,8 @@
     return (data && data.note) || fallback || "";
   }
 
-  async function cbToggleTopbarRemoteBridge() {
-    var pill = $("topbar-card-bridge");
-    if (pill && pill.getAttribute("data-busy") === "true") return;
-    var previousState = (typeof cbState !== "undefined" && cbState.globalState)
-      || (pill && pill.getAttribute("data-state"))
-      || "idle";
-    var value = $("topbar-card-bridge-value");
-    var previousLabel = (typeof cbState !== "undefined" && cbState.globalLabel)
-      || (value && value.textContent)
-      || previousState;
-    var running = previousState === "running";
-    ccSetTopbarBridgeBusy("topbar-card-bridge", true);
-    setText("topbar-card-bridge-value", running ? "stopping" : "starting");
-    try {
-      var data;
-      if (running) {
-        if (typeof cbRigStopAllFromSavedSettings !== "function") {
-          throw new Error("Remote Bridge stop helper is unavailable.");
-        }
-        data = await cbRigStopAllFromSavedSettings();
-      } else {
-        if (typeof cbRigStartAllFromSavedSettings !== "function") {
-          throw new Error("Remote Bridge start helper is unavailable.");
-        }
-        data = await cbRigStartAllFromSavedSettings();
-      }
-      if (!data || data.ok === false) {
-        if (typeof cbSetGlobalBridgeStatus === "function" && (!data || !data.state)) {
-          cbSetGlobalBridgeStatus(previousState, previousLabel);
-        }
-        setStatusAction(ccDescribeTopbarBridgeAction(
-          data,
-          running ? "Remote Bridge stop failed." : "Remote Bridge start failed."
-        ));
-      }
-    } catch (err) {
-      if (typeof cbSetGlobalBridgeStatus === "function") {
-        cbSetGlobalBridgeStatus(previousState, previousLabel);
-      }
-      setStatusAction(String((err && err.message) || err));
-    } finally {
-      ccSetTopbarBridgeBusy("topbar-card-bridge", false);
-      if (typeof loadCardBridgeStatus === "function") loadCardBridgeStatus();
-    }
+  function cbToggleTopbarRemoteBridge() {
+    ccOpenInspectView("remote_lab", "leaf-adv-remote-lab");
   }
 
   function hilTopbarActions() {
@@ -473,6 +641,12 @@
       var inspectView = nav.getAttribute("data-cc-view");
       if (inspectView) {
         ccOpenInspectView(inspectView, nav.getAttribute("data-cc-leaf-id") || "");
+        if (
+          window.YggdraSimSidebar
+          && typeof window.YggdraSimSidebar.closeOverlayAfterNavigation === "function"
+        ) {
+          window.YggdraSimSidebar.closeOverlayAfterNavigation();
+        }
         return;
       }
       var subsystem = nav.getAttribute("data-cc-subsystem");
@@ -484,6 +658,12 @@
         leafId: leafId,
         stub: nav.classList.contains("is-stub"),
       });
+      if (
+        window.YggdraSimSidebar
+        && typeof window.YggdraSimSidebar.closeOverlayAfterNavigation === "function"
+      ) {
+        window.YggdraSimSidebar.closeOverlayAfterNavigation();
+      }
     });
   }
 
@@ -947,11 +1127,20 @@
     reader = readerBarCanonicalReader(reader);
     if (!reader) return document.createDocumentFragment();
     var name = String(reader && reader.name || "");
+    // Keep the reader selector and the session-close control as sibling
+    // buttons.  Nesting a role=button span inside the selector button made
+    // the close affordance invalid HTML and unreachable to keyboard users.
+    var pillGroup = document.createElement("span");
+    pillGroup.className = "topbar-reader-pill-group";
+    pillGroup.setAttribute("role", "presentation");
+    pillGroup.setAttribute("data-reader-name", name);
     var pill = document.createElement("button");
     pill.type = "button";
     pill.className = "topbar-reader-pill";
     pill.setAttribute("role", "tab");
     pill.setAttribute("data-reader-name", name);
+    pill.setAttribute("aria-haspopup", "dialog");
+    pill.setAttribute("aria-expanded", "false");
     if (bar.activeReader === name) {
       pill.classList.add("is-active");
       pill.setAttribute("aria-selected", "true");
@@ -992,9 +1181,9 @@
     label.textContent = readerBarShortName(name);
     pill.appendChild(label);
 
-    var close = document.createElement("span");
+    var close = document.createElement("button");
+    close.type = "button";
     close.className = "topbar-reader-pill-close";
-    close.setAttribute("role", "button");
     close.setAttribute("aria-label", "Close session on " + name);
     close.title = "Close session on this reader";
     close.textContent = "\u00d7";
@@ -1002,7 +1191,6 @@
       event.stopPropagation();
       readerBarCloseSessionFor(name);
     });
-    pill.appendChild(close);
 
     pill.addEventListener("click", function (event) {
       event.stopPropagation();
@@ -1011,13 +1199,16 @@
       // expect the same affordance as a dropdown menu.
       var bar = commandState.readerBar;
       if (bar.openPopover && bar.openPopoverFor === name) {
-        readerBarClosePopover();
+        readerBarClosePopover({ restoreFocus: true });
         return;
       }
       readerBarOpenPopover(name, pill);
     });
 
-    return pill;
+    pillGroup.setAttribute("data-session", status === "green" ? "active" : "inactive");
+    pillGroup.appendChild(pill);
+    pillGroup.appendChild(close);
+    return pillGroup;
   }
 
   function readerBarShortName(name) {
@@ -1037,30 +1228,41 @@
     return s.substring(0, 22) + "…";
   }
 
+	  function readerBarSaveCurrentContext(readerName) {
+	    var name = readerBarCanonicalName(readerName || "");
+	    if (!name) return;
+	    var ctx = commandState.readerSessions[name] || {};
+	    ctx.activeSubsystem = commandState.activeSubsystem;
+	    ctx.activeScope = commandState.activeScope;
+	    ctx.activeLeafId = commandState.activeLeafId;
+	    ctx.activeInspectView = "";
+	    var activeView = ccCurrentActiveViewName();
+	    if (!ctx.activeSubsystem && ccIsReaderScopedInspectView(activeView)) {
+	      ctx.activeInspectView = activeView;
+	    }
+	    var wb = commandState.scp03Workbench;
+	    if (wb && wb.activeTabId) {
+	      ctx.scp03ActiveTabId = wb.activeTabId;
+	    }
+    ctx._savedAt = Date.now();
+    commandState.readerSessions[name] = ctx;
+  }
+
   function readerBarActivate(readerName) {
     readerName = readerBarCanonicalName(readerName);
     if (!readerName) return;
-    var bar = commandState.readerBar;
-    var prevReader = readerBarCanonicalName(bar.activeReader);
+	    var bar = commandState.readerBar;
+	    var prevReader = readerBarCanonicalName(bar.activeReader);
 
-    // --- Save current context for the previous reader ---
-    if (prevReader && prevReader !== readerName) {
-      var ctx = commandState.readerSessions[prevReader] || {};
-      ctx.activeSubsystem = commandState.activeSubsystem;
-      ctx.activeScope = commandState.activeScope;
-      ctx.activeLeafId = commandState.activeLeafId;
-      // SCP03: remember which tab was active
-      var wb = commandState.scp03Workbench;
-      if (wb && wb.activeTabId) {
-        ctx.scp03ActiveTabId = wb.activeTabId;
-      }
-      ctx._savedAt = Date.now();
-      commandState.readerSessions[prevReader] = ctx;
-    }
+	    // --- Save current context for the previous reader ---
+	    if (prevReader && prevReader !== readerName) {
+	      readerBarSaveCurrentContext(prevReader);
+	      readerBarSaveCurrentRigTenant(prevReader);
+	    }
 
-    bar.activeReader = readerName;
-    bar.openPopover = null;
-    bar.openPopoverFor = "";
+	    bar.activeReader = readerName;
+	    bar.openPopover = null;
+	    bar.openPopoverFor = "";
 
     // Bridge into the legacy YggdraSimReaderStore so existing
     // subsystems (SCP03, SCP80, SCP11) can resolve the operator's
@@ -1075,8 +1277,9 @@
         }
       }
     } catch (_err) { /* YggdraSimReaderStore not loaded */ }
-    ccRefreshReaderSessionFormFields(readerName);
-    readerBarNotifySessionChanged();
+	    ccRefreshReaderSessionFormFields(readerName);
+	    readerBarRestoreRigTenant(readerName);
+	    readerBarNotifySessionChanged();
 
     // Sync the reader-bar-picked name into the old SCP03 sidebar
     // data so the per-reader-Name sidebar still works even in the
@@ -1087,18 +1290,22 @@
       commandState.scp03Workbench.readersError = null;
     }
 
-    // --- Restore context for the new reader ---
-    var savedCtx = commandState.readerSessions[readerName];
-    if (savedCtx && savedCtx.activeSubsystem) {
-      // Restore the subsystem/view the user was on for this reader
-      if (savedCtx.activeSubsystem !== commandState.activeSubsystem
-          || savedCtx.activeScope !== commandState.activeScope) {
-        openCommandSubsystem(savedCtx.activeSubsystem, {
-          scope: savedCtx.activeScope,
-          leafId: savedCtx.activeLeafId,
-        });
-      }
-    }
+	    // --- Restore context for the new reader ---
+	    var savedCtx = commandState.readerSessions[readerName];
+	    var restoredInspectView = false;
+	    if (savedCtx && savedCtx.activeSubsystem) {
+	      // Restore the subsystem/view the user was on for this reader
+	      if (savedCtx.activeSubsystem !== commandState.activeSubsystem
+	          || savedCtx.activeScope !== commandState.activeScope) {
+	        openCommandSubsystem(savedCtx.activeSubsystem, {
+	          scope: savedCtx.activeScope,
+	          leafId: savedCtx.activeLeafId,
+	        });
+	      }
+	    } else if (savedCtx && ccIsReaderScopedInspectView(savedCtx.activeInspectView)) {
+	      ccOpenInspectView(savedCtx.activeInspectView, savedCtx.activeLeafId || "leaf-adv-card-bridge");
+	      restoredInspectView = true;
+	    }
 
     // Drive the SCP03 workbench: locate or create the session tab
     // bound to this reader, hydrate from localStorage, and re-paint.
@@ -1113,22 +1320,26 @@
         scope: commandState.activeScope || "all",
         leafId: commandState.activeLeafId || "",
       });
-    } else if (commandState.activeSubsystem === null) {
-      openCommandSubsystem("SCP03");
-    } else if (!savedCtx) {
+	    } else if (commandState.activeSubsystem === null && !restoredInspectView) {
+	      var currentInspectView = ccCurrentActiveViewName();
+	      if (ccIsReaderScopedInspectView(currentInspectView)) {
+	        ccLoadStandaloneView(currentInspectView);
+	      } else {
+	        openCommandSubsystem("SCP03");
+	      }
+	    } else if (!savedCtx) {
       // First time clicking this reader — stay in current subsystem
-      // but the subsystem should re-fetch data for the new reader.
-      // The dashboard auto-fetch in renderCompactWorkbench handles this
-      // on next render.
+      // but the subsystem should stay passive until the operator presses
+      // Refresh or runs a concrete action.
     }
 
-    // If the selected reader has a card present (yellow) and there is
-    // no persisted state, auto-open a session immediately so operators
-    // don't have to click the Open button on the welcome panel. This
-    // restores the old "click reader → scan starts" UX the sidebar had,
-    // but only for first-time encounters — hydrated tabs get Resume.
-    var pillStatus = readerBarDeriveStatus(readerName);
-    if (pillStatus === "yellow") {
+    // If the selected reader has a card present and there is no live
+    // SCP03 session, auto-open a session immediately so operators do
+    // not need a second reader selector inside SCP03. Hydrated tabs
+    // still get Resume instead of a silent scan.
+    if (commandState.activeSubsystem === "SCP03"
+        && readerBarProbeHasCard(readerName)
+        && !readerBarHasScp03Session(readerName)) {
       var wb = commandState.scp03Workbench;
       if (wb) {
         var tab = scp03FindTab(wb.activeTabId);
@@ -1138,8 +1349,8 @@
         }
         if (tab && !tab.readerName && !scp03HasPersistedState(tab)) {
           tab.pendingReader = readerName;
-          var tabBar = document.querySelector(".cc-scp03-tabs");
-          var tabBody = document.querySelector(".cc-scp03-body");
+          var tabBar = document.querySelector(".cc-wb-tabs.scp03-topbar");
+          var tabBody = document.querySelector(".cc-wb-body");
           scp03OpenSessionForTab(tab, tabBar, tabBody);
         }
       }
@@ -1215,13 +1426,9 @@
     }
     wb.activeTabId = tab.id;
 
-    // If the SCP03 workbench is currently mounted, repaint so the
-    // new active tab + its reader binding become visible.
-    var tabBar = document.querySelector(".cc-wb-tabs.scp03-topbar");
-    var tabBody = document.querySelector(".cc-wb-body");
-    if (tabBar && tabBody && typeof renderScp03Tabs === "function") {
-      renderScp03Tabs(tabBar, tabBody);
-    }
+    // Rendering is driven through the normal reader-scoped subsystem
+    // path. The SCP03 tab object remains an internal cache/session
+    // holder, not a second visible reader selector.
   }
 
   async function readerBarCloseSessionFor(readerName) {
@@ -1278,6 +1485,9 @@
     if (bar.openPopover && bar.openPopoverFor) {
       readerBarRefreshPopover();
     }
+    if (typeof remoteLabRefreshSessionState === "function") {
+      remoteLabRefreshSessionState();
+    }
   }
 
   // -------------------------------------------------------------------
@@ -1329,13 +1539,17 @@
     return "Reader is offline. Reconnect the device or check pcscd.";
   }
 
-  function readerBarClosePopover() {
+  function readerBarClosePopover(options) {
+    options = options || {};
     var bar = commandState.readerBar;
+    var anchor = bar.openPopoverAnchor;
+    if (anchor) anchor.setAttribute("aria-expanded", "false");
     if (bar.openPopover && bar.openPopover.parentNode) {
       bar.openPopover.parentNode.removeChild(bar.openPopover);
     }
     bar.openPopover = null;
     bar.openPopoverFor = "";
+    bar.openPopoverAnchor = null;
     if (bar._popoverDocHandler) {
       document.removeEventListener("click", bar._popoverDocHandler, true);
       bar._popoverDocHandler = null;
@@ -1343,6 +1557,14 @@
     if (bar._popoverKeyHandler) {
       document.removeEventListener("keydown", bar._popoverKeyHandler, true);
       bar._popoverKeyHandler = null;
+    }
+    if (
+      options.restoreFocus
+      && anchor
+      && anchor.isConnected
+      && typeof anchor.focus === "function"
+    ) {
+      window.setTimeout(function () { anchor.focus(); }, 0);
     }
   }
 
@@ -1352,6 +1574,8 @@
     if (!name) return;
     var bar = commandState.readerBar;
     bar.openPopoverFor = name;
+    bar.openPopoverAnchor = anchor || null;
+    if (anchor) anchor.setAttribute("aria-expanded", "true");
 
     var pop = document.createElement("div");
     pop.className = "topbar-reader-popover";
@@ -1366,6 +1590,12 @@
     document.body.appendChild(pop);
     readerBarPaintPopover(pop, name);
     readerBarPositionPopover(pop, anchor);
+    var initialFocus = pop.querySelector(
+      '[data-reader-popover-action="connect"]:not([disabled]), '
+        + '[data-reader-popover-action="disconnect"]:not([disabled]), '
+        + '[data-reader-popover-action="close"]',
+    );
+    if (initialFocus) initialFocus.focus();
 
     // Outside-click + Esc to dismiss. Bound on the next tick so the
     // click that opened the panel doesn't immediately close it.
@@ -1383,7 +1613,7 @@
       bar._popoverKeyHandler = function (ev) {
         if (ev.key === "Escape") {
           ev.preventDefault();
-          readerBarClosePopover();
+          readerBarClosePopover({ restoreFocus: true });
         }
       };
       document.addEventListener("click", bar._popoverDocHandler, true);
@@ -1408,7 +1638,17 @@
   function readerBarRefreshPopover() {
     var bar = commandState.readerBar;
     if (!bar.openPopover || !bar.openPopoverFor) return;
+    var active = document.activeElement;
+    var action = active && bar.openPopover.contains(active)
+      ? active.getAttribute("data-reader-popover-action")
+      : "";
     readerBarPaintPopover(bar.openPopover, bar.openPopoverFor);
+    if (action) {
+      var replacement = bar.openPopover.querySelector(
+        '[data-reader-popover-action="' + action + '"]',
+      );
+      if (replacement && !replacement.disabled) replacement.focus();
+    }
   }
 
   function readerBarPaintPopover(pop, name) {
@@ -1429,10 +1669,11 @@
     closeBtn.className = "topbar-reader-popover-close";
     closeBtn.title = "Close (Esc)";
     closeBtn.setAttribute("aria-label", "Close reader panel");
+    closeBtn.setAttribute("data-reader-popover-action", "close");
     closeBtn.textContent = "\u00D7";
     closeBtn.addEventListener("click", function (ev) {
       ev.stopPropagation();
-      readerBarClosePopover();
+      readerBarClosePopover({ restoreFocus: true });
     });
     head.appendChild(closeBtn);
     pop.appendChild(head);
@@ -1497,6 +1738,7 @@
     var connectBtn = document.createElement("button");
     connectBtn.type = "button";
     connectBtn.className = "btn btn-primary";
+    connectBtn.setAttribute("data-reader-popover-action", "connect");
     connectBtn.textContent = (status === "green")
       ? (hasRealSession ? "Open workbench" : "Selected")
       : "Connect";
@@ -1522,6 +1764,7 @@
     var disconnectBtn = document.createElement("button");
     disconnectBtn.type = "button";
     disconnectBtn.className = "btn btn-secondary";
+    disconnectBtn.setAttribute("data-reader-popover-action", "disconnect");
     var canClearBinding = (status === "green");
     disconnectBtn.textContent = hasRealSession ? "Disconnect" : "Clear selection";
     disconnectBtn.disabled = !canClearBinding;
@@ -1564,6 +1807,9 @@
       commandState.catalogue = data;
       renderCommandNav(data);
       renderOverviewModuleLauncher(data);
+      if (typeof saipRefreshCatalogueContributions === "function") {
+        saipRefreshCatalogueContributions();
+      }
     } catch (err) {
       var nav = $("command-center-nav");
       if (nav) {
@@ -1606,7 +1852,7 @@
       children: [
         {
           id: "leaf-scp03-filesystem",
-          label: "Filesystem",
+          label: "File system",
           subsystem: "SCP03",
           scope: "filesystem",
           hint: "ETSI TS 102 221 file system / 3GPP NAA records",
@@ -1641,7 +1887,7 @@
         },
         {
           id: "leaf-esim-local-smdp",
-          label: "Local SMDP+",
+          label: "Local SM-DP+",
           subsystem: "SCP11 Local",
           requiresReader: true,
           hint: "Offline SM-DP+ over SCP11.local_access",
@@ -1682,10 +1928,16 @@
       defaultOpen: false,
       children: [
         {
+          id: "leaf-adv-remote-lab",
+          label: "Remote Lab",
+          inspectView: "remote_lab",
+          hint: "Self-hosted modem/card rig registry and one-click lab sessions",
+        },
+        {
           id: "leaf-adv-card-bridge",
           label: "Remote Bridge",
           inspectView: "card_bridge",
-          hint: "Remote card relay diagnostics and remote HIL rig controls",
+          hint: "Prepare remote hosts for Remote Lab access",
         },
         {
           id: "leaf-adv-hil",
@@ -1695,7 +1947,7 @@
         },
         {
           id: "leaf-adv-simcard",
-          label: "SIMCARD helpers",
+          label: "SIM card helpers",
           subsystem: "SIMCARD",
           hint: "Simulator-side helpers (quirks, profile store)",
         },
@@ -1802,7 +2054,10 @@
       childList.setAttribute("aria-label", group.label);
 
       (group.children || []).forEach(function (leaf) {
-        var li = document.createElement("li");
+        var item = document.createElement("li");
+        item.className = "cc-nav-leaf-item";
+        var li = document.createElement("button");
+        li.type = "button";
         li.className = "subsystem-entry cc-nav-leaf";
         li.setAttribute("data-cc-leaf-id", leaf.id);
         if (leaf.subsystem) li.setAttribute("data-cc-subsystem", leaf.subsystem);
@@ -1843,7 +2098,8 @@
           li.appendChild(countEl);
         }
 
-        childList.appendChild(li);
+        item.appendChild(li);
+        childList.appendChild(item);
       });
 
       groupLi.appendChild(childList);
@@ -1969,10 +2225,10 @@
     var status = hilTraceIndicatorStatus();
     var running = status.state === "running";
     var label = status.label || "tracing";
-    var topbar = $("topbar-hil-bridge");
-    if (topbar) {
-      var topbarLabel = running ? label : "idle";
-      topbar.setAttribute("data-state", running ? "running" : "idle");
+	    var topbar = $("topbar-hil-bridge");
+	    if (topbar) {
+	      var topbarLabel = running ? label : "stopped";
+	      topbar.setAttribute("data-state", running ? "running" : "idle");
       topbar.title = "HIL Bridge status: " + topbarLabel
         + ". Click to " + (running ? "stop" : "start") + ".";
       topbar.setAttribute("aria-label", topbar.title);
@@ -2039,6 +2295,9 @@
     commandState.activeSubsystem = subsystem;
     commandState.activeScope = scope;
     commandState.activeLeafId = leafId;
+    if (ccSubsystemRequiresReaderSession(subsystem)) {
+      readerBarSaveCurrentContext(ccActiveReaderName());
+    }
 
     // Look up a friendly crumb label from the nav leaf, falling back
     // to the backend subsystem name for direct callers.
@@ -2132,7 +2391,7 @@
     titleBlock.appendChild(title);
     var hint = document.createElement("p");
     hint.className = "cc-compact-hint";
-    hint.textContent = "Select a reader before running this eSIM surface.";
+    hint.textContent = "Select a reader before running this reader-backed surface.";
     titleBlock.appendChild(hint);
     header.appendChild(titleBlock);
     wb.appendChild(header);
@@ -2141,7 +2400,7 @@
     body.className = "cc-reader-session-card";
     var lead = document.createElement("p");
     lead.className = "cc-reader-session-copy";
-    lead.textContent = "eSIM actions are scoped to one PC/SC reader. Pick the reader here or from the top bar; action forms will use that reader automatically.";
+    lead.textContent = "Reader-backed actions are scoped to one PC/SC reader. Pick the reader here or from the top bar; action forms will use that reader automatically.";
     body.appendChild(lead);
 
     var choices = ccReaderSessionChoices();
@@ -2447,6 +2706,83 @@
     return raw.substring(dot + 1);
   }
 
+  var CC_ICON_MARKUP = {
+    action: '<path d="M12 5v14"></path><path d="M5 12h14"></path>',
+    "add-above": '<path d="M12 4v10"></path><path d="M7 9l5-5 5 5"></path><path d="M5 18h14"></path><path d="M12 15v6"></path><path d="M9 18h6"></path>',
+    "add-below": '<path d="M12 20V10"></path><path d="M7 15l5 5 5-5"></path><path d="M5 6h14"></path><path d="M12 3v6"></path><path d="M9 6h6"></path>',
+    auth: '<circle cx="8" cy="14" r="3"></circle><path d="M11 14h9"></path><path d="M16 14v3"></path><path d="M19 14v2"></path>',
+    batch: '<rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect>',
+    check: '<path d="M5 13l4 4L19 7"></path>',
+    clear: '<path d="M7 7l10 10"></path><path d="M17 7L7 17"></path>',
+    close: '<path d="M7 7l10 10"></path><path d="M17 7L7 17"></path>',
+    compare: '<rect x="4" y="5" width="7" height="14" rx="1"></rect><rect x="13" y="5" width="7" height="14" rx="1"></rect>',
+    copy: '<rect x="8" y="8" width="11" height="11" rx="1"></rect><path d="M5 15H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1"></path>',
+    counter: '<path d="M9 4L7 20"></path><path d="M17 4l-2 16"></path><path d="M4 9h16"></path><path d="M3 15h16"></path>',
+    delete: '<path d="M4 7h16"></path><path d="M9 7V5h6v2"></path><path d="M7 7l1 13h8l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path>',
+    diff: '<path d="M7 5v14"></path><path d="M17 5v14"></path><path d="M10 9h4"></path><path d="M10 15h4"></path>',
+    enable: '<path d="M12 3v8"></path><path d="M7 6a7 7 0 1 0 10 0"></path>',
+    export: '<path d="M12 15V4"></path><path d="M7 9l5-5 5 5"></path><path d="M5 19h14"></path>',
+    find: '<circle cx="10" cy="10" r="5"></circle><path d="M14 14l5 5"></path>',
+    guides: '<path d="M6 5h10a2 2 0 0 1 2 2v12H8a2 2 0 0 0-2 2z"></path><path d="M6 5v16"></path><path d="M9 9h6"></path>',
+    hotfolder: '<path d="M3 7h7l2 2h9v10H3z"></path><path d="M8 13h8"></path>',
+    import: '<path d="M12 4v11"></path><path d="M7 10l5 5 5-5"></path><path d="M5 19h14"></path>',
+    list: '<path d="M8 7h12"></path><path d="M8 12h12"></path><path d="M8 17h12"></path><path d="M4 7h.01"></path><path d="M4 12h.01"></path><path d="M4 17h.01"></path>',
+    live: '<path d="M4 12a8 8 0 0 1 16 0"></path><path d="M8 12a4 4 0 0 1 8 0"></path><circle cx="12" cy="12" r="1.5"></circle><path d="M12 14v6"></path>',
+    "move-down": '<path d="M12 5v14"></path><path d="M7 14l5 5 5-5"></path>',
+    "move-up": '<path d="M12 19V5"></path><path d="M7 10l5-5 5 5"></path>',
+    more: '<circle cx="6" cy="12" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="18" cy="12" r="1.5"></circle>',
+    new: '<path d="M12 5v14"></path><path d="M5 12h14"></path>',
+    notification: '<path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7"></path><path d="M10 20h4"></path>',
+    open: '<path d="M3 7h7l2 2h9l-2 10H4z"></path><path d="M3 7v12"></path>',
+    package: '<path d="M12 3l8 4v10l-8 4-8-4V7z"></path><path d="M12 11l8-4"></path><path d="M12 11v10"></path><path d="M12 11L4 7"></path>',
+    pause: '<path d="M9 5v14"></path><path d="M15 5v14"></path>',
+    personalize: '<circle cx="10" cy="8" r="3"></circle><path d="M4 20a6 6 0 0 1 12 0"></path><path d="M18 8v6"></path><path d="M15 11h6"></path>',
+    read: '<path d="M6 4h9l3 3v13H6z"></path><path d="M14 4v4h4"></path><path d="M9 12h6"></path><path d="M9 16h6"></path>',
+    recent: '<circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l4 2"></path>',
+    redo: '<path d="M17 7l4 4-4 4"></path><path d="M3 18v-3a4 4 0 0 1 4-4h14"></path>',
+    reference: '<circle cx="12" cy="12" r="8"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path>',
+    refresh: '<path d="M20 6v5h-5"></path><path d="M4 18v-5h5"></path><path d="M19 11a7 7 0 0 0-12-4l-3 3"></path><path d="M5 13a7 7 0 0 0 12 4l3-3"></path>',
+    report: '<path d="M7 4h10v16H7z"></path><path d="M9 8h6"></path><path d="M9 12h6"></path><path d="M9 16h4"></path>',
+    revert: '<path d="M8 7H4V3"></path><path d="M5 7a8 8 0 1 1-1 7"></path>',
+    run: '<path d="M8 5v14l11-7z"></path>',
+    save: '<path d="M5 4h12l2 2v14H5z"></path><path d="M8 4v6h8V4"></path><path d="M8 16h8"></path>',
+    "save-as": '<path d="M5 4h12l2 2v14H5z"></path><path d="M8 4v6h8V4"></path><path d="M12 17l5-5 2 2-5 5h-2z"></path>',
+    scan: '<path d="M4 7V4h3"></path><path d="M17 4h3v3"></path><path d="M20 17v3h-3"></path><path d="M7 20H4v-3"></path><circle cx="12" cy="12" r="3"></circle>',
+    shell: '<path d="M5 7l5 5-5 5"></path><path d="M11 17h8"></path>',
+    stop: '<rect x="7" y="7" width="10" height="10" rx="1"></rect>',
+    sync: '<path d="M20 7v5h-5"></path><path d="M4 17v-5h5"></path><path d="M19 12a7 7 0 0 0-12-5"></path><path d="M5 12a7 7 0 0 0 12 5"></path>',
+    token: '<path d="M8 7L4 12l4 5"></path><path d="M16 7l4 5-4 5"></path><path d="M11 19l2-14"></path>',
+    trace: '<path d="M4 16c4 0 4-8 8-8s4 8 8 8"></path><path d="M4 20h16"></path>',
+    tree: '<path d="M6 5h5v5H6z"></path><path d="M13 14h5v5h-5z"></path><path d="M6 14h5v5H6z"></path><path d="M11 8h2v9"></path>',
+    undo: '<path d="M7 7l-4 4 4 4"></path><path d="M21 18v-3a4 4 0 0 0-4-4H3"></path>',
+    write: '<path d="M4 17v3h3L18 9l-3-3z"></path><path d="M14 7l3 3"></path>',
+  };
+
+  function ccIconMarkup(name) {
+    var key = String(name || "action").toLowerCase();
+    return CC_ICON_MARKUP[key] || CC_ICON_MARKUP.action;
+  }
+
+  function ccSetActionIcon(host, iconName) {
+    if (!host) return;
+    var key = String(iconName || "action").toLowerCase();
+    host.innerHTML = "";
+    host.setAttribute("aria-hidden", "true");
+    host.setAttribute("data-icon", CC_ICON_MARKUP[key] ? key : "action");
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("cc-action-svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = ccIconMarkup(key);
+    host.appendChild(svg);
+  }
+
   function ccGroupActionsForSubsystem(subsystem, actions) {
     var groups = CC_ACTION_GROUPS_BY_SUBSYSTEM[subsystem];
     if (!groups || !groups.length) return null;
@@ -2559,6 +2895,21 @@
     for (var i = 0; i < names.length; i++) {
       var action = ccFindActionById(subsystems[names[i]], actionId);
       if (action) return action;
+    }
+    return null;
+  }
+
+  function ccFindCatalogueActionByTag(tag) {
+    var cat = commandState && commandState.catalogue;
+    var subsystems = cat && cat.subsystems ? cat.subsystems : {};
+    var names = Object.keys(subsystems);
+    for (var i = 0; i < names.length; i++) {
+      var actions = subsystems[names[i]] || [];
+      for (var j = 0; j < actions.length; j++) {
+        var action = actions[j];
+        var tags = action && Array.isArray(action.tags) ? action.tags : [];
+        if (tags.indexOf(tag) !== -1) return action;
+      }
     }
     return null;
   }
@@ -2720,30 +3071,32 @@
   }
 
   // -- Ribbon button icon resolver ------------------------------------
-  // Maps action-ID suffix patterns to Unicode glyphs so every compact
-  // workbench button gets an icon without per-action manual wiring.
+  // Maps action-ID suffix patterns to shared inline SVG icons so every
+  // compact workbench button gets a coherent action symbol without
+  // per-action manual wiring.
   function _ccResolveIcon(actionId) {
     var id = (actionId || "").toLowerCase();
-    if (/status|scan|discover/.test(id)) return "◷";
-    if (/^get_|^list_|^read_|^show_/.test(id)) return "▣";
-    if (/^set_|^update_|^store_|^write_/.test(id)) return "✎";
-    if (/^enable_|^disable_/.test(id)) return "◐";
-    if (/^delete_|^remove_|^clear_/.test(id)) return "✕";
-    if (/^download_|^load_|^import_|^dump_/.test(id)) return "↓";
-    if (/^export_|^explain_|^lint_/.test(id)) return "↑";
-    if (/^reset_|^refresh_/.test(id)) return "↻";
-    if (/^verify_|^validate_/.test(id)) return "✓";
-    if (/^send_|^run_|^flow_|^execute/.test(id)) return "▶";
-    if (/_package|_profile|_pe_|iso/.test(id)) return "⧉";
-    if (/auth|_cert_|_certs_|key/.test(id)) return "⊙";
-    if (/poll|campaign/.test(id)) return "⟳";
-    if (/config/.test(id)) return "⚙";
-    if (/script/.test(id)) return "≣";
-    if (/record|recording|trace/.test(id)) return "●";
-    if (/counter|handover/.test(id)) return "⧖";
-    if (/notif|notification/.test(id)) return "✉";
-    if (/hotfolder/.test(id)) return "❐";
-    return "●";
+    var suffix = ccActionSuffix(id);
+    var haystack = id + " " + suffix;
+    if (/hotfolder/.test(haystack)) return "hotfolder";
+    if (/notif|notification/.test(haystack)) return "notification";
+    if (/^(set|update|store|write)_/.test(suffix)) return "write";
+    if (/^(download|load|import|dump)_/.test(suffix)) return "import";
+    if (/^(export)_/.test(suffix)) return "export";
+    if (/^(enable|disable)_/.test(suffix)) return "enable";
+    if (/^(delete|remove|clear)_/.test(suffix)) return "delete";
+    if (/^(send|run|flow|execute|issue)_/.test(suffix)) return "run";
+    if (/poll|campaign|refresh|reset/.test(haystack)) return "refresh";
+    if (/auth|authenticate|_cert_|_certs_|certificate|key/.test(haystack)) return "auth";
+    if (/status|scan|discover/.test(haystack)) return "scan";
+    if (/verify|validate|lint|explain/.test(haystack)) return "check";
+    if (/config|metadata|policy|rat|es9|smdp|euicc|eid|info/.test(haystack)) return "read";
+    if (/^(get|list|read|show|retrieve)_/.test(suffix)) return "read";
+    if (/package|profile|_pe_|iso/.test(haystack)) return "package";
+    if (/script|shell/.test(haystack)) return "shell";
+    if (/record|recording|trace/.test(haystack)) return "trace";
+    if (/counter|handover/.test(haystack)) return "counter";
+    return "action";
   }
 
   function ccActionNeedsManualInput(action) {
@@ -2755,21 +3108,150 @@
 
   function ccActionShouldAutoRunOnOpen(action) {
     if (!action || action.streams) return false;
+    if (ccActionIsDestructive(action)) return false;
     return !ccActionNeedsManualInput(action);
   }
 
   function ccActionShouldAutoRunInEsimFlowPane(action) {
     if (!action) return false;
+    if (ccActionIsDestructive(action)) return false;
     return !ccActionNeedsManualInput(action);
+  }
+
+  var CC_SAIP_WORKBOOK_GENERATOR_TAG = "saip-filesystem-workbook";
+  var CC_SAIP_WORKBOOK_INTERNAL_FIELDS = {
+    workbook_filename: true,
+    workbook_content_base64: true,
+  };
+
+  function ccIsSaipWorkbookInternalField(action, field) {
+    if (!action || !field || !CC_SAIP_WORKBOOK_INTERNAL_FIELDS[field.name]) {
+      return false;
+    }
+    var tags = Array.isArray(action.tags) ? action.tags : [];
+    return tags.indexOf(CC_SAIP_WORKBOOK_GENERATOR_TAG) !== -1;
+  }
+
+  function ccShowSaipWorkbookUploadSource(action, form, initialValues) {
+    if (!action || !form || !initialValues) return;
+    var fields = action.inputs || [];
+    var filenameField = fields.find(function (field) {
+      return field && field.name === "workbook_filename";
+    });
+    var contentField = fields.find(function (field) {
+      return field && field.name === "workbook_content_base64";
+    });
+    if (!ccIsSaipWorkbookInternalField(action, filenameField)
+        || !ccIsSaipWorkbookInternalField(action, contentField)) {
+      return;
+    }
+    var rawName = String(initialValues.workbook_filename || "")
+      .replace(/\\/g, "/");
+    var uploadName = rawName.split("/").pop() || "";
+    if (!uploadName || !String(initialValues.workbook_content_base64 || "")) {
+      return;
+    }
+
+    // Do not put the display label in workbook_path: that named field is
+    // submitted, and the backend correctly rejects simultaneous path/upload
+    // sources. Keep the real path control empty and replace only its visible
+    // row with an unnamed read-only source indicator.
+    var pathControl = form.elements.namedItem("workbook_path");
+    var pathRow = ccActionFieldRow(form, "workbook_path");
+    if (pathControl) {
+      pathControl.value = "";
+      pathControl.disabled = true;
+    }
+    if (pathRow) pathRow.hidden = true;
+
+    var displayRow = document.createElement("div");
+    displayRow.className = "form-row cc-form-row cc-saip-workbook-upload-source";
+    var label = document.createElement("label");
+    label.textContent = "Workbook";
+    var display = document.createElement("input");
+    display.type = "text";
+    display.readOnly = true;
+    display.value = "upload:" + uploadName;
+    display.setAttribute("aria-label", "Browser-local workbook upload");
+    display.setAttribute("autocomplete", "off");
+    displayRow.appendChild(label);
+    displayRow.appendChild(display);
+    var hint = document.createElement("small");
+    hint.className = "cc-field-hint";
+    hint.textContent = "Browser-local workbook prepared in memory; it is not staged on disk.";
+    displayRow.appendChild(hint);
+    if (pathRow && pathRow.parentNode) {
+      pathRow.parentNode.insertBefore(displayRow, pathRow);
+    } else {
+      form.insertBefore(displayRow, form.firstChild);
+    }
+  }
+
+  function ccApplyActionFormInitialValues(action, form, initialValues) {
+    if (!form || !initialValues || typeof initialValues !== "object") return;
+    var actionTags = action && Array.isArray(action.tags) ? action.tags : [];
+    var activeSessionInjected = (
+      actionTags.indexOf("saip-ribbon-active-session-form") !== -1
+      && Object.prototype.hasOwnProperty.call(initialValues, "session_id")
+      && String(initialValues.session_id || "").trim().length > 0
+    );
+    (action && action.inputs || []).forEach(function (field) {
+      // Initial values normally never populate secret controls. The sole
+      // exception is the browser-upload bridge for the Excel → SAIP
+      // generator: bytes read from a user-selected File must cross the
+      // shared action form without ever becoming a visible/editable field.
+      // Both the contribution tag and an exact field-name allowlist are
+      // required so no other action can opt into secret prefilling.
+      if (!field || (field.secret && !ccIsSaipWorkbookInternalField(action, field))) {
+        return;
+      }
+      if (!Object.prototype.hasOwnProperty.call(initialValues, field.name)) return;
+      var control = form.elements.namedItem(field.name);
+      if (!control) return;
+      var value = initialValues[field.name];
+      if (control.dataset
+          && control.dataset.saipTokenConfigurationRole
+          && value !== undefined
+          && value !== null) {
+        control.dataset.preferredConfiguration = String(value);
+      }
+      if (control.type === "checkbox") {
+        control.checked = Boolean(value);
+      } else if (value !== undefined && value !== null) {
+        control.value = String(value);
+      }
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+      if (field.name === "session_id"
+          && actionTags.indexOf("saip-ribbon-active-session-form") !== -1) {
+        var row = ccActionFieldRow(form, field.name);
+        if (row) {
+          row.hidden = true;
+          row.dataset.prefilledActiveSession = "true";
+        }
+      }
+    });
+    ccShowSaipWorkbookUploadSource(action, form, initialValues);
+    if (activeSessionInjected) {
+      var alternatePath = form.elements.namedItem("profile_path");
+      var alternatePathRow = ccActionFieldRow(form, "profile_path");
+      if (alternatePath) {
+        alternatePath.value = "";
+        alternatePath.disabled = true;
+      }
+      if (alternatePathRow) {
+        alternatePathRow.hidden = true;
+        alternatePathRow.dataset.activeSessionAlternateSource = "true";
+      }
+    }
   }
 
   // -- Action popout builder ------------------------------------------
   // Opens a floating popout with the action's form + run button.
   // Reuses _ccBuildCompactPopout (dedup + cascade) and buildField()
   // so the form experience is identical to the old card-based layout.
-  function _ccBuildActionPopout(action) {
+  function _ccBuildActionPopout(action, initialValues) {
     var title = action.title || action.id || "Action";
-    var popBody = _ccBuildCompactPopout(title);
+    var popBody = _ccBuildCompactPopout(title, action.id || title);
 
     // Description
     if (action.description) {
@@ -2786,6 +3268,7 @@
       form.appendChild(buildField(action, field));
     });
     ccEnhanceActionForm(action, form);
+    ccApplyActionFormInitialValues(action, form, initialValues);
 
     // Run button + status
     var actionsBar = document.createElement("div");
@@ -2797,7 +3280,7 @@
     actionsBar.appendChild(runBtn);
     var status = document.createElement("span");
     status.className = "cc-action-status";
-    status.textContent = "idle";
+    status.textContent = "Ready";
     actionsBar.appendChild(status);
     form.appendChild(actionsBar);
 
@@ -2805,6 +3288,7 @@
     var result = document.createElement("div");
     result.className = "cc-action-result cc-action-result--" + (action.output_kind || "json");
     form.appendChild(result);
+    ccPrepareActionFeedback(action, form, status, result);
 
     form.addEventListener("submit", function (event) {
       event.preventDefault();
@@ -2820,6 +3304,22 @@
     });
 
     popBody.appendChild(form);
+
+    ccInitializeSaipTokenConfigurationForm(action, form, runBtn, status, result);
+
+    window.setTimeout(function () {
+      var popout = popBody && popBody.closest ? popBody.closest(".cc-popout") : null;
+      var first = form.querySelector(
+        "input:not([type='hidden']):not(:disabled), "
+          + "select:not(:disabled), textarea:not(:disabled), "
+          + "button:not(:disabled)"
+      );
+      if (first && first.focus) {
+        try { first.focus({ preventScroll: true }); } catch (_e) { first.focus(); }
+      } else if (popout && popout.focus) {
+        popout.focus();
+      }
+    }, 0);
 
     // If the action has no visible manual fields, the action button is
     // the operator's explicit request. Run immediately and leave a
@@ -3048,16 +3548,17 @@
       wb.appendChild(ribbon);
     }
 
-    // --- Dashboard: auto-fetch card overview on open ---
+    // --- Dashboard: manual card overview refresh ---
     var dashboardActions = ["eSIM Management", "SCP11 Local", "Local eIM"];
     var isDashboardSubsystem = dashboardActions.indexOf(subsystem) !== -1;
+    var isOtaModuleSurface = subsystem === "SCP80";
     // Map subsystem to the overview action that returns a snapshot
     var DASHBOARD_SCAN_ACTION = {
       "eSIM Management": "scp11_live.scan",
       "SCP11 Local": "scp11_local.discover",
       "Local eIM": "eim_local.scan",
     };
-    var useEsimSplitPane = isDashboardSubsystem;
+    var useEsimSplitPane = isDashboardSubsystem || isOtaModuleSurface;
     var esimFlowPane = null;
     var esimFlowTitle = null;
     var esimFlowStatus = null;
@@ -3104,8 +3605,12 @@
     }
 
     function _renderEsimFlowPlaceholder() {
-      var body = _resetEsimFlowPane(null, "idle");
+      var body = _resetEsimFlowPane(null, isOtaModuleSurface ? "ready" : "idle");
       if (!body) return;
+      if (isOtaModuleSurface) {
+        esimFlowTitle.textContent = "OTA output";
+        return;
+      }
       var empty = document.createElement("div");
       empty.className = "cc-esim-flow-placeholder";
       var title = document.createElement("div");
@@ -3118,19 +3623,157 @@
       body.appendChild(empty);
     }
 
-    function _renderEsimFlowError(message, action) {
-      var body = _resetEsimFlowPane(action || null, "error");
-      if (!body) return;
-      body.appendChild(renderErrorBlock(message));
-    }
+	    function _renderEsimFlowError(message, action) {
+	      var body = _resetEsimFlowPane(action || null, "error");
+	      if (!body) return;
+	      body.appendChild(renderErrorBlock(message));
+	    }
 
-    function _buildEsimFlowResult(action, runningText) {
-      var body = _resetEsimFlowPane(action, "running");
-      if (!body) return null;
-      if (action && action.description) {
-        var desc = document.createElement("p");
-        desc.className = "cc-action-desc";
-        desc.textContent = action.description;
+	    function _otaValue(value) {
+	      if (value == null) return "";
+	      if (typeof value === "boolean") return value ? "yes" : "no";
+	      return String(value);
+	    }
+
+	    function _otaShortHex(value) {
+	      var text = _otaValue(value).replace(/\s+/g, "");
+	      if (text.length <= 64) return text;
+	      return text.substring(0, 36) + "..." + text.substring(text.length - 20);
+	    }
+
+	    function _otaActionLabel(action) {
+	      var id = String(action && action.id || "");
+	      if (id === "scp80.send") return "Send OTA";
+	      if (id === "scp80.build_plan") return "Build Plan";
+	      if (id === "scp80.ota_smart") return "Smart OTA";
+	      if (id === "scp80.send_raw") return "Raw APDU";
+	      if (id === "scp80.run_script") return "Script";
+	      if (id === "scp80.protocol_summary") return "Protocol";
+	      if (id === "scp80.reset_connection") return "Reset Transport";
+	      return action && (action.title || action.id) || "OTA action";
+	    }
+
+	    function _otaAppendKv(parent, labelText, valueText, options) {
+	      var raw = _otaValue(valueText);
+	      if (options && options.skipEmpty && raw.length === 0) return null;
+	      var row = document.createElement("div");
+	      row.className = "cc-ota-result-kv";
+	      var label = document.createElement("span");
+	      label.className = "cc-ota-result-k";
+	      label.textContent = labelText;
+	      row.appendChild(label);
+	      var value = document.createElement("span");
+	      value.className = "cc-ota-result-v";
+	      if (options && options.mono) value.classList.add("is-mono");
+	      value.textContent = raw || "-";
+	      row.appendChild(value);
+	      parent.appendChild(row);
+	      return row;
+	    }
+
+	    function _otaAppendDetails(parent, titleText, textValue, open) {
+	      var text = _otaValue(textValue).trim();
+	      if (!text) return;
+	      var details = document.createElement("details");
+	      details.className = "cc-ota-result-details";
+	      if (open) details.open = true;
+	      var summary = document.createElement("summary");
+	      summary.textContent = titleText;
+	      details.appendChild(summary);
+	      var pre = document.createElement("pre");
+	      pre.className = "cc-ota-result-pre";
+	      pre.textContent = text;
+	      details.appendChild(pre);
+	      parent.appendChild(details);
+	    }
+
+	    function _otaAppendApduList(parent, plan) {
+	      var apdus = Array.isArray(plan && plan.apdus) ? plan.apdus : [];
+	      var readerApdus = Array.isArray(plan && plan.reader_apdus) ? plan.reader_apdus : [];
+	      if (!apdus.length && !readerApdus.length) return;
+	      var details = document.createElement("details");
+	      details.className = "cc-ota-result-details";
+	      details.open = true;
+	      var summary = document.createElement("summary");
+	      summary.textContent = "APDUs";
+	      details.appendChild(summary);
+	      var list = document.createElement("div");
+	      list.className = "cc-ota-apdu-list";
+	      if (readerApdus.length) {
+	        readerApdus.forEach(function (apdu, idx) {
+	          _otaAppendKv(list, "Reader APDU " + (idx + 1), _otaShortHex(apdu), { mono: true });
+	        });
+	      } else {
+	        apdus.forEach(function (row, idx) {
+	          var label = "Segment " + (row && row.index || idx + 1);
+	          if (row && row.total) label += "/" + row.total;
+	          _otaAppendKv(list, label, _otaShortHex(row && row.apdu_hex), { mono: true });
+	        });
+	      }
+	      details.appendChild(list);
+	      parent.appendChild(details);
+	    }
+
+	    function _renderOtaActionResult(action, data, result) {
+	      if (!result) return;
+	      result.innerHTML = "";
+	      result.classList.add("cc-ota-result");
+	      var payload = data || {};
+	      var plan = payload.plan || {};
+	      var transportResult = payload.result || {};
+	      var summary = payload.summary || {};
+	      var ok = payload.ok !== false;
+
+	      var head = document.createElement("div");
+	      head.className = "cc-ota-result-head";
+	      var badge = document.createElement("span");
+	      badge.className = "cc-ota-result-badge " + (ok ? "is-ok" : "is-error");
+	      badge.textContent = ok ? "OK" : "ERROR";
+	      head.appendChild(badge);
+	      var title = document.createElement("div");
+	      title.className = "cc-ota-result-title";
+	      title.textContent = _otaActionLabel(action);
+	      head.appendChild(title);
+	      result.appendChild(head);
+
+	      if (payload.note) {
+	        var note = document.createElement("div");
+	        note.className = "cc-ota-result-note";
+	        note.textContent = _otaValue(payload.note);
+	        result.appendChild(note);
+	      }
+
+	      var grid = document.createElement("div");
+	      grid.className = "cc-ota-result-grid";
+	      _otaAppendKv(grid, "Transport", payload.transport || summary.transport, { skipEmpty: true });
+	      _otaAppendKv(grid, "Reader", payload.reader_name || payload.reader_index, { skipEmpty: true });
+	      _otaAppendKv(grid, "Protocol", summary.active_protocol || summary.protocol, { skipEmpty: true });
+	      _otaAppendKv(grid, "ATR", _otaShortHex(summary.atr_hex || summary.atr), { mono: true, skipEmpty: true });
+	      _otaAppendKv(grid, "Segments", plan.segment_count, { skipEmpty: true });
+	      _otaAppendKv(grid, "Counter", plan.cntr_hex, { mono: true, skipEmpty: true });
+	      _otaAppendKv(grid, "Payload", _otaShortHex(plan.payload_hex || payload.apdu_hex), { mono: true, skipEmpty: true });
+	      _otaAppendKv(grid, "Delivered", transportResult.delivered || payload.delivered, { skipEmpty: true });
+	      _otaAppendKv(grid, "POR", _otaShortHex(transportResult.por || payload.por || payload.response_hex), { mono: true, skipEmpty: true });
+	      _otaAppendKv(grid, "SW", transportResult.sw || payload.sw, { mono: true, skipEmpty: true });
+	      _otaAppendKv(grid, "Script", payload.script_path, { mono: true, skipEmpty: true });
+	      _otaAppendKv(grid, "Executed", payload.executed, { skipEmpty: true });
+	      _otaAppendKv(grid, "Delivered count", payload.delivered, { skipEmpty: true });
+	      if (grid.children.length > 0) result.appendChild(grid);
+
+	      _otaAppendApduList(result, plan);
+	      _otaAppendDetails(result, "Decoded POR", payload.por_decoded, true);
+	      _otaAppendDetails(result, "Trace", payload.trace, false);
+	      _otaAppendDetails(result, "Raw result JSON", JSON.stringify(payload, null, 2), false);
+	    }
+
+	    function _buildEsimFlowResult(action, runningText, options) {
+	      var opts = options || {};
+	      var body = _resetEsimFlowPane(action, "running");
+	      if (!body) return null;
+	      if (!isOtaModuleSurface && opts.showDescription !== false && action && action.description) {
+	        var desc = document.createElement("p");
+	        desc.className = "cc-action-desc";
+	        desc.textContent = action.description;
         body.appendChild(desc);
       }
       var result = document.createElement("div");
@@ -3151,11 +3794,11 @@
       var inputs = Object.assign({}, inputsMap || {});
       applyActiveReaderDefault(action, inputs);
       if (ccActionUsesReaderSession(action) && !ccActiveReaderName()) {
-        _renderEsimFlowError("Select a reader before running this eSIM action.", action);
+        _renderEsimFlowError("Select a reader before running this reader-backed action.", action);
         setStatusAction("action blocked: reader required");
         return null;
       }
-      var result = _buildEsimFlowResult(action, opts.runningText);
+      var result = _buildEsimFlowResult(action, opts.runningText, opts);
       setStatusAction("action: " + action.id);
       logBus.emit({
         level: "info",
@@ -3181,11 +3824,15 @@
           });
           return null;
         }
-        var data = resp.data || {};
-        if (result) {
-          result.innerHTML = "";
-          renderActionResult(action, data, result);
-        }
+	        var data = resp.data || {};
+	        if (result) {
+	          result.innerHTML = "";
+	          if (isOtaModuleSurface) {
+	            _renderOtaActionResult(action, data, result);
+	          } else {
+	            renderActionResult(action, data, result);
+	          }
+	        }
         _setEsimFlowStatus(opts.doneText || "ok");
         logBus.emit({
           level: "info",
@@ -3215,6 +3862,16 @@
         return;
       }
       _setEsimFlowActiveAction(action);
+      if (ccActionShouldAutoRunInEsimFlowPane(action)) {
+        window.setTimeout(function () {
+          _runActionInEsimFlowPane(action, {}, {
+            runningText: "running " + (action.title || action.id || "action"),
+            doneText: "ok",
+            showDescription: false,
+          });
+        }, 0);
+        return;
+      }
       var body = _resetEsimFlowPane(action, "idle");
       if (!body) return;
       if (action.description) {
@@ -3229,6 +3886,7 @@
       (action.inputs || []).forEach(function (field) {
         form.appendChild(buildField(action, field));
       });
+      ccEnhanceActionForm(action, form);
 
       var actionsBar = document.createElement("div");
       actionsBar.className = "inline-actions cc-action-bar";
@@ -3239,7 +3897,7 @@
       actionsBar.appendChild(runBtn);
       var status = document.createElement("span");
       status.className = "cc-action-status";
-      status.textContent = "idle";
+      status.textContent = "Ready";
       actionsBar.appendChild(status);
       form.appendChild(actionsBar);
 
@@ -3247,6 +3905,7 @@
       result.className = "cc-action-result cc-esim-flow-result cc-action-result--"
         + (action.output_kind || "json");
       form.appendChild(result);
+      ccPrepareActionFeedback(action, form, status, result);
 
       form.addEventListener("submit", function (event) {
         event.preventDefault();
@@ -3341,13 +4000,14 @@
       actionsBar.appendChild(runBtn);
       var formStatus = document.createElement("span");
       formStatus.className = "cc-action-status";
-      formStatus.textContent = "idle";
+      formStatus.textContent = "Ready";
       actionsBar.appendChild(formStatus);
       form.appendChild(actionsBar);
 
       var result = document.createElement("div");
       result.className = "cc-action-result cc-action-result--" + (action.output_kind || "json");
       form.appendChild(result);
+      ccPrepareActionFeedback(action, form, formStatus, result);
 
       form.addEventListener("submit", function (event) {
         event.preventDefault();
@@ -3389,6 +4049,539 @@
       } catch (_err) {
         pane.scrollIntoView();
       }
+    }
+
+    function _buildOtaOverviewPanel() {
+      var panel = document.createElement("section");
+      panel.className = "cc-ota-overview";
+      panel.setAttribute("data-ota-overview", "1");
+
+      var state = {
+        current: {},
+        busy: false,
+      };
+      var fieldRecords = [];
+      var toolButtons = [];
+
+      function otaAction(actionId) {
+        return ccFindActionById(actions, actionId) || ccFindCatalogueActionById(actionId);
+      }
+
+      function setBusy(busy, text) {
+        state.busy = !!busy;
+        panel.classList.toggle("is-busy", state.busy);
+        status.textContent = text || (state.busy ? "running" : "ready");
+        toolButtons.forEach(function (button) {
+          if (button !== saveBtn) button.disabled = state.busy;
+        });
+        if (saveBtn) {
+          if (state.busy) saveBtn.disabled = true;
+          else markDirty();
+        }
+      }
+
+      function addTool(parent, iconName, labelText, titleText, handler, primary) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cc-local-eim-tool cc-ota-tool"
+          + (primary ? " is-primary" : "");
+        button.title = titleText || labelText;
+        var icon = document.createElement("span");
+        icon.className = "cc-local-eim-tool-icon cc-ota-tool-icon";
+        ccSetActionIcon(icon, iconName || "action");
+        button.appendChild(icon);
+        var label = document.createElement("span");
+        label.className = "cc-local-eim-tool-label cc-ota-tool-label";
+        label.textContent = labelText;
+        button.appendChild(label);
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          if (!state.busy) handler();
+        });
+        parent.appendChild(button);
+        toolButtons.push(button);
+        return button;
+      }
+
+      function appendOtaKv(parent, labelText, valueText) {
+        var row = document.createElement("div");
+        row.className = "cc-local-eim-kv cc-ota-kv";
+        var k = document.createElement("span");
+        k.className = "cc-local-eim-k cc-ota-k";
+        k.textContent = labelText;
+        row.appendChild(k);
+        var v = document.createElement("span");
+        v.className = "cc-local-eim-v cc-ota-v";
+        v.textContent = _localEimText(valueText) || "-";
+        row.appendChild(v);
+        parent.appendChild(row);
+      }
+
+      function configMapFromPayload(data) {
+        var map = {};
+        (Array.isArray(data && data.lines) ? data.lines : []).forEach(function (row) {
+          var key = _localEimText(row && row.key);
+          if (!key) return;
+          map[key] = _localEimText(row && row.value);
+        });
+        if (_localEimText(data && data.active_iccid)) {
+          map.active_iccid = _localEimText(data.active_iccid);
+        }
+        return map;
+      }
+
+      function ensureSelectValue(select, value) {
+        var text = _localEimText(value);
+        var found = false;
+        Array.prototype.slice.call(select.options || []).forEach(function (option) {
+          if (option.value === text) found = true;
+        });
+        if (!found && text) {
+          var opt = document.createElement("option");
+          opt.value = text;
+          opt.textContent = text;
+          select.appendChild(opt);
+        }
+      }
+
+      function markDirty() {
+        var dirty = fieldRecords.some(function (rec) {
+          return _localEimText(rec.input.value) !== _localEimText(rec.original);
+        });
+        saveBtn.disabled = state.busy || !dirty;
+        saveBtn.classList.toggle("is-primary", dirty);
+        status.textContent = dirty ? "modified" : "ready";
+      }
+
+      function makeConfigField(spec) {
+        var wrap = document.createElement("label");
+        wrap.className = "cc-local-eim-path cc-ota-config-field";
+        var label = document.createElement("span");
+        label.className = "cc-local-eim-path-label cc-ota-config-label";
+        label.textContent = spec.label;
+        wrap.appendChild(label);
+
+        var input;
+        if (Array.isArray(spec.choices) && spec.choices.length > 0) {
+          input = document.createElement("select");
+          input.className = "cc-ota-config-input cc-ota-config-select";
+          spec.choices.forEach(function (choice) {
+            var opt = document.createElement("option");
+            opt.value = choice.value;
+            opt.textContent = choice.label || choice.value;
+            input.appendChild(opt);
+          });
+        } else {
+          input = document.createElement("input");
+          input.type = "text";
+          input.className = "cc-local-eim-path-input cc-ota-config-input";
+          input.placeholder = spec.placeholder || "";
+          input.autocomplete = "off";
+        }
+        input.setAttribute("data-ota-config-key", spec.key);
+        input.addEventListener("input", markDirty);
+        input.addEventListener("change", markDirty);
+        wrap.appendChild(input);
+        var rec = { key: spec.key, input: input, original: "", spec: spec };
+        fieldRecords.push(rec);
+        return wrap;
+      }
+
+      function renderMeta(data) {
+        metaCard.innerHTML = "";
+        var title = document.createElement("div");
+        title.className = "cc-local-eim-card-title cc-ota-card-title";
+        title.textContent = "Runtime";
+        metaCard.appendChild(title);
+        var body = document.createElement("div");
+        body.className = "cc-local-eim-card-body cc-ota-card-body";
+        appendOtaKv(body, "Config path", data && data.config_path);
+        appendOtaKv(body, "Reader", data && (data.reader_name || data.reader_index));
+        appendOtaKv(body, "ICCID", data && data.active_iccid);
+        var proto = data && data.protocol && typeof data.protocol === "object"
+          ? data.protocol
+          : {};
+        if (Object.keys(proto).length > 0) {
+          appendOtaKv(body, "Protocol", proto.active_protocol || (proto.available ? "available" : "unavailable"));
+          appendOtaKv(body, "ATR", proto.atr_hex || proto.atr || proto.error);
+        }
+        metaCard.appendChild(body);
+      }
+
+      function renderMetaError(message) {
+        if (!metaCard) return;
+        metaCard.innerHTML = "";
+        var title = document.createElement("div");
+        title.className = "cc-local-eim-card-title cc-ota-card-title";
+        title.textContent = "Runtime";
+        metaCard.appendChild(title);
+        var empty = document.createElement("div");
+        empty.className = "cc-local-eim-empty cc-ota-runtime-error";
+        empty.textContent = _localEimText(message) || "Unable to read OTA runtime state.";
+        metaCard.appendChild(empty);
+      }
+
+      function applyConfig(data) {
+        state.current = configMapFromPayload(data);
+        fieldRecords.forEach(function (rec) {
+          var value = state.current[rec.key] || "";
+          if (rec.input.tagName === "SELECT") ensureSelectValue(rec.input, value);
+          rec.input.value = value;
+          rec.original = value;
+        });
+        iccidInput.value = _localEimText(data && data.active_iccid);
+        renderMeta(data || {});
+        markDirty();
+      }
+
+      async function refreshConfig() {
+        var action = otaAction("scp80.show_config");
+        if (!action) {
+          renderMetaError("SCP80 show_config action is not registered.");
+          return null;
+        }
+        setBusy(true, "loading");
+        try {
+          var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
+            method: "POST",
+            body: JSON.stringify({ inputs: { reader: scopedReader } }),
+          });
+          if (!resp || !resp.ok) {
+            throw new Error(resp && resp.error ? resp.error : "unknown error");
+          }
+          applyConfig(resp.data || {});
+          setBusy(false, "ready");
+          return resp.data || {};
+        } catch (err) {
+          setBusy(false, "error");
+          renderMetaError(String(err && err.message || err));
+          return null;
+        }
+      }
+
+      async function saveConfig() {
+        var action = otaAction("scp80.set_config");
+        if (!action) {
+          _renderEsimFlowError("SCP80 set_config action is not registered.", null);
+          return;
+        }
+        var changed = fieldRecords.filter(function (rec) {
+          return _localEimText(rec.input.value) !== _localEimText(rec.original);
+        });
+        if (changed.length === 0) {
+          markDirty();
+          return;
+        }
+        setBusy(true, "saving");
+        var errors = [];
+        for (var i = 0; i < changed.length; i++) {
+          var rec = changed[i];
+          try {
+            var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
+              method: "POST",
+              body: JSON.stringify({
+                inputs: {
+                  key: rec.key,
+                  value: _localEimText(rec.input.value),
+                },
+              }),
+            });
+            if (!resp || !resp.ok) {
+              throw new Error(resp && resp.error ? resp.error : "unknown error");
+            }
+          } catch (err) {
+            errors.push(rec.key + ": " + String(err && err.message || err));
+          }
+        }
+        if (errors.length > 0) {
+          setBusy(false, "error");
+          _renderEsimFlowError(errors.join("\n"), action);
+          return;
+        }
+        await refreshConfig();
+      }
+
+      async function runOtaAction(actionId, inputsMap, options) {
+        var action = otaAction(actionId);
+        if (!action) {
+          _renderEsimFlowError(actionId + " is not registered.", null);
+          return null;
+        }
+        var opts = options || {};
+        setBusy(true, opts.statusText || "running");
+        var data = await _runActionInEsimFlowPane(action, inputsMap || {}, {
+          runningText: opts.runningText || ("running " + _otaActionLabel(action).toLowerCase()),
+          doneText: opts.doneText || "ok",
+        });
+        setBusy(false, data ? (opts.doneText || "ok") : "error");
+        if (data && opts.refreshConfig) refreshConfig();
+        return data;
+      }
+
+      function otaPayloadOverrideValue() {
+        return _localEimText(payloadOverrideInput && payloadOverrideInput.value).replace(/\s+/g, "").toUpperCase();
+      }
+
+      function otaDefaultPayloadValue() {
+        for (var i = 0; i < fieldRecords.length; i++) {
+          if (fieldRecords[i].key === "payload") {
+            return _localEimText(fieldRecords[i].input.value).replace(/\s+/g, "").toUpperCase();
+          }
+        }
+        return _localEimText(state.current.payload).replace(/\s+/g, "").toUpperCase();
+      }
+
+      function otaVerboseEnabled() {
+        return !!(verboseTraceInput && verboseTraceInput.checked);
+      }
+
+      function otaScriptPathValue() {
+        return _localEimText(scriptPathInput && scriptPathInput.value);
+      }
+
+      function requireOtaHex(action, value, message) {
+        if (value) return true;
+        _renderEsimFlowError(message, action);
+        setBusy(false, "input required");
+        return false;
+      }
+
+      async function bindIccid() {
+        var action = otaAction("scp80.iccid_bind");
+        if (!action) {
+          _renderEsimFlowError("SCP80 ICCID bind action is not registered.", null);
+          return;
+        }
+        var iccid = _localEimText(iccidInput.value);
+        if (!iccid) {
+          _renderEsimFlowError("Enter an ICCID before binding the OTA profile.", action);
+          return;
+        }
+        setBusy(true, "binding");
+        var data = await _runActionInEsimFlowPane(action, { iccid: iccid }, {
+          runningText: "binding ICCID profile",
+          doneText: "bound",
+        });
+        setBusy(false, data ? "bound" : "error");
+        if (data) refreshConfig();
+      }
+
+      var head = document.createElement("div");
+      head.className = "cc-local-eim-head cc-ota-head";
+      var title = document.createElement("div");
+      title.className = "cc-local-eim-title cc-ota-title";
+      title.textContent = "OTA profile";
+      head.appendChild(title);
+      var status = document.createElement("span");
+      status.className = "cc-local-eim-status cc-ota-status";
+      status.textContent = "idle";
+      head.appendChild(status);
+      panel.appendChild(head);
+
+      var configGrid = document.createElement("div");
+      configGrid.className = "cc-ota-config-grid";
+      var sections = [
+        {
+          title: "Security",
+          fields: [
+            { key: "cntr", label: "Counter (CNTR)", placeholder: "0000000000" },
+            { key: "spi", label: "SPI flags", placeholder: "1621" },
+            { key: "kic", label: "KIc keyset", placeholder: "15" },
+            { key: "kid", label: "KID keyset", placeholder: "15" },
+            { key: "tar", label: "TAR", placeholder: "B00010" },
+          ],
+        },
+        {
+          title: "Transport",
+          fields: [
+            {
+	              key: "transport",
+	              label: "Transport mode",
+	              choices: [
+	                { value: "reader", label: "Reader (PC/SC)" },
+	                { value: "print", label: "Print APDUs" },
+	              ],
+	            },
+	            {
+	              key: "concat_sms",
+	              label: "Concatenated SMS",
+	              choices: [
+	                { value: "off", label: "Off" },
+	                { value: "on", label: "On" },
+	                { value: "false", label: "False" },
+	                { value: "true", label: "True" },
+	              ],
+	            },
+	            { key: "tp_ud_max", label: "TP-UD max bytes", placeholder: "140" },
+          ],
+        },
+        {
+          title: "Payload",
+          fields: [
+            { key: "payload", label: "Default payload (APDU hex)", placeholder: "00A40004023F00" },
+          ],
+        },
+      ];
+      sections.forEach(function (sectionSpec) {
+        var card = document.createElement("section");
+        card.className = "cc-local-eim-card cc-ota-config-card";
+        var cardTitle = document.createElement("div");
+        cardTitle.className = "cc-local-eim-card-title cc-ota-card-title";
+        cardTitle.textContent = sectionSpec.title;
+        card.appendChild(cardTitle);
+        var fields = document.createElement("div");
+        fields.className = "cc-ota-config-fields";
+        sectionSpec.fields.forEach(function (spec) {
+          fields.appendChild(makeConfigField(spec));
+        });
+        card.appendChild(fields);
+        configGrid.appendChild(card);
+      });
+      panel.appendChild(configGrid);
+
+      var profileRow = document.createElement("div");
+      profileRow.className = "cc-ota-profile-row";
+      var iccidWrap = document.createElement("label");
+      iccidWrap.className = "cc-local-eim-path cc-ota-iccid-field";
+      var iccidLabel = document.createElement("span");
+      iccidLabel.className = "cc-local-eim-path-label cc-ota-config-label";
+      iccidLabel.textContent = "ICCID profile";
+      iccidWrap.appendChild(iccidLabel);
+      var iccidInput;
+      iccidInput = document.createElement("input");
+      iccidInput.type = "text";
+      iccidInput.className = "cc-local-eim-path-input cc-ota-config-input";
+      iccidInput.placeholder = "89014104211118510720";
+      iccidInput.autocomplete = "off";
+      iccidWrap.appendChild(iccidInput);
+      profileRow.appendChild(iccidWrap);
+
+      var profileTools = document.createElement("div");
+      profileTools.className = "cc-local-eim-tools cc-ota-tools";
+      profileRow.appendChild(profileTools);
+      panel.appendChild(profileRow);
+
+      addTool(profileTools, "refresh", "Refresh", "Reload OTA profile configuration", refreshConfig);
+      var saveBtn = addTool(profileTools, "save", "Save config", "Persist changed OTA profile fields", saveConfig, true);
+      saveBtn.disabled = true;
+	      addTool(profileTools, "package", "Bind ICCID", "Load or seed the per-ICCID OTA profile", bindIccid);
+
+	      var optionsCard = document.createElement("section");
+	      optionsCard.className = "cc-local-eim-card cc-ota-options-card";
+	      var optionsTitle = document.createElement("div");
+	      optionsTitle.className = "cc-local-eim-card-title cc-ota-card-title";
+	      optionsTitle.textContent = "Send options";
+	      optionsCard.appendChild(optionsTitle);
+	      var optionsGrid = document.createElement("div");
+	      optionsGrid.className = "cc-ota-options-grid";
+
+	      var payloadWrap = document.createElement("label");
+	      payloadWrap.className = "cc-local-eim-path cc-ota-option-field";
+	      var payloadLabel = document.createElement("span");
+	      payloadLabel.className = "cc-local-eim-path-label cc-ota-config-label";
+	      payloadLabel.textContent = "Payload override (APDU hex)";
+	      payloadWrap.appendChild(payloadLabel);
+	      var payloadOverrideInput = document.createElement("input");
+	      payloadOverrideInput.type = "text";
+	      payloadOverrideInput.className = "cc-local-eim-path-input cc-ota-config-input cc-ota-payload-override";
+	      payloadOverrideInput.placeholder = "blank uses default payload";
+	      payloadOverrideInput.autocomplete = "off";
+	      payloadWrap.appendChild(payloadOverrideInput);
+	      optionsGrid.appendChild(payloadWrap);
+
+	      var scriptWrap = document.createElement("label");
+	      scriptWrap.className = "cc-local-eim-path cc-ota-option-field";
+	      var scriptLabel = document.createElement("span");
+	      scriptLabel.className = "cc-local-eim-path-label cc-ota-config-label";
+	      scriptLabel.textContent = "Script file";
+	      scriptWrap.appendChild(scriptLabel);
+	      var scriptPathInput = document.createElement("input");
+	      scriptPathInput.type = "text";
+	      scriptPathInput.className = "cc-local-eim-path-input cc-ota-config-input cc-ota-script-path";
+	      scriptPathInput.placeholder = "optional path for Script";
+	      scriptPathInput.autocomplete = "off";
+	      scriptWrap.appendChild(scriptPathInput);
+	      optionsGrid.appendChild(scriptWrap);
+
+	      var verboseWrap = document.createElement("label");
+	      verboseWrap.className = "cc-checkbox cc-ota-option-check";
+	      var verboseTraceInput = document.createElement("input");
+	      verboseTraceInput.type = "checkbox";
+	      verboseWrap.appendChild(verboseTraceInput);
+	      var verboseLabel = document.createElement("span");
+	      verboseLabel.textContent = "Verbose APDU trace";
+	      verboseWrap.appendChild(verboseLabel);
+	      optionsGrid.appendChild(verboseWrap);
+
+	      optionsCard.appendChild(optionsGrid);
+	      panel.appendChild(optionsCard);
+
+	      var actionTools = document.createElement("div");
+	      actionTools.className = "cc-local-eim-tools cc-ota-tools cc-ota-run-tools";
+	      panel.appendChild(actionTools);
+	      addTool(actionTools, "run", "Send OTA", "Build and send the active OTA packet", function () {
+	        runOtaAction("scp80.send", {
+	          payload: otaPayloadOverrideValue(),
+	          verbose: otaVerboseEnabled(),
+	        }, { runningText: "sending OTA packet", doneText: "sent" });
+	      }, true);
+	      addTool(actionTools, "check", "Build plan", "Build the OTA plan without sending", function () {
+	        runOtaAction("scp80.build_plan", {
+	          payload: otaPayloadOverrideValue(),
+	          verbose: otaVerboseEnabled(),
+	        }, { runningText: "building OTA plan", doneText: "plan ready" });
+	      });
+	      addTool(actionTools, "run", "Smart OTA", "Build, send, and decode the POR", function () {
+	        var action = otaAction("scp80.ota_smart");
+	        var apduHex = otaPayloadOverrideValue() || otaDefaultPayloadValue();
+	        if (!requireOtaHex(action, apduHex, "Enter a payload override or configure a default payload before running Smart OTA.")) return;
+	        runOtaAction("scp80.ota_smart", {
+	          apdu_hex: apduHex,
+	          verbose: otaVerboseEnabled(),
+	        }, { runningText: "sending smart OTA", doneText: "decoded" });
+	      });
+	      addTool(actionTools, "shell", "Raw APDU", "Send a raw APDU over reader transport", function () {
+	        var action = otaAction("scp80.send_raw");
+	        var apduHex = otaPayloadOverrideValue() || otaDefaultPayloadValue();
+	        if (!requireOtaHex(action, apduHex, "Enter a payload override or configure a default payload before sending a raw APDU.")) return;
+	        runOtaAction("scp80.send_raw", {
+	          apdu_hex: apduHex,
+	        }, { runningText: "sending raw APDU", doneText: "sent" });
+	      });
+	      addTool(actionTools, "list", "Script", "Run a batch of OTA payloads from a file", function () {
+	        var action = otaAction("scp80.run_script");
+	        var scriptPath = otaScriptPathValue();
+	        if (!scriptPath) {
+	          _renderEsimFlowError("Enter a script file path before running the OTA script.", action);
+	          return;
+	        }
+	        runOtaAction("scp80.run_script", {
+	          script_path: scriptPath,
+	          stop_on_error: true,
+	        }, { runningText: "running OTA script", doneText: "script done" });
+	      });
+	      addTool(actionTools, "scan", "Protocol", "Read the current reader protocol summary", function () {
+	        runOtaAction("scp80.protocol_summary", {}, {
+	          runningText: "reading reader protocol",
+	          doneText: "protocol ready",
+	        });
+	      });
+	      addTool(actionTools, "refresh", "Reset transport", "Reset the reader transport and replay STK bootstrap", function () {
+	        runOtaAction("scp80.reset_connection", {}, {
+	          runningText: "resetting reader transport",
+	          doneText: "reset",
+	        });
+	      });
+
+      var metaCard = document.createElement("section");
+      metaCard.className = "cc-local-eim-card cc-ota-runtime-card";
+      panel.appendChild(metaCard);
+
+	      window.setTimeout(function () {
+	        refreshConfig();
+	      }, 0);
+
+      return panel;
     }
 
     // Mutation suffixes — actions that are NOT shown in the dashboard
@@ -4035,15 +5228,14 @@
         }
       }
 
-      function addTool(iconText, labelText, titleText, handler, primary) {
+      function addTool(iconName, labelText, titleText, handler, primary) {
         var button = document.createElement("button");
         button.type = "button";
         button.className = "cc-local-eim-tool cc-local-smdp-tool" + (primary ? " is-primary" : "");
         button.title = titleText || labelText;
         var icon = document.createElement("span");
         icon.className = "cc-local-eim-tool-icon cc-local-smdp-tool-icon";
-        icon.setAttribute("aria-hidden", "true");
-        icon.textContent = iconText || ">";
+        ccSetActionIcon(icon, iconName || "action");
         button.appendChild(icon);
         var label = document.createElement("span");
         label.className = "cc-local-eim-tool-label cc-local-smdp-tool-label";
@@ -4141,14 +5333,14 @@
         if (data) renderInventory(data.inventory || data);
       }
 
-      addTool("↻", "Refresh", "Refresh local SM-DP+ certificate state", function () {
+      addTool("refresh", "Refresh", "Refresh local SM-DP+ certificate state", function () {
         refreshInventory(true);
       });
-      addTool("＋", "Import cert", "Choose and persist a local SM-DP+ certificate", importCertificate, true);
-      addTool("⊙", "Inventory", "Open certificate inventory", function () {
+      addTool("import", "Import cert", "Choose and persist a local SM-DP+ certificate", importCertificate, true);
+      addTool("reference", "Inventory", "Open certificate inventory", function () {
         refreshInventory(true);
       });
-      addTool("↓", "Load profile", "Load the selected profile to the card", function () {
+      addTool("import", "Load profile", "Load the selected profile to the card", function () {
         var pathValue = _localEimText(profilePath.input.value);
         if (!pathValue) {
           resultHost.innerHTML = "";
@@ -4287,15 +5479,14 @@
         }
       }
 
-      function addTool(iconText, labelText, titleText, handler, primary) {
+      function addTool(iconName, labelText, titleText, handler, primary) {
         var button = document.createElement("button");
         button.type = "button";
         button.className = "cc-local-eim-tool" + (primary ? " is-primary" : "");
         button.title = titleText || labelText;
         var icon = document.createElement("span");
         icon.className = "cc-local-eim-tool-icon";
-        icon.setAttribute("aria-hidden", "true");
-        icon.textContent = iconText || ">";
+        ccSetActionIcon(icon, iconName || "action");
         button.appendChild(icon);
         var label = document.createElement("span");
         label.className = "cc-local-eim-tool-label";
@@ -4520,11 +5711,11 @@
 
       localOverviewRefreshers.push(refreshAll);
 
-      addTool("↻", "Refresh", "Refresh certificate and queue state", refreshAll, true);
-      addTool("⊙", "Certs", "Open certificate inventory", function () {
+      addTool("refresh", "Refresh", "Refresh certificate and queue state", refreshAll, true);
+      addTool("auth", "Certs", "Open certificate inventory", function () {
         refreshCerts();
       });
-      addTool("✓", "Lint", "Lint the selected or next package", function () {
+      addTool("check", "Lint", "Lint the selected or next package", function () {
         var pathValue = packageInputValue();
         if (!pathValue) {
           resultHost.innerHTML = "";
@@ -4538,7 +5729,7 @@
           package_path: pathValue,
         }, { runningText: "linting package" });
       });
-      addTool("▣", "Explain", "Explain the selected or next package", function () {
+      addTool("reference", "Explain", "Explain the selected or next package", function () {
         var pathValue = packageInputValue();
         if (!pathValue) {
           resultHost.innerHTML = "";
@@ -4552,7 +5743,7 @@
           package_path: pathValue,
         }, { runningText: "explaining package" });
       });
-      addTool("↓", "Load", "Load the selected or next package to the card", function () {
+      addTool("import", "Load", "Load the selected or next package to the card", function () {
         var pathValue = packageInputValue();
         if (!pathValue) {
           resultHost.innerHTML = "";
@@ -4567,14 +5758,14 @@
           cert_path: certInputValue(),
         }, { runningText: "loading package" });
       }, true);
-      addTool("❐", "Queue", "Refresh queued package metadata", refreshQueue);
-      addTool("▶", "Issue next", "Issue the next queued package", async function () {
+      addTool("list", "Queue", "Refresh queued package metadata", refreshQueue);
+      addTool("run", "Issue next", "Issue the next queued package", async function () {
         await runLocalEimAction("eim_local.issue_package", {
           hotfolder_dir: hotfolderInputValue(),
         }, { runningText: "issuing next package" });
         refreshQueue();
       });
-      addTool("⟳", "Hotfolder", "Open hotfolder campaign", function () {
+      addTool("hotfolder", "Hotfolder", "Open hotfolder campaign", function () {
         var action = _localEimAction("eim_local.hotfolder_campaign");
         if (action) _openEsimActionPane(action);
       });
@@ -4631,11 +5822,16 @@
       mutationActions = actions.filter(_shouldShowLocalSmdpDashboardAction);
     } else if (subsystem === "Local eIM") {
       mutationActions = actions.filter(_shouldShowLocalEimDashboardAction);
+    } else if (isOtaModuleSurface) {
+      mutationActions = [];
     } else if (subsystem === "Offline Tools") {
       mutationActions = actions.filter(function (action) {
         var actionId = String(action && action.id || "");
         return !CC_OFFLINE_TOOLS_HIDDEN_ACTIONS[actionId];
       });
+    }
+    if (isOtaModuleSurface) {
+      _appendCompactContent(_buildOtaOverviewPanel());
     }
     if (subsystem === "SCP11 Local") {
       _appendCompactContent(_buildLocalSmdpOverviewPanel());
@@ -4663,8 +5859,7 @@
         btn.title = (action.description || action.title || action.id);
         var icon = document.createElement("span");
         icon.className = "cc-compact-rbtn-icon";
-        icon.setAttribute("aria-hidden", "true");
-        icon.textContent = _ccResolveIcon(action.id);
+        ccSetActionIcon(icon, _ccResolveIcon(action.id));
         btn.appendChild(icon);
         var label = document.createElement("span");
         label.className = "cc-compact-rbtn-label";
@@ -4803,7 +5998,9 @@
     if (!useEsimSplitPane && mutationActions.length > 0) {
       _appendCompactContent(_ensureInlineActionPane());
     }
-    _appendCompactContent(dashBody);
+    if (!isOtaModuleSurface) {
+      _appendCompactContent(dashBody);
+    }
 
     // --- Search filter (filters mutation buttons) ---
     var allButtons = [];
@@ -4933,7 +6130,40 @@
       }
     }
 
-    // --- Auto-fetch dashboard ---
+    function renderDashboardPlaceholder(message, options) {
+      var opts = options || {};
+      dashBody.innerHTML = "";
+      var wrap = document.createElement("div");
+      wrap.className = "cc-dash-placeholder";
+      var text = document.createElement("p");
+      text.className = "cc-dash-placeholder-text cc-dash-loading";
+      text.textContent = message || "card overview not loaded";
+      wrap.appendChild(text);
+      if (opts.showLoad !== false) {
+        var actionsWrap = document.createElement("div");
+        actionsWrap.className = "cc-dash-placeholder-actions";
+        var loadBtn = document.createElement("button");
+        loadBtn.type = "button";
+        loadBtn.className = "cc-dash-load-btn";
+        loadBtn.title = "Load card overview for the selected reader";
+        var icon = document.createElement("span");
+        icon.className = "cc-dash-load-icon";
+        ccSetActionIcon(icon, "refresh");
+        loadBtn.appendChild(icon);
+        var label = document.createElement("span");
+        label.textContent = "Load card overview";
+        loadBtn.appendChild(label);
+        loadBtn.addEventListener("click", function (event) {
+          event.preventDefault();
+          refreshEsimSurface({ manual: true });
+        });
+        actionsWrap.appendChild(loadBtn);
+        wrap.appendChild(actionsWrap);
+      }
+      dashBody.appendChild(wrap);
+    }
+
+    // --- Manual dashboard refresh ---
     function refreshDashboard(opts) {
       opts = opts || {};
       if (!isDashboardSubsystem || commandState.activeSubsystem !== subsystem) {
@@ -4946,7 +6176,7 @@
         scanInputs.reader = scopedReader;
       }
       if (!opts.quiet) {
-        dashBody.innerHTML = "<p class='cc-dash-loading'>loading card overview…</p>";
+        renderDashboardPlaceholder("loading card overview...", { showLoad: false });
       }
       return apiFetch("/api/actions/" + encodeURIComponent(scanActionId) + "/run", {
         method: "POST",
@@ -4959,22 +6189,24 @@
           // Some actions return flat fields instead of a snapshot wrapper
           _renderDashboard(resp.data);
         } else {
-          dashBody.innerHTML = "<p class='cc-dash-loading'>no card overview available"
-            + (resp && resp.data && resp.data.note ? " — " + escapeHtml(String(resp.data.note)) : "")
-            + "</p>";
+          var note = resp && resp.data && resp.data.note ? String(resp.data.note) : "";
+          renderDashboardPlaceholder(
+            "no card overview available" + (note ? " - " + note : "")
+          );
         }
         return resp;
       }).catch(function (err) {
         if (commandState.activeSubsystem !== subsystem) return null;
-        dashBody.innerHTML = "<p class='cc-dash-loading'>failed to load card overview"
-          + (err && err.message ? ": " + escapeHtml(String(err.message)) : "")
-          + "</p>";
+        renderDashboardPlaceholder(
+          "failed to load card overview"
+          + (err && err.message ? ": " + String(err.message) : "")
+        );
         return null;
       });
     }
 
-    if (isDashboardSubsystem && commandState.activeSubsystem === subsystem) {
-      refreshDashboard();
+    if (isDashboardSubsystem && dashBody.childNodes.length === 0) {
+      renderDashboardPlaceholder("card overview not loaded");
     }
 
     container.appendChild(wb);
@@ -4991,15 +6223,31 @@
       try { state.rawUnsubscribe(); } catch (_err) {}
       state.rawUnsubscribe = null;
     }
-    if (state.rawRenderTimerId !== null) {
-      clearTimeout(state.rawRenderTimerId);
-      state.rawRenderTimerId = null;
-    }
-    if (state.timerStatusTimerId !== null) {
-      clearInterval(state.timerStatusTimerId);
-      state.timerStatusTimerId = null;
-    }
-  }
+	    if (state.rawRenderTimerId !== null) {
+	      clearTimeout(state.rawRenderTimerId);
+	      state.rawRenderTimerId = null;
+	    }
+	    if (state.packetRenderTimerId !== null) {
+	      clearTimeout(state.packetRenderTimerId);
+	      state.packetRenderTimerId = null;
+	    }
+	    if (state.packetVirtualRenderTimerId !== null) {
+	      clearTimeout(state.packetVirtualRenderTimerId);
+	      state.packetVirtualRenderTimerId = null;
+	    }
+	    if (state.packetPointerReleaseTimerId !== null) {
+	      clearTimeout(state.packetPointerReleaseTimerId);
+	      state.packetPointerReleaseTimerId = null;
+	    }
+	    if (state.timerStatusTimerId !== null) {
+	      clearInterval(state.timerStatusTimerId);
+	      state.timerStatusTimerId = null;
+	    }
+	    state.packetRenderPending = false;
+	    state.packetPointerActive = false;
+	    state.packetPointerId = null;
+	    state.packetHoverActive = false;
+	  }
 
   function renderHilWorkbench(container, actions, leaf) {
     var state = commandState.hilWorkbench;
@@ -5037,7 +6285,7 @@
     toolbar.appendChild(moduleGroup);
 
     moduleGroup.appendChild(hilToolbarButton(
-      state.startInFlight ? "..." : (state.armed ? "●" : "▶"),
+      state.startInFlight ? "more" : (state.armed ? "live" : "run"),
       state.startInFlight ? "Starting" : (state.armed ? "Running" : "Start"),
       "Start the supervised HIL session and attach the GUI decoder",
       function () {
@@ -5046,14 +6294,14 @@
       state.armed,
       state.startInFlight || state.stopInFlight
     ));
-    moduleGroup.appendChild(hilToolbarButton("■", "Stop", "Stop the supervised HIL session", function () {
+    moduleGroup.appendChild(hilToolbarButton("stop", "Stop", "Stop the supervised HIL session", function () {
       hilStopLiveSession(actions, container, leaf);
     }, false, state.startInFlight || state.stopInFlight));
-    moduleGroup.appendChild(hilToolbarButton("↻", "Refresh", "Refresh decoded packets", function () {
+    moduleGroup.appendChild(hilToolbarButton("refresh", "Refresh", "Refresh decoded packets", function () {
       hilRefreshSnapshot({ force: true });
     }, false, state.inflight || state.liveBaselinePending));
     moduleGroup.appendChild(hilToolbarButton(
-      state.autoRefresh ? "⏸" : "▶",
+      state.autoRefresh ? "pause" : "run",
       state.autoRefresh ? "Auto on" : "Auto off",
       "Toggle decoded packet auto-refresh",
       function () {
@@ -5063,7 +6311,7 @@
       state.autoRefresh
     ));
     moduleGroup.appendChild(hilToolbarButton(
-      state.paused ? "▶" : "⏸",
+      state.paused ? "run" : "pause",
       state.paused ? "Resume" : "Pause",
       "Pause decoded packet refresh",
       function () {
@@ -5074,7 +6322,7 @@
       state.paused
     ));
     moduleGroup.appendChild(hilToolbarButton(
-      state.viewMode === "context" ? "▤" : "☰",
+      state.viewMode === "context" ? "tree" : "list",
       state.viewMode === "context" ? "Context" : "Flat",
       "Toggle decoded packet grouping",
       function () {
@@ -5083,7 +6331,7 @@
       },
       state.viewMode === "context"
     ));
-    moduleGroup.appendChild(hilToolbarButton("⎘", "Open pcap", "Open a saved pcap path", function () {
+    moduleGroup.appendChild(hilToolbarButton("open", "Open pcap", "Open a saved pcap path", function () {
       var nextPath = window.prompt("Capture path", state.capturePath || "");
       if (nextPath === null) return;
       state.capturePath = String(nextPath || "").trim();
@@ -5106,7 +6354,7 @@
       hilRefreshSnapshot({ force: true });
       renderHilWorkbench(container, actions, leaf);
     }));
-    moduleGroup.appendChild(hilToolbarButton("⌂", "Live", "Use the active live capture", function () {
+    moduleGroup.appendChild(hilToolbarButton("live", "Live", "Use the active live capture", function () {
       state.capturePath = "";
       state.captureSource = "";
       state.armed = true;
@@ -5130,7 +6378,7 @@
       });
       renderHilWorkbench(container, actions, leaf);
     }));
-    moduleGroup.appendChild(hilToolbarButton("×", "Clear view", "Clear the decoded view", function () {
+    moduleGroup.appendChild(hilToolbarButton("clear", "Clear view", "Clear the decoded view", function () {
       if (hilIsLiveCaptureMode(state)) {
         hilPromoteLiveBaselineFromRows(state.rows);
       }
@@ -5266,7 +6514,7 @@
     return true;
   }
 
-  function hilToolbarButton(iconText, labelText, titleText, onClick, active, disabled) {
+  function hilToolbarButton(iconName, labelText, titleText, onClick, active, disabled) {
     var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "cc-hil-action-btn" + (active ? " is-active" : "");
@@ -5274,8 +6522,7 @@
     btn.disabled = !!disabled;
     var icon = document.createElement("span");
     icon.className = "cc-hil-action-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.textContent = iconText || "●";
+    ccSetActionIcon(icon, iconName || "action");
     var label = document.createElement("span");
     label.className = "cc-hil-action-label";
     label.textContent = labelText || "";
@@ -5417,12 +6664,20 @@
     }
   }
 
-  async function hilStartLiveSession(actions, container, leaf) {
-    var state = commandState.hilWorkbench;
-    if (state.startInFlight || state.stopInFlight) return;
-    if (!hilFindAction(actions, "hil.session_start")) {
-      state.errorText = "HIL start action is not registered by the backend.";
-      renderHilWorkbench(container, actions, leaf);
+	  async function hilStartLiveSession(actions, container, leaf) {
+	    var state = commandState.hilWorkbench;
+	    if (state.startInFlight || state.stopInFlight) return;
+	    var activeReader = ccActiveReaderName();
+	    if (!activeReader) {
+	      state.errorText = "Select a top-bar reader before starting HIL.";
+	      state.actionStatusText = state.errorText;
+	      renderHilWorkbench(container, actions, leaf);
+	      setStatusAction(state.errorText);
+	      return;
+	    }
+	    if (!hilFindAction(actions, "hil.session_start")) {
+	      state.errorText = "HIL start action is not registered by the backend.";
+	      renderHilWorkbench(container, actions, leaf);
       return;
     }
     state.startInFlight = true;
@@ -5446,8 +6701,8 @@
     state.lastRenderedRawId = 0;
     state.refreshQueuedForce = false;
     state.refreshQueuedSelectedFrame = null;
-    state.readerName = "";
-    state.readerIndex = -1;
+	    state.readerName = activeReader;
+	    state.readerIndex = -1;
     state.selectedFrameNumber = null;
     state.selectionFollowsTail = true;
     state.liveBaselinePending = true;
@@ -5467,9 +6722,11 @@
     state.errorText = "";
     renderHilWorkbench(container, actions, leaf);
     try {
-      var resp = await hilRunActionRequest("hil.session_start", {
-        mode: "decoded",
-      });
+	      var resp = await hilRunActionRequest("hil.session_start", {
+	        mode: "decoded",
+	        reader_name: activeReader,
+	        reader_index: "",
+	      });
       var data = resp && resp.data ? resp.data : {};
       if (!resp || !resp.ok || data.ok === false) {
         state.armed = false;
@@ -5629,7 +6886,7 @@
         state.actionStatusText = failure;
       } else {
         state.errorText = "";
-        state.actionStatusText = describe(data, "Remote Bridge rig is active.");
+        state.actionStatusText = describe(data, "Remote host is active.");
       }
     } catch (err) {
       var message = String((err && err.message) || err);
@@ -5674,10 +6931,20 @@
     list.addEventListener("pointerdown", function (event) {
       hilBeginPacketPointerInteraction(event);
     });
+    list.addEventListener("pointerover", function (event) {
+      hilUpdatePacketHoverInteraction(event);
+    });
+    list.addEventListener("pointermove", function (event) {
+      hilUpdatePacketHoverInteraction(event);
+    });
+    list.addEventListener("pointerleave", function () {
+      hilEndPacketHoverInteraction();
+    });
     list.addEventListener("pointerup", function () {
       hilEndPacketPointerInteraction();
     });
     list.addEventListener("pointercancel", function () {
+      hilEndPacketHoverInteraction();
       hilEndPacketPointerInteraction();
     });
     list.addEventListener("lostpointercapture", function () {
@@ -6385,6 +7652,7 @@
     }
     state.packetPointerActive = false;
     state.packetPointerId = null;
+    state.packetHoverActive = false;
     state.packetScrollTop = 0;
     state.packetScrollHeight = 0;
     state.packetClientHeight = 0;
@@ -6433,6 +7701,32 @@
   function hilPacketPointerIsActive() {
     var state = commandState.hilWorkbench;
     return !!state.packetPointerActive;
+  }
+
+  function hilPacketHoverIsActive() {
+    var state = commandState.hilWorkbench;
+    return !!state.packetHoverActive;
+  }
+
+  function hilPacketHoverTarget(event) {
+    var target = event && event.target;
+    return !!(
+      target
+      && target.closest
+      && target.closest(".cc-hil-packet-row, .cc-hil-context-title")
+    );
+  }
+
+  function hilUpdatePacketHoverInteraction(event) {
+    var state = commandState.hilWorkbench;
+    state.packetHoverActive = hilPacketHoverTarget(event);
+  }
+
+  function hilEndPacketHoverInteraction() {
+    var state = commandState.hilWorkbench;
+    if (!state.packetHoverActive) return;
+    state.packetHoverActive = false;
+    hilFlushDeferredPacketRender();
   }
 
   function hilBeginPacketPointerInteraction(event) {
@@ -6485,7 +7779,7 @@
     if (opts.force) return false;
     if (commandState.activeSubsystem !== "HIL") return false;
     if (state.activeTab !== "dissector") return false;
-    return hilPacketPointerIsActive() || hilPacketListIsUserActive();
+    return hilPacketPointerIsActive() || hilPacketHoverIsActive() || hilPacketListIsUserActive();
   }
 
   function hilScheduleDeferredPacketRender() {
@@ -6879,7 +8173,7 @@
     var rawBar = document.createElement("div");
     rawBar.className = "cc-hil-raw-bar";
     rawBar.appendChild(hilToolbarButton(
-      state.rawPaused ? "▶" : "⏸",
+      state.rawPaused ? "run" : "pause",
       state.rawPaused ? "Resume" : "Pause",
       "Pause raw trace repaint",
       function () {
@@ -6888,7 +8182,7 @@
       },
       state.rawPaused
     ));
-    rawBar.appendChild(hilToolbarButton("×", "Clear raw", "Clear raw APDU trace rows", function () {
+    rawBar.appendChild(hilToolbarButton("clear", "Clear raw", "Clear raw APDU trace rows", function () {
       state.rawRows = [];
       state.rawPendingRows = [];
       state.rawPendingDropCount = 0;
@@ -6997,10 +8291,10 @@
     });
     bar.appendChild(commandInput);
 
-    var startButton = hilToolbarButton("▶", "Start", "Start modem shell", hilStartModemShell);
+    var startButton = hilToolbarButton("run", "Start", "Start modem shell", hilStartModemShell);
     startButton.id = "hil-modem-start";
     bar.appendChild(startButton);
-    var stopButton = hilToolbarButton("■", "Stop", "Stop modem shell", function () {
+    var stopButton = hilToolbarButton("stop", "Stop", "Stop modem shell", function () {
       hilStopModemShell({ dispose: false });
     });
     stopButton.id = "hil-modem-stop";
@@ -7012,12 +8306,12 @@
     deviceSelect.setAttribute("aria-label", "Serial device");
     bar.appendChild(deviceSelect);
 
-    var refreshButton = hilToolbarButton("↻", "Devices", "Refresh serial devices", function () {
+    var refreshButton = hilToolbarButton("refresh", "Devices", "Refresh serial devices", function () {
       hilLoadModemShellMetadata({ force: true });
     });
     refreshButton.id = "hil-modem-device-refresh";
     bar.appendChild(refreshButton);
-    var useDeviceButton = hilToolbarButton("+", "Use device", "Use selected serial device", hilUseSelectedModemDevice);
+    var useDeviceButton = hilToolbarButton("check", "Use device", "Use selected serial device", hilUseSelectedModemDevice);
     useDeviceButton.id = "hil-modem-device-use";
     bar.appendChild(useDeviceButton);
 
@@ -7028,6 +8322,110 @@
     bar.appendChild(statusChip);
 
     shell.appendChild(bar);
+
+    var actionsBar = document.createElement("div");
+    actionsBar.className = "cc-hil-modem-actions";
+    actionsBar.setAttribute("role", "toolbar");
+    actionsBar.setAttribute("aria-label", "Modem quick actions");
+
+    var authButton = hilToolbarButton("auth", "Auth status", "Send AT+CREG?", function () {
+      hilRunModemQuickAction("auth");
+    });
+    authButton.id = "hil-modem-action-auth";
+    authButton.setAttribute("data-hil-modem-action", "auth");
+    actionsBar.appendChild(authButton);
+
+    var ceerButton = hilToolbarButton("report", "Last error", "Send AT+CEER", function () {
+      hilRunModemQuickAction("ceer");
+    });
+    ceerButton.id = "hil-modem-action-ceer";
+    ceerButton.setAttribute("data-hil-modem-action", "ceer");
+    actionsBar.appendChild(ceerButton);
+
+    var signalButton = hilToolbarButton("live", "Signal", "Send AT+CSQ", function () {
+      hilRunModemQuickAction("signal");
+    });
+    signalButton.id = "hil-modem-action-signal";
+    signalButton.setAttribute("data-hil-modem-action", "signal");
+    actionsBar.appendChild(signalButton);
+
+    var operatorButton = hilToolbarButton("find", "Operator", "Send AT+COPS?", function () {
+      hilRunModemQuickAction("operator");
+    });
+    operatorButton.id = "hil-modem-action-operator";
+    operatorButton.setAttribute("data-hil-modem-action", "operator");
+    actionsBar.appendChild(operatorButton);
+
+    var dialButton = hilToolbarButton("shell", "Dial", "Send ATD", hilDialModemCall);
+    dialButton.id = "hil-modem-action-dial";
+    dialButton.setAttribute("data-hil-modem-action", "dial");
+    actionsBar.appendChild(dialButton);
+
+    var answerButton = hilToolbarButton("run", "Answer", "Send ATA", function () {
+      hilRunModemQuickAction("answer");
+    });
+    answerButton.id = "hil-modem-action-answer";
+    answerButton.setAttribute("data-hil-modem-action", "answer");
+    actionsBar.appendChild(answerButton);
+
+    var hangupButton = hilToolbarButton("stop", "Hang up", "Send ATH", function () {
+      hilRunModemQuickAction("hangup");
+    });
+    hangupButton.id = "hil-modem-action-hangup";
+    hangupButton.setAttribute("data-hil-modem-action", "hangup");
+    actionsBar.appendChild(hangupButton);
+
+    var csimButton = hilToolbarButton("token", "CSIM", "Send AT+CSIM", hilSendModemCsim);
+    csimButton.id = "hil-modem-action-csim";
+    csimButton.setAttribute("data-hil-modem-action", "csim");
+    actionsBar.appendChild(csimButton);
+
+    var crsmButton = hilToolbarButton("read", "CRSM", "Send AT+CRSM", hilSendModemCrsm);
+    crsmButton.id = "hil-modem-action-crsm";
+    crsmButton.setAttribute("data-hil-modem-action", "crsm");
+    actionsBar.appendChild(crsmButton);
+
+    var refreshModemButton = hilToolbarButton("refresh", "Refresh", "Send AT+CFUN=0 then AT+CFUN=1", function () {
+      hilRunModemQuickAction("refresh");
+    });
+    refreshModemButton.id = "hil-modem-action-refresh";
+    refreshModemButton.setAttribute("data-hil-modem-action", "refresh");
+    actionsBar.appendChild(refreshModemButton);
+
+    var rebootButton = hilToolbarButton("enable", "Reboot", "Send AT+CFUN=1,1", function () {
+      hilRunModemQuickAction("reboot");
+    });
+    rebootButton.id = "hil-modem-action-reboot";
+    rebootButton.setAttribute("data-hil-modem-action", "reboot");
+    actionsBar.appendChild(rebootButton);
+
+    var smsButton = hilToolbarButton("notification", "Send SMS", "Send AT+CMGF=1 and AT+CMGS", hilSendModemSms);
+    smsButton.id = "hil-modem-action-sms";
+    smsButton.setAttribute("data-hil-modem-action", "sms");
+    actionsBar.appendChild(smsButton);
+
+    var standardSelect = document.createElement("select");
+    standardSelect.id = "hil-modem-standard-command";
+    standardSelect.className = "cc-hil-modem-standard";
+    standardSelect.setAttribute("aria-label", "Standard AT command");
+    var standardBlank = document.createElement("option");
+    standardBlank.value = "";
+    standardBlank.textContent = "Standard AT...";
+    standardSelect.appendChild(standardBlank);
+    HIL_MODEM_STANDARD_COMMANDS.forEach(function (item) {
+      var opt = document.createElement("option");
+      opt.value = item.id;
+      opt.textContent = item.label + " (" + item.command + ")";
+      standardSelect.appendChild(opt);
+    });
+    actionsBar.appendChild(standardSelect);
+
+    var standardButton = hilToolbarButton("shell", "Send", "Send selected standard AT command", hilSendSelectedStandardAtCommand);
+    standardButton.id = "hil-modem-standard-send";
+    standardButton.setAttribute("data-hil-modem-action", "standard");
+    actionsBar.appendChild(standardButton);
+
+    shell.appendChild(actionsBar);
 
     var terminalFrame = document.createElement("div");
     terminalFrame.className = "cc-hil-modem-terminal-frame";
@@ -7076,6 +8474,8 @@
     var stop = $("hil-modem-stop");
     var select = $("hil-modem-device");
     var useDevice = $("hil-modem-device-use");
+    var quickActions = document.querySelectorAll("[data-hil-modem-action]");
+    var standardSelect = $("hil-modem-standard-command");
 
     if (select) {
       var current = select.value;
@@ -7109,9 +8509,14 @@
     var capability = state.modemShellCapability || null;
     var capDisabled = capability && capability.enabled === false;
     var running = !!state.modemShellRunning;
+    var ready = !!(state.modemShellSocket && state.modemShellSocket.readyState === 1);
     if (start) start.disabled = running || !!capDisabled;
     if (stop) stop.disabled = !running && !state.modemShellSocket;
     if (useDevice) useDevice.disabled = !select || !select.value;
+    quickActions.forEach(function (button) {
+      button.disabled = !ready || !!capDisabled;
+    });
+    if (standardSelect) standardSelect.disabled = !ready || !!capDisabled;
     var input = $("hil-modem-command");
     if (input) input.placeholder = hilPreferredModemShellCommand();
 
@@ -7140,7 +8545,7 @@
     } else if (/^\s*(sudo\s+)?tio(\s|$)/.test(command)) {
       command = command + " " + select.value;
     } else {
-      command = "sudo tio " + select.value;
+      command = "tio " + select.value;
     }
     input.value = command;
     hilSaveModemShellCommand(command);
@@ -7152,6 +8557,171 @@
     state.modemShellStatusText = String(text || "");
     state.modemShellErrorText = String(errorText || "");
     hilRenderModemShellMetadata();
+  }
+
+  function hilSendModemShellInput(data, labelText) {
+    var state = commandState.hilWorkbench;
+    var sock = state.modemShellSocket;
+    if (!sock || sock.readyState !== 1) {
+      hilSetModemShellStatus("not connected", "start modem shell first");
+      return false;
+    }
+    sock.send(JSON.stringify({ type: "stdin", data: String(data || "") }));
+    if (labelText) {
+      state.modemShellStatusText = String(labelText);
+      state.modemShellErrorText = "";
+      hilRenderModemShellMetadata();
+      setStatusAction("modem shell: " + String(labelText));
+    }
+    if (state.modemShellTerm && typeof state.modemShellTerm.focus === "function") {
+      try { state.modemShellTerm.focus(); } catch (_err) {}
+    }
+    return true;
+  }
+
+  function hilSendAtCommand(command, labelText) {
+    var line = String(command || "").replace(/[\r\n]/g, "").trim();
+    if (!line) {
+      hilSetModemShellStatus("empty command", "");
+      return false;
+    }
+    return hilSendModemShellInput(line + "\r", labelText || ("sent " + line));
+  }
+
+  function hilSanitizeAtLine(value) {
+    return String(value || "").replace(/[\r\n]/g, "").trim();
+  }
+
+  function hilNormalizeAtHex(value, labelText) {
+    var hex = String(value || "").replace(/[\s:]/g, "").toUpperCase();
+    if (!hex) {
+      hilSetModemShellStatus("missing " + String(labelText || "hex").toLowerCase(), "");
+      return "";
+    }
+    if (!/^[0-9A-F]+$/.test(hex)) {
+      hilSetModemShellStatus("invalid " + String(labelText || "hex").toLowerCase(), "");
+      return "";
+    }
+    if (hex.length % 2 !== 0) {
+      hilSetModemShellStatus("odd-length " + String(labelText || "hex").toLowerCase(), "");
+      return "";
+    }
+    return hex;
+  }
+
+  function hilFindStandardAtCommand(commandId) {
+    var id = String(commandId || "");
+    for (var i = 0; i < HIL_MODEM_STANDARD_COMMANDS.length; i++) {
+      if (HIL_MODEM_STANDARD_COMMANDS[i].id === id) {
+        return HIL_MODEM_STANDARD_COMMANDS[i];
+      }
+    }
+    return null;
+  }
+
+  function hilSendSelectedStandardAtCommand() {
+    var select = $("hil-modem-standard-command");
+    var item = select ? hilFindStandardAtCommand(select.value) : null;
+    if (!item) {
+      hilSetModemShellStatus("pick command", "");
+      return;
+    }
+    if (hilSendAtCommand(item.command, "sent " + item.command) && select) {
+      select.value = "";
+    }
+  }
+
+  function hilRunModemQuickAction(actionId) {
+    var action = String(actionId || "");
+    if (action === "auth") {
+      hilSendAtCommand("AT+CREG?", "sent AT+CREG?");
+      return;
+    }
+    if (action === "ceer") {
+      hilSendAtCommand("AT+CEER", "sent AT+CEER");
+      return;
+    }
+    if (action === "signal") {
+      hilSendAtCommand("AT+CSQ", "sent AT+CSQ");
+      return;
+    }
+    if (action === "operator") {
+      hilSendAtCommand("AT+COPS?", "sent AT+COPS?");
+      return;
+    }
+    if (action === "answer") {
+      hilSendAtCommand("ATA", "sent ATA");
+      return;
+    }
+    if (action === "hangup") {
+      hilSendAtCommand("ATH", "sent ATH");
+      return;
+    }
+    if (action === "refresh") {
+      if (!hilSendModemShellInput("AT+CFUN=0\r", "refresh: AT+CFUN=0")) return;
+      window.setTimeout(function () {
+        hilSendModemShellInput("AT+CFUN=1\r", "refresh: AT+CFUN=1");
+      }, 1200);
+      return;
+    }
+    if (action === "reboot") {
+      hilSendAtCommand("AT+CFUN=1,1", "sent AT+CFUN=1,1");
+    }
+  }
+
+  function hilDialModemCall() {
+    var target = window.prompt("Dial string after ATD", "");
+    if (target === null) return;
+    target = hilSanitizeAtLine(target);
+    if (!target) {
+      hilSetModemShellStatus("dial needs target", "");
+      return;
+    }
+    var command = /^ATD/i.test(target) ? target : ("ATD" + target);
+    hilSendAtCommand(command, "sent " + command);
+  }
+
+  function hilSendModemCsim() {
+    var value = window.prompt("CSIM APDU hex", "");
+    if (value === null) return;
+    var hex = hilNormalizeAtHex(value, "CSIM APDU");
+    if (!hex) return;
+    hilSendAtCommand("AT+CSIM=" + hex.length + ",\"" + hex + "\"", "sent AT+CSIM");
+  }
+
+  function hilSendModemCrsm() {
+    var value = window.prompt("CRSM arguments", "176,28423,0,0,10");
+    if (value === null) return;
+    var args = hilSanitizeAtLine(value);
+    if (!args) {
+      hilSetModemShellStatus("missing CRSM args", "");
+      return;
+    }
+    var command = /^AT\+CRSM/i.test(args) ? args : ("AT+CRSM=" + args);
+    hilSendAtCommand(command, "sent AT+CRSM");
+  }
+
+  function hilSendModemSms() {
+    var number = window.prompt("SMS recipient number", "");
+    if (number === null) return;
+    number = String(number || "").replace(/[\r\n"]/g, "").trim();
+    if (!number) {
+      hilSetModemShellStatus("sms needs number", "");
+      setStatusAction("modem shell: SMS recipient number is required");
+      return;
+    }
+
+    var body = window.prompt("SMS body", "");
+    if (body === null) return;
+    body = String(body || "").replace(/\x1a/g, "");
+
+    if (!hilSendModemShellInput("AT+CMGF=1\r", "sms: text mode")) return;
+    window.setTimeout(function () {
+      if (!hilSendModemShellInput("AT+CMGS=\"" + number + "\"\r", "sms: recipient")) return;
+      window.setTimeout(function () {
+        hilSendModemShellInput(body + "\x1a", "sms submitted");
+      }, 700);
+    }, 250);
   }
 
   function hilEnsureModemShellTerminal() {
@@ -7266,18 +8836,20 @@
     var rows = term.rows || 30;
     var cols = term.cols || 120;
     var url = scheme + "://" + window.location.host + "/api/host-shell"
-      + "?t=" + encodeURIComponent(token)
-      + "&scope=hil-modem"
-      + "&rows=" + rows
-      + "&cols=" + cols
-      + "&command=" + encodeURIComponent(command);
-    var sock = new WebSocket(url);
+      + "?scope=hil-modem";
+    var sock = new WebSocket(url, ["yggdrasim", "bearer." + token]);
     sock.binaryType = "arraybuffer";
     state.modemShellSocket = sock;
     state.modemShellRunning = true;
     hilSetModemShellStatus("connecting", "");
 
     sock.onopen = function () {
+      sock.send(JSON.stringify({
+        type: "start",
+        rows: rows,
+        cols: cols,
+        command: command,
+      }));
       hilSetModemShellStatus("running", "");
       hilSendModemShellResize();
     };
@@ -8165,7 +9737,7 @@
     actionsBar.appendChild(runBtn);
     var status = document.createElement("span");
     status.className = "cc-action-status";
-    status.textContent = "idle";
+    status.textContent = "Ready";
     actionsBar.appendChild(status);
     form.appendChild(actionsBar);
     card.appendChild(form);
@@ -8173,6 +9745,7 @@
     var result = document.createElement("div");
     result.className = "cc-action-result cc-action-result--" + action.output_kind;
     card.appendChild(result);
+    ccPrepareActionFeedback(action, form, status, result);
 
     form.addEventListener("submit", function (event) {
       event.preventDefault();
@@ -8186,6 +9759,7 @@
       }
     });
 
+    ccInitializeSaipTokenConfigurationForm(action, form, runBtn, status, result);
     return card;
   }
 
@@ -8202,15 +9776,579 @@
     return input && input.closest ? input.closest(".cc-form-row") : null;
   }
 
+  var CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG =
+    "saip-ribbon-tokens-form";
+  var ccSaipTokenConfigurationIds = [];
+
+  function ccActionHasInput(action, fieldName) {
+    return (action && action.inputs || []).some(function (field) {
+      return field && field.name === fieldName;
+    });
+  }
+
+  function ccIsSaipTokenConfigurationManager(action) {
+    var actionTags = action && Array.isArray(action.tags) ? action.tags : [];
+    return actionTags.indexOf(CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG) !== -1;
+  }
+
+  function ccIsSaipTokenConfigurationGenerator(action) {
+    return ccActionHasInput(action, "token_configuration_id");
+  }
+
+  function ccNormalizeTokenConfigurationIds(rawIds) {
+    var seen = Object.create(null);
+    var normalized = [];
+    (Array.isArray(rawIds) ? rawIds : []).forEach(function (rawId) {
+      var id = String(rawId || "").trim();
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      normalized.push(id);
+    });
+    return normalized;
+  }
+
+  function ccReplaceTokenConfigurationInput(form, fieldName, role) {
+    var control = form && form.elements.namedItem(fieldName);
+    if (!control) return null;
+    if (String(control.tagName || "").toUpperCase() === "SELECT"
+        && control.dataset
+        && control.dataset.saipTokenConfigurationRole) {
+      return control;
+    }
+    var select = document.createElement("select");
+    select.id = control.id;
+    select.name = control.name;
+    select.required = Boolean(control.required);
+    select.dataset.saipTokenConfigurationRole = role;
+    select.dataset.preferredConfiguration = String(control.value || "");
+    select.setAttribute("aria-label", role === "manager"
+      ? "Token configuration to edit"
+      : "Token configuration for template generation");
+    var loading = document.createElement("option");
+    loading.value = "";
+    loading.textContent = "Loading token configurations…";
+    select.appendChild(loading);
+    select.disabled = true;
+    control.parentNode.replaceChild(select, control);
+    if (ccSaipTokenConfigurationIds.length > 0) {
+      ccPopulateTokenConfigurationSelect(
+        select,
+        ccSaipTokenConfigurationIds,
+        select.dataset.preferredConfiguration
+      );
+    }
+    return select;
+  }
+
+  function ccPopulateTokenConfigurationSelect(select, ids, preferred) {
+    if (!select) return "";
+    var options = ccNormalizeTokenConfigurationIds(ids);
+    var wanted = String(
+      preferred
+      || select.value
+      || (select.dataset && select.dataset.preferredConfiguration)
+      || ""
+    ).trim();
+    select.innerHTML = "";
+    if (options.length === 0) {
+      var empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "No token configurations available";
+      select.appendChild(empty);
+      select.disabled = true;
+      return "";
+    }
+    options.forEach(function (id) {
+      var option = document.createElement("option");
+      option.value = id;
+      option.textContent = id;
+      select.appendChild(option);
+    });
+    select.value = options.indexOf(wanted) !== -1 ? wanted : options[0];
+    select.disabled = false;
+    if (select.dataset) {
+      select.dataset.preferredConfiguration = select.value;
+    }
+    return select.value;
+  }
+
+  function ccApplyTokenConfigurationCatalogue(data) {
+    if (!data || !Array.isArray(data.token_configurations)) return false;
+    ccSaipTokenConfigurationIds = ccNormalizeTokenConfigurationIds(
+      data.token_configurations
+    );
+    document.querySelectorAll(
+      'select[data-saip-token-configuration-role="manager"]'
+    ).forEach(function (select) {
+      var current = String(
+        select.value
+        || (select.dataset && select.dataset.preferredConfiguration)
+        || ""
+      ).trim();
+      ccPopulateTokenConfigurationSelect(
+        select,
+        ccSaipTokenConfigurationIds,
+        current
+      );
+    });
+    document.querySelectorAll(
+      'select[data-saip-token-configuration-role="generator"]'
+    ).forEach(function (select) {
+      var current = String(
+        select.value
+        || (select.dataset && select.dataset.preferredConfiguration)
+        || ""
+      ).trim();
+      ccPopulateTokenConfigurationSelect(
+        select,
+        ccSaipTokenConfigurationIds,
+        current
+      );
+    });
+    return true;
+  }
+
+  async function ccFetchTokenConfigurationCatalogue() {
+    var managerAction = ccFindCatalogueActionByTag(
+      CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG
+    );
+    if (!managerAction) {
+      throw new Error("Token configuration manager action is unavailable.");
+    }
+    var response = await apiFetch(
+      "/api/actions/"
+        + encodeURIComponent(managerAction.id)
+        + "/run",
+      {
+        method: "POST",
+        body: JSON.stringify({ inputs: { list_configurations: true } }),
+      }
+    );
+    if (!response || !response.ok) {
+      throw new Error(
+        response && response.error
+          ? response.error
+          : "Could not list token configurations."
+      );
+    }
+    return response.data || {};
+  }
+
+  function ccInitializeTokenConfigurationGenerator(form, runBtn, statusEl, resultEl) {
+    var select = form && form.elements.namedItem("token_configuration_id");
+    if (!select || (form.dataset && form.dataset.saipTokenCatalogueLoading === "true")) {
+      return;
+    }
+    form.dataset.saipTokenCatalogueLoading = "true";
+    var previousRunDisabled = Boolean(runBtn.disabled);
+    runBtn.disabled = true;
+    select.disabled = true;
+    ccSetActionStatus(statusEl, "running", "Loading token configurations\u2026");
+    window.setTimeout(async function () {
+      try {
+        var data = await ccFetchTokenConfigurationCatalogue();
+        ccApplyTokenConfigurationCatalogue(data);
+        if (!select.value) {
+          throw new Error("No reusable token configuration is available.");
+        }
+        ccSetActionStatus(statusEl, "ready");
+        runBtn.disabled = previousRunDisabled;
+      } catch (error) {
+        ccSetActionStatus(statusEl, "error", "Configuration error");
+        resultEl.innerHTML = "";
+        resultEl.appendChild(renderErrorBlock(
+          String(error && error.message || error)
+        ));
+        logBus.emit({
+          level: "error",
+          source: CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG,
+          message: String(error && error.message || error),
+        });
+        runBtn.disabled = true;
+        select.disabled = true;
+      } finally {
+        form.dataset.saipTokenCatalogueLoading = "false";
+      }
+    }, 0);
+  }
+
+  function ccReloadTokenConfigurationManager(
+    action, form, runBtn, statusEl, resultEl, clearSaveAs
+  ) {
+    if (!form || form.dataset.saipTokenConfigurationLoading === "true") {
+      return Promise.resolve(false);
+    }
+    var reloadInput = form.elements.namedItem("reload_current");
+    var listInput = form.elements.namedItem("list_configurations");
+    var registryInput = form.elements.namedItem("registry_json");
+    var configurationInput = form.elements.namedItem("configuration_id");
+    var deleteInput = form.elements.namedItem("delete_configuration");
+    var resetInput = form.elements.namedItem("reset_defaults");
+    var saveAsInput = form.elements.namedItem("save_as_configuration_id");
+    if (!reloadInput || reloadInput.type !== "checkbox") {
+      return Promise.resolve(false);
+    }
+    form.dataset.saipTokenConfigurationLoading = "true";
+    form.dataset.saipTokenConfigurationResponseApplied = "false";
+    reloadInput.checked = true;
+    if (listInput && listInput.type === "checkbox") listInput.checked = false;
+    if (deleteInput && deleteInput.type === "checkbox") deleteInput.checked = false;
+    if (resetInput && resetInput.type === "checkbox") resetInput.checked = false;
+    if (clearSaveAs && saveAsInput) saveAsInput.value = "";
+    runBtn.disabled = true;
+    if (registryInput) registryInput.disabled = true;
+    if (configurationInput) configurationInput.disabled = true;
+    ccSetActionStatus(statusEl, "running", "Loading configuration\u2026");
+    var loaded = false;
+    return Promise.resolve(
+      runActionFromForm(action, form, statusEl, resultEl)
+    ).then(function () {
+      loaded = form.dataset.saipTokenConfigurationResponseApplied === "true";
+      return loaded;
+    }, function () {
+      loaded = false;
+      return false;
+    }).finally(function () {
+      reloadInput.checked = false;
+      if (listInput && listInput.type === "checkbox") listInput.checked = false;
+      runBtn.disabled = !loaded;
+      if (registryInput) registryInput.disabled = !loaded;
+      if (configurationInput) {
+        configurationInput.disabled = (
+          !loaded || ccSaipTokenConfigurationIds.length === 0
+        );
+      }
+      form.dataset.saipTokenConfigurationLoading = "false";
+    });
+  }
+
+  function ccInitializeTokenConfigurationManager(
+    action, form, runBtn, statusEl, resultEl
+  ) {
+    var select = form && form.elements.namedItem("configuration_id");
+    if (select && select.dataset.saipTokenConfigurationChangeBound !== "true") {
+      select.dataset.saipTokenConfigurationChangeBound = "true";
+      select.addEventListener("change", function () {
+        if (form.dataset.saipTokenConfigurationLoading === "true") return;
+        if (select.dataset) select.dataset.preferredConfiguration = select.value;
+        ccReloadTokenConfigurationManager(
+          action,
+          form,
+          runBtn,
+          statusEl,
+          resultEl,
+          true
+        );
+      });
+    }
+    window.setTimeout(async function () {
+      if (form.dataset.saipTokenConfigurationLoading === "true") return;
+      var registryInput = form.elements.namedItem("registry_json");
+      form.dataset.saipTokenConfigurationLoading = "true";
+      runBtn.disabled = true;
+      if (select) select.disabled = true;
+      if (registryInput) registryInput.disabled = true;
+      ccSetActionStatus(statusEl, "running", "Loading token configurations\u2026");
+      try {
+        var data = await ccFetchTokenConfigurationCatalogue();
+        ccApplyTokenConfigurationCatalogue(data);
+        if (!select || !select.value) {
+          throw new Error("No reusable token configuration is available.");
+        }
+        form.dataset.saipTokenConfigurationLoading = "false";
+        await ccReloadTokenConfigurationManager(
+          action,
+          form,
+          runBtn,
+          statusEl,
+          resultEl,
+          false
+        );
+      } catch (error) {
+        form.dataset.saipTokenConfigurationLoading = "false";
+        runBtn.disabled = true;
+        if (select) select.disabled = true;
+        if (registryInput) registryInput.disabled = true;
+        ccSetActionStatus(statusEl, "error", "Configuration error");
+        resultEl.innerHTML = "";
+        resultEl.appendChild(renderErrorBlock(
+          String(error && error.message || error)
+        ));
+        logBus.emit({
+          level: "error",
+          source: CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG,
+          message: String(error && error.message || error),
+        });
+      }
+    }, 0);
+  }
+
+  function ccInitializeSaipTokenConfigurationForm(
+    action, form, runBtn, statusEl, resultEl
+  ) {
+    if (ccIsSaipTokenConfigurationGenerator(action)) {
+      ccInitializeTokenConfigurationGenerator(form, runBtn, statusEl, resultEl);
+    }
+    if (ccIsSaipTokenConfigurationManager(action)) {
+      ccInitializeTokenConfigurationManager(
+        action,
+        form,
+        runBtn,
+        statusEl,
+        resultEl
+      );
+    }
+  }
+
   function ccCompactHexText(raw) {
     return String(raw || "").replace(/0x/gi, "").replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
   }
 
+  var CC_ACTION_FEEDBACK_SEQ = 0;
+
+  function ccActionIsDestructive(action) {
+    var tags = action && Array.isArray(action.tags) ? action.tags : [];
+    return tags.indexOf("destructive") !== -1;
+  }
+
+  function ccEnsureDestructiveAcknowledgement(action, form) {
+    if (!ccActionIsDestructive(action) || !form
+        || form.querySelector(".cc-destructive-banner[data-shared-action-warning='1']")) {
+      return;
+    }
+    var banner = document.createElement("div");
+    banner.className = "cc-destructive-banner";
+    banner.dataset.sharedActionWarning = "1";
+    banner.setAttribute("role", "note");
+
+    var warning = document.createElement("strong");
+    warning.className = "cc-destructive-banner-title";
+    warning.textContent = "Persistent or disruptive action";
+    banner.appendChild(warning);
+
+    var message = document.createElement("span");
+    message.className = "cc-destructive-banner-text";
+    message.textContent = (
+      "Review the selected target and confirmation controls before continuing."
+    );
+    banner.appendChild(message);
+
+    // Some older action specs are tagged destructive but do not expose a
+    // backend ``confirm`` field.  Add an unnamed, UI-only acknowledgement
+    // so those actions still require a deliberate gesture without sending
+    // an unexpected input key to the dispatcher.
+    var confirm = form.elements && form.elements.namedItem("confirm");
+    if (!confirm) {
+      var acknowledge = document.createElement("label");
+      acknowledge.className = "cc-destructive-confirm";
+      var acknowledgeInput = document.createElement("input");
+      acknowledgeInput.type = "checkbox";
+      acknowledgeInput.required = true;
+      acknowledgeInput.dataset.ccDestructiveAcknowledge = "true";
+      acknowledgeInput.setAttribute(
+        "aria-label",
+        "Confirm that the destructive action target has been reviewed"
+      );
+      acknowledge.appendChild(acknowledgeInput);
+      var acknowledgeText = document.createElement("span");
+      acknowledgeText.textContent = "I have reviewed the target and understand the impact.";
+      acknowledge.appendChild(acknowledgeText);
+      banner.appendChild(acknowledge);
+    }
+    form.insertBefore(banner, form.firstChild);
+  }
+
+  function ccPrepareActionFeedback(action, form, statusEl, resultEl) {
+    if (!form || !statusEl || !resultEl) return;
+    CC_ACTION_FEEDBACK_SEQ += 1;
+    var baseId = "cc-action-feedback-" + CC_ACTION_FEEDBACK_SEQ;
+    var actionTitle = String(action && (action.title || action.id) || "Action");
+    form.setAttribute("aria-label", actionTitle);
+    form.setAttribute("aria-busy", "false");
+
+    statusEl.id = baseId + "-status";
+    statusEl.setAttribute("role", "status");
+    statusEl.setAttribute("aria-live", "polite");
+    statusEl.setAttribute("aria-atomic", "true");
+    statusEl.dataset.state = "ready";
+    statusEl.textContent = "Ready";
+
+    resultEl.id = baseId + "-result";
+    resultEl.setAttribute("role", "region");
+    resultEl.setAttribute("aria-label", actionTitle + " result");
+    resultEl.setAttribute("aria-live", "polite");
+    resultEl.setAttribute("aria-busy", "false");
+    resultEl.tabIndex = -1;
+  }
+
+  function ccSetActionStatus(statusEl, state, text) {
+    if (!statusEl) return;
+    var normalized = String(state || "ready").toLowerCase();
+    var labels = {
+      ready: "Ready",
+      running: "Running\u2026",
+      starting: "Starting\u2026",
+      success: "Completed",
+      error: "Error",
+      blocked: "Action required",
+      cancelling: "Cancelling\u2026",
+      cancelled: "Cancelled",
+      closed: "Closed",
+    };
+    statusEl.dataset.state = normalized;
+    statusEl.textContent = text || labels[normalized] || normalized;
+  }
+
+  function ccSetActionFormBusy(form, action, busy) {
+    if (!form) return;
+    var isBusy = Boolean(busy);
+    form.dataset.actionRunning = isBusy ? "true" : "false";
+    form.setAttribute("aria-busy", isBusy ? "true" : "false");
+    var result = form.querySelector(".cc-action-result");
+    if (result) result.setAttribute("aria-busy", isBusy ? "true" : "false");
+
+    form.querySelectorAll("input, select, textarea, button").forEach(function (control) {
+      if (isBusy) {
+        control.dataset.ccBusyWasDisabled = control.disabled ? "true" : "false";
+        control.disabled = true;
+      } else if (Object.prototype.hasOwnProperty.call(
+        control.dataset, "ccBusyWasDisabled"
+      )) {
+        control.disabled = control.dataset.ccBusyWasDisabled === "true";
+        delete control.dataset.ccBusyWasDisabled;
+      }
+    });
+
+    var submit = form.querySelector('button[type="submit"]');
+    if (submit) {
+      if (isBusy) {
+        if (!submit.dataset.ccIdleLabel) {
+          submit.dataset.ccIdleLabel = submit.textContent || (
+            action && action.streams ? "Start" : "Run"
+          );
+        }
+        submit.textContent = action && action.streams ? "Starting\u2026" : "Running\u2026";
+      } else if (submit.dataset.ccIdleLabel) {
+        submit.textContent = submit.dataset.ccIdleLabel;
+      }
+    }
+  }
+
+  function ccFocusActionResult(resultEl, preferError) {
+    if (!resultEl) return;
+    var target = preferError ? resultEl.querySelector(".cc-error") : resultEl;
+    if (!target) target = resultEl;
+    try {
+      target.focus({ preventScroll: true });
+    } catch (_err) {
+      try { target.focus(); } catch (_focusErr) { /* no-op */ }
+    }
+  }
+
   function ccEnhanceActionForm(action, form) {
     if (!action || !form) return;
+    var actionTags = Array.isArray(action.tags) ? action.tags : [];
+    ccEnsureDestructiveAcknowledgement(action, form);
+    if (actionTags.indexOf(CC_SAIP_WORKBOOK_GENERATOR_TAG) !== -1) {
+      (action.inputs || []).forEach(function (field) {
+        if (!ccIsSaipWorkbookInternalField(action, field)) return;
+        var control = form.elements.namedItem(field.name);
+        var row = ccActionFieldRow(form, field.name);
+        if (control) {
+          control.setAttribute("autocomplete", "off");
+          control.setAttribute("aria-hidden", "true");
+          control.tabIndex = -1;
+        }
+        if (row) {
+          row.hidden = true;
+          row.dataset.saipWorkbookInternal = "true";
+        }
+      });
+      var workbookOutput = form.elements.namedItem("output_path");
+      if (workbookOutput && !workbookOutput.placeholder) {
+        workbookOutput.placeholder = "Workspace/SAIP/generated (default)";
+      }
+    }
+    if (ccIsSaipTokenConfigurationGenerator(action)) {
+      ccReplaceTokenConfigurationInput(
+        form,
+        "token_configuration_id",
+        "generator"
+      );
+    }
+    if (actionTags.indexOf("saip-ribbon-tokens-form") !== -1) {
+      ccReplaceTokenConfigurationInput(form, "configuration_id", "manager");
+      var registryInput = form.querySelector('[name="registry_json"]');
+      if (registryInput && String(registryInput.tagName || "").toUpperCase() === "TEXTAREA") {
+        registryInput.rows = Math.max(Number(registryInput.rows || 0), 18);
+        registryInput.spellcheck = false;
+        registryInput.setAttribute("autocomplete", "off");
+        registryInput.setAttribute("autocapitalize", "off");
+      }
+      ["expected_digest", "reload_current", "list_configurations"].forEach(function (fieldName) {
+        var row = ccActionFieldRow(form, fieldName);
+        if (row) row.hidden = true;
+      });
+    }
     if (action.id === "tool.asn1_tlv.decode") {
       ccEnhanceAsn1TlvDecodeForm(form);
     }
+  }
+
+  function ccApplyTokenRegistryActionResult(action, form, data) {
+    var actionTags = action && Array.isArray(action.tags) ? action.tags : [];
+    if (actionTags.indexOf("saip-ribbon-tokens-form") === -1 || !data) {
+      return false;
+    }
+    var catalogueApplied = ccApplyTokenConfigurationCatalogue(data);
+    if (typeof data.effective_registry_json !== "string") {
+      return catalogueApplied;
+    }
+    form.dataset.saipTokenConfigurationResponseApplied = "true";
+    var registryInput = form.elements.namedItem("registry_json");
+    if (registryInput) registryInput.value = data.effective_registry_json;
+    var digest = String(data.digest_sha256 || "");
+    var digestInput = form.elements.namedItem("expected_digest");
+    if (digestInput) digestInput.value = digest;
+    var configurationId = String(data.configuration_id || "");
+    var configurationInput = form.elements.namedItem("configuration_id");
+    if (configurationInput && configurationId) {
+      configurationInput.value = configurationId;
+      if (configurationInput.dataset) {
+        configurationInput.dataset.preferredConfiguration = configurationId;
+      }
+    }
+    var saveAsInput = form.elements.namedItem("save_as_configuration_id");
+    if (saveAsInput) saveAsInput.value = "";
+    [
+      "delete_configuration",
+      "reset_defaults",
+      "reload_current",
+      "list_configurations",
+    ].forEach(function (fieldName) {
+      var input = form.elements.namedItem(fieldName);
+      if (input && input.type === "checkbox") input.checked = false;
+    });
+    (action.inputs || []).forEach(function (field) {
+      if (!field) return;
+      if (field.name === "registry_json") {
+        field.default = data.effective_registry_json;
+      } else if (field.name === "expected_digest") {
+        field.default = digest;
+      } else if (field.name === "configuration_id") {
+        field.default = configurationId;
+      } else if (field.name === "save_as_configuration_id") {
+        field.default = "";
+      } else if (
+        field.name === "delete_configuration"
+        || field.name === "reset_defaults"
+        || field.name === "reload_current"
+        || field.name === "list_configurations"
+      ) {
+        field.default = false;
+      }
+    });
+    return true;
   }
 
   function ccEnhanceAsn1TlvDecodeForm(form) {
@@ -8320,22 +10458,50 @@
   function buildField(action, field) {
     var row = document.createElement("div");
     row.className = "form-row cc-form-row";
+    row.dataset.fieldName = String(field.name || "");
+    row.dataset.fieldKind = String(field.kind || "string");
+    if (field.required) row.dataset.required = "true";
 
     var label = document.createElement("label");
     label.textContent = field.label || field.name;
     var fid = "cc-" + action.id.replace(/\./g, "-") + "-" + field.name;
     label.setAttribute("for", fid);
+    if (field.required) {
+      var requiredMarker = document.createElement("span");
+      requiredMarker.className = "cc-required-marker";
+      requiredMarker.setAttribute("aria-hidden", "true");
+      requiredMarker.textContent = "*";
+      label.appendChild(requiredMarker);
+    }
     row.appendChild(label);
 
     var input;
+    if (field.kind === "internal") {
+      row.hidden = true;
+      row.dataset.internalActionField = "true";
+      input = document.createElement("input");
+      input.type = "hidden";
+      input.id = fid;
+      input.name = field.name;
+      if (field.default !== undefined && field.default !== null) {
+        input.value = String(field.default);
+      }
+      row.appendChild(input);
+      return row;
+    }
     if (ccShouldHideReaderField(action, field)) {
+      var sessionFieldMode = ccReaderSessionFieldMode(field);
       row.classList.add("cc-form-row--reader-session");
+      row.setAttribute(
+        "data-reader-session-field",
+        sessionFieldMode
+      );
       row.hidden = true;
       input = document.createElement("input");
       input.type = "hidden";
       input.id = fid;
       input.name = field.name;
-      input.value = ccActiveReaderName();
+      input.value = sessionFieldMode === "reader" ? ccActiveReaderName() : "";
       row.appendChild(input);
       return row;
     }
@@ -8346,14 +10512,25 @@
       input.type = "checkbox";
       input.id = fid;
       input.name = field.name;
+      input.required = Boolean(field.required);
       if (field.default === true) {
         input.checked = true;
       }
       wrapper.appendChild(input);
       var wrapText = document.createElement("span");
-      wrapText.textContent = field.help || field.label || field.name;
+      wrapText.textContent = /confirm|understand/i.test(
+        String(field.name || "") + " " + String(field.label || "")
+      ) ? "Confirmed" : "Enabled";
       wrapper.appendChild(wrapText);
       row.appendChild(wrapper);
+      if (field.help) {
+        var boolHint = document.createElement("small");
+        boolHint.id = fid + "-help";
+        boolHint.className = "cc-field-hint";
+        boolHint.textContent = field.help;
+        input.setAttribute("aria-describedby", boolHint.id);
+        row.appendChild(boolHint);
+      }
       return row;
     }
     if (field.kind === "enum") {
@@ -8370,12 +10547,19 @@
       empty.value = "";
       empty.textContent = "(default / first reader)";
       input.appendChild(empty);
-    } else if (field.multiline) {
+    } else if (field.multiline || field.kind === "json" || field.kind === "text") {
       input = document.createElement("textarea");
-      input.rows = 4;
+      input.rows = field.kind === "json" ? 6 : 4;
+      if (field.kind === "json" || field.kind === "text") {
+        input.spellcheck = false;
+        input.setAttribute("autocomplete", "off");
+        input.setAttribute("autocapitalize", "off");
+      }
     } else if (field.kind === "int") {
       input = document.createElement("input");
       input.type = "number";
+      input.step = "1";
+      input.inputMode = "numeric";
       if (field.min_value !== undefined) input.min = field.min_value;
       if (field.max_value !== undefined) input.max = field.max_value;
     } else {
@@ -8384,6 +10568,24 @@
     }
     input.id = fid;
     input.name = field.name;
+    if (field.secret) {
+      input.setAttribute("autocomplete", "new-password");
+      input.setAttribute("autocapitalize", "off");
+      input.spellcheck = false;
+    } else if (
+      field.kind === "hex"
+      || field.kind === "path"
+      || field.kind === "directory"
+      || field.kind === "save_path"
+    ) {
+      input.setAttribute("autocomplete", "off");
+      input.setAttribute("autocapitalize", "off");
+      input.spellcheck = false;
+    }
+    if (field.kind === "hex") {
+      input.inputMode = "text";
+      input.classList.add("cc-mono-input");
+    }
     if (field.placeholder) {
       input.placeholder = field.placeholder;
     }
@@ -8420,13 +10622,6 @@
       if (!input.title) {
         input.title = "Double-click to browse \u00B7 drop a file to paste its path";
       }
-      input.addEventListener("dblclick", async function () {
-        var chosen = await pickForField(field);
-        if (chosen) {
-          input.value = chosen;
-          input.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-      });
       var pathWrap = document.createElement("div");
       pathWrap.className = "cc-path-row";
       pathWrap.appendChild(input);
@@ -8437,13 +10632,33 @@
       browse.title = field.kind === "directory"
         ? "Pick a folder"
         : (field.kind === "save_path" ? "Pick a save location" : "Pick a file");
-      browse.addEventListener("click", async function () {
-        var chosen = await pickForField(field);
-        if (chosen) {
-          input.value = chosen;
-          input.dispatchEvent(new Event("change", { bubbles: true }));
+      async function choosePath() {
+        browse.disabled = true;
+        browse.setAttribute("aria-busy", "true");
+        try {
+          var chosen = await pickForField(field);
+          if (chosen) {
+            input.setCustomValidity("");
+            input.value = chosen;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        } catch (error) {
+          input.setCustomValidity(
+            "Could not open the file browser: "
+              + String(error && error.message || error)
+          );
+          input.reportValidity();
+        } finally {
+          browse.disabled = false;
+          browse.removeAttribute("aria-busy");
         }
+      }
+      input.addEventListener("input", function () {
+        input.setCustomValidity("");
       });
+      input.addEventListener("dblclick", choosePath);
+      browse.addEventListener("click", choosePath);
       pathWrap.appendChild(browse);
       row.appendChild(pathWrap);
       // Drag-and-drop: operators can drop a file (or a folder for
@@ -8452,6 +10667,30 @@
       // absolute path from pywebview's File.path, a file:// URI, or
       // a plain-text fallback.
       enableFilePathDrop(input);
+    } else if (field.secret && String(input.tagName || "").toUpperCase() === "INPUT") {
+      var secretWrap = document.createElement("div");
+      secretWrap.className = "cc-secret-input";
+      secretWrap.appendChild(input);
+      var reveal = document.createElement("button");
+      reveal.type = "button";
+      reveal.className = "btn btn-small cc-secret-toggle";
+      reveal.textContent = "Show";
+      reveal.setAttribute("aria-controls", fid);
+      reveal.setAttribute("aria-pressed", "false");
+      reveal.title = "Show this value temporarily";
+      reveal.addEventListener("click", function () {
+        var showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        reveal.textContent = showing ? "Show" : "Hide";
+        reveal.setAttribute("aria-pressed", showing ? "false" : "true");
+        reveal.title = showing
+          ? "Show this value temporarily"
+          : "Mask this value";
+        input.focus();
+      });
+      secretWrap.appendChild(reveal);
+      row.appendChild(secretWrap);
+      if (profileTargetList) row.appendChild(profileTargetList);
     } else {
       row.appendChild(input);
       if (profileTargetList) row.appendChild(profileTargetList);
@@ -8459,8 +10698,10 @@
 
     if (field.help) {
       var hint = document.createElement("small");
+      hint.id = fid + "-help";
       hint.className = "cc-field-hint";
       hint.textContent = field.help;
+      input.setAttribute("aria-describedby", hint.id);
       row.appendChild(hint);
     }
     return row;
@@ -8511,6 +10752,63 @@
     return values;
   }
 
+  function ccActionSecretFieldNames(action) {
+    var names = Object.create(null);
+    (action && Array.isArray(action.inputs) ? action.inputs : []).forEach(function (field) {
+      if (!field || !field.secret || !field.name) return;
+      names[String(field.name).toLowerCase()] = true;
+    });
+    return names;
+  }
+
+  function ccRedactActionError(message, action, inputs) {
+    var text = String(message == null ? "" : message);
+    (action && Array.isArray(action.inputs) ? action.inputs : []).forEach(function (field) {
+      if (!field || !field.secret || !field.name) return;
+      var secret = String(inputs && inputs[field.name] == null ? "" : inputs[field.name]);
+      if (!secret) return;
+      text = text.split(secret).join("[REDACTED]");
+      if (secret.length >= 4) {
+        text = text.split(secret.toUpperCase()).join("[REDACTED]");
+        text = text.split(secret.toLowerCase()).join("[REDACTED]");
+      }
+    });
+    return text;
+  }
+
+  function ccRedactActionResult(action, value, seen) {
+    var secretNames = ccActionSecretFieldNames(action);
+    if (Object.keys(secretNames).length === 0) return value;
+    var visited = seen || (typeof WeakMap === "function" ? new WeakMap() : null);
+
+    function clone(node, depth) {
+      if (node === null || typeof node !== "object") return node;
+      if (depth > 32) return "[truncated]";
+      if (visited && visited.has(node)) return "[circular]";
+      var copy = Array.isArray(node) ? [] : {};
+      if (visited) visited.set(node, copy);
+      Object.keys(node).forEach(function (key) {
+        if (secretNames[String(key).toLowerCase()]) {
+          copy[key] = "[REDACTED]";
+        } else {
+          copy[key] = clone(node[key], depth + 1);
+        }
+      });
+      return copy;
+    }
+    return clone(value, 0);
+  }
+
+  function ccClearCollectedSecretValues(action, inputs) {
+    if (!inputs || typeof inputs !== "object") return;
+    (action && Array.isArray(action.inputs) ? action.inputs : []).forEach(function (field) {
+      if (!field || !field.secret || !field.name) return;
+      if (Object.prototype.hasOwnProperty.call(inputs, field.name)) {
+        inputs[field.name] = "";
+      }
+    });
+  }
+
   function findHostCard(form) {
     if (!form) return null;
     return form.closest(".cc-action-card") || null;
@@ -8550,18 +10848,36 @@
     if (!action || !action.inputs || !inputs) return;
     var activeReader = ccActiveReaderName();
     if (activeReader.length === 0) return;
-    var forceSessionReader = ccActionUsesReaderSession(action);
-    action.inputs.forEach(function (field) {
-      if (!field || field.kind !== "reader") return;
-      var fieldName = field.name;
-      var current = String(inputs[fieldName] || "");
-      if (forceSessionReader || current.length === 0) {
-        inputs[fieldName] = activeReader;
-      }
+	    var forceSessionReader = ccActionUsesReaderSession(action);
+	    action.inputs.forEach(function (field) {
+	      if (!field) return;
+	      var fieldName = field.name;
+	      var fieldMode = ccReaderSessionFieldMode(field);
+	      if (forceSessionReader && fieldMode === "override") {
+	        inputs[fieldName] = "";
+	        return;
+	      }
+	      if (forceSessionReader && fieldMode === "reader") {
+	        inputs[fieldName] = activeReader;
+	        return;
+	      }
+	      if (field.kind !== "reader") return;
+	      var current = String(inputs[fieldName] || "");
+	      if (forceSessionReader || current.length === 0) {
+	        inputs[fieldName] = activeReader;
+	      }
     });
   }
 
   async function runActionFromForm(action, form, statusEl, resultEl) {
+    if (!form || form.dataset.actionRunning === "true") return;
+    if (form.checkValidity && !form.checkValidity()) {
+      ccSetActionStatus(statusEl, "blocked", "Check required fields");
+      if (form.reportValidity) form.reportValidity();
+      var invalid = form.querySelector(":invalid");
+      if (invalid && invalid.focus) invalid.focus();
+      return;
+    }
     var inputs = collectFormValues(form);
     applyActiveReaderDefault(action, inputs);
     var currentEsimFlowPane = resultEl && resultEl.closest
@@ -8581,22 +10897,28 @@
       if (paneStatus) paneStatus.textContent = text;
     }
     if (ccActionUsesReaderSession(action) && !ccActiveReaderName()) {
-      statusEl.textContent = "select reader";
+      ccSetActionStatus(statusEl, "blocked", "Select a reader");
       setEsimInlinePaneStatus("select reader");
       setInlineActionPaneStatus("select reader");
       resultEl.innerHTML = "";
       resultEl.appendChild(renderErrorBlock(
-        "Select a reader before running this eSIM action."
+        "Select a reader before running this reader-backed action."
       ));
+      resultEl.dataset.state = "error";
+      ccFocusActionResult(resultEl, true);
       setStatusAction("action blocked: reader required");
+      ccClearCollectedSecretValues(action, inputs);
       return;
     }
     var card = findHostCard(form);
-    statusEl.textContent = action.streams ? "starting…" : "running…";
+    ccSetActionStatus(statusEl, action.streams ? "starting" : "running");
     setEsimInlinePaneStatus(action.streams ? "starting" : "running");
     setInlineActionPaneStatus(action.streams ? "starting" : "running");
     setStatusAction("action: " + action.id);
     resultEl.innerHTML = "";
+    resultEl.dataset.state = "running";
+    resultEl.setAttribute("aria-busy", "true");
+    ccSetActionFormBusy(form, action, true);
     setActionBusy(card, action, true);
     logBus.emit({
       level: "info",
@@ -8605,7 +10927,8 @@
     });
     if (action.streams) {
       // Streaming clears its own busy flag in the socket lifecycle.
-      runStreamingAction(action, inputs, statusEl, resultEl, card);
+      runStreamingAction(action, inputs, statusEl, resultEl, card, form);
+      clearActionSecretFields(action, form);
       return;
     }
 
@@ -8615,51 +10938,146 @@
         body: JSON.stringify({ inputs: inputs }),
       });
       if (!resp.ok) {
-        statusEl.textContent = "error";
+        ccSetActionStatus(statusEl, "error");
         setEsimInlinePaneStatus("error");
         setInlineActionPaneStatus("error");
-        var errBlock = renderErrorBlock(resp.error || "unknown error");
+        var responseError = ccRedactActionError(
+          resp.error || "Unknown error",
+          action,
+          inputs
+        );
+        var errBlock = renderErrorBlock(responseError);
         resultEl.appendChild(errBlock);
+        resultEl.dataset.state = "error";
+        ccFocusActionResult(resultEl, true);
         logBus.emit({
           level: "error",
           source: action.id,
-          message: "run: failed — " + (resp.error || "unknown error"),
+          message: "run: failed — " + responseError,
         });
         return;
       }
-      statusEl.textContent = "ok";
+      ccSetActionStatus(statusEl, "success");
       setEsimInlinePaneStatus("ok");
       setInlineActionPaneStatus("ok");
-      renderActionResult(action, resp.data || {}, resultEl);
+      if (action && action.subsystem === "SCP03"
+          && resp.data && resp.data.session_authenticated === false) {
+        var genericScp03Tab = scp03LookupTabForSessionId(inputs.session_id);
+        if (genericScp03Tab) {
+          scp03ClearTabAuth(genericScp03Tab);
+          scp03RefreshAuthChip();
+        }
+      }
+      renderActionResult(
+        action,
+        ccRedactActionResult(action, resp.data || {}),
+        resultEl
+      );
+      resultEl.dataset.state = "success";
+      ccFocusActionResult(resultEl, false);
+      var actionTags = action && Array.isArray(action.tags) ? action.tags : [];
+      ccApplyTokenRegistryActionResult(action, form, resp.data || {});
+      // Optional SAIP package-form contributions (for example an Excel
+      // filesystem generator) need manual inputs before they can create a
+      // session, so they cannot use the no-input package-session ribbon
+      // path.  When such an action returns the normal SAIP session shape,
+      // activate it through the same workbench pipeline as Open/New.
+      var returnedSessionId = resp.data && String(resp.data.session_id || "");
+      if (returnedSessionId.length > 0
+          && actionTags.indexOf("saip-ribbon-package-form") !== -1
+          && actionTags.indexOf("saip-ribbon-active-session-form") === -1
+          && typeof saipActivateOpenedPackage === "function") {
+        saipActivateOpenedPackage(
+          resp.data || {},
+          action.id,
+          "",
+          null,
+          null,
+          null,
+          null
+        );
+      }
       logBus.emit({
         level: "info",
         source: action.id,
         message: "run: ok",
       });
     } catch (err) {
-      statusEl.textContent = "error";
+      ccSetActionStatus(statusEl, "error");
       setEsimInlinePaneStatus("error");
       setInlineActionPaneStatus("error");
-      var catchBlock = renderErrorBlock(String(err && err.message || err));
+      var errorText = ccRedactActionError(
+        String(err && err.message || err),
+        action,
+        inputs
+      );
+      var catchBlock = renderErrorBlock(errorText);
       resultEl.appendChild(catchBlock);
+      resultEl.dataset.state = "error";
+      ccFocusActionResult(resultEl, true);
       logBus.emit({
         level: "error",
         source: action.id,
-        message: "run: " + String(err && err.message || err),
+        message: "run: " + errorText,
       });
     } finally {
+      ccClearCollectedSecretValues(action, inputs);
+      clearActionSecretFields(action, form);
+      ccSetActionFormBusy(form, action, false);
+      resultEl.setAttribute("aria-busy", "false");
       setActionBusy(card, action, false);
+    }
+  }
+
+  function clearActionSecretFields(action, form) {
+    if (!action || !Array.isArray(action.inputs) || !form || !form.elements) return;
+    var consumedWorkbookUpload = false;
+    action.inputs.forEach(function (field) {
+      if (!field || !field.secret) return;
+      var node = form.elements.namedItem(field.name);
+      if (node && typeof node.value === "string") {
+        if (node.value
+            && field.name === "workbook_content_base64"
+            && ccIsSaipWorkbookInternalField(action, field)) {
+          consumedWorkbookUpload = true;
+        }
+        node.value = "";
+        if (node.type === "text" && field.secret) node.type = "password";
+        var row = node.closest ? node.closest(".cc-form-row") : null;
+        var toggle = row && row.querySelector(".cc-secret-toggle");
+        if (toggle) {
+          toggle.textContent = "Show";
+          toggle.setAttribute("aria-pressed", "false");
+          toggle.title = "Show this value temporarily";
+        }
+      }
+    });
+    if (!consumedWorkbookUpload) return;
+    var filename = form.elements.namedItem("workbook_filename");
+    if (filename && typeof filename.value === "string") filename.value = "";
+    var uploadRow = form.querySelector(".cc-saip-workbook-upload-source");
+    var hint = uploadRow && uploadRow.querySelector(".cc-field-hint");
+    if (hint) {
+      hint.textContent = "Upload payload cleared after use. Drop the workbook again to rerun.";
+    }
+    var runButton = form.querySelector(".cc-action-bar .btn[type='submit']");
+    if (runButton) {
+      runButton.disabled = true;
+      runButton.title = "Drop the workbook again to prepare a new in-memory upload.";
     }
   }
 
   function renderErrorBlock(message) {
     var el = document.createElement("div");
     el.className = "cc-error";
+    el.setAttribute("role", "alert");
+    el.setAttribute("aria-atomic", "true");
+    el.tabIndex = -1;
     el.textContent = message;
     return el;
   }
 
-  function runStreamingAction(action, inputs, statusEl, resultEl, card) {
+  function runStreamingAction(action, inputs, statusEl, resultEl, card, form) {
     var token = getStoredToken();
     var scheme = window.location.protocol === "https:" ? "wss" : "ws";
     var endpoint;
@@ -8669,10 +11087,29 @@
     } else {
       endpoint = "/api/actions/" + encodeURIComponent(action.id) + "/stream";
     }
-    var url = scheme + "://" + window.location.host + endpoint
-      + "?t=" + encodeURIComponent(token);
+    var url = scheme + "://" + window.location.host + endpoint;
     var log = document.createElement("div");
     log.className = "flow-log cc-log";
+    var streamSocket = null;
+    var cancelBtn = null;
+    if (action.id !== "scp11.download_profile") {
+      var streamControls = document.createElement("div");
+      streamControls.className = "cc-action-stream-controls";
+      cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn cc-action-stream-cancel";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.disabled = true;
+      cancelBtn.addEventListener("click", function () {
+        if (!streamSocket || streamSocket.readyState !== WebSocket.OPEN) return;
+        streamSocket.send(JSON.stringify({ type: "cancel" }));
+        cancelBtn.disabled = true;
+        ccSetActionStatus(statusEl, "cancelling");
+        setInlinePaneStatus("cancelling");
+      });
+      streamControls.appendChild(cancelBtn);
+      resultEl.appendChild(streamControls);
+    }
     resultEl.appendChild(log);
 
     var runBtn = resultEl.parentElement.querySelector(".cc-action-bar .btn");
@@ -8687,14 +11124,48 @@
     }
     if (runBtn) runBtn.disabled = true;
 
+    function failToStart(error) {
+      var message = ccRedactActionError(
+        String(error && error.message || error || "Could not start stream."),
+        action,
+        inputs
+      );
+      ccSetActionStatus(statusEl, "error", "Could not start");
+      setInlinePaneStatus("error");
+      resultEl.dataset.state = "error";
+      resultEl.setAttribute("aria-busy", "false");
+      log.appendChild(renderErrorBlock(message));
+      ccFocusActionResult(resultEl, true);
+      ccClearCollectedSecretValues(action, inputs);
+      ccSetActionFormBusy(form, action, false);
+      setActionBusy(card, action, false);
+      logBus.emit({
+        level: "error",
+        source: action.id,
+        message: "stream: " + message,
+      });
+    }
+
     ccRefreshGlobalDebugFlag().then(function () {
-      startStreamingSocket();
+      try {
+        startStreamingSocket();
+      } catch (error) {
+        failToStart(error);
+      }
+    }, function () {
+      try {
+        startStreamingSocket();
+      } catch (error) {
+        failToStart(error);
+      }
     });
 
     function startStreamingSocket() {
-      var sock = new WebSocket(url);
+      var sock = new WebSocket(url, ["yggdrasim", "bearer." + token]);
+      streamSocket = sock;
 
       sock.onopen = function () {
+        if (cancelBtn) cancelBtn.disabled = false;
         appendLogRow(log, "info", "connected — sending start frame");
         logBus.emit({
           level: "info",
@@ -8709,7 +11180,8 @@
           startPayload = { type: "start", inputs: inputs };
         }
         sock.send(JSON.stringify(startPayload));
-        statusEl.textContent = "running";
+        ccClearCollectedSecretValues(action, inputs);
+        ccSetActionStatus(statusEl, "running");
         setInlinePaneStatus("running");
       };
       sock.onmessage = function (event) {
@@ -8730,15 +11202,17 @@
             hiddenErrorCount += 1;
           }
           if (level === "done") {
-            statusEl.textContent = "done";
+            ccSetActionStatus(statusEl, "success");
             setInlinePaneStatus("done");
+            resultEl.dataset.state = "success";
             if (msg.report) {
               resultEl.appendChild(renderReportSummary(msg.report));
             }
           } else if (level === "error") {
             if (showFrame) {
-              statusEl.textContent = "error";
+              ccSetActionStatus(statusEl, "error");
               setInlinePaneStatus("error");
+              resultEl.dataset.state = "error";
             }
           }
         } catch (_err) {
@@ -8751,9 +11225,13 @@
         }
       };
       sock.onclose = function () {
+        if (cancelBtn) cancelBtn.disabled = true;
+        streamSocket = null;
         if (runBtn) runBtn.disabled = false;
+        ccSetActionFormBusy(form, action, false);
+        resultEl.setAttribute("aria-busy", "false");
         setActionBusy(card, action, false);
-        if (hiddenErrorCount > 0 && statusEl.textContent !== "done") {
+        if (hiddenErrorCount > 0 && statusEl.dataset.state !== "success") {
           appendLogRow(log, "warn", "Flow stopped before completion. Enable debug for details.");
           logBus.emit({
             level: "warn",
@@ -8762,8 +11240,10 @@
           });
         }
         appendLogRow(log, "info", "socket closed");
-        if (statusEl.textContent !== "done" && statusEl.textContent !== "error") {
+        if (statusEl.dataset.state !== "success" && statusEl.dataset.state !== "error") {
+          ccSetActionStatus(statusEl, "closed");
           setInlinePaneStatus("closed");
+          resultEl.dataset.state = "closed";
         }
         logBus.emit({
           level: "info",
@@ -8780,8 +11260,10 @@
         sock.onclose = null;
       };
       sock.onerror = function () {
-        statusEl.textContent = "socket error";
+        if (cancelBtn) cancelBtn.disabled = true;
+        ccSetActionStatus(statusEl, "error", "Connection error");
         setInlinePaneStatus("socket error");
+        resultEl.dataset.state = "error";
         setActionBusy(card, action, false);
         logBus.emit({
           level: "error",
@@ -8871,6 +11353,7 @@
       || subsystem === "eSIM Management"
       || subsystem === "SCP11 Local"
       || subsystem === "Local eIM"
+      || subsystem === "SCP80"
       || ccActionUsesReaderSession(action);
   }
 
@@ -8965,6 +11448,476 @@
     return Object.keys(payload).length > 0 ? payload : data;
   }
 
+  function ccEsimText(value) {
+    if (value === null || value === undefined) return "";
+    return String(value).trim();
+  }
+
+  function ccEsimHasValue(value) {
+    if (Array.isArray(value)) return value.length > 0;
+    if (value && typeof value === "object") return Object.keys(value).length > 0;
+    return ccEsimText(value).length > 0;
+  }
+
+  function ccEsimFormatValue(value) {
+    if (typeof value === "boolean") return value ? "true" : "false";
+    if (Array.isArray(value)) {
+      return value.map(function (item) { return ccEsimText(item); })
+        .filter(function (item) { return item.length > 0; })
+        .join(", ");
+    }
+    return ccEsimText(value);
+  }
+
+  function ccEsimHumanLabel(key) {
+    var map = {
+      eid: "eID",
+      eim_fqdn: "eIM FQDN",
+      eim_id: "eIM ID",
+      firmware_version: "Firmware version",
+      free_nvm: "Free NVM",
+      free_ram: "Free RAM",
+      ipa_mode: "IPA mode",
+      iot_specific_info: "IoT specific info",
+      ecall_supported: "eCall supported",
+      fallback_supported: "Fallback supported",
+      installed_apps: "Installed apps",
+      profile_version: "Profile version",
+      supported_version: "Supported SGP.22 SVN",
+      euicc_capability: "eUICC capability",
+      uicc_capability: "UICC capability",
+      ci_pk_verify_entries: "CI PK verify entries",
+      ci_pk_sign_entries: "CI PK sign entries",
+    };
+    var raw = ccEsimText(key);
+    if (map[raw]) return map[raw];
+    return raw.replace(/_/g, " ").replace(/\b\w/g, function (ch) {
+      return ch.toUpperCase();
+    });
+  }
+
+  function ccEsimAppendDashKv(parent, label, value) {
+    if (!ccEsimHasValue(value)) return false;
+    var div = document.createElement("div");
+    div.className = "cc-dash-kv";
+    var spanL = document.createElement("span");
+    spanL.className = "cc-dash-kv-label";
+    spanL.textContent = label + ":";
+    div.appendChild(spanL);
+    var spanV = document.createElement("span");
+    spanV.className = "cc-dash-kv-value";
+    spanV.textContent = ccEsimFormatValue(value);
+    div.appendChild(spanV);
+    parent.appendChild(div);
+    return true;
+  }
+
+  function ccEsimDashboardSection(title, options) {
+    var opts = options || {};
+    var collapsible = !!opts.collapsible;
+    var sec = document.createElement(collapsible ? "details" : "div");
+    sec.className = "cc-dash-section";
+    if (collapsible) {
+      sec.classList.add("cc-dash-section--collapsible");
+      sec.open = opts.open === true;
+    }
+    var hdr = document.createElement(collapsible ? "summary" : "div");
+    hdr.className = "cc-dash-section-header";
+    hdr.textContent = title;
+    sec.appendChild(hdr);
+    var body = document.createElement("div");
+    body.className = "cc-dash-section-body";
+    sec.appendChild(body);
+    return { section: sec, body: body };
+  }
+
+  function ccEsimProfileTarget(profile) {
+    if (!profile) return "";
+    return ccEsimText(
+      profile.aid
+      || profile.isdp_aid
+      || profile.isd_p_aid
+      || profile.iccid
+      || profile.nickname
+      || profile.profile_name
+      || profile.alias
+      || ""
+    );
+  }
+
+  function ccEsimProfileState(profile) {
+    return ccEsimText(profile && profile.state);
+  }
+
+  function ccEsimProfileEnabled(profile) {
+    var state = ccEsimProfileState(profile).toLowerCase();
+    return state === "enabled" || state === "enable" || state === "01";
+  }
+
+  function ccEsimProfileLabel(profile) {
+    return ccEsimText(profile && (
+      profile.nickname || profile.profile_name || profile.iccid || profile.aid
+    )) || "Profile";
+  }
+
+  function ccEsimProfileCard(profile) {
+    var card = document.createElement("details");
+    card.className = "cc-esim-profile-card cc-esim-result-profile-card";
+    var target = ccEsimProfileTarget(profile);
+    var summary = document.createElement("summary");
+    summary.className = "cc-esim-profile-summary";
+    var main = document.createElement("div");
+    main.className = "cc-esim-profile-main";
+
+    var state = document.createElement("span");
+    state.className = "cc-esim-profile-state"
+      + (ccEsimProfileEnabled(profile) ? " is-enabled" : " is-disabled");
+    state.textContent = ccEsimProfileState(profile) || "unknown";
+    main.appendChild(state);
+
+    var name = document.createElement("span");
+    name.className = "cc-esim-profile-name";
+    name.textContent = ccEsimProfileLabel(profile);
+    main.appendChild(name);
+
+    var ident = document.createElement("span");
+    ident.className = "cc-esim-profile-ident";
+    ident.textContent = target || "no profile target";
+    main.appendChild(ident);
+
+    summary.appendChild(main);
+    card.appendChild(summary);
+
+    var meta = document.createElement("div");
+    meta.className = "cc-esim-profile-meta";
+    var hasMeta = false;
+    hasMeta = ccEsimAppendDashKv(meta, "Class", profile && profile.profile_class) || hasMeta;
+    hasMeta = ccEsimAppendDashKv(meta, "ICCID", profile && profile.iccid) || hasMeta;
+    hasMeta = ccEsimAppendDashKv(meta, "AID", profile && profile.aid) || hasMeta;
+    hasMeta = ccEsimAppendDashKv(meta, "Nickname", profile && (profile.nickname || profile.profile_name)) || hasMeta;
+    if (hasMeta) card.appendChild(meta);
+    return card;
+  }
+
+  function ccEsimAppendOverviewSections(dashboard, snapshot, options) {
+    var opts = options || {};
+    var sectionOptions = opts.collapsible
+      ? { collapsible: true, open: opts.open === true }
+      : {};
+    var produced = false;
+    var profiles = Array.isArray(snapshot && snapshot.profiles) ? snapshot.profiles : [];
+
+    if (ccEsimHasValue(snapshot && snapshot.eid)) {
+      var identity = ccEsimDashboardSection("Card Identity", sectionOptions);
+      ccEsimAppendDashKv(identity.body, "eID", snapshot.eid);
+      if (ccEsimHasValue(snapshot.issuer_name)) {
+        ccEsimAppendDashKv(
+          identity.body,
+          "Issuer (eCASD)",
+          snapshot.issuer_name
+            + (ccEsimHasValue(snapshot.issuer_number) ? " (" + snapshot.issuer_number + ")" : "")
+        );
+      }
+      dashboard.appendChild(identity.section);
+      produced = true;
+    }
+
+    if (profiles.length > 0) {
+      var profileSec = ccEsimDashboardSection("Profiles (" + profiles.length + ")", sectionOptions);
+      var list = document.createElement("div");
+      list.className = "cc-esim-profile-list";
+      profiles.forEach(function (profile) {
+        list.appendChild(ccEsimProfileCard(profile));
+      });
+      profileSec.body.appendChild(list);
+      dashboard.appendChild(profileSec.section);
+      produced = true;
+    } else if (Number(snapshot && snapshot.profile_count || 0) > 0) {
+      var profileCount = ccEsimDashboardSection("Profiles", sectionOptions);
+      ccEsimAppendDashKv(profileCount.body, "Profile count", String(snapshot.profile_count));
+      dashboard.appendChild(profileCount.section);
+      produced = true;
+    }
+
+    var cfg = snapshot && (snapshot.configured_decoded || snapshot.configured || snapshot.configured_data);
+    if (cfg && typeof cfg === "object" && Object.keys(cfg).length > 0) {
+      var cfgSec = ccEsimDashboardSection("eUICC Configuration Data", sectionOptions);
+      var cfgAdded = false;
+      cfgAdded = ccEsimAppendDashKv(cfgSec.body, "Default SM-DP+", cfg.default_smdp) || cfgAdded;
+      cfgAdded = ccEsimAppendDashKv(cfgSec.body, "Root SM-DS", cfg.root_smds_primary) || cfgAdded;
+      cfgAdded = ccEsimAppendDashKv(cfgSec.body, "Additional SM-DS", cfg.root_smds_additional) || cfgAdded;
+      cfgAdded = ccEsimAppendDashKv(cfgSec.body, "Allowed CI PKIDs", cfg.allowed_ci_pkid) || cfgAdded;
+      if (cfgAdded) {
+        dashboard.appendChild(cfgSec.section);
+        produced = true;
+      }
+    }
+
+    var info2 = snapshot && snapshot.euicc_info2_summary;
+    if (info2 && typeof info2 === "object" && Object.keys(info2).length > 0) {
+      var infoSec = ccEsimDashboardSection("eUICC Info2", sectionOptions);
+      Object.keys(info2).forEach(function (key) {
+        ccEsimAppendDashKv(infoSec.body, ccEsimHumanLabel(key), info2[key]);
+      });
+      dashboard.appendChild(infoSec.section);
+      produced = true;
+    }
+
+    var eim = snapshot && snapshot.eim_summary;
+    if (eim && typeof eim === "object" && Object.keys(eim).length > 0) {
+      var entries = Array.isArray(eim.entries) ? eim.entries : [];
+      var eimSec = ccEsimDashboardSection(
+        entries.length > 0 ? "eIM Configuration (" + entries.length + " entries)" : "eIM Configuration",
+        sectionOptions
+      );
+      var eimAdded = false;
+      if (entries.length > 0) {
+        entries.forEach(function (entry, i) {
+          var valueParts = [];
+          if (ccEsimHasValue(entry && entry.eim_fqdn)) valueParts.push(entry.eim_fqdn);
+          if (ccEsimHasValue(entry && entry.eim_id)) valueParts.push("(" + entry.eim_id + ")");
+          eimAdded = ccEsimAppendDashKv(eimSec.body, "Entry " + (i + 1), valueParts.join(" ")) || eimAdded;
+        });
+      } else {
+        eimAdded = ccEsimAppendDashKv(eimSec.body, "eIM FQDN", eim.eim_fqdn) || eimAdded;
+        eimAdded = ccEsimAppendDashKv(eimSec.body, "eIM ID", eim.eim_id) || eimAdded;
+      }
+      if (eimAdded) {
+        dashboard.appendChild(eimSec.section);
+        produced = true;
+      }
+    }
+
+    if (Number(snapshot && snapshot.notification_count || 0) > 0) {
+      var notif = ccEsimDashboardSection("Notifications", sectionOptions);
+      ccEsimAppendDashKv(notif.body, "Pending", String(snapshot.notification_count));
+      dashboard.appendChild(notif.section);
+      produced = true;
+    }
+
+    return produced;
+  }
+
+  function ccEsimReportEntryTone(entry) {
+    var text = ccEsimText((entry && (entry.summary || entry.text)) || "").toLowerCase();
+    if (text.indexOf("[-]") === 0 || text.indexOf("error") >= 0) return "error";
+    if (text.indexOf("[!]") === 0 || text.indexOf(" failed") >= 0 || text.indexOf("retrying") >= 0) return "warn";
+    if (text.indexOf("[+]") === 0 || text.indexOf(" ok") >= 0 || text.indexOf("completed") >= 0) return "ok";
+    return "neutral";
+  }
+
+  function ccEsimCleanReportLine(text) {
+    return ccEsimText(text)
+      .replace(/^\[(?:\*|\+|!|-)\]\s*/, "")
+      .replace(/^\|\s*/, "");
+  }
+
+  function ccEsimReportEntryText(entry) {
+    return ccEsimCleanReportLine((entry && (entry.summary || entry.text)) || "");
+  }
+
+  function ccEsimReportEntryIsNoise(entry) {
+    var text = ccEsimReportEntryText(entry);
+    var lower = text.toLowerCase();
+    if (!text) return true;
+    if (/^-{4,}$/.test(text) || /^={4,}$/.test(text)) return true;
+    if (lower.indexOf("failed") >= 0 || lower.indexOf("retrying") >= 0) return true;
+    if (lower.indexOf("entering stk mode") >= 0) return true;
+    if (lower.indexOf("raw euiccconfigureddata") === 0) return true;
+    if (lower.indexOf("raw ") === 0 && lower.indexOf("hex") >= 0) return true;
+    return false;
+  }
+
+  function ccEsimAppendDiscoveryLine(parent, entry) {
+    if (!entry || ccEsimReportEntryIsNoise(entry)) return false;
+    var text = ccEsimReportEntryText(entry);
+    if (!text) return false;
+    var fields = Array.isArray(entry.fields) ? entry.fields : [];
+    var row = document.createElement("div");
+    row.className = "cc-esim-discovery-row";
+
+    var colon = text.indexOf(":");
+    if (colon > 0 && colon < 48 && colon < text.length - 1 && fields.length === 0) {
+      row.classList.add("cc-esim-discovery-row--kv");
+      var key = document.createElement("span");
+      key.className = "cc-dash-kv-label";
+      key.textContent = text.slice(0, colon).trim() + ":";
+      row.appendChild(key);
+      var value = document.createElement("span");
+      value.className = "cc-dash-kv-value";
+      value.textContent = text.slice(colon + 1).trim();
+      row.appendChild(value);
+    } else {
+      var title = document.createElement("div");
+      title.className = "cc-esim-discovery-line";
+      title.textContent = text;
+      row.appendChild(title);
+    }
+
+    if (fields.length > 0) {
+      var chips = document.createElement("div");
+      chips.className = "cc-esim-run-fields cc-esim-discovery-fields";
+      fields.forEach(function (field) {
+        var valueText = ccEsimCleanReportLine(field && (field.value || field.text) || "");
+        if (!valueText) return;
+        var chip = document.createElement("span");
+        chip.className = "cc-esim-run-field";
+        if (field.label) {
+          var label = document.createElement("span");
+          label.className = "cc-esim-run-field-label";
+          label.textContent = field.label;
+          chip.appendChild(label);
+        }
+        var value = document.createElement("span");
+        value.className = "cc-esim-run-field-value";
+        value.textContent = valueText;
+        chip.appendChild(value);
+        chips.appendChild(chip);
+      });
+      if (chips.childNodes.length > 0) row.appendChild(chips);
+    }
+
+    parent.appendChild(row);
+    return true;
+  }
+
+  function ccEsimAppendDiscoveryReportSections(dashboard, reportSections, options) {
+    var opts = options || {};
+    var sections = Array.isArray(reportSections) ? reportSections : [];
+    if (sections.length === 0) return false;
+    var sectionOptions = opts.collapsible
+      ? { collapsible: true, open: opts.open === true }
+      : {};
+    var sec = ccEsimDashboardSection("Discovery Details", sectionOptions);
+    var list = document.createElement("div");
+    list.className = "cc-esim-discovery-list";
+    var produced = false;
+    sections.forEach(function (section) {
+      var entries = Array.isArray(section && section.entries) ? section.entries : [];
+      var sectionRows = [];
+      entries.forEach(function (entry) {
+        if (!ccEsimReportEntryIsNoise(entry)) sectionRows.push(entry);
+      });
+      if (sectionRows.length === 0) return;
+      var card = document.createElement(opts.collapsible ? "details" : "section");
+      card.className = "cc-esim-discovery-card";
+      if (opts.collapsible) {
+        card.classList.add("cc-esim-discovery-card--collapsible");
+        card.open = opts.openDiscoveryCards === true;
+      }
+      var title = document.createElement(opts.collapsible ? "summary" : "div");
+      title.className = "cc-esim-discovery-title";
+      title.textContent = ccEsimText(section && section.title) || "Report";
+      card.appendChild(title);
+      sectionRows.forEach(function (entry) {
+        produced = ccEsimAppendDiscoveryLine(card, entry) || produced;
+      });
+      if (card.childNodes.length > 1) list.appendChild(card);
+    });
+    if (!produced) return false;
+    sec.body.appendChild(list);
+    dashboard.appendChild(sec.section);
+    return true;
+  }
+
+  function ccEsimAppendRunLog(sheet, reportSections, rawReport) {
+    if ((!reportSections || reportSections.length === 0) && !ccEsimHasValue(rawReport)) return;
+    var main = scp03DatasheetWrapMain();
+    var head = document.createElement("div");
+    head.className = "cc-action-datasheet-main-head";
+    head.textContent = "Run Log";
+    main.appendChild(head);
+
+    var wrap = document.createElement("div");
+    wrap.className = "cc-esim-run-log";
+    (reportSections || []).forEach(function (section) {
+      if (!section || !Array.isArray(section.entries) || section.entries.length === 0) return;
+      var sec = document.createElement("section");
+      sec.className = "cc-esim-run-section";
+      var title = document.createElement("div");
+      title.className = "cc-esim-run-section-title";
+      title.textContent = section.title || "Report";
+      sec.appendChild(title);
+      section.entries.forEach(function (entry) {
+        var tone = ccEsimReportEntryTone(entry);
+        var row = document.createElement("div");
+        row.className = "cc-esim-run-entry cc-esim-run-entry--" + tone;
+        var label = document.createElement("div");
+        label.className = "cc-esim-run-entry-title";
+        label.textContent = ccEsimCleanReportLine((entry && (entry.summary || entry.text)) || "");
+        row.appendChild(label);
+        if (entry && Array.isArray(entry.fields) && entry.fields.length > 0) {
+          var fields = document.createElement("div");
+          fields.className = "cc-esim-run-fields";
+          entry.fields.forEach(function (field) {
+            var chip = document.createElement("span");
+            chip.className = "cc-esim-run-field";
+            if (field.label) {
+              var key = document.createElement("span");
+              key.className = "cc-esim-run-field-label";
+              key.textContent = field.label;
+              chip.appendChild(key);
+            }
+            var value = document.createElement("span");
+            value.className = "cc-esim-run-field-value";
+            value.textContent = ccEsimCleanReportLine(field.value || field.text || "");
+            chip.appendChild(value);
+            fields.appendChild(chip);
+          });
+          row.appendChild(fields);
+        }
+        sec.appendChild(row);
+      });
+      wrap.appendChild(sec);
+    });
+
+    if (wrap.childNodes.length === 0 && ccEsimHasValue(rawReport)) {
+      scp03RenderTrace(wrap, rawReport);
+    }
+    main.appendChild(wrap);
+    sheet.appendChild(main);
+  }
+
+  function ccEsimAppendRawReport(sheet, report) {
+    if (!ccEsimHasValue(report)) return;
+    var det = document.createElement("details");
+    det.className = "cc-action-datasheet-trace cc-esim-raw-report";
+    var sum = document.createElement("summary");
+    sum.textContent = "Raw console report";
+    det.appendChild(sum);
+    scp03RenderTrace(det, report);
+    sheet.appendChild(det);
+  }
+
+  function renderEsimConsolidatedResult(action, data, container) {
+    var snapshot = data && data.snapshot && typeof data.snapshot === "object" ? data.snapshot : {};
+    var reportSections = data && typeof data.report === "string"
+      ? ccReportSectionsFromText(data.report)
+      : [];
+    var dashboard = document.createElement("div");
+    dashboard.className = "cc-dashboard cc-esim-result-dashboard";
+    var foldOptions = { collapsible: true, open: false, openDiscoveryCards: false };
+    var hasOverview = ccEsimAppendOverviewSections(dashboard, snapshot, foldOptions);
+    var hasDiscovery = ccEsimAppendDiscoveryReportSections(dashboard, reportSections, foldOptions);
+    if (!hasOverview && !hasDiscovery) {
+      var body = container && container.closest ? container.closest(".cc-esim-flow-body") : null;
+      if (body) body.innerHTML = "";
+      return;
+    }
+
+    var sheet = document.createElement("div");
+    sheet.className = "cc-action-datasheet cc-esim-consolidated-result";
+
+    var main = scp03DatasheetWrapMain();
+    var head = document.createElement("div");
+    head.className = "cc-action-datasheet-main-head";
+    head.textContent = "Card Overview";
+    main.appendChild(head);
+    main.appendChild(dashboard);
+    sheet.appendChild(main);
+    container.appendChild(sheet);
+  }
+
   function renderStructuredActionTreeResult(action, data, container) {
     var sheet = document.createElement("div");
     sheet.className = "cc-action-datasheet cc-action-datasheet--tree";
@@ -8978,7 +11931,10 @@
 
     var tree = document.createElement("div");
     tree.className = "cc-action-tree";
-    tree.appendChild(renderPrettyValue(ccActionResultTreePayload(action, data), 0));
+    tree.appendChild(renderPrettyValue(ccActionResultTreePayload(action, data), 0, {
+      collapseObjects: true,
+      collapseFromDepth: 1,
+    }));
     main.appendChild(tree);
     sheet.appendChild(main);
 
@@ -9281,6 +12237,10 @@
     }
     if (kind === "sima_response") {
       return renderSimaResponseResult(data, container);
+    }
+    if (action && action.id === "scp11_live.get_all_data") {
+      renderEsimConsolidatedResult(action, data, container);
+      return;
     }
     if (ccActionResultPrefersTree(action, kind, data)) {
       renderStructuredActionTreeResult(action, data, container);
@@ -10143,7 +13103,7 @@
           || typeof value.active_count === "number");
   }
 
-  // Manual-aligned label translations for SAIP field keys. The keys
+  // Standards-aligned label translations for SAIP field keys. The keys
   // pySim emits are spec-faithful camelCase (``applicationLoadPackageAID``,
   // ``minimumSecurityLevel``) which is fine for API surfaces but
   // unhelpful inside an editor — operators recognise the wording from
@@ -10292,8 +13252,9 @@
     return "[" + idx + "]";
   }
 
-  function renderPrettyValue(value, depth) {
+  function renderPrettyValue(value, depth, options) {
     var depthIdx = Number(depth || 0);
+    var prettyOptions = options || {};
     if (value === null || typeof value !== "object") {
       return renderPrettyPrimitive(value);
     }
@@ -10356,16 +13317,16 @@
         label.textContent = saipPrettyArrayRowLabel(item, idx);
         var body = document.createElement("div");
         body.className = "cc-pv-array-body";
-        body.appendChild(renderPrettyValue(item, depthIdx + 1));
+        body.appendChild(renderPrettyValue(item, depthIdx + 1, prettyOptions));
         row.appendChild(label);
         row.appendChild(body);
         arr.appendChild(row);
       });
       return arr;
     }
-    // Object — render as a nested definition list. Beyond depth 2,
-    // wrap the body in a <details> so the operator can keep the
-    // outer view scannable.
+    // Object — render as a nested definition list. At the configured
+    // depth threshold, wrap the body in a <details> so the operator can
+    // keep the outer view scannable.
     var keys = Object.keys(value);
     if (keys.length === 0) {
       var emptyObj = document.createElement("span");
@@ -10383,15 +13344,19 @@
       dt.textContent = saipPrettySaipFieldKey(key);
       var dd = document.createElement("dd");
       dd.className = "cc-pv-val";
-      dd.appendChild(renderPrettyValue(value[key], depthIdx + 1));
+      dd.appendChild(renderPrettyValue(value[key], depthIdx + 1, prettyOptions));
       row.appendChild(dt);
       row.appendChild(dd);
       dl.appendChild(row);
     });
-    if (depthIdx >= 2) {
+    var collapseFromDepth = Number(prettyOptions.collapseFromDepth);
+    if (!Number.isFinite(collapseFromDepth) || collapseFromDepth < 0) {
+      collapseFromDepth = 2;
+    }
+    if (depthIdx >= collapseFromDepth) {
       var details = document.createElement("details");
       details.className = "cc-pv-collapsible";
-      details.open = depthIdx === 2;
+      details.open = prettyOptions.collapseObjects ? false : depthIdx === collapseFromDepth;
       var summary = document.createElement("summary");
       summary.className = "cc-pv-collapsible-head";
       summary.textContent = "{" + keys.length + " field"
@@ -10564,7 +13529,7 @@
 
   // --- scp03.scan tree ----------------------------------------------------
 
-  // -- SCP03 Workbench (multi-reader tabs) --------------------------------
+  // -- SCP03 Workbench (reader-scoped internal session tabs) ---------------
 
   function renderScp03Workbench(container, actions, options) {
     var opts = options || {};
@@ -10586,9 +13551,8 @@
     wb.setAttribute("data-wb", "scp03");
     wb.setAttribute("data-scp03-scope", scope);
 
-    // Session-tab strip lives at the very top — one tab = one reader =
-    // one secure-channel session. Each tab owns a full-height shell
-    // (reader sidebar + main column) inside ``tabBody``.
+    // Hidden tab strip: one internal secure-channel/cache object per
+    // reader. The visible reader selector is the top-bar pill strip.
     var tabBar = document.createElement("div");
     tabBar.className = "cc-wb-tabs scp03-topbar";
     tabBar.setAttribute("role", "tablist");
@@ -10610,8 +13574,6 @@
     if (bar && bar.activeReader) {
       readerBarSyncToScp03Tab(bar.activeReader);
     }
-    // Kick off a live-readers poll so the sidebar is populated on open.
-    scp03RefreshReaderInventory();
     renderScp03Tabs(tabBar, tabBody);
     // Ensure the top-bar pill strip reflects the current active tab
     // (e.g. on direct deep-link into SCP03 the pills may not have
@@ -10776,15 +13738,6 @@
         pending.textContent = "unopened";
         btn.appendChild(pending);
       }
-      var close = document.createElement("span");
-      close.className = "cc-wb-tab-close";
-      close.textContent = "\u00d7";
-      close.title = "Close this tab";
-      close.addEventListener("click", function (event) {
-        event.stopPropagation();
-        scp03CloseTab(tab.id, tabBar, tabBody);
-      });
-      btn.appendChild(close);
       btn.addEventListener("click", function () {
         wb.activeTabId = tab.id;
         renderScp03Tabs(tabBar, tabBody);
@@ -10821,10 +13774,8 @@
 
   function scp03RenderTabBody(tab, tabBody, tabBar) {
     tabBody.innerHTML = "";
-    // Every tab renders the same two-column shell (reader pane + main).
-    // Only the main column differs by session state — this keeps the
-    // reader sidebar visible end-to-end so switching tabs never hides
-    // the "what reader am I driving?" context.
+    // The reader pane is legacy/internal and hidden by CSS. The main
+    // column is driven by the active top-bar reader's tab object.
     var shell = document.createElement("div");
     shell.className = "scp03-shell";
 
@@ -10873,7 +13824,7 @@
     return panel;
   }
 
-  // --- scp03: reader sidebar (per-tab reader binding) --------------------
+  // --- scp03: legacy hidden reader sidebar helpers -----------------------
 
   async function scp03RefreshReaderInventory() {
     var wb = commandState.scp03Workbench;
@@ -11081,6 +14032,9 @@
     tab.fcpCache = {};
     tab.lastRecoverAt = 0;
     refreshSessionStatusMetric();
+    if (typeof readerBarNotifySessionChanged === "function") {
+      readerBarNotifySessionChanged();
+    }
   }
 
   // ---------------------------------------------------------------
@@ -11963,20 +14917,58 @@
     var strip = document.createElement("div");
     strip.className = "scp03-ribbon-tabstrip";
     strip.setAttribute("role", "tablist");
+    strip.setAttribute("aria-label", "SCP03 action categories");
+    var panelId = "scp03-ribbon-panel-" + String(tab.id);
+
+    function activateRibbonTab(ribTab, returnFocus) {
+      tab.activeRibbonTab = ribTab.id;
+      scp03RepaintRibbon(tab, tabBar, tabBody);
+      // Persist the ribbon selection so a reload restores the same
+      // category. The repaint replaces the clicked button, so explicitly
+      // return focus to its active replacement.
+      try { scp03PersistTab(tab); } catch (_err) {}
+      if (returnFocus) {
+        window.setTimeout(function () {
+          var replacement = document.getElementById(
+            "scp03-ribbon-tab-" + String(tab.id) + "-" + ribTab.id
+          );
+          if (replacement && replacement.focus) replacement.focus();
+        }, 0);
+      }
+    }
+
     ribbonTabs.forEach(function (ribTab) {
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "scp03-ribbon-tabbtn" + (ribTab.id === activeId ? " active" : "");
       btn.textContent = ribTab.label;
+      btn.id = "scp03-ribbon-tab-" + String(tab.id) + "-" + ribTab.id;
       btn.setAttribute("role", "tab");
       btn.setAttribute("aria-selected", String(ribTab.id === activeId));
+      btn.setAttribute("aria-controls", panelId);
+      btn.tabIndex = ribTab.id === activeId ? 0 : -1;
       btn.addEventListener("click", function () {
-        tab.activeRibbonTab = ribTab.id;
-        scp03RepaintRibbon(tab, tabBar, tabBody);
-        // Persist the ribbon selection so a reload restores the same
-        // tab (Home / Files / APDU / Admin …). Cheap — only the one
-        // field changed; the rest of the payload is unchanged.
-        try { scp03PersistTab(tab); } catch (_err) {}
+        activateRibbonTab(ribTab, true);
+      });
+      btn.addEventListener("keydown", function (event) {
+        var buttons = Array.prototype.slice.call(
+          strip.querySelectorAll('[role="tab"]')
+        );
+        var current = buttons.indexOf(btn);
+        var next = current;
+        if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+          next = (current + 1) % buttons.length;
+        } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+          next = (current - 1 + buttons.length) % buttons.length;
+        } else if (event.key === "Home") {
+          next = 0;
+        } else if (event.key === "End") {
+          next = buttons.length - 1;
+        } else {
+          return;
+        }
+        event.preventDefault();
+        activateRibbonTab(ribbonTabs[next], true);
       });
       strip.appendChild(btn);
     });
@@ -11984,7 +14976,13 @@
 
     var section = document.createElement("div");
     section.className = "scp03-ribbon-section";
+    section.id = panelId;
     section.setAttribute("role", "tabpanel");
+    section.setAttribute(
+      "aria-labelledby",
+      "scp03-ribbon-tab-" + String(tab.id) + "-" + activeId
+    );
+    section.tabIndex = 0;
     var activeTab = ribbonTabs.find(function (t) { return t.id === activeId; });
     if (activeTab && typeof activeTab.panel === "function") {
       // Custom workbench panel (e.g. the APDU console) — render it
@@ -12223,13 +15221,13 @@
           + " / AID=" + (authStat.targetAid || "ISD")
           + " / KVN=" + (authStat.kvn || "??"))
       : "auth: not authenticated";
-    var scopeLabel = scope === "filesystem" ? "scope: filesystem"
-      : scope === "applications" ? "scope: applications"
-      : "scope: all";
+    var scopeLabel = scope === "filesystem" ? "Scope: File system"
+      : scope === "applications" ? "Scope: Applications"
+      : "Scope: All tools";
     var chipsHtml = ''
       + '<span class="cc-chip cc-chip-scope">' + escapeHtml(scopeLabel) + '</span>'
       + '<span class="cc-chip">atr: ' + escapeHtml(tab.atrHex || "(none)") + '</span>';
-    // Card overview chips (auto-fetched after scan)
+    // Card overview chips from the most recent scan.
     if (tab.cardInfo) {
       if (tab.cardInfo.iccid) {
         chipsHtml += '<span class="cc-chip">iccid: <code>' + escapeHtml(tab.cardInfo.iccid) + '</code></span>';
@@ -12287,10 +15285,10 @@
       hint.innerHTML = ''
         + '<p><strong>Applications view.</strong> The file system tree '
         + 'is hidden here — switch to <em>Card Administration \u203A '
-        + 'Filesystem</em> when you need to walk MF/ADF/DF/EF nodes. '
+        + 'File system</em> when you need to walk MF/ADF/DF/EF nodes. '
         + 'Ribbon actions (Auth, Registry, Install, eUICC, APDU, '
         + 'Admin) target the same session, so an SCP03 handshake here '
-        + 'also unlocks the filesystem view.</p>';
+        + 'also unlocks the file system view.</p>';
       wrap.appendChild(hint);
     }
 
@@ -12473,7 +15471,8 @@
 
   var SCP03_POPOUT_Z_BASE = 7500;
   var _CC_COMPACT_POPOUT_Z = 8000;
-  var _ccCompactPopoutMap = {};
+  var CC_POPOUT_SEQ = 0;
+  var _ccCompactPopoutMap = Object.create(null);
 
   // ------------------------------------------------------------------
   // Generic result popout (compact workbench — eSIM Management / Tools / …)
@@ -12487,29 +15486,64 @@
   // popout (brings it to front + clears the body), matching SCP03's
   // ``scp03BuildExtrasCard`` dedup-by-title behaviour.
 
-  function _ccBuildCompactPopout(title) {
+  function ccPopoutRestoreFocus(popout) {
+    if (!popout) return;
+    var target = popout.__returnFocus;
+    popout.__returnFocus = null;
+    if (!target || !target.isConnected || typeof target.focus !== "function") return;
+    window.setTimeout(function () {
+      if (!target.isConnected) return;
+      try { target.focus({ preventScroll: true }); } catch (_e) { target.focus(); }
+    }, 0);
+  }
+
+  function ccPopoutMarkFocused(popout) {
+    if (!popout) return;
+    document.querySelectorAll(".cc-popout.is-focused").forEach(function (other) {
+      if (other !== popout) other.classList.remove("is-focused");
+    });
+    popout.classList.add("is-focused");
+  }
+
+  function ccPopoutRemove(popout, restoreFocus) {
+    if (!popout) return;
+    if (popout.parentNode) popout.parentNode.removeChild(popout);
+    if (restoreFocus !== false) ccPopoutRestoreFocus(popout);
+  }
+
+  function _ccBuildCompactPopout(title, identity) {
     var safeTitle = String(title || "Result");
+    var mapKey = String(identity || safeTitle);
 
     // --- deduplication -----------------------------------------------
-    var existing = _ccCompactPopoutMap[safeTitle];
+    var existing = _ccCompactPopoutMap[mapKey];
     if (existing && existing.parentNode) {
+      existing.__returnFocus = document.activeElement;
       _CC_COMPACT_POPOUT_Z += 1;
       existing.style.zIndex = String(_CC_COMPACT_POPOUT_Z);
-      existing.classList.add("is-focused");
+      ccPopoutMarkFocused(existing);
       var reuseBody = existing.querySelector(".cc-popout-body");
       if (reuseBody) reuseBody.innerHTML = "";
+      if (existing.focus) existing.focus();
       return reuseBody || existing;
     }
 
     // --- sizing (matches scp03PopoutDefaultSize) --------------------
     var popSz = scp03PopoutDefaultSize();
     var vw = window.innerWidth;
-    var vh = window.innerHeight;
+    var vh = ccPopoutUsableBottom();
 
     var popout = document.createElement("div");
+    CC_POPOUT_SEQ += 1;
     popout.className = "cc-popout card";
     popout.setAttribute("role", "dialog");
-    popout.setAttribute("aria-label", safeTitle);
+    popout.setAttribute("aria-modal", "false");
+    popout.setAttribute("tabindex", "-1");
+    popout.__returnFocus = document.activeElement;
+    popout.style.setProperty(
+      "--cc-popout-usable-bottom",
+      ccPopoutUsableBottom() + "px"
+    );
     popout.style.position = "fixed";
     popout.style.width = popSz.width + "px";
     popout.style.height = popSz.height + "px";
@@ -12533,7 +15567,9 @@
     titlebar.className = "cc-popout-titlebar";
     var titleEl = document.createElement("span");
     titleEl.className = "cc-popout-title";
+    titleEl.id = "cc-popout-title-" + String(CC_POPOUT_SEQ);
     titleEl.textContent = safeTitle;
+    popout.setAttribute("aria-labelledby", titleEl.id);
     titlebar.appendChild(titleEl);
 
     var actions = document.createElement("div");
@@ -12548,7 +15584,12 @@
     maxBtn.addEventListener("click", function (ev) {
       ev.stopPropagation();
       scp03PopoutToggleMaximize(popout);
+      var maximized = popout.classList.contains("is-maximized");
+      maxBtn.setAttribute("aria-pressed", maximized ? "true" : "false");
+      maxBtn.title = maximized ? "Restore window" : "Maximize window";
+      maxBtn.setAttribute("aria-label", maxBtn.title);
     });
+    maxBtn.setAttribute("aria-pressed", "false");
     actions.appendChild(maxBtn);
 
     var closeBtn = document.createElement("button");
@@ -12559,8 +15600,8 @@
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", function (ev) {
       ev.stopPropagation();
-      delete _ccCompactPopoutMap[safeTitle];
-      if (popout.parentNode) popout.parentNode.removeChild(popout);
+      delete _ccCompactPopoutMap[mapKey];
+      ccPopoutRemove(popout);
     });
     actions.appendChild(closeBtn);
 
@@ -12578,7 +15619,12 @@
     popout.addEventListener("pointerdown", function () {
       _CC_COMPACT_POPOUT_Z += 1;
       popout.style.zIndex = String(_CC_COMPACT_POPOUT_Z);
-      popout.classList.add("is-focused");
+      ccPopoutMarkFocused(popout);
+    });
+    popout.addEventListener("focusin", function () {
+      _CC_COMPACT_POPOUT_Z += 1;
+      popout.style.zIndex = String(_CC_COMPACT_POPOUT_Z);
+      ccPopoutMarkFocused(popout);
     });
 
     scp03PopoutInstallDrag(popout, titlebar);
@@ -12588,7 +15634,7 @@
     popout.appendChild(body);
 
     scp03PopoutHost().appendChild(popout);
-    _ccCompactPopoutMap[safeTitle] = popout;
+    _ccCompactPopoutMap[mapKey] = popout;
     return body;
   }
 
@@ -12632,7 +15678,7 @@
       return true;
     }
     if (popout.parentNode) {
-      popout.parentNode.removeChild(popout);
+      ccPopoutRemove(popout);
       return true;
     }
     return false;
@@ -12649,11 +15695,27 @@
     commandState._popoutEscapeBound = true;
     document.addEventListener("keydown", function (ev) {
       if (ev.key !== "Escape") return;
+      // A true modal (for example the fallback file explorer) owns Escape
+      // while it is open.  Do not close an unrelated floating action window
+      // behind it.
+      var modalOpen = Array.prototype.some.call(
+        document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
+        function (dialog) { return scp03PopoutIsVisible(dialog); }
+      );
+      if (modalOpen) return;
       if (scp03PopoutCloseTopmostVisible()) {
         ev.preventDefault();
         ev.stopPropagation();
       }
     }, true);
+    window.addEventListener("resize", ccPopoutRefreshViewportBounds);
+    var dock = document.getElementById("log-dock");
+    if (dock && typeof ResizeObserver === "function") {
+      commandState._popoutDockObserver = new ResizeObserver(function () {
+        ccPopoutRefreshViewportBounds();
+      });
+      commandState._popoutDockObserver.observe(dock);
+    }
   }
 
   // Default popout size tracks the viewport so first open is large enough
@@ -12662,9 +15724,41 @@
   var SCP03_POPOUT_MIN_WIDTH = 320;
   var SCP03_POPOUT_MIN_HEIGHT = 200;
 
+  function ccPopoutUsableBottom() {
+    var bottom = window.innerHeight;
+    var dock = document.getElementById("log-dock");
+    if (dock && !dock.hidden && dock.getBoundingClientRect) {
+      var rect = dock.getBoundingClientRect();
+      if (rect.height > 0 && rect.top > 0) bottom = Math.min(bottom, rect.top);
+    }
+    return Math.max(240, bottom);
+  }
+
+  function ccPopoutRefreshViewportBounds() {
+    var usableBottom = ccPopoutUsableBottom();
+    document.querySelectorAll(".cc-popout").forEach(function (popout) {
+      popout.style.setProperty(
+        "--cc-popout-usable-bottom",
+        usableBottom + "px"
+      );
+      if (popout.classList.contains("is-maximized")) return;
+      var rect = popout.getBoundingClientRect();
+      var left = Math.min(
+        Math.max(-Math.max(0, rect.width - 80), rect.left),
+        Math.max(8, window.innerWidth - 80)
+      );
+      var top = Math.min(
+        Math.max(8, rect.top),
+        Math.max(8, usableBottom - 40)
+      );
+      popout.style.left = Math.round(left) + "px";
+      popout.style.top = Math.round(top) + "px";
+    });
+  }
+
   function scp03PopoutDefaultSize() {
     var vw = window.innerWidth;
-    var vh = window.innerHeight;
+    var vh = ccPopoutUsableBottom();
     var marginX = 44;
     var marginY = 52;
     var w = Math.round(vw * 0.56);
@@ -12710,9 +15804,10 @@
     // the visual viewport, not the document, which keeps windows
     // visible regardless of scroll position.
     var sz = size || scp03PopoutDefaultSize();
+    var usableBottom = ccPopoutUsableBottom();
     var base = {
       left: Math.max(160, Math.round(window.innerWidth * 0.18)),
-      top: Math.max(120, Math.round(window.innerHeight * 0.18)),
+      top: Math.max(72, Math.round(usableBottom * 0.14)),
     };
     var cascade = tab.popoutCascadeIdx || 0;
     var left = base.left + cascade * SCP03_POPOUT_CASCADE_STEP;
@@ -12720,7 +15815,7 @@
     // Reset the cascade once it would push a window off the visible
     // area. Keeps a 40 px safety margin on the right/bottom edges.
     if (left + sz.width > window.innerWidth - 40
-        || top + sz.height > window.innerHeight - 40) {
+        || top + sz.height > usableBottom - 12) {
       tab.popoutCascadeIdx = 0;
       left = base.left;
       top = base.top;
@@ -12737,12 +15832,7 @@
   function scp03PopoutBringToFront(tab, popout) {
     if (!popout) return;
     popout.style.zIndex = String(scp03PopoutNextZ(tab));
-    popout.classList.add("is-focused");
-    // Drop the focus ring from sibling popouts on the same tab.
-    Object.keys(tab.popouts || {}).forEach(function (k) {
-      var other = tab.popouts[k];
-      if (other && other !== popout) other.classList.remove("is-focused");
-    });
+    ccPopoutMarkFocused(popout);
   }
 
   function scp03PopoutClose(tab, key) {
@@ -12750,18 +15840,14 @@
     var popout = tab.popouts[key];
     if (!popout) return;
     delete tab.popouts[key];
-    if (popout.parentNode) {
-      popout.parentNode.removeChild(popout);
-    }
+    ccPopoutRemove(popout);
   }
 
   function scp03PopoutCloseAllForTab(tab) {
     if (!tab || !tab.popouts) return;
     Object.keys(tab.popouts).forEach(function (k) {
       var popout = tab.popouts[k];
-      if (popout && popout.parentNode) {
-        popout.parentNode.removeChild(popout);
-      }
+      if (popout) ccPopoutRemove(popout, false);
     });
     tab.popouts = {};
   }
@@ -12835,7 +15921,7 @@
       var nextTop = startTop + dy;
       // Clamp to viewport so the titlebar can't slip off-screen.
       var maxLeft = window.innerWidth - 80;
-      var maxTop = window.innerHeight - 40;
+      var maxTop = ccPopoutUsableBottom() - 40;
       if (nextLeft < -120) nextLeft = -120;
       if (nextLeft > maxLeft) nextLeft = maxLeft;
       if (nextTop < 0) nextTop = 0;
@@ -12844,6 +15930,7 @@
       popout.style.top = nextTop + "px";
       // Any explicit position cancels a previous maximize state.
       popout.classList.remove("is-maximized");
+      scp03PopoutSyncMaxButton(popout);
     }
     function onUp(ev) {
       if (!dragging) return;
@@ -12857,7 +15944,21 @@
     titlebar.addEventListener("pointercancel", onUp);
   }
 
+  function scp03PopoutSyncMaxButton(popout) {
+    if (!popout) return;
+    var button = popout.querySelector(".cc-popout-max");
+    if (!button) return;
+    var maximized = popout.classList.contains("is-maximized");
+    button.setAttribute("aria-pressed", maximized ? "true" : "false");
+    button.title = maximized ? "Restore window" : "Maximize window";
+    button.setAttribute("aria-label", button.title);
+  }
+
   function scp03PopoutToggleMaximize(popout) {
+    popout.style.setProperty(
+      "--cc-popout-usable-bottom",
+      ccPopoutUsableBottom() + "px"
+    );
     if (popout.classList.contains("is-maximized")) {
       popout.classList.remove("is-maximized");
       // Restore cached geometry.
@@ -12867,6 +15968,7 @@
         popout.style.width = popout.__prevGeom.width;
         popout.style.height = popout.__prevGeom.height;
       }
+      scp03PopoutSyncMaxButton(popout);
       return;
     }
     popout.__prevGeom = {
@@ -12882,6 +15984,7 @@
     popout.style.top = "";
     popout.style.width = "";
     popout.style.height = "";
+    scp03PopoutSyncMaxButton(popout);
   }
 
   function scp03BuildExtrasCard(title) {
@@ -12897,6 +16000,7 @@
     // the pre-popout behaviour where the extras strip got replaced).
     if (tab && tab.popouts && tab.popouts[key]) {
       var existing = tab.popouts[key];
+      existing.__returnFocus = document.activeElement;
       var body = existing.querySelector(".cc-popout-body");
       if (body) body.innerHTML = "";
       existing.hidden = false;
@@ -12905,10 +16009,17 @@
     }
 
     var popout = document.createElement("div");
+    CC_POPOUT_SEQ += 1;
     popout.className = "cc-popout card";
     popout.setAttribute("role", "dialog");
-    popout.setAttribute("aria-label", safeTitle);
+    popout.setAttribute("aria-modal", "false");
+    popout.setAttribute("tabindex", "-1");
     popout.setAttribute("data-popout-key", key);
+    popout.__returnFocus = document.activeElement;
+    popout.style.setProperty(
+      "--cc-popout-usable-bottom",
+      ccPopoutUsableBottom() + "px"
+    );
     if (tab) popout.setAttribute("data-tab-id", tab.id);
     popout.style.position = "fixed";
     var popSz = scp03PopoutDefaultSize();
@@ -12930,7 +16041,9 @@
     titlebar.className = "cc-popout-titlebar";
     var titleEl = document.createElement("span");
     titleEl.className = "cc-popout-title";
+    titleEl.id = "cc-scp03-popout-title-" + String(CC_POPOUT_SEQ);
     titleEl.textContent = safeTitle;
+    popout.setAttribute("aria-labelledby", titleEl.id);
     titlebar.appendChild(titleEl);
 
     var actions = document.createElement("div");
@@ -12945,7 +16058,12 @@
     maxBtn.addEventListener("click", function (ev) {
       ev.stopPropagation();
       scp03PopoutToggleMaximize(popout);
+      var maximized = popout.classList.contains("is-maximized");
+      maxBtn.setAttribute("aria-pressed", maximized ? "true" : "false");
+      maxBtn.title = maximized ? "Restore window" : "Maximize window";
+      maxBtn.setAttribute("aria-label", maxBtn.title);
     });
+    maxBtn.setAttribute("aria-pressed", "false");
     actions.appendChild(maxBtn);
 
     var closeBtn = document.createElement("button");
@@ -12959,7 +16077,7 @@
       if (tab) {
         scp03PopoutClose(tab, key);
       } else if (popout.parentNode) {
-        popout.parentNode.removeChild(popout);
+        ccPopoutRemove(popout);
       }
     });
     actions.appendChild(closeBtn);
@@ -12985,6 +16103,9 @@
     popout.addEventListener("pointerdown", function () {
       if (tab) scp03PopoutBringToFront(tab, popout);
     });
+    popout.addEventListener("focusin", function () {
+      if (tab) scp03PopoutBringToFront(tab, popout);
+    });
 
     scp03PopoutInstallDrag(popout, titlebar);
 
@@ -12994,6 +16115,11 @@
       tab.popouts[key] = popout;
       scp03PopoutBringToFront(tab, popout);
     }
+
+    window.setTimeout(function () {
+      if (!popout.isConnected) return;
+      try { popout.focus({ preventScroll: true }); } catch (_e) { popout.focus(); }
+    }, 0);
 
     return body;
   }
@@ -13353,8 +16479,8 @@
     // round-trip to the server for every keystroke.
     var result = {
       cla: "", ins: "", p1: "", p2: "",
-      lc: "", dataHex: "", dataLength: 0, le: "",
-      case: "", byteCount: 0,
+      lc: "", dataHex: "", dataLength: 0, le: "", leValue: null,
+      case: "", byteCount: 0, extended: false, valid: true, error: "",
     };
     if (!hex || hex.length < 8 || hex.length % 2 !== 0) return result;
     result.cla = hex.substring(0, 2);
@@ -13363,40 +16489,103 @@
     result.p2 = hex.substring(6, 8);
     result.byteCount = hex.length / 2;
     var total = result.byteCount;
+
+    function malformed(message, dataStartByte) {
+      result.case = "malformed";
+      result.valid = false;
+      result.error = message;
+      var start = (dataStartByte == null ? 5 : dataStartByte) * 2;
+      if (hex.length > start) {
+        result.dataHex = hex.substring(start);
+        result.dataLength = (hex.length - start) / 2;
+      }
+      return result;
+    }
+
     if (total === 4) { result.case = "1"; return result; }
     if (total === 5) {
       result.case = "2";
       result.le = hex.substring(8, 10);
+      result.leValue = result.le === "00" ? 256 : parseInt(result.le, 16);
       return result;
     }
-    var lc = parseInt(hex.substring(8, 10), 16);
-    if (lc === 0 && total > 5) {
-      result.case = "ext";
-      result.lc = "00";
-      result.dataHex = hex.substring(10);
-      result.dataLength = total - 5;
-      return result;
-    }
-    if (total === 5 + lc) {
-      result.case = "3";
+
+    var firstLength = parseInt(hex.substring(8, 10), 16);
+    if (firstLength !== 0) {
       result.lc = hex.substring(8, 10);
-      result.dataHex = hex.substring(10);
-      result.dataLength = lc;
+      var shortDataEnd = 5 + firstLength;
+      if (shortDataEnd > total) {
+        return malformed(
+          "short Lc=" + firstLength + " exceeds supplied data ("
+            + Math.max(total - 5, 0) + " byte(s))",
+          5
+        );
+      }
+      var shortTrailing = total - shortDataEnd;
+      result.dataHex = hex.substring(10, shortDataEnd * 2);
+      result.dataLength = firstLength;
+      if (shortTrailing === 0) {
+        result.case = "3";
+        return result;
+      }
+      if (shortTrailing === 1) {
+        result.case = "4";
+        result.le = hex.substring(shortDataEnd * 2, shortDataEnd * 2 + 2);
+        result.leValue = result.le === "00" ? 256 : parseInt(result.le, 16);
+        return result;
+      }
+      return malformed(
+        "short APDU has " + shortTrailing
+          + " trailing bytes after Data; expected 0 or 1",
+        5
+      );
+    }
+
+    result.extended = true;
+    if (total < 7) {
+      return malformed("extended APDU is missing the two-byte Lc/Le field", 5);
+    }
+    var extendedLength = parseInt(hex.substring(10, 14), 16);
+    if (total === 7) {
+      result.case = "2E";
+      result.le = hex.substring(10, 14);
+      result.leValue = result.le === "0000" ? 65536 : extendedLength;
       return result;
     }
-    if (total === 6 + lc) {
-      result.case = "4";
-      result.lc = hex.substring(8, 10);
-      result.dataHex = hex.substring(10, 10 + lc * 2);
-      result.dataLength = lc;
-      result.le = hex.substring(hex.length - 2);
+    result.lc = hex.substring(10, 14);
+    if (extendedLength === 0) {
+      return malformed(
+        "extended Lc=0 is invalid outside exact case 2E framing",
+        7
+      );
+    }
+    var extendedDataEnd = 7 + extendedLength;
+    if (extendedDataEnd > total) {
+      return malformed(
+        "extended Lc=" + extendedLength + " exceeds supplied data ("
+          + Math.max(total - 7, 0) + " byte(s))",
+        7
+      );
+    }
+    var extendedTrailing = total - extendedDataEnd;
+    result.dataHex = hex.substring(14, extendedDataEnd * 2);
+    result.dataLength = extendedLength;
+    if (extendedTrailing === 0) {
+      result.case = "3E";
       return result;
     }
-    result.case = "malformed";
-    result.lc = hex.substring(8, 10);
-    result.dataHex = hex.substring(10);
-    result.dataLength = Math.max(total - 5, 0);
-    return result;
+    if (extendedTrailing === 2) {
+      result.case = "4E";
+      result.le = hex.substring(extendedDataEnd * 2, extendedDataEnd * 2 + 4);
+      result.leValue = result.le === "0000"
+        ? 65536 : parseInt(result.le, 16);
+      return result;
+    }
+    return malformed(
+      "extended APDU has " + extendedTrailing
+        + " trailing bytes after Data; expected 0 or 2",
+      7
+    );
   }
 
   function scp03HexToAscii(hex) {
@@ -13497,6 +16686,16 @@
     retry6c.title = "When the card returns 6Cxx, re-send the same APDU with Le = xx.";
     optionsWrap.appendChild(retry6c);
 
+    var traceBytes = document.createElement("label");
+    traceBytes.className = "scp03-apdu-opt";
+    var traceBytesChk = document.createElement("input");
+    traceBytesChk.type = "checkbox";
+    traceBytesChk.checked = tab.apduWireTrace === true;
+    traceBytes.appendChild(traceBytesChk);
+    traceBytes.appendChild(document.createTextNode(" APDU trace bytes"));
+    traceBytes.title = "Advanced diagnostics: include clear and secure-messaging wire bytes. Sensitive commands and authentication responses remain redacted.";
+    optionsWrap.appendChild(traceBytes);
+
     topBar.appendChild(optionsWrap);
     panel.appendChild(topBar);
 
@@ -13572,8 +16771,8 @@
         sendBtn.disabled = true;
         return;
       }
-      sendBtn.disabled = false;
       var bd = scp03BreakdownApdu(norm.hex);
+      sendBtn.disabled = false;
       var table = document.createElement("table");
       table.className = "scp03-apdu-breakdown-table";
       var fields = [
@@ -13584,7 +16783,9 @@
         { label: "Lc",   value: bd.lc || "—" },
         { label: "Data", value: bd.dataLength + " B"
           + (bd.dataHex ? " · " + bd.dataHex : "") },
-        { label: "Le",   value: bd.le || "—" },
+        { label: "Le",   value: bd.le
+          ? (bd.le + (bd.leValue != null ? " (" + bd.leValue + ")" : ""))
+          : "—" },
         { label: "Case", value: bd.case || "?" },
         { label: "Bytes", value: String(bd.byteCount) },
       ];
@@ -13603,6 +16804,13 @@
       });
       table.appendChild(bodyRow);
       breakdownHost.appendChild(table);
+      if (!bd.valid) {
+        var framingWarning = document.createElement("p");
+        framingWarning.className = "cc-hint cc-hint-warn";
+        framingWarning.textContent = "Malformed APDU framing: " + (bd.error || "unknown error")
+          + ". Raw send remains available, but automatic 6C correction is suppressed.";
+        breakdownHost.appendChild(framingWarning);
+      }
       if (bd.dataHex && bd.dataLength > 0) {
         var ascii = scp03HexToAscii(bd.dataHex);
         var mirror = document.createElement("div");
@@ -13630,6 +16838,9 @@
     retry6cChk.addEventListener("change", function () {
       tab.apduRetry6C = !!retry6cChk.checked;
     });
+    traceBytesChk.addEventListener("change", function () {
+      tab.apduWireTrace = !!traceBytesChk.checked;
+    });
 
     clearBtn.addEventListener("click", function () {
       input.value = "";
@@ -13651,6 +16862,7 @@
       scp03SendApdu(tab, input.value, {
         follow61: follow61Chk.checked,
         retry6c: retry6cChk.checked,
+        wireTrace: traceBytesChk.checked,
         outHost: outHost,
         historyHost: historyHost,
         refreshBreakdown: refreshBreakdown,
@@ -13691,6 +16903,7 @@
             apdu: norm.hex,
             follow_61: !!opts.follow61,
             retry_6c: !!opts.retry6c,
+            include_wire_trace: !!opts.wireTrace,
           },
         }),
       });
@@ -13715,6 +16928,7 @@
         ok: !!data.ok,
         length: data.response_length || 0,
         meaning: data.sw_meaning || "",
+        reusable: !data.apdu_redacted,
       });
       if (tab.apduHistory.length > 20) tab.apduHistory.length = 20;
       scp03RenderApduHistory(historyHost, tab, {
@@ -13762,6 +16976,20 @@
     headLine.appendChild(lenSpan);
     card.appendChild(headLine);
 
+    if (data.transport_error) {
+      var transportError = document.createElement("p");
+      transportError.className = "cc-hint cc-hint-warn";
+      transportError.textContent = "Transport failed locally: " + data.transport_error;
+      card.appendChild(transportError);
+    }
+    if (data.session_invalidated) {
+      var invalidation = document.createElement("p");
+      invalidation.className = "cc-hint cc-hint-warn";
+      invalidation.textContent = data.session_invalidation_reason
+        || "The secure channel ended; authenticate again before the next protected command.";
+      card.appendChild(invalidation);
+    }
+
     // Breakdown echo — small because we already showed it above the
     // input; surfacing it here is a receipt so the operator can
     // cite it in a bug report without copying the input field.
@@ -13792,8 +17020,55 @@
           + escapeHtml(step.sw || "") + "</span> "
           + "<span class=\"scp03-apdu-chain-len\">"
           + (step.response_length || 0) + " B</span>";
+        if (step.secure_messaging) {
+          var sm = document.createElement("span");
+          sm.className = "scp03-apdu-chain-reason";
+          sm.textContent = step.response_verified === true
+            ? " secure response verified"
+            : (step.response_verified === false
+              ? " secure response verification failed"
+              : " secure messaging");
+          row.appendChild(sm);
+        }
         card.appendChild(row);
       });
+    }
+    if (
+      data.wire_trace_enabled
+      && Array.isArray(data.transport_trace)
+      && data.transport_trace.length > 0
+    ) {
+      var traceDetails = document.createElement("details");
+      traceDetails.className = "scp03-apdu-trace-details";
+      var traceSummary = document.createElement("summary");
+      traceSummary.textContent = "APDU transport trace ("
+        + data.transport_trace.length + " exchange"
+        + (data.transport_trace.length === 1 ? "" : "s") + ")";
+      traceDetails.appendChild(traceSummary);
+      data.transport_trace.forEach(function (step) {
+        var traceBlock = document.createElement("pre");
+        traceBlock.className = "cc-log cc-log-inline scp03-apdu-response-hex";
+        var traceLines = [
+          "#" + String(step.sequence || "?") + " " + String(step.reason || step.phase || "command"),
+          "clear command: " + String(step.apdu || "(hidden)"),
+          "wire command:  " + String(step.wire_apdu_hex || "(hidden)"),
+          "wire response: " + String(step.wire_response_hex || "(empty/hidden)"),
+          "clear response: " + String(step.response_hex || "(empty/hidden)"),
+          "SW=" + String(step.sw || "????")
+            + " · secure=" + String(!!step.secure_messaging)
+            + " · verified=" + String(step.response_verified),
+        ];
+        if (step.error) traceLines.push("error=" + String(step.error));
+        traceBlock.textContent = traceLines.join("\n");
+        traceDetails.appendChild(traceBlock);
+      });
+      card.appendChild(traceDetails);
+    }
+    if (data.retry_warning) {
+      var retryWarning = document.createElement("p");
+      retryWarning.className = "cc-hint cc-hint-warn";
+      retryWarning.textContent = "6C retry skipped: " + data.retry_warning;
+      card.appendChild(retryWarning);
     }
 
     if (data.response_hex && data.response_length > 0) {
@@ -13877,7 +17152,9 @@
       reuse.className = "btn btn-ghost scp03-apdu-history-reuse";
       reuse.textContent = "Load";
       reuse.title = "Put this APDU back in the input field";
+      reuse.disabled = entry.reusable === false;
       reuse.addEventListener("click", function () {
+        if (entry.reusable === false) return;
         if (ctx && ctx.input) {
           ctx.input.value = entry.apdu || "";
           tab.apduInputHex = entry.apdu || "";
@@ -13890,7 +17167,9 @@
       copy.className = "btn btn-ghost scp03-apdu-history-copy";
       copy.textContent = "Copy";
       copy.title = "Copy APDU hex to clipboard";
+      copy.disabled = entry.reusable === false;
       copy.addEventListener("click", function () {
+        if (entry.reusable === false) return;
         try {
           navigator.clipboard.writeText(entry.apdu || "");
         } catch (_err) {
@@ -14183,6 +17462,8 @@
 
   // -- C-2: auth + GP registry + profile telemetry ---------------------
 
+  var SCP03_INLINE_FORM_SEQ = 0;
+
   function scp03BuildInlineForm(card, fields, submitLabel, onSubmit) {
     // ``fields`` : [{ name, label, placeholder, value, required, kind?, choices?, help? }]
     // ``kind`` — defaults to "text". Also supports "select" (use ``choices`` :
@@ -14193,21 +17474,30 @@
     var form = document.createElement("form");
     form.className = "cc-action-form cc-wb-extras-form";
     form.noValidate = true;
+    SCP03_INLINE_FORM_SEQ += 1;
+    var formId = "cc-scp03-inline-" + SCP03_INLINE_FORM_SEQ;
     var inputs = {};
+    var rows = {};
     (fields || []).forEach(function (field) {
       var row = document.createElement("div");
       row.className = "cc-form-row";
+      row.setAttribute("data-field-name", field.name);
       var label = document.createElement("label");
       label.textContent = field.label || field.name;
-      label.htmlFor = "cc-inline-" + field.name;
+      label.htmlFor = formId + "-" + field.name;
       var input;
       var kind = field.kind || "text";
       if (kind === "select") {
         input = document.createElement("select");
         (field.choices || []).forEach(function (choice) {
           var opt = document.createElement("option");
-          opt.value = String(choice);
-          opt.textContent = String(choice);
+          if (choice && typeof choice === "object") {
+            opt.value = String(choice.value == null ? "" : choice.value);
+            opt.textContent = String(choice.label == null ? opt.value : choice.label);
+          } else {
+            opt.value = String(choice);
+            opt.textContent = String(choice);
+          }
           input.appendChild(opt);
         });
         if (field.value != null) input.value = String(field.value);
@@ -14224,23 +17514,37 @@
         if (field.value != null) input.value = String(field.value);
       } else {
         input = document.createElement("input");
-        input.type = (kind === "number") ? "number" : "text";
+        input.type = (field.secret || kind === "secret")
+          ? "password" : ((kind === "number") ? "number" : "text");
         if (field.placeholder) input.placeholder = field.placeholder;
         if (field.value != null) input.value = String(field.value);
       }
       input.id = label.htmlFor;
       input.name = field.name;
-      if (field.required && kind !== "bool") input.required = true;
+      input.required = !!field.required;
+      if (field.min != null) input.min = String(field.min);
+      if (field.max != null) input.max = String(field.max);
+      if (field.maxLength != null) input.maxLength = Number(field.maxLength);
+      if (field.pattern) input.pattern = String(field.pattern);
+      if (field.inputMode) input.inputMode = String(field.inputMode);
+      if (input.type === "text" || input.type === "password" || kind === "textarea") {
+        input.spellcheck = false;
+        input.autocapitalize = "off";
+        input.autocomplete = field.secret ? "new-password" : "off";
+      }
       row.appendChild(label);
       row.appendChild(input);
       if (field.help) {
         var hint = document.createElement("div");
         hint.className = "cc-field-hint";
+        hint.id = input.id + "-help";
         hint.textContent = field.help;
+        input.setAttribute("aria-describedby", hint.id);
         row.appendChild(hint);
       }
       form.appendChild(row);
       inputs[field.name] = input;
+      rows[field.name] = row;
     });
     var bar = document.createElement("div");
     bar.className = "cc-action-bar";
@@ -14253,6 +17557,10 @@
     card.appendChild(form);
     form.addEventListener("submit", async function (ev) {
       ev.preventDefault();
+      if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+      }
       var values = {};
       Object.keys(inputs).forEach(function (key) {
         var node = inputs[key];
@@ -14266,10 +17574,15 @@
       try {
         await onSubmit(values);
       } finally {
+        (fields || []).forEach(function (field) {
+          if (!field || !field.secret) return;
+          var node = inputs[field.name];
+          if (node && typeof node.value === "string") node.value = "";
+        });
         submit.disabled = false;
       }
     });
-    return { form: form, inputs: inputs, submit: submit };
+    return { form: form, inputs: inputs, rows: rows, submit: submit };
   }
 
   async function scp03AuthFlow(tab, actionId, title) {
@@ -14286,6 +17599,33 @@
           placeholder: "leave blank for ISD",
           help: "Optional hex AID of the SD to authenticate against.",
         },
+        {
+          name: "kvn",
+          label: "KVN override (hex, optional)",
+          placeholder: "e.g. 30",
+          help: "Blank = use the workspace key version.",
+        },
+        {
+          name: "enc_key",
+          label: "ENC / KENC override (hex, optional)",
+          placeholder: "SCP02: 32/48; SCP03: 32/48/64 hex chars",
+          help: "Session-scoped only; never persisted or returned.",
+          secret: true,
+        },
+        {
+          name: "mac_key",
+          label: "MAC / KMAC override (hex, optional)",
+          placeholder: "SCP02: 32/48; SCP03: 32/48/64 hex chars",
+          help: "Session-scoped only; never persisted or returned.",
+          secret: true,
+        },
+        {
+          name: "dek_key",
+          label: "DEK override (hex, optional)",
+          placeholder: "SCP02: 32/48; SCP03: 32/48/64 hex chars",
+          help: "Session-scoped only; never persisted or returned.",
+          secret: true,
+        },
       ],
       "Authenticate",
       async function (values) {
@@ -14298,6 +17638,10 @@
               inputs: {
                 session_id: tab.sessionId,
                 target_aid: (values.target_aid || "").trim(),
+                kvn: (values.kvn || "").trim(),
+                enc_key: (values.enc_key || "").trim(),
+                mac_key: (values.mac_key || "").trim(),
+                dek_key: (values.dek_key || "").trim(),
               },
             }),
           });
@@ -14307,6 +17651,12 @@
             return;
           }
           var data = resp.data || {};
+          if (data.warning) {
+            var authWarning = document.createElement("div");
+            authWarning.className = "cc-destructive-banner";
+            authWarning.textContent = String(data.warning);
+            out.appendChild(authWarning);
+          }
           // Mirror the auth result into the per-tab cache so
           // subsequent ``requires_auth`` actions bypass the popout
           // gate. A failed auth clears the flag — scp03ClearTabAuth
@@ -14323,6 +17673,11 @@
             { label: "KVN", value: data.kvn || "" },
             { label: "Sec level", value: data.sec_level || "" },
             { label: "Active protocol", value: data.active_protocol || "" },
+            {
+              label: "Overrides applied",
+              value: Array.isArray(data.overrides_applied)
+                ? (data.overrides_applied.join(", ") || "none") : "none",
+            },
           ]);
           if (data.trace) {
             var pre = document.createElement("pre");
@@ -14898,18 +18253,21 @@
           {
             name: "enc_key",
             label: "ENC / KENC override (hex, optional)",
-            placeholder: "32 / 48 / 64 hex chars",
+            placeholder: "SCP02: 32/48; SCP03: 32/48/64 hex chars",
             help: "Blank = use workspace keys. Not persisted.",
+            secret: true,
           },
           {
             name: "mac_key",
             label: "MAC / KMAC override (hex, optional)",
-            placeholder: "32 / 48 / 64 hex chars",
+            placeholder: "SCP02: 32/48; SCP03: 32/48/64 hex chars",
+            secret: true,
           },
           {
             name: "dek_key",
             label: "DEK override (hex, optional)",
-            placeholder: "32 / 48 / 64 hex chars",
+            placeholder: "SCP02: 32/48; SCP03: 32/48/64 hex chars",
+            secret: true,
           },
         ],
         "Authenticate",
@@ -14939,6 +18297,12 @@
               return;
             }
             var data = resp.data || {};
+            if (data.warning) {
+              var gateAuthWarning = document.createElement("div");
+              gateAuthWarning.className = "cc-destructive-banner";
+              gateAuthWarning.textContent = String(data.warning);
+              shell.out.appendChild(gateAuthWarning);
+            }
             scp03UpdateTabAuthFromResponse(tab, data);
             if (scp03HasLiveAuth(tab)) {
               scp03RenderKeyValueRows(shell.out, [
@@ -15048,6 +18412,13 @@
         }
         out.appendChild(renderErrorBlock(errText));
         return null;
+      }
+      if (resp.data && resp.data.session_authenticated === false) {
+        var sessionTab = scp03LookupTabForSessionId(inputs && inputs.session_id);
+        if (sessionTab) {
+          scp03ClearTabAuth(sessionTab);
+          scp03RefreshAuthChip();
+        }
       }
       var sheet = scp03CreateDatasheetRoot();
       out.appendChild(sheet);
@@ -15200,18 +18571,41 @@
   async function scp03ShowLockUnlock(tab, actionId, title, logVerb) {
     var card = scp03BuildExtrasCard(title);
     if (!card) return;
+    var isLock = actionId === "scp03.lock";
+    if (isLock) {
+      scp03BuildDestructiveBanner(
+        card,
+        "LOCK can be irreversible on some cards. Confirm explicitly before "
+          + "setting lifecycle state 80."
+      );
+    }
     var out = document.createElement("div");
     out.className = "cc-wb-extras-out";
+    var fields = [
+      {
+        name: "target_aid",
+        label: "Target AID (hex)",
+        placeholder: "A00000015141434C00",
+        required: true,
+      },
+    ];
+    if (isLock) {
+      fields.push({
+        name: "confirm",
+        label: "I understand this may permanently lock the application",
+        kind: "bool",
+        required: true,
+      });
+    }
     scp03BuildInlineForm(
       card,
-      [
-        { name: "target_aid", label: "Target AID", placeholder: "ARAM / A0...00", required: true },
-      ],
+      fields,
       logVerb,
       async function (values) {
         await scp03RunActionWithOutput(out, actionId, {
           session_id: tab.sessionId,
           target_aid: (values.target_aid || "").trim(),
+          confirm: isLock ? !!values.confirm : undefined,
         }, function (data, sheet) {
           scp03DatasheetAppendMetaKvl(sheet, [
             { label: "Target AID", value: data.target_aid || "" },
@@ -15284,15 +18678,28 @@
   async function scp03ShowStoreData(tab) {
     var card = scp03BuildExtrasCard("STORE DATA");
     if (!card) return;
+    scp03BuildDestructiveBanner(
+      card,
+      "STORE DATA writes arbitrary personalization data to the selected "
+        + "application. Review P1/P2 and confirm before transmission."
+    );
     var out = document.createElement("div");
     out.className = "cc-wb-extras-out";
     scp03BuildInlineForm(
       card,
       [
-        { name: "data", label: "Data (hex)", placeholder: "e.g. BF2D00", required: true },
+        { name: "data", label: "Data (hex)", placeholder: "e.g. BF2D00",
+          required: true, secret: true,
+          help: "Masked and cleared after submission; may contain personalization secrets." },
         { name: "p1", label: "P1", placeholder: "(auto)" },
         { name: "p2", label: "P2", placeholder: "(auto)",
           help: "Blank = auto-chunk with GP block index. Otherwise provide both." },
+        {
+          name: "confirm",
+          label: "I understand this writes data to the card",
+          kind: "bool",
+          required: true,
+        },
       ],
       "STORE DATA",
       async function (values) {
@@ -15301,6 +18708,7 @@
           data: (values.data || "").trim(),
           p1: (values.p1 || "").trim(),
           p2: (values.p2 || "").trim(),
+          confirm: !!values.confirm,
         }, function (data, sheet) {
           scp03DatasheetAppendMetaKvl(sheet, [
             { label: "Bytes", value: data.bytes || 0 },
@@ -15321,6 +18729,11 @@
   async function scp03ShowUpdateBinary(tab) {
     var card = scp03BuildExtrasCard("UPDATE BINARY");
     if (!card) return;
+    scp03BuildDestructiveBanner(
+      card,
+      "UPDATE BINARY overwrites transparent-EF content. Read or export "
+        + "the current body first if you may need to restore it."
+    );
     var out = document.createElement("div");
     out.className = "cc-wb-extras-out";
     scp03BuildInlineForm(
@@ -15332,6 +18745,21 @@
           value: tab.selectedPath || "",
           placeholder: "MF/EF_ICCID",
           help: "Optional path to SELECT first. Blank = use current selection." },
+        {
+          name: "offset",
+          label: "Offset (decimal bytes)",
+          kind: "number",
+          value: 0,
+          min: 0,
+          max: 32767,
+          help: "Absolute offset. The contextual Files wizard also accepts hex.",
+        },
+        {
+          name: "confirm",
+          label: "I understand this overwrites file content",
+          kind: "bool",
+          required: true,
+        },
       ],
       "UPDATE BINARY",
       async function (values) {
@@ -15339,11 +18767,16 @@
           session_id: tab.sessionId,
           hex_data: (values.hex_data || "").trim(),
           path: (values.path || "").trim(),
+          offset: parseInt(values.offset || "0", 10),
+          confirm: !!values.confirm,
         }, function (data, sheet) {
           scp03DatasheetAppendMetaKvl(sheet, [
             { label: "Path", value: data.path || "(current)" },
             { label: "SELECTed", value: data.selected === false ? "failed" : (data.selected ? "yes" : "n/a") },
             { label: "Bytes", value: data.bytes || 0 },
+            { label: "Bytes written", value: data.bytes_written || 0 },
+            { label: "Offset", value: data.offset || 0 },
+            { label: "Chunks", value: data.chunk_count || 0 },
             { label: "SW", value: data.sw || "" },
             { label: "OK", value: data.ok ? "yes" : "no" },
           ]);
@@ -15365,6 +18798,10 @@
   async function scp03ShowUpdateRecord(tab) {
     var card = scp03BuildExtrasCard("UPDATE RECORD");
     if (!card) return;
+    scp03BuildDestructiveBanner(
+      card,
+      "UPDATE RECORD overwrites one record in a linear-fixed or cyclic EF."
+    );
     var out = document.createElement("div");
     out.className = "cc-wb-extras-out";
     scp03BuildInlineForm(
@@ -15376,6 +18813,12 @@
           value: tab.selectedPath || "",
           placeholder: "MF/ADF_USIM/EF_MSISDN",
           help: "Optional path to SELECT first. Blank = use current selection." },
+        {
+          name: "confirm",
+          label: "I understand this overwrites record content",
+          kind: "bool",
+          required: true,
+        },
       ],
       "UPDATE RECORD",
       async function (values) {
@@ -15384,6 +18827,7 @@
           record: (values.record || "").trim(),
           hex_data: (values.hex_data || "").trim(),
           path: (values.path || "").trim(),
+          confirm: !!values.confirm,
         }, function (data, sheet) {
           scp03DatasheetAppendMetaKvl(sheet, [
             { label: "Path", value: data.path || "(current)" },
@@ -16457,14 +19901,18 @@
     scp03BuildInlineForm(
       card,
       [
-        { name: "new_kvn", label: "New KVN (hex)", required: true, placeholder: "01" },
-        { name: "new_key_id", label: "New Key ID (hex)", required: true, placeholder: "01" },
+        { name: "new_kvn", label: "New KVN (hex)", required: true, placeholder: "01",
+          help: "One byte (00..FF)." },
+        { name: "new_key_id", label: "New Key ID (hex)", required: true, placeholder: "01",
+          help: "One byte (00..FF)." },
         { name: "old_kvn", label: "Old KVN (hex)", value: "00",
           help: "00 = add new keyset; otherwise the KVN being replaced." },
-        { name: "enc_key", label: "ENC key (hex)", required: true },
-        { name: "mac_key", label: "MAC key (hex)", required: true },
-        { name: "dek_key", label: "DEK key (hex)", required: true,
-          help: "All three keys must be 32 / 48 / 64 hex chars (16 / 24 / 32 bytes)." },
+        { name: "enc_key", label: "ENC key (hex)", required: true, secret: true,
+          help: "AES: 16/24/32 bytes; 3DES: 16/24 bytes. Never returned." },
+        { name: "mac_key", label: "MAC key (hex)", required: true, secret: true,
+          help: "AES: 16/24/32 bytes; 3DES: 16/24 bytes. Never returned." },
+        { name: "dek_key", label: "DEK key (hex)", required: true, secret: true,
+          help: "AES: 16/24/32 bytes; 3DES: 16/24 bytes. Never returned." },
         { name: "algorithm", label: "Algorithm", kind: "select",
           choices: ["AES", "3DES"], value: "AES" },
         { name: "confirm", label: "Confirm", required: true,
@@ -16820,35 +20268,51 @@
   // Build a single wizard field (label + input + optional hint + live
   // decimal mirror for hex-number inputs). Returns the row element and
   // stores the input under ``inputs[name]`` so callers can harvest values.
+  var SCP03_WIZARD_FIELD_SEQ = 0;
+
   function scp03MakeWizardField(inputs, name, label, opts) {
     opts = opts || {};
+    SCP03_WIZARD_FIELD_SEQ += 1;
     var row = document.createElement("div");
     row.className = "cc-form-row cc-fs-wizard-row";
+    row.setAttribute("data-field-name", name);
     var lab = document.createElement("label");
     lab.textContent = label;
-    lab.htmlFor = "cc-fs-wiz-" + name;
+    lab.htmlFor = "cc-fs-wiz-" + SCP03_WIZARD_FIELD_SEQ + "-" + name;
     row.appendChild(lab);
 
     var input;
-    if (opts.textarea) {
+    if (opts.kind === "bool") {
+      input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !!opts.value;
+    } else if (opts.textarea) {
       input = document.createElement("textarea");
       input.rows = opts.rows || 3;
     } else {
       input = document.createElement("input");
-      input.type = "text";
+      input.type = opts.secret ? "password" : "text";
     }
     input.id = lab.htmlFor;
     input.name = name;
     if (opts.placeholder) input.placeholder = opts.placeholder;
-    if (opts.value) input.value = String(opts.value);
+    if (opts.value != null && opts.kind !== "bool") input.value = String(opts.value);
     if (opts.required) input.required = true;
+    if (opts.maxLength != null) input.maxLength = Number(opts.maxLength);
+    if (input.type === "text" || input.type === "password" || opts.textarea) {
+      input.spellcheck = false;
+      input.autocapitalize = "off";
+      input.autocomplete = opts.secret ? "new-password" : "off";
+    }
     row.appendChild(input);
     inputs[name] = input;
 
     if (opts.help) {
       var hint = document.createElement("div");
       hint.className = "cc-field-hint";
+      hint.id = input.id + "-help";
       hint.textContent = opts.help;
+      input.setAttribute("aria-describedby", hint.id);
       row.appendChild(hint);
     }
 
@@ -16876,6 +20340,19 @@
     }
 
     return row;
+  }
+
+  function scp03ValidateWizardInputs(inputs) {
+    var names = Object.keys(inputs || {});
+    for (var i = 0; i < names.length; i++) {
+      var input = inputs[names[i]];
+      if (input && !input.checkValidity()) {
+        input.reportValidity();
+        try { input.focus(); } catch (_err) {}
+        return false;
+      }
+    }
+    return true;
   }
 
   function scp03BuildFsCreateGuided(tab, out) {
@@ -17043,6 +20520,7 @@
     });
 
     previewBtn.addEventListener("click", async function () {
+      if (!scp03ValidateWizardInputs(inputs)) return;
       previewBtn.disabled = true;
       previewHost.innerHTML = "";
       previewHost.appendChild(loadingEl("building FCP\u2026"));
@@ -17396,6 +20874,7 @@
     wrap.appendChild(bar);
 
     submit.addEventListener("click", async function () {
+      if (!scp03ValidateWizardInputs(inputs)) return;
       submit.disabled = true;
       await scp03RunActionWithOutput(out, "scp03.fs_resize", {
         session_id: tab.sessionId,
@@ -17546,6 +21025,11 @@
       });
     wrap.appendChild(dataField);
     scp03AttachHexAsciiMirror(dataField, inputs.hex_data);
+    wrap.appendChild(scp03MakeWizardField(inputs, "confirm",
+      "I understand this overwrites file content", {
+        kind: "bool",
+        required: true,
+      }));
 
     var bar = document.createElement("div");
     bar.className = "cc-action-bar";
@@ -17557,6 +21041,7 @@
     wrap.appendChild(bar);
 
     submit.addEventListener("click", async function () {
+      if (!scp03ValidateWizardInputs(inputs)) return;
       submit.disabled = true;
       var offsetText = (inputs.offset.value || "").trim();
       var offsetVal = 0;
@@ -17573,6 +21058,7 @@
         path: (inputs.path.value || "").trim(),
         hex_data: (inputs.hex_data.value || "").trim(),
         offset: offsetVal,
+        confirm: !!inputs.confirm.checked,
       }, function (data, sheet) {
         scp03RenderMutationActionResult(sheet, data, [
           { label: "Path", value: data.path || "(current selection)" },
@@ -17679,6 +21165,11 @@
       });
     wrap.appendChild(dataField);
     scp03AttachHexAsciiMirror(dataField, inputs.hex_data);
+    wrap.appendChild(scp03MakeWizardField(inputs, "confirm",
+      "I understand this overwrites record content", {
+        kind: "bool",
+        required: true,
+      }));
 
     var bar = document.createElement("div");
     bar.className = "cc-action-bar";
@@ -17690,6 +21181,7 @@
     wrap.appendChild(bar);
 
     submit.addEventListener("click", async function () {
+      if (!scp03ValidateWizardInputs(inputs)) return;
       submit.disabled = true;
       var recText = (inputs.record.value || "").trim();
       if (recText.length === 0 || !/^\d+$/.test(recText)) {
@@ -17708,6 +21200,7 @@
         path: (inputs.path.value || "").trim(),
         record: recInt,
         hex_data: (inputs.hex_data.value || "").trim(),
+        confirm: !!inputs.confirm.checked,
       }, function (data, sheet) {
         scp03RenderMutationActionResult(sheet, data, [
           { label: "Path", value: data.path || "(current selection)" },
@@ -18578,6 +22071,7 @@
     wrap.appendChild(bar);
 
     submit.addEventListener("click", async function () {
+      if (!scp03ValidateWizardInputs(inputs)) return;
       submit.disabled = true;
       await scp03RunActionWithOutput(out, "scp03.fs_lifecycle", {
         session_id: tab.sessionId,
@@ -18670,6 +22164,7 @@
     wrap.appendChild(bar);
 
     submit.addEventListener("click", async function () {
+      if (!scp03ValidateWizardInputs(inputs)) return;
       submit.disabled = true;
       await scp03RunActionWithOutput(out, "scp03.fs_search_record", {
         session_id: tab.sessionId,
@@ -18732,6 +22227,7 @@
     wrap.appendChild(bar);
 
     submit.addEventListener("click", async function () {
+      if (!scp03ValidateWizardInputs(inputs)) return;
       submit.disabled = true;
       await scp03RunActionWithOutput(out, "scp03.fs_suspend_uicc", {
         session_id: tab.sessionId,
@@ -18749,28 +22245,42 @@
   async function scp03ShowManagePin(tab) {
     var card = scp03BuildExtrasCard("Manage PIN");
     if (!card) return;
+    var intro = document.createElement("p");
+    intro.className = "cc-fs-op-hint";
+    intro.textContent = "PIN, PUK, and replacement PIN values are masked, "
+      + "never returned by the action, and must contain 1..8 ASCII characters.";
+    card.appendChild(intro);
     var out = document.createElement("div");
     out.className = "cc-wb-extras-out";
-    scp03BuildInlineForm(
+    var handle = scp03BuildInlineForm(
       card,
       [
         { name: "op", label: "Operation", kind: "select",
           choices: ["VERIFY", "CHANGE", "DISABLE", "ENABLE", "UNBLOCK"], required: true },
-        { name: "pin_ref", label: "PIN reference (hex)", value: "01",
-          help: "01 = PIN1, 02 = PIN2, 81 = ADM1, …" },
-        { name: "pin", label: "PIN (ASCII)", placeholder: "1234" },
-        { name: "new_pin", label: "New PIN (ASCII, for CHANGE / UNBLOCK)" },
-        { name: "puk", label: "PUK (ASCII, for UNBLOCK)" },
+        { name: "pin_ref", label: "PIN reference (hex)", value: "01", required: true,
+          help: "01 = PIN1, 81 = PIN2, 0A = ADM1, …" },
+        { name: "pin", label: "Current PIN (ASCII)", placeholder: "1234",
+          secret: true, maxLength: 8, help: "1..8 ASCII characters." },
+        { name: "new_pin", label: "New PIN (ASCII)", secret: true,
+          maxLength: 8, help: "Required for CHANGE and UNBLOCK." },
+        { name: "puk", label: "PUK / unblock key (ASCII)", secret: true,
+          maxLength: 8, help: "Required for UNBLOCK." },
+        { name: "confirm", label: "I understand this operation can block the PIN",
+          kind: "bool", help: "Required for DISABLE and UNBLOCK." },
       ],
       "Run",
       async function (values) {
+        var op = String(values.op || "").trim().toUpperCase();
         await scp03RunActionWithOutput(out, "scp03.manage_pin", {
           session_id: tab.sessionId,
-          op: (values.op || "").trim(),
+          op: op,
           pin_ref: (values.pin_ref || "01").trim(),
-          pin: (values.pin || "").toString(),
-          new_pin: (values.new_pin || "").toString(),
-          puk: (values.puk || "").toString(),
+          pin: op === "UNBLOCK" ? "" : (values.pin || "").toString(),
+          new_pin: (op === "CHANGE" || op === "UNBLOCK")
+            ? (values.new_pin || "").toString() : "",
+          puk: op === "UNBLOCK" ? (values.puk || "").toString() : "",
+          confirm: (op === "DISABLE" || op === "UNBLOCK")
+            ? !!values.confirm : false,
         }, function (data, sheet) {
           scp03RenderMutationActionResult(sheet, data, [
             { label: "Op", value: data.op || "" },
@@ -18780,6 +22290,35 @@
         });
       }
     );
+
+    function configurePinField(name, visible, required) {
+      var input = handle.inputs[name];
+      var row = handle.rows[name];
+      if (!input || !row) return;
+      row.hidden = !visible;
+      input.required = !!(visible && required);
+      input.disabled = !visible;
+      if (!visible && input.type !== "checkbox") input.value = "";
+      if (!visible && input.type === "checkbox") input.checked = false;
+    }
+
+    function refreshPinOperation() {
+      var op = String(handle.inputs.op.value || "VERIFY").toUpperCase();
+      configurePinField("pin", op !== "UNBLOCK", true);
+      configurePinField(
+        "new_pin",
+        op === "CHANGE" || op === "UNBLOCK",
+        true
+      );
+      configurePinField("puk", op === "UNBLOCK", true);
+      configurePinField(
+        "confirm",
+        op === "DISABLE" || op === "UNBLOCK",
+        true
+      );
+    }
+    handle.inputs.op.addEventListener("change", refreshPinOperation);
+    refreshPinOperation();
     card.appendChild(out);
   }
 
@@ -18788,11 +22327,12 @@
     if (!card) return;
     var out = document.createElement("div");
     out.className = "cc-wb-extras-out";
-    scp03BuildInlineForm(
+    var handle = scp03BuildInlineForm(
       card,
       [
         { name: "op", label: "Operation", kind: "select", choices: ["OPEN", "CLOSE"], required: true },
-        { name: "channel", label: "Channel (hex, for CLOSE)", placeholder: "01" },
+        { name: "channel", label: "Channel (hex, for CLOSE)", placeholder: "01",
+          help: "Logical channel 01..13 hex (1..19 decimal)." },
       ],
       "Run",
       async function (values) {
@@ -18808,6 +22348,15 @@
         });
       }
     );
+    function refreshChannelOperation() {
+      var closing = String(handle.inputs.op.value || "").toUpperCase() === "CLOSE";
+      handle.rows.channel.hidden = !closing;
+      handle.inputs.channel.disabled = !closing;
+      handle.inputs.channel.required = closing;
+      if (!closing) handle.inputs.channel.value = "";
+    }
+    handle.inputs.op.addEventListener("change", refreshChannelOperation);
+    refreshChannelOperation();
     card.appendChild(out);
   }
 
@@ -19023,13 +22572,18 @@
     if (!card) return;
     var out = document.createElement("div");
     out.className = "cc-wb-extras-out";
-    scp03BuildInlineForm(
+    var handle = scp03BuildInlineForm(
       card,
       [
         { name: "context", label: "Context", kind: "select",
           choices: ["USIM", "ISIM", "GSM"], value: "USIM", required: true },
-        { name: "rand", label: "RAND (32 hex)", required: true },
-        { name: "autn", label: "AUTN (32 hex, USIM/ISIM)" },
+        { name: "rand", label: "RAND (16 bytes / 32 hex)", required: true,
+          placeholder: "23553CBE9637A89D218AE64DAE47BF35" },
+        { name: "autn", label: "AUTN (16 bytes / 32 hex, USIM/ISIM)",
+          placeholder: "55F328B43577B9B94A9FFAC354DFAFB3" },
+        { name: "reveal_sensitive", label: "Reveal derived CK / IK / Kc",
+          kind: "bool",
+          help: "Off by default. Revealed values remain visible in this browser result." },
       ],
       "Authenticate",
       async function (values) {
@@ -19038,6 +22592,7 @@
           context: values.context || "USIM",
           rand: (values.rand || "").trim(),
           autn: (values.autn || "").trim(),
+          reveal_sensitive: !!values.reveal_sensitive,
         }, function (data, sheet) {
           var rows = [
             { label: "Context", value: data.context || "" },
@@ -19052,7 +22607,16 @@
           if (resp.kc) rows.push({ label: "Kc", value: resp.kc });
           if (resp.sres) rows.push({ label: "SRES", value: resp.sres });
           if (resp.auts) rows.push({ label: "AUTS", value: resp.auts });
+          if (resp.derived_keys_redacted) {
+            rows.push({
+              label: "Derived keys",
+              value: "REDACTED (enable the reveal option to display CK / IK / Kc)",
+            });
+          }
           scp03DatasheetAppendMetaKvl(sheet, rows);
+          if (resp.parse_warning) {
+            scp03DatasheetAppendWarn(sheet, resp.parse_warning);
+          }
           if (resp.raw_hex) {
             scp03DatasheetAppendTraceMain(sheet, "Raw response: " + resp.raw_hex, "");
           }
@@ -19064,6 +22628,15 @@
         });
       }
     );
+    function refreshAuthContext() {
+      var needsAutn = String(handle.inputs.context.value || "USIM").toUpperCase() !== "GSM";
+      handle.rows.autn.hidden = !needsAutn;
+      handle.inputs.autn.disabled = !needsAutn;
+      handle.inputs.autn.required = needsAutn;
+      if (!needsAutn) handle.inputs.autn.value = "";
+    }
+    handle.inputs.context.addEventListener("change", refreshAuthContext);
+    refreshAuthContext();
     card.appendChild(out);
   }
 

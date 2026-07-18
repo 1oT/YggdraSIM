@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Context menu (G-3) ---------------------------------------------------- */
 
 .ctx-menu {
@@ -64,13 +65,29 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  flex: 0 0 18px;
+  width: 22px;
+  height: 20px;
+  flex: 0 0 22px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in oklab, var(--accent), transparent 52%);
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in oklab, var(--accent-soft), transparent 16%);
   color: var(--accent);
-  font-size: 13px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.ctx-menu-icon .cc-action-svg {
+  width: 13px;
+  height: 13px;
 }
 
 .ctx-menu-item--danger .ctx-menu-icon {
+  border-color: color-mix(in oklab, var(--fail), transparent 45%);
+  background: color-mix(in oklab, var(--fail), transparent 88%);
   color: var(--fail);
 }
 
@@ -84,4 +101,3 @@
   background: var(--border);
   margin: 4px 4px;
 }
-

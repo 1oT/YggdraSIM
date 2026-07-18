@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ----------------------------------------------------------------------- */
 /* Workbench shell — unified module layout contract                        */
 /* ----------------------------------------------------------------------- */
@@ -113,4 +114,3 @@
   color: var(--fg-dim);
   font-size: 12.5px;
 }
-

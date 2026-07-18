@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Dense headers (title + ``.cc-badge`` row) sit inside ``.card``; the
    global lift reads as the chips moving. Keep a static frame. */
 .cc-action-card.card:hover {
@@ -54,4 +55,3 @@
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-

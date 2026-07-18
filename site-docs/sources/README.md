@@ -5,7 +5,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 # YggdraSIM
 
-YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. The SAIP decoding path and the SCP11 local / eIM flows pull in upstream `pySim`; install them in one shot with `pip install -e '.[saip]'` (the `[saip]` extra pins pySim directly from its GitHub mirror).
+YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. Upstream `pySim` is a commit-pinned core dependency; install `pip install -e '.[saip]'` when optional SAIP spreadsheet import/export extensions are also required.
 
 > **Releases.** v1.0.1 was tagged on 2026-06-05 for SCP11 notification
 > recovery fixes on the v1 line. Check out the frozen v1.0.0 footprint
@@ -130,14 +130,11 @@ python -m pip install -r requirements.txt
 python -m pip install -e '.[saip]'
 ```
 
-The `[saip]` extra installs upstream pySim from its GitHub mirror
-(`pySim @ git+https://github.com/osmocom/pysim.git`). That gives you
-the SCP11-local flows, eIM-local flows, SAIP ASN.1 compile, the SAIP
-transcode TUI, and the profile-scaffold wizards without any manual
-clone step. A bare `pip install -e .` without the extra still works if
-you only need the flows that do not touch SAIP (core SIMCARD
-simulator, HIL bridge, SCP03, SCP80, SCP11 relay); `yggdrasim
---doctor` marks pySim as `WARN` in that case, which is expected.
+The base install resolves the commit-pinned upstream `pySim` dependency used
+by SAIP, SCP03/SCP80, and SCP11-local flows. The `[saip]` extra adds
+`openpyxl` and `defusedxml`, which are required by optional spreadsheet
+import/export extensions. This keeps a bare runtime lean without leaving the
+documented SAIP workstation install partially functional.
 
 If you are working against an unreleased upstream pySim branch you can
 still drop a developer checkout at `<repo>/pysim` (`git clone
@@ -331,7 +328,11 @@ Optional encryption:
 
 Frozen executable runtime model:
 
-- source runs continue to use the repository tree directly
+- source/editable runs use the repository tree directly
+- installed wheels use the platform's per-user data directory (`%LOCALAPPDATA%\YggdraSIM`,
+  `~/Library/Application Support/YggdraSIM`, or
+  `$XDG_DATA_HOME/YggdraSIM`/`~/.local/share/YggdraSIM`) and never write
+  mutable state into `site-packages`
 - frozen builds spawn a writable runtime tree under `YggdraSIM-data` next to
   the executable when possible
 - if that location is not writable, the runtime tree falls back to

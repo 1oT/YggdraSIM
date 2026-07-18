@@ -19,6 +19,9 @@ from xml.etree import ElementTree
 
 DEFAULT_DECODE_RULE = "udp.port==4729,gsmtap"
 SUMMARY_REFRESH_SECONDS = 0.35
+MAX_PDML_TEXT_CHARS = 8 * 1024 * 1024
+MAX_PDML_NODES = 100_000
+MAX_PDML_DEPTH = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +250,11 @@ def parse_packet_field_ranges(pdml_text: str) -> list[dict[str, object]]:
     normalized = str(pdml_text or "").strip()
     if len(normalized) == 0:
         return []
+    if len(normalized) > MAX_PDML_TEXT_CHARS:
+        return []
+    lowered = normalized.lower()
+    if "<!doctype" in lowered or "<!entity" in lowered:
+        return []
     try:
         root = ElementTree.fromstring(normalized)
     except ElementTree.ParseError:
@@ -254,7 +262,13 @@ def parse_packet_field_ranges(pdml_text: str) -> list[dict[str, object]]:
 
     ranges: list[dict[str, object]] = []
 
-    def _walk(node: ElementTree.Element, depth: int) -> None:
+    stack: list[tuple[ElementTree.Element, int]] = [(root, 0)]
+    visited = 0
+    while stack:
+        node, depth = stack.pop()
+        visited += 1
+        if visited > MAX_PDML_NODES or depth > MAX_PDML_DEPTH:
+            return []
         tag = _xml_local_name(node.tag)
         if tag in {"proto", "field"}:
             parsed = _pdml_node_range(node, depth)
@@ -263,10 +277,9 @@ def parse_packet_field_ranges(pdml_text: str) -> list[dict[str, object]]:
             next_depth = depth + 1 if tag == "field" else depth
         else:
             next_depth = depth
-        for child in list(node):
-            _walk(child, next_depth)
-
-    _walk(root, 0)
+        children = list(node)
+        for child in reversed(children):
+            stack.append((child, next_depth))
     ranges.sort(
         key=lambda item: (
             int(item.get("start", 0) or 0),

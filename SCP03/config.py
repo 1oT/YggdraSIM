@@ -20,7 +20,13 @@
 import os 
 import configparser 
 
-from yggdrasim_common.runtime_paths import bundle_path, ensure_seeded_workspace_file, ensure_workspace_dir
+from yggdrasim_common.runtime_paths import (
+    bundle_path,
+    ensure_seeded_workspace_file,
+    ensure_workspace_dir,
+    runtime_path,
+    WORKSPACE_DIRNAME,
+)
 from yggdrasim_common.nord_palette import NordHex as _NordHex
 
 try :
@@ -32,12 +38,32 @@ class Config :
     """Centralized configuration and constants."""
 
     BASE_DIR =bundle_path ("Workspace","SCP03")
-    CONFIG_DIR =ensure_workspace_dir ("SCP03")
+    CONFIG_DIR =runtime_path (WORKSPACE_DIRNAME ,"SCP03")
 
-    INI_FILE =ensure_seeded_workspace_file (("SCP03","seeds","keys.ini"),"SCP03","keys.ini")
-    FIDS_FILE =ensure_seeded_workspace_file (("SCP03","seeds","fids.txt"),"SCP03","fids.txt")
-    AID_FILE =ensure_seeded_workspace_file (("SCP03","seeds","aid.txt"),"SCP03","aid.txt")
-    BINDS_FILE =ensure_seeded_workspace_file (("SCP03","seeds","binds.json"),"SCP03","binds.json")
+    # These path values are pure at import time. Operational entry points call
+    # ``initialize_workspace`` before reading or modifying their seed files.
+    INI_FILE =runtime_path (WORKSPACE_DIRNAME ,"SCP03","keys.ini")
+    FIDS_FILE =runtime_path (WORKSPACE_DIRNAME ,"SCP03","fids.txt")
+    AID_FILE =runtime_path (WORKSPACE_DIRNAME ,"SCP03","aid.txt")
+    BINDS_FILE =runtime_path (WORKSPACE_DIRNAME ,"SCP03","binds.json")
+
+    @classmethod
+    def initialize_workspace (cls )->None :
+        """Create the SCP03 runtime directory and copy missing shipped seeds."""
+        cls .BASE_DIR =bundle_path ("Workspace","SCP03")
+        cls .CONFIG_DIR =ensure_workspace_dir ("SCP03")
+        cls .INI_FILE =ensure_seeded_workspace_file (
+        ("SCP03","seeds","keys.ini"),"SCP03","keys.ini"
+        )
+        cls .FIDS_FILE =ensure_seeded_workspace_file (
+        ("SCP03","seeds","fids.txt"),"SCP03","fids.txt"
+        )
+        cls .AID_FILE =ensure_seeded_workspace_file (
+        ("SCP03","seeds","aid.txt"),"SCP03","aid.txt"
+        )
+        cls .BINDS_FILE =ensure_seeded_workspace_file (
+        ("SCP03","seeds","binds.json"),"SCP03","binds.json"
+        )
 
     DEFAULT_KEYS ={
     'scp03_kenc':'1122334455667788AABBCCDDEEFF0011',
@@ -163,6 +189,7 @@ def enforce_demo_key_policy (config_keys ,backend_label :str =""):
 
 
 def _legacy_scp03_parser ()->configparser .ConfigParser :
+    Config .initialize_workspace ()
     parser =configparser .ConfigParser ()
     if os .path .exists (Config .INI_FILE ):
         parser .read (Config .INI_FILE )
@@ -191,7 +218,7 @@ def _legacy_scp03_parser ()->configparser .ConfigParser :
         gold_sec ['standard']='SGP.32'
     if 'authenticate_sd'not in gold_sec :
         gold_sec ['authenticate_sd']='false'
-    return parser 
+    return parser
 
 
 def load_scp03_runtime_parser ()->configparser .ConfigParser :
@@ -214,4 +241,4 @@ def load_scp03_runtime_parser ()->configparser .ConfigParser :
     if isinstance (gold_payload ,dict ):
         for key_name ,value in gold_payload .items ():
             parser ['GOLD_PROFILE'][str (key_name )]=str (value )
-    return parser 
+    return parser

@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Ink · light (paper field + steel blue accent) ---------------- */
 html[data-theme="ink-light"] {
   --bg: #f5f4f1;
@@ -15,17 +16,17 @@ html[data-theme="ink-light"] {
   --border-strong: rgba(40, 48, 60, 0.28);
   --fg: #1e2430;
   --fg-dim: #4f5d6e;
-  --fg-muted: #6b7582;
+  --fg-muted: var(--fg-dim);
   --accent: #34507a;
   --accent-strong: #284064;
   --accent-soft: rgba(52, 80, 122, 0.12);
   --accent-fg: #ffffff;
   --accent-glow: rgba(52, 80, 122, 0.35);
-  --gradient-accent: linear-gradient(135deg, #34507a 0%, #486899 58%, #5c80b3 100%);
+  --gradient-accent: linear-gradient(135deg, #34507a 0%, #486899 58%, #4b6b99 100%);
   --gradient-brand: linear-gradient(135deg, #34507a 0%, #3d6868 100%);
   --ok: #346c48;
   --ok-soft: rgba(52, 108, 72, 0.14);
-  --warn: #b8620a;
+  --warn: #945000;
   --warn-soft: rgba(184, 98, 10, 0.14);
   --fail: #b33a3a;
   --fail-soft: rgba(179, 58, 58, 0.14);
@@ -40,4 +41,3 @@ html[data-theme="ink-light"] {
     radial-gradient(circle at 85% 95%, rgba(61, 104, 104, 0.08), transparent 46%),
     radial-gradient(circle at 55% 35%, rgba(184, 98, 10, 0.04), transparent 50%);
 }
-

@@ -65,6 +65,7 @@ if PROJECT_ROOT not in sys .path :
     sys .path .insert (0 ,PROJECT_ROOT )
 
 from yggdrasim_common.plugin_runtime import ensure_plugins_loaded ,plugin_load_errors 
+from yggdrasim_common.frozen_dispatch import dispatch_internal_entry
 from yggdrasim_common.card_backend import (
     CARD_BACKEND_ENV,
     CARD_RELAY_TOKEN_FILE_ENV,
@@ -324,7 +325,9 @@ def _apply_runtime_path_override (user_input :str ,setter ,success_label :str ,c
 
 
 def _normalized_runtime_path (path_text :str )->str :
-    return os .path .abspath (os .path .expanduser (str (path_text or "").strip ()))
+    return os .path .normcase (
+    os .path .abspath (os .path .expanduser (str (path_text or "").strip ()))
+    )
 
 
 def _path_is_same_or_child (candidate_path :str ,parent_path :str )->bool :
@@ -1736,7 +1739,7 @@ def _manage_local_hil_bridge ()->None :
             print (f"Supervisor reason   : {reason_text}")
         next_remote_card_url ,next_remote_card_token_file =_resolve_hil_remote_card_service_settings (supervisor_state )
         if len (next_remote_card_url )>0 :
-            print (f"Next start card     : Remote Card Bridge")
+            print ("Next start card     : Remote Card Bridge")
             print (f"Remote card URL     : {next_remote_card_url}")
             if len (next_remote_card_token_file )>0 :
                 print (f"Remote token file   : {next_remote_card_token_file}")
@@ -1849,7 +1852,7 @@ def _stop_hil_session_one_shot ()->None :
         "service_name":str (saved_state .get ("service_name","")or "yggdrasim-hil-supervisor.service").strip (),
         "local_gui_port":_state_int_value (saved_state ,"local_gui_port",27854 ),
         "remote_workdir":str (saved_state .get ("remote_workdir","")or "~/YggdraSIM").strip (),
-        "remote_python":str (saved_state .get ("remote_python","")or "~/YggdraSIM/python/bin/python").strip (),
+        "remote_python":str (saved_state .get ("remote_python","")or "~/YggdraSIM/.venv/bin/python").strip (),
         "confirm":True ,
         },
         )
@@ -2367,7 +2370,7 @@ def _prompt_card_bridge_remote_rig_start ()->None :
     advanced =_prompt_yes_no ("Show advanced remote service settings",False )
     service_name =str (saved_state .get ("service_name","")or "yggdrasim-hil-supervisor.service").strip ()
     remote_workdir =str (saved_state .get ("remote_workdir","")or "~/YggdraSIM").strip ()
-    remote_python =str (saved_state .get ("remote_python","")or "~/YggdraSIM/python/bin/python").strip ()
+    remote_python =str (saved_state .get ("remote_python","")or "~/YggdraSIM/.venv/bin/python").strip ()
     remote_token_file =str (
     saved_state .get ("remote_token_file","")or f"~/.config/yggdrasim/card_bridge/{remote_card_port}.token"
     ).strip ()
@@ -3558,6 +3561,9 @@ def _apply_remote_card_arguments_with_log (args )->None :
 
 
 def run_cli (argv =None ):
+    internal_exit =dispatch_internal_entry (argv )
+    if internal_exit is not None :
+        return int (internal_exit )
     parser =_build_cli_parser ()
     args =parser .parse_args (argv )
     if getattr (args ,"asn1",None )is not None or getattr (args ,"asn1_file",None )is not None :
@@ -3578,7 +3584,8 @@ def run_cli (argv =None ):
     _apply_remote_card_arguments_with_log (args )
     if bool (getattr (args ,"doctor",False )):
         from yggdrasim_common.doctor import run_doctor
-        return run_doctor (Path (PROJECT_ROOT )if PROJECT_ROOT else None )
+        from yggdrasim_common.runtime_paths import runtime_root
+        return run_doctor (Path (runtime_root ()))
     gui_exit =_route_gui_modes (args )
     if gui_exit is not None :
         return int (gui_exit )

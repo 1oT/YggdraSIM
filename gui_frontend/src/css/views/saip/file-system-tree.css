@@ -3,13 +3,14 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ---- SA-G3: file system tree -------------------------------------- */
 /*
  * Hierarchical tree view for the File System tab. Section roots
  * (MF / DF.TELECOM / ADF.USIM / …) sit at depth 0; mf / df-* / adf-*
  * containers sit at depth 1; EFs sit at depth 2 (or depth 1 in
- * sections without an explicit container row). Each row is a thin
- * 22 px lane with a caret + glyph + label + optional FID / sFID
+ * sections without an explicit container row). Each row is a compact
+ * lane with a caret + glyph + label + optional FID / sFID
  * badges; the active row picks up the accent ring in the same way
  * the PE cards do.
  */
@@ -30,7 +31,7 @@
 .saip-file-tree-search {
   flex: 1 1 auto;
   min-width: 0;
-  height: 26px;
+  height: 30px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg, transparent);
@@ -46,7 +47,7 @@
 
 .saip-file-tree-sort {
   flex: 0 0 auto;
-  height: 26px;
+  height: 30px;
   max-width: 98px;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -57,7 +58,7 @@
 }
 
 .saip-file-tree-clear {
-  height: 26px;
+  min-height: 30px;
   flex: 0 0 auto;
 }
 
@@ -109,6 +110,16 @@
   background: var(--surface-alt, rgba(255, 255, 255, 0.04));
 }
 
+.saip-file-node:focus-visible {
+  outline: none;
+}
+
+.saip-file-node:focus-visible > .saip-file-node-row {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+}
+
 .saip-file-node-row.is-active {
   background: var(--accent-soft);
   color: var(--fg);
@@ -139,8 +150,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 24px;
+  height: 24px;
   font-size: 9px;
   border: none;
   background: transparent;

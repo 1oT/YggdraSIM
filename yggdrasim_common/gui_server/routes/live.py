@@ -35,7 +35,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
 
-from yggdrasim_common.gui_server.auth import compare_tokens, token_id
+from yggdrasim_common.gui_server.auth import (
+    compare_tokens,
+    token_id,
+    websocket_accept_protocol,
+    websocket_bearer,
+)
 
 
 _LOGGER = logging.getLogger("yggdrasim.gui.live")
@@ -470,13 +475,7 @@ class FlowContext:
 
 
 def _extract_token(websocket: WebSocket) -> str:
-    header = websocket.headers.get("authorization") or ""
-    if header.lower().startswith("bearer "):
-        return header.split(" ", 1)[1].strip()
-    qs_token = websocket.query_params.get("t")
-    if qs_token:
-        return str(qs_token)
-    return ""
+    return websocket_bearer(websocket)
 
 
 def _expected_token(websocket: WebSocket) -> str:
@@ -495,7 +494,7 @@ async def download_profile_flow(websocket: WebSocket) -> None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="auth")
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
     _LOGGER.info("gui.flow.opened kind=download-profile token=%s", token_id(provided))
 
     event_queue: asyncio.Queue = asyncio.Queue()

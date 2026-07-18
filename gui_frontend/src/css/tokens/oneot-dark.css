@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: 1oT Dark ----------------------------------------------------- */
 html[data-theme="oneot-dark"] {
   --bg: #03152a;
@@ -39,4 +40,3 @@ html[data-theme="oneot-dark"] {
     radial-gradient(circle at 5% 100%, rgba(99, 130, 238, 0.14), transparent 50%),
     radial-gradient(circle at 50% 50%, rgba(1, 215, 153, 0.04), transparent 60%);
 }
-

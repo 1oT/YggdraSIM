@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ============================================================
  * Top-bar reader strip
  *
@@ -24,7 +25,8 @@
   gap: 6px;
   min-width: 180px;
   max-width: min(36vw, 440px);
-  padding: 4px 6px;
+  min-height: 38px;
+  padding: 2px 6px;
   background: var(--bg-elev, rgba(255, 255, 255, 0.03));
   border: 1px solid var(--border);
   border-radius: var(--radius-pill, 999px);
@@ -64,8 +66,8 @@
 
 .topbar-readers-refresh {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -78,8 +80,18 @@
   transition: background var(--transition-fast, 120ms);
 }
 
-.topbar-readers-refresh:hover {
+.topbar-readers-refresh:hover:not(:disabled) {
   background: var(--bg-hover, var(--bg-elev));
+}
+
+.topbar-readers-refresh:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.topbar-readers-refresh:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .topbar-readers-refresh.is-spinning {
@@ -95,5 +107,13 @@
   .topbar-readers {
     flex-basis: 210px;
     max-width: 260px;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar-readers {
+    flex-basis: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 }

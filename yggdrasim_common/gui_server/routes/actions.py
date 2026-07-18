@@ -29,6 +29,7 @@ import asyncio
 import inspect
 import json
 import logging
+import threading
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
@@ -40,7 +41,13 @@ from yggdrasim_common.gui_server.actions.registry import (
     ensure_builtin_actions_loaded,
 )
 from yggdrasim_common.gui_server.actions.registry import ActionContext
-from yggdrasim_common.gui_server.auth import compare_tokens, token_id
+from yggdrasim_common.gui_server.action_security import scrub_action_result
+from yggdrasim_common.gui_server.auth import (
+    compare_tokens,
+    token_id,
+    websocket_accept_protocol,
+    websocket_bearer,
+)
 from yggdrasim_common.gui_server.sessions import get_manager
 
 
@@ -128,7 +135,8 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
     except ValueError as validation_error:
         raise HTTPException(status_code=422, detail=str(validation_error))
 
-    ctx = ActionContext()
+    cancel_event = threading.Event()
+    ctx = ActionContext(extras={"cancel_event": cancel_event})
     try:
         result = await _invoke_dispatcher(spec, ctx, coerced)
     except HTTPException:
@@ -159,9 +167,22 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
         )
 
     if isinstance(result, dict):
-        payload: dict[str, Any] = result
+        payload = scrub_action_result(action_id, result)
     else:
         payload = {"value": result}
+    if spec.subsystem == "SCP03":
+        session_id = str(coerced.get("session_id") or "").strip()
+        if session_id:
+            try:
+                card_session = get_manager().get(session_id)
+                handle = card_session.handle
+                transporter = handle.get("transporter") if isinstance(handle, dict) else None
+                secure_session = getattr(transporter, "session", None)
+                payload["session_authenticated"] = bool(
+                    getattr(secure_session, "is_authenticated", False)
+                )
+            except (KeyError, AttributeError):
+                payload["session_authenticated"] = False
     return RunResponse(ok=True, action_id=action_id, data=payload)
 
 
@@ -182,13 +203,7 @@ async def _invoke_dispatcher(spec: ActionSpec, ctx: ActionContext, coerced: dict
 
 
 def _extract_ws_token(websocket: WebSocket) -> str:
-    header = websocket.headers.get("authorization") or ""
-    if header.lower().startswith("bearer "):
-        return header.split(" ", 1)[1].strip()
-    qs_token = websocket.query_params.get("t")
-    if qs_token:
-        return str(qs_token)
-    return ""
+    return websocket_bearer(websocket)
 
 
 def _expected_ws_token(websocket: WebSocket) -> str:
@@ -222,7 +237,7 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="external-endpoint")
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
     _LOGGER.info("gui.action.stream.open id=%s token=%s", action_id, token_id(provided))
 
     try:
@@ -250,7 +265,8 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
         await websocket.close()
         return
 
-    ctx = ActionContext()
+    cancel_event = threading.Event()
+    ctx = ActionContext(extras={"cancel_event": cancel_event})
     dispatcher = spec.dispatcher
     try:
         stream = dispatcher(ctx, **coerced)
@@ -280,9 +296,29 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
         await websocket.close()
         return
 
+    async def _listen_for_cancel() -> None:
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if str(payload.get("type") or "") == "cancel":
+                    cancel_event.set()
+                    return
+        except WebSocketDisconnect:
+            cancel_event.set()
+        except Exception:
+            cancel_event.set()
+
+    cancel_listener = asyncio.create_task(_listen_for_cancel())
+
     try:
         async for event in async_iter:
             try:
+                if isinstance(event, dict):
+                    event = scrub_action_result(action_id, event)
                 await websocket.send_text(json.dumps(event))
             except Exception:
                 break
@@ -297,6 +333,14 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
         except Exception:
             pass
     finally:
+        cancel_event.set()
+        cancel_listener.cancel()
+        try:
+            await cancel_listener
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
         # Drain & close the async generator explicitly so any worker
         # thread / queue / card connection it owns is released right
         # away. Relying on GC is non-deterministic and pre-CPython 3.13

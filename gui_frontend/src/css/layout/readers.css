@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Reader pane (G-1) ----------------------------------------------------- */
 
 .sidebar-title-readers {
@@ -24,8 +25,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border-radius: var(--radius-sm, 4px);
   border: 1px solid transparent;
@@ -43,6 +44,11 @@
   background: var(--bg-hover);
   color: var(--fg);
   border-color: var(--border);
+}
+
+.sidebar-iconbtn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .sidebar-iconbtn:active {
@@ -76,10 +82,10 @@
   padding: 5px 8px;
 }
 
-.reader-pane-search input:focus {
+.reader-pane-search input:focus-visible {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--focus-ring-soft);
 }
 
 .reader-list {
@@ -110,6 +116,12 @@
 .reader-row:hover {
   background: var(--bg-hover);
   transform: translateX(1px);
+}
+
+.reader-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  background: var(--bg-hover);
 }
 
 .reader-row.is-selected {
@@ -174,7 +186,6 @@
   padding: 8px;
   font-size: 11px;
   color: var(--fg-dim);
-  font-style: italic;
 }
 
 .reader-pane-note {
@@ -187,4 +198,3 @@
 .reader-pane-note.is-error {
   color: var(--fail);
 }
-

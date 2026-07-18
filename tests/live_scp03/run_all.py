@@ -36,7 +36,6 @@ import re
 import shutil
 import subprocess
 import sys
-import textwrap
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -407,7 +406,7 @@ def _render_report(
     summary_lines.append(f"- Started:  {started_at}")
     summary_lines.append(f"- Finished: {finished_at}")
     summary_lines.append(f"- Backend:  YGGDRASIM_CARD_BACKEND={backend}")
-    summary_lines.append(f"- Plugins:  YGGDRASIM_DISALLOW_PLUGINS=1")
+    summary_lines.append("- Plugins:  YGGDRASIM_DISALLOW_PLUGINS=1")
     if backend == BACKEND_READER and reader_summary is not None:
         summary_lines.append(f"- Reader:   [{reader_summary.get('selected_index')}] {reader_summary.get('selected_name', '')}")
         if reader_summary.get("atr"):

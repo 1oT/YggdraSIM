@@ -72,34 +72,162 @@ class ShellInteractiveWizards :
     @staticmethod
     def _consume_pin_encoding_args (parts :list [str ])->tuple [str ,list [str ]]:
         remaining =list (parts )
-        if len (remaining )==0 :
-            return "ascii",remaining
+        encoding ="ascii"
+        encoding_seen =False
 
-        token =remaining [0 ].strip ().lower ()
-        if token in ("--encoding","--enc","encoding","enc"):
-            if len (remaining )<2 :
-                raise ValueError ("PIN encoding flag requires ASCII or HEX/BINARY.")
-            return ShellInteractiveWizards ._normalize_pin_encoding_choice (remaining [1 ]),remaining [2 :]
+        # Preserve the original convenient ``verify hex 01 ...`` form while
+        # treating unprefixed words in credential positions as literal data.
+        if remaining :
+            first =remaining [0 ].strip ().lower ()
+            if first in ("a","ascii","text","h","hex","binary","bin","raw"):
+                encoding =ShellInteractiveWizards ._normalize_pin_encoding_choice (first )
+                encoding_seen =True
+                remaining =remaining [1 :]
 
-        prefixed =False
-        if token .startswith ("--"):
-            prefixed =True
-        if prefixed :
-            candidate =token [2 :]
-            if candidate in ("a","ascii","text","h","hex","binary","bin","raw"):
-                return ShellInteractiveWizards ._normalize_pin_encoding_choice (candidate ),remaining [1 :]
-            return "ascii",remaining
+        positional =[]
+        idx =0
+        while idx <len (remaining ):
+            token =remaining [idx ].strip ()
+            folded =token .lower ()
+            parsed_encoding =None
+            consumed =1
 
-        if token in ("a","ascii","text","h","hex","binary","bin","raw"):
-            return ShellInteractiveWizards ._normalize_pin_encoding_choice (token ),remaining [1 :]
+            if folded in ("--encoding","--enc"):
+                if idx +1 >=len (remaining ):
+                    raise ValueError ("PIN encoding flag requires ASCII or HEX/BINARY.")
+                parsed_encoding =ShellInteractiveWizards ._normalize_pin_encoding_choice (
+                remaining [idx +1 ]
+                )
+                consumed =2
+            elif folded .startswith ("--encoding=")or folded .startswith ("--enc="):
+                _flag ,raw_value =folded .split ("=",1 )
+                if len (raw_value )==0 :
+                    raise ValueError ("PIN encoding flag requires ASCII or HEX/BINARY.")
+                parsed_encoding =ShellInteractiveWizards ._normalize_pin_encoding_choice (
+                raw_value
+                )
+            elif folded .startswith ("--"):
+                candidate =folded [2 :]
+                if candidate in ("a","ascii","text","h","hex","binary","bin","raw"):
+                    parsed_encoding =ShellInteractiveWizards ._normalize_pin_encoding_choice (
+                    candidate
+                    )
+                else :
+                    raise ValueError (f"Unknown MANAGE-PIN option: {token}")
 
-        return "ascii",remaining
+            if parsed_encoding is not None :
+                if encoding_seen and parsed_encoding !=encoding :
+                    raise ValueError ("Conflicting PIN encoding options were provided.")
+                encoding =parsed_encoding
+                encoding_seen =True
+                idx +=consumed
+                continue
+
+            positional .append (token )
+            idx +=1
+
+        return encoding,positional
+
+    @staticmethod
+    def _is_skip_value (value )->bool :
+        return value is None or str (value ).strip ().upper ()=="SKIP"
+
+    @staticmethod
+    def _hex_size_validator (
+        label :str ,
+        *,
+        exact_bytes :int |None =None ,
+        allowed_bytes :tuple [int ,...]|None =None ,
+        minimum_bytes :int |None =None ,
+        maximum_bytes :int |None =None ,
+    ):
+        """Return an InteractiveWizard validator for an already-normalized hex value."""
+        def validate (value )->str |None :
+            if ShellInteractiveWizards ._is_skip_value (value ):
+                return None
+            byte_len =len (str (value ))//2
+            if exact_bytes is not None and byte_len !=exact_bytes :
+                return f"{label} must be exactly {exact_bytes} byte(s)."
+            if allowed_bytes is not None and byte_len not in allowed_bytes :
+                choices =", ".join (str (item )for item in allowed_bytes )
+                return f"{label} must be {choices} byte(s)."
+            if minimum_bytes is not None and byte_len <minimum_bytes :
+                return f"{label} must be at least {minimum_bytes} byte(s)."
+            if maximum_bytes is not None and byte_len >maximum_bytes :
+                return f"{label} must be at most {maximum_bytes} byte(s)."
+            return None
+        return validate
+
+    @staticmethod
+    def _single_byte_tlv_validator (label :str ,allowed_tags :tuple [int ,...]):
+        """Validate a complete one-byte-tag BER-TLV entered by an operator."""
+        def validate (value )->str |None :
+            if ShellInteractiveWizards ._is_skip_value (value )or value =="":
+                return None
+            raw =bytes .fromhex (str (value ))
+            if len (raw )<2 :
+                return f"{label} must contain a tag, length, and value."
+            if raw [0 ]not in allowed_tags :
+                tags =", ".join (f"{tag:02X}"for tag in allowed_tags )
+                return f"{label} must use tag {tags}."
+            first_len =raw [1 ]
+            offset =2
+            if first_len <=0x7F :
+                value_len =first_len
+            else :
+                count =first_len &0x7F
+                if count ==0 or count >2 or len (raw )<2 +count :
+                    return f"{label} uses an unsupported BER length."
+                encoded_length =raw [2 :2 +count ]
+                value_len =int .from_bytes (encoded_length ,"big")
+                if encoded_length [0 ]==0 or value_len <0x80 :
+                    return f"{label} uses a non-minimal BER length."
+                if count ==2 and value_len <=0xFF :
+                    return f"{label} uses a non-minimal BER length."
+                offset +=count
+            if offset +value_len !=len (raw ):
+                return f"{label} length does not match its value."
+            return None
+        return validate
+
+    @staticmethod
+    def _fid_path_validator (value )->str |None :
+        if ShellInteractiveWizards ._is_skip_value (value )or value =="":
+            return None
+        text =str (value )
+        if len (text )<4 or len (text )%4 !=0 :
+            return "FID/path must contain one or more complete two-byte FIDs."
+        return None
+
+    @staticmethod
+    def _ber_length_hex (length :int )->str :
+        if length <0 :
+            raise ValueError ("BER length cannot be negative.")
+        if length <=0x7F :
+            return f"{length:02X}"
+        if length <=0xFF :
+            return f"81{length:02X}"
+        if length <=0xFFFF :
+            return f"82{length:04X}"
+        raise ValueError ("BER value is too large for this wizard.")
+
+    @staticmethod
+    def _unsigned_hex (value :int ,minimum_bytes :int =1 )->str :
+        if value <0 :
+            raise ValueError ("Unsigned value cannot be negative.")
+        byte_len =max (minimum_bytes ,max (1,(value .bit_length ()+7 )//8 ))
+        return value .to_bytes (byte_len ,"big").hex ().upper ()
 
     @staticmethod 
     def run_put_key_wizard (shell )->None :
         """Run the interactive PUT KEY wizard: prompts for key version, algorithm, and key material."""
         wiz =InteractiveWizard ("GP PUT KEY Command (GPCS 11.8)",Config .Colors ,"WARNING: CRITICAL CRYPTOGRAPHIC OPERATION\nExecuting PUT KEY overwrites the active session keys. Loss of keys bricks the card.")
-        wiz .add_step ("action","Action [1=Add New, 2=Rotate (ID 01), 3=Replace Specific]:",default ="1")
+        wiz .add_step (
+        "action",
+        "Action [1=Add New, 2=Rotate (ID 01), 3=Replace Specific]:",
+        default ="1",
+        choices =("1","2","3"),
+        )
 
         def action_cond (res ):
             action =res .get ("action")
@@ -108,25 +236,55 @@ class ShellInteractiveWizards :
                 is_replace =True 
             return is_replace 
 
-        wiz .add_step ("okvn","Old KVN to replace [Hex]:",default ="SKIP",condition =action_cond )
-        wiz .add_step ("okid","Key ID to replace [Hex]:",default ="SKIP",condition =action_cond )
+        one_byte =ShellInteractiveWizards ._hex_size_validator
+        wiz .add_step (
+        "okvn","Old KVN to replace [Hex]:",default ="",
+        condition =action_cond ,is_mandatory =True,input_kind ="hex",
+        validator =one_byte ("Old KVN",exact_bytes =1 ),
+        )
+        wiz .add_step (
+        "okid","Key ID to replace [Hex]:",default ="",
+        condition =action_cond ,is_mandatory =True,input_kind ="hex",
+        validator =one_byte ("Key ID",exact_bytes =1 ),
+        )
 
         def nkid_cond (res ):
-            action =res .get ("action")
-            is_rotate =False 
-            if action =='2':
-                is_rotate =True 
-            return not is_rotate 
+            return res .get ("action")=="1"
 
-        wiz .add_step ("nkid","New Key ID [Hex]:",default ="SKIP",condition =nkid_cond )
-        wiz .add_step ("nkvn","New KVN [Hex]:",default ="")
-        wiz .add_step ("enc","New ENC Key [Hex, 32/48/64 chars]:",default ="")
-        wiz .add_step ("mac","New MAC Key [Hex, 32/48/64 chars]:",default ="")
-        wiz .add_step ("dek","New DEK Key [Hex, 32/48/64 chars]:",default ="")
-        wiz .add_step ("algo","Algorithm [AES/3DES, Default: AES]:",default ="AES")
+        wiz .add_step (
+        "nkid","New Key ID [Hex]:",default ="",condition =nkid_cond,
+        is_mandatory =True,input_kind ="hex",
+        validator =one_byte ("New Key ID",exact_bytes =1 ),
+        )
+        wiz .add_step (
+        "nkvn","New KVN [Hex]:",default ="",is_mandatory =True,
+        input_kind ="hex",validator =one_byte ("New KVN",exact_bytes =1 ),
+        )
+        key_validator =one_byte ("Key",allowed_bytes =(16,24,32 ))
+        wiz .add_step (
+        "enc","New ENC Key [Hex, 16/24/32 bytes]:",default ="",
+        is_mandatory =True,input_kind ="hex",secret =True,
+        validator =key_validator,
+        )
+        wiz .add_step (
+        "mac","New MAC Key [Hex, 16/24/32 bytes]:",default ="",
+        is_mandatory =True,input_kind ="hex",secret =True,
+        validator =key_validator,
+        )
+        wiz .add_step (
+        "dek","New DEK Key [Hex, 16/24/32 bytes]:",default ="",
+        is_mandatory =True,input_kind ="hex",secret =True,
+        validator =key_validator,
+        )
+        wiz .add_step (
+        "algo","Algorithm [AES/3DES, Default: AES]:",default ="AES",
+        choices =("AES","3DES"),input_kind ="text",
+        )
         wiz .add_step ("exec","Execute PUT KEY? [y/N]:",default =False ,is_bool =True )
 
         res =wiz .run ()
+        if res is None :
+            return
 
         is_exec =False 
         if res .get ("exec"):
@@ -153,7 +311,7 @@ class ShellInteractiveWizards :
         if is_one :
             kid_input =res .get ("nkid")
             is_skip =False 
-            if kid_input =="SKIP":
+            if ShellInteractiveWizards ._is_skip_value (kid_input ):
                 is_skip =True 
             if is_skip :
                 print ("[-] Key ID required for Add. Aborting.")
@@ -190,13 +348,20 @@ class ShellInteractiveWizards :
                 print ("[-] Error: Current KVN unknown. Aborting.")
                 return
 
-            old_kvn =int (str (kvn_val ),16 )
+            try :
+                old_kvn =int (str (kvn_val ),16 )
+            except (TypeError ,ValueError ):
+                print ("[-] Error: Current KVN is not a valid hexadecimal byte. Aborting.")
+                return
+            if not 0 <=old_kvn <=0xFF :
+                print ("[-] Error: Current KVN must be one byte. Aborting.")
+                return
             print (f"[*] Sourced current KVN: {old_kvn:02X}")
 
         if is_three :
             okvn_input =res .get ("okvn")
             is_okvn_skip =False 
-            if okvn_input =="SKIP":
+            if ShellInteractiveWizards ._is_skip_value (okvn_input ):
                 is_okvn_skip =True 
             if is_okvn_skip :
                 print ("[-] Old KVN required for Replace. Aborting.")
@@ -205,7 +370,7 @@ class ShellInteractiveWizards :
 
             okid_input =res .get ("okid")
             is_okid_skip =False 
-            if okid_input =="SKIP":
+            if ShellInteractiveWizards ._is_skip_value (okid_input ):
                 is_okid_skip =True 
             if is_okid_skip :
                 print ("[-] Key ID required for Replace. Aborting.")
@@ -227,6 +392,11 @@ class ShellInteractiveWizards :
         algo =res .get ("algo").upper ()
 
         keys =[enc ,mac ,dek ]
+        if algo =="3DES":
+            invalid_lengths =[len (key )//2 for key in keys if len (key )//2 not in (16,24 )]
+            if invalid_lengths :
+                print ("[-] 3DES keys must be 16 or 24 bytes. Aborting.")
+                return
         print ("\n[*] Executing PUT KEY...")
         ShellInteractiveWizards ._exec_put_key (shell ,old_kvn ,key_id ,new_kvn ,keys ,algo )
 
@@ -273,6 +443,8 @@ class ShellInteractiveWizards :
         wiz =InteractiveWizard ("Configuration Synchronization",Config .Colors )
         wiz .add_step ("upd","Update SQLite-backed SCP03 state with new keys? [y/N]:",default =False ,is_bool =True )
         res =wiz .run ()
+        if res is None :
+            return
 
         is_upd =False 
         if res .get ("upd"):
@@ -318,6 +490,24 @@ class ShellInteractiveWizards :
                 pin_id =pin_args [0 ].upper ()
 
             print ("\n[*] Executing PIN Command via Macro...")
+            requirements ={
+            "verify":2,
+            "change":3,
+            "disable":2,
+            "enable":2,
+            "unblock":3,
+            }
+            if action not in requirements :
+                print ("[-] Unknown action for MANAGE-PIN macro.")
+                return
+            required_count =requirements [action]
+            if len (pin_args )!=required_count :
+                print (
+                f"[-] {action.upper()} requires a PIN reference and "
+                f"{required_count -1} credential value(s). "
+                "Run MANAGE-PIN without arguments for masked input."
+                )
+                return
 
             is_verify =False 
             if action =="verify":
@@ -380,13 +570,20 @@ class ShellInteractiveWizards :
                 shell .sec_ctrl .unblock_pin (pin_id ,puk ,new_pin ,pin_encoding )
                 return
 
-            print ("[-] Unknown action for MANAGE-PIN macro.")
-            return
-
         wiz =InteractiveWizard ("GP PIN Management Command",Config .Colors )
-        wiz .add_step ("action","Action [1=Verify, 2=Change, 3=Disable, 4=Enable, 5=Unblock]:",default ="1")
-        wiz .add_step ("pin_id","PIN ID [Hex/name, Default: 01]:",default ="01")
-        wiz .add_step ("pin_encoding","PIN Data Encoding [1=ASCII, 2=HEX/BINARY]:",default ="1")
+        wiz .add_step (
+        "action",
+        "Action [1=Verify, 2=Change, 3=Disable, 4=Enable, 5=Unblock]:",
+        default ="1",choices =("1","2","3","4","5"),
+        )
+        wiz .add_step (
+        "pin_id","PIN ID [Hex/name, Default: 01]:",default ="01",
+        input_kind ="text",is_mandatory =True,
+        )
+        wiz .add_step (
+        "pin_encoding","PIN Data Encoding [1=ASCII, 2=HEX/BINARY]:",
+        default ="1",choices =("1","2"),
+        )
 
         def curr_cond (res ):
             action =res .get ("action")
@@ -395,7 +592,10 @@ class ShellInteractiveWizards :
                 is_unblock =True 
             return not is_unblock 
 
-        wiz .add_step ("curr","Enter PIN / key data:",default ="SKIP",condition =curr_cond )
+        wiz .add_step (
+        "curr","Enter PIN / key data:",default ="",
+        condition =curr_cond ,is_mandatory =True,input_kind ="text",secret =True,
+        )
 
         def new_cond (res ):
             """Return a MANAGE PROFILE condition predicate bound to *target_state*."""
@@ -407,7 +607,10 @@ class ShellInteractiveWizards :
                 is_change_or_unblock =True 
             return is_change_or_unblock 
 
-        wiz .add_step ("new","New PIN / key data:",default ="SKIP",condition =new_cond )
+        wiz .add_step (
+        "new","New PIN / key data:",default ="",
+        condition =new_cond ,is_mandatory =True,input_kind ="text",secret =True,
+        )
 
         def puk_cond (res ):
             action =res .get ("action")
@@ -416,10 +619,26 @@ class ShellInteractiveWizards :
                 is_unblock =True 
             return is_unblock 
 
-        wiz .add_step ("puk","PUK / unblock key data:",default ="SKIP",condition =puk_cond )
+        wiz .add_step (
+        "puk","PUK / unblock key data:",default ="",
+        condition =puk_cond ,is_mandatory =True,input_kind ="text",secret =True,
+        )
+
+        def mutation_cond (values ):
+            return values .get ("action")in ("2","3","4","5")
+
+        wiz .add_step (
+        "confirm","Execute this PIN state change? [y/N]:",
+        default =False,condition =mutation_cond,is_bool =True,
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         choice =res .get ("action")
+        if mutation_cond (res )and not res .get ("confirm"):
+            print ("[-] PIN state change aborted by user.")
+            return
 
         is_one =False 
         if choice =='1':
@@ -437,7 +656,7 @@ class ShellInteractiveWizards :
         if choice =='5':
             is_five =True 
 
-        pin_id =res .get ("pin_id").upper ()
+        pin_id =str (res .get ("pin_id")).upper ()
         try :
             pin_encoding =ShellInteractiveWizards ._normalize_pin_encoding_choice (res .get ("pin_encoding"))
         except ValueError as error :
@@ -446,21 +665,21 @@ class ShellInteractiveWizards :
 
         curr =res .get ("curr")
         is_curr_skip =False 
-        if curr =="SKIP":
+        if ShellInteractiveWizards ._is_skip_value (curr ):
             is_curr_skip =True 
         if is_curr_skip :
             curr =""
 
         new_pin =res .get ("new")
         is_new_skip =False 
-        if new_pin =="SKIP":
+        if ShellInteractiveWizards ._is_skip_value (new_pin ):
             is_new_skip =True 
         if is_new_skip :
             new_pin =""
 
         puk =res .get ("puk")
         is_puk_skip =False 
-        if puk =="SKIP":
+        if ShellInteractiveWizards ._is_skip_value (puk ):
             is_puk_skip =True 
         if is_puk_skip :
             puk =""
@@ -481,7 +700,10 @@ class ShellInteractiveWizards :
     def run_manage_profile_wizard (shell )->None :
         """Run the interactive MANAGE PROFILE wizard: load, enable, disable, or delete an eSIM profile."""
         wiz =InteractiveWizard ("eSIM Profile Management",Config .Colors )
-        wiz .add_step ("spec","Target Spec [1=SGP.22, 2=SGP.32, 3=SGP.02]:",default ="2")
+        wiz .add_step (
+        "spec","Target Spec [1=SGP.22, 2=SGP.32, 3=SGP.02]:",
+        default ="2",choices =("1","2","3"),
+        )
 
         def action22_cond (res ):
             spec =res .get ("spec")
@@ -494,7 +716,8 @@ class ShellInteractiveWizards :
         "action22",
         "SGP.22 Action [1=List (LIST/LIST-IOT), 2=Scan (GET-IOT), 3=Enable, 4=Disable, 5=Delete, 6=GetConfiguredData, 7=GetCerts, 8=GetEID, 9=ReadMetadata]:",
         default ="1",
-        condition =action22_cond 
+        condition =action22_cond,
+        choices =tuple (str (value )for value in range (1,10 )),
         )
 
         def action32_cond (res ):
@@ -508,7 +731,8 @@ class ShellInteractiveWizards :
         "action32",
         "SGP.32 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetAllData, 7=ReadMetadata]:",
         default ="1",
-        condition =action32_cond 
+        condition =action32_cond,
+        choices =tuple (str (value )for value in range (1,8 )),
         )
 
         def action02_cond (res ):
@@ -522,7 +746,8 @@ class ShellInteractiveWizards :
         "action02",
         "SGP.02 Action [1=Scan]:",
         default ="1",
-        condition =action02_cond 
+        condition =action02_cond,
+        choices =("1",),
         )
 
         def target_cond (res ):
@@ -550,9 +775,18 @@ class ShellInteractiveWizards :
                 is_req =True 
             return is_req 
 
-        wiz .add_step ("target","Target Profile AID/ICCID/Alias:",default ="SKIP",condition =target_cond )
+        wiz .add_step (
+        "target","Target Profile AID/ICCID/Alias:",default ="",
+        condition =target_cond ,is_mandatory =True,input_kind ="text",
+        )
+        wiz .add_step (
+        "confirm","Execute this profile state change? [y/N]:",
+        default =False,condition =target_cond,is_bool =True,
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
 
         is_sgp22 =False 
         if res .get ("spec")=='1':
@@ -640,6 +874,9 @@ class ShellInteractiveWizards :
                 needs_target =True 
 
             if needs_target :
+                if not res .get ("confirm"):
+                    print ("[-] Profile state change aborted by user.")
+                    return
                 is_skip =False 
                 if target =="SKIP":
                     is_skip =True 
@@ -718,6 +955,9 @@ class ShellInteractiveWizards :
                 needs_target =True 
 
             if needs_target :
+                if not res .get ("confirm"):
+                    print ("[-] Profile state change aborted by user.")
+                    return
                 is_skip =False 
                 if target =="SKIP":
                     is_skip =True 
@@ -761,8 +1001,17 @@ class ShellInteractiveWizards :
     def run_auth_wizard (shell )->None :
         """Run the interactive authentication wizard: INITIALIZE-UPDATE + EXTERNAL-AUTHENTICATE sequence."""
         wiz =InteractiveWizard ("Telecom Authentication Command",Config .Colors )
-        wiz .add_step ("ctx","Context [1=GSM, 2=USIM, 3=ISIM]:",default ="1")
-        wiz .add_step ("rand","RAND [Hex, 32 chars (16 bytes)]:",default ="")
+        wiz .add_step (
+        "ctx","Context [1=GSM, 2=USIM, 3=ISIM]:",
+        default ="1",choices =("1","2","3"),
+        )
+        exact_16 =ShellInteractiveWizards ._hex_size_validator (
+        "Authentication value",exact_bytes =16
+        )
+        wiz .add_step (
+        "rand","RAND [Hex, 32 chars (16 bytes)]:",default ="",
+        is_mandatory =True,input_kind ="hex",validator =exact_16,
+        )
 
         def autn_cond (res ):
             ctx =res .get ("ctx")
@@ -771,9 +1020,21 @@ class ShellInteractiveWizards :
                 is_gsm =True 
             return not is_gsm 
 
-        wiz .add_step ("autn","AUTN [Hex, 32 chars (16 bytes)]:",default ="SKIP",condition =autn_cond )
+        wiz .add_step (
+        "autn","AUTN [Hex, 32 chars (16 bytes)]:",default ="",
+        condition =autn_cond ,is_mandatory =True,input_kind ="hex",
+        validator =exact_16,
+        )
+        wiz .add_step (
+        "reveal_sensitive",
+        "Reveal derived CK/IK/Kc in terminal output? [y/N]:",
+        default =False,is_bool =True,
+        warning ="Derived authentication keys are sensitive and may be copied from terminal output.",
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         ctx =res .get ("ctx")
 
         is_gsm =False 
@@ -792,12 +1053,15 @@ class ShellInteractiveWizards :
         if is_isim :
             context ="ISIM"
 
-        rand_val =res .get ("rand").replace (" ","")
-        autn_val =res .get ("autn").replace (" ","")
+        rand_val =str (res .get ("rand")or "").replace (" ","")
+        autn_val =str (res .get ("autn")or "").replace (" ","")
+        reveal_sensitive =bool (res .get ("reveal_sensitive",False ))
 
         print (f"\n[*] Executing {context} AUTH...")
         if is_gsm :
-            shell .sec_ctrl .run_auth (rand_val ,app_context ="GSM")
+            shell .sec_ctrl .run_auth (
+            rand_val ,app_context ="GSM",reveal_sensitive =reveal_sensitive
+            )
             shell ._set_prompt_context ("GSM")
 
         is_not_gsm =False 
@@ -805,19 +1069,40 @@ class ShellInteractiveWizards :
             is_not_gsm =True 
 
         if is_not_gsm :
-            shell .sec_ctrl .run_auth (rand_val ,autn_val ,app_context =context )
+            shell .sec_ctrl .run_auth (
+            rand_val ,autn_val ,app_context =context ,
+            reveal_sensitive =reveal_sensitive ,
+            )
             shell ._set_prompt_context (context )
 
     @staticmethod 
     def run_config_wizard (shell )->None :
         """Run the interactive configuration wizard: review and update the active SCP03 configuration."""
         wiz =InteractiveWizard ("Environment Configuration",Config .Colors )
-        wiz .add_step ("key","Update [1=SCP03 ENC, 2=SCP03 MAC, 3=SCP03 DEK, 4=SCP03 KVN, 5=SCP02 ENC, 6=SCP02 MAC, 7=SCP02 DEK, 8=SCP02 KVN, 9=ADM, 10=AID]:",default ="1")
-        wiz .add_step ("val","New Value [Hex]:",default ="")
+        wiz .add_step (
+        "key",
+        "Update [1=SCP03 ENC, 2=SCP03 MAC, 3=SCP03 DEK, 4=SCP03 KVN, "
+        "5=SCP02 ENC, 6=SCP02 MAC, 7=SCP02 DEK, 8=SCP02 KVN, "
+        "9=ADM, 10=AID]:",
+        default ="1",choices =tuple (str (value )for value in range (1,11 )),
+        )
+        wiz .add_step (
+        "val","New Value [Hex]:",default ="",is_mandatory =True,
+        input_kind ="hex",secret =True,
+        )
+        wiz .add_step (
+        "confirm","Save this configuration value? [y/N]:",
+        default =False,is_bool =True,
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         choice =res .get ("key")
         val =res .get ("val").replace (" ","")
+        if not res .get ("confirm"):
+            print ("[-] Configuration update aborted by user.")
+            return
 
         key_name =""
         is_one =False 
@@ -880,6 +1165,23 @@ class ShellInteractiveWizards :
         if is_ten :
             key_name ="aid"
 
+        value_bytes =len (val )//2
+        if choice in ("1","2","3")and value_bytes not in (16,24,32 ):
+            print ("[-] SCP03 AES keys must be 16, 24, or 32 bytes.")
+            return
+        if choice in ("5","6","7")and value_bytes not in (16,24 ):
+            print ("[-] SCP02 DES/3DES keys must be 16 or 24 bytes.")
+            return
+        if choice in ("4","8")and value_bytes !=1 :
+            print ("[-] Key version number must be exactly one byte.")
+            return
+        if choice =="9"and not 1 <=value_bytes <=16 :
+            print ("[-] ADM value must be between 1 and 16 bytes.")
+            return
+        if choice =="10"and not 5 <=value_bytes <=16 :
+            print ("[-] AID must be between 5 and 16 bytes.")
+            return
+
         print ("\n[*] Updating configuration...")
         shell ._update_config (key_name ,val )
 
@@ -887,11 +1189,29 @@ class ShellInteractiveWizards :
     def run_get_data_wizard (shell )->None :
         """Run the interactive GET DATA wizard: prompts for tag selection and displays the response."""
         wiz =InteractiveWizard ("GP GET DATA Command (GPCS 11.3)",Config .Colors )
-        wiz .add_step ("choice","Action [1=Apps, 2=Pkgs, 3=SDs, 4=CPLC, 5=Custom]:",default ="1")
-        wiz .add_step ("p1","Custom P1 [Hex, SKIP for 1-4]:",default ="SKIP")
-        wiz .add_step ("p2","Custom P2 [Hex, SKIP for 1-4]:",default ="SKIP")
+        wiz .add_step (
+        "choice","Action [1=Apps, 2=Pkgs, 3=SDs, 4=CPLC, 5=Custom]:",
+        default ="1",choices =("1","2","3","4","5"),
+        )
+
+        def custom_cond (values ):
+            return values .get ("choice")=="5"
+
+        one_byte =ShellInteractiveWizards ._hex_size_validator
+        wiz .add_step (
+        "p1","Custom P1 [Hex]:",default ="",condition =custom_cond,
+        is_mandatory =True,input_kind ="hex",
+        validator =one_byte ("P1",exact_bytes =1 ),
+        )
+        wiz .add_step (
+        "p2","Custom P2 [Hex]:",default ="",condition =custom_cond,
+        is_mandatory =True,input_kind ="hex",
+        validator =one_byte ("P2",exact_bytes =1 ),
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         choice =res .get ("choice")
 
         print ("\n[*] Retrieving Data from Card...")
@@ -942,12 +1262,30 @@ class ShellInteractiveWizards :
     def run_set_status (shell )->None :
         """Run the interactive SET STATUS wizard: prompts for target, scope, and lifecycle state."""
         wiz =InteractiveWizard ("GP SET STATUS Command (GPCS 11.10)",Config .Colors ,"WARNING: Irreversible operation.")
-        wiz .add_step ("target","Target [1=ISD, 2=App, 3=ELF]:",default ="1")
-        wiz .add_step ("state","New State [Hex, e.g. 0F]:",default ="")
-        wiz .add_step ("aid","Target AID [Hex, SKIP for ISD]:",default ="SKIP")
+        wiz .add_step (
+        "target","Target [1=ISD, 2=App, 3=ELF]:",
+        default ="1",choices =("1","2","3"),
+        )
+        one_byte =ShellInteractiveWizards ._hex_size_validator
+        wiz .add_step (
+        "state","New State [Hex, e.g. 0F]:",default ="",
+        is_mandatory =True,input_kind ="hex",
+        validator =one_byte ("Lifecycle state",exact_bytes =1 ),
+        )
+
+        def aid_cond (values ):
+            return values .get ("target")in ("2","3")
+
+        wiz .add_step (
+        "aid","Target AID [Hex]:",default ="",condition =aid_cond,
+        is_mandatory =True,input_kind ="hex",
+        validator =one_byte ("AID",minimum_bytes =5,maximum_bytes =16 ),
+        )
         wiz .add_step ("exec","Execute SET STATUS? [y/N]:",default =False ,is_bool =True )
 
         res =wiz .run ()
+        if res is None :
+            return
 
         is_exec =False 
         if res .get ("exec"):
@@ -1000,12 +1338,7 @@ class ShellInteractiveWizards :
             is_app_or_elf =True 
 
         if is_app_or_elf :
-            raw_aid =res .get ("aid").replace (" ","").upper ()
-            is_valid_aid =False 
-            if raw_aid !="SKIP":
-                is_valid_aid =True 
-            if is_valid_aid :
-                aid_hex =raw_aid 
+            aid_hex =str (res .get ("aid")or "").replace (" ","").upper ()
 
         data_len =len (aid_hex )//2 
 
@@ -1070,10 +1403,31 @@ class ShellInteractiveWizards :
     def run_manage_channel (shell )->None :
         """Run the interactive MANAGE CHANNEL wizard: open, close, or select a logical channel."""
         wiz =InteractiveWizard ("GP MANAGE CHANNEL Command (GPCS 11.6)",Config .Colors )
-        wiz .add_step ("choice","Action [1=Open, 2=Close]:",default ="1")
-        wiz .add_step ("chan","Channel to close [Hex, SKIP for Open]:",default ="SKIP")
+        wiz .add_step (
+        "choice","Action [1=Open, 2=Close]:",
+        default ="1",choices =("1","2"),
+        )
+
+        def close_cond (values ):
+            return values .get ("choice")=="2"
+
+        def channel_validator (value )->str |None :
+            if len (str (value ))!=2 :
+                return "Logical channel must be exactly one byte."
+            channel =int (str (value ),16 )
+            if not 1 <=channel <=19 :
+                return "Logical channel must be between 01 and 13 (1-19)."
+            return None
+
+        wiz .add_step (
+        "chan","Channel to close [Hex, 01-13]:",default ="",
+        condition =close_cond,is_mandatory =True,input_kind ="hex",
+        validator =channel_validator,
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         choice =res .get ("choice")
 
         apdu =""
@@ -1167,7 +1521,7 @@ class ShellInteractiveWizards :
         wiz .add_step (
         "choice",
         "Action [1=Export FS to Disk (DUMP-FS), 2=Generate Full YAML Report, 3=Export eUICC YAML, 4=Combined FS+eUICC YAML]:",
-        default ="1"
+        default ="1",choices =("1","2","3","4"),
         )
 
         def dest_cond (res ):
@@ -1218,17 +1572,25 @@ class ShellInteractiveWizards :
                 should_ask =True 
             return should_ask 
 
-        wiz .add_step ("std","Target Standard [1=SGP.22, 2=SGP.32, 3=SGP.02]:",default ="2",condition =std_cond )
+        wiz .add_step (
+        "std","Target Standard [1=SGP.22, 2=SGP.32, 3=SGP.02]:",
+        default ="2",condition =std_cond ,choices =("1","2","3"),
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         choice =res .get ("choice")
 
         def _normalize_yaml_name (name :str )->str :
             cleaned =name .strip ()
+            if len (cleaned )>=2 and cleaned [0 ]==cleaned [-1 ]and cleaned [0 ]in ("'",'"'):
+                cleaned =cleaned [1 :-1 ]
+            cleaned =os .path .expandvars (os .path .expanduser (cleaned ))
             has_yaml_ext =False 
-            if cleaned .endswith (".yaml"):
+            if cleaned .lower ().endswith (".yaml"):
                 has_yaml_ext =True 
-            if cleaned .endswith (".yml"):
+            if cleaned .lower ().endswith (".yml"):
                 has_yaml_ext =True 
             if has_yaml_ext ==False :
                 cleaned =cleaned +".yaml"
@@ -1329,13 +1691,29 @@ class ShellInteractiveWizards :
             if is_std_02 :
                 standard ="SGP.02"
 
-            adm_input =input ("Enter ADM: (Skip if no) ").strip ()
-            auth_input =input ("Authenticate SD? (Y/N) ").strip ().upper ()
-            do_auth =False 
-            if auth_input =="Y":
-                do_auth =True 
-            if auth_input =="YES":
-                do_auth =True 
+            auth_wiz =InteractiveWizard (
+            "Combined Report Authentication",Config .Colors,
+            "ADM is optional. Leave it blank to read only publicly accessible data.",
+            )
+            auth_wiz .add_step (
+            "adm","ADM credential [Hex, optional]:",default ="",
+            input_kind ="hex",secret =True,
+            validator =ShellInteractiveWizards ._hex_size_validator (
+            "ADM credential",maximum_bytes =16
+            ),
+            )
+            auth_wiz .add_step (
+            "authenticate","Authenticate the Security Domain? [y/N]:",
+            default =False,is_bool =True,
+            )
+            auth_res =auth_wiz .run ()
+            if auth_res is None :
+                return
+            adm_input =str (auth_res .get ("adm")or "")
+            do_auth =bool (auth_res .get ("authenticate"))
+            if do_auth and len (adm_input )==0 :
+                print ("[-] ADM is required when Security Domain authentication is enabled.")
+                return
 
             print ("[*] Building combined FS + eUICC report... this may take a moment.")
             combined =shell ._build_combined_profile_dict (
@@ -1344,24 +1722,99 @@ class ShellInteractiveWizards :
                 authenticate_sd =do_auth ,
             )
             with open (filename ,"w",encoding ="utf-8")as out :
-                yaml .dump (combined ,out ,default_flow_style =False ,allow_unicode =True ,sort_keys =False )
+                yaml .safe_dump (combined ,out ,default_flow_style =False ,allow_unicode =True ,sort_keys =False )
             print (f"[+] Combined report saved to {filename}")
 
     @staticmethod 
     def _build_fcp_template ()->dict :
         wiz =InteractiveWizard ("ETSI TS 102 222 FCP Builder",Config .Colors )
-        wiz .add_step ("type","File Type [1=DF/ADF, 2=Transparent EF, 3=Linear Fixed EF]:",default ="1")
-        wiz .add_step ("path","Full Path for new file [Hex, e.g. 3F007F105F01]:",default ="")
-        wiz .add_step ("sec","Security Attribute TLV (Tag 8C/8B/AB) [Hex]:",default ="")
-        wiz .add_step ("size","File Size / DF Memory [Hex]:",default ="")
-        wiz .add_step ("aid","ADF AID (Tag 84) [Hex, SKIP for DF/EF]:",default ="SKIP")
-        wiz .add_step ("c6","PIN Status Template DO (Tag C6) [Hex, SKIP for EF]:",default ="SKIP")
-        wiz .add_step ("sfi","Short File Identifier [Hex, SKIP for DF/None]:",default ="SKIP")
-        wiz .add_step ("reclen","Record Length [Hex, SKIP for DF/Transparent]:",default ="SKIP")
-        wiz .add_step ("numrec","Number of Records [Hex, SKIP for DF/Transparent]:",default ="SKIP")
-        wiz .add_step ("prop","Proprietary Info (Tag A5) [Hex, SKIP to omit]:",default ="SKIP")
+        wiz .add_step (
+        "type","File Type [1=DF/ADF, 2=Transparent EF, 3=Linear Fixed EF]:",
+        default ="1",choices =("1","2","3"),
+        )
+        wiz .add_step (
+        "path","Full Path for new file [Hex, e.g. 3F007F105F01]:",
+        default ="",is_mandatory =True,input_kind ="hex",
+        )
+        wiz .add_step (
+        "sec","Security Attribute TLV (Tag 8C/8B/AB) [Hex, optional]:",
+        default ="",input_kind ="hex",
+        validator =ShellInteractiveWizards ._single_byte_tlv_validator (
+        "Security attribute", (0x8C,0x8B,0xAB)
+        ),
+        )
+
+        def positive_size (value )->str |None :
+            if len (str (value ))>4 :
+                return "File size must fit in two bytes (0001-FFFF)."
+            if int (str (value ),16 )<=0 :
+                return "File size must be greater than zero."
+            return None
+
+        def df_cond (values ):
+            return values .get ("type")=="1"
+
+        def ef_cond (values ):
+            return values .get ("type")in ("2","3")
+
+        def linear_cond (values ):
+            return values .get ("type")=="3"
+
+        def sized_file_cond (values ):
+            return values .get ("type")in ("1","2")
+
+        wiz .add_step (
+        "size","File Size / DF Memory [Hex]:",
+        default ="",condition =sized_file_cond,is_mandatory =True,
+        input_kind ="hex",validator =positive_size,
+        )
+
+        wiz .add_step (
+        "aid","ADF AID value (wrapped in Tag 84) [Hex, optional]:",
+        default ="",condition =df_cond,input_kind ="hex",
+        validator =ShellInteractiveWizards ._hex_size_validator (
+        "ADF AID",minimum_bytes =5,maximum_bytes =16
+        ),
+        )
+        wiz .add_step (
+        "c6","PIN Status Template DO (complete Tag C6 TLV) [Hex]:",
+        default ="",condition =df_cond,is_mandatory =True,input_kind ="hex",
+        validator =ShellInteractiveWizards ._single_byte_tlv_validator (
+        "PIN Status Template DO",(0xC6,)
+        ),
+        )
+        wiz .add_step (
+        "sfi","Short File Identifier [Hex, optional, 01-1E]:",
+        default ="",condition =ef_cond,input_kind ="hex",
+        validator =ShellInteractiveWizards ._hex_size_validator (
+        "Short File Identifier",exact_bytes =1
+        ),
+        )
+        wiz .add_step (
+        "reclen","Record Length [Hex, 0001-FFFF]:",
+        default ="",condition =linear_cond,is_mandatory =True,input_kind ="hex",
+        validator =ShellInteractiveWizards ._hex_size_validator (
+        "Record length",maximum_bytes =2
+        ),
+        )
+        wiz .add_step (
+        "numrec","Number of Records [Hex, 01-FF]:",
+        default ="",condition =linear_cond,is_mandatory =True,input_kind ="hex",
+        validator =ShellInteractiveWizards ._hex_size_validator (
+        "Number of records",exact_bytes =1
+        ),
+        )
+        wiz .add_step (
+        "prop","Proprietary Info value (wrapped in Tag A5) [Hex, optional]:",
+        default ="",input_kind ="hex",
+        validator =ShellInteractiveWizards ._hex_size_validator (
+        "Proprietary information",maximum_bytes =65000
+        ),
+        )
 
         res =wiz .run ()
+        if res is None :
+            return {}
         type_choice =res .get ("type")
         full_path =res .get ("path").replace (" ","").upper ()
         sec_attr =res .get ("sec").replace (" ","").upper ()
@@ -1430,13 +1883,13 @@ class ShellInteractiveWizards :
                 return {}
 
             f_size_int =int (f_size ,16 )
-            f_size_hex =f"{f_size_int:04X}"
+            f_size_hex =ShellInteractiveWizards ._unsigned_hex (f_size_int ,2 )
             size_len =len (f_size_hex )//2 
             tag_80_81 =f"81{size_len:02X}{f_size_hex}"
 
             aid_input =res .get ("aid")
             has_aid =False 
-            if aid_input !="SKIP":
+            if not ShellInteractiveWizards ._is_skip_value (aid_input )and aid_input !="":
                 has_aid =True 
 
             if has_aid :
@@ -1448,7 +1901,7 @@ class ShellInteractiveWizards :
 
             c6_attr =res .get ("c6")
             is_c6_empty =False 
-            if c6_attr =="SKIP":
+            if ShellInteractiveWizards ._is_skip_value (c6_attr )or c6_attr =="":
                 is_c6_empty =True 
 
             if is_c6_empty :
@@ -1470,7 +1923,7 @@ class ShellInteractiveWizards :
         if is_ef :
             sfi_input =res .get ("sfi")
             is_sfi_empty =False 
-            if sfi_input =="SKIP":
+            if ShellInteractiveWizards ._is_skip_value (sfi_input )or sfi_input =="":
                 is_sfi_empty =True 
 
             if is_sfi_empty :
@@ -1483,6 +1936,10 @@ class ShellInteractiveWizards :
             if has_sfi :
                 is_sfi_hex =ShellInteractiveWizards ._is_hex_string (sfi_input )
                 if is_sfi_hex ==False :
+                    return {}
+                sfi_int =int (sfi_input ,16 )
+                if not 1 <=sfi_int <=30 :
+                    print ("[-] Short File Identifier must be between 01 and 1E.")
                     return {}
                 tag_88 =f"8801{sfi_input}"
 
@@ -1502,7 +1959,7 @@ class ShellInteractiveWizards :
                 return {}
 
             f_size_int =int (f_size ,16 )
-            f_size_hex =f"{f_size_int:04X}"
+            f_size_hex =ShellInteractiveWizards ._unsigned_hex (f_size_int ,2 )
             size_len =len (f_size_hex )//2 
             tag_80_81 =f"80{size_len:02X}{f_size_hex}"
 
@@ -1511,10 +1968,10 @@ class ShellInteractiveWizards :
             num_rec =res .get ("numrec")
 
             is_rec_empty =False 
-            if rec_len =="SKIP":
+            if ShellInteractiveWizards ._is_skip_value (rec_len )or rec_len =="":
                 is_rec_empty =True 
 
-            if num_rec =="SKIP":
+            if ShellInteractiveWizards ._is_skip_value (num_rec )or num_rec =="":
                 is_rec_empty =True 
 
             if is_rec_empty :
@@ -1529,18 +1986,27 @@ class ShellInteractiveWizards :
 
             rec_len_int =int (rec_len ,16 )
             num_rec_int =int (num_rec ,16 )
+            if not 1 <=rec_len_int <=0xFFFF :
+                print ("[-] Record length must be between 0001 and FFFF.")
+                return {}
+            if not 1 <=num_rec_int <=0xFF :
+                print ("[-] Number of records must be between 01 and FF.")
+                return {}
 
-            tag_82 =f"82044221{rec_len_int:04X}"
+            tag_82 =f"82054221{rec_len_int:04X}{num_rec_int:02X}"
 
             f_size_int =rec_len_int *num_rec_int 
-            size_hex =f"{f_size_int:04X}"
+            if f_size_int >0xFFFF :
+                print ("[-] Record length × number of records exceeds FFFF bytes.")
+                return {}
+            size_hex =ShellInteractiveWizards ._unsigned_hex (f_size_int ,2 )
             size_len =len (size_hex )//2 
             tag_80_81 =f"80{size_len:02X}{size_hex}"
 
         tag_a5 =""
         prop_info =res .get ("prop")
         has_prop =False 
-        if prop_info !="SKIP":
+        if not ShellInteractiveWizards ._is_skip_value (prop_info )and prop_info !="":
             has_prop =True 
 
         if has_prop :
@@ -1548,11 +2014,11 @@ class ShellInteractiveWizards :
             if is_prop_hex ==False :
                 return {}
             prop_len =len (prop_info )//2 
-            tag_a5 =f"A5{prop_len:02X}{prop_info}"
+            tag_a5 =f"A5{ShellInteractiveWizards._ber_length_hex(prop_len)}{prop_info}"
 
         fcp_content =tag_82 +tag_83 +tag_84 +tag_8a +sec_attr +tag_80_81 +tag_88 +tag_c6 +tag_a5 
         fcp_len =len (fcp_content )//2 
-        fcp_hex =f"62{fcp_len:02X}{fcp_content}"
+        fcp_hex =f"62{ShellInteractiveWizards._ber_length_hex(fcp_len)}{fcp_content}"
 
         return {
         "fcp":fcp_hex ,
@@ -1560,7 +2026,8 @@ class ShellInteractiveWizards :
         "fid":fid ,
         "parent_path":parent_path ,
         "file_size":f_size_int ,
-        "rec_len":rec_len_int 
+        "rec_len":rec_len_int ,
+        "num_rec":num_rec_int if is_linear else 0 ,
         }
 
     @staticmethod 
@@ -1618,7 +2085,20 @@ class ShellInteractiveWizards :
             while offset <len (parent_path ):
                 chunk =parent_path [offset :offset +4 ]
                 apdu =f"00A4000402{chunk}"
-                tp_obj .transmit (apdu )
+                try :
+                    response =tp_obj .transmit (apdu )
+                except Exception as error :
+                    print (f"[-] Parent path selection failed at {chunk}: {error}")
+                    return "ERROR"
+                if isinstance (response ,tuple )and len (response )>=3 :
+                    sw1 =response [-2 ]
+                    sw2 =response [-1 ]
+                    if sw1 !=0x90 or sw2 !=0x00 :
+                        print (
+                        f"[-] Parent path selection failed at {chunk}: "
+                        f"{sw1:02X}{sw2:02X}"
+                        )
+                        return "ERROR"
                 offset +=4 
 
             return target_fid 
@@ -1629,19 +2109,88 @@ class ShellInteractiveWizards :
     def run_fs_admin_wizard (shell )->None :
         """Run the interactive FS admin wizard: select, read, update, and delete UICC files."""
         wiz =InteractiveWizard ("ETSI File System Administration",Config .Colors )
-        wiz .add_step ("action","Operation [1=ACTIVATE, 2=DEACT, 3=SUSPEND, 4=SEARCH, 5=CREATE, 6=DELETE, 7=TERM DF, 8=TERM EF, 9=RESIZE]:",default ="1")
-        wiz .add_step ("target","Target FID/Path [SKIP for current/Suspend/Create]:",default ="SKIP")
-        wiz .add_step ("search","Search string [Hex, for SEARCH]:",default ="SKIP")
-        wiz .add_step ("create","Creation Mode [1=Raw FCP, 2=Builder, SKIP for non-CREATE]:",default ="SKIP")
-        wiz .add_step ("raw_fcp","Raw FCP Template [Hex, for mode 1]:",default ="SKIP")
-        wiz .add_step ("parent","Parent Path to select [Hex, SKIP for current]:",default ="SKIP")
-        wiz .add_step ("resize83","Target FID for Resize (Tag 83) [Hex, SKIP for non-RESIZE]:",default ="SKIP")
-        wiz .add_step ("resize80","New File Size (Tag 80) [Hex, SKIP for non-RESIZE]:",default ="SKIP")
-        wiz .add_step ("resize81","New Total Size (Tag 81) [Hex, SKIP for non-RESIZE]:",default ="SKIP")
+        wiz .add_step (
+        "action",
+        "Operation [1=ACTIVATE, 2=DEACT, 3=SUSPEND, 4=SEARCH, 5=CREATE, "
+        "6=DELETE, 7=TERM DF, 8=TERM EF, 9=RESIZE]:",
+        default ="1",choices =tuple (str (value )for value in range (1,10 )),
+        )
+
+        def target_cond (values ):
+            return values .get ("action")not in ("3","5")
+
+        def search_cond (values ):
+            return values .get ("action")=="4"
+
+        def create_cond (values ):
+            return values .get ("action")=="5"
+
+        def raw_create_cond (values ):
+            return values .get ("action")=="5"and values .get ("create")=="1"
+
+        def resize_cond (values ):
+            return values .get ("action")=="9"
+
+        def mutation_cond (values ):
+            return values .get ("action")in ("5","6","7","8","9")
+
+        wiz .add_step (
+        "target","Target FID/path [Hex, SKIP for current file]:",
+        default ="SKIP",condition =target_cond,input_kind ="hex",
+        validator =ShellInteractiveWizards ._fid_path_validator,
+        )
+        wiz .add_step (
+        "search","Search string [Hex]:",default ="",condition =search_cond,
+        is_mandatory =True,input_kind ="hex",
+        )
+        wiz .add_step (
+        "create","Creation Mode [1=Raw FCP, 2=Builder]:",
+        default ="1",condition =create_cond,is_mandatory =True,
+        choices =("1","2"),
+        )
+        wiz .add_step (
+        "raw_fcp","Raw FCP Template [Hex]:",default ="",
+        condition =raw_create_cond,is_mandatory =True,input_kind ="hex",
+        )
+        wiz .add_step (
+        "parent","Parent Path to select [Hex, SKIP for current]:",
+        default ="SKIP",condition =create_cond,input_kind ="hex",
+        validator =ShellInteractiveWizards ._fid_path_validator,
+        )
+        wiz .add_step (
+        "resize83","Target FID for Resize (Tag 83) [Hex, optional if target set]:",
+        default ="",condition =resize_cond,input_kind ="hex",
+        validator =ShellInteractiveWizards ._hex_size_validator (
+        "Resize FID",exact_bytes =2
+        ),
+        )
+        wiz .add_step (
+        "resize80","New File Size (Tag 80) [Hex, optional]:",
+        default ="",condition =resize_cond,input_kind ="hex",
+        validator =ShellInteractiveWizards ._hex_size_validator (
+        "New file size",maximum_bytes =2
+        ),
+        )
+        wiz .add_step (
+        "resize81","New Total Size (Tag 81) [Hex, optional]:",
+        default ="",condition =resize_cond,input_kind ="hex",
+        validator =ShellInteractiveWizards ._hex_size_validator (
+        "New total size",maximum_bytes =2
+        ),
+        )
+        wiz .add_step (
+        "confirm","Execute this file-system change? [y/N]:",
+        default =False,condition =mutation_cond,is_bool =True,
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         choice =res .get ("action")
-        raw_target =res .get ("target")
+        if mutation_cond (res )and not res .get ("confirm"):
+            print ("[-] File-system change aborted by user.")
+            return
+        raw_target =res .get ("target")or "SKIP"
 
         target =""
         is_target_skip =False 
@@ -1711,7 +2260,7 @@ class ShellInteractiveWizards :
 
             search =res .get ("search")
             is_search_skip =False 
-            if search =="SKIP":
+            if ShellInteractiveWizards ._is_skip_value (search )or search =="":
                 is_search_skip =True 
             if is_search_skip :
                 print ("[-] Search value required for SEARCH.")
@@ -1738,7 +2287,7 @@ class ShellInteractiveWizards :
             if is_raw :
                 parent_path =res .get ("parent")
                 has_parent =False 
-                if parent_path !="SKIP":
+                if not ShellInteractiveWizards ._is_skip_value (parent_path )and parent_path !="":
                     has_parent =True 
 
                 if has_parent :
@@ -1746,13 +2295,13 @@ class ShellInteractiveWizards :
                     shell .fs_ctrl .select (parent_path )
 
                 data =res .get ("raw_fcp")
-                data_clean =data .replace (" ","").upper ()
                 is_data_skip =False 
-                if data =="SKIP":
+                if ShellInteractiveWizards ._is_skip_value (data )or data =="":
                     is_data_skip =True 
                 if is_data_skip :
                     print ("[-] Raw FCP is required for CREATE mode 1.")
                     return
+                data_clean =data .replace (" ","").upper ()
                 is_data_hex =ShellInteractiveWizards ._is_hex_string (data_clean )
                 if is_data_hex ==False :
                     print ("[-] Raw FCP must be valid even-length hex.")
@@ -1797,6 +2346,8 @@ class ShellInteractiveWizards :
                         ans_wiz =InteractiveWizard ("EF Initialization",Config .Colors )
                         ans_wiz .add_step ("upd","Update data? [y/N]:",default =False ,is_bool =True )
                         ans_res =ans_wiz .run ()
+                        if ans_res is None :
+                            return
 
                         do_update =False 
                         if ans_res .get ("upd"):
@@ -1834,14 +2385,24 @@ class ShellInteractiveWizards :
                                 if has_gp_inner :
                                     tp_obj =shell .gp_ctrl .tp 
 
+                            if tp_obj is None :
+                                print ("[-] Cannot initialize the EF: no transport is available.")
+                                return
+
                             is_transparent =False 
                             if build_info ["type_choice"]=='2':
                                 is_transparent =True 
 
                             if is_transparent :
                                 input_wiz =InteractiveWizard ("EF Data Update",Config .Colors )
-                                input_wiz .add_step ("t_data",f"Data for Transparent EF (Max {build_info['file_size']} bytes) [Hex]:",default ="")
+                                input_wiz .add_step (
+                                "t_data",
+                                f"Data for Transparent EF (Max {build_info['file_size']} bytes) [Hex]:",
+                                default ="",input_kind ="hex",
+                                )
                                 t_res =input_wiz .run ()
+                                if t_res is None :
+                                    return
                                 t_data =t_res .get ("t_data").upper ()
 
                                 target_len =build_info ['file_size']*2 
@@ -1853,7 +2414,19 @@ class ShellInteractiveWizards :
                                     pad_len =target_len -len (t_data )
                                     t_data +="F"*pad_len 
 
-                                apdu =f"00D60000{len(t_data)//2:02X}{t_data}"
+                                if len (t_data )>target_len :
+                                    print (
+                                    f"[-] Data exceeds the {build_info['file_size']}-byte "
+                                    "transparent EF size."
+                                    )
+                                    return
+                                try :
+                                    apdu =shell .fs_ctrl ._build_case3_apdu (
+                                    "00D60000",t_data ,"UPDATE BINARY"
+                                    )
+                                except ValueError as error :
+                                    print (f"[-] {error}")
+                                    return
 
                                 has_tp =False 
                                 if tp_obj is not None :
@@ -1869,12 +2442,31 @@ class ShellInteractiveWizards :
 
                             if is_linear :
                                 input_wiz =InteractiveWizard ("EF Data Update",Config .Colors )
-                                input_wiz .add_step ("rec","Record Number to update [Hex, e.g. 01]:",default ="01")
-                                input_wiz .add_step ("l_data",f"Data for Record (Max {build_info['rec_len']} bytes) [Hex]:",default ="")
+                                input_wiz .add_step (
+                                "rec","Record Number to update [Hex, e.g. 01]:",
+                                default ="01",input_kind ="hex",
+                                validator =ShellInteractiveWizards ._hex_size_validator (
+                                "Record number",exact_bytes =1
+                                ),
+                                )
+                                input_wiz .add_step (
+                                "l_data",
+                                f"Data for Record (Max {build_info['rec_len']} bytes) [Hex]:",
+                                default ="",input_kind ="hex",
+                                )
                                 l_res =input_wiz .run ()
+                                if l_res is None :
+                                    return
 
                                 rec_num_str =l_res .get ("rec").upper ()
                                 l_data =l_res .get ("l_data").upper ()
+                                rec_num =int (rec_num_str ,16 )
+                                if not 1 <=rec_num <=build_info .get ("num_rec",0 ):
+                                    print (
+                                    f"[-] Record number must be between 01 and "
+                                    f"{build_info.get('num_rec',0):02X}."
+                                    )
+                                    return
 
                                 target_len =build_info ['rec_len']*2 
                                 needs_pad =False 
@@ -1885,7 +2477,19 @@ class ShellInteractiveWizards :
                                     pad_len =target_len -len (l_data )
                                     l_data +="F"*pad_len 
 
-                                apdu =f"00DC{rec_num_str}04{len(l_data)//2:02X}{l_data}"
+                                if len (l_data )>target_len :
+                                    print (
+                                    f"[-] Data exceeds the {build_info['rec_len']}-byte "
+                                    "record length."
+                                    )
+                                    return
+                                try :
+                                    apdu =shell .fs_ctrl ._build_case3_apdu (
+                                    f"00DC{rec_num_str}04",l_data ,"UPDATE RECORD"
+                                    )
+                                except ValueError as error :
+                                    print (f"[-] {error}")
+                                    return
 
                                 has_tp =False 
                                 if tp_obj is not None :
@@ -1955,7 +2559,7 @@ class ShellInteractiveWizards :
             if is_fid_empty :
                 target_fid =res .get ("resize83")
 
-            target_fid =target_fid .replace (" ","").upper ()
+            target_fid =str (target_fid or "").replace (" ","").upper ()
             is_resize_fid_ok =ShellInteractiveWizards ._is_fid_hex (target_fid )
             if is_resize_fid_ok ==False :
                 print ("[-] Resize requires a valid 2-byte FID (Tag 83).")
@@ -1966,7 +2570,7 @@ class ShellInteractiveWizards :
             new_size_80 =res .get ("resize80")
             tag_80 =""
             has_80 =False 
-            if new_size_80 !="SKIP":
+            if not ShellInteractiveWizards ._is_skip_value (new_size_80 )and new_size_80 !="":
                 has_80 =True 
 
             if has_80 :
@@ -1975,14 +2579,17 @@ class ShellInteractiveWizards :
                     print ("[-] Tag 80 size must be valid even-length hex.")
                     return
                 size_int =int (new_size_80 ,16 )
-                size_hex =f"{size_int:04X}"
+                if size_int <=0 :
+                    print ("[-] Tag 80 size must be greater than zero.")
+                    return
+                size_hex =ShellInteractiveWizards ._unsigned_hex (size_int ,2 )
                 size_len =len (size_hex )//2 
                 tag_80 =f"80{size_len:02X}{size_hex}"
 
             new_size_81 =res .get ("resize81")
             tag_81 =""
             has_81 =False 
-            if new_size_81 !="SKIP":
+            if not ShellInteractiveWizards ._is_skip_value (new_size_81 )and new_size_81 !="":
                 has_81 =True 
 
             if has_81 :
@@ -1991,13 +2598,20 @@ class ShellInteractiveWizards :
                     print ("[-] Tag 81 size must be valid even-length hex.")
                     return
                 size_int =int (new_size_81 ,16 )
-                size_hex =f"{size_int:04X}"
+                if size_int <=0 :
+                    print ("[-] Tag 81 size must be greater than zero.")
+                    return
+                size_hex =ShellInteractiveWizards ._unsigned_hex (size_int ,2 )
                 size_len =len (size_hex )//2 
                 tag_81 =f"81{size_len:02X}{size_hex}"
 
+            if len (tag_80 )==0 and len (tag_81 )==0 :
+                print ("[-] Resize requires at least one new Tag 80 or Tag 81 size.")
+                return
+
             fcp_content =tag_83 +tag_80 +tag_81 
             fcp_len =len (fcp_content )//2 
-            fcp =f"62{fcp_len:02X}{fcp_content}"
+            fcp =f"62{ShellInteractiveWizards._ber_length_hex(fcp_len)}{fcp_content}"
 
             print (f"[*] Generated Resize FCP Template: {fcp}")
             shell .fs_ctrl .resize_file (fcp )

@@ -52,39 +52,34 @@ mkdir -p "$OUT/css" "$OUT/js" "$OUT/vendor"
 # --- CSS ----------------------------------------------------------------
 if [ -d "$SRC/css" ]; then
     # Modular CSS: concatenate in order from .css_order manifest so the
-    # output is byte-identical to the pre-split original.
+    # output is byte-identical to the canonical source. Each source chunk
+    # carries its own SPDX header for standalone review; only the first
+    # header belongs in the served monolith.
     ORDER_FILE="$SRC/css/.css_order"
     if [ -f "$ORDER_FILE" ]; then
         {
+            first_css=1
             while IFS= read -r rel; do
                 [ -z "$rel" ] && continue
                 f="$SRC/css/$rel"
-                if [ -f "$f" ]; then
+                if [ ! -f "$f" ]; then
+                    echo "[!] CSS manifest entry is missing: $f" >&2
+                    exit 1
+                fi
+                if [ "$first_css" -eq 1 ]; then
+                    cat "$f"
+                    first_css=0
+                elif head -n 2 "$f" | grep -q "SPDX-License-Identifier:"; then
+                    tail -n +6 "$f"
+                else
                     cat "$f"
                 fi
             done < "$ORDER_FILE"
         } > "$OUT/app.css"
         echo "    app.css  : $(wc -l < "$OUT/app.css") lines (modular, ordered)"
     else
-        # Fallback: alphabetical glob (for development before splitter runs).
-        {
-            for layer in tokens layout components views; do
-                layer_dir="$SRC/css/$layer"
-                if [ -d "$layer_dir" ]; then
-                    for f in "$layer_dir"/*.css; do
-                        [ -f "$f" ] || continue
-                        cat "$f"
-                    done
-                fi
-            done
-            if [ -d "$SRC/css/views/saip" ]; then
-                for f in "$SRC/css/views/saip/"*.css; do
-                    [ -f "$f" ] || continue
-                    cat "$f"
-                done
-            fi
-        } > "$OUT/app.css"
-        echo "    app.css  : $(wc -l < "$OUT/app.css") lines (modular, alphabetical)"
+        echo "[!] CSS order manifest is missing: $ORDER_FILE" >&2
+        exit 1
     fi
 else
     cp "$SRC/app.css" "$OUT/app.css"
@@ -94,41 +89,34 @@ fi
 # --- JS -----------------------------------------------------------------
 if [ -d "$SRC/js" ]; then
     # Modular JS: concatenate in order from .js_order manifest. The
-    # IIFE wrapper (__head.js / __foot.js) is part of the concatenation
-    # so the output is byte-identical to the pre-split original.
+    # IIFE wrapper (__head.js / __foot.js) is part of the concatenation.
+    # Strip per-chunk SPDX headers after the first source file so the served
+    # output remains one clean JavaScript document.
     ORDER_FILE="$SRC/js/.js_order"
     if [ -f "$ORDER_FILE" ]; then
         {
+            first_js=1
             while IFS= read -r rel; do
                 [ -z "$rel" ] && continue
                 f="$SRC/js/$rel"
-                if [ -f "$f" ]; then
+                if [ ! -f "$f" ]; then
+                    echo "[!] JavaScript manifest entry is missing: $f" >&2
+                    exit 1
+                fi
+                if [ "$first_js" -eq 1 ]; then
+                    cat "$f"
+                    first_js=0
+                elif head -n 1 "$f" | grep -q "^// SPDX-License-Identifier:"; then
+                    tail -n +4 "$f"
+                else
                     cat "$f"
                 fi
             done < "$ORDER_FILE"
         } > "$OUT/app.js"
         echo "    app.js   : $(wc -l < "$OUT/app.js") lines (modular, ordered)"
     else
-        {
-            for section in core components views; do
-                section_dir="$SRC/js/$section"
-                if [ -d "$section_dir" ]; then
-                    for f in "$section_dir"/*.js; do
-                        [ -f "$f" ] || continue
-                        cat "$f"
-                        echo ""
-                    done
-                fi
-            done
-            if [ -d "$SRC/js/views/saip" ]; then
-                for f in "$SRC/js/views/saip/"*.js; do
-                    [ -f "$f" ] || continue
-                    cat "$f"
-                    echo ""
-                done
-            fi
-        } > "$OUT/app.js"
-        echo "    app.js   : $(wc -l < "$OUT/app.js") lines (modular, alphabetical)"
+        echo "[!] JavaScript order manifest is missing: $ORDER_FILE" >&2
+        exit 1
     fi
 else
     cp "$SRC/app.js" "$OUT/app.js"

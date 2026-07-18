@@ -1245,7 +1245,6 @@ def _dispatch_eim_package_explain(
     package_path: Any = None,
 ) -> dict[str, Any]:
     path_s = str(package_path or "").strip()
-    session = _build_eim_session()
     trace_sink = io.StringIO()
     payload: dict[str, Any] = {}
     note_parts: list[str] = []

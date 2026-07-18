@@ -3,8 +3,9 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* =====================================================================
-   SCP03 Workbench v2 — full-height session tabs + reader sidebar.
+   SCP03 Workbench v2 — internal session tabs + hidden legacy sidebar.
    Overrides the older inline "ribbon + card" layout defined earlier.
    ===================================================================== */
 
@@ -323,7 +324,8 @@
   border: 1px solid transparent;
   border-bottom: none;
   color: var(--fg-muted);
-  padding: 6px 14px 7px;
+  padding: 8px 14px;
+  min-height: 36px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -346,6 +348,11 @@
   border-bottom-color: var(--bg-elev);
 }
 
+.scp03-ribbon-tabbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .scp03-ribbon-section {
   display: flex;
   flex-wrap: wrap;
@@ -353,6 +360,17 @@
   padding: 10px 12px;
   align-items: stretch;
   min-height: 74px;
+}
+
+.scp03-ribbon-section:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scp03-ribbon-tabbtn {
+    transition: none;
+  }
 }
 
 .scp03-ribbon-section .ribbon-group {
@@ -422,4 +440,3 @@
   box-shadow: none;
   background: var(--code-bg, rgba(0, 0, 0, 0.25));
 }
-

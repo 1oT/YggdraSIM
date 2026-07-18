@@ -22,9 +22,14 @@ exercise the plugin gate opt in locally via
 
 from __future__ import annotations
 
+import atexit
+import errno
 import os
+import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -44,6 +49,29 @@ def _default_env(name: str, value: str) -> None:
         os.environ[name] = value
 
 
+_TEST_ISOLATION_ROOT: Path | None = None
+if os.environ.get("YGGDRASIM_TEST_USE_AMBIENT_STATE", "").strip() != "1":
+    _TEST_ISOLATION_ROOT = Path(
+        tempfile.mkdtemp(prefix="yggdrasim-test-environment-")
+    ).resolve()
+    _ISOLATED_ENVIRONMENT = {
+        "HOME": _TEST_ISOLATION_ROOT / "home",
+        "USERPROFILE": _TEST_ISOLATION_ROOT / "home",
+        "GNUPGHOME": _TEST_ISOLATION_ROOT / "gnupg",
+        "XDG_CONFIG_HOME": _TEST_ISOLATION_ROOT / "xdg-config",
+        "XDG_CACHE_HOME": _TEST_ISOLATION_ROOT / "xdg-cache",
+        "XDG_STATE_HOME": _TEST_ISOLATION_ROOT / "xdg-state",
+        "XDG_DATA_HOME": _TEST_ISOLATION_ROOT / "xdg-data",
+        "YGGDRASIM_RUNTIME_ROOT": _TEST_ISOLATION_ROOT / "runtime",
+    }
+    for environment_name, directory in _ISOLATED_ENVIRONMENT.items():
+        directory.mkdir(parents=True, exist_ok=True)
+        if environment_name == "GNUPGHOME":
+            directory.chmod(0o700)
+        os.environ[environment_name] = str(directory)
+    atexit.register(shutil.rmtree, _TEST_ISOLATION_ROOT, True)
+
+
 os.environ["YGGDRASIM_ALLOW_PLUGINS"] = "0"
 os.environ.pop("YGGDRASIM_DISALLOW_PLUGINS", None)
 _default_env("YGGDRASIM_ALLOW_QUIRKS", "1")
@@ -54,6 +82,19 @@ def _restore_regression_env_defaults():
     """Restore process-wide defaults after tests that deliberately clear env vars."""
     _default_env("YGGDRASIM_ALLOW_QUIRKS", "1")
     yield
+
+
+@pytest.fixture
+def require_loopback_socket() -> None:
+    """Skip socket integration when the execution sandbox forbids networking."""
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+    except OSError as exc:
+        if exc.errno in {errno.EACCES, errno.EPERM}:
+            pytest.skip(f"loopback sockets are unavailable in this environment: {exc}")
+        raise
 
 
 def pytest_addoption(parser):

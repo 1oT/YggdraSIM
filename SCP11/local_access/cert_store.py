@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 local-access certificate store: CI and SM-DP+ certificate management for SGP.26 local delivery."""
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -13,6 +13,9 @@ from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import ExtensionOID
 from yggdrasim_common.inventory_crypto import read_secret_file_bytes, read_secret_json_file
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -159,7 +162,11 @@ class LocalSgp26CertStore:
     def _load_ci_records(self) -> list[CiCertificateRecord]:
         records: list[CiCertificateRecord] = []
         for cert_path in self._iter_paths("**/CI/CERT_CI_SIG_*.pem"):
-            certificate = self._load_certificate(cert_path)
+            try:
+                certificate = self._load_certificate(cert_path)
+            except Exception as load_error:
+                self._warn_unreadable_material(cert_path, load_error)
+                continue
             records.append(
                 CiCertificateRecord(
                     variant_group=self._variant_group(cert_path),
@@ -177,7 +184,11 @@ class LocalSgp26CertStore:
     def _load_subca_root_map(self) -> dict[str, str]:
         output: dict[str, str] = {}
         for cert_path in self._iter_paths("**/SM-DP+/SM_DPSubCA/CERT_*.pem"):
-            certificate = self._load_certificate(cert_path)
+            try:
+                certificate = self._load_certificate(cert_path)
+            except Exception as load_error:
+                self._warn_unreadable_material(cert_path, load_error)
+                continue
             subca_ski = self._subject_key_identifier(certificate)
             root_aki = self._authority_key_identifier(certificate)
             if len(subca_ski) == 0:
@@ -201,8 +212,12 @@ class LocalSgp26CertStore:
             if len(private_key_path) == 0 or os.path.exists(private_key_path) is False:
                 continue
 
-            certificate = self._load_certificate(cert_path)
-            private_key = self._load_private_key(private_key_path)
+            try:
+                certificate = self._load_certificate(cert_path)
+                private_key = self._load_private_key(private_key_path)
+            except Exception as load_error:
+                self._warn_unreadable_material(cert_path, load_error)
+                continue
             aki = self._authority_key_identifier(certificate)
             root_ci_ski = aki
             if aki in self._subca_by_ski:
@@ -416,6 +431,15 @@ class LocalSgp26CertStore:
             protect_plaintext_on_read=self._path_is_under_root(path, self.override_cert_root),
         )
         return serialization.load_pem_private_key(key_data, password=None)
+
+    @staticmethod
+    def _warn_unreadable_material(path: str, load_error: Exception) -> None:
+        _LOGGER.warning(
+            "Skipping unreadable SGP.26 certificate material %s (%s: %s).",
+            path,
+            load_error.__class__.__name__,
+            load_error,
+        )
 
     @staticmethod
     def _path_is_under_root(path_text: str, root_text: str) -> bool:

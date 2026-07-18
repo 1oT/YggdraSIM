@@ -35,6 +35,9 @@ fi
 if [ "${YG_HOST_ARCH}" = "unknown" ]; then
     yg_die "unsupported CPU architecture: $(uname -m)"
 fi
+if [ "${YG_MODE}" = "release" ]; then
+    yg_validate_release_arch "${YG_HOST_OS}" "${YG_HOST_ARCH}"
+fi
 
 yg_validate_flavor_for_host "${YG_FLAVOR}" "${YG_HOST_OS}"
 
@@ -57,9 +60,6 @@ install_macos_prereqs() {
 
 
 install_from_release() {
-    if [ "${YG_HOST_ARCH}" = "x86_64" ]; then
-        yg_die "macOS Intel release bundles are not published; use --mode source on this host"
-    fi
     local asset
     asset="$(yg_asset_name "macos" "${YG_HOST_ARCH}" "${YG_FLAVOR}")"
     local asset_tmp
@@ -72,17 +72,17 @@ install_from_release() {
     fi
     trap "rm -f '${asset_tmp}' '${gui_asset_tmp}'" EXIT
 
-    local url
-    url="$(yg_resolve_release_url "${YG_VERSION}" "${asset}")"
-    yg_download_release_asset "${url}" "${asset_tmp}"
+    yg_download_verified_release_asset "${YG_VERSION}" "${asset}" "${asset_tmp}"
+    codesign --verify --deep --strict --verbose=2 "${asset_tmp}" ||
+        yg_die "code-signature verification failed for ${asset}"
     yg_install_executable "${asset_tmp}" "${YG_INSTALL_DIR}" "yggdrasim"
     if [ "${YG_WITH_GUI}" = "1" ]; then
-        local gui_url
-        gui_url="$(yg_resolve_release_url "${YG_VERSION}" "${gui_asset}")"
-        yg_download_release_asset "${gui_url}" "${gui_asset_tmp}"
+        yg_download_verified_release_asset "${YG_VERSION}" "${gui_asset}" "${gui_asset_tmp}"
+        codesign --verify --deep --strict --verbose=2 "${gui_asset_tmp}" ||
+            yg_die "code-signature verification failed for ${gui_asset}"
         yg_install_executable "${gui_asset_tmp}" "${YG_INSTALL_DIR}" "yggdrasim-gui"
     fi
-    yg_emit "if Gatekeeper complains, right-click the binary once to approve it"
+    yg_emit "the release binary is code-signed; do not bypass a Gatekeeper signature warning"
     yg_emit "run 'yggdrasim --version' to verify"
     if [ "${YG_WITH_GUI}" = "1" ]; then
         yg_emit "run 'yggdrasim-gui' to launch the desktop GUI"

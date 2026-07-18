@@ -18,9 +18,9 @@
 site_name: YggdraSIM — A 1oT OSS initiative
 site_description: Secure-element, eUICC, OTA, SCP11, HIL bridge, and SAIP toolkit documentation.
 site_author: Hampus Hellsberg
-site_url: https://hampushellsberg-dev.github.io/YggdraSIM/oneot/
-repo_url: https://github.com/hampushellsberg-dev/YggdraSIM
-repo_name: hampushellsberg-dev/YggdraSIM
+site_url: https://1ot.github.io/YggdraSIM/oneot/
+repo_url: https://github.com/1oT/YggdraSIM
+repo_name: 1oT/YggdraSIM
 edit_uri: edit/main/site-docs/
 docs_dir: site-docs
 site_dir: site-oneot
@@ -37,7 +37,7 @@ extra_javascript:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/hampushellsberg-dev/YggdraSIM
+      link: https://github.com/1oT/YggdraSIM
       name: YggdraSIM source repository
     - icon: fontawesome/solid/comments
       link: https://github.com/1oT/YggdraSIM/discussions

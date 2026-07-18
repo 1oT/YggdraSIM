@@ -5,7 +5,7 @@
 """Tests for the SAIP authoring / packaging dispatchers.
 
 Covered surfaces:
-  * ``saip.save_package`` — DER / hex / JSON output, overwrite guard
+  * ``saip.save_package`` — DER / hex / ASN.1 / varder / JSON output
   * ``saip.add_pe`` / ``saip.delete_pe`` — sequence splice / drop
   * ``saip.import_pe`` / ``saip.export_pe`` — single-PE I/O
   * ``saip.list_applications`` / ``saip.compare_applications`` —
@@ -116,6 +116,52 @@ class SavePackageFormatTests(unittest.TestCase):
         )
         doc = json.loads(target.read_text(encoding="utf-8"))
         self.assertIn("sections", doc)
+
+    def test_save_asn1_round_trips_and_appends_asn_extension(self) -> None:
+        original_der = bytes(self._manager.claim(self._sid)["pes"].to_der())
+        result = self._actions._dispatch_save_package(
+            ctx=None,
+            session_id=self._sid,
+            output_path=str(self._tmpdir / "profile-value-notation"),
+            format="asn1",
+        )
+
+        self.assertEqual(result["format"], "asn1")
+        self.assertTrue(result["output_path"].endswith(".asn"))
+        target = Path(result["output_path"])
+        rendered = target.read_text(encoding="utf-8")
+        self.assertIn("ProfileElement ::=", rendered)
+
+        reopened = self._actions._dispatch_open_package(
+            ctx=None,
+            path=str(target),
+        )
+        try:
+            reopened_der = bytes(self._manager.claim(reopened["session_id"])["pes"].to_der())
+            self.assertEqual(reopened_der, original_der)
+        finally:
+            self._manager.close(reopened["session_id"])
+
+    def test_save_asn_alias_returns_canonical_asn1_format(self) -> None:
+        result = self._actions._dispatch_save_package(
+            ctx=None,
+            session_id=self._sid,
+            output_path=str(self._tmpdir / "alias"),
+            format="asn",
+        )
+
+        self.assertEqual(result["format"], "asn1")
+        self.assertEqual(result["encoding"], "asn1")
+        self.assertTrue(result["output_path"].endswith(".asn"))
+
+    def test_save_varder_rejects_concrete_session(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unresolved inline-template"):
+            self._actions._dispatch_save_package(
+                ctx=None,
+                session_id=self._sid,
+                output_path=str(self._tmpdir / "not-a-template"),
+                format="varder",
+            )
 
     def test_save_appends_default_extension(self) -> None:
         target = self._tmpdir / "no_extension"

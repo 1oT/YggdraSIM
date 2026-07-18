@@ -65,8 +65,6 @@ from Tools.ProfilePackage.saip_diff_loader import (
 )
 from Tools.ProfilePackage.saip_diff_tui_prefs import (
     DECODED_HEIGHT_DEFAULT,
-    DECODED_HEIGHT_MAX,
-    DECODED_HEIGHT_MIN,
     clamp_decoded_height,
     load_diff_tui_layout,
     load_theme_pref,

@@ -153,7 +153,7 @@ class Opaque5gEfTests(unittest.TestCase):
 
     # 5GS LOCI layout: 13B 5G-GUTI + 3B TAI-PLMN + 3B TAC + 1B status.
     _LOCI_SAMPLE = bytes.fromhex(
-        "00F110" "AA" "BBCC" "11223344" "00FFEE"  # 5G-GUTI
+        "000B" "F2" "00F110" "AA" "BBCC" "11223344"  # 5G-GUTI
         "00F110"
         "000001"
         "00"

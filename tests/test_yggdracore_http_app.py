@@ -3,10 +3,10 @@
 
 """HTTP-surface tests for the YggdraCore stub AUSF launcher.
 
-Exercises the FastAPI app via :class:`fastapi.testclient.TestClient`
-(no port binding, no env vars) so the wire shape -- request body
-keys, response body keys, status codes -- is locked independently
-of the underlying :class:`AusfStub`.
+Exercises the endpoints registered on the FastAPI app directly (no
+port binding, client thread, or env vars) so the request/response
+shape and declared route status codes are locked independently of
+the underlying :class:`AusfStub`.
 
 Coverage:
 
@@ -17,17 +17,15 @@ Coverage:
 * Launcher refuses to start when ``YGGDRASIM_5GCORE_MODE`` is unset.
 * Launcher refuses non-loopback bind without explicit override.
 
-The HTTP-client tests skip cleanly when ``httpx`` -- a transitive
-dependency of FastAPI's TestClient -- is missing so a developer
-without the ``test`` extra installed still gets a clean signal from
-the rest of the suite. The launcher-safety tests do not need a
-client and always run.
+The endpoint tests skip cleanly when FastAPI is missing. The
+launcher-safety tests do not need FastAPI and always run.
 """
 
 from __future__ import annotations
 
 import os
 import unittest
+from typing import Any
 
 from SIMCARD.aka_5g import derive_res_star
 from SIMCARD.auth import milenage_vectors
@@ -36,12 +34,13 @@ from Tools.YggdraCore.ausf_stub import AusfStub
 from Tools.YggdraCore.http_app import build_app, main
 from Tools.YggdraCore.subscription_store import SubscriptionStore
 
-try:  # FastAPI's TestClient pulls httpx; make the dep visible up-front.
-    import httpx as _httpx  # noqa: F401  -- imported only for the gate.
+try:
+    from fastapi import HTTPException as _HTTPException
 
-    _HAS_HTTPX = True
+    _HAS_FASTAPI = True
 except ImportError:
-    _HAS_HTTPX = False
+    _HTTPException = Exception
+    _HAS_FASTAPI = False
 
 
 _K = bytes.fromhex("465B5CE8B199B49FAA5F0A2EE238A6BC")
@@ -82,25 +81,61 @@ def _ue_compute_res_star() -> bytes:
     return derive_res_star(vectors.ck, vectors.ik, _SN_NAME, _FIXED_RAND, vectors.res)
 
 
-@unittest.skipUnless(_HAS_HTTPX, "httpx is required for FastAPI TestClient")
+def _route(app: Any, path: str, method: str) -> Any:
+    """Return one registered route, failing clearly if the surface changes."""
+    method = method.upper()
+    for route in app.routes:
+        methods = getattr(route, "methods", None) or set()
+        if getattr(route, "path", None) == path and method in methods:
+            return route
+    raise AssertionError(f"route not registered: {method} {path}")
+
+
+def _effective_status(route: Any) -> int:
+    """FastAPI represents its default successful response status as ``None``."""
+    return int(route.status_code or 200)
+
+
+@unittest.skipUnless(_HAS_FASTAPI, "FastAPI is required for endpoint tests")
 class _AppTestBase(unittest.TestCase):
     def setUp(self) -> None:
-        from fastapi.testclient import TestClient
-
         self.app, self.stub, self.subscriptions, self.aanf = _build_isolated_app()
-        self.client = TestClient(self.app)
+        self.health_route = _route(self.app, "/yggdracore/healthz", "GET")
+        self.diagnostics_route = _route(self.app, "/yggdracore/diagnostics", "GET")
+        self.start_route = _route(
+            self.app,
+            "/nausf-auth/v1/ue-authentications",
+            "POST",
+        )
+        self.confirm_route = _route(
+            self.app,
+            (
+                "/nausf-auth/v1/ue-authentications/{ctx_id}"
+                "/5g-aka-confirmation"
+            ),
+            "PUT",
+        )
+
+    def assert_http_error(
+        self,
+        expected_status: int,
+        endpoint: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        with self.assertRaises(_HTTPException) as caught:
+            endpoint(*args, **kwargs)
+        self.assertEqual(caught.exception.status_code, expected_status)
 
 
 class HealthAndDiagnosticsTests(_AppTestBase):
     def test_healthz_returns_ok(self) -> None:
-        response = self.client.get("/yggdracore/healthz")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok"})
+        self.assertEqual(_effective_status(self.health_route), 200)
+        self.assertEqual(self.health_route.endpoint(), {"status": "ok"})
 
     def test_diagnostics_includes_subscription_count(self) -> None:
-        response = self.client.get("/yggdracore/diagnostics")
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
+        self.assertEqual(_effective_status(self.diagnostics_route), 200)
+        body = self.diagnostics_route.endpoint()
         self.assertEqual(body["subscriptions"], 1)
         self.assertIn("aanf_entries", body)
         self.assertIn("in_flight_auth_contexts", body)
@@ -108,12 +143,10 @@ class HealthAndDiagnosticsTests(_AppTestBase):
 
 class StartAuthenticationHttpTests(_AppTestBase):
     def test_happy_path_returns_201_with_av(self) -> None:
-        response = self.client.post(
-            "/nausf-auth/v1/ue-authentications",
-            json={"supiOrSuci": _SUPI, "servingNetworkName": _SN_NAME},
+        self.assertEqual(_effective_status(self.start_route), 201)
+        body = self.start_route.endpoint(
+            payload={"supiOrSuci": _SUPI, "servingNetworkName": _SN_NAME},
         )
-        self.assertEqual(response.status_code, 201)
-        body = response.json()
         self.assertEqual(body["supi"], _SUPI)
         self.assertEqual(body["authType"], "5G_AKA")
         self.assertEqual(len(body["ctxId"]), 32)
@@ -122,38 +155,38 @@ class StartAuthenticationHttpTests(_AppTestBase):
         self.assertIn("_links", body)
 
     def test_missing_supi_returns_400(self) -> None:
-        response = self.client.post(
-            "/nausf-auth/v1/ue-authentications",
-            json={"servingNetworkName": _SN_NAME},
+        self.assert_http_error(
+            400,
+            self.start_route.endpoint,
+            payload={"servingNetworkName": _SN_NAME},
         )
-        self.assertEqual(response.status_code, 400)
 
     def test_unknown_supi_returns_404(self) -> None:
-        response = self.client.post(
-            "/nausf-auth/v1/ue-authentications",
-            json={"supiOrSuci": "imsi-000000000000000", "servingNetworkName": _SN_NAME},
+        self.assert_http_error(
+            404,
+            self.start_route.endpoint,
+            payload={
+                "supiOrSuci": "imsi-000000000000000",
+                "servingNetworkName": _SN_NAME,
+            },
         )
-        self.assertEqual(response.status_code, 404)
 
 
 class ConfirmAuthenticationHttpTests(_AppTestBase):
     def _start(self) -> str:
-        response = self.client.post(
-            "/nausf-auth/v1/ue-authentications",
-            json={"supiOrSuci": _SUPI, "servingNetworkName": _SN_NAME},
+        body = self.start_route.endpoint(
+            payload={"supiOrSuci": _SUPI, "servingNetworkName": _SN_NAME},
         )
-        self.assertEqual(response.status_code, 201)
-        return response.json()["ctxId"]
+        return body["ctxId"]
 
     def test_correct_res_star_returns_success_with_akma_payload(self) -> None:
         ctx_id = self._start()
         ue_res_star = _ue_compute_res_star()
-        response = self.client.put(
-            f"/nausf-auth/v1/ue-authentications/{ctx_id}/5g-aka-confirmation",
-            json={"resStar": ue_res_star.hex().upper()},
+        self.assertEqual(_effective_status(self.confirm_route), 200)
+        body = self.confirm_route.endpoint(
+            ctx_id=ctx_id,
+            payload={"resStar": ue_res_star.hex().upper()},
         )
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
         self.assertEqual(body["authResult"], "AUTHENTICATION_SUCCESS")
         self.assertEqual(body["supi"], _SUPI)
         self.assertEqual(len(body["kSeaf"]), 64)  # 32 bytes hex.
@@ -164,26 +197,29 @@ class ConfirmAuthenticationHttpTests(_AppTestBase):
     def test_wrong_res_star_returns_401(self) -> None:
         ctx_id = self._start()
         forged = ("00" * 16)
-        response = self.client.put(
-            f"/nausf-auth/v1/ue-authentications/{ctx_id}/5g-aka-confirmation",
-            json={"resStar": forged},
+        self.assert_http_error(
+            401,
+            self.confirm_route.endpoint,
+            ctx_id=ctx_id,
+            payload={"resStar": forged},
         )
-        self.assertEqual(response.status_code, 401)
 
     def test_unknown_ctx_id_returns_404(self) -> None:
-        response = self.client.put(
-            "/nausf-auth/v1/ue-authentications/deadbeef/5g-aka-confirmation",
-            json={"resStar": "00" * 16},
+        self.assert_http_error(
+            404,
+            self.confirm_route.endpoint,
+            ctx_id="deadbeef",
+            payload={"resStar": "00" * 16},
         )
-        self.assertEqual(response.status_code, 404)
 
     def test_missing_res_star_returns_400(self) -> None:
         ctx_id = self._start()
-        response = self.client.put(
-            f"/nausf-auth/v1/ue-authentications/{ctx_id}/5g-aka-confirmation",
-            json={},
+        self.assert_http_error(
+            400,
+            self.confirm_route.endpoint,
+            ctx_id=ctx_id,
+            payload={},
         )
-        self.assertEqual(response.status_code, 400)
 
 
 class LauncherSafetyTests(unittest.TestCase):

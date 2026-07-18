@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Findings (SAIP + eIM) */
 
 .data-table tr.severity-error td,
@@ -82,4 +83,3 @@
 }
 
 .tool-finding-block.severity-ok::before { background: var(--ok); }
-

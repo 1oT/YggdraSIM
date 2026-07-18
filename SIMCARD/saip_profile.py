@@ -11,7 +11,6 @@ from typing import Any
 
 from SIMCARD.etsi_fs import ISIM_AID, USIM_AID
 from SIMCARD.saip_pysim_specs import (
-    FcpAttributes,
     GfmEntry,
     apply_pysim_augmentations,
     apply_pysim_service_table_overlay_to_inspector,
@@ -2474,17 +2473,22 @@ def _finalize_image(image: SimProfileImage) -> SimProfileImage | None:
             pass
 
     if len(image.iccid) > 0 and _node_by_path(image, ("MF", "EF.ICCID")) is None:
-        image.nodes.append(
-            SimProfileFsNode(
-                path=("MF", "EF.ICCID"),
-                name="EF.ICCID",
-                kind="ef",
-                fid="2FE2",
-                structure="transparent",
-                data=encode_iccid_ef(image.iccid),
-                sfi=0x02,
+        try:
+            encoded_iccid = encode_iccid_ef(image.iccid)
+        except ValueError:
+            encoded_iccid = b""
+        if encoded_iccid:
+            image.nodes.append(
+                SimProfileFsNode(
+                    path=("MF", "EF.ICCID"),
+                    name="EF.ICCID",
+                    kind="ef",
+                    fid="2FE2",
+                    structure="transparent",
+                    data=encoded_iccid,
+                    sfi=0x02,
+                )
             )
-        )
 
     if len(image.imsi) > 0 and _node_by_path(image, ("MF", "ADF.USIM")) is None:
         image.nodes.append(
@@ -2498,17 +2502,22 @@ def _finalize_image(image: SimProfileImage) -> SimProfileImage | None:
             )
         )
     if len(image.imsi) > 0 and _node_by_path(image, ("MF", "ADF.USIM", "EF.IMSI")) is None:
-        image.nodes.append(
-            SimProfileFsNode(
-                path=("MF", "ADF.USIM", "EF.IMSI"),
-                name="EF.IMSI",
-                kind="ef",
-                fid="6F07",
-                structure="transparent",
-                data=encode_imsi_ef(image.imsi),
-                sfi=0x07,
+        try:
+            encoded_imsi = encode_imsi_ef(image.imsi)
+        except ValueError:
+            encoded_imsi = b""
+        if encoded_imsi:
+            image.nodes.append(
+                SimProfileFsNode(
+                    path=("MF", "ADF.USIM", "EF.IMSI"),
+                    name="EF.IMSI",
+                    kind="ef",
+                    fid="6F07",
+                    structure="transparent",
+                    data=encoded_imsi,
+                    sfi=0x07,
+                )
             )
-        )
     if len(image.imsi) > 0 and _node_by_path(image, ("MF", "ADF.USIM", "EF.AD")) is None:
         image.nodes.append(
             SimProfileFsNode(

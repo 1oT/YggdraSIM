@@ -20,6 +20,7 @@ from threading import Event
 from typing import Any, Protocol
 
 from yggdrasim_common.card_backend import CARD_RELAY_MARKER_FILENAME, is_simulated_card_backend
+from yggdrasim_common.frozen_dispatch import build_module_command
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 from yggdrasim_common.runtime_paths import ensure_runtime_dir, runtime_path
@@ -836,11 +837,10 @@ class HilBridgeSupervisor:
 
     def _build_bridge_command(self) -> list[str]:
         bridge = self.config.bridge
-        command = [
-            str(self.config.bridge_python or sys.executable),
-            "-m",
+        command = build_module_command(
             "Tools.HilBridge.main",
-        ]
+            source_python=str(self.config.bridge_python or "").strip() or None,
+        )
         if self.config.debug_enabled:
             command.append("--debug")
         command.extend(
@@ -1148,7 +1148,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--bridge-python",
         type=str,
         default=sys.executable,
-        help="Python interpreter used to spawn the bridge child process.",
+        help=(
+            "Python interpreter used to spawn the bridge child in source mode. "
+            "Frozen bundles use the allow-listed internal dispatcher."
+        ),
     )
     parser.add_argument(
         "--no-remsim-client",

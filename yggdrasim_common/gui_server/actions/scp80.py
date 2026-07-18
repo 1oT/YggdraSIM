@@ -619,7 +619,6 @@ def _dispatch_run_script(
                         verbose=False,
                         override_payload=payload_hex,
                     )
-                    plan_dict = _plan_to_dict(plan)
                     result = transport.send_ota_sequence(
                         _plan_apdu_list_for_transport(plan, config),
                         verbose=False,

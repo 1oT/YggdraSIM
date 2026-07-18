@@ -20,11 +20,15 @@ NO_COLOR=1 disables ANSI colour. YGGDRASIM_DEMO_FAST=1 skips pauses.
 
 from __future__ import annotations
 
+import datetime
 import os
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -268,16 +272,37 @@ def main() -> int:
     pause(0.6)
 
     banner("Step 8 — LoadCRL (BF35) — eIM pushes a revocation list (SGP.22 §5.7.13)")
-    crl_inner = bytes.fromhex("3010A00E300C020101180A323032363030333030") + b"\x00" * 4
-    crl_payload = tlv("BF35", crl_inner)
-    response = store_data(engine, crl_payload.hex(), "LoadCRL")
-    if response.startswith(b"\xbf\x35"):
-        ok = b"\x80\x01\x00" in response
+    ci_private_key = engine.sgp._ci_private_key
+    ci_certificate_der = bytes(engine.sgp._ci_certificate_der or b"")
+    if ci_private_key is None or not ci_certificate_der:
         step(
-            "Card persisted the CRL DER and replied "
-            f"{'ok(0)' if ok else 'invalidSignature(2)'}",
-            f"state.loaded_crls now has {len(engine.state.loaded_crls)} entry/entries",
+            "LoadCRL skipped because the demo CI signing material is unavailable.",
+            "Install the bundled interoperability assets to exercise signed CRL validation.",
+            colour=C_YELLOW,
         )
+    else:
+        ci_certificate = x509.load_der_x509_certificate(ci_certificate_der)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        crl_der = (
+            x509.CertificateRevocationListBuilder()
+            .issuer_name(ci_certificate.subject)
+            .last_update(now - datetime.timedelta(minutes=1))
+            .next_update(now + datetime.timedelta(days=1))
+            .sign(ci_private_key, hashes.SHA256())
+            .public_bytes(serialization.Encoding.DER)
+        )
+        crl_tag, crl_value, _crl_raw, crl_next = read_tlv(crl_der, 0)
+        if crl_tag != b"\x30" or crl_next != len(crl_der):
+            raise RuntimeError("Generated CRL is not one DER CertificateList.")
+        crl_payload = tlv("BF35", tlv(b"\xA0", crl_value))
+        response = store_data(engine, crl_payload.hex(), "LoadCRL")
+        if response.startswith(b"\xbf\x35"):
+            ok = b"\x80\x01\x00" in response
+            step(
+                "Card validated and persisted the CRL DER, then replied "
+                f"{'ok(0)' if ok else 'invalidSignature(2)'}",
+                f"state.loaded_crls now has {len(engine.state.loaded_crls)} entry/entries",
+            )
     pause(0.6)
 
     banner("Done — what just happened")

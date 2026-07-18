@@ -20,7 +20,7 @@ cannot silently strip the headers again.
 import unittest
 
 from SCP11.live.orchestrator import SGP22Orchestrator as LiveOrchestrator
-from SCP11.test.orchestrator import SGP22Orchestrator as TestOrchestrator
+from SCP11.test.orchestrator import SGP22Orchestrator as CompatibilityOrchestrator
 from SCP11.orchestrator import SGP22Orchestrator as MainOrchestrator
 from SCP11.local_access.session import LocalIsdrSession
 
@@ -87,7 +87,11 @@ class SegmenterAnnexMComplianceTests(unittest.TestCase):
         return MainOrchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
 
     def _make_test_orchestrator(self):
-        return TestOrchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
+        return CompatibilityOrchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=None,
+        )
 
     def _make_live_orchestrator(self):
         return LiveOrchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)

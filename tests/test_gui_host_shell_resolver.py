@@ -22,9 +22,6 @@ child and is covered by the route tests when those run.
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
 
@@ -32,6 +29,7 @@ import pytest
 def _clear_host_shell_env(monkeypatch, tmp_path):
     """Default-off posture mirrors a fresh shell."""
     monkeypatch.delenv("YGGDRASIM_GUI_HOST_SHELL", raising=False)
+    monkeypatch.delenv("YGGDRASIM_GUI_HIL_MODEM", raising=False)
     monkeypatch.setenv("YGGDRASIM_RUNTIME_ROOT", str(tmp_path))
     yield
 
@@ -132,19 +130,33 @@ def test_describe_hil_modem_capability_does_not_require_full_host_shell(monkeypa
     from yggdrasim_common.gui_server import host_shell
 
     monkeypatch.delenv("YGGDRASIM_GUI_HOST_SHELL", raising=False)
+    monkeypatch.setenv("YGGDRASIM_GUI_HIL_MODEM", "1")
     snapshot = host_shell.describe_hil_modem_capability()
     assert snapshot["scope"] == "hil-modem"
     if snapshot["supported"]:
         assert snapshot["enabled"] is True
         assert "tio" in snapshot["allowed_commands"]
-        assert snapshot["default_command"] == "sudo tio /dev/ttyUSB2"
+        assert snapshot["default_command"] == "tio /dev/ttyUSB2"
         assert snapshot["default_command_source"] == "local"
 
 
-def test_describe_hil_modem_capability_prefers_remote_card_bridge_target() -> None:
+def test_describe_hil_modem_capability_is_default_off() -> None:
+    from yggdrasim_common.gui_server import host_shell
+
+    snapshot = host_shell.describe_hil_modem_capability()
+    if snapshot["supported"]:
+        assert snapshot["enabled"] is False
+        assert snapshot["default_command"] == ""
+        assert "YGGDRASIM_GUI_HIL_MODEM=1" in snapshot["reason"]
+
+
+def test_describe_hil_modem_capability_prefers_remote_card_bridge_target(
+    monkeypatch,
+) -> None:
     from yggdrasim_common.gui_server import host_shell
     from yggdrasim_common.gui_server.actions import card_bridge
 
+    monkeypatch.setenv("YGGDRASIM_GUI_HIL_MODEM", "1")
     card_bridge._write_remote_rig_state({
         "ssh_target": "pi@example.test",
         "identity_file": "~/.ssh/id_rpi",
@@ -156,14 +168,21 @@ def test_describe_hil_modem_capability_prefers_remote_card_bridge_target() -> No
         assert snapshot["remote_target"] == "pi@example.test"
         assert "ssh -tt" in snapshot["default_command"]
         assert "pi@example.test" in snapshot["default_command"]
-        assert "sudo tio /dev/ttyUSB2" in snapshot["default_command"]
+        assert "tio /dev/ttyUSB2" in snapshot["default_command"]
+        assert "sudo" not in snapshot["default_command"]
 
 
-def test_parse_hil_modem_command_accepts_sudo_tio() -> None:
+def test_parse_hil_modem_command_rejects_sudo_tio() -> None:
     from yggdrasim_common.gui_server import host_shell
 
-    assert host_shell.parse_hil_modem_command("sudo tio /dev/ttyUSB2") == [
-        "sudo",
+    with pytest.raises(ValueError, match="does not run sudo"):
+        host_shell.parse_hil_modem_command("sudo tio /dev/ttyUSB2")
+
+
+def test_parse_hil_modem_command_accepts_unprivileged_tio() -> None:
+    from yggdrasim_common.gui_server import host_shell
+
+    assert host_shell.parse_hil_modem_command("tio /dev/ttyUSB2") == [
         "tio",
         "/dev/ttyUSB2",
     ]
@@ -174,7 +193,7 @@ def test_parse_hil_modem_command_accepts_remote_ssh_tio() -> None:
 
     command = (
         "ssh -tt -o BatchMode=yes -o ConnectTimeout=8 "
-        "-i /home/user/.ssh/id_rpi pi@example.test sudo tio /dev/ttyUSB2"
+        "-i /home/user/.ssh/id_rpi pi@example.test tio /dev/ttyUSB2"
     )
     assert host_shell.parse_hil_modem_command(command) == [
         "ssh",
@@ -186,7 +205,6 @@ def test_parse_hil_modem_command_accepts_remote_ssh_tio() -> None:
         "-i",
         "/home/user/.ssh/id_rpi",
         "pi@example.test",
-        "sudo",
         "tio",
         "/dev/ttyUSB2",
     ]

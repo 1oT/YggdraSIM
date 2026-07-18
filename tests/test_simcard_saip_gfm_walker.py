@@ -22,7 +22,7 @@ from __future__ import annotations
 import unittest
 
 from SIMCARD.saip_profile import _consume_generic_file_management
-from SIMCARD.saip_pysim_specs import GfmEntry, pysim_gfm_walk
+from SIMCARD.saip_pysim_specs import pysim_gfm_walk
 from SIMCARD.state import SimProfileImage
 
 

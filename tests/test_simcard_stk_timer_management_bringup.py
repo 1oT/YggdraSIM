@@ -39,7 +39,7 @@ from SIMCARD.utils import tlv
 def _make_toolkit() -> ToolkitLogic:
     state = SimCardState(
         atr=b"",
-        eid="89049032123451234512345678901234",
+        eid="89049032123451234512345678901235",
         iccid="8949000000000000001",
         imsi="999990000000001",
         default_dp_address="",

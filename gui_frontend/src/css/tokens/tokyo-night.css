@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Tokyo Night (storm-inflected dark, blue-violet accent) ------- */
 html[data-theme="tokyo-night"] {
   --bg: #1a1b26;
@@ -15,7 +16,7 @@ html[data-theme="tokyo-night"] {
   --border-strong: rgba(192, 202, 245, 0.28);
   --fg: #c0caf5;
   --fg-dim: #a9b1d6;
-  --fg-muted: #565f89;
+  --fg-muted: var(--fg-dim);
   --accent: #7aa2f7;
   --accent-strong: #5d81e8;
   --accent-soft: rgba(122, 162, 247, 0.14);
@@ -40,4 +41,3 @@ html[data-theme="tokyo-night"] {
     radial-gradient(circle at 8% 96%, rgba(187, 154, 247, 0.10), transparent 48%),
     radial-gradient(circle at 50% 45%, rgba(125, 207, 255, 0.04), transparent 56%);
 }
-

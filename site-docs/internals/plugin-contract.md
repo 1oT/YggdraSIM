@@ -27,10 +27,12 @@ The plugin runtime in `yggdrasim_common/plugin_runtime.py` scans the
 - package-style plugins `plugins/<name>/` with an `__init__.py` (skipped if
   that file is missing)
 
-Loaded plugins get unique synthetic module names on the form
-`yggdrasim_plugin_<name>`. Load errors are captured per plugin and surfaced
-back to the runtime, not raised globally. A broken plugin must not break the
-rest of the process.
+Directory plugins load canonically as `plugins.<name>` so package-relative
+imports work in source and drop-in runtime installs. The legacy
+`yggdrasim_plugin_<name>` name remains an alias to the same module object.
+Single-file plugins retain the legacy synthetic name. Load errors are captured
+per plugin and surfaced back to the runtime, not raised globally. A broken
+plugin must not break the rest of the process.
 
 ## Registration contract
 

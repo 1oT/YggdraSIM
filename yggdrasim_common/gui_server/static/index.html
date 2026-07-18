@@ -18,12 +18,14 @@
     <script src="/static/vendor/xterm/addon-fit.js" defer></script>
   </head>
   <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
     <div id="app" class="app-shell" data-ready="false" data-log-collapsed="true">
       <header class="topbar">
         <button
           type="button"
           id="sidebar-collapse-toggle"
           class="sidebar-collapse-toggle"
+          aria-controls="module-navigation"
           aria-label="Collapse Command Center sidebar"
           title="Hide the Command Center sidebar. Click again to bring it back.">
           <span class="sidebar-collapse-glyph" aria-hidden="true">&#x25C0;</span>
@@ -167,7 +169,7 @@
         </button>
       </header>
 
-      <aside class="sidebar">
+      <aside class="sidebar" id="module-navigation" aria-label="Module navigation">
         <div class="sidebar-title">Command Center</div>
         <ul class="subsystem-list tool-list" id="command-center-nav">
           <li class="loading">loading…</li>
@@ -181,12 +183,22 @@
         -->
         <div class="sidebar-title">Meta</div>
         <ul class="subsystem-list tool-list">
-          <li data-view="overview" class="subsystem-entry active">Overview</li>
-          <li data-view="about" class="subsystem-entry">About</li>
+          <li>
+            <button
+              type="button"
+              data-view="overview"
+              class="subsystem-entry active">Overview</button>
+          </li>
+          <li>
+            <button
+              type="button"
+              data-view="about"
+              class="subsystem-entry">About</button>
+          </li>
         </ul>
       </aside>
 
-      <main class="main" id="main">
+      <main class="main" id="main" tabindex="-1">
         <section data-view="overview" class="view view-active">
           <h1>YggdraSIM Universal GUI</h1>
           <p class="lead">
@@ -250,10 +262,21 @@
               <span class="cc-chip" id="remote-lab-state">idle</span>
             </div>
             <div class="remote-lab-import-panel" id="remote-lab-import-panel" hidden>
+              <label for="remote-lab-import-files">Invite files</label>
+              <input
+                type="file"
+                id="remote-lab-import-files"
+                accept=".ygglab,.json,application/json"
+                multiple
+              />
+              <p class="hint">
+                Select one or more <code>.ygglab</code>/JSON files, or paste a
+                single invite, invite array, or invite bundle below.
+              </p>
               <label for="remote-lab-import-json">Invite JSON</label>
               <textarea id="remote-lab-import-json" rows="8" spellcheck="false"></textarea>
               <div class="remote-lab-import-actions">
-                <button class="btn btn-primary" id="remote-lab-import-submit">Save invite</button>
+                <button class="btn btn-primary" id="remote-lab-import-submit">Save invite(s)</button>
                 <button class="btn" id="remote-lab-import-cancel">Cancel</button>
               </div>
             </div>
@@ -385,7 +408,11 @@
               <div class="form-row host-shell-device-strip">
                 <label for="host-shell-device">Serial device</label>
                 <select id="host-shell-device" aria-label="Serial device shortcut"></select>
-                <button class="btn" id="host-shell-device-refresh" title="Re-scan /dev/ttyUSB* /dev/ttyACM* /dev/serial/by-id/*">↻</button>
+                <button
+                  class="btn"
+                  id="host-shell-device-refresh"
+                  aria-label="Refresh serial devices"
+                  title="Re-scan /dev/ttyUSB* /dev/ttyACM* /dev/serial/by-id/*">↻</button>
                 <button class="btn" id="host-shell-device-insert" title="Insert the chosen device path at the shell cursor">Insert path</button>
                 <label class="host-shell-toggle">
                   <input type="checkbox" id="host-shell-decode-toggle" />
@@ -421,7 +448,7 @@
           server-side helper returns.
         -->
         <section data-view="card_bridge" class="view">
-          <h1>Remote host onboarding</h1>
+          <h1>Remote Bridge</h1>
           <p class="lead">
             Prepare a remote host for Remote Lab access. Card Bridge remains
             the APDU data plane; this view configures the host, tunnel, token,
@@ -430,7 +457,7 @@
 
           <div class="cb-panel">
             <header class="cb-panel-header">
-              <h2>Card Bridge data plane</h2>
+              <h2>Bridge connection</h2>
               <div class="cb-panel-controls">
                 <label class="cb-toggle">
                   <input type="checkbox" id="cb-auto-refresh" checked />
@@ -479,7 +506,7 @@
               <h2>Remote host onboarding</h2>
               <div class="cb-panel-controls">
                 <button class="btn btn-small" id="cb-rig-refresh">Refresh</button>
-                <button class="btn btn-small" id="cb-rig-open-gui">Open RPi GUI</button>
+                <button class="btn btn-small" id="cb-rig-open-gui">Open remote GUI</button>
               </div>
             </header>
 
@@ -492,6 +519,10 @@
               <div class="form-row cb-rig-field">
                 <label for="cb-rig-identity-file">SSH key</label>
                 <input type="text" id="cb-rig-identity-file" placeholder="optional private key path" autocomplete="off" />
+              </div>
+              <div class="form-row cb-rig-field">
+                <label for="cb-rig-ssh-path">SSH executable</label>
+                <input type="text" id="cb-rig-ssh-path" placeholder="ssh or full OpenSSH path" autocomplete="off" />
               </div>
               <div class="form-row cb-rig-field">
                 <label for="cb-rig-reader-index">PC reader index</label>
@@ -513,26 +544,26 @@
             <div class="cb-rig-port-plan" id="cb-rig-port-plan"></div>
 
             <details class="cb-override cb-rig-advanced">
-              <summary>RPi service settings</summary>
+              <summary>Remote host service settings</summary>
               <div class="cb-rig-grid">
                 <div class="form-row cb-rig-field">
                   <label for="cb-rig-service-name">Service</label>
                   <input type="text" id="cb-rig-service-name" value="yggdrasim-hil-supervisor.service" />
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-remote-workdir">RPi repo directory</label>
+                  <label for="cb-rig-remote-workdir">Remote repo directory</label>
                   <input type="text" id="cb-rig-remote-workdir" value="~/YggdraSIM" />
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-remote-python">RPi Python</label>
-                  <input type="text" id="cb-rig-remote-python" value="~/YggdraSIM/python/bin/python" />
+                  <label for="cb-rig-remote-python">Remote Python</label>
+                  <input type="text" id="cb-rig-remote-python" value="~/YggdraSIM/.venv/bin/python" />
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-remote-token">RPi token file</label>
+                  <label for="cb-rig-remote-token">Remote token file</label>
                   <input type="text" id="cb-rig-remote-token" value="~/.config/yggdrasim/card_bridge/8642.token" />
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-remsim-binary">RPi REMSIM binary</label>
+                  <label for="cb-rig-remsim-binary">Remote REMSIM binary</label>
                   <input type="text" id="cb-rig-remsim-binary" value="osmo-remsim-client-st2" autocomplete="off" />
                 </div>
                 <div class="form-row cb-rig-field">
@@ -575,11 +606,11 @@
                 <div class="cb-probe-value" id="cb-rig-tunnel-status">–</div>
               </div>
               <div class="cb-probe-card">
-                <div class="cb-probe-label">RPi service</div>
+                <div class="cb-probe-label">Remote service</div>
                 <div class="cb-probe-value" id="cb-rig-service-status">–</div>
               </div>
               <div class="cb-probe-card">
-                <div class="cb-probe-label">RPi bridge</div>
+                <div class="cb-probe-label">Remote bridge</div>
                 <div class="cb-probe-value" id="cb-rig-bridge-status">–</div>
               </div>
               <div class="cb-probe-card">
@@ -595,7 +626,7 @@
                 <div class="cb-probe-value" id="cb-rig-modem-link-status">–</div>
               </div>
               <div class="cb-probe-card">
-                <div class="cb-probe-label">RPi GUI</div>
+                <div class="cb-probe-label">Remote GUI</div>
                 <div class="cb-probe-value cb-mono" id="cb-rig-gui-url">http://127.0.0.1:27854</div>
               </div>
             </div>
@@ -729,7 +760,15 @@
           </div>
         </section>
 
-        <div class="cc-doc-modal" id="doc-modal" data-state="hidden" aria-hidden="true" role="dialog">
+        <div
+          class="cc-doc-modal"
+          id="doc-modal"
+          data-state="hidden"
+          aria-hidden="true"
+          aria-modal="true"
+          aria-labelledby="doc-modal-title"
+          role="dialog"
+          tabindex="-1">
           <div class="cc-doc-modal-backdrop" data-doc-close="true"></div>
           <div class="cc-doc-modal-card" role="document">
             <header class="cc-doc-modal-header">
@@ -747,15 +786,24 @@
                   type="button"
                   class="cc-doc-modal-btn cc-doc-modal-close"
                   id="doc-modal-close"
+                  aria-label="Close document viewer"
                   title="Close">×</button>
               </div>
             </header>
-            <div class="cc-doc-modal-body" id="doc-modal-body"></div>
+            <div
+              class="cc-doc-modal-body"
+              id="doc-modal-body"
+              aria-busy="false"
+              tabindex="0"></div>
           </div>
         </div>
       </main>
 
-      <aside class="log-dock" id="log-dock" data-collapsed="true">
+      <aside
+        class="log-dock"
+        id="log-dock"
+        data-collapsed="true"
+        aria-label="Event log">
         <div
           class="log-dock-resize-handle"
           id="log-dock-resize-handle"
@@ -767,9 +815,11 @@
           title="Drag to resize event log"></div>
         <div class="log-dock-tabs" role="tablist" aria-label="Event log">
           <button
+            type="button"
             class="log-dock-tab is-active"
             role="tab"
             aria-selected="true"
+            aria-controls="log-tabpanel-messages"
             data-log-tab="messages"
             id="log-tab-messages">
             <span class="log-dock-tab-dot log-dock-tab-dot--info"></span>
@@ -777,9 +827,11 @@
             <span class="log-dock-tab-count" id="log-count-messages">0</span>
           </button>
           <button
+            type="button"
             class="log-dock-tab"
             role="tab"
             aria-selected="false"
+            aria-controls="log-tabpanel-warnings"
             data-log-tab="warnings"
             id="log-tab-warnings">
             <span class="log-dock-tab-dot log-dock-tab-dot--warn"></span>
@@ -787,9 +839,11 @@
             <span class="log-dock-tab-count" id="log-count-warnings">0</span>
           </button>
           <button
+            type="button"
             class="log-dock-tab"
             role="tab"
             aria-selected="false"
+            aria-controls="log-tabpanel-errors"
             data-log-tab="errors"
             id="log-tab-errors">
             <span class="log-dock-tab-dot log-dock-tab-dot--error"></span>
@@ -797,9 +851,11 @@
             <span class="log-dock-tab-count" id="log-count-errors">0</span>
           </button>
           <button
+            type="button"
             class="log-dock-tab"
             role="tab"
             aria-selected="false"
+            aria-controls="log-tabpanel-apdu"
             data-log-tab="apdu"
             id="log-tab-apdu">
             <span class="log-dock-tab-dot log-dock-tab-dot--apdu"></span>
@@ -807,9 +863,11 @@
             <span class="log-dock-tab-count" id="log-count-apdu">0</span>
           </button>
           <button
+            type="button"
             class="log-dock-tab"
             role="tab"
             aria-selected="false"
+            aria-controls="log-tabpanel-validation"
             data-log-tab="validation"
             id="log-tab-validation">
             <span class="log-dock-tab-dot log-dock-tab-dot--validation"></span>
@@ -818,47 +876,75 @@
           </button>
           <div class="log-dock-spacer"></div>
           <button
+            type="button"
             class="log-dock-action"
             id="log-dock-copy"
             title="Copy all rows in the active tab to clipboard"
             aria-label="Copy active tab to clipboard">Copy</button>
           <button
+            type="button"
             class="log-dock-action"
             id="log-dock-clear"
             title="Clear all log entries">Clear all</button>
           <button
+            type="button"
             class="log-dock-action log-dock-toggle"
             id="log-dock-toggle"
             title="Collapse / expand event log"
             aria-label="Toggle event log dock">▾</button>
         </div>
         <div class="log-dock-body">
-          <div class="log-dock-panel is-active" data-log-panel="messages">
+          <div
+            class="log-dock-panel is-active"
+            id="log-tabpanel-messages"
+            role="tabpanel"
+            aria-labelledby="log-tab-messages"
+            data-log-panel="messages">
             <div class="log-dock-rows" id="log-panel-messages"></div>
             <div class="log-dock-placeholder" id="log-empty-messages">
               No messages yet. Action runs and system events will appear here.
             </div>
           </div>
-          <div class="log-dock-panel" data-log-panel="warnings">
+          <div
+            class="log-dock-panel"
+            id="log-tabpanel-warnings"
+            role="tabpanel"
+            aria-labelledby="log-tab-warnings"
+            data-log-panel="warnings">
             <div class="log-dock-rows" id="log-panel-warnings"></div>
             <div class="log-dock-placeholder" id="log-empty-warnings">
               No warnings yet.
             </div>
           </div>
-          <div class="log-dock-panel" data-log-panel="errors">
+          <div
+            class="log-dock-panel"
+            id="log-tabpanel-errors"
+            role="tabpanel"
+            aria-labelledby="log-tab-errors"
+            data-log-panel="errors">
             <div class="log-dock-rows" id="log-panel-errors"></div>
             <div class="log-dock-placeholder" id="log-empty-errors">
               No errors yet.
             </div>
           </div>
-          <div class="log-dock-panel" data-log-panel="apdu">
+          <div
+            class="log-dock-panel"
+            id="log-tabpanel-apdu"
+            role="tabpanel"
+            aria-labelledby="log-tab-apdu"
+            data-log-panel="apdu">
             <div class="log-dock-rows log-dock-rows--mono" id="log-panel-apdu"></div>
             <div class="log-dock-placeholder" id="log-empty-apdu">
               APDU trace rows will land here when a card-touching action
               runs (populated by the G-4 slice).
             </div>
           </div>
-          <div class="log-dock-panel" data-log-panel="validation">
+          <div
+            class="log-dock-panel"
+            id="log-tabpanel-validation"
+            role="tabpanel"
+            aria-labelledby="log-tab-validation"
+            data-log-panel="validation">
             <section
               class="saip-validation saip-validation--logdock"
               data-saip-slot="validation"></section>

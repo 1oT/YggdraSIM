@@ -31,13 +31,20 @@ Use this file as the entry point for choosing the correct `SCP11` module.
 
 ### Relay implementation layout
 
-The relay implementation is exposed through one eSIM management entrypoint:
+The operator entrypoints intentionally retain separate workflow
+orchestrators, while protocol parsing and compatibility aliases have one
+owner:
 
 | Tree | Status | Notes |
 | --- | --- | --- |
-| `SCP11/orchestrator.py` and `SCP11/console.py` | **canonical** | Spec-correctness work, bug fixes, and API additions land here first. |
-| `SCP11/live/orchestrator.py` and `SCP11/live/console.py` | **relay implementation** | Relay-first shell with LPAd / IPAd behavior and physical-card recovery helpers. |
-| `SCP11/test/*.py` | **compatibility shims** | Import the live relay implementation for older imports. This namespace is not a separate operator entrypoint. |
+| `SCP11/orchestrator.py` and `SCP11/console.py` | **legacy relay workflow owner** | Backs the historical `SCP11.relay` automation contract. |
+| `SCP11/live/orchestrator.py` and `SCP11/live/console.py` | **live workflow owner** | Backs the current LPAd / IPAd shell and its physical-card recovery behavior. |
+| `SCP11/eim_packages.py` and `SCP11/shared/ber_tlv.py` | **protocol parser owner** | All live, relay, and test namespaces use these parser symbols. |
+| `SCP11/test/*.py` | **compatibility shims** | Alias the live implementation for older imports. This namespace is not a separate operator entrypoint. |
+
+Do not copy parser or BER framing logic into either orchestrator. Workflow
+logic moves into `SCP11/shared/` only after both owners demonstrate the same
+contract through shared tests.
 
 Remote relay mode uses platform TLS trust by default. `ES9_CA_BUNDLE_PATH`
 is empty unless the operator explicitly pins a CA bundle with `SET-ES9-CA`.

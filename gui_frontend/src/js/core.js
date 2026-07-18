@@ -233,6 +233,7 @@
       host_shell: "Advanced · Host shell",
       live_readers: "Inspect · PC/SC readers",
       card_bridge: "Advanced · Remote Bridge",
+      remote_lab: "Advanced · Remote Lab",
       command_center: (options && options.crumb) || "Command Center",
     }[name] || "Overview");
     highlightSidebar(name);
@@ -592,6 +593,8 @@
           loadLiveReaders();
         } else if (view === "card_bridge") {
           loadCardBridge();
+        } else if (view === "remote_lab") {
+          loadRemoteLab();
         }
         // Pause the Card Bridge auto-refresh whenever the operator
         // navigates away so we never poll in the background.
@@ -944,12 +947,11 @@
       }
     } catch (_err) { /* commandState may not exist on bootstrap */ }
     var url = scheme + "://" + window.location.host + "/api/terminal/" + encodeURIComponent(moduleName)
-      + "?t=" + encodeURIComponent(token)
-      + "&rows=" + rows + "&cols=" + cols;
+      + "?rows=" + rows + "&cols=" + cols;
     if (activeReader.length > 0) {
       url += "&reader=" + encodeURIComponent(activeReader);
     }
-    var sock = new WebSocket(url);
+    var sock = new WebSocket(url, ["yggdrasim", "bearer." + token]);
     sock.binaryType = "arraybuffer";
     tab.socket = sock;
     tab.status = "connecting";
@@ -1101,6 +1103,475 @@
     if (btn) btn.addEventListener("click", loadLiveReaders);
   }
 
+  // -- Remote Lab dashboard -------------------------------------------------
+
+  var remoteLabState = {
+    devices: [],
+    statuses: {},
+    activeSessions: [],
+    activeSessionCount: 0,
+    sessionPollTimer: null,
+    loading: false,
+    connectInFlight: "",
+  };
+
+  function wireRemoteLabPanel() {
+    var refresh = $("remote-lab-refresh");
+    if (refresh) {
+      refresh.addEventListener("click", function () {
+        loadRemoteLab();
+      });
+    }
+    var importBtn = $("remote-lab-import");
+    var panel = $("remote-lab-import-panel");
+    if (importBtn && panel) {
+      importBtn.setAttribute("aria-controls", panel.id);
+      importBtn.setAttribute("aria-expanded", panel.hidden ? "false" : "true");
+      importBtn.addEventListener("click", function () {
+        remoteLabSetImportPanel(panel.hidden, {
+          focus: true,
+          restoreFocus: false,
+        });
+      });
+    }
+    var cancel = $("remote-lab-import-cancel");
+    if (cancel && panel) {
+      cancel.addEventListener("click", function () {
+        remoteLabSetImportPanel(false, {
+          focus: false,
+          restoreFocus: true,
+        });
+      });
+    }
+    var submit = $("remote-lab-import-submit");
+    if (submit) {
+      submit.addEventListener("click", remoteLabSubmitImport);
+    }
+    var files = $("remote-lab-import-files");
+    if (files) {
+      files.addEventListener("change", remoteLabLoadInviteFiles);
+    }
+    var state = $("remote-lab-state");
+    if (state) {
+      state.setAttribute("role", "status");
+      state.setAttribute("aria-live", "polite");
+      state.setAttribute("aria-atomic", "true");
+    }
+  }
+
+  function remoteLabSetImportPanel(open, options) {
+    var panel = $("remote-lab-import-panel");
+    var trigger = $("remote-lab-import");
+    if (!panel) return;
+    var shouldOpen = Boolean(open);
+    panel.hidden = !shouldOpen;
+    if (trigger) trigger.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+    var opts = options || {};
+    if (shouldOpen && opts.focus !== false) {
+      var json = $("remote-lab-import-json");
+      var files = $("remote-lab-import-files");
+      var target = json && String(json.value || "").trim() ? json : (files || json);
+      if (target && target.focus) target.focus();
+    } else if (!shouldOpen && opts.restoreFocus && trigger && trigger.focus) {
+      trigger.focus();
+    }
+  }
+
+  function remoteLabSetImportError(message) {
+    var panel = $("remote-lab-import-panel");
+    if (!panel) return;
+    var error = $("remote-lab-import-error");
+    if (!error) {
+      error = document.createElement("div");
+      error.id = "remote-lab-import-error";
+      error.className = "remote-lab-import-error cc-error";
+      error.setAttribute("role", "alert");
+      error.setAttribute("aria-live", "assertive");
+      var actions = panel.querySelector(".remote-lab-import-actions");
+      panel.insertBefore(error, actions || null);
+    }
+    error.textContent = String(message || "");
+    error.hidden = !message;
+  }
+
+  function remoteLabSetState(text) {
+    var state = $("remote-lab-state");
+    if (!state) return;
+    var label = String(text || "idle");
+    var lower = label.toLowerCase();
+    var semantic = /error|fail|unavailable/.test(lower)
+      ? "error"
+      : (/loading|connecting|working/.test(lower) ? "busy"
+        : (/ready|connected|imported|loaded|removed|exported/.test(lower)
+          ? "success" : "idle"));
+    state.textContent = label;
+    state.dataset.state = semantic;
+  }
+
+  function remoteLabLocalActiveSessions() {
+    var sessions = [];
+    var wb = commandState && commandState.scp03Workbench;
+    var tabs = wb && Array.isArray(wb.tabs) ? wb.tabs : [];
+    tabs.forEach(function (tab) {
+      if (!tab || !tab.sessionId) return;
+      var scan = tab.scanData || {};
+      var meta = scan.remote_lab || {};
+      if (!meta || !meta.remote_session_id) return;
+      sessions.push({
+        session_id: tab.sessionId,
+        device_id: meta.device_id || "",
+        rig_id: meta.rig_id || "",
+        remote_session_id: meta.remote_session_id || "",
+        agent: meta.agent || "",
+        reader_name: tab.readerName || "",
+      });
+    });
+    return sessions;
+  }
+
+  function remoteLabSetActiveSessions(sessions) {
+    var rows = Array.isArray(sessions) ? sessions.filter(function (item) {
+      return item && (item.session_id || item.remote_session_id);
+    }) : [];
+    remoteLabState.activeSessions = rows;
+    remoteLabState.activeSessionCount = rows.length;
+    remoteLabRenderGlobalSessionIndicators();
+  }
+
+  function remoteLabRenderGlobalSessionIndicators() {
+    var count = remoteLabState.activeSessionCount || 0;
+    var state = count > 0 ? "running" : "idle";
+    var label = count > 0 ? "running" : "stopped";
+    document.querySelectorAll('#command-center-nav [data-cc-leaf-id="leaf-adv-remote-lab"]').forEach(function (entry) {
+      entry.setAttribute("data-cb-state", state);
+      entry.classList.toggle("is-cb-active", state === "running");
+      var marker = entry.querySelector(".cc-nav-card-bridge-state");
+      if (marker) marker.textContent = state === "running" ? "running" : "";
+    });
+    document.querySelectorAll('.overview-module-card[data-cc-view="remote_lab"]').forEach(function (card) {
+      card.setAttribute("data-cb-state", state);
+      card.classList.toggle("is-cb-active", state === "running");
+      var badge = card.querySelector('[data-cb-role="overview-status"]');
+      if (badge) badge.textContent = label;
+    });
+  }
+
+  async function remoteLabRefreshSessionState() {
+    try {
+      var data = await apiFetch("/api/remote-lab/sessions");
+      remoteLabSetActiveSessions((data && Array.isArray(data.sessions)) ? data.sessions : []);
+    } catch (_err) {
+      remoteLabSetActiveSessions(remoteLabLocalActiveSessions());
+    }
+  }
+
+  function remoteLabStartSessionPoll() {
+    if (remoteLabState.sessionPollTimer != null) return;
+    remoteLabState.sessionPollTimer = window.setInterval(function () {
+      if (document.hidden) return;
+      remoteLabRefreshSessionState();
+    }, 10000);
+  }
+
+  async function loadRemoteLab() {
+    if (remoteLabState.loading) return;
+    remoteLabState.loading = true;
+    remoteLabSetState("loading");
+    try {
+      var data = await apiFetch("/api/remote-lab/devices");
+      remoteLabState.devices = (data && Array.isArray(data.devices)) ? data.devices : [];
+      var statusData = await apiFetch("/api/remote-lab/status").catch(function () {
+        return { devices: [] };
+      });
+      remoteLabState.statuses = {};
+      ((statusData && statusData.devices) || []).forEach(function (status) {
+        if (status && status.id) remoteLabState.statuses[String(status.id)] = status;
+      });
+      await remoteLabRefreshSessionState();
+      renderRemoteLab();
+      remoteLabSetState("ready");
+    } catch (err) {
+      remoteLabSetState("error");
+      var host = $("remote-lab-devices");
+      if (host) {
+        host.innerHTML = '<p class="loading">Remote Lab unavailable: '
+          + escapeHtml(String(err && err.message || err)) + "</p>";
+      }
+    } finally {
+      remoteLabState.loading = false;
+    }
+  }
+
+  function renderRemoteLab() {
+    setText("remote-lab-count", "devices: " + String(remoteLabState.devices.length));
+    var host = $("remote-lab-devices");
+    if (!host) return;
+    host.innerHTML = "";
+    if (remoteLabState.devices.length === 0) {
+      var empty = document.createElement("p");
+      empty.className = "loading";
+      empty.textContent = "No Remote Lab devices imported.";
+      host.appendChild(empty);
+      return;
+    }
+    remoteLabState.devices.forEach(function (device) {
+      host.appendChild(remoteLabBuildCard(device));
+    });
+  }
+
+  function remoteLabBuildCard(device) {
+    var id = String(device && device.id || "");
+    var status = remoteLabState.statuses[id] || {};
+    var card = document.createElement("article");
+    card.className = "remote-lab-card";
+    card.setAttribute("data-device-id", id);
+
+    var head = document.createElement("div");
+    head.className = "remote-lab-card-head";
+    var title = document.createElement("div");
+    title.className = "remote-lab-title";
+    title.textContent = String(device.name || id || "Remote Lab device");
+    head.appendChild(title);
+    var badge = document.createElement("span");
+    var state = String(status.status || "offline");
+    badge.className = "remote-lab-status remote-lab-status--" + state;
+    badge.textContent = state;
+    badge.setAttribute("role", "status");
+    badge.setAttribute("aria-label", "Device status: " + state);
+    head.appendChild(badge);
+    card.appendChild(head);
+
+    var meta = document.createElement("div");
+    meta.className = "remote-lab-meta";
+    var location = String(device.location || status.location || "");
+    var tags = Array.isArray(device.tags) ? device.tags : [];
+    meta.textContent = [
+      location || "no location",
+      tags.length ? tags.join(", ") : "no tags",
+    ].join(" · ");
+    card.appendChild(meta);
+
+    var detail = document.createElement("div");
+    detail.className = "remote-lab-detail";
+    var agent = device.agent || {};
+    var agentHost = String(agent.host || "");
+    if (agentHost.indexOf(":") !== -1 && agentHost.charAt(0) !== "[") {
+      agentHost = "[" + agentHost + "]";
+    }
+    detail.textContent = String(agentHost + ":" + (agent.control_port || ""));
+    if (status.stream_port) {
+      detail.textContent += " · stream " + String(status.stream_port);
+    }
+    if (status.locked_by) {
+      detail.textContent += " · busy by " + String(status.locked_by);
+    }
+    if (status.error) {
+      detail.textContent += " · " + String(status.error);
+    }
+    card.appendChild(detail);
+
+    var actions = document.createElement("div");
+    actions.className = "remote-lab-actions";
+    var connect = document.createElement("button");
+    connect.type = "button";
+    connect.className = "btn btn-primary";
+    connect.textContent = remoteLabState.connectInFlight === id ? "Connecting..." : "Connect";
+    connect.disabled = remoteLabState.connectInFlight === id || state === "busy" || state === "reserved";
+    connect.addEventListener("click", function () { remoteLabConnect(id); });
+    actions.appendChild(connect);
+
+    var refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "btn";
+    refresh.textContent = "Refresh";
+    refresh.addEventListener("click", function () { remoteLabRefreshOne(id); });
+    actions.appendChild(refresh);
+
+    var exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.className = "btn";
+    exportBtn.textContent = "Export";
+    exportBtn.addEventListener("click", function () { remoteLabExport(id); });
+    actions.appendChild(exportBtn);
+
+    var remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn btn-danger";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", function () { remoteLabRemove(id); });
+    actions.appendChild(remove);
+
+    card.appendChild(actions);
+    return card;
+  }
+
+  async function remoteLabRefreshOne(id) {
+    try {
+      var status = await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id) + "/status");
+      remoteLabState.statuses[id] = status || {};
+      renderRemoteLab();
+    } catch (err) {
+      remoteLabState.statuses[id] = { id: id, status: "offline", error: String(err && err.message || err) };
+      renderRemoteLab();
+    }
+  }
+
+  async function remoteLabConnect(id) {
+    if (!id) return;
+    remoteLabState.connectInFlight = id;
+    remoteLabSetState("connecting " + id);
+    renderRemoteLab();
+    try {
+      var resp = await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id) + "/connect", {
+        method: "POST",
+        body: JSON.stringify({ user: "", requested_ttl_seconds: 3600 }),
+      });
+      var data = resp && resp.data ? resp.data : {};
+      remoteLabAdoptScp03Session(data);
+      remoteLabSetState("connected");
+      logBus.emit({
+        level: "info",
+        source: "remote-lab",
+        message: "connected " + id + " as session " + String(data.session_id || "").substring(0, 8),
+      });
+    } catch (err) {
+      remoteLabSetState("connect failed");
+      logBus.emit({
+        level: "error",
+        source: "remote-lab",
+        message: "connect failed for " + id + ": " + String(err && err.message || err),
+      });
+    } finally {
+      remoteLabState.connectInFlight = "";
+      await loadRemoteLab();
+    }
+  }
+
+  function remoteLabAdoptScp03Session(data) {
+    if (!data || !data.session_id) return;
+    openCommandSubsystem("SCP03", { scope: "filesystem", leafId: "leaf-scp03-filesystem" });
+    var wb = commandState.scp03Workbench;
+    var tab = null;
+    for (var i = 0; i < wb.tabs.length; i++) {
+      if (!wb.tabs[i].sessionId) { tab = wb.tabs[i]; break; }
+    }
+    if (!tab) {
+      tab = scp03CreateEmptyTab();
+      wb.tabs.push(tab);
+    }
+    wb.activeTabId = tab.id;
+    tab.sessionId = data.session_id || null;
+    tab.readerName = data.reader_name || "Remote Lab";
+    tab.atrHex = data.atr_hex || "";
+    tab.scanData = data;
+    tab.status = "open";
+    tab.pendingReader = "";
+    tab.error = null;
+      tab.errorKind = "";
+    commandState.scp03Session = tab.sessionId;
+    scp03PersistTab(tab);
+    readerBarSetActiveReaderOnly(tab.readerName);
+    remoteLabSetActiveSessions(remoteLabLocalActiveSessions());
+    remoteLabRefreshSessionState();
+    var tabBar = document.querySelector(".cc-wb-tabs.scp03-topbar");
+    var tabBody = document.querySelector(".cc-wb-body");
+    if (tabBar && tabBody) renderScp03Tabs(tabBar, tabBody);
+    if (typeof readerBarNotifySessionChanged === "function") {
+      readerBarNotifySessionChanged();
+    }
+  }
+
+  async function remoteLabLoadInviteFiles(event) {
+    var files = Array.prototype.slice.call((event && event.target && event.target.files) || []);
+    var input = $("remote-lab-import-json");
+    if (!input || files.length === 0) return;
+    remoteLabSetImportError("");
+    try {
+      var payloads = [];
+      for (var index = 0; index < files.length; index++) {
+        payloads.push(JSON.parse(await files[index].text()));
+      }
+      input.value = JSON.stringify(payloads.length === 1 ? payloads[0] : payloads, null, 2);
+      remoteLabSetState("loaded " + String(files.length) + " invite file(s)");
+    } catch (err) {
+      remoteLabSetState("invite file error");
+      remoteLabSetImportError(
+        "Could not parse the selected invite file: "
+          + String(err && err.message || err)
+      );
+      logBus.emit({
+        level: "error",
+        source: "remote-lab",
+        message: "invite file could not be parsed: " + String(err && err.message || err),
+      });
+    }
+  }
+
+  async function remoteLabSubmitImport() {
+    var input = $("remote-lab-import-json");
+    if (!input) return;
+    remoteLabSetImportError("");
+    try {
+      var invite = JSON.parse(String(input.value || ""));
+      var response = await apiFetch("/api/remote-lab/import", {
+        method: "POST",
+        body: JSON.stringify({ invite: invite, replace: true }),
+      });
+      input.value = "";
+      var files = $("remote-lab-import-files");
+      if (files) files.value = "";
+      var panel = $("remote-lab-import-panel");
+      if (panel) {
+        remoteLabSetImportPanel(false, {
+          focus: false,
+          restoreFocus: true,
+        });
+      }
+      await loadRemoteLab();
+      remoteLabSetState("imported " + String((response && response.count) || 1));
+    } catch (err) {
+      remoteLabSetState("import failed");
+      remoteLabSetImportError(
+        "Import failed: " + String(err && err.message || err)
+      );
+      input.focus();
+      logBus.emit({
+        level: "error",
+        source: "remote-lab",
+        message: "import failed: " + String(err && err.message || err),
+      });
+    }
+  }
+
+  async function remoteLabExport(id) {
+    try {
+      var invite = await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id) + "/export");
+      var input = $("remote-lab-import-json");
+      if (input) input.value = JSON.stringify(invite, null, 2);
+      remoteLabSetImportPanel(true, {
+        focus: true,
+        restoreFocus: false,
+      });
+      remoteLabSetState("exported " + id);
+    } catch (err) {
+      remoteLabSetState("export failed");
+    }
+  }
+
+  async function remoteLabRemove(id) {
+    if (!window.confirm("Remove Remote Lab device '" + id + "' from this GUI?")) return;
+    try {
+      await apiFetch(
+        "/api/remote-lab/devices/" + encodeURIComponent(id) + "?remove_token_file=true",
+        { method: "DELETE" }
+      );
+      await loadRemoteLab();
+      remoteLabSetState("removed " + id);
+    } catch (err) {
+      remoteLabSetState("remove failed");
+    }
+  }
+
   // -- Card Bridge panel (CB-4 frontend) -----------------------------------
   //
   // Wraps the read-only ``card_bridge.status`` / ``card_bridge.probe``
@@ -1114,40 +1585,67 @@
   // SVG so a wedged tunnel is visible at a glance.
 
   var CB_HISTORY_MAX = 60;
-  var cbState = {
-    history: [],
-    autoRefreshTimer: null,
-    autoRefreshIntervalMs: 5000,
-    lastStatus: null,
-    globalState: "idle",
-    globalLabel: "idle",
-  };
+	  var cbState = {
+	    history: [],
+	    autoRefreshTimer: null,
+	    autoRefreshIntervalMs: 5000,
+	    lastStatus: null,
+	    globalState: "idle",
+	    globalLabel: "stopped",
+	  };
 
-  function cbBridgeStatusFromPayload(data) {
-    if (!data || !data.configured) return { state: "idle", label: "idle" };
-    if (data.url_source === "marker") return { state: "running", label: "running" };
-    return { state: "configured", label: "configured" };
-  }
+	  function cbBridgeStatusFromPayload(data) {
+	    if (!data || !data.configured) return { state: "idle", label: "stopped" };
+	    if (data.url_source === "marker") return { state: "running", label: "running" };
+	    return { state: "configured", label: "configured" };
+	  }
 
-  function cbSetGlobalBridgeStatus(state, label) {
-    var nextState = state || "idle";
-    var nextLabel = label || nextState;
-    cbState.globalState = nextState;
-    cbState.globalLabel = nextLabel;
+	  function cbBridgeDisplayLabel(state, label) {
+	    var nextState = String(state || "idle");
+	    var nextLabel = String(label || "").trim();
+	    if (nextLabel.length > 0 && nextLabel !== "idle") return nextLabel;
+	    if (nextState === "idle") return "stopped";
+	    return nextState;
+	  }
+
+	  function cbSetGlobalBridgeStatus(state, label) {
+	    var nextState = state || "idle";
+	    var nextLabel = cbBridgeDisplayLabel(nextState, label);
+	    cbState.globalState = nextState;
+	    cbState.globalLabel = nextLabel;
     var pill = $("topbar-card-bridge");
     if (pill) {
       pill.setAttribute("data-state", nextState);
-      pill.title = "Remote Bridge status: " + nextLabel
-        + ". Click to " + (nextState === "running" ? "stop" : "start") + ".";
+      pill.title = "Remote Bridge status: " + nextLabel;
       pill.setAttribute("aria-label", pill.title);
     }
     setText("topbar-card-bridge-value", nextLabel);
     cbSyncCommandCenterBridgeIndicators();
   }
 
+  function cbSetSemanticStatus(elementId, text, accessibleLabel) {
+    var element = $(elementId);
+    if (!element) return;
+    var value = String(text == null ? "\u2013" : text);
+    var lower = value.toLowerCase();
+    var semantic = /error|missing|unreachable|failed|rejected/.test(lower)
+      ? "error"
+      : (/running|present|connected|online|accepted|enabled/.test(lower)
+        ? "success"
+        : (/waiting|configured|disabled/.test(lower) ? "warning" : "idle"));
+    element.textContent = value;
+    element.dataset.state = semantic;
+    element.setAttribute("role", "status");
+    element.setAttribute("aria-live", "polite");
+    element.setAttribute(
+      "aria-label",
+      String(accessibleLabel || elementId) + ": " + value
+    );
+  }
+
   function cbSyncCommandCenterBridgeIndicators() {
     var state = cbState.globalState || "idle";
-    var label = cbState.globalLabel || state;
+    var label = cbState.globalLabel || cbBridgeDisplayLabel(state, "");
     document.querySelectorAll('#command-center-nav [data-cc-leaf-id="leaf-adv-card-bridge"]').forEach(function (entry) {
       entry.setAttribute("data-cb-state", state);
       entry.classList.toggle("is-cb-active", state === "running");
@@ -1247,7 +1745,10 @@
       if (!resp.ok) {
         cbSetBadge("cb-status-badge", "error");
         cbSetGlobalBridgeStatus("error", "error");
-        if (summary) summary.textContent = "status action failed: " + (resp.error || "unknown error");
+        if (summary) {
+          summary.textContent = "Status action failed: " + (resp.error || "unknown error");
+          summary.dataset.state = "error";
+        }
         return;
       }
       cbState.lastStatus = resp.data || {};
@@ -1255,7 +1756,10 @@
     } catch (err) {
       cbSetBadge("cb-status-badge", "error");
       cbSetGlobalBridgeStatus("error", "error");
-      if (summary) summary.textContent = "status request failed: " + (err && err.message || String(err));
+      if (summary) {
+        summary.textContent = "Status request failed: " + (err && err.message || String(err));
+        summary.dataset.state = "error";
+      }
     }
   }
 
@@ -1285,6 +1789,7 @@
 
     var summary = $("cb-status-summary");
     if (summary) {
+      summary.dataset.state = configured ? "success" : "warning";
       if (configured) {
         summary.innerHTML =
           "Resolved <code>" + escapeHtml(data.url || "") + "</code>" +
@@ -1295,7 +1800,7 @@
       } else {
         summary.innerHTML =
           "Not configured — set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass " +
-          "<code>--remote-card-url</code> to talk to a Remote Bridge over SSH.";
+          "<code>--remote-card-url</code> to talk to a Card Bridge stream.";
       }
     }
 
@@ -1346,7 +1851,13 @@
 
   function renderCardBridgeProbe(data) {
     var resultRoot = $("cb-probe-result");
-    if (resultRoot) resultRoot.hidden = false;
+    if (resultRoot) {
+      resultRoot.hidden = false;
+      resultRoot.setAttribute("role", "region");
+      resultRoot.setAttribute("aria-label", "Remote Bridge probe result");
+      resultRoot.setAttribute("aria-live", "polite");
+      resultRoot.dataset.state = data && data.ok ? "success" : "error";
+    }
 
     var posture = data && data.auth_posture ? data.auth_posture : (data && data.ok ? "ok" : "unreachable");
     cbSetBadge("cb-probe-posture", posture);
@@ -1399,6 +1910,7 @@
       if (data && data.ok === false && data.reason) {
         reasonEl.textContent = data.reason;
         reasonEl.hidden = false;
+        reasonEl.setAttribute("role", "alert");
       } else {
         reasonEl.textContent = "";
         reasonEl.hidden = true;
@@ -1595,9 +2107,13 @@
 
   var CB_RIG_STORAGE_KEY = "yggdrasim.card_bridge.remote_rig";
   var CB_RIG_PROFILES_STORAGE_KEY = "yggdrasim.card_bridge.remote_rig.profiles";
+  var CB_RIG_DEFAULT_CARD_PORT = 8642;
+  var CB_RIG_DEFAULT_GUI_PORT = 27854;
+  var CB_RIG_DEFAULT_HIL_PORT = 9997;
   var CB_RIG_FIELD_IDS = [
     "cb-rig-ssh-target",
     "cb-rig-identity-file",
+    "cb-rig-ssh-path",
     "cb-rig-reader-index",
     "cb-rig-reader-name",
     "cb-rig-card-port",
@@ -1617,16 +2133,128 @@
     return el ? String(el.value || "").trim() : "";
   }
 
-  function cbRigWriteField(id, value) {
-    var el = $(id);
-    if (!el || value == null) return;
-    el.value = String(value);
+	  function cbRigWriteField(id, value) {
+	    var el = $(id);
+	    if (!el || value == null) return;
+	    el.value = String(value);
+	  }
+
+  function cbRigDefaultTokenFileForPort(port) {
+    return "~/.config/yggdrasim/card_bridge/" + String(port || CB_RIG_DEFAULT_CARD_PORT) + ".token";
   }
 
-  function cbRigReadSettingsPayload() {
-    var payload = {};
-    CB_RIG_FIELD_IDS.forEach(function (id) { payload[id] = cbRigReadField(id); });
-    return payload;
+  function cbRigIsDefaultTokenFile(value) {
+    var text = String(value || "").trim();
+    if (!text) return true;
+    return /^~\/\.config\/yggdrasim\/card_bridge\/[0-9]+\.token$/.test(text);
+  }
+
+  function cbRigHashTarget(target) {
+    var text = String(target || "").trim();
+    var hash = 2166136261;
+    for (var i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash >>> 0;
+  }
+
+  function cbRigSuggestedPortsForTarget(target) {
+    var normalized = String(target || "").trim();
+    if (!normalized) {
+      return {
+        card: CB_RIG_DEFAULT_CARD_PORT,
+        gui: CB_RIG_DEFAULT_GUI_PORT,
+        hil: CB_RIG_DEFAULT_HIL_PORT,
+      };
+    }
+    var slot = cbRigHashTarget(normalized) % 160;
+    return {
+      card: 8600 + (slot * 4),
+      gui: 27000 + (slot * 4),
+      hil: 9900 + slot,
+    };
+  }
+
+  function cbRigFieldIsAutoOrDefault(id, defaultValue) {
+    var el = $(id);
+    if (!el) return false;
+    var value = String(el.value || "").trim();
+    return !value || value === String(defaultValue) || el.dataset.autoPort === "true";
+  }
+
+  function cbRigWriteAutoPort(id, value) {
+    var el = $(id);
+    if (!el) return;
+    el.value = String(value);
+    el.dataset.autoPort = "true";
+  }
+
+  function cbRigClearAutoPortFlag(id) {
+    var el = $(id);
+    if (el) el.dataset.autoPort = "false";
+  }
+
+  function cbRigSyncTokenFileToCardPort(options) {
+    var token = $("cb-rig-remote-token");
+    if (!token) return;
+    var force = !!(options && options.force);
+    if (!force && token.dataset.autoPort !== "true" && !cbRigIsDefaultTokenFile(token.value)) {
+      return;
+    }
+    token.value = cbRigDefaultTokenFileForPort(cbRigNumber("cb-rig-card-port", CB_RIG_DEFAULT_CARD_PORT));
+    token.dataset.autoPort = "true";
+  }
+
+  function cbRigApplySuggestedPortsForTarget(target) {
+    var normalized = String(target || "").trim();
+    if (!normalized) return false;
+    var ports = cbRigSuggestedPortsForTarget(normalized);
+    var changed = false;
+    if (cbRigFieldIsAutoOrDefault("cb-rig-card-port", CB_RIG_DEFAULT_CARD_PORT)) {
+      cbRigWriteAutoPort("cb-rig-card-port", ports.card);
+      changed = true;
+    }
+    if (cbRigFieldIsAutoOrDefault("cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT)) {
+      cbRigWriteAutoPort("cb-rig-gui-port", ports.gui);
+      changed = true;
+    }
+    if (cbRigFieldIsAutoOrDefault("cb-rig-hil-port", CB_RIG_DEFAULT_HIL_PORT)) {
+      cbRigWriteAutoPort("cb-rig-hil-port", ports.hil);
+      changed = true;
+    }
+    if (changed) {
+      cbRigSyncTokenFileToCardPort();
+    }
+    cbRigUpdatePortPlan();
+    return changed;
+  }
+
+	  function cbRigSyncReaderFieldsToActiveReader() {
+	    var activeReader = ccActiveReaderName();
+	    var readerIndex = $("cb-rig-reader-index");
+	    var readerName = $("cb-rig-reader-name");
+	    if (readerIndex) {
+	      readerIndex.value = "";
+	      readerIndex.disabled = true;
+	      readerIndex.placeholder = "top-bar reader";
+	    }
+	    if (readerName) {
+	      readerName.value = activeReader;
+	      readerName.disabled = true;
+	      readerName.placeholder = "select a reader in the top bar";
+	    }
+	    ["cb-rig-reader-index", "cb-rig-reader-name"].forEach(function (id) {
+	      var el = $(id);
+	      var row = el && el.closest ? el.closest(".cb-rig-field") : null;
+	      if (row) row.hidden = true;
+	    });
+	  }
+
+	  function cbRigReadSettingsPayload() {
+	    var payload = {};
+	    CB_RIG_FIELD_IDS.forEach(function (id) { payload[id] = cbRigReadField(id); });
+	    return payload;
   }
 
   function cbRigLoadProfiles() {
@@ -1692,22 +2320,29 @@
     CB_RIG_FIELD_IDS.forEach(function (id) {
       if (Object.prototype.hasOwnProperty.call(profile, id)) {
         cbRigWriteField(id, profile[id]);
+        if (id === "cb-rig-card-port" || id === "cb-rig-gui-port" || id === "cb-rig-hil-port" || id === "cb-rig-remote-token") {
+          cbRigClearAutoPortFlag(id);
+        }
       }
     });
-    cbRigApplyingProfile = false;
-    cbRigUpdateGuiUrl();
-    return true;
-  }
+	    cbRigApplyingProfile = false;
+	    cbRigUpdateGuiUrl();
+      cbRigUpdatePortPlan();
+	    cbRigSyncReaderFieldsToActiveReader();
+	    return true;
+	  }
 
   function cbRigLoadSettings() {
     var profiles = cbRigLoadProfiles();
     cbRigRenderProfileOptions(profiles);
     var stored = cbRigLoadStoredSettingsPayload(profiles);
-    Object.keys(stored).forEach(function (id) {
-      cbRigWriteField(id, stored[id]);
-    });
-    cbRigUpdateGuiUrl();
-  }
+	    Object.keys(stored).forEach(function (id) {
+	      cbRigWriteField(id, stored[id]);
+	    });
+	    cbRigSyncReaderFieldsToActiveReader();
+	    cbRigUpdateGuiUrl();
+      cbRigUpdatePortPlan();
+	  }
 
   function cbRigSaveSettings(options) {
     var payload = cbRigReadSettingsPayload();
@@ -1736,28 +2371,29 @@
   }
 
   function cbRigInputsFromPayload(payload) {
-    var cardPort = cbRigPayloadNumber(payload, "cb-rig-card-port", 8642);
-    var guiPort = cbRigPayloadNumber(payload, "cb-rig-gui-port", 27854);
-    return {
-      ssh_target: cbRigPayloadValue(payload, "cb-rig-ssh-target"),
-      identity_file: cbRigPayloadValue(payload, "cb-rig-identity-file"),
-      reader_index: cbRigPayloadNumber(payload, "cb-rig-reader-index", 0),
-      reader_name: cbRigPayloadValue(payload, "cb-rig-reader-name"),
-      local_card_port: cardPort,
-      remote_card_port: cardPort,
-      local_gui_port: guiPort,
-      remote_gui_port: guiPort,
+	    var cardPort = cbRigPayloadNumber(payload, "cb-rig-card-port", CB_RIG_DEFAULT_CARD_PORT);
+	    var guiPort = cbRigPayloadNumber(payload, "cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT);
+	    return ccApplyActiveReaderBindingInputs({
+	      ssh_target: cbRigPayloadValue(payload, "cb-rig-ssh-target"),
+	      identity_file: cbRigPayloadValue(payload, "cb-rig-identity-file"),
+	      ssh_path: cbRigPayloadValue(payload, "cb-rig-ssh-path"),
+	      reader_index: "",
+	      reader_name: ccActiveReaderName() || cbRigPayloadValue(payload, "cb-rig-reader-name"),
+	      local_card_port: cardPort,
+	      remote_card_port: cardPort,
+	      local_gui_port: guiPort,
+	      remote_gui_port: guiPort,
       service_name: cbRigPayloadValue(payload, "cb-rig-service-name") || "yggdrasim-hil-supervisor.service",
       remote_card_url: "http://127.0.0.1:" + cardPort + "/apdu",
-      remote_token_file: cbRigPayloadValue(payload, "cb-rig-remote-token") || "~/.config/yggdrasim/card_bridge/" + cardPort + ".token",
+      remote_token_file: cbRigPayloadValue(payload, "cb-rig-remote-token") || cbRigDefaultTokenFileForPort(cardPort),
       remote_workdir: cbRigPayloadValue(payload, "cb-rig-remote-workdir") || "~/YggdraSIM",
-      remote_python: cbRigPayloadValue(payload, "cb-rig-remote-python") || "~/YggdraSIM/python/bin/python",
+      remote_python: cbRigPayloadValue(payload, "cb-rig-remote-python") || "~/YggdraSIM/.venv/bin/python",
       remsim_binary: cbRigPayloadValue(payload, "cb-rig-remsim-binary") || "osmo-remsim-client-st2",
-      usb_vidpid: cbRigPayloadValue(payload, "cb-rig-usb-vidpid") || "1d50:60e3",
-      hil_port: cbRigPayloadNumber(payload, "cb-rig-hil-port", 9997),
-      apdu_timeout_ms: 30000,
-    };
-  }
+	      usb_vidpid: cbRigPayloadValue(payload, "cb-rig-usb-vidpid") || "1d50:60e3",
+	      hil_port: cbRigPayloadNumber(payload, "cb-rig-hil-port", CB_RIG_DEFAULT_HIL_PORT),
+	      apdu_timeout_ms: 30000,
+	    });
+	  }
 
   function cbRigCommonInputs() {
     return cbRigInputsFromPayload(cbRigReadSettingsPayload());
@@ -1779,6 +2415,7 @@
     return {
       ssh_target: cfg.ssh_target,
       identity_file: cfg.identity_file,
+      ssh_path: cfg.ssh_path,
       reader_index: cfg.reader_index,
       reader_name: cfg.reader_name,
       local_card_port: cfg.local_card_port,
@@ -1816,6 +2453,10 @@
     var note = $("cb-rig-note");
     if (!note) return;
     note.textContent = message || "";
+    note.setAttribute("role", isError ? "alert" : "status");
+    note.setAttribute("aria-live", isError ? "assertive" : "polite");
+    note.setAttribute("aria-atomic", "true");
+    note.dataset.state = isError ? "error" : "success";
     note.classList.toggle("cb-rig-note-error", !!isError);
     var flashOk = !!(options && options.flashOk && !isError);
     note.classList.toggle("cb-rig-note-ok", flashOk);
@@ -1826,13 +2467,22 @@
     }
   }
 
-  function cbRigRequireSshTarget() {
-    if (cbRigReadField("cb-rig-ssh-target")) return true;
-    cbRigSetNote("SSH target is required for RPi actions.", true);
-    var field = $("cb-rig-ssh-target");
-    if (field && typeof field.focus === "function") field.focus();
-    return false;
-  }
+	  function cbRigRequireSshTarget() {
+	    if (cbRigReadField("cb-rig-ssh-target")) return true;
+	    cbRigSetNote("SSH target is required for remote host actions.", true);
+	    var field = $("cb-rig-ssh-target");
+	    if (field && typeof field.focus === "function") field.focus();
+	    return false;
+	  }
+
+	  function cbRigRequireActiveReader(actionLabel) {
+	    if (ccActiveReaderName()) return true;
+	    var label = actionLabel || "this bridge action";
+	    var message = "Select a top-bar reader before starting " + label + ".";
+	    cbRigSetNote(message, true);
+	    setStatusAction(message);
+	    return false;
+	  }
 
   function cbRigDescribeAction(data, fallback) {
     if (!data) return fallback || "";
@@ -1849,18 +2499,42 @@
   }
 
   function cbRigUpdateGuiUrl() {
-    var port = cbRigNumber("cb-rig-gui-port", 27854);
+    var port = cbRigNumber("cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT);
     setText("cb-rig-gui-url", "http://127.0.0.1:" + port);
+  }
+
+  function cbRigUpdatePortPlan() {
+    var host = $("cb-rig-port-plan");
+    if (!host) return;
+    var target = cbRigReadField("cb-rig-ssh-target");
+    var card = cbRigNumber("cb-rig-card-port", CB_RIG_DEFAULT_CARD_PORT);
+    var gui = cbRigNumber("cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT);
+    var hil = cbRigNumber("cb-rig-hil-port", CB_RIG_DEFAULT_HIL_PORT);
+    var token = cbRigReadField("cb-rig-remote-token") || cbRigDefaultTokenFileForPort(card);
+    if (!target) {
+      host.textContent = "Port plan: card " + card + " · GUI " + gui + " · HIL " + hil + ".";
+      return;
+    }
+    host.textContent = "Port plan for " + target + ": card " + card
+      + " · GUI " + gui + " · HIL " + hil + " · token " + token + ".";
   }
 
   function cbRigRenderStatus(data, options) {
     var state = data && data.state ? data.state : {};
-    setText("cb-rig-local-status", state.local_card_bridge_running ? "running" : "stopped");
-    setText("cb-rig-tunnel-status", state.ssh_tunnel_running ? "running" : "stopped");
+    cbSetSemanticStatus(
+      "cb-rig-local-status",
+      state.local_card_bridge_running ? "running" : "stopped",
+      "PC bridge"
+    );
+    cbSetSemanticStatus(
+      "cb-rig-tunnel-status",
+      state.ssh_tunnel_running ? "running" : "stopped",
+      "SSH tunnel"
+    );
     var remote = state.remote_service || {};
     var remoteStatus = remote.ActiveState || (state.remote_error ? "error" : "–");
     if (remote.SubState) remoteStatus += " · " + remote.SubState;
-    setText("cb-rig-service-status", remoteStatus);
+    cbSetSemanticStatus("cb-rig-service-status", remoteStatus, "Remote service");
     var hil = state.remote_hil || {};
     var bridgeStatus = Object.prototype.hasOwnProperty.call(hil, "bridge_running")
       ? (hil.bridge_running ? "running" : "stopped")
@@ -1883,20 +2557,20 @@
         linkStatus = "waiting";
       }
     }
-    setText("cb-rig-bridge-status", bridgeStatus);
-    setText("cb-rig-usb-status", usbStatus);
-    setText("cb-rig-remsim-status", remsimStatus);
-    setText("cb-rig-modem-link-status", linkStatus);
+    cbSetSemanticStatus("cb-rig-bridge-status", bridgeStatus, "Remote bridge");
+    cbSetSemanticStatus("cb-rig-usb-status", usbStatus, "SIMtrace2");
+    cbSetSemanticStatus("cb-rig-remsim-status", remsimStatus, "REMSIM");
+    cbSetSemanticStatus("cb-rig-modem-link-status", linkStatus, "Modem link");
     if (state.local_gui_url) setText("cb-rig-gui-url", state.local_gui_url);
     if (state.local_card_bridge_running) {
       cbSetGlobalBridgeStatus("running", "running");
-    } else if (Object.prototype.hasOwnProperty.call(state, "local_card_bridge_running")) {
-      var global = cbBridgeStatusFromPayload(cbState.lastStatus);
-      if (global.state === "running") global = { state: "idle", label: "idle" };
-      cbSetGlobalBridgeStatus(global.state, global.label);
-    }
+	    } else if (Object.prototype.hasOwnProperty.call(state, "local_card_bridge_running")) {
+	      var global = cbBridgeStatusFromPayload(cbState.lastStatus);
+	      if (global.state === "running") global = { state: "idle", label: "stopped" };
+	      cbSetGlobalBridgeStatus(global.state, global.label);
+	    }
     cbRigSetNote(
-      cbRigDescribeAction(data, "Remote rig status refreshed."),
+      cbRigDescribeAction(data, "Remote host status refreshed."),
       !!(state.remote_error || (hil && hil.ok === false) || (data && data.ok === false)),
       options && options.flashOk ? { flashOk: true } : null
     );
@@ -1936,6 +2610,7 @@
     var data = await cbRigRun("card_bridge.remote_rig_status", {
       ssh_target: cfg.ssh_target,
       identity_file: cfg.identity_file,
+      ssh_path: cfg.ssh_path,
       service_name: cfg.service_name,
       local_gui_port: cfg.local_gui_port,
       remote_workdir: cfg.remote_workdir,
@@ -1944,16 +2619,17 @@
     if (data) cbRigRenderStatus(data);
   }
 
-  async function cbRigStartLocal(button) {
-    var cfg = cbRigCommonInputs();
-    var data = await cbRigRun("card_bridge.local_start", {
-      port: cfg.local_card_port,
-      reader_index: cbRigNumber("cb-rig-reader-index", 0),
-      reader_name: cbRigReadField("cb-rig-reader-name"),
-      apdu_timeout_ms: cfg.apdu_timeout_ms,
-      restart: false,
-      confirm: true,
-    }, button, "starting…", { flashOk: true });
+	  async function cbRigStartLocal(button) {
+	    if (!cbRigRequireActiveReader("Card Bridge")) return;
+	    var cfg = cbRigCommonInputs();
+	    var data = await cbRigRun("card_bridge.local_start", {
+	      port: cfg.local_card_port,
+	      reader_index: cfg.reader_index,
+	      reader_name: cfg.reader_name,
+	      apdu_timeout_ms: cfg.apdu_timeout_ms,
+	      restart: false,
+	      confirm: true,
+	    }, button, "starting…", { flashOk: true });
     if (data) {
       loadCardBridgeStatus();
       cbRigRefreshStatus(null);
@@ -1971,6 +2647,7 @@
     var data = await cbRigRun("card_bridge.remote_rig_tunnel_start", {
       ssh_target: cfg.ssh_target,
       identity_file: cfg.identity_file,
+      ssh_path: cfg.ssh_path,
       local_card_port: cfg.local_card_port,
       remote_card_port: cfg.remote_card_port,
       local_gui_port: cfg.local_gui_port,
@@ -1982,9 +2659,10 @@
     if (data) cbRigRefreshStatus(null);
   }
 
-  async function cbRigStartAll(button) {
-    if (!cbRigRequireSshTarget()) return;
-    var cfg = cbRigCommonInputs();
+	  async function cbRigStartAll(button) {
+	    if (!cbRigRequireActiveReader("remote host onboarding")) return;
+	    if (!cbRigRequireSshTarget()) return;
+	    var cfg = cbRigCommonInputs();
     var data = await cbRigRun(
       "card_bridge.remote_rig_start",
       cbRigRemoteRigStartInputs(cfg),
@@ -1998,10 +2676,13 @@
     }
   }
 
-  async function cbRigStartAllFromSavedSettings() {
-    var cfg = cbRigInputsFromSavedSettings();
+	  async function cbRigStartAllFromSavedSettings() {
+	    if (!cbRigRequireActiveReader("remote host onboarding")) {
+	      return { ok: false, note: "Select a top-bar reader before starting remote host onboarding." };
+	    }
+	    var cfg = cbRigInputsFromSavedSettings();
     if (!cfg.ssh_target) {
-      var missing = "Remote Bridge SSH target is required. Configure it once in Remote Bridge.";
+      var missing = "Remote host SSH target is required. Configure it once in Remote Host Onboarding.";
       cbRigSetNote(missing, true);
       return { ok: false, note: missing };
     }
@@ -2024,6 +2705,7 @@
     var data = await cbRigRun("card_bridge.remote_rig_stop", {
       ssh_target: cfg.ssh_target,
       identity_file: cfg.identity_file,
+      ssh_path: cfg.ssh_path,
       service_name: cfg.service_name,
       local_gui_port: cfg.local_gui_port,
       remote_workdir: cfg.remote_workdir,
@@ -2039,13 +2721,14 @@
   async function cbRigStopAllFromSavedSettings() {
     var cfg = cbRigInputsFromSavedSettings();
     if (!cfg.ssh_target) {
-      var missing = "Remote Bridge SSH target is required. Configure it once in Remote Bridge.";
+      var missing = "Remote host SSH target is required. Configure it once in Remote Host Onboarding.";
       cbRigSetNote(missing, true);
       return { ok: false, note: missing };
     }
     var data = await cbRigRun("card_bridge.remote_rig_stop", {
       ssh_target: cfg.ssh_target,
       identity_file: cfg.identity_file,
+      ssh_path: cfg.ssh_path,
       service_name: cfg.service_name,
       local_gui_port: cfg.local_gui_port,
       remote_workdir: cfg.remote_workdir,
@@ -2070,6 +2753,7 @@
     await cbRigRun("card_bridge.remote_rig_sync_token", {
       ssh_target: cfg.ssh_target,
       identity_file: cfg.identity_file,
+      ssh_path: cfg.ssh_path,
       remote_token_file: cfg.remote_token_file,
       confirm: true,
     }, button, "syncing…");
@@ -2081,6 +2765,7 @@
     var data = await cbRigRun("card_bridge.remote_rig_install_service", {
       ssh_target: cfg.ssh_target,
       identity_file: cfg.identity_file,
+      ssh_path: cfg.ssh_path,
       service_name: cfg.service_name,
       remote_workdir: cfg.remote_workdir,
       remote_python: cfg.remote_python,
@@ -2102,6 +2787,7 @@
     var data = await cbRigRun("card_bridge.remote_rig_service", {
       ssh_target: cfg.ssh_target,
       identity_file: cfg.identity_file,
+      ssh_path: cfg.ssh_path,
       service_name: cfg.service_name,
       action: action,
       confirm: action !== "status",
@@ -2125,6 +2811,19 @@
   }
 
   function wireCardBridgePanel() {
+    ["cb-status-summary", "cb-rig-note"].forEach(function (id) {
+      var region = $(id);
+      if (!region) return;
+      region.setAttribute("role", "status");
+      region.setAttribute("aria-live", "polite");
+      region.setAttribute("aria-atomic", "true");
+    });
+    var statusBadge = $("cb-status-badge");
+    if (statusBadge) {
+      statusBadge.setAttribute("role", "status");
+      statusBadge.setAttribute("aria-live", "polite");
+    }
+
     var refreshBtn = $("cb-refresh-status");
     if (refreshBtn) refreshBtn.addEventListener("click", loadCardBridgeStatus);
 
@@ -2165,19 +2864,35 @@
       if (!el) return;
       el.addEventListener("change", function () {
         if (id === "cb-rig-ssh-target") {
-          cbRigApplyProfileForTarget(cbRigReadField(id));
+          var applied = cbRigApplyProfileForTarget(cbRigReadField(id));
+          if (!applied) cbRigApplySuggestedPortsForTarget(cbRigReadField(id));
+        } else if (id === "cb-rig-card-port") {
+          cbRigClearAutoPortFlag(id);
+          cbRigSyncTokenFileToCardPort();
+        } else if (id === "cb-rig-gui-port" || id === "cb-rig-hil-port" || id === "cb-rig-remote-token") {
+          cbRigClearAutoPortFlag(id);
         }
         cbRigSaveSettings();
         cbRigUpdateGuiUrl();
+        cbRigUpdatePortPlan();
       });
       el.addEventListener("input", function () {
         if (id === "cb-rig-ssh-target") {
           var applied = cbRigApplyProfileForTarget(cbRigReadField(id));
+          if (!applied) cbRigApplySuggestedPortsForTarget(cbRigReadField(id));
           cbRigSaveSettings({ updateProfile: applied });
+        } else if (id === "cb-rig-card-port") {
+          cbRigClearAutoPortFlag(id);
+          cbRigSyncTokenFileToCardPort();
+          cbRigSaveSettings();
+        } else if (id === "cb-rig-gui-port" || id === "cb-rig-hil-port" || id === "cb-rig-remote-token") {
+          cbRigClearAutoPortFlag(id);
+          cbRigSaveSettings();
         } else if (!cbRigApplyingProfile) {
           cbRigSaveSettings();
         }
         cbRigUpdateGuiUrl();
+        cbRigUpdatePortPlan();
       });
     });
 

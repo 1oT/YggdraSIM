@@ -17,6 +17,7 @@ from SCP03.logic.stk import StkController
 class StkShell:
     def __init__(self, transport, debug: bool = False) -> None:
         self.controller = StkController(transport, debug=debug)
+        self._exit_requested = False
         self._commands: dict[str, Callable[[str], bool]] = {
             "HELP": self._cmd_help,
             "INIT": self._cmd_init,
@@ -105,11 +106,14 @@ class StkShell:
         before_commands = len(self.controller.state.command_history)
         before_flow = len(self.controller.state.flow_events)
         data, sw1, sw2 = action()
-        print(f"{Config.Colors.GREEN}[+] {label}: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+        succeeded = sw1 == 0x90 and sw2 == 0x00
+        color = Config.Colors.GREEN if succeeded else Config.Colors.FAIL
+        marker = "[+]" if succeeded else "[-]"
+        print(f"{color}{marker} {label}: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
         if len(data) > 0:
             print(f"    Data: {data.hex().upper()}")
         self._print_new_activity(before_commands, before_flow)
-        return True
+        return succeeded
 
     def _run_init(self) -> bool:
         before_commands = len(self.controller.state.command_history)
@@ -214,6 +218,9 @@ class StkShell:
             except ValueError:
                 print(f"{Config.Colors.FAIL}[-] LOCATION status must be hex, e.g. 00.{Config.Colors.ENDC}")
                 return False
+            if not 0 <= status_value <= 0xFF:
+                print(f"{Config.Colors.FAIL}[-] LOCATION status must be one byte (00-FF).{Config.Colors.ENDC}")
+                return False
         if len(parts) > 1:
             location_hex = "".join(parts[1:])
         return self._run_exchange(
@@ -237,7 +244,8 @@ class StkShell:
         return True
 
     def _cmd_exit(self, _arg: str = "") -> bool:
-        raise SystemExit(0)
+        self._exit_requested = True
+        return True
 
     def _cmd_quit_all(self, _arg: str = "") -> bool:
         quit_all()
@@ -285,14 +293,10 @@ class StkShell:
         self._maybe_auto_initialize(first_command)
         had_error = False
         for command_text in commands:
-            try:
-                succeeded = self._exec_line(command_text)
-                if succeeded is False:
-                    had_error = True
-            except SystemExit as error:
-                exit_code = error.code if isinstance(error.code, int) else 0
-                if exit_code not in (0, None):
-                    raise
+            succeeded = self._exec_line(command_text)
+            if succeeded is False:
+                had_error = True
+            if self._exit_requested:
                 break
         if had_error:
             raise SystemExit(1)
@@ -315,3 +319,5 @@ class StkShell:
                 print("")
                 return
             self._exec_line(line)
+            if self._exit_requested:
+                return

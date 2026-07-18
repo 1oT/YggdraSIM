@@ -11,7 +11,9 @@ placeholders: default ``{name}``, or ``[name]`` when
 ``__ygg_placeholder_style__`` is ``bracket``. Definitions live under
 ``__ygg_token_defs__`` at the document root (same value shapes as
 ``__ygg_saip_ph__``). Occurrences are expanded independently; nothing enforces
-that the same token matches across the profile.
+that the same token matches across the profile. Opened typed-hex templates keep
+their sentinel-to-literal records under ``__ygg_inline_placeholders__`` so a
+tagged-JSON save/reopen cannot silently discard the unresolved-template guard.
 
 PySim is imported only from paths that build or encode profile elements.
 """
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import hmac
 import json
 import re
 import sys
@@ -45,7 +48,157 @@ _PREV_TAG_TUPLE = "tuple"
 
 _META_TOKEN_DEFS = "__ygg_token_defs__"
 _META_PLACEHOLDER_STYLE = "__ygg_placeholder_style__"
-_DOCUMENT_META_KEYS = (_META_TOKEN_DEFS, _META_PLACEHOLDER_STYLE)
+_META_VARIABLE_CATALOG = "__ygg_variable_catalog__"
+_META_GENERATION = "__ygg_generation__"
+_META_GENERATION_LOCK = "__ygg_generation_lock__"
+_META_GENERATION_PROVENANCE = "__ygg_generation_provenance__"
+_META_INLINE_PLACEHOLDERS = "__ygg_inline_placeholders__"
+_GENERATION_PROVENANCE_SCHEMA = "yggdrasim.generated-partial-provenance/v1"
+_DOCUMENT_META_KEYS = (
+    _META_TOKEN_DEFS,
+    _META_PLACEHOLDER_STYLE,
+    _META_VARIABLE_CATALOG,
+    _META_GENERATION,
+    _META_GENERATION_LOCK,
+    _META_GENERATION_PROVENANCE,
+    _META_INLINE_PLACEHOLDERS,
+)
+
+
+def _critical_generation_binding(document: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the critical values shared by an intact generation marker pair."""
+
+    generation = document.get(_META_GENERATION)
+    generation_lock = document.get(_META_GENERATION_LOCK)
+    if not isinstance(generation, dict) or not isinstance(generation_lock, dict):
+        return None
+    scope = str(generation.get("generation_scope") or "")
+    lock_scope = str(generation_lock.get("generation_scope") or "")
+    completeness = str(generation.get("completeness") or "")
+    lock_completeness = str(generation_lock.get("completeness") or "")
+    if not scope or scope != lock_scope:
+        return None
+    if not completeness or completeness != lock_completeness:
+        return None
+    if generation.get("concrete_export_allowed") is not False:
+        return None
+    if generation_lock.get("concrete_export_allowed") is not False:
+        return None
+    return {
+        "generation_scope": scope,
+        "completeness": completeness,
+        "generation_schema_version": str(generation.get("schema_version") or ""),
+        "lock_schema_version": str(generation_lock.get("schema_version") or ""),
+        "concrete_export_allowed": False,
+    }
+
+
+def _generation_provenance_body(binding: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": _GENERATION_PROVENANCE_SCHEMA,
+        "generation_scope": str(binding.get("generation_scope") or ""),
+        "completeness": str(binding.get("completeness") or ""),
+        "generation_schema_version": str(
+            binding.get("generation_schema_version") or ""
+        ),
+        "lock_schema_version": str(binding.get("lock_schema_version") or ""),
+        "concrete_export_allowed": False,
+    }
+
+
+def _generation_provenance_seal(body: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        body,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def install_generation_provenance(document: dict[str, Any]) -> dict[str, Any]:
+    """Install the independent persisted provenance marker for a generated draft.
+
+    The core calls this only at the trusted generated-session handoff.  Keeping
+    the provenance separate from the editable envelope/lock pair lets reopen
+    fail closed when either or both of those primary markers are removed, and
+    binds the original scope/completeness against coordinated marker edits.
+    """
+
+    existing = document.get(_META_GENERATION_PROVENANCE)
+    if existing is not None:
+        status = inspect_generation_provenance(document)
+        if status["valid"] is not True:
+            raise ValueError(
+                f"{_META_GENERATION_PROVENANCE} is malformed or has an invalid seal."
+            )
+        return existing
+    binding = _critical_generation_binding(document)
+    if binding is None:
+        raise ValueError(
+            "Generated SAIP provenance requires a matching partial-artifact "
+            "generation envelope and generation lock."
+        )
+    body = _generation_provenance_body(binding)
+    provenance = dict(body)
+    provenance["seal_sha256"] = _generation_provenance_seal(body)
+    document[_META_GENERATION_PROVENANCE] = provenance
+    return provenance
+
+
+def inspect_generation_provenance(document: dict[str, Any]) -> dict[str, Any]:
+    """Describe whether persisted provenance is sealed and matches both markers."""
+
+    if _META_GENERATION_PROVENANCE not in document:
+        return {
+            "present": False,
+            "valid": False,
+            "matches_markers": False,
+            "generation_scope": "",
+            "completeness": "",
+        }
+    provenance = document.get(_META_GENERATION_PROVENANCE)
+    if not isinstance(provenance, dict):
+        return {
+            "present": True,
+            "valid": False,
+            "matches_markers": False,
+            "generation_scope": "",
+            "completeness": "",
+        }
+    body = {
+        "schema_version": provenance.get("schema_version"),
+        "generation_scope": provenance.get("generation_scope"),
+        "completeness": provenance.get("completeness"),
+        "generation_schema_version": provenance.get("generation_schema_version"),
+        "lock_schema_version": provenance.get("lock_schema_version"),
+        "concrete_export_allowed": provenance.get("concrete_export_allowed"),
+    }
+    scope = str(body.get("generation_scope") or "")
+    completeness = str(body.get("completeness") or "")
+    expected_seal = _generation_provenance_seal(body)
+    supplied_seal = str(provenance.get("seal_sha256") or "")
+    valid = bool(
+        body.get("schema_version") == _GENERATION_PROVENANCE_SCHEMA
+        and scope
+        and completeness
+        and body.get("concrete_export_allowed") is False
+        and len(supplied_seal) == 64
+        and hmac.compare_digest(supplied_seal, expected_seal)
+    )
+    marker_binding = _critical_generation_binding(document)
+    matches_markers = bool(
+        valid
+        and marker_binding is not None
+        and _generation_provenance_body(marker_binding) == body
+    )
+    return {
+        "present": True,
+        "valid": valid,
+        "matches_markers": matches_markers,
+        "generation_scope": scope if valid else "",
+        "completeness": completeness if valid else "",
+    }
 
 
 def _format_codec_path(path: tuple[str, ...]) -> str:
@@ -360,13 +513,43 @@ def _transform_encode_ef_imsi(raw: bytes) -> bytes:
     8 bytes of parity-tagged nibble-swapped digits (padded to 15 digits
     with the ``F`` filler nibble).
     """
+    if len(raw) == 0:
+        digits = ""
+    elif all(0x30 <= octet <= 0x39 for octet in raw):
+        # The textual form is deliberately strict.  The previous
+        # loss-tolerant decode and digit filter silently removed malformed
+        # bytes and punctuation, potentially personalising a different
+        # subscriber identity than the operator supplied.
+        digits = raw.decode("ascii")
+    else:
+        if all(0x20 <= octet <= 0x7E for octet in raw):
+            raise ValueError(
+                "EncodeEfImsi ASCII input must contain decimal digits only."
+            )
 
-    digits = "".join(ch for ch in raw.decode("ascii", errors="ignore") if ch.isdigit())
-    if len(digits) == 0:
-        # Treat the source as packed BCD (e.g. raw token already hex
-        # digits). Strip any 0xF filler nibbles before re-encoding.
-        text = raw.hex().upper().rstrip("F")
-        digits = "".join(ch for ch in text if ch.isdigit())
+        # Packed BCD is the other supported representation.  Decimal
+        # nibbles precede an optional trailing run of 0xF filler nibbles;
+        # A..E and digits after filler are malformed rather than characters
+        # that may be discarded.
+        digit_parts: list[str] = []
+        filler_seen = False
+        for octet in raw:
+            for nibble in ((octet >> 4) & 0x0F, octet & 0x0F):
+                if 0 <= nibble <= 9:
+                    if filler_seen:
+                        raise ValueError(
+                            "EncodeEfImsi packed BCD contains a digit after "
+                            "an F filler nibble."
+                        )
+                    digit_parts.append(str(nibble))
+                elif nibble == 0x0F:
+                    filler_seen = True
+                else:
+                    raise ValueError(
+                        "EncodeEfImsi packed BCD contains a non-decimal "
+                        f"nibble 0x{nibble:X}."
+                    )
+        digits = "".join(digit_parts)
     if len(digits) == 0 or len(digits) > 15:
         raise ValueError(
             "EncodeEfImsi expects an IMSI of 1..15 digits "
@@ -705,6 +888,13 @@ def ensure_workspace_pysim_on_path(
             root_text = str(candidate)
             if root_text not in sys.path:
                 sys.path.insert(0, root_text)
+            from Tools.ProfilePackage.saip_pysim_compat import (
+                install_base_df_path_compatibility,
+                install_lossless_security_domain_encoding,
+            )
+
+            install_base_df_path_compatibility()
+            install_lossless_security_domain_encoding()
             return candidate
 
     try:
@@ -722,6 +912,13 @@ def ensure_workspace_pysim_on_path(
 
     package_path = getattr(pySim, "__file__", None)
     if isinstance(package_path, str) and len(package_path) > 0:
+        from Tools.ProfilePackage.saip_pysim_compat import (
+            install_base_df_path_compatibility,
+            install_lossless_security_domain_encoding,
+        )
+
+        install_base_df_path_compatibility()
+        install_lossless_security_domain_encoding()
         installed_root = Path(package_path).resolve().parent
         return installed_root
 
@@ -1020,6 +1217,50 @@ def dejsonify_document(
         restored[_META_TOKEN_DEFS] = dict(defs_raw)
     if _META_PLACEHOLDER_STYLE in document:
         restored[_META_PLACEHOLDER_STYLE] = document[_META_PLACEHOLDER_STYLE]
+    if _META_VARIABLE_CATALOG in document:
+        variable_catalog = document[_META_VARIABLE_CATALOG]
+        if isinstance(variable_catalog, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_VARIABLE_CATALOG} must be an object.",
+                (_META_VARIABLE_CATALOG,),
+            )
+        restored[_META_VARIABLE_CATALOG] = copy.deepcopy(variable_catalog)
+    if _META_GENERATION in document:
+        generation = document[_META_GENERATION]
+        if isinstance(generation, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_GENERATION} must be an object.",
+                (_META_GENERATION,),
+            )
+        restored[_META_GENERATION] = copy.deepcopy(generation)
+    if _META_GENERATION_LOCK in document:
+        generation_lock = document[_META_GENERATION_LOCK]
+        if isinstance(generation_lock, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_GENERATION_LOCK} must be an object.",
+                (_META_GENERATION_LOCK,),
+            )
+        restored[_META_GENERATION_LOCK] = copy.deepcopy(generation_lock)
+    if _META_GENERATION_PROVENANCE in document:
+        generation_provenance = document[_META_GENERATION_PROVENANCE]
+        if isinstance(generation_provenance, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_GENERATION_PROVENANCE} must be an object.",
+                (_META_GENERATION_PROVENANCE,),
+            )
+        restored[_META_GENERATION_PROVENANCE] = copy.deepcopy(
+            generation_provenance
+        )
+    if _META_INLINE_PLACEHOLDERS in document:
+        inline_placeholders = document[_META_INLINE_PLACEHOLDERS]
+        if isinstance(inline_placeholders, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_INLINE_PLACEHOLDERS} must be an object.",
+                (_META_INLINE_PLACEHOLDERS,),
+            )
+        restored[_META_INLINE_PLACEHOLDERS] = copy.deepcopy(
+            inline_placeholders
+        )
 
     return restored
 
@@ -1113,7 +1354,9 @@ def reapply_transcode_editor_placeholders(
     """
     After DER encode → pySim decode → ``jsonify_document``, restore editor-only artefacts:
 
-    - Root ``__ygg_token_defs__`` and ``__ygg_placeholder_style__`` from the pre-save JSON.
+    - Root ``__ygg_token_defs__``, ``__ygg_placeholder_style__``,
+      ``__ygg_variable_catalog__``, and inline-placeholder sidecar metadata
+      from the pre-save JSON.
     - ``hex`` strings that used ``{token}`` / ``[token]`` when the
       expanded bytes match the round-tripped literal hex.
 
@@ -1135,6 +1378,18 @@ def reapply_transcode_editor_placeholders(
         post_tagged[_META_PLACEHOLDER_STYLE] = copy.deepcopy(
             pre_loaded[_META_PLACEHOLDER_STYLE]
         )
+
+    if _META_VARIABLE_CATALOG in pre_loaded:
+        raw_catalog = pre_loaded[_META_VARIABLE_CATALOG]
+        if isinstance(raw_catalog, dict):
+            post_tagged[_META_VARIABLE_CATALOG] = copy.deepcopy(raw_catalog)
+
+    if _META_INLINE_PLACEHOLDERS in pre_loaded:
+        raw_inline_placeholders = pre_loaded[_META_INLINE_PLACEHOLDERS]
+        if isinstance(raw_inline_placeholders, dict):
+            post_tagged[_META_INLINE_PLACEHOLDERS] = copy.deepcopy(
+                raw_inline_placeholders
+            )
 
     ctx = _token_ctx_from_loaded_document(pre_loaded)
     pre_secs = pre_loaded.get("sections")
@@ -1259,6 +1514,50 @@ def parse_editor_json_template_aware(
         restored[_META_TOKEN_DEFS] = dict(defs_raw)
     if _META_PLACEHOLDER_STYLE in loaded:
         restored[_META_PLACEHOLDER_STYLE] = loaded[_META_PLACEHOLDER_STYLE]
+    if _META_VARIABLE_CATALOG in loaded:
+        variable_catalog = loaded[_META_VARIABLE_CATALOG]
+        if isinstance(variable_catalog, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_VARIABLE_CATALOG} must be an object.",
+                (_META_VARIABLE_CATALOG,),
+            )
+        restored[_META_VARIABLE_CATALOG] = copy.deepcopy(variable_catalog)
+    if _META_GENERATION in loaded:
+        generation = loaded[_META_GENERATION]
+        if isinstance(generation, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_GENERATION} must be an object.",
+                (_META_GENERATION,),
+            )
+        restored[_META_GENERATION] = copy.deepcopy(generation)
+    if _META_GENERATION_LOCK in loaded:
+        generation_lock = loaded[_META_GENERATION_LOCK]
+        if isinstance(generation_lock, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_GENERATION_LOCK} must be an object.",
+                (_META_GENERATION_LOCK,),
+            )
+        restored[_META_GENERATION_LOCK] = copy.deepcopy(generation_lock)
+    if _META_GENERATION_PROVENANCE in loaded:
+        generation_provenance = loaded[_META_GENERATION_PROVENANCE]
+        if isinstance(generation_provenance, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_GENERATION_PROVENANCE} must be an object.",
+                (_META_GENERATION_PROVENANCE,),
+            )
+        restored[_META_GENERATION_PROVENANCE] = copy.deepcopy(
+            generation_provenance
+        )
+    if _META_INLINE_PLACEHOLDERS in loaded:
+        inline_placeholders = loaded[_META_INLINE_PLACEHOLDERS]
+        if isinstance(inline_placeholders, dict) is False:
+            raise SaipCodecValueError(
+                f"{_META_INLINE_PLACEHOLDERS} must be an object.",
+                (_META_INLINE_PLACEHOLDERS,),
+            )
+        restored[_META_INLINE_PLACEHOLDERS] = copy.deepcopy(
+            inline_placeholders
+        )
 
     normalized_paths: set[str] = set()
     for raw_path in placeholder_paths:
@@ -1355,8 +1654,55 @@ def build_profile_sequence_from_document(
     return pes
 
 
+def assert_concrete_export_allowed(document: dict[str, Any]) -> None:
+    """Reject concrete output for a generated partial authoring artifact.
+
+    Ordinary imported profiles carry no generation marker and keep their
+    historical behaviour. Plugin-generated drafts carry a one-way envelope,
+    redundant lock, and independent core provenance marker; resolving tokens,
+    flipping a mutable boolean, or deleting the primary pair does not silently
+    promote them into deployable profiles.
+    """
+    generation_present = _META_GENERATION in document
+    lock_present = _META_GENERATION_LOCK in document
+    provenance_present = _META_GENERATION_PROVENANCE in document
+    generation = document.get(_META_GENERATION)
+    generation_lock = document.get(_META_GENERATION_LOCK)
+    provenance = document.get(_META_GENERATION_PROVENANCE)
+    if generation_present and not isinstance(generation, dict):
+        raise ValueError(f"{_META_GENERATION} must be an object.")
+    if lock_present and not isinstance(generation_lock, dict):
+        raise ValueError(f"{_META_GENERATION_LOCK} must be an object.")
+    if provenance_present and not isinstance(provenance, dict):
+        raise ValueError(f"{_META_GENERATION_PROVENANCE} must be an object.")
+    if not generation_present and not lock_present and not provenance_present:
+        return
+    # A generated-partial marker is a one-way authoring lock. Flipping a
+    # mutable boolean is never a completion flow. A future trusted completion
+    # composer must create a separately validated and attested document rather
+    # than promoting this partial document in place.
+    metadata = generation if isinstance(generation, dict) else generation_lock
+    if not isinstance(metadata, dict):
+        metadata = provenance
+    assert isinstance(metadata, dict)
+    scope = str(metadata.get("generation_scope") or "UNTRUSTED_PARTIAL")
+    unresolved = (
+        generation.get("unresolved_requirements")
+        if isinstance(generation, dict)
+        else None
+    )
+    count = len(unresolved) if isinstance(unresolved, list) else 0
+    detail = f" ({count} unresolved requirement(s))" if count else ""
+    raise ValueError(
+        f"Concrete DER/HEX export is blocked for {scope}{detail}. "
+        "Save tagged JSON for continued authoring; only an explicit profile "
+        "completion flow may create a deployable artifact."
+    )
+
+
 def encode_der_from_document(document: dict[str, Any], workspace_root: Path) -> bytes:
     """JSON document (restored Python types) to concatenated PE DER."""
+    assert_concrete_export_allowed(document)
     pes = build_profile_sequence_from_document(document, workspace_root)
     return pes.to_der()
 

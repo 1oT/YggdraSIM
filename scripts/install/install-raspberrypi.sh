@@ -30,10 +30,10 @@ if [ "${YG_HOST_OS}" != "linux" ]; then
     yg_die "this installer is for Raspberry Pi OS (Linux) only (detected: ${YG_HOST_OS})"
 fi
 if [ "${YG_HOST_ARCH}" != "arm64" ] && [ "${YG_HOST_ARCH}" != "armv7" ]; then
-    yg_warn "expected arm64 / armv7 host; continuing anyway (detected: ${YG_HOST_ARCH})"
+    yg_die "unsupported Raspberry Pi CPU architecture: ${YG_HOST_ARCH}"
 fi
-if [ "${YG_HOST_ARCH}" = "armv7" ]; then
-    yg_warn "no pre-built release asset exists for armv7; --mode source is recommended"
+if [ "${YG_MODE}" = "release" ]; then
+    yg_validate_release_arch "${YG_HOST_OS}" "${YG_HOST_ARCH}"
 fi
 
 yg_validate_flavor_for_host "${YG_FLAVOR}" "${YG_HOST_OS}"
@@ -44,9 +44,10 @@ install_rpi_prereqs() {
         yg_emit "skipping apt package install (--no-deps)"
         return 0
     fi
-    local common_packages="python3 python3-pip python3-venv libpcsclite1 pcscd gpg"
+    local common_packages="python3 python3-pip python3-venv libpcsclite1 pcscd gpg curl"
     local build_packages="libpcsclite-dev swig pkg-config build-essential"
     local hil_packages="libudev-dev dfu-util usbutils"
+    local gui_packages="libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0"
 
     case "${YG_MODE}:${YG_FLAVOR}" in
         release:clean)
@@ -54,18 +55,19 @@ install_rpi_prereqs() {
             ;;
         release:full)
             yg_apt_install ${common_packages} ${hil_packages}
-            yg_apt_install osmo-remsim-client || \
-                yg_warn "osmo-remsim-client not in default apt sources; see guides/SIMTRACE2_CARDEM_GUIDE.md"
+            yg_install_remsim_client
             ;;
         source:clean)
             yg_apt_install ${common_packages} ${build_packages}
             ;;
         source:full)
             yg_apt_install ${common_packages} ${build_packages} ${hil_packages}
-            yg_apt_install osmo-remsim-client || \
-                yg_warn "osmo-remsim-client not in default apt sources; see guides/SIMTRACE2_CARDEM_GUIDE.md"
+            yg_install_remsim_client
             ;;
     esac
+    if [ "${YG_WITH_GUI}" = "1" ]; then
+        yg_apt_install ${gui_packages}
+    fi
 }
 
 
@@ -82,14 +84,10 @@ install_from_release() {
     fi
     trap "rm -f '${asset_tmp}' '${gui_asset_tmp}'" EXIT
 
-    local url
-    url="$(yg_resolve_release_url "${YG_VERSION}" "${asset}")"
-    yg_download_release_asset "${url}" "${asset_tmp}"
+    yg_download_verified_release_asset "${YG_VERSION}" "${asset}" "${asset_tmp}"
     yg_install_executable "${asset_tmp}" "${YG_INSTALL_DIR}" "yggdrasim"
     if [ "${YG_WITH_GUI}" = "1" ]; then
-        local gui_url
-        gui_url="$(yg_resolve_release_url "${YG_VERSION}" "${gui_asset}")"
-        yg_download_release_asset "${gui_url}" "${gui_asset_tmp}"
+        yg_download_verified_release_asset "${YG_VERSION}" "${gui_asset}" "${gui_asset_tmp}"
         yg_install_executable "${gui_asset_tmp}" "${YG_INSTALL_DIR}" "yggdrasim-gui"
     fi
     yg_emit "run 'yggdrasim --version' to verify"

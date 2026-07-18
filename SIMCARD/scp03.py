@@ -29,6 +29,9 @@ class Scp03CardLogic:
         self.state = state
         self._static_keys = self._load_static_keys()
         self._session_keys: dict[str, bytes] = {}
+        self._authenticated_channel: int | None = None
+        self._last_command_ins: int | None = None
+        self._last_command_channel: int | None = None
 
     def reset(self) -> None:
         """Clear active SCP03 session state and reload static keys from ``state.scp03_keys``."""
@@ -41,6 +44,9 @@ class Scp03CardLogic:
         self._static_keys = self._load_static_keys()
         self.state.scp03_session = SimScp03Session(key_version=self._static_keys["kvn"])
         self._session_keys = {}
+        self._authenticated_channel = None
+        self._last_command_ins = None
+        self._last_command_channel = None
 
     def is_wrapped_command(self, apdu: bytes) -> bool:
         """Return True when *apdu* carries a GP SCP03 security-level header (CLA bit 0x04 set)."""
@@ -53,6 +59,8 @@ class Scp03CardLogic:
         ins = command[1]
         if ins in (0x50, 0x82):
             return False
+        if command[0] & 0x40:
+            return bool(command[0] & 0x20)
         return bool(command[0] & 0x04)
 
     def handle_initialize_update(self, kvn: int, host_challenge: bytes) -> tuple[bytes, int, int]:
@@ -87,8 +95,11 @@ class Scp03CardLogic:
             card_challenge=card_challenge,
             selected_aid=self._selected_aid_hex(),
         )
+        self._authenticated_channel = None
         card_cryptogram = self._gen_crypto(constant=0x00)
-        i_parameter = 0x00 
+        # b7/b6=11 declares R-MAC and R-ENC support; b5=0 declares the
+        # random challenge generated above (SCP03 Amendment D, Table 5-1).
+        i_parameter = 0x60
         key_info = bytes([expected_kvn, 0x03, i_parameter])
         response = (b"\x00" * 10) + key_info + card_challenge + card_cryptogram 
         if (i_parameter & 0x10) != 0:
@@ -105,8 +116,10 @@ class Scp03CardLogic:
         session = self.state.scp03_session
         if len(self._session_keys) == 0 or len(session.host_challenge) == 0:
             return b"", 0x69, 0x85
-        if len(payload) < 16:
+        if len(payload) != 16:
             return b"", 0x67, 0x00
+        if security_level not in (0x00, 0x01, 0x03, 0x11, 0x13, 0x33):
+            return b"", 0x6A, 0x86
 
         host_cryptogram = payload[:8]
         host_mac = payload[8:16]
@@ -125,6 +138,7 @@ class Scp03CardLogic:
         session.security_level = security_level & 0xFF
         session.authenticated = True
         session.ssc = 1
+        self._authenticated_channel = 0
         return b"", 0x90, 0x00
 
     def unwrap_command(self, apdu: bytes) -> tuple[bytes | None, tuple[bytes, int, int] | None]:
@@ -137,52 +151,94 @@ class Scp03CardLogic:
         if session.authenticated is False:
             return bytes(apdu or b""), None
 
-        parsed = parse_apdu(bytes(apdu or b""))
+        protected_apdu = bytes(apdu or b"")
+        parsed = parse_apdu(protected_apdu)
         command_data = bytes(parsed["data"] or b"")
         if len(command_data) < 8:
+            self.reset()
             return None, (b"", 0x69, 0x88)
 
         cla = int(parsed["cla"])
         ins = int(parsed["ins"])
         p1 = int(parsed["p1"])
         p2 = int(parsed["p2"])
+        command_channel = 4 + (cla & 0x0F) if cla & 0x40 else cla & 0x03
+        if (
+            self._authenticated_channel is None
+            or command_channel != self._authenticated_channel
+        ):
+            self.reset()
+            return None, (b"", 0x69, 0x85)
         mac_value = command_data[-8:]
         protected_payload = command_data[:-8]
 
-        session.ssc += 1
-        header = bytes([cla, ins, p1, p2, len(command_data)])
+        # SCP03 Amendment D §6.2.4 authenticates a five-byte short APDU
+        # header. GlobalPlatform APDUs do not use extended Lc/Le.
+        is_extended = len(protected_apdu) >= 7 and protected_apdu[4] == 0x00
+        if is_extended:
+            self.reset()
+            return None, (b"", 0x67, 0x00)
+        if cla & 0x40:
+            mac_cla = (cla & 0x80) | 0x04
+        else:
+            mac_cla = (cla & 0xF0) | 0x04
+        header = bytes([mac_cla, ins, p1, p2, len(command_data)])
         expected_full_mac = self._cmac(
             self._session_keys["s_mac"],
             session.chaining_value + header + protected_payload,
         )
         if not hmac.compare_digest(mac_value, expected_full_mac[:8]):
+            self.reset()
             return None, (b"", 0x69, 0x88)
         session.chaining_value = expected_full_mac
 
         plain_payload = protected_payload
+        encryption_counter: int | None = None
+        if session.security_level & 0x02:
+            encryption_counter = session.ssc if session.ssc > 0 else 1
+            session.ssc = encryption_counter + 1
         if len(protected_payload) > 0 and (session.security_level & 0x02):
-            iv = self._generate_iv((session.ssc - 1).to_bytes(16, "big"))
-            plain_payload = self._cbc_decrypt(self._session_keys["s_enc"], iv, protected_payload)
-            plain_payload = self._remove_iso_padding(plain_payload)
+            assert encryption_counter is not None
+            try:
+                iv = self._generate_iv(encryption_counter.to_bytes(16, "big"))
+                plain_payload = self._cbc_decrypt(
+                    self._session_keys["s_enc"], iv, protected_payload
+                )
+                plain_payload = self._remove_iso_padding(plain_payload)
+            except (ValueError, TypeError):
+                self.reset()
+                return None, (b"", 0x69, 0x88)
 
-        original_cla = cla & 0xFB
+        original_cla = cla & (0xDF if cla & 0x40 else 0xFB)
         le = parsed["le"]
         rebuilt = bytearray([original_cla, ins, p1, p2])
-        if len(plain_payload) > 0:
-            if len(plain_payload) > 0xFF:
-                rebuilt.extend([0x00, (len(plain_payload) >> 8) & 0xFF, len(plain_payload) & 0xFF])
-            else:
-                rebuilt.append(len(plain_payload))
+        use_extended = is_extended or len(plain_payload) > 0xFF or (
+            le is not None and int(le) > 0x100
+        )
+        if len(plain_payload) == 0:
+            if le is not None:
+                if use_extended:
+                    encoded_le = 0 if int(le) == 65536 else int(le)
+                    rebuilt.append(0x00)
+                    rebuilt.extend(encoded_le.to_bytes(2, "big"))
+                else:
+                    encoded_le = 0 if int(le) == 256 else int(le)
+                    rebuilt.append(encoded_le & 0xFF)
+        elif use_extended:
+            rebuilt.append(0x00)
+            rebuilt.extend(len(plain_payload).to_bytes(2, "big"))
             rebuilt.extend(plain_payload)
-        if le is not None:
-            if le == 65536:
-                rebuilt.extend(b"\x00\x00")
-            elif le == 256:
-                rebuilt.append(0x00)
-            elif le <= 0xFF:
-                rebuilt.append(le & 0xFF)
-            else:
-                rebuilt.extend(le.to_bytes(2, "big"))
+            if le is not None:
+                encoded_le = 0 if int(le) == 65536 else int(le)
+                rebuilt.extend(encoded_le.to_bytes(2, "big"))
+        else:
+            rebuilt.append(len(plain_payload))
+            rebuilt.extend(plain_payload)
+            if le is not None:
+                encoded_le = 0 if int(le) == 256 else int(le)
+                rebuilt.append(encoded_le & 0xFF)
+        self._last_command_ins = ins
+        self._last_command_channel = command_channel
         return bytes(rebuilt), None
 
     def wrap_response(self, data: bytes, sw1: int, sw2: int) -> bytes:
@@ -191,26 +247,44 @@ class Scp03CardLogic:
         response = bytes(data or b"")
         if session.authenticated is False:
             return response
-        if len(response) == 0:
-            return response
-        if (session.security_level & 0x20) == 0:
-            return response
+        protected_status = sw1 == 0x90 or sw1 in (0x62, 0x63)
+        if protected_status is False:
+            # SCP03 §6.2.5: error responses carry only the status word.
+            wire_response = b""
+        elif (session.security_level & 0x10) == 0:
+            wire_response = response
+        else:
+            protected_response = response
+            if len(response) > 0 and (session.security_level & 0x20):
+                iv_counter = session.ssc - 1
+                if iv_counter < 1:
+                    raise RuntimeError(
+                        "R-ENC response has no matching command encryption counter."
+                    )
+                iv_input = bytearray(iv_counter.to_bytes(16, "big"))
+                iv_input[0] = 0x80
+                iv = self._generate_iv(bytes(iv_input))
+                padded = self._add_iso_padding(response)
+                protected_response = self._cbc_encrypt(
+                    self._session_keys["s_enc"], iv, padded
+                )
+            response_mac = self._cmac(
+                self._session_keys["s_rmac"],
+                session.chaining_value
+                + protected_response
+                + bytes([sw1 & 0xFF, sw2 & 0xFF]),
+            )
+            wire_response = protected_response + response_mac[:8]
 
-        iv_counter = session.ssc - 1
-        if iv_counter < 0:
-            iv_counter = 0
-        iv_input = bytearray(iv_counter.to_bytes(16, "big"))
-        iv_input[0] = 0x80
-        iv = self._generate_iv(bytes(iv_input))
-        padded = self._add_iso_padding(response)
-        encrypted = self._cbc_encrypt(self._session_keys["s_enc"], iv, padded)
-        # Host-side simulator transport currently ignores response MAC bytes,
-        # but keeping the trailer preserves the expected SCP03 wire shape.
-        response_mac = self._cmac(
-            self._session_keys["s_rmac"],
-            session.chaining_value + encrypted + bytes([sw1 & 0xFF, sw2 & 0xFF]),
-        )
-        return encrypted + response_mac[:8]
+        if (
+            (sw1, sw2) == (0x90, 0x00)
+            and self._last_command_ins == 0xA4
+            and self._last_command_channel == self._authenticated_channel
+        ):
+            # Selecting another application on the channel terminates the
+            # associated Application Session and its Secure Channel Session.
+            self.reset()
+        return wire_response
 
     def key_template(self) -> bytes:
         kvn = int(self._static_keys["kvn"]) & 0xFF
@@ -293,7 +367,7 @@ class Scp03CardLogic:
     def _remove_iso_padding(payload: bytes) -> bytes:
         index = payload.rfind(b"\x80")
         if index == -1:
-            return bytes(payload)
+            raise ValueError("SCP03 encrypted command padding marker is missing.")
         if any(byte != 0x00 for byte in payload[index + 1 :]):
-            return bytes(payload)
+            raise ValueError("SCP03 encrypted command padding is invalid.")
         return bytes(payload[:index])

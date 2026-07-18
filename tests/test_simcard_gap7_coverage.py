@@ -42,7 +42,7 @@ from SIMCARD.toolkit import (
     _decode_timer_value_bcd,
     _encode_timer_value_bcd,
 )
-from SIMCARD.utils import read_tlv, tlv
+from SIMCARD.utils import tlv
 
 
 class _EngineHarness(unittest.TestCase):
@@ -224,7 +224,7 @@ class TimerManagementProactiveTests(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
+            eid="89049032123451234512345678901235",
             iccid="8949000000000000001",
             imsi="999990000000001",
             default_dp_address="",
@@ -357,7 +357,7 @@ class TimerExpirationEnvelopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
+            eid="89049032123451234512345678901235",
             iccid="8949000000000000001",
             imsi="999990000000001",
             default_dp_address="",
@@ -406,7 +406,7 @@ class MoreTimePollingOffDeclareServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
+            eid="89049032123451234512345678901235",
             iccid="8949000000000000001",
             imsi="999990000000001",
             default_dp_address="",

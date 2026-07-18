@@ -103,6 +103,53 @@ class TolerantLoaderHelperTests(unittest.TestCase):
         # head_hex is a human-readable hex dump of the failing segment.
         self.assertIn("A0", first_fail["head_hex"])
 
+    def test_tolerant_walker_rejects_typeless_pe_between_good_pes(self) -> None:
+        """``50 00`` decodes to ``type=None`` and must become a warning.
+
+        pySim accepts the segment as a generic ``ProfileElement`` instead of
+        raising.  The tolerant loader must not append that unusable object,
+        while still recovering both valid neighbours.
+        """
+        good = self._good_pe_tlv()
+        typeless = bytes.fromhex("50 00")
+
+        pes, warnings, first_fail = self.saip._parse_pes_tolerant(
+            good + typeless + good
+        )
+
+        self.assertEqual([pe.type for pe in pes.pe_list], ["end", "end"])
+        self.assertEqual(len(warnings), 1)
+        self.assertIsNotNone(first_fail)
+        assert first_fail is not None
+        self.assertEqual(first_fail["stage"], "pe_decode")
+        self.assertEqual(first_fail["offset"], len(good))
+        self.assertEqual(first_fail["head_hex"], "50 00")
+        self.assertIn("non-empty string type", first_fail["error"])
+        self.assertIn("None", first_fail["error"])
+
+    def test_nonempty_unregistered_pe_type_remains_usable(self) -> None:
+        """New ASN.1 choices need not have a specialised pySim class."""
+
+        class _FutureProfileElement:
+            type = "future-profile-element"
+
+        self.assertTrue(
+            self.saip._pe_has_usable_type(_FutureProfileElement())
+        )
+
+    def test_blank_and_non_string_pe_types_are_not_usable(self) -> None:
+        """Only a non-empty string can identify a decoded PE."""
+
+        class _ProfileElementStub:
+            def __init__(self, pe_type: Any) -> None:
+                self.type = pe_type
+
+        for value in (None, "", "   ", 0, b"end"):
+            with self.subTest(value=value):
+                self.assertFalse(
+                    self.saip._pe_has_usable_type(_ProfileElementStub(value))
+                )
+
     def test_tolerant_walker_survives_total_garbage(self) -> None:
         """Pure random bytes produce an empty sequence + a first_fail entry."""
         raw = bytes([0x01, 0x02, 0x03])
@@ -193,6 +240,125 @@ class TolerantLoaderHelperTests(unittest.TestCase):
         self.assertIn("warnings", package)
         self.assertEqual(package["warnings"], [])
         self.assertGreaterEqual(len(package["pes"].pe_list), 1)
+
+    def test_excel_workbook_is_rejected_before_der_recovery(self) -> None:
+        """An XLSX must use the plugin action, never tolerant DER recovery."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workbook = Path(temp_dir) / "operator-profile.xlsx"
+            # A valid PE body proves the suffix guard wins even when the bytes
+            # themselves could otherwise be accepted by the DER decoder.
+            workbook.write_bytes(self._good_pe_tlv())
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Excel workbook .* is not a SAIP package.*Excel → SAIP template",
+            ):
+                self.saip._load_package_from_path(workbook)
+
+    def test_open_package_path_rejects_xlsx_suffix(self) -> None:
+        """The path dispatcher preserves the workbook-specific guidance."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workbook = Path(temp_dir) / "operator-profile.xlsx"
+            workbook.write_bytes(self._good_pe_tlv())
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Excel workbook .* is not a SAIP package.*Excel → SAIP template",
+            ):
+                self.saip._dispatch_open_package(ctx=None, path=str(workbook))
+
+    def test_open_package_upload_rejects_xlsx_suffix(self) -> None:
+        """Browser uploads apply the same XLSX guard as filesystem paths."""
+        import base64
+        import tempfile
+        from unittest import mock
+
+        encoded = base64.b64encode(self._good_pe_tlv()).decode("ascii")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch.object(
+                self.saip.tempfile,
+                "gettempdir",
+                return_value=temp_dir,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"Excel workbook .* is not a SAIP package.*Excel → SAIP template",
+                ):
+                    self.saip._dispatch_open_package_upload(
+                        ctx=None,
+                        filename="operator-profile.xlsx",
+                        content_base64=encoded,
+                    )
+
+    def test_renamed_zip_content_is_rejected_before_der_recovery(self) -> None:
+        """An XLSX/ZIP renamed to ``.der`` must not reach the BER walker."""
+        import io
+        import tempfile
+        import zipfile
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as workbook:
+            workbook.writestr("[Content_Types].xml", "<Types />")
+            workbook.writestr("xl/workbook.xml", "<workbook />")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            renamed = Path(temp_dir) / "operator-profile.der"
+            renamed.write_bytes(archive.getvalue())
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"ZIP archive content detected.*not a SAIP package.*Excel",
+            ):
+                self.saip._load_package_from_path(renamed)
+
+    def test_zip_magic_is_rejected_even_when_archive_is_truncated(self) -> None:
+        """A leading local-file signature is sufficient to reject ZIP input."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            renamed = Path(temp_dir) / "truncated-workbook.der"
+            renamed.write_bytes(b"PK\x03\x04" + (b"\x00" * 12))
+
+            with self.assertRaisesRegex(ValueError, "ZIP archive content"):
+                self.saip._load_package_from_path(renamed)
+
+    def test_typeless_only_der_is_rejected_by_full_loader(self) -> None:
+        """Strict acceptance of ``50 00`` must fall through to shaped failure."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "typeless.der"
+            input_path.write_bytes(bytes.fromhex("50 00"))
+
+            with self.assertRaises(ValueError) as raised:
+                self.saip._load_package_from_path(input_path)
+
+        message = str(raised.exception)
+        self.assertIn("Failed to parse SAIP package", message)
+        self.assertIn("no usable non-empty string type", message)
+        self.assertIn("None", message)
+        self.assertIn("50 00", message)
+
+    def test_full_loader_recovers_good_typeless_good_sequence(self) -> None:
+        """Strict type validation still preserves tolerant partial recovery."""
+        import tempfile
+
+        good = self._good_pe_tlv()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "partially-damaged.der"
+            input_path.write_bytes(good + bytes.fromhex("50 00") + good)
+            package = self.saip._load_package_from_path(input_path)
+
+        self.assertEqual(
+            [pe.type for pe in package["pes"].pe_list],
+            ["end", "end"],
+        )
+        self.assertEqual(len(package["warnings"]), 1)
+        self.assertEqual(package["warnings"][0]["head_hex"], "50 00")
 
 
 class OpenPackageResponseTests(unittest.TestCase):

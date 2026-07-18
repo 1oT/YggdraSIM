@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Gruv · dark (brown paper + orange accent, popular lab palette) ----- */
 html[data-theme="gruv-dark"] {
   --bg: #282828;
@@ -14,8 +15,8 @@ html[data-theme="gruv-dark"] {
   --border: rgba(235, 219, 178, 0.12);
   --border-strong: rgba(235, 219, 178, 0.28);
   --fg: #ebdbb2;
-  --fg-dim: #a89984;
-  --fg-muted: #928374;
+  --fg-dim: #b0a18c;
+  --fg-muted: var(--fg-dim);
   --accent: #fe8019;
   --accent-strong: #d65d0e;
   --accent-soft: rgba(254, 128, 25, 0.14);
@@ -27,7 +28,7 @@ html[data-theme="gruv-dark"] {
   --ok-soft: rgba(184, 187, 38, 0.16);
   --warn: #fabd2f;
   --warn-soft: rgba(250, 189, 47, 0.14);
-  --fail: #fb4934;
+  --fail: #ff7263;
   --fail-soft: rgba(251, 73, 52, 0.16);
   --code-bg: #1d2021;
   --kbd-bg: rgba(29, 32, 33, 0.96);
@@ -40,4 +41,3 @@ html[data-theme="gruv-dark"] {
     radial-gradient(circle at 92% 88%, rgba(250, 189, 47, 0.07), transparent 48%),
     radial-gradient(circle at 48% 40%, rgba(184, 187, 38, 0.05), transparent 52%);
 }
-

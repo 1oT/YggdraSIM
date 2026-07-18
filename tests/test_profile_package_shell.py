@@ -787,7 +787,7 @@ class ProfilePackageShellTests(unittest.TestCase):
                 },
                 "usim": {
                     "ef-imsi": [
-                        ("fillFileContent", bytes.fromhex("091132547618325476F8")),
+                        ("fillFileContent", bytes.fromhex("081932547618325476")),
                     ],
                 },
             },
@@ -799,7 +799,7 @@ class ProfilePackageShellTests(unittest.TestCase):
             output_path = Path(temp_dir) / "profile_template.json"
             with contextlib.redirect_stdout(io.StringIO()) as captured:
                 self.shell._cmd_generate_template(
-                    f'"{output_path}" ICCID=89461111111111111112 IMSI=1234567812345678'
+                    f'"{output_path}" ICCID=89461111111111111112 IMSI=123456781234567'
                 )
 
             rendered = json.loads(output_path.read_text(encoding="utf-8"))
@@ -815,7 +815,7 @@ class ProfilePackageShellTests(unittest.TestCase):
         )
         self.assertEqual(rendered["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
         self.assertEqual(rendered["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
-        self.assertEqual(rendered["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
+        self.assertEqual(rendered["__ygg_token_defs__"]["IMSI"]["hex"], "081932547618325476")
         self.assertIn("Placeholder injection summary", captured.getvalue())
 
     def test_cmd_generate_profile_applies_typed_placeholder_overrides(self) -> None:
@@ -863,7 +863,7 @@ class ProfilePackageShellTests(unittest.TestCase):
                     with contextlib.redirect_stdout(io.StringIO()) as captured:
                         self.shell._cmd_generate_profile(
                             f'"{template_path}" "{output_path}" '
-                            "ICCID=89461111111111111112 IMSI=1234567812345678"
+                            "ICCID=89461111111111111112 IMSI=123456781234567"
                         )
                     written_bytes = output_path.read_bytes()
 
@@ -876,11 +876,11 @@ class ProfilePackageShellTests(unittest.TestCase):
         )
         self.assertEqual(
             document["sections"]["usim"]["ef-imsi"][0][1],
-            bytes.fromhex("091132547618325476F8"),
+            bytes.fromhex("081932547618325476"),
         )
         self.assertEqual(document["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
         self.assertEqual(document["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
-        self.assertEqual(document["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
+        self.assertEqual(document["__ygg_token_defs__"]["IMSI"]["hex"], "081932547618325476")
         self.assertEqual(written_bytes, b"\xAA\xBB")
         self.assertIn("Placeholder override summary", captured.getvalue())
 
@@ -921,8 +921,8 @@ class ProfilePackageShellTests(unittest.TestCase):
             template_path.write_text(json.dumps(template), encoding="utf-8")
             data_path.write_text(
                 "ICCID,IMSI\n"
-                "89881111111111111112,1234567812345678\n"
-                "89881111111111111113,1234567812345679\n",
+                "89881111111111111112,123456781234567\n"
+                "89881111111111111113,123456781234568\n",
                 encoding="utf-8",
             )
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 import sys
 
 from SCP11.live import asn1_registry as _impl
-from SCP11.live.asn1_registry import *  # noqa: F401,F403
 
 
 sys.modules[__name__] = _impl

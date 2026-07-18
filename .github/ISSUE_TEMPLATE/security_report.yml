@@ -14,7 +14,7 @@ body:
         forgery, bypass of SCP03/11 authentication, eSIM profile
         compromise, supply chain injection), do **not** file this issue.
         Use the private path:
-        https://github.com/hampus/YggdraSIM/security/advisories/new
+        https://github.com/1oT/YggdraSIM/security/advisories/new
 
         This form is for:
         - Hardening proposals (defence-in-depth)

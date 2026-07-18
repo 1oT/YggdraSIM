@@ -118,7 +118,9 @@ Domains (suffix is numeric or mnemonic):
        TCA PP TS PIN-007); keyReference outside ETSI TS 102 221 §9.5 Table
        9.3 ranges — global 0x01..0x08, local 0x81..0x88 (-007 FAIL)
   UCR  USIM decoded shape expectations
-  UST  EF(UST) service bits vs related files (informational coherence)
+  UST  EF(UST) service-to-required-file coherence (-001 FAIL when an
+       enabled service lacks a normatively required file; -002 WARN when
+       related file presence suggests that the service bit should be set)
   MET  Sidecar metadata alignment / operator fields
   RFM  Remote File Management PE coherence: duplicate TAR value across PEs
        (-001 FAIL, ETSI TS 102 226 §8.2), TAR not exactly 3 bytes (-002 WARN,

@@ -138,6 +138,7 @@ class TestSingleOverrideRollback:
         )
         assert result["removed"] is True
         assert result["overrides_applied"] == {}
+        assert result["remaining_inline_placeholder_count"] == 0
         assert any("reset to source" in s.lower() for s in result["summaries"])
 
         listing = _dispatch_list_variables(None, session_id=saip_session.id)

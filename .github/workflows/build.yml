@@ -24,6 +24,49 @@ on:
   workflow_dispatch:
 
 jobs:
+  dependency-policy:
+    name: Dependency lock and package boundary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
+      - name: Verify dependency lock is current
+        run: uv lock --check --python 3.11
+
+      - name: Verify frozen resource allowlists
+        shell: bash
+        run: |
+          python scripts/release/prepare_bundle_data.py \
+            --flavor clean --stage-dir "${RUNNER_TEMP}/bundle-data-clean"
+          python scripts/release/prepare_bundle_data.py \
+            --flavor full --stage-dir "${RUNNER_TEMP}/bundle-data-full"
+
+      - name: Build and inspect wheel
+        shell: bash
+        run: |
+          python scripts/release/source_boundary.py
+          uv build --sdist --out-dir "${RUNNER_TEMP}/sdist"
+          SDIST=$(find "${RUNNER_TEMP}/sdist" -maxdepth 1 -name '*.tar.gz' -print -quit)
+          test -n "${SDIST}"
+          python scripts/release/verify_sdist.py "${SDIST}"
+          uv build --wheel --out-dir "${RUNNER_TEMP}/wheel" "${SDIST}"
+          WHEEL=$(find "${RUNNER_TEMP}/wheel" -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "${WHEEL}"
+          python scripts/release/verify_wheel.py "${WHEEL}"
+
   docs-strict:
     name: Docs (mkdocs --strict)
     runs-on: ubuntu-latest
@@ -38,10 +81,14 @@ jobs:
           python-version: "3.11"
 
       - name: Install docs dependencies
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
+      - name: Sync locked docs environment
         shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-docs.txt
+        run: uv pip install --system -r requirements-docs.txt
 
       - name: Mirror repo docs into site-docs/sources/
         shell: bash
@@ -71,10 +118,21 @@ jobs:
             libpcsclite-dev pcscd swig pkg-config gpg libudev-dev build-essential
 
       - name: Install Python dependencies (full + test extras)
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
+      - name: Sync locked full test environment
+        shell: bash
+        run: uv sync --frozen --extra full --extra test
+
+      - name: Run fatal Python static-analysis gate
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[full]'
+          uv run ruff check \
+            main SCP03 SCP80 SCP11 SIMCARD Tools yggdrasim_common scripts tests \
+            --select E9,F
 
       - name: Run pytest suite
         shell: bash
@@ -90,7 +148,7 @@ jobs:
         # ``git clone https://gitlab.com/osmocom/pysim.git pysim`` into the
         # workspace prior to the pytest step.
         run: |
-          python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=5 tests/
+          uv run python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=5 tests/
 
   build-linux-x86_64:
     name: Linux x86_64 (${{ matrix.flavor }})
@@ -127,26 +185,30 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libpcsclite-dev pcscd swig pkg-config gpg
+          sudo apt-get install -y --no-install-recommends \
+            libpcsclite-dev pcscd swig pkg-config gpg \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 xauth xvfb
+
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
 
       - name: Install Python dependencies (clean)
         if: matrix.flavor == 'clean'
         shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[build,test,gui]'
+        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
 
       - name: Install Python dependencies (full)
         if: matrix.flavor == 'full'
         shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[full,gui]'
+        run: uv sync --frozen --extra full --extra saip --extra build --extra test --extra gui
 
       - name: Build Linux bundle
         env:
           YGGDRASIM_FLAVOR: ${{ matrix.flavor }}
-        run: python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+        run: uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 
       - name: Smoke test Linux bundle
         shell: bash
@@ -159,7 +221,23 @@ jobs:
           chmod +x "${GUI_BIN}"
           "${BIN}" --version
           "${GUI_BIN}" --version
-          "${BIN}" --doctor || true
+          DOCTOR_OUTPUT=$("${BIN}" --doctor || true)
+          printf '%s\n' "${DOCTOR_OUTPUT}"
+          printf '%s\n' "${DOCTOR_OUTPUT}" | grep -E 'usable backends:.*qt'
+          uv run python scripts/release/validate_release.py artifact "${BIN}" "${GUI_BIN}"
+          set +e
+          timeout 12s xvfb-run -a "${GUI_BIN}" \
+            >"${RUNNER_TEMP}/yggdrasim-gui-smoke.log" 2>&1
+          GUI_STATUS=$?
+          set -e
+          case "${GUI_STATUS}" in
+            0|124) ;;
+            *)
+              cat "${RUNNER_TEMP}/yggdrasim-gui-smoke.log"
+              echo "GUI exited before the Xvfb smoke window could stay open" >&2
+              exit "${GUI_STATUS}"
+              ;;
+          esac
 
       - name: Upload Linux bundle artifact
         uses: actions/upload-artifact@v6
@@ -193,12 +271,9 @@ jobs:
 
       - name: Build arm64 bundle inside Debian container
         shell: bash
-        # ``python3-dev`` is required for the ``pyscard`` C extension build
-        # (it pulls in ``Python.h``); ``git`` is required by pip when an
-        # extra resolves to a ``git+https://`` source. The clean flavor does
-        # not currently consume ``saip`` (which uses git+), but the clean
-        # ``[build,test]`` extras keep us future-proof against transitive
-        # changes.
+        # ``python3-dev`` supplies ``Python.h`` for pyscard. ``git`` resolves
+        # the commit-pinned pySim and asn1tools sources in the locked base
+        # dependency graph.
         run: |
           mkdir -p dist
           docker run --rm --platform linux/arm64 \
@@ -210,16 +285,21 @@ jobs:
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 python3 python3-pip python3-venv python3-dev \
                 libpcsclite-dev pcscd swig pkg-config gpg git \
+                libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
                 build-essential
+              python3 -m venv /opt/uv
+              /opt/uv/bin/pip install "uv==0.5.9"
               python3 -m venv /opt/venv
-              . /opt/venv/bin/activate
-              python -m pip install --upgrade pip
-              python -m pip install -e ".[build,test,gui]"
-              python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+              export UV_PROJECT_ENVIRONMENT=/opt/venv
+              /opt/uv/bin/uv sync --frozen \
+                --extra saip --extra build --extra test --extra gui
+              /opt/uv/bin/uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
               chmod +x dist/yggdrasim-clean
               chmod +x dist/yggdrasim-gui-clean
               dist/yggdrasim-clean --version
               dist/yggdrasim-gui-clean --version
+              /opt/uv/bin/uv run python scripts/release/validate_release.py \
+                artifact dist/yggdrasim-clean dist/yggdrasim-gui-clean
             '
 
       - name: Upload arm64 bundle artifact
@@ -268,16 +348,21 @@ jobs:
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 python3 python3-pip python3-venv python3-dev \
                 libpcsclite-dev pcscd swig pkg-config gpg git \
-                libudev-dev build-essential
+                libudev-dev libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+                build-essential
+              python3 -m venv /opt/uv
+              /opt/uv/bin/pip install "uv==0.5.9"
               python3 -m venv /opt/venv
-              . /opt/venv/bin/activate
-              python -m pip install --upgrade pip
-              python -m pip install -e ".[full,gui]"
-              python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+              export UV_PROJECT_ENVIRONMENT=/opt/venv
+              /opt/uv/bin/uv sync --frozen \
+                --extra full --extra saip --extra build --extra test --extra gui
+              /opt/uv/bin/uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
               chmod +x dist/yggdrasim-full
               chmod +x dist/yggdrasim-gui-full
               dist/yggdrasim-full --version
               dist/yggdrasim-gui-full --version
+              /opt/uv/bin/uv run python scripts/release/validate_release.py \
+                artifact dist/yggdrasim-full dist/yggdrasim-gui-full
             '
 
       - name: Upload arm64 full bundle artifact
@@ -314,23 +399,83 @@ jobs:
         shell: pwsh
         run: choco install swig -y
 
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
       - name: Install Python dependencies
         shell: pwsh
+        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
+
+      - name: Verify portable Remote Lab and Card Bridge contracts
+        shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[build,test,gui]'
+          uv run python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=1 `
+            tests/test_remote_cross_platform_boundary.py `
+            tests/test_remote_lab.py `
+            tests/test_gui_card_bridge_actions.py `
+            tests/test_gui_card_bridge_actions_http.py `
+            tests/test_apdu_relay_service.py `
+            tests/test_card_backend_relay_token.py `
+            tests/test_hil_bridge_card_relay.py
 
       - name: Build Windows bundle
         shell: pwsh
         env:
           YGGDRASIM_FLAVOR: clean
-        run: python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+        run: uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      - name: Require Authenticode credentials for tagged releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_PFX_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:SIGNING_PASSWORD)) {
+            throw 'Tagged releases require WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PASSWORD.'
+          }
+
+      - name: Authenticode-sign Windows release binaries
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'yggdrasim-codesign.pfx'
+          try {
+            [IO.File]::WriteAllBytes(
+              $pfx,
+              [Convert]::FromBase64String($env:SIGNING_PFX_BASE64)
+            )
+            $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
+            foreach ($binary in @(
+              '.\dist\yggdrasim-clean.exe',
+              '.\dist\yggdrasim-gui-clean.exe'
+            )) {
+              & $signtool sign /fd SHA256 /td SHA256 `
+                /tr 'https://timestamp.digicert.com' `
+                /f $pfx /p $env:SIGNING_PASSWORD $binary
+              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $binary" }
+              & $signtool verify /pa /all $binary
+              if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $binary" }
+            }
+          }
+          finally {
+            Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Smoke test Windows bundle
         shell: pwsh
         run: |
           .\dist\yggdrasim-clean.exe --version
           .\dist\yggdrasim-gui-clean.exe --version
+          uv run python scripts/release/validate_release.py artifact `
+            .\dist\yggdrasim-clean.exe .\dist\yggdrasim-gui-clean.exe
 
       - name: Upload Windows bundle artifact
         uses: actions/upload-artifact@v6
@@ -374,17 +519,99 @@ jobs:
           brew update
           brew install swig || true
 
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
       - name: Install Python dependencies
         shell: bash
+        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
+
+      - name: Verify portable Remote Lab and Card Bridge contracts
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[build,test,gui]'
+          uv run python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=1 \
+            tests/test_remote_cross_platform_boundary.py \
+            tests/test_remote_lab.py \
+            tests/test_gui_card_bridge_actions.py \
+            tests/test_gui_card_bridge_actions_http.py \
+            tests/test_apdu_relay_service.py \
+            tests/test_card_backend_relay_token.py \
+            tests/test_hil_bridge_card_relay.py
 
       - name: Build macOS bundle
         shell: bash
         env:
           YGGDRASIM_FLAVOR: clean
-        run: python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+        run: uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      - name: Require signing and notarization credentials for tagged releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CODESIGN_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CODESIGN_CERT_PASSWORD }}
+          CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          set -eu
+          for name in CERT_P12_BASE64 CERT_PASSWORD CODESIGN_IDENTITY \
+            APPLE_ID APPLE_ID_PASSWORD APPLE_TEAM_ID; do
+            test -n "$(printenv "${name}")" || {
+              echo "Tagged releases require ${name}." >&2
+              exit 2
+            }
+          done
+
+      - name: Sign and notarize macOS release binaries
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CODESIGN_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CODESIGN_CERT_PASSWORD }}
+          CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          set -eu
+          P12="${RUNNER_TEMP}/yggdrasim-codesign.p12"
+          KEYCHAIN="${RUNNER_TEMP}/yggdrasim-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          ARCHIVE="${RUNNER_TEMP}/yggdrasim-notary.zip"
+          GUI_ARCHIVE="${RUNNER_TEMP}/yggdrasim-gui-notary.zip"
+          cleanup() {
+            security delete-keychain "${KEYCHAIN}" >/dev/null 2>&1 || true
+            rm -f "${P12}" "${ARCHIVE}" "${GUI_ARCHIVE}"
+          }
+          trap cleanup EXIT
+          printf '%s' "${CERT_P12_BASE64}" | base64 --decode > "${P12}"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security import "${P12}" -k "${KEYCHAIN}" -P "${CERT_PASSWORD}" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security list-keychains -d user -s "${KEYCHAIN}"
+          for binary in dist/yggdrasim-clean dist/yggdrasim-gui-clean; do
+            codesign --force --options runtime --timestamp \
+              --keychain "${KEYCHAIN}" --sign "${CODESIGN_IDENTITY}" "${binary}"
+            codesign --verify --deep --strict --verbose=2 "${binary}"
+          done
+          ditto -c -k --keepParent dist/yggdrasim-clean "${ARCHIVE}"
+          ditto -c -k --keepParent dist/yggdrasim-gui-clean \
+            "${GUI_ARCHIVE}"
+          xcrun notarytool submit "${ARCHIVE}" --wait \
+            --apple-id "${APPLE_ID}" --password "${APPLE_ID_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}"
+          xcrun notarytool submit "${GUI_ARCHIVE}" --wait \
+            --apple-id "${APPLE_ID}" --password "${APPLE_ID_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}"
 
       - name: Smoke test macOS bundle
         shell: bash
@@ -393,6 +620,8 @@ jobs:
           chmod +x dist/yggdrasim-gui-clean
           dist/yggdrasim-clean --version
           dist/yggdrasim-gui-clean --version
+          uv run python scripts/release/validate_release.py artifact \
+            dist/yggdrasim-clean dist/yggdrasim-gui-clean
 
       - name: Upload macOS bundle artifact
         uses: actions/upload-artifact@v6
@@ -436,7 +665,7 @@ jobs:
           Priority: optional
           Architecture: ${ARCH}
           Maintainer: GitHub Actions
-          Depends: libpcsclite1, pcscd, gpg
+          Depends: libpcsclite1, pcscd, gpg, libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0
           Description: YggdraSIM secure-element and eUICC toolkit (clean flavor, no HIL bridge)
           EOF
           dpkg-deb --build "$PKGROOT" "dist/${DEB_NAME}"
@@ -455,6 +684,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs:
+      - dependency-policy
       - docs-strict
       - pytest-suite
       - build-linux-x86_64
@@ -465,6 +695,8 @@ jobs:
       - build-linux-deb-clean
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout code
@@ -476,6 +708,7 @@ jobs:
         run: |
           VERSION=$(python3 -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
           TAG="${GITHUB_REF#refs/tags/}"
+          python3 scripts/release/validate_release.py tag --tag "${TAG}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
@@ -550,6 +783,14 @@ jobs:
           install -m 0755 dl/windows-x86_64-clean/yggdrasim-gui-clean.exe release-assets/yggdrasim-gui-windows-x86_64-clean.exe
           cp dl/linux-deb-clean/yggdrasim-clean_${{ steps.meta.outputs.version }}_amd64.deb release-assets/
 
+      - name: Generate locked dependency SBOM
+        shell: bash
+        run: |
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+            python3 scripts/release/generate_sbom.py \
+            --version "${{ steps.meta.outputs.version }}" \
+            --output "release-assets/yggdrasim-${{ steps.meta.outputs.version }}.cdx.json"
+
       - name: Generate SHA256 manifest
         shell: bash
         working-directory: release-assets
@@ -582,6 +823,7 @@ jobs:
             yggdrasim-gui-macos-arm64-clean
             yggdrasim-windows-x86_64-clean.exe
             yggdrasim-gui-windows-x86_64-clean.exe
+            yggdrasim-${{ steps.meta.outputs.version }}.cdx.json
             SHA256SUMS
           "
           missing=
@@ -596,6 +838,11 @@ jobs:
           fi
           echo 'all required release assets present'
           ls -la release-assets/
+
+      - name: Sign release provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: release-assets/*
 
       # ``--notes-from-tag`` reuses the annotated tag message we shipped with
       # v1.0.0 (BCD EID marker + HIL fix + audit rectifications). Future tags

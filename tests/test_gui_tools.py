@@ -3,24 +3,21 @@
 
 """Narrow tests for ``yggdrasim_common/gui_server/routes/tools.py`` (B-1).
 
-The file is structured so the low-level helpers run in every environment
-(no FastAPI needed), while the HTTP-surface tests use
-``pytest.importorskip`` to gracefully skip when the ``gui`` optional
-dependency stack is not installed.
+The route handlers are exercised directly so the tests cover their
+request/response contracts without starting an HTTP client or event-loop
+portal.  The bearer gate is tested independently at its pure-ASGI boundary.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
 # The tools router imports ``fastapi`` at module scope, so the entire
-# test file only makes sense when the optional ``gui`` / ``gui-server``
-# stack is installed. Skip the whole file in environments where it is
-# not, rather than each test individually.
+# test file only makes sense when the optional GUI stack is installed.
 pytest.importorskip("fastapi")
-pytest.importorskip("starlette")
 
 from yggdrasim_common.gui_server.routes import tools as tools_module  # noqa: E402
 
@@ -76,89 +73,55 @@ class TestTlvNodeProjection:
         assert nodes[0].children[0].value_hex == "AA"
 
 
-# --- HTTP-surface tests via starlette TestClient -----------------------
-
-
-@pytest.fixture(scope="module")
-def test_client():
-    pytest.importorskip("fastapi")
-    pytest.importorskip("starlette")
-    from starlette.testclient import TestClient
-
-    from yggdrasim_common.gui_server.app import create_app
-    from yggdrasim_common.gui_server.config import GuiServerConfig
-
-    config = GuiServerConfig(
-        mode="desktop",
-        host="127.0.0.1",
-        port=0,
-        token="0123456789abcdef0123456789abcdef",
-        allow_origins=tuple(),
-        tls_cert_path="",
-        tls_key_path="",
-        tls_self_signed=False,
-        token_source="test-fixture",
-        token_strength="generated",
-        allow_ephemeral_port=True,
-        idle_seconds=300,
-        webview_debug=False,
-    )
-    app = create_app(config)
-    client = TestClient(app)
-    client.headers.update({"Authorization": "Bearer " + config.token})
-    yield client
+# --- Route request/response contracts ---------------------------------
 
 
 class TestTlvRoute:
-    def test_parse_flat_tag(self, test_client) -> None:
-        response = test_client.post("/api/tools/tlv/parse", json={"hex": "80 02 9000"})
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["complete"] is True
-        assert payload["error"] is None
-        assert payload["consumed"] == 4
-        assert len(payload["nodes"]) == 1
-        assert payload["nodes"][0]["tag_hex"] == "80"
-        assert payload["nodes"][0]["value_hex"] == "9000"
+    def test_parse_flat_tag(self) -> None:
+        response = tools_module.parse_tlv(tools_module.TlvParseRequest(hex="80 02 9000"))
+        assert response.complete is True
+        assert response.error is None
+        assert response.consumed == 4
+        assert len(response.nodes) == 1
+        assert response.nodes[0].tag_hex == "80"
+        assert response.nodes[0].value_hex == "9000"
 
-    def test_parse_invalid_hex_returns_400(self, test_client) -> None:
-        response = test_client.post("/api/tools/tlv/parse", json={"hex": "not-hex"})
-        assert response.status_code == 400
+    def test_parse_invalid_hex_returns_400(self) -> None:
+        with pytest.raises(tools_module.HTTPException) as excinfo:
+            tools_module.parse_tlv(tools_module.TlvParseRequest(hex="not-hex"))
+        assert excinfo.value.status_code == 400
 
-    def test_parse_truncated_reports_incomplete(self, test_client) -> None:
-        response = test_client.post("/api/tools/tlv/parse", json={"hex": "8005AB"})
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["complete"] is False
-        assert payload["error"] is not None
+    def test_parse_truncated_reports_incomplete(self) -> None:
+        response = tools_module.parse_tlv(tools_module.TlvParseRequest(hex="8005AB"))
+        assert response.complete is False
+        assert response.error is not None
 
 
 class TestSwRoute:
-    def test_hex_9000_is_success(self, test_client) -> None:
-        response = test_client.post("/api/tools/sw/translate", json={"hex": "9000"})
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["sw_hex"] == "9000"
-        assert "Success" in payload["description"]
+    def test_hex_9000_is_success(self) -> None:
+        response = tools_module.translate_sw(tools_module.SwTranslateRequest(hex="9000"))
+        assert response.sw_hex == "9000"
+        assert "Success" in response.description
 
-    def test_dynamic_63cx_retries(self, test_client) -> None:
-        response = test_client.post("/api/tools/sw/translate", json={"hex": "63C3"})
-        assert response.status_code == 200
-        assert "3 retries" in response.json()["description"]
+    def test_dynamic_63cx_retries(self) -> None:
+        response = tools_module.translate_sw(tools_module.SwTranslateRequest(hex="63C3"))
+        assert "3 retries" in response.description
 
-    def test_requires_hex_or_split_bytes(self, test_client) -> None:
-        response = test_client.post("/api/tools/sw/translate", json={})
-        assert response.status_code == 400
+    def test_requires_hex_or_split_bytes(self) -> None:
+        with pytest.raises(tools_module.HTTPException) as excinfo:
+            tools_module.translate_sw(tools_module.SwTranslateRequest())
+        assert excinfo.value.status_code == 400
 
 
 class TestEuiccInfo2Route:
-    def test_invalid_payload_400(self, test_client) -> None:
-        response = test_client.post("/api/tools/euicc-info2/decode", json={"hex": "00"})
-        assert response.status_code == 400
+    def test_invalid_payload_400(self) -> None:
+        with pytest.raises(tools_module.HTTPException) as excinfo:
+            tools_module.decode_euicc_info2(tools_module.EuiccInfo2Request(hex="00"))
+        assert excinfo.value.status_code == 400
 
 
 class TestEimLintRoute:
-    def test_valid_document_returns_report(self, test_client) -> None:
+    def test_valid_document_returns_report(self) -> None:
         document = {
             "package_type": "sm_dp_plus_address",
             "package_version": "1.0.0",
@@ -166,41 +129,60 @@ class TestEimLintRoute:
             "matching_id": "ABC-123",
             "additional_tlvs": [],
         }
-        response = test_client.post(
-            "/api/tools/eim/lint",
-            json={"document_json": json.dumps(document)},
+        response = tools_module.lint_eim_package(
+            tools_module.EimLintRequest(document_json=json.dumps(document))
         )
-        assert response.status_code == 200
-        payload = response.json()
-        assert isinstance(payload["errors"], list)
-        assert isinstance(payload["warnings"], list)
+        assert isinstance(response.errors, list)
+        assert isinstance(response.warnings, list)
 
-    def test_non_json_returns_400(self, test_client) -> None:
-        response = test_client.post(
-            "/api/tools/eim/lint",
-            json={"document_json": "{not valid"},
-        )
-        assert response.status_code == 400
+    def test_non_json_returns_400(self) -> None:
+        with pytest.raises(tools_module.HTTPException) as excinfo:
+            tools_module.lint_eim_package(
+                tools_module.EimLintRequest(document_json="{not valid")
+            )
+        assert excinfo.value.status_code == 400
 
 
 class TestGsmaRoute:
-    def test_tables_include_es10b(self, test_client) -> None:
-        response = test_client.get("/api/tools/gsma/codes")
-        assert response.status_code == 200
-        payload = response.json()
-        assert "es10b_profile_state" in payload["order"]
-        assert payload["tables"]["es10b_profile_state"]["0"] == "ok"
+    def test_tables_include_es10b(self) -> None:
+        response = tools_module.list_gsma_codes()
+        assert "es10b_profile_state" in response.order
+        assert response.tables["es10b_profile_state"]["0"] == "ok"
 
 
 class TestAuthGate:
-    def test_missing_token_is_401(self, test_client) -> None:
-        # Create a fresh client without the auth header to confirm
-        # /api/tools/* is gated by the existing middleware.
-        from fastapi import FastAPI
-        from starlette.testclient import TestClient
+    def test_missing_token_is_401(self) -> None:
+        from yggdrasim_common.gui_server.auth import AuthMiddleware
 
-        # Reuse the configured app but strip the default header.
-        app: FastAPI = test_client.app  # type: ignore[attr-defined]
-        unauth = TestClient(app)
-        response = unauth.get("/api/tools/gsma/codes")
-        assert response.status_code == 401
+        downstream_called = False
+        messages: list[dict] = []
+
+        async def downstream(scope, receive, send) -> None:
+            nonlocal downstream_called
+            downstream_called = True
+
+        async def receive() -> dict:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message: dict) -> None:
+            messages.append(message)
+
+        middleware = AuthMiddleware(
+            downstream,
+            expected_token="0123456789abcdef0123456789abcdef",
+        )
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/tools/gsma/codes",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+        }
+        asyncio.run(middleware(scope, receive, send))
+
+        assert downstream_called is False
+        response_start = next(item for item in messages if item["type"] == "http.response.start")
+        response_body = next(item for item in messages if item["type"] == "http.response.body")
+        assert response_start["status"] == 401
+        assert (b"www-authenticate", b"Bearer") in response_start["headers"]
+        assert json.loads(response_body["body"]) == {"error": "unauthorized"}

@@ -54,7 +54,7 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
 ### Added
 
 - Default eUICC identity is now the reserved SGP.22 Annex A.2 test EID
-  `89049032123451234512345678901234`, with prefix `89049032` and a valid
+  `89049032123451234512345678901235`, with prefix `89049032` and a valid
   Luhn check digit.
 - SIMCARD 5G core: TS 33.501 Annex A AKA helpers (`SIMCARD/aka_5g.py`),
   TS 33.535 AKMA (`SIMCARD/akma.py`), TS 33.501 §C.3 SUCI Profile A & B

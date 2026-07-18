@@ -2248,6 +2248,98 @@ def _decode_loci(hex_clean: str) -> dict[str, object] | None:
     }
 
 
+def _decode_eps_loci(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.EPSLOCI (TS 31.102 §4.2.91).
+
+    The first 12 bytes are not a bare PLMN/MME tuple.  They are the part of
+    the TS 24.301 EPS mobile-identity IE beginning at octet 2, so an assigned
+    GUTI starts with the one-byte identity length (``0B``) and the GUTI
+    identity header (``F6``).  An all-``FF`` GUTI is the standards-defined
+    unassigned/default form and is therefore accepted without a header.
+    """
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) != 18:
+        return None
+
+    guti = raw[:12]
+    guti_assigned = guti != b"\xFF" * 12
+    validation_errors: list[str] = []
+    guti_plmn: str | None = None
+    if guti_assigned:
+        if guti[0] != 0x0B:
+            validation_errors.append(
+                f"GUTI identity length is 0x{guti[0]:02X}; expected 0x0B"
+            )
+        if guti[1] != 0xF6:
+            validation_errors.append(
+                f"GUTI identity header is 0x{guti[1]:02X}; expected 0xF6"
+            )
+        guti_plmn = _decode_plmn_hex(guti[2:5].hex().upper())
+        if guti_plmn is None:
+            validation_errors.append("GUTI PLMN contains invalid BCD digits")
+
+    tai = raw[12:17]
+    tai_assigned = tai[0:3] != b"\xFF\xFF\xFF"
+    tai_plmn = (
+        _decode_plmn_hex(tai[0:3].hex().upper()) if tai_assigned else None
+    )
+    if tai_assigned and tai_plmn is None:
+        validation_errors.append("Last visited TAI PLMN contains invalid BCD digits")
+
+    status_byte = raw[17]
+    status_value = status_byte & 0x07
+    status_labels = {
+        0x00: "updated",
+        0x01: "not updated",
+        0x02: "roaming not allowed",
+        0x03: "reserved",
+        0x04: "reserved",
+        0x05: "reserved",
+        0x06: "reserved",
+        0x07: "reserved",
+    }
+    decoded: dict[str, object] = {
+        "format": "EPS Location Information",
+        "specReference": "TS 31.102 §4.2.91",
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        "guti": {
+            "assigned": guti_assigned,
+            "hex": guti.hex().upper(),
+            "identityLength": guti[0] if guti_assigned else None,
+            "identityLengthHex": f"{guti[0]:02X}" if guti_assigned else None,
+            "identityHeaderHex": f"{guti[1]:02X}" if guti_assigned else None,
+            "plmn": guti_plmn,
+            "plmnRaw": guti[2:5].hex().upper() if guti_assigned else None,
+            "mmeGroupIdHex": guti[5:7].hex().upper() if guti_assigned else None,
+            "mmeCodeHex": f"{guti[7]:02X}" if guti_assigned else None,
+            "mTmsiHex": guti[8:12].hex().upper() if guti_assigned else None,
+        },
+        "tai": {
+            "assigned": tai_assigned,
+            "hex": tai.hex().upper(),
+            "plmn": tai_plmn,
+            "plmnRaw": tai[0:3].hex().upper(),
+            "tacHex": tai[3:5].hex().upper(),
+            "tac": int.from_bytes(tai[3:5], "big"),
+        },
+        "updateStatus": {
+            "byte": f"0x{status_byte:02X}",
+            "value": status_value,
+            "label": status_labels[status_value],
+        },
+    }
+    if status_byte & 0xF8:
+        decoded["warnings"] = ["EPS update-status RFU bits 4..8 are non-zero"]
+    if validation_errors:
+        decoded["validationErrors"] = validation_errors
+    return decoded
+
+
 def _decode_msisdn(hex_clean: str) -> dict[str, object] | None:
     try:
         raw = bytes.fromhex(hex_clean)
@@ -4256,12 +4348,16 @@ def _decode_5gs_loci(
 
     Fixed 20-byte layout:
 
-        [0..12]  5G-GUTI (13 bytes; TS 24.501 §9.11.3.4 — PLMN 3 || AMF
-                 Region ID 1 || AMF Set ID/Pointer 2 || 5G-TMSI 4 ||
-                 RFU padding 3)
+        [0..12]  5G-GUTI (13 bytes).  This is the TS 24.501 5GS
+                 mobile-identity IE beginning at octet 2: identity length 2
+                 (``000B``), identity header 1 (``F2``), PLMN 3, AMF Region
+                 ID 1, AMF Set ID/Pointer 2, and 5G-TMSI 4.
         [13..15] Last visited registered TAI — PLMN (BCD, swapped)
         [16..18] Last visited registered TAI — TAC
         [19]     5GS update status (TS 24.501 §9.11.3.2)
+
+    An all-``FF`` 13-byte GUTI is the unassigned/default form and does not
+    carry the otherwise mandatory ``000B F2`` identity prefix.
     """
 
     try:
@@ -4271,12 +4367,31 @@ def _decode_5gs_loci(
     if len(raw) != 20:
         return None
     guti = raw[:13]
-    guti_plmn = _decode_plmn_hex(guti[0:3].hex().upper())
-    amf_region_id = guti[3]
-    amf_set_pointer = guti[4:6]
-    tmsi = guti[6:10]
-    guti_rfu = guti[10:13]
-    tai_plmn = _decode_plmn_hex(raw[13:16].hex().upper())
+    guti_assigned = guti != b"\xFF" * 13
+    validation_errors: list[str] = []
+    guti_plmn: str | None = None
+    if guti_assigned:
+        identity_length = int.from_bytes(guti[0:2], "big")
+        if identity_length != 11:
+            validation_errors.append(
+                f"5G-GUTI identity length is {identity_length}; expected 11"
+            )
+        if guti[2] != 0xF2:
+            validation_errors.append(
+                f"5G-GUTI identity header is 0x{guti[2]:02X}; expected 0xF2"
+            )
+        guti_plmn = _decode_plmn_hex(guti[3:6].hex().upper())
+        if guti_plmn is None:
+            validation_errors.append("5G-GUTI PLMN contains invalid BCD digits")
+    amf_region_id = guti[6]
+    amf_set_pointer = guti[7:9]
+    tmsi = guti[9:13]
+    tai_assigned = raw[13:16] != b"\xFF\xFF\xFF"
+    tai_plmn = (
+        _decode_plmn_hex(raw[13:16].hex().upper()) if tai_assigned else None
+    )
+    if tai_assigned and tai_plmn is None:
+        validation_errors.append("Last visited TAI PLMN contains invalid BCD digits")
     tac = raw[16:19]
     status_byte = raw[19]
     status_label = _5GS_UPDATE_STATUS_LABELS.get(status_byte & 0x07)
@@ -4286,15 +4401,23 @@ def _decode_5gs_loci(
         "hex": raw.hex().upper(),
         "length": len(raw),
         "guti": {
+            "assigned": guti_assigned,
             "hex": guti.hex().upper(),
+            "identityLength": (
+                int.from_bytes(guti[0:2], "big") if guti_assigned else None
+            ),
+            "identityLengthHex": (
+                guti[0:2].hex().upper() if guti_assigned else None
+            ),
+            "identityHeaderHex": f"{guti[2]:02X}" if guti_assigned else None,
             "plmn": guti_plmn,
-            "plmnRaw": guti[0:3].hex().upper(),
+            "plmnRaw": guti[3:6].hex().upper() if guti_assigned else None,
             "amfRegionId": f"0x{amf_region_id:02X}",
             "amfSetAndPointerHex": amf_set_pointer.hex().upper(),
             "tmsiHex": tmsi.hex().upper(),
-            "rfuHex": guti_rfu.hex().upper(),
         },
         "tai": {
+            "assigned": tai_assigned,
             "hex": raw[13:19].hex().upper(),
             "plmn": tai_plmn,
             "plmnRaw": raw[13:16].hex().upper(),
@@ -4307,6 +4430,10 @@ def _decode_5gs_loci(
             "label": status_label if status_label is not None else "reserved",
         },
     }
+    if status_byte & 0xF8:
+        decoded["warnings"] = ["5GS update-status RFU bits 4..8 are non-zero"]
+    if validation_errors:
+        decoded["validationErrors"] = validation_errors
     return decoded
 
 
@@ -9390,8 +9517,12 @@ def _decode_puct(hex_clean: str) -> dict[str, object] | None:
     currency = _decode_printable_ascii(raw[0:3]) or raw[0:3].hex().upper()
     eppu = (raw[3] << 4) | (raw[4] & 0x0F)
     exp_nibble = (raw[4] >> 4) & 0x0F
-    sign = -1 if (exp_nibble & 0x08) else 1
-    exponent = sign * (exp_nibble & 0x07)
+    # TS 31.102 §4.2.18 numbers bits within the exponent nibble as
+    # b5..b8: b5 is the sign (1 = negative), while b6..b8 carry the
+    # magnitude.  In the ordinary integer representation of that
+    # high nibble this is therefore ``magnitude << 1 | sign``.
+    sign = -1 if (exp_nibble & 0x01) else 1
+    exponent = sign * ((exp_nibble >> 1) & 0x07)
     return {
         "currency": currency,
         "eppu": eppu,
@@ -10113,9 +10244,11 @@ def _decode_known_ef_payload(
         return _decode_ef_bst(hex_clean)
     if token == "ef-pst":
         return _decode_ef_pst(hex_clean)
-    if token in {"ef-loci", "ef-psloci", "ef-epsloci"}:
+    if token == "ef-epsloci" or fid_upper == "6FE3":
+        return _decode_eps_loci(hex_clean)
+    if token in {"ef-loci", "ef-psloci"}:
         return _decode_loci(hex_clean)
-    if fid_upper in {"6F7E", "6F73", "6FE3"}:
+    if fid_upper in {"6F7E", "6F73"}:
         return _decode_loci(hex_clean)
     if token == "ef-gid1" or fid_upper == "6F3E":
         return _decode_group_identifier(hex_clean, format_name="Group Identifier Level 1")
@@ -13168,11 +13301,6 @@ def _decode_connectivity_dcs(value_bytes: bytes) -> dict[str, object]:
     dcs = value_bytes[0]
     group = (dcs >> 4) & 0xF
     detail = dcs & 0xF
-    alphabet_names = {
-        0x0: "GSM 7-bit default alphabet",
-        0x4: "8-bit data",
-        0x8: "UCS2",
-    }
     class_names = {0b00: "Class 0", 0b01: "Class 1 (ME-specific)", 0b10: "Class 2 (U)SIM-specific", 0b11: "Class 3 (TE-specific)"}
     decoded: dict[str, object] = {"hex": value_bytes.hex().upper(), "decimal": dcs}
     if group in (0x0, 0x1, 0x2, 0x3):

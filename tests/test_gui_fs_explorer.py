@@ -23,7 +23,6 @@ All tests are pure-Python — no card, no live HTTP server.
 
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,6 +33,14 @@ _FS_BROWSE_PY = _REPO / "yggdrasim_common" / "gui_server" / "routes" / "fs_brows
 _APP_PY = _REPO / "yggdrasim_common" / "gui_server" / "app.py"
 _APP_JS = _REPO / "yggdrasim_common" / "gui_server" / "static" / "app.js"
 _APP_CSS = _REPO / "yggdrasim_common" / "gui_server" / "static" / "app.css"
+_SOURCE_CSS = (
+    _REPO
+    / "gui_frontend"
+    / "src"
+    / "css"
+    / "views"
+    / "key-value-swatches.css"
+)
 
 
 # ---------------------------------------------------------------------- #
@@ -217,6 +224,11 @@ class FrontendExplorerWiring(unittest.TestCase):
 class FrontendExplorerCss(unittest.TestCase):
     def setUp(self) -> None:
         self.css = _APP_CSS.read_text(encoding="utf-8")
+        self.source_css = _SOURCE_CSS.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _overlay_rule(css: str) -> str:
+        return css.split(".cc-fs-explorer-overlay", 1)[1].split("}", 1)[0]
 
     def test_modal_class_hooks_present(self) -> None:
         for selector in (
@@ -232,6 +244,15 @@ class FrontendExplorerCss(unittest.TestCase):
             ".cc-fs-explorer-status",
         ):
             self.assertIn(selector, self.css, f"missing CSS hook: {selector}")
+
+    def test_explorer_modal_stays_above_action_popouts(self) -> None:
+        # Compact action pop-outs start at z-index 8000 and increase every
+        # time they are focused. The file explorer is a blocking modal, so
+        # use the browser's maximum CSS stacking integer in both source and
+        # served styles rather than another modest, eventually-crossed base.
+        for css in (self.source_css, self.css):
+            rule = self._overlay_rule(css)
+            self.assertIn("z-index: 2147483647", rule)
 
     def test_responsive_breakpoint_collapses_to_single_column(self) -> None:
         self.assertIn("@media (max-width: 720px)", self.css)

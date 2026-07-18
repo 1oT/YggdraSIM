@@ -210,8 +210,8 @@ class SaipProfileLinterTests(unittest.TestCase):
             check_return_code=0,
         )
 
-        info_codes = [item.code for item in report.findings if item.severity == "INFO"]
-        self.assertIn("YRL-UST-001", info_codes)
+        fail_codes = [item.code for item in report.findings if item.severity == "FAIL"]
+        self.assertIn("YRL-UST-001", fail_codes)
 
     def test_gate_by_prefix_and_min_score(self) -> None:
         decoded_document = {

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import threading
 import time
 from dataclasses import dataclass
@@ -136,7 +137,13 @@ class _ApduRelayHttpServer(ThreadingHTTPServer):
         service: "HilBridgeApduRelayService",
     ) -> None:
         self.service = service
-        super().__init__(server_address, handler_class)
+        host, port = server_address
+        normalized_host = str(host or "").strip()
+        if normalized_host.startswith("[") and normalized_host.endswith("]"):
+            normalized_host = normalized_host[1:-1]
+        if ":" in normalized_host:
+            self.address_family = socket.AF_INET6
+        super().__init__((normalized_host, port), handler_class)
 
 
 class _ApduRelayHandler(BaseHTTPRequestHandler):
@@ -379,7 +386,11 @@ class HilBridgeApduRelayService:
         if self._server is not None:
             host = str(self._server.server_address[0])
             port = int(self._server.server_address[1])
-        return f"http://{host}:{port}"
+        normalized_host = str(host or "").strip()
+        if normalized_host.startswith("[") and normalized_host.endswith("]"):
+            normalized_host = normalized_host[1:-1]
+        url_host = f"[{normalized_host}]" if ":" in normalized_host else normalized_host
+        return f"http://{url_host}:{port}"
 
     @property
     def apdu_url(self) -> str:

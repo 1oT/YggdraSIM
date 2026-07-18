@@ -36,7 +36,6 @@ payload as defined by SGP.32 §2.11.1.1.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
@@ -96,9 +95,11 @@ def decode_euicc_package_request(payload: bytes) -> EuiccPackageEnvelope:
     if len(raw) == 0:
         raise EuiccPackageDecodeError("Empty payload.")
     try:
-        tag_bytes, value, _raw_outer, _next = read_tlv(raw, 0)
+        tag_bytes, value, _raw_outer, next_offset = read_tlv(raw, 0)
     except ValueError as error:
         raise EuiccPackageDecodeError(f"Outer TLV malformed: {error}") from error
+    if next_offset != len(raw):
+        raise EuiccPackageDecodeError("Trailing bytes after EuiccPackageRequest.")
     if tag_bytes != TAG_EUICC_PACKAGE:
         raise EuiccPackageDecodeError(
             f"Outer tag {tag_bytes.hex().upper()} is not EuiccPackageRequest BF51."

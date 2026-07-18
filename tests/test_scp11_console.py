@@ -7,7 +7,6 @@ import sys
 import io
 import contextlib
 from pathlib import Path
-from unittest import mock
 
 CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "console.py"
 LIVE_CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "live" / "console.py"

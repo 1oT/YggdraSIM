@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -23,13 +24,12 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import unquote, urlparse, urlsplit, urlunparse
 
 from yggdrasim_common.__about__ import __version__
 from yggdrasim_common.card_backend import _request_card_relay_json
 from yggdrasim_common.card_bridge_auth import fingerprint, parse_bearer_header
 from yggdrasim_common.remote_lab.config import (
-    AccessTokenConfig,
     RemoteLabAgentConfig,
     RigConfig,
     load_config,
@@ -73,6 +73,26 @@ def _base_url_for_apdu(apdu_url: str) -> str:
     if path.endswith("/apdu"):
         path = path[: -len("/apdu")]
     return urlunparse((parsed.scheme, parsed.netloc, path or "", "", "", "")).rstrip("/")
+
+
+def _url_host(value: Any) -> str:
+    host = str(value or "").strip()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1].strip()
+    if "%25" in host and ":" in host:
+        host = host.replace("%25", "%")
+    if ":" in host:
+        return f"[{host.replace('%', '%25')}]"
+    return host
+
+
+def _request_path(value: Any) -> str:
+    return unquote(urlsplit(str(value or "")).path).rstrip("/") or "/"
+
+
+def _address_family_for_host(host: str) -> socket.AddressFamily:
+    normalized = str(host or "").strip().strip("[]")
+    return socket.AF_INET6 if ":" in normalized else socket.AF_INET
 
 
 def _read_optional_token(raw_token: str = "", token_file: str = "") -> str:
@@ -144,6 +164,7 @@ class RemoteLabAgentService:
         self._relay_threads: list[threading.Thread] = []
         self._cleanup_stop = threading.Event()
         self._cleanup_thread: threading.Thread | None = None
+        self._control_serving = threading.Event()
 
     def authorize(self, presented_token: str, *, role: str = "user") -> AuthorizedToken | None:
         required_admin = role == "admin"
@@ -223,15 +244,18 @@ class RemoteLabAgentService:
         return payload
 
     def relay_base_url(self, handler: BaseHTTPRequestHandler, rig: RigConfig) -> str:
+        if rig.stream_proxy.public_base_url:
+            return rig.stream_proxy.public_base_url
         public_host = rig.stream_proxy.public_host or self.config.agent.public_host
         if not public_host:
             host_header = str(handler.headers.get("Host") or "").strip()
-            public_host = host_header.split(":", 1)[0] if host_header else ""
+            if host_header:
+                public_host = urlsplit("//" + host_header).hostname or ""
         if not public_host:
             public_host = rig.stream_proxy.bind_host
         if public_host in ("0.0.0.0", "::"):
             public_host = "127.0.0.1"
-        return f"http://{public_host}:{rig.stream_proxy.external_port}"
+        return f"http://{_url_host(public_host)}:{rig.stream_proxy.external_port}"
 
     def create_session_payload(
         self,
@@ -253,6 +277,10 @@ class RemoteLabAgentService:
             "status": session.state,
             "expires_at": _utc_iso(session.expires_at),
             "reservation_expires_at": _utc_iso(session.reservation_expires_at),
+            "heartbeat_interval_seconds": max(
+                1,
+                min(10, self.config.defaults.heartbeat_timeout_seconds // 3),
+            ),
             "stream": {
                 "transport": "http-card-bridge",
                 "url": base_url + "/apdu",
@@ -266,40 +294,60 @@ class RemoteLabAgentService:
         return self.sessions.validate_for_rig(rig.id, token)
 
     def start(self) -> None:
-        for rig in self.config.rigs:
-            server = _RelayServer(
-                (rig.stream_proxy.bind_host, rig.stream_proxy.external_port),
-                _RelayHandler,
+        if self._control_server is not None or self._relay_servers:
+            raise RuntimeError("Remote Lab agent is already started.")
+        relay_servers: list[_RelayServer] = []
+        control_server: _ControlServer | None = None
+        try:
+            for rig in self.config.rigs:
+                relay_servers.append(
+                    _RelayServer(
+                        (rig.stream_proxy.bind_host, rig.stream_proxy.external_port),
+                        _RelayHandler,
+                        self,
+                        rig,
+                    )
+                )
+            control_server = _ControlServer(
+                (self.config.agent.bind_host, self.config.agent.control_port),
+                _ControlHandler,
                 self,
-                rig,
             )
-            thread = threading.Thread(
-                target=server.serve_forever,
-                name=f"remote-lab-relay-{rig.id}",
+        except Exception:
+            if control_server is not None:
+                control_server.server_close()
+            for relay_server in relay_servers:
+                relay_server.server_close()
+            raise
+
+        self._control_server = control_server
+        self._relay_servers = relay_servers
+        try:
+            for rig, server in zip(self.config.rigs, relay_servers):
+                thread = threading.Thread(
+                    target=server.serve_forever,
+                    name=f"remote-lab-relay-{rig.id}",
+                    daemon=True,
+                )
+                thread.start()
+                self._relay_threads.append(thread)
+                _LOGGER.info(
+                    "remote_lab relay started rig=%s addr=%s:%s",
+                    rig.id,
+                    rig.stream_proxy.bind_host,
+                    rig.stream_proxy.external_port,
+                )
+
+            self._cleanup_stop.clear()
+            self._cleanup_thread = threading.Thread(
+                target=self._cleanup_loop,
+                name="remote-lab-cleanup",
                 daemon=True,
             )
-            thread.start()
-            self._relay_servers.append(server)
-            self._relay_threads.append(thread)
-            _LOGGER.info(
-                "remote_lab relay started rig=%s addr=%s:%s",
-                rig.id,
-                rig.stream_proxy.bind_host,
-                rig.stream_proxy.external_port,
-            )
-
-        self._control_server = _ControlServer(
-            (self.config.agent.bind_host, self.config.agent.control_port),
-            _ControlHandler,
-            self,
-        )
-        self._cleanup_stop.clear()
-        self._cleanup_thread = threading.Thread(
-            target=self._cleanup_loop,
-            name="remote-lab-cleanup",
-            daemon=True,
-        )
-        self._cleanup_thread.start()
+            self._cleanup_thread.start()
+        except Exception:
+            self.stop()
+            raise
         _LOGGER.info(
             "remote_lab control API listening on %s:%s",
             self.config.agent.bind_host,
@@ -310,53 +358,72 @@ class RemoteLabAgentService:
         if self._control_server is None:
             self.start()
         assert self._control_server is not None
-        self._control_server.serve_forever()
+        self._control_serving.set()
+        try:
+            self._control_server.serve_forever()
+        finally:
+            self._control_serving.clear()
 
     def stop(self) -> None:
         self._cleanup_stop.set()
         server = self._control_server
         self._control_server = None
         if server is not None:
-            try:
-                server.shutdown()
-            except Exception:
-                pass
+            if self._control_serving.is_set():
+                try:
+                    server.shutdown()
+                except Exception:
+                    pass
             server.server_close()
-        for relay in self._relay_servers:
-            try:
-                relay.shutdown()
-            except Exception:
-                pass
+        relay_threads = list(self._relay_threads)
+        for index, relay in enumerate(self._relay_servers):
+            if index < len(relay_threads):
+                try:
+                    relay.shutdown()
+                except Exception:
+                    pass
             relay.server_close()
         self._relay_servers = []
-        for thread in self._relay_threads:
+        for thread in relay_threads:
             try:
                 thread.join(timeout=1.0)
             except RuntimeError:
                 pass
         self._relay_threads = []
         if self._cleanup_thread is not None:
-            self._cleanup_thread.join(timeout=1.0)
+            try:
+                self._cleanup_thread.join(timeout=1.0)
+            except RuntimeError:
+                pass
             self._cleanup_thread = None
 
     def _cleanup_loop(self) -> None:
         while not self._cleanup_stop.wait(5.0):
             expired = self.sessions.expire_stale()
             if expired:
-                _LOGGER.info("remote_lab expired %d stale session(s)", expired)
+                _LOGGER.info(
+                    "remote_lab expired %d stale session(s)",
+                    expired,
+                )
 
 
 class _ControlServer(ThreadingHTTPServer):
-    allow_reuse_address = True
+    allow_reuse_address = os.name != "nt"
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], handler: type[BaseHTTPRequestHandler], service: RemoteLabAgentService) -> None:
+    def __init__(
+        self,
+        address: tuple[str, int],
+        handler: type[BaseHTTPRequestHandler],
+        service: RemoteLabAgentService,
+    ) -> None:
         self.service = service
+        self.address_family = _address_family_for_host(address[0])
         super().__init__(address, handler)
 
 
 class _RelayServer(ThreadingHTTPServer):
-    allow_reuse_address = True
+    allow_reuse_address = os.name != "nt"
     daemon_threads = True
 
     def __init__(
@@ -368,6 +435,7 @@ class _RelayServer(ThreadingHTTPServer):
     ) -> None:
         self.service = service
         self.rig = rig
+        self.address_family = _address_family_for_host(address[0])
         super().__init__(address, handler)
 
 
@@ -377,7 +445,7 @@ class _ControlHandler(_JsonHandler):
         return self.server.service  # type: ignore[attr-defined]
 
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        path = _request_path(self.path)
         if path == "/healthz":
             self._send_text(HTTPStatus.OK, b"ok\n")
             return
@@ -405,7 +473,7 @@ class _ControlHandler(_JsonHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_POST(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        path = _request_path(self.path)
         auth = self.service.authorize_header(self.headers.get("Authorization", ""))
         if auth is None:
             self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
@@ -477,7 +545,7 @@ class _ControlHandler(_JsonHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_DELETE(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        path = _request_path(self.path)
         auth = self.service.authorize_header(self.headers.get("Authorization", ""))
         if auth is None:
             self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
@@ -530,7 +598,7 @@ class _RelayHandler(_JsonHandler):
         return self.server.rig  # type: ignore[attr-defined]
 
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        path = _request_path(self.path)
         if path == "/ping":
             self._send_text(HTTPStatus.OK, b"pong\n")
             return
@@ -561,7 +629,7 @@ class _RelayHandler(_JsonHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_POST(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        path = _request_path(self.path)
         if path not in ("/apdu", "/card/reset"):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return

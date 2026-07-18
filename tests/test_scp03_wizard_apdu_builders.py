@@ -45,8 +45,8 @@ class WizardInstallParameterBuilderTests(unittest.TestCase):
         self.assertEqual(result.hex().upper(), "C9020102")
 
     def test_lv_field_over_255_bytes_does_not_truncate(self) -> None:
-        result = InteractiveWizards._build_lv_field("AA" * 256)
-        self.assertEqual(result, b"\x00")
+        with self.assertRaisesRegex(ValueError, "exceeds 255 bytes"):
+            InteractiveWizards._build_lv_field("AA" * 256)
 
     def test_store_data_p1_must_be_one_byte(self) -> None:
         with self.assertRaises(ValueError):
@@ -88,7 +88,7 @@ class CapInstallWizardExecutionTests(unittest.TestCase):
                 return True
 
         fake_gp = FakeGp()
-        answers = iter(["", "", "", "N", "", "N", "", "Y"])
+        answers = iter(["", "", "", "N", "", "N", "Y"])
 
         with tempfile.TemporaryDirectory() as temp_dir:
             ijc_path = _write_ijc(Path(temp_dir), package_aid, applet_aid)

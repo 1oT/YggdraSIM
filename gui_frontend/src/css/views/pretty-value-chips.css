@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Pretty primitives — type chips help an operator read a row without
    parsing it. Hex strings get their own monospace pill so an ICCID or
    IMSI is byte-grouped exactly like the hex dump panes. */
@@ -110,4 +111,3 @@
   border: 1px solid color-mix(in oklab, var(--border), transparent 12%);
   background: color-mix(in oklab, var(--bg-hover), transparent 55%);
 }
-

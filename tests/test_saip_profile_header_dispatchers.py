@@ -11,7 +11,6 @@ through ``build_profile_sequence_from_document`` succeeds.
 
 from __future__ import annotations
 
-import os
 import unittest
 from pathlib import Path
 
@@ -36,7 +35,6 @@ class ProfileHeaderDispatcherTests(unittest.TestCase):
 
         from yggdrasim_common.gui_server.actions import saip as saip_actions
         from yggdrasim_common.gui_server.sessions import (
-            CardSession,
             get_manager,
         )
 

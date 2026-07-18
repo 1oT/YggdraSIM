@@ -149,6 +149,90 @@ def _get_atr_hex(transporter: Any) -> str:
     return atr.hex().upper() if atr else ""
 
 
+def _scan_transporter_to_session(
+    transporter: Any,
+    *,
+    reader_index: int,
+    reader_label: str,
+    close_callback: Any = None,
+    metadata_extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Scan an already-connected transport and adopt it as a GUI SCP03 session."""
+
+    from SCP03.config import Config as Scp03Config
+    from SCP03.logic.fs import FileSystemController
+    from yggdrasim_common.gui_server.sessions import get_manager
+
+    close_transport = close_callback or (
+        lambda active_transporter=transporter: _close_transporter(active_transporter)
+    )
+    try:
+        Scp03Config.initialize_workspace()
+        fs_controller = FileSystemController(transporter)
+        stdout_sink = io.StringIO()
+        with contextlib.redirect_stdout(stdout_sink):
+            structured = fs_controller.scan_tree(return_tree=True)
+
+        atr_hex = _get_atr_hex(transporter)
+        metadata = {
+            "reader_index": int(reader_index),
+            "reader_name": str(reader_label),
+            "atr_hex": atr_hex,
+        }
+        metadata.update(dict(metadata_extra or {}))
+
+        tree_payload = structured or {"tree": [], "scan_cache": {}}
+        raw_tree = tree_payload.get("tree", [])
+        promoted_tree = []
+        adf_roots = []
+        for node in raw_tree:
+            if node.get("kind") == "mf" or node.get("name", "").upper() == "MF":
+                mf_node = dict(node)
+                kept_children = []
+                for child in list(mf_node.get("children", [])):
+                    if child.get("kind") == "adf":
+                        adf_roots.append(dict(child))
+                    else:
+                        kept_children.append(child)
+                mf_node["children"] = kept_children
+                promoted_tree.append(mf_node)
+            else:
+                promoted_tree.append(node)
+        promoted_tree.extend(adf_roots)
+
+        new_cache: dict[str, Any] = {}
+        next_index = [0]
+
+        def _walk_cache(nodes: Any) -> None:
+            for node in nodes:
+                next_index[0] += 1
+                new_cache[str(next_index[0])] = node.get("path", "")
+                if node.get("children"):
+                    _walk_cache(node["children"])
+
+        _walk_cache(promoted_tree)
+        manager = get_manager()
+        session = manager.open(
+            kind="scp03",
+            handle={"transporter": transporter, "fs": fs_controller},
+            close=close_transport,
+            metadata=metadata,
+        )
+    except Exception:
+        close_transport()
+        raise
+
+    return {
+        "session_id": session.id,
+        "reader_index": int(reader_index),
+        "reader_name": str(reader_label),
+        "atr_hex": atr_hex,
+        "tree": promoted_tree,
+        "scan_cache": new_cache,
+        "raw_trace": stdout_sink.getvalue(),
+    }
+
+
 def _restore_fs_root_best_effort(session_or_transporter: Any) -> dict[str, Any]:
     """Leave the card on MF (3F00) + re-sync ``fs_controller.current_fid``.
 
@@ -210,9 +294,6 @@ def _restore_fs_root_best_effort(session_or_transporter: Any) -> dict[str, Any]:
 
 
 def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
-    from SCP03.logic.fs import FileSystemController
-    from yggdrasim_common.gui_server.sessions import get_manager
-
     requested_reader_name = str(reader or "")
     reader_index, resolved_reader_name = _resolve_reader_binding(requested_reader_name)
     reader_label = resolved_reader_name or requested_reader_name or "(default)"
@@ -234,90 +315,19 @@ def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
             ) from error
         raise
 
-    # Build the FS controller and run the scan. ``scan_tree(return_tree=True)``
-    # prints its usual tree to stdout; we throw that away for the API path
-    # and keep the structured return value.
-    fs_controller = FileSystemController(transporter)
-    stdout_sink = io.StringIO()
     try:
-        with contextlib.redirect_stdout(stdout_sink):
-            structured = fs_controller.scan_tree(return_tree=True)
+        return _scan_transporter_to_session(
+            transporter,
+            reader_index=reader_index,
+            reader_label=reader_label,
+        )
     except Exception as error:  # noqa: BLE001
-        _close_transporter(transporter)
         if _is_no_card_error(error):
             raise RuntimeError(
                 f"{NO_CARD_ERROR_PREFIX} card removed during scan on reader "
                 f"{reader_label!r}"
             ) from error
         raise
-
-    atr_hex = _get_atr_hex(transporter)
-
-    manager = get_manager()
-    session = manager.open(
-        kind="scp03",
-        handle={"transporter": transporter, "fs": fs_controller},
-        close=lambda t=transporter: _close_transporter(t),
-        metadata={
-            "reader_index": reader_index,
-            "reader_name": reader_label,
-            "atr_hex": atr_hex,
-        },
-    )
-
-    tree_payload = structured or {"tree": [], "scan_cache": {}}
-    raw_tree = tree_payload.get("tree", [])
-    raw_cache = tree_payload.get("scan_cache", {})
-
-    # --- Promote ADFs to root-level tree nodes ---
-    # The CLI scan nests ADFs under MF as children. For the GUI tree,
-    # ADFs should be root-level siblings of MF — each ADF is its own
-    # independent file-system root accessible by AID. This matches the
-    # ETSI model where an ADF is a self-contained application DF that
-    # is SELECTed directly via AID, never reached by walking through MF.
-    promoted_tree = []
-    adf_roots = []
-    mf_node = None
-    for node in raw_tree:
-        if node.get("kind") == "mf" or node.get("name", "").upper() == "MF":
-            mf_node = dict(node)
-            mf_children = list(mf_node.get("children", []))
-            # Extract ADF children from MF
-            kept_children = []
-            for child in mf_children:
-                if child.get("kind") == "adf":
-                    adf_roots.append(dict(child))
-                else:
-                    kept_children.append(child)
-            mf_node["children"] = kept_children
-            promoted_tree.append(mf_node)
-        else:
-            promoted_tree.append(node)
-    promoted_tree.extend(adf_roots)
-
-    # Rebuild scan_cache: walk the promoted tree depth-first and assign
-    # fresh sequential indices. Each node's path is preserved.
-    new_cache = {}
-    _idx = [0]
-
-    def _walk_cache(nodes):
-        for node in nodes:
-            _idx[0] += 1
-            new_cache[str(_idx[0])] = node.get("path", "")
-            if node.get("children"):
-                _walk_cache(node["children"])
-
-    _walk_cache(promoted_tree)
-
-    return {
-        "session_id": session.id,
-        "reader_index": reader_index,
-        "reader_name": reader_label,
-        "atr_hex": atr_hex,
-        "tree": promoted_tree,
-        "scan_cache": new_cache,
-        "raw_trace": stdout_sink.getvalue(),
-    }
 
 
 def _strip_ansi(text: str) -> str:
@@ -1018,9 +1028,11 @@ def _dispatch_recover_session(
     / ``atr_hex``) so the GUI can swap the refreshed tree into
     ``tab.scanData`` without a special-case renderer.
     """
+    from SCP03.config import Config as Scp03Config
     from SCP03.logic.fs import FileSystemController
     from yggdrasim_common.gui_server.sessions import get_manager
 
+    Scp03Config.initialize_workspace()
     manager = get_manager()
     sid_s = str(session_id or "").strip()
     if len(sid_s) == 0:
@@ -1453,7 +1465,12 @@ def _normalise_apdu_hex(raw: str) -> str:
     text = str(raw or "").strip()
     if len(text) == 0:
         raise ValueError("apdu is required (hex string).")
-    compact = text.replace(" ", "").replace("-", "").replace("_", "").replace("\t", "")
+    # ``split`` covers spaces, tabs, CR/LF, and other Unicode whitespace.
+    # This matters for APDUs copied from multi-line traces: the browser
+    # preview has always accepted them, so the backend must normalise the
+    # exact same input rather than rejecting it after the operator presses
+    # Send.
+    compact = "".join(text.split()).replace("-", "").replace("_", "")
     if compact.lower().startswith("0x"):
         compact = compact[2:]
     if len(compact) % 2 != 0:
@@ -1467,17 +1484,26 @@ def _normalise_apdu_hex(raw: str) -> str:
 
 
 def _parse_apdu_breakdown(apdu_hex: str) -> dict[str, Any]:
-    """Classify the APDU as ISO 7816-4 case 1/2/3/4 and return the TLV slices.
+    """Classify a short or extended ISO 7816-4 command APDU.
 
-    Case 1 : CLA INS P1 P2                         (4 bytes)
-    Case 2 : CLA INS P1 P2 Le                      (5 bytes)
-    Case 3 : CLA INS P1 P2 Lc Data                 (5 + Lc bytes)
-    Case 4 : CLA INS P1 P2 Lc Data Le              (6 + Lc bytes)
+    Short framing:
 
-    The ambiguous 5-byte form is reported as Case 2 (Le = last byte).
-    A zero-Lc case-3 header with trailing data is treated as a
-    case-4 APDU with Le omitted, matching how ``transporter.transmit``
-    forwards the raw bytes to the card.
+    * case 1:  ``CLA INS P1 P2``
+    * case 2:  ``CLA INS P1 P2 Le``
+    * case 3:  ``CLA INS P1 P2 Lc Data``
+    * case 4:  ``CLA INS P1 P2 Lc Data Le``
+
+    Extended framing uses the ISO marker byte ``00`` followed by a
+    two-byte length and is labelled case ``2E`` / ``3E`` / ``4E``.
+    An exact three-byte extended body is case 2E; elsewhere an extended
+    ``Lc`` of zero is invalid. Extended case 4 has either zero or exactly
+    two trailing Le bytes after Data (never one).
+
+    Raw Le bytes are retained in ``le`` while ``le_value`` exposes their
+    ISO meaning: short ``00`` = 256, extended ``0000`` = 65536. Malformed
+    input is described rather than raised so the raw-APDU console can
+    still transmit deliberately malformed frames without silently
+    mislabelling their payload.
     """
     raw = bytes.fromhex(apdu_hex)
     total = len(raw)
@@ -1490,60 +1516,128 @@ def _parse_apdu_breakdown(apdu_hex: str) -> dict[str, Any]:
         "data_hex": "",
         "data_length": 0,
         "le": "",
+        "le_value": None,
         "case": "",
         "byte_count": total,
+        "extended": False,
+        "valid": True,
+        "error": "",
     }
+
+    def malformed(message: str, *, data_start: int = 5) -> dict[str, Any]:
+        result["case"] = "malformed"
+        result["valid"] = False
+        result["error"] = message
+        if total > data_start:
+            result["data_hex"] = raw[data_start:].hex().upper()
+            result["data_length"] = total - data_start
+        return result
+
     if total == 4:
         result["case"] = "1"
         return result
     if total == 5:
         result["case"] = "2"
         result["le"] = apdu_hex[8:10]
+        result["le_value"] = 256 if raw[4] == 0 else raw[4]
         return result
-    lc = raw[4]
-    if lc == 0 and total > 5:
-        # Extended-length APDUs start with 00 as Lc placeholder; we
-        # don't decode extended form here (most cards in this repo
-        # reject it) — just pass the bytes through unannotated.
-        result["case"] = "ext"
-        result["lc"] = apdu_hex[8:10]
-        result["data_hex"] = apdu_hex[10:]
-        result["data_length"] = (total - 5)
-        return result
-    expected_case3 = 5 + lc
-    expected_case4 = 6 + lc
-    if total == expected_case3:
-        result["case"] = "3"
-        result["lc"] = apdu_hex[8:10]
-        result["data_hex"] = apdu_hex[10:]
+
+    first_length = raw[4]
+    if first_length != 0:
+        lc = first_length
+        result["lc"] = f"{lc:02X}"
+        data_end = 5 + lc
+        if data_end > total:
+            return malformed(
+                f"short Lc={lc} exceeds supplied data ({max(total - 5, 0)} byte(s))"
+            )
+        trailing = total - data_end
+        result["data_hex"] = raw[5:data_end].hex().upper()
         result["data_length"] = lc
+        if trailing == 0:
+            result["case"] = "3"
+            return result
+        if trailing == 1:
+            result["case"] = "4"
+            result["le"] = f"{raw[data_end]:02X}"
+            result["le_value"] = 256 if raw[data_end] == 0 else raw[data_end]
+            return result
+        return malformed(
+            f"short APDU has {trailing} trailing bytes after Data; expected 0 or 1",
+            data_start=5,
+        )
+
+    result["extended"] = True
+    if total < 7:
+        return malformed(
+            "extended APDU is missing the two-byte Lc/Le field",
+            data_start=5,
+        )
+
+    extended_length = int.from_bytes(raw[5:7], "big", signed=False)
+    if total == 7:
+        result["case"] = "2E"
+        result["le"] = raw[5:7].hex().upper()
+        result["le_value"] = 65536 if extended_length == 0 else extended_length
         return result
-    if total == expected_case4:
-        result["case"] = "4"
-        result["lc"] = apdu_hex[8:10]
-        result["data_hex"] = apdu_hex[10 : 10 + lc * 2]
-        result["data_length"] = lc
-        result["le"] = apdu_hex[-2:]
+
+    result["lc"] = raw[5:7].hex().upper()
+    if extended_length == 0:
+        return malformed(
+            "extended Lc=0 is invalid outside exact case 2E framing",
+            data_start=7,
+        )
+
+    data_end = 7 + extended_length
+    if data_end > total:
+        return malformed(
+            f"extended Lc={extended_length} exceeds supplied data "
+            f"({max(total - 7, 0)} byte(s))",
+            data_start=7,
+        )
+    trailing = total - data_end
+    result["data_hex"] = raw[7:data_end].hex().upper()
+    result["data_length"] = extended_length
+    if trailing == 0:
+        result["case"] = "3E"
         return result
-    # Malformed — return what we parsed so the GUI can surface it as
-    # a warning next to the field; the card will likely reject it.
-    result["case"] = "malformed"
-    result["lc"] = apdu_hex[8:10]
-    result["data_hex"] = apdu_hex[10:]
-    result["data_length"] = max(total - 5, 0)
-    return result
+    if trailing == 2:
+        result["case"] = "4E"
+        result["le"] = raw[data_end:data_end + 2].hex().upper()
+        raw_le = int.from_bytes(raw[data_end:data_end + 2], "big", signed=False)
+        result["le_value"] = 65536 if raw_le == 0 else raw_le
+        return result
+    return malformed(
+        f"extended APDU has {trailing} trailing bytes after Data; expected 0 or 2",
+        data_start=7,
+    )
 
 
 def _apdu_with_corrected_le(apdu_hex: str, correct_le: int) -> str:
-    """Return the APDU with its final Le byte replaced by ``correct_le``.
+    """Return *apdu_hex* with Le corrected after a ``6Cxx`` response.
 
     Cards reply 0x6Cxx when the transmitted Le is wrong; the standard
-    retry is to re-send the exact same header/body but with Le = xx.
-    For case-1/3 APDUs (no Le to begin with) we append the new Le.
+    retry is to re-send the same header/body with Le = xx. Short APDUs
+    use the one-byte SW2 value directly (``00`` means 256). Extended
+    APDUs retain two-byte Le framing: ``xx`` becomes ``00xx`` and SW2
+    ``00`` becomes ``0100`` because extended ``0000`` means 65536, not
+    256.
+
+    Malformed frames are rejected rather than "best effort" rewritten;
+    replacing their final byte can corrupt command data.
     """
+    if not isinstance(correct_le, int) or correct_le < 0 or correct_le > 0xFF:
+        raise ValueError("correct_le must be a status-word byte in range 00..FF")
+
     breakdown = _parse_apdu_breakdown(apdu_hex)
-    new_le = f"{correct_le:02X}"
     case = str(breakdown.get("case") or "")
+    if case == "malformed":
+        raise ValueError(
+            "cannot apply 6Cxx Le correction to malformed APDU framing: "
+            + str(breakdown.get("error") or "unknown framing error")
+        )
+
+    new_le = f"{correct_le:02X}"
     if case == "1":
         return apdu_hex + new_le
     if case == "2":
@@ -1552,10 +1646,27 @@ def _apdu_with_corrected_le(apdu_hex: str, correct_le: int) -> str:
         return apdu_hex + new_le
     if case == "4":
         return apdu_hex[:-2] + new_le
-    # "ext" / "malformed" — best effort: replace or append.
-    if len(apdu_hex) >= 10:
-        return apdu_hex[:-2] + new_le
-    return apdu_hex + new_le
+    extended_le = "0100" if correct_le == 0 else f"00{correct_le:02X}"
+    if case == "2E":
+        return apdu_hex[:-4] + extended_le
+    if case == "3E":
+        return apdu_hex + extended_le
+    if case == "4E":
+        return apdu_hex[:-4] + extended_le
+    raise ValueError(f"unsupported APDU case for Le correction: {case!r}")
+
+
+def _get_response_cla(apdu_hex: str) -> int:
+    """Return an interindustry GET RESPONSE CLA preserving logical channel.
+
+    Proprietary class bits and secure-messaging indicators are cleared.
+    Channels 0..3 use first interindustry coding; channels 4..19 retain
+    the further-interindustry ``0x40`` coding.
+    """
+    cla = int(apdu_hex[:2], 16)
+    if (cla & 0x80) == 0 and (cla & 0x40):
+        return 0x40 | (cla & 0x0F)
+    return cla & 0x03
 
 
 def _ascii_preview(data: bytes) -> str:
@@ -1571,6 +1682,225 @@ def _ascii_preview(data: bytes) -> str:
     return "".join(chars)
 
 
+_SENSITIVE_COMMAND_INS = frozenset({0x20, 0x24, 0x26, 0x28, 0x2C, 0x82, 0xD8, 0xE2})
+_SENSITIVE_RESPONSE_INS = frozenset({0x88, 0xE2})
+
+
+def _redact_sensitive_apdu(apdu_hex: str) -> tuple[str, bool]:
+    """Redact credential/personalisation data from a rendered C-APDU."""
+    try:
+        raw = bytes.fromhex(apdu_hex)
+    except ValueError:
+        return "[REDACTED MALFORMED APDU]", True
+    if len(raw) < 5 or raw[1] not in _SENSITIVE_COMMAND_INS:
+        return apdu_hex, False
+
+    breakdown = _parse_apdu_breakdown(apdu_hex)
+    data_length = int(breakdown.get("data_length") or 0)
+    if data_length <= 0 and len(raw) <= 5:
+        return apdu_hex, False
+    prefix_bytes = 7 if bool(breakdown.get("extended")) and len(raw) >= 7 else 5
+    return (
+        f"{raw[:prefix_bytes].hex().upper()}"
+        f"[REDACTED:{max(data_length, len(raw) - prefix_bytes)}B]",
+        True,
+    )
+
+
+def _action_bool(value: Any, *, default: bool) -> bool:
+    """Coerce an action input to bool without treating ``"false"`` as true."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "0", "no", "off", "")
+    return bool(value)
+
+
+def _trace_value(entry: Any, name: str, default: Any = None) -> Any:
+    if isinstance(entry, dict):
+        return entry.get(name, default)
+    return getattr(entry, name, default)
+
+
+def _render_transport_trace(
+    trace: Any,
+    *,
+    response_redacted: bool,
+) -> list[dict[str, Any]]:
+    """Project transport trace objects into secret-safe JSON rows."""
+    rows: list[dict[str, Any]] = []
+    for entry in tuple(trace or ()):
+        command_hex = str(_trace_value(entry, "command_hex", "") or "")
+        rendered_command = ""
+        command_redacted = False
+        if command_hex:
+            rendered_command, command_redacted = _redact_sensitive_apdu(command_hex)
+
+        wire_command = str(_trace_value(entry, "wire_command_hex", "") or "")
+        wire_response = str(_trace_value(entry, "wire_response_hex", "") or "")
+        clear_response = str(_trace_value(entry, "clear_response_hex", "") or "")
+        response_verified = _trace_value(entry, "response_verified")
+        if command_redacted:
+            wire_command = "[REDACTED]"
+        if response_redacted or response_verified is False:
+            wire_response = ""
+            clear_response = ""
+
+        sw1 = int(_trace_value(entry, "sw1", 0) or 0)
+        sw2 = int(_trace_value(entry, "sw2", 0) or 0)
+        phase = str(_trace_value(entry, "phase", "command") or "command")
+        reason = {
+            "command": "command",
+            "correct-le": "retry with corrected Le",
+            "get-response": "GET RESPONSE",
+        }.get(phase, phase)
+        rows.append({
+            "sequence": int(_trace_value(entry, "sequence", len(rows) + 1) or 0),
+            "phase": phase,
+            "reason": reason,
+            "apdu": rendered_command or f"[{reason}; bytes hidden]",
+            "apdu_redacted": command_redacted,
+            "command_length": int(_trace_value(entry, "command_length", 0) or 0),
+            "wire_command_length": int(
+                _trace_value(entry, "wire_command_length", 0) or 0
+            ),
+            "response_length": int(
+                _trace_value(entry, "clear_response_length", 0) or 0
+            ),
+            "wire_response_length": int(
+                _trace_value(entry, "response_length", 0) or 0
+            ),
+            "sw": f"{sw1:02X}{sw2:02X}",
+            "sw1": f"{sw1:02X}",
+            "sw2": f"{sw2:02X}",
+            "secure_messaging": bool(
+                _trace_value(entry, "secure_messaging", False)
+            ),
+            "response_verified": response_verified,
+            "wire_apdu_hex": wire_command,
+            "wire_response_hex": wire_response,
+            "response_hex": clear_response,
+            "response_redacted": response_redacted,
+            "error": str(_trace_value(entry, "error", "") or ""),
+        })
+    return rows
+
+
+def _dispatch_send_apdu_detailed(
+    *,
+    transporter: Any,
+    sid: str,
+    apdu_hex: str,
+    breakdown: dict[str, Any],
+    follow_61: bool,
+    retry_6c: bool,
+    include_wire_trace: bool,
+) -> dict[str, Any]:
+    """Use the secure-channel-aware logical transport for a raw GUI APDU."""
+    from SCP03.transport.card import ApduTransportError, ApduTransportPolicy
+
+    policy = ApduTransportPolicy(
+        retry_wrong_length=retry_6c,
+        follow_response_data=follow_61,
+        max_followups=16,
+        capture_apdu_bytes=include_wire_trace,
+    )
+    session = getattr(transporter, "session", None)
+    authenticated_before = bool(
+        session is not None and getattr(session, "is_authenticated", False)
+    )
+    result = None
+    transport_error = ""
+    cause_type = ""
+    trace: Any = ()
+
+    sink = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(sink):
+            result = transporter.transmit_detailed(apdu_hex, policy=policy)
+        merged = bytes(result.data or b"")
+        sw1, sw2 = int(result.sw1), int(result.sw2)
+        trace = result.trace
+    except ApduTransportError as error:
+        # A local transport or secure-messaging failure is not a card SW.
+        # Keep the card-side statuses in the metadata trace and expose a
+        # deterministic local-failure status without returning unverified data.
+        merged = b""
+        sw1, sw2 = 0x6F, 0x00
+        trace = error.trace
+        transport_error = str(error)
+        cause_type = str(error.cause_type or type(error).__name__)
+
+    response_redacted = int(apdu_hex[2:4], 16) in _SENSITIVE_RESPONSE_INS
+    trace_rows = _render_transport_trace(
+        trace,
+        response_redacted=response_redacted,
+    )
+    rendered_apdu, apdu_redacted = _redact_sensitive_apdu(apdu_hex)
+    rendered_breakdown = dict(breakdown)
+    if apdu_redacted and rendered_breakdown.get("data_hex"):
+        rendered_breakdown["data_hex"] = (
+            f"[REDACTED:{rendered_breakdown.get('data_length', 0)}B]"
+        )
+
+    session_invalidated = bool(
+        result is not None and result.session_invalidated
+    )
+    invalidation_reason = (
+        str(result.invalidation_reason or "") if result is not None else ""
+    )
+    authenticated_after = bool(
+        session is not None and getattr(session, "is_authenticated", False)
+    )
+    if authenticated_before and not authenticated_after:
+        session_invalidated = True
+        if not invalidation_reason:
+            invalidation_reason = (
+                "The secure channel was invalidated after a transport or "
+                "response-protection failure; re-authentication is required."
+            )
+
+    sw_hex = f"{sw1:02X}{sw2:02X}"
+    try:
+        from SCP03.core.utils import StatusWordTranslator
+        sw_meaning = StatusWordTranslator.translate(sw1, sw2)
+    except Exception:  # noqa: BLE001
+        sw_meaning = ""
+    if transport_error:
+        sw_meaning = f"Local transport failure: {transport_error}"
+
+    response_hex = "" if response_redacted else merged.hex().upper()
+    return {
+        "session_id": sid,
+        "apdu": rendered_apdu,
+        "apdu_redacted": apdu_redacted,
+        "breakdown": rendered_breakdown,
+        "response_hex": response_hex,
+        "response_length": len(merged),
+        "response_ascii": "[REDACTED]" if response_redacted else _ascii_preview(merged),
+        "response_redacted": response_redacted,
+        "sw": sw_hex,
+        "sw1": f"{sw1:02X}",
+        "sw2": f"{sw2:02X}",
+        "sw_meaning": sw_meaning,
+        "ok": not transport_error and sw1 == 0x90,
+        "chain": trace_rows[1:],
+        "transport_trace": trace_rows,
+        "transport_error": transport_error,
+        "transport_error_type": cause_type,
+        "follow_61_enabled": follow_61,
+        "retry_6c_enabled": retry_6c,
+        "wire_trace_enabled": include_wire_trace,
+        "retry_warning": "",
+        "continuation_truncated": (
+            bool(transport_error)
+            and "too many APDU continuation" in transport_error
+        ),
+        "session_invalidated": session_invalidated,
+        "session_invalidation_reason": invalidation_reason,
+    }
+
+
 def _dispatch_send_apdu(
     ctx: ActionContext,
     *,
@@ -1578,6 +1908,7 @@ def _dispatch_send_apdu(
     apdu: Any = None,
     follow_61: Any = True,
     retry_6c: Any = True,
+    include_wire_trace: Any = False,
 ) -> dict[str, Any]:
     """Transmit an arbitrary hex APDU on the active session.
 
@@ -1591,9 +1922,9 @@ def _dispatch_send_apdu(
 
     Automatic chaining mirrors the CLI shell:
 
-      * ``61xx`` (more data available) → issues ``00C00000xx`` GET
-        RESPONSE until SW != 0x61, concatenating the returned bytes.
-        Bounded to 16 follow-ups to avoid loops on misbehaving cards.
+      * ``61xx`` / legacy SIM ``9Fxx`` (more data available) → issues
+        GET RESPONSE on the same logical channel, concatenating returned
+        bytes. Bounded to 16 follow-ups to avoid loops on bad cards.
       * ``6Cxx`` (wrong Le) → re-sends the original APDU once with the
         corrected Le byte. A second 6Cxx aborts the chain (that would
         indicate a card-side bug, not a usable retry).
@@ -1609,12 +1940,23 @@ def _dispatch_send_apdu(
     apdu_hex = _normalise_apdu_hex(apdu)
     breakdown = _parse_apdu_breakdown(apdu_hex)
 
-    follow_61_flag = bool(follow_61) if not isinstance(follow_61, str) else (
-        follow_61.strip().lower() not in ("false", "0", "no", "off", "")
-    )
-    retry_6c_flag = bool(retry_6c) if not isinstance(retry_6c, str) else (
-        retry_6c.strip().lower() not in ("false", "0", "no", "off", "")
-    )
+    follow_61_flag = _action_bool(follow_61, default=True)
+    retry_6c_flag = _action_bool(retry_6c, default=True)
+    include_wire_trace_flag = _action_bool(include_wire_trace, default=False)
+
+    # CardTransporter owns all secure-messaging continuation exchanges.
+    # Keeping 6C and GET RESPONSE inside one logical transport prevents
+    # follow-ups from bypassing command wrapping or response-MAC checks.
+    if callable(getattr(transporter, "transmit_detailed", None)):
+        return _dispatch_send_apdu_detailed(
+            transporter=transporter,
+            sid=sid,
+            apdu_hex=apdu_hex,
+            breakdown=breakdown,
+            follow_61=follow_61_flag,
+            retry_6c=retry_6c_flag,
+            include_wire_trace=include_wire_trace_flag,
+        )
 
     # Initial transmit — capture any stdout the transporter emits so
     # the secure-channel wrapper's own debug prints don't leak into
@@ -1627,15 +1969,24 @@ def _dispatch_send_apdu(
     chain: list[dict[str, Any]] = []
     merged = bytes(data or b"")
     steps_budget = 16
+    retry_6c_requested = retry_6c_flag
+    retry_warning = ""
+    get_response_cla = _get_response_cla(apdu_hex)
+    last_wire_apdu = apdu_hex
+    last_response_mode = "replace"
+    last_chunk_length = len(merged)
 
     while steps_budget > 0:
         steps_budget -= 1
-        if sw1 == 0x61 and follow_61_flag:
+        if sw1 in (0x61, 0x9F) and follow_61_flag:
             length = sw2 if sw2 != 0 else 0x00
-            get_resp = f"00C00000{length:02X}"
+            get_resp = f"{get_response_cla:02X}C00000{length:02X}"
             chunk, sw1, sw2 = transporter.transmit(get_resp, silent=True)
             chunk_bytes = bytes(chunk or b"")
             merged = merged + chunk_bytes
+            last_wire_apdu = get_resp
+            last_response_mode = "append"
+            last_chunk_length = len(chunk_bytes)
             chain.append({
                 "apdu": get_resp,
                 "reason": "GET RESPONSE",
@@ -1645,11 +1996,23 @@ def _dispatch_send_apdu(
             })
             continue
         if sw1 == 0x6C and retry_6c_flag:
-            retry_apdu = _apdu_with_corrected_le(apdu_hex, sw2)
+            try:
+                retry_apdu = _apdu_with_corrected_le(last_wire_apdu, sw2)
+            except ValueError as error:
+                retry_warning = str(error)
+                retry_6c_flag = False
+                break
             chunk, sw1, sw2 = transporter.transmit(retry_apdu, silent=True)
             chunk_bytes = bytes(chunk or b"")
-            # 6C retry replaces the response (same logical read, new Le)
-            merged = chunk_bytes
+            if last_response_mode == "append":
+                if last_chunk_length > 0:
+                    merged = merged[:-last_chunk_length]
+                merged = merged + chunk_bytes
+            else:
+                # An initial-command 6C retry replaces the failed response.
+                merged = chunk_bytes
+            last_wire_apdu = retry_apdu
+            last_chunk_length = len(chunk_bytes)
             chain.append({
                 "apdu": retry_apdu,
                 "reason": "retry with corrected Le",
@@ -1662,6 +2025,12 @@ def _dispatch_send_apdu(
             continue
         break
 
+    continuation_truncated = bool(
+        steps_budget == 0
+        and follow_61_flag
+        and sw1 in (0x61, 0x9F)
+    )
+
     sw_hex = f"{sw1:02X}{sw2:02X}"
     try:
         from SCP03.core.utils import StatusWordTranslator
@@ -1670,14 +2039,36 @@ def _dispatch_send_apdu(
         sw_meaning = ""
 
     response_hex = merged.hex().upper()
+    rendered_apdu, apdu_redacted = _redact_sensitive_apdu(apdu_hex)
+    rendered_breakdown = dict(breakdown)
+    if apdu_redacted and rendered_breakdown.get("data_hex"):
+        rendered_breakdown["data_hex"] = (
+            f"[REDACTED:{rendered_breakdown.get('data_length', 0)}B]"
+        )
+
+    for step in chain:
+        rendered_step_apdu, step_redacted = _redact_sensitive_apdu(
+            str(step.get("apdu") or "")
+        )
+        step["apdu"] = rendered_step_apdu
+        step["apdu_redacted"] = step_redacted
+
+    response_redacted = int(apdu_hex[2:4], 16) in _SENSITIVE_RESPONSE_INS
+    if response_redacted:
+        response_hex = ""
+        for step in chain:
+            step["response_hex"] = ""
+            step["response_redacted"] = True
 
     return {
         "session_id": sid,
-        "apdu": apdu_hex,
-        "breakdown": breakdown,
+        "apdu": rendered_apdu,
+        "apdu_redacted": apdu_redacted,
+        "breakdown": rendered_breakdown,
         "response_hex": response_hex,
         "response_length": len(merged),
-        "response_ascii": _ascii_preview(merged),
+        "response_ascii": "[REDACTED]" if response_redacted else _ascii_preview(merged),
+        "response_redacted": response_redacted,
         "sw": sw_hex,
         "sw1": f"{sw1:02X}",
         "sw2": f"{sw2:02X}",
@@ -1685,7 +2076,9 @@ def _dispatch_send_apdu(
         "ok": sw1 == 0x90,
         "chain": chain,
         "follow_61_enabled": follow_61_flag,
-        "retry_6c_enabled": bool(retry_6c),
+        "retry_6c_enabled": retry_6c_requested,
+        "retry_warning": retry_warning,
+        "continuation_truncated": continuation_truncated,
     }
 
 
@@ -1695,8 +2088,9 @@ SEND_APDU_SPEC = ActionSpec(
     title="Send APDU (raw)",
     description=(
         "Transmit an arbitrary hex APDU on the active session. Auto-"
-        "follows ``61xx`` with GET RESPONSE and retries ``6Cxx`` with "
-        "the card-suggested Le. Does NOT restore MF afterwards — the "
+        "follows ``61xx`` / ``9Fxx`` with GET RESPONSE and retries ``6Cxx`` with "
+        "the card-suggested Le (including extended cases 2E/3E/4E). "
+        "Does NOT restore MF afterwards — the "
         "card's DF / AID is left exactly where your APDU put it."
     ),
     inputs=(
@@ -1711,11 +2105,14 @@ SEND_APDU_SPEC = ActionSpec(
         ),
         ActionField(
             name="follow_61",
-            label="Auto-follow 61xx (GET RESPONSE)",
+            label="Auto-follow 61xx / 9Fxx (GET RESPONSE)",
             kind="bool",
             required=False,
             default=True,
-            help="When the card returns 61xx, issue 00C00000xx and append the returned bytes.",
+            help=(
+                "When the card returns 61xx or legacy SIM 9Fxx, issue "
+                "GET RESPONSE on the same logical channel."
+            ),
         ),
         ActionField(
             name="retry_6c",
@@ -1724,6 +2121,17 @@ SEND_APDU_SPEC = ActionSpec(
             required=False,
             default=True,
             help="When the card returns 6Cxx, re-send the same APDU with Le = xx.",
+        ),
+        ActionField(
+            name="include_wire_trace",
+            label="Include APDU trace bytes",
+            kind="bool",
+            required=False,
+            default=False,
+            help=(
+                "Advanced diagnostics. Include clear/wrapped APDU bytes in the "
+                "result; credential and authentication payloads remain redacted."
+            ),
         ),
     ),
     output_kind="json",
@@ -2165,20 +2573,31 @@ get_registry().register(DUMP_FS_SPEC)
 # cached on ``session.handle["gp"]``; they survive as long as the tab.
 
 
-def _get_or_make_gp_ctrl(session: Any) -> Any:
-    """Return the cached ``GlobalPlatformManager`` or build one on demand.
-
-    Keys default to ``Config.DEFAULT_KEYS`` (the demo values). Callers that
-    need custom keys should rebuild the manager explicitly via
-    ``session.handle['gp'] = None`` before dispatching.
-    """
-    gp = session.handle.get("gp")
-    if gp is not None:
-        return gp
+def _load_workspace_gp_keys() -> dict[str, str]:
+    """Load the canonical persisted SCP03/SCP02 key configuration."""
     from SCP03.config import Config as Scp03Config
-    from SCP03.logic.gp import GlobalPlatformManager
+    from SCP03.config import load_scp03_runtime_parser
 
     keys = dict(Scp03Config.DEFAULT_KEYS)
+    parser = load_scp03_runtime_parser()
+    if "KEYS" in parser:
+        keys.update({str(key): str(value) for key, value in parser["KEYS"].items()})
+    return keys
+
+
+def _get_or_make_gp_ctrl(session: Any, *, refresh: bool = False) -> Any:
+    """Return the cached ``GlobalPlatformManager`` or build one on demand.
+
+    Keys come from the canonical workspace/inventory resolver. ``refresh``
+    creates a fresh manager so per-attempt key/AID overrides can never
+    become sticky across later authentication attempts.
+    """
+    gp = session.handle.get("gp")
+    if gp is not None and not refresh:
+        return gp
+    from SCP03.logic.gp import GlobalPlatformManager
+
+    keys = _load_workspace_gp_keys()
     transporter = session.handle["transporter"]
     # Silence any stderr banners the GP manager wants to push on boot —
     # ``pending_demo_keys_warning`` is surfaced via the response instead.
@@ -2220,7 +2639,7 @@ def _apply_auth_key_overrides(
     enc_override: str,
     mac_override: str,
     dek_override: str,
-) -> dict[str, str]:
+) -> set[str]:
     """Swap the GP manager's keyset for this authenticate call.
 
     Returns the set of fields that were actually overridden so the
@@ -2234,18 +2653,11 @@ def _apply_auth_key_overrides(
     with a cryptography stack trace that's painful to decode at the
     action layer.
     """
-    applied: dict[str, str] = {}
+    applied: set[str] = set()
     proto = str(protocol or "SCP03").strip().upper()
 
     def _clean(raw: Any, label: str) -> str:
-        text = str(raw or "").strip().upper().replace(" ", "")
-        if len(text) == 0:
-            return ""
-        try:
-            bytes.fromhex(text)
-        except ValueError as error:
-            raise ValueError(f"invalid {label}: {error}") from error
-        return text
+        return _normalize_hex(raw, label=label, allow_empty=True)
 
     enc_hex = _clean(enc_override, "enc_key")
     mac_hex = _clean(mac_override, "mac_key")
@@ -2254,26 +2666,49 @@ def _apply_auth_key_overrides(
     if len(kvn_hex) > 0 and len(kvn_hex) != 2:
         raise ValueError(f"kvn must be a single byte (2 hex chars), got {kvn_override!r}")
 
+    allowed_key_lengths = (16, 24) if proto == "SCP02" else (16, 24, 32)
+    for label, value in (
+        ("enc_key", enc_hex),
+        ("mac_key", mac_hex),
+        ("dek_key", dek_hex),
+    ):
+        if value and len(value) // 2 not in allowed_key_lengths:
+            choices = " or ".join(str(length) for length in allowed_key_lengths)
+            raise ValueError(
+                f"{label} must be {choices} bytes for {proto} "
+                f"(got {len(value) // 2})."
+            )
+
     if proto == "SCP02":
-        keyset = getattr(gp, "scp02_keys", None) or {}
+        keyset = dict(getattr(gp, "scp02_keys", None) or {})
         if enc_hex:
-            keyset["enc"] = bytes.fromhex(enc_hex); applied["enc_key"] = enc_hex
+            keyset["enc"] = bytes.fromhex(enc_hex)
+            applied.add("enc_key")
         if mac_hex:
-            keyset["mac"] = bytes.fromhex(mac_hex); applied["mac_key"] = mac_hex
+            keyset["mac"] = bytes.fromhex(mac_hex)
+            applied.add("mac_key")
         if dek_hex:
-            keyset["dek"] = bytes.fromhex(dek_hex); applied["dek_key"] = dek_hex
+            keyset["dek"] = bytes.fromhex(dek_hex)
+            applied.add("dek_key")
+        gp.scp02_keys = keyset
         if kvn_hex:
-            gp.scp02_kvn = int(kvn_hex, 16); applied["kvn"] = kvn_hex
+            gp.scp02_kvn = int(kvn_hex, 16)
+            applied.add("kvn")
     else:
-        keyset = getattr(gp, "scp03_keys", None) or {}
+        keyset = dict(getattr(gp, "scp03_keys", None) or {})
         if enc_hex:
-            keyset["kenc"] = bytes.fromhex(enc_hex); applied["enc_key"] = enc_hex
+            keyset["kenc"] = bytes.fromhex(enc_hex)
+            applied.add("enc_key")
         if mac_hex:
-            keyset["kmac"] = bytes.fromhex(mac_hex); applied["mac_key"] = mac_hex
+            keyset["kmac"] = bytes.fromhex(mac_hex)
+            applied.add("mac_key")
         if dek_hex:
-            keyset["dek"] = bytes.fromhex(dek_hex); applied["dek_key"] = dek_hex
+            keyset["dek"] = bytes.fromhex(dek_hex)
+            applied.add("dek_key")
+        gp.scp03_keys = keyset
         if kvn_hex:
-            gp.scp03_kvn = int(kvn_hex, 16); applied["kvn"] = kvn_hex
+            gp.scp03_kvn = int(kvn_hex, 16)
+            applied.add("kvn")
 
     return applied
 
@@ -2294,12 +2729,13 @@ def _dispatch_auth(
     The optional ``kvn`` / ``enc_key`` / ``mac_key`` / ``dek_key`` hex
     overrides bypass the workspace config so the operator can authenticate
     against a card whose production keys aren't checked into the Workspace
-    keybag. Empty / omitted values fall through to ``Config.DEFAULT_KEYS``
-    as before — the override is purely additive so existing callers keep
-    working.
+    keybag. Empty / omitted values use the persisted workspace/inventory
+    keyset for this attempt.
     """
     session, transporter, sid = _get_scp03_session(session_id)
-    gp = _get_or_make_gp_ctrl(session)
+    # Authentication overrides are request-scoped. Rebuild from persisted
+    # workspace keys and the canonical target AID on every attempt.
+    gp = _get_or_make_gp_ctrl(session, refresh=True)
 
     aid_text = str(target_aid or "").strip().upper().replace(" ", "")
     if len(aid_text) > 0:
@@ -2331,7 +2767,8 @@ def _dispatch_auth(
         kvn_hex = f"{gp.scp03_kvn:02X}"
     else:
         kvn_hex = f"{gp.scp02_kvn:02X}"
-    return {
+    warning = getattr(gp, "pending_demo_keys_warning", None)
+    result = {
         "session_id": sid,
         "ok": bool(ok),
         "protocol": protocol_norm,
@@ -2343,9 +2780,13 @@ def _dispatch_auth(
         # Which override fields actually took effect (never includes the
         # key bytes themselves — just the names, so the GUI can show a
         # "used custom keys" chip without leaking material into the log).
-        "overrides_applied": sorted(applied_overrides.keys()),
+        "overrides_applied": sorted(applied_overrides),
         "trace": trace,
+        "warning": str(warning) if warning else None,
     }
+    if warning:
+        gp.pending_demo_keys_warning = None
+    return result
 
 
 def _dispatch_auth_scp03(
@@ -2629,6 +3070,7 @@ def _dispatch_list_aids(ctx: ActionContext) -> dict[str, Any]:
     """
     from SCP03.config import Config as Scp03Config
 
+    Scp03Config.initialize_workspace()
     path = str(Scp03Config.AID_FILE)
     entries: list[dict[str, str]] = []
     read_error: str | None = None
@@ -2695,7 +3137,7 @@ _AUTH_ENC_FIELD = ActionField(
     label="ENC key override",
     kind="hex",
     required=False,
-    placeholder="16 / 24 / 32 bytes hex",
+    placeholder="SCP02: 16/24 bytes; SCP03: 16/24/32",
     help="Optional ENC/KENC key. Blank = use workspace key. Not persisted.",
     secret=True,
 )
@@ -2704,7 +3146,7 @@ _AUTH_MAC_FIELD = ActionField(
     label="MAC key override",
     kind="hex",
     required=False,
-    placeholder="16 / 24 / 32 bytes hex",
+    placeholder="SCP02: 16/24 bytes; SCP03: 16/24/32",
     help="Optional MAC/KMAC key. Blank = use workspace key. Not persisted.",
     secret=True,
 )
@@ -2713,7 +3155,7 @@ _AUTH_DEK_FIELD = ActionField(
     label="DEK key override",
     kind="hex",
     required=False,
-    placeholder="16 / 24 / 32 bytes hex",
+    placeholder="SCP02: 16/24 bytes; SCP03: 16/24/32",
     help="Optional DEK key. Blank = use workspace key. Not persisted.",
     secret=True,
 )
@@ -3125,7 +3567,7 @@ def _dispatch_update_binary(
     session_id: Any = None,
     hex_data: Any = None,
     path: Any = None,
-    offset: int = 0,
+    offset: Any = 0,
     confirm: Any = None,
 ) -> dict[str, Any]:
     """UPDATE BINARY (00D6 P1 P2) on the current or named EF.
@@ -3136,57 +3578,107 @@ def _dispatch_update_binary(
     """
     if bool(confirm) is False:
         raise ValueError("confirm must be true — UPDATE BINARY overwrites file content on the card.")
-    session, _transporter, sid = _get_scp03_session(session_id)
+    session, transporter, sid = _get_scp03_session(session_id)
+    _require_auth_session(transporter)
     fs_controller = session.handle["fs"]
 
-    hex_text = str(hex_data or "").strip().upper().replace(" ", "")
-    if len(hex_text) == 0:
-        raise ValueError("hex_data is required.")
-    if len(hex_text) % 2 != 0:
-        raise ValueError("hex_data has odd length.")
+    hex_text = _normalize_hex(hex_data, label="hex_data")
+    payload = bytes.fromhex(hex_text)
+
     try:
-        bytes.fromhex(hex_text)
-    except ValueError as error:
-        raise ValueError(f"invalid hex_data: {error}") from error
+        offset_int = int(str(offset or 0), 0)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"offset must be an integer in range 0..32767: {offset!r}") from error
+    if offset_int < 0 or offset_int > 0x7FFF:
+        raise ValueError(f"offset out of range 0..32767: {offset_int}")
+    if offset_int + len(payload) > 0x8000:
+        raise ValueError(
+            "offset + payload length exceeds the 15-bit absolute-offset range "
+            f"(offset={offset_int}, bytes={len(payload)})."
+        )
 
     select_trace = ""
     path_text = str(path or "").strip()
+    selected_path = ""
     if path_text:
+        selected_path = _normalise_fs_path(path_text)
+        if "/" in selected_path or selected_path.upper() == "MF":
+            _restore_fs_root_best_effort(session)
         sink = io.StringIO()
         with contextlib.redirect_stdout(sink):
-            ok = fs_controller.select(path_text, silent=False)
+            ok = fs_controller.select(selected_path, silent=False)
         select_trace = _strip_ansi(sink.getvalue())
         if ok is False:
             return {
                 "session_id": sid,
                 "path": path_text,
+                "resolved_path": selected_path,
                 "selected": False,
                 "select_trace": select_trace,
                 "ok": False,
                 "sw": "0000",
                 "bytes": 0,
+                "bytes_written": 0,
+                "offset": offset_int,
+                "chunks": [],
                 "trace": "",
             }
 
-    # Fall back to the current helper — fs_ctrl.update_binary talks to
-    # whatever is currently selected. We capture its own trace for parity
-    # with the other FS actions.
-    sink = io.StringIO()
-    with contextlib.redirect_stdout(sink):
-        fs_controller.update_binary(hex_text)
-    trace = _strip_ansi(sink.getvalue())
-    sw = _extract_sw_from_trace(trace)
-    ok = bool(sw and sw.startswith("9000"))
+    # UPDATE BINARY uses a short command APDU, so split bodies above 255
+    # bytes into consecutive absolute-offset commands. Validate the entire
+    # range before transmitting so an impossible final chunk cannot leave
+    # a partially written EF.
+    chunks: list[dict[str, Any]] = []
+    bytes_written = 0
+    final_sw = ""
+    final_status = ""
+    ok = True
+    for start in range(0, len(payload), 0xFF):
+        chunk = payload[start:start + 0xFF]
+        chunk_offset = offset_int + start
+        p1 = (chunk_offset >> 8) & 0x7F
+        p2 = chunk_offset & 0xFF
+        apdu = (
+            f"00D6{p1:02X}{p2:02X}{len(chunk):02X}"
+            f"{chunk.hex().upper()}"
+        )
+        _data, sw1, sw2 = transporter.transmit(apdu, silent=True)
+        chunk_ok, status = _classify_sw(sw1, sw2)
+        final_sw = f"{sw1:02X}{sw2:02X}"
+        final_status = status
+        chunks.append({
+            "offset": chunk_offset,
+            "bytes": len(chunk),
+            "sw": final_sw,
+            "ok": chunk_ok,
+            "status": status,
+        })
+        if not chunk_ok:
+            ok = False
+            break
+        bytes_written += len(chunk)
+
+    trace = "\n".join(
+        "UPDATE BINARY "
+        f"offset=0x{row['offset']:04X} bytes={row['bytes']} "
+        f"SW={row['sw']} ({row['status']})"
+        for row in chunks
+    )
 
     return {
         "session_id": sid,
         "path": path_text,
+        "resolved_path": selected_path or path_text,
         "selected": True if path_text else None,
         "select_trace": select_trace,
-        "bytes": len(hex_text) // 2,
-        "offset": int(offset or 0),
-        "sw": sw,
+        "bytes": len(payload),
+        "bytes_written": bytes_written,
+        "offset": offset_int,
+        "sw": final_sw,
+        "status": final_status,
         "ok": ok,
+        "chunk_count": len(chunks),
+        "chunks": chunks,
         "trace": trace,
     }
 
@@ -3214,7 +3706,8 @@ def _dispatch_update_record(
     """UPDATE RECORD (00DC REC 04 LC) on the current or named EF."""
     if bool(confirm) is False:
         raise ValueError("confirm must be true — UPDATE RECORD overwrites record content on the card.")
-    session, _transporter, sid = _get_scp03_session(session_id)
+    session, transporter, sid = _get_scp03_session(session_id)
+    _require_auth_session(transporter)
     fs_controller = session.handle["fs"]
 
     rec_text = str(record or "").strip()
@@ -3224,30 +3717,32 @@ def _dispatch_update_record(
         rec_int = int(rec_text, 10 if rec_text.isdigit() else 16)
     except ValueError as error:
         raise ValueError(f"invalid record: {rec_text!r}") from error
-    if rec_int < 0 or rec_int > 0xFF:
-        raise ValueError(f"record out of range 0..255: {rec_int}")
+    if rec_int < 1 or rec_int > 0xFE:
+        raise ValueError(f"record out of range 1..254: {rec_int}")
 
-    hex_text = str(hex_data or "").strip().upper().replace(" ", "")
-    if len(hex_text) == 0:
-        raise ValueError("hex_data is required.")
-    if len(hex_text) % 2 != 0:
-        raise ValueError("hex_data has odd length.")
-    try:
-        bytes.fromhex(hex_text)
-    except ValueError as error:
-        raise ValueError(f"invalid hex_data: {error}") from error
+    hex_text = _normalize_hex(hex_data, label="hex_data")
+    payload = bytes.fromhex(hex_text)
+    if len(payload) > 0xFF:
+        raise ValueError(
+            f"hex_data is {len(payload)} bytes; UPDATE RECORD supports at most 255."
+        )
 
     select_trace = ""
     path_text = str(path or "").strip()
+    selected_path = ""
     if path_text:
+        selected_path = _normalise_fs_path(path_text)
+        if "/" in selected_path or selected_path.upper() == "MF":
+            _restore_fs_root_best_effort(session)
         sink = io.StringIO()
         with contextlib.redirect_stdout(sink):
-            ok = fs_controller.select(path_text, silent=False)
+            ok = fs_controller.select(selected_path, silent=False)
         select_trace = _strip_ansi(sink.getvalue())
         if ok is False:
             return {
                 "session_id": sid,
                 "path": path_text,
+                "resolved_path": selected_path,
                 "record": rec_int,
                 "selected": False,
                 "select_trace": select_trace,
@@ -3257,21 +3752,22 @@ def _dispatch_update_record(
                 "trace": "",
             }
 
-    sink = io.StringIO()
-    with contextlib.redirect_stdout(sink):
-        fs_controller.update_record(rec_int, hex_text)
-    trace = _strip_ansi(sink.getvalue())
-    sw = _extract_sw_from_trace(trace)
-    ok = bool(sw and sw.startswith("9000"))
+    apdu = f"00DC{rec_int:02X}04{len(payload):02X}{hex_text}"
+    _data, sw1, sw2 = transporter.transmit(apdu, silent=True)
+    ok, status = _classify_sw(sw1, sw2)
+    sw = f"{sw1:02X}{sw2:02X}"
+    trace = f"UPDATE RECORD record={rec_int} bytes={len(payload)} SW={sw} ({status})"
 
     return {
         "session_id": sid,
         "path": path_text,
+        "resolved_path": selected_path or path_text,
         "selected": True if path_text else None,
         "select_trace": select_trace,
         "record": rec_int,
-        "bytes": len(hex_text) // 2,
+        "bytes": len(payload),
         "sw": sw,
+        "status": status,
         "ok": ok,
         "trace": trace,
     }
@@ -3685,6 +4181,7 @@ STORE_DATA_SPEC = ActionSpec(
             label="Data",
             kind="hex",
             required=True,
+            secret=True,
             help="Hex payload to store.",
         ),
         ActionField(
@@ -3744,6 +4241,16 @@ UPDATE_BINARY_SPEC = ActionSpec(
             required=False,
             placeholder="MF/EF_ICCID",
             help="Optional path to SELECT first. Blank = use current selection.",
+        ),
+        ActionField(
+            name="offset",
+            label="Offset",
+            kind="int",
+            required=False,
+            default=0,
+            min_value=0,
+            max_value=0x7FFF,
+            help="Absolute byte offset (decimal API value; GUI accepts hex and converts it).",
         ),
         ActionField(
             name="confirm",
@@ -4279,6 +4786,7 @@ def _dispatch_get_euicc_configured_data(
         data, sw1, sw2 = sgp22._send_store_data_with_retry_ladder("BF3C00")
         data_bytes = bytes(data or b"")
         decoded: dict[str, Any] = {}
+        parse_errors: list[str] = []
         try:
             from SCP03.core.utils import TlvParser
 
@@ -4288,9 +4796,17 @@ def _dispatch_get_euicc_configured_data(
                 smdp = TlvParser.get_first(configured, 0x80)
                 smds = TlvParser.get_first(configured, 0x81)
                 if isinstance(smdp, (bytes, bytearray)):
-                    decoded["default_smdp"] = bytes(smdp).decode("utf-8", "ignore").strip()
+                    value, error = _decode_configured_address(bytes(smdp), "default_smdp")
+                    decoded["default_smdp"] = value
+                    if error:
+                        parse_errors.append(error)
                 if isinstance(smds, (bytes, bytearray)):
-                    decoded["root_smds_primary"] = bytes(smds).decode("utf-8", "ignore").strip()
+                    value, error = _decode_configured_address(
+                        bytes(smds), "root_smds_primary"
+                    )
+                    decoded["root_smds_primary"] = value
+                    if error:
+                        parse_errors.append(error)
                 pkids = TlvParser.get_first(configured, 0x84)
                 if isinstance(pkids, bytes):
                     decoded["allowed_ci_pkid"] = [pkids.hex().upper()]
@@ -4303,11 +4819,18 @@ def _dispatch_get_euicc_configured_data(
                 for tag in (0x82, 0x83, 0x85, 0x86, 0x87, 0x88, 0x89):
                     val = TlvParser.get_first(configured, tag)
                     if isinstance(val, (bytes, bytearray)):
-                        additional.append(bytes(val).decode("utf-8", "ignore").strip())
+                        value, error = _decode_configured_address(
+                            bytes(val), f"root_smds_additional tag {tag:02X}"
+                        )
+                        additional.append(value)
+                        if error:
+                            parse_errors.append(error)
                 if additional:
                     decoded["root_smds_additional"] = additional
-        except Exception:
-            pass
+            elif len(data_bytes) > 0:
+                parse_errors.append("BF3C configured-data template is missing or malformed.")
+        except Exception as error:  # noqa: BLE001
+            parse_errors.append(str(error))
         return {
             "session_id": sid,
             "sw": f"{sw1:02X}{sw2:02X}",
@@ -4315,9 +4838,27 @@ def _dispatch_get_euicc_configured_data(
             "decoded": decoded,
             "lines": _sgp32_bulk_trace_lines(trace),
             "trace": trace,
+            "parse_error": "; ".join(parse_errors) if parse_errors else None,
         }
     finally:
         _restore_fs_root_best_effort(session)
+
+
+def _decode_configured_address(raw: bytes, label: str) -> tuple[str, str | None]:
+    """Decode a configured SM-DP+/SM-DS address without hiding bad bytes."""
+    value = bytes(raw)
+    raw_hex = value.hex().upper()
+    try:
+        text = value.decode("utf-8")
+    except UnicodeDecodeError as error:
+        return raw_hex, f"{label} is not valid UTF-8 ({error}); showing raw hex."
+    if (
+        len(text) == 0
+        or text != text.strip()
+        or any(character.isspace() or not character.isprintable() for character in text)
+    ):
+        return raw_hex, f"{label} is not a non-empty printable address; showing raw hex."
+    return text, None
 
 
 def _sgp32_bulk_trace_lines(trace_text: str) -> list[str]:
@@ -4673,9 +5214,8 @@ def _dispatch_derive_opc(
     except RuntimeError as error:
         raise ValueError(str(error)) from error
     return {
-        "ki": ki_text,
-        "op": op_text,
         "opc": opc,
+        "secret_outputs_redacted": ["ki", "op"],
     }
 
 
@@ -5061,6 +5601,7 @@ DERIVE_OPC_SPEC = ActionSpec(
             required=True,
             placeholder="32 hex chars",
             help="Subscriber authentication key Ki (16 bytes).",
+            secret=True,
         ),
         ActionField(
             name="op",
@@ -5069,6 +5610,7 @@ DERIVE_OPC_SPEC = ActionSpec(
             required=True,
             placeholder="32 hex chars",
             help="Operator Variant OP (16 bytes).",
+            secret=True,
         ),
     ),
     output_kind="json",
@@ -5259,6 +5801,7 @@ def _dispatch_show_config(
     from SCP03.config import Config as Scp03Config
     from yggdrasim_common.device_inventory import DeviceInventoryStore
 
+    Scp03Config.initialize_workspace()
     mask = bool(mask_secrets) if not isinstance(mask_secrets, str) else (
         str(mask_secrets).lower() in ("1", "true", "yes", "on")
     )
@@ -5348,6 +5891,7 @@ def _rewrite_aid_file(entries: dict[str, str]) -> None:
     """Rewrite the aid.txt registry atomically with the provided alias map."""
     from SCP03.config import Config as Scp03Config
 
+    Scp03Config.initialize_workspace()
     path = str(Scp03Config.AID_FILE)
     tmp_path = path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as handle:
@@ -5366,6 +5910,7 @@ def _dispatch_set_aid_alias(
     """Add / update / delete an entry in the AID registry (aid.txt)."""
     from SCP03.config import Config as Scp03Config
 
+    Scp03Config.initialize_workspace()
     name_text = str(name or "").strip().upper()
     if not _valid_aid_alias_name(name_text):
         raise ValueError(
@@ -5457,6 +6002,7 @@ def _dispatch_set_defaults(
     # the session's handle dict is reachable without touching private
     # internals.
     invalidated = 0
+    controllers_reloaded = 0
     try:
         manager = get_manager()
         snapshot = manager.list()
@@ -5470,8 +6016,24 @@ def _dispatch_set_defaults(
                 handle = manager.claim(str(session_id))
             except KeyError:
                 continue
-            if isinstance(handle, dict) and handle.get("gp") is not None:
+            if not isinstance(handle, dict):
+                continue
+            if handle.get("gp") is not None:
                 handle["gp"] = None
+                controllers_reloaded += 1
+            transporter = handle.get("transporter")
+            secure_session = getattr(transporter, "session", None)
+            was_authenticated = bool(
+                getattr(secure_session, "is_authenticated", False)
+            )
+            reset_method = getattr(transporter, "reset_session_state", None)
+            if callable(reset_method):
+                reset_method()
+            elif secure_session is not None:
+                session_reset = getattr(secure_session, "reset_state", None)
+                if callable(session_reset):
+                    session_reset()
+            if was_authenticated:
                 invalidated += 1
     except Exception:  # noqa: BLE001 — best-effort
         pass
@@ -5480,6 +6042,7 @@ def _dispatch_set_defaults(
         "reset": True,
         "key_count": len(default_keys),
         "sessions_invalidated": invalidated,
+        "gp_controllers_reloaded": controllers_reloaded,
         "module_state_name": Scp03Config.MODULE_STATE_NAME,
     }
 
@@ -5604,7 +6167,11 @@ def _capture_method(target: Any, method_name: str, *args: Any, **kwargs: Any) ->
 
 
 def _normalize_hex(value: Any, *, label: str, allow_empty: bool = False) -> str:
-    cleaned = str(value or "").strip().upper().replace(" ", "")
+    cleaned = "".join(str(value or "").split())
+    cleaned = cleaned.replace(":", "").replace("-", "").replace("_", "")
+    if cleaned.lower().startswith("0x"):
+        cleaned = cleaned[2:]
+    cleaned = cleaned.upper()
     if len(cleaned) == 0:
         if allow_empty:
             return ""
@@ -5683,26 +6250,40 @@ def _dispatch_put_key(
     mac_hex = _normalize_hex(mac_key, label="mac_key")
     dek_hex = _normalize_hex(dek_key, label="dek_key")
 
-    # GP key lengths: AES-128/192/256 = 16/24/32 bytes; 3DES = 16 / 24.
-    for label, hex_val in (("enc_key", enc_hex), ("mac_key", mac_hex), ("dek_key", dek_hex)):
-        n_bytes = len(hex_val) // 2
-        if n_bytes not in (16, 24, 32):
-            raise ValueError(
-                f"{label} length {n_bytes} bytes invalid — expected 16 / 24 / 32."
-            )
-
     algo_norm = str(algorithm or "AES").strip().upper()
     if algo_norm in ("AES", "AES-128", "AES-192", "AES-256"):
         key_type = 0x88
+        allowed_lengths = (16, 24, 32)
     elif algo_norm in ("3DES", "DES", "TDES"):
         key_type = 0x82
+        allowed_lengths = (16, 24)
     elif algo_norm.startswith("0X"):
         try:
             key_type = int(algo_norm, 16)
         except ValueError as error:
             raise ValueError(f"invalid algorithm hex override: {error}") from error
+        if key_type < 0 or key_type > 0xFF:
+            raise ValueError("algorithm key-type override must be one byte (00..FF).")
+        allowed_lengths = (16, 24, 32)
     else:
         raise ValueError(f"unsupported algorithm: {algo_norm!r}")
+
+    # GP key lengths: AES-128/192/256 = 16/24/32 bytes; 3DES is
+    # double- or triple-length only. Accepting a 32-byte 3DES key gets
+    # as far as cryptography.TripleDES before failing after the operator
+    # has already authenticated, so validate the chosen algorithm first.
+    expected_lengths = " / ".join(str(length) for length in allowed_lengths)
+    for label, hex_val in (
+        ("enc_key", enc_hex),
+        ("mac_key", mac_hex),
+        ("dek_key", dek_hex),
+    ):
+        n_bytes = len(hex_val) // 2
+        if n_bytes not in allowed_lengths:
+            raise ValueError(
+                f"{label} length {n_bytes} bytes invalid for {algo_norm} — "
+                f"expected {expected_lengths}."
+            )
 
     gp = _get_or_make_gp_ctrl(session)
     success, trace = _capture_method(
@@ -6029,6 +6610,92 @@ _FS_TYPE_LINEAR_FIXED_EF = "LINEAR_FIXED_EF"
 _FS_FILE_TYPES = (_FS_TYPE_DF, _FS_TYPE_TRANSPARENT_EF, _FS_TYPE_LINEAR_FIXED_EF)
 
 
+def _validate_encoded_tlv(
+    hex_value: str,
+    *,
+    label: str,
+    allowed_tags: tuple[int, ...],
+) -> bytes:
+    """Validate one complete definite-length BER-TLV value."""
+    raw = bytes.fromhex(hex_value)
+    if len(raw) < 2:
+        raise ValueError(f"{label} must contain a complete tag and length.")
+    if raw[0] not in allowed_tags:
+        expected = " / ".join(f"{tag:02X}" for tag in allowed_tags)
+        raise ValueError(
+            f"{label} must start with tag {expected} (got {raw[0]:02X})."
+        )
+    first_length = raw[1]
+    header_length = 2
+    if first_length == 0x80:
+        raise ValueError(f"{label} uses unsupported indefinite BER length.")
+    if first_length & 0x80:
+        length_octets = first_length & 0x7F
+        if length_octets == 0 or length_octets > 3:
+            raise ValueError(f"{label} has an invalid BER length field.")
+        if len(raw) < 2 + length_octets:
+            raise ValueError(f"{label} has a truncated BER length field.")
+        declared_length = int.from_bytes(
+            raw[2:2 + length_octets],
+            "big",
+            signed=False,
+        )
+        header_length += length_octets
+    else:
+        declared_length = first_length
+    actual_length = len(raw) - header_length
+    if declared_length != actual_length:
+        raise ValueError(
+            f"{label} declares {declared_length} value byte(s), "
+            f"but contains {actual_length}."
+        )
+    return raw
+
+
+def _encode_ber_length(length: int) -> str:
+    """Return the canonical definite BER length for a card TLV value."""
+    if length < 0:
+        raise ValueError("BER length cannot be negative.")
+    if length < 0x80:
+        return f"{length:02X}"
+    if length <= 0xFF:
+        return f"81{length:02X}"
+    if length <= 0xFFFF:
+        return f"82{length:04X}"
+    raise ValueError(
+        f"BER value is {length} bytes; this workflow supports at most 65535."
+    )
+
+
+def _encode_case3_apdu(header_hex: str, data_hex: str) -> str:
+    """Build a short or extended case-3 APDU without truncating Lc."""
+    try:
+        header = bytes.fromhex(header_hex)
+        data = bytes.fromhex(data_hex)
+    except ValueError as error:
+        raise ValueError(f"invalid internal APDU hex: {error}") from error
+    if len(header) != 4:
+        raise ValueError("case-3 APDU header must be exactly 4 bytes.")
+    if len(data) == 0:
+        raise ValueError("case-3 APDU data must not be empty.")
+    if len(data) <= 0xFF:
+        return f"{header.hex()}{len(data):02X}{data.hex()}".upper()
+    if len(data) <= 0xFFFF:
+        return f"{header.hex()}00{len(data):04X}{data.hex()}".upper()
+    raise ValueError(
+        f"APDU data is {len(data)} bytes; extended Lc supports at most 65535."
+    )
+
+
+def _positive_u16_hex(value: str, *, label: str) -> tuple[int, str]:
+    """Parse positive hex and return its canonical two-byte encoding."""
+    cleaned = _normalize_hex(value, label=label)
+    parsed = int(cleaned, 16)
+    if parsed <= 0 or parsed > 0xFFFF:
+        raise ValueError(f"{label} must encode a value in range 1..65535.")
+    return parsed, f"{parsed:04X}"
+
+
 def _build_fcp_template_fields(
     *,
     file_type: str,
@@ -6097,6 +6764,12 @@ def _build_fcp_template_fields(
     tag_8a = "8A0105"
 
     sec = _normalize_hex(sec_attr_hex, label="sec_attr_hex", allow_empty=True)
+    if sec:
+        _validate_encoded_tlv(
+            sec,
+            label="sec_attr_hex",
+            allowed_tags=(0x8B, 0x8C, 0xAB),
+        )
 
     tag_82 = ""
     tag_80_81 = ""
@@ -6113,24 +6786,27 @@ def _build_fcp_template_fields(
         # File descriptor for DF: 78 21 (DF, not shareable, structure=none).
         tag_82 = "82027821"
 
-        size_hex = _normalize_hex(file_size_hex, label="file_size_hex")
-        try:
-            file_size_int = int(size_hex, 16)
-        except ValueError as error:
-            raise ValueError(
-                f"file_size_hex: invalid integer: {error}") from error
-        size_text = f"{file_size_int:04X}"
+        file_size_int, size_text = _positive_u16_hex(
+            file_size_hex,
+            label="file_size_hex",
+        )
         # DF uses tag 81 (total file size / memory quota).
         tag_80_81 = f"81{len(size_text) // 2:02X}{size_text}"
 
         aid = _normalize_hex(aid_hex, label="aid_hex", allow_empty=True)
         if len(aid) > 0:
+            aid_length = len(aid) // 2
+            if aid_length < 5 or aid_length > 16:
+                raise ValueError(
+                    f"aid_hex must be 5..16 bytes (got {aid_length})."
+                )
             tag_84 = f"84{len(aid) // 2:02X}{aid}"
 
         c6 = _normalize_hex(c6_hex, label="c6_hex", allow_empty=True)
         if len(c6) == 0:
             raise ValueError(
                 "c6_hex (PIN Status Template DO) is required for DF/ADF.")
+        _validate_encoded_tlv(c6, label="c6_hex", allowed_tags=(0xC6,))
         # Caller hands us the complete C6 TLV — the CLI wizard does the
         # same so we don't have to second-guess the inner layout.
         tag_c6 = c6
@@ -6139,30 +6815,32 @@ def _build_fcp_template_fields(
         # Transparent EF descriptor: 41 21.
         tag_82 = "82024121"
 
-        size_hex = _normalize_hex(file_size_hex, label="file_size_hex")
-        try:
-            file_size_int = int(size_hex, 16)
-        except ValueError as error:
-            raise ValueError(
-                f"file_size_hex: invalid integer: {error}") from error
-        size_text = f"{file_size_int:04X}"
+        file_size_int, size_text = _positive_u16_hex(
+            file_size_hex,
+            label="file_size_hex",
+        )
         tag_80_81 = f"80{len(size_text) // 2:02X}{size_text}"
 
     elif ft == _FS_TYPE_LINEAR_FIXED_EF:
-        rec_len_clean = _normalize_hex(rec_len_hex, label="rec_len_hex")
+        rec_len_int, rec_len_text = _positive_u16_hex(
+            rec_len_hex,
+            label="rec_len_hex",
+        )
         num_rec_clean = _normalize_hex(num_rec_hex, label="num_rec_hex")
-        try:
-            rec_len_int = int(rec_len_clean, 16)
-            num_rec_int = int(num_rec_clean, 16)
-        except ValueError as error:
-            raise ValueError(
-                f"rec_len_hex/num_rec_hex: invalid integer: {error}") from error
-        if rec_len_int <= 0 or num_rec_int <= 0:
-            raise ValueError("rec_len / num_rec must be positive.")
-        # Linear fixed EF descriptor: 42 21 <RECLEN_16>.
-        tag_82 = f"82044221{rec_len_int:04X}"
+        num_rec_int = int(num_rec_clean, 16)
+        if num_rec_int <= 0 or num_rec_int > 0xFF:
+            raise ValueError("num_rec_hex must encode a value in range 1..255.")
+        # Descriptor byte + coding byte + 2-byte record length + 1-byte
+        # record count. The old 82-04 form omitted the record count and
+        # could not create a conformant linear-fixed EF.
+        tag_82 = f"82054221{rec_len_text}{num_rec_int:02X}"
 
         file_size_int = rec_len_int * num_rec_int
+        if file_size_int > 0xFFFF:
+            raise ValueError(
+                "rec_len × num_rec exceeds the supported two-byte file "
+                f"size (got {file_size_int})."
+            )
         size_text = f"{file_size_int:04X}"
         tag_80_81 = f"80{len(size_text) // 2:02X}{size_text}"
 
@@ -6180,7 +6858,7 @@ def _build_fcp_template_fields(
     # Tag A5 — Proprietary Info (optional inner bytes; we wrap them).
     prop = _normalize_hex(prop_a5_hex, label="prop_a5_hex", allow_empty=True)
     if len(prop) > 0:
-        tag_a5 = f"A5{len(prop) // 2:02X}{prop}"
+        tag_a5 = f"A5{_encode_ber_length(len(prop) // 2)}{prop}"
 
     # Preserve the CLI wizard's concatenation order precisely — even
     # though card parsers MUST be tag-order-agnostic, matching the CLI
@@ -6197,15 +6875,12 @@ def _build_fcp_template_fields(
         + tag_a5
     )
     fcp_len = len(fcp_content) // 2
-    if fcp_len > 0x7F:
-        # CLI wizard uses short-form length; flag anything that would
-        # require BER long-form so the operator notices rather than
-        # silently emitting a broken template.
+    fcp_length_hex = _encode_ber_length(fcp_len)
+    fcp_hex = f"62{fcp_length_hex}{fcp_content}"
+    if len(fcp_hex) // 2 > 0xFFFF:
         raise ValueError(
-            f"FCP body is {fcp_len} bytes — exceeds short-form length (127). "
-            "Trim the security attribute / C6 / proprietary TLVs or use "
-            "the raw-FCP mode.")
-    fcp_hex = f"62{fcp_len:02X}{fcp_content}"
+            "Encoded FCP exceeds the 65535-byte extended APDU data limit."
+        )
 
     breakdown: list[dict[str, str]] = []
     if tag_82:
@@ -6320,12 +6995,17 @@ def _dispatch_fs_create_file(
     _require_auth_session(transporter)
 
     fcp = _normalize_hex(fcp_hex, label="fcp_hex")
+    _validate_encoded_tlv(
+        fcp,
+        label="fcp_hex",
+        allowed_tags=(0x62,),
+    )
     select_trace: list[dict[str, Any]] = []
     if parent_path is not None and len(str(parent_path).strip()) > 0:
         parent_hex = _normalize_hex(parent_path, label="parent_path")
         select_trace = _select_path_chain(transporter, parent_hex)
 
-    apdu = f"00E00000{len(fcp) // 2:02X}{fcp}"
+    apdu = _encode_case3_apdu("00E00000", fcp)
     data, sw1, sw2 = transporter.transmit(apdu, silent=True)
     ok, label = _classify_sw(sw1, sw2)
     return {
@@ -6401,22 +7081,18 @@ def _dispatch_fs_resize(
     tag_81 = ""
 
     if new_file_size is not None and len(str(new_file_size).strip()) > 0:
-        size_hex = _normalize_hex(new_file_size, label="new_file_size")
-        try:
-            size_int = int(size_hex, 16)
-        except ValueError as error:
-            raise ValueError(f"invalid new_file_size hex: {error}") from error
-        size_text = f"{size_int:04X}"
-        tag_80 = f"80{len(size_text) // 2:02X}{size_text}"
+        _size_int, size_text = _positive_u16_hex(
+            new_file_size,
+            label="new_file_size",
+        )
+        tag_80 = f"8002{size_text}"
 
     if new_total_size is not None and len(str(new_total_size).strip()) > 0:
-        size_hex = _normalize_hex(new_total_size, label="new_total_size")
-        try:
-            size_int = int(size_hex, 16)
-        except ValueError as error:
-            raise ValueError(f"invalid new_total_size hex: {error}") from error
-        size_text = f"{size_int:04X}"
-        tag_81 = f"81{len(size_text) // 2:02X}{size_text}"
+        _size_int, size_text = _positive_u16_hex(
+            new_total_size,
+            label="new_total_size",
+        )
+        tag_81 = f"8102{size_text}"
 
     if len(tag_80) == 0 and len(tag_81) == 0:
         raise ValueError("at least one of new_file_size (tag 80) or new_total_size (tag 81) is required.")
@@ -6427,8 +7103,8 @@ def _dispatch_fs_resize(
         select_trace = _select_path_chain(transporter, parent_hex)
 
     fcp_content = tag_83 + tag_80 + tag_81
-    fcp_hex = f"62{len(fcp_content) // 2:02X}{fcp_content}"
-    apdu = f"80D40000{len(fcp_hex) // 2:02X}{fcp_hex}"
+    fcp_hex = f"62{_encode_ber_length(len(fcp_content) // 2)}{fcp_content}"
+    apdu = _encode_case3_apdu("80D40000", fcp_hex)
     data, sw1, sw2 = transporter.transmit(apdu, silent=True)
     ok, label = _classify_sw(sw1, sw2)
     return {
@@ -6518,7 +7194,7 @@ def _dispatch_fs_search_record(
         target_hex = _normalize_hex(target, label="target")
         select_trace = _select_path_chain(transporter, target_hex)
 
-    apdu = f"00A20104{len(needle) // 2:02X}{needle}"
+    apdu = _encode_case3_apdu("00A20104", needle)
     data, sw1, sw2 = transporter.transmit(apdu, silent=True)
     ok, label = _classify_sw(sw1, sw2)
     return {
@@ -6562,11 +7238,22 @@ def _dispatch_fs_suspend_uicc(
 # --- C-5: MANAGE-PIN --------------------------------------------------
 
 
-def _pad_pin_ascii(pin: str) -> str:
-    """ISO 7816-4 ASCII-PIN padded with 0xFF to 8 bytes — uppercase hex."""
-    raw = str(pin or "").encode("ascii")
+def _pad_pin_ascii(pin: str, *, label: str = "PIN") -> str:
+    """Encode a 1..8-byte ASCII PIN and pad it with ``FF`` to 8 bytes.
+
+    Silently truncating an over-length PIN changes the credential sent
+    to the card and can consume retry counters for a value the operator
+    never intended. Reject it before any APDU is transmitted instead.
+    """
+    text = str(pin or "")
+    try:
+        raw = text.encode("ascii")
+    except UnicodeEncodeError as error:
+        raise ValueError(f"{label} must contain ASCII characters only.") from error
+    if len(raw) == 0:
+        raise ValueError(f"{label} is required.")
     if len(raw) > 8:
-        return raw[:8].hex().upper()
+        raise ValueError(f"{label} must be at most 8 ASCII bytes (got {len(raw)}).")
     return (raw + b"\xFF" * (8 - len(raw))).hex().upper()
 
 
@@ -6593,29 +7280,25 @@ def _dispatch_manage_pin(
     ref_byte = _parse_hex_byte(pin_ref or "01", label="pin_ref")
 
     if op_norm == "VERIFY":
-        if pin is None or len(str(pin)) == 0:
-            raise ValueError("pin is required for VERIFY.")
-        payload = _pad_pin_ascii(pin)
+        payload = _pad_pin_ascii(pin, label="pin")
         apdu = f"002000{ref_byte:02X}08{payload}"
     elif op_norm == "CHANGE":
-        if pin is None or new_pin is None:
-            raise ValueError("pin and new_pin are required for CHANGE.")
-        payload = _pad_pin_ascii(pin) + _pad_pin_ascii(new_pin)
+        payload = (
+            _pad_pin_ascii(pin, label="pin")
+            + _pad_pin_ascii(new_pin, label="new_pin")
+        )
         apdu = f"002400{ref_byte:02X}10{payload}"
     elif op_norm == "DISABLE":
-        if pin is None:
-            raise ValueError("pin is required for DISABLE.")
-        payload = _pad_pin_ascii(pin)
+        payload = _pad_pin_ascii(pin, label="pin")
         apdu = f"002600{ref_byte:02X}08{payload}"
     elif op_norm == "ENABLE":
-        if pin is None:
-            raise ValueError("pin is required for ENABLE.")
-        payload = _pad_pin_ascii(pin)
+        payload = _pad_pin_ascii(pin, label="pin")
         apdu = f"002800{ref_byte:02X}08{payload}"
     else:  # UNBLOCK
-        if puk is None or new_pin is None:
-            raise ValueError("puk and new_pin are required for UNBLOCK.")
-        payload = _pad_pin_ascii(puk) + _pad_pin_ascii(new_pin)
+        payload = (
+            _pad_pin_ascii(puk, label="puk")
+            + _pad_pin_ascii(new_pin, label="new_pin")
+        )
         apdu = f"002C00{ref_byte:02X}10{payload}"
 
     _data, sw1, sw2 = transporter.transmit(apdu, silent=True)
@@ -6632,7 +7315,13 @@ def _dispatch_manage_pin(
         "ok": ok,
         "status": label,
         "sw": f"{sw1:02X}{sw2:02X}",
-        "apdu": apdu,
+        # Never return the credential-bearing command. Action responses
+        # are rendered, cached, copied, and sometimes logged by the GUI.
+        # The header + Lc remains useful for diagnostics without exposing
+        # PIN/PUK/new-PIN bytes.
+        "apdu": f"{apdu[:10]}[REDACTED:{len(payload) // 2}B]",
+        "payload_redacted": True,
+        "payload_length": len(payload) // 2,
         "op": op_norm,
         "pin_ref": f"{ref_byte:02X}",
         "attempts_remaining": attempts_remaining,
@@ -6659,6 +7348,10 @@ def _dispatch_manage_channel(
         if channel is None or len(str(channel).strip()) == 0:
             raise ValueError("channel is required for CLOSE.")
         ch_byte = _parse_hex_byte(channel, label="channel")
+        if ch_byte < 1 or ch_byte > 19:
+            raise ValueError(
+                f"channel must identify an open logical channel in range 1..19 (got {ch_byte})."
+            )
         apdu = f"007080{ch_byte:02X}00"
     else:
         raise ValueError(f"unsupported op={op_norm!r}; expected OPEN or CLOSE.")
@@ -6667,8 +7360,16 @@ def _dispatch_manage_channel(
     ok, label = _classify_sw(sw1, sw2)
 
     assigned_channel = None
-    if op_norm == "OPEN" and ok and data:
-        assigned_channel = data.hex().upper()
+    if op_norm == "OPEN" and ok:
+        response = bytes(data or b"")
+        if len(response) != 1 or response[0] < 1 or response[0] > 19:
+            ok = False
+            label = (
+                "Malformed MANAGE CHANNEL response: expected one channel "
+                f"byte in range 01..13, got {response.hex().upper() or '(empty)'}"
+            )
+        else:
+            assigned_channel = f"{response[0]:02X}"
 
     return {
         "session_id": sid,
@@ -6685,44 +7386,109 @@ def _dispatch_manage_channel(
 
 
 def _decode_umts_auth_response(data: bytes) -> dict[str, Any]:
-    """Parse a UMTS AUTHENTICATE response (DB / DC tag) into a dict."""
-    out: dict[str, Any] = {"raw_hex": data.hex().upper()}
-    if len(data) == 0:
+    """Parse a USIM/ISIM/GSM AUTHENTICATE response defensively.
+
+    Every embedded LV must fit completely inside the response. Partial
+    slices are never exposed as valid RES/CK/IK/Kc/AUTS values.
+    """
+    raw = bytes(data or b"")
+    out: dict[str, Any] = {"raw_hex": raw.hex().upper(), "valid": False}
+    if len(raw) == 0:
         out["status"] = "(empty)"
+        out["parse_warning"] = "Empty AUTHENTICATE response."
         return out
 
-    if data[0] == 0xDC:
+    if raw[0] == 0xDC:
         out["status"] = "Synchronization failure (AUTS)"
-        if len(data) >= 2:
-            out["auts"] = data[2:].hex().upper()
+        if len(raw) < 2:
+            out["parse_warning"] = "Truncated AUTS response: missing length byte."
+            return out
+        auts_len = raw[1]
+        available = len(raw) - 2
+        if auts_len != available:
+            out["parse_warning"] = (
+                f"AUTS declares {auts_len} byte(s), but {available} byte(s) are present."
+            )
+            return out
+        if auts_len != 14:
+            out["parse_warning"] = (
+                f"AUTS must be 14 bytes for Milenage resynchronization (got {auts_len})."
+            )
+            return out
+        out["auts"] = raw[2:].hex().upper()
+        out["valid"] = True
         return out
 
-    if data[0] == 0xDB:
+    if raw[0] == 0xDB:
         out["status"] = "Authentication successful"
         idx = 1
-        try:
-            res_len = data[idx]; idx += 1
-            out["res"] = data[idx:idx + res_len].hex().upper(); idx += res_len
-            if idx < len(data):
-                ck_len = data[idx]; idx += 1
-                out["ck"] = data[idx:idx + ck_len].hex().upper(); idx += ck_len
-            if idx < len(data):
-                ik_len = data[idx]; idx += 1
-                out["ik"] = data[idx:idx + ik_len].hex().upper(); idx += ik_len
-            if idx < len(data):
-                kc_len = data[idx]; idx += 1
-                out["kc"] = data[idx:idx + kc_len].hex().upper()
-        except IndexError:
-            out["parse_warning"] = "Truncated UMTS authenticate response."
+        for field_name in ("res", "ck", "ik"):
+            if idx >= len(raw):
+                out["parse_warning"] = (
+                    f"Truncated UMTS response: missing {field_name.upper()} length."
+                )
+                return out
+            field_length = raw[idx]
+            idx += 1
+            if field_length == 0:
+                out["parse_warning"] = (
+                    f"UMTS response declares an empty {field_name.upper()} value."
+                )
+                return out
+            if field_name == "res" and not 4 <= field_length <= 16:
+                out["parse_warning"] = (
+                    f"RES length must be 4..16 bytes (got {field_length})."
+                )
+                return out
+            if field_name in ("ck", "ik") and field_length != 16:
+                out["parse_warning"] = (
+                    f"{field_name.upper()} length must be 16 bytes "
+                    f"(got {field_length})."
+                )
+                return out
+            end = idx + field_length
+            if end > len(raw):
+                out["parse_warning"] = (
+                    f"{field_name.upper()} declares {field_length} byte(s), "
+                    f"but only {len(raw) - idx} byte(s) remain."
+                )
+                return out
+            out[field_name] = raw[idx:end].hex().upper()
+            idx = end
+
+        # Kc is optional in UMTS AKA responses. If present it is another LV.
+        if idx < len(raw):
+            kc_length = raw[idx]
+            idx += 1
+            end = idx + kc_length
+            if kc_length != 8 or end > len(raw):
+                out["parse_warning"] = (
+                    f"Kc must declare 8 byte(s) (got {kc_length}); "
+                    f"{len(raw) - idx} byte(s) remain."
+                )
+                return out
+            out["kc"] = raw[idx:end].hex().upper()
+            idx = end
+        if idx != len(raw):
+            out["parse_warning"] = (
+                f"UMTS response has {len(raw) - idx} unexpected trailing byte(s)."
+            )
+            return out
+        out["valid"] = True
         return out
 
-    if len(data) >= 12:
+    if len(raw) == 14 and raw[0] == 0x04 and raw[5] == 0x08:
         out["status"] = "GSM SRES + Kc"
-        out["sres"] = data[:4].hex().upper()
-        out["kc"] = data[4:12].hex().upper()
+        out["sres"] = raw[1:5].hex().upper()
+        out["kc"] = raw[6:14].hex().upper()
+        out["valid"] = True
         return out
 
-    out["status"] = f"Unknown response ({len(data)} bytes)"
+    out["status"] = f"Unknown response ({len(raw)} bytes)"
+    out["parse_warning"] = (
+        "Expected DB-tagged UMTS success, DC-tagged AUTS, or exactly "
+        "14 bytes of LV-encoded GSM SRES+Kc."
+    )
     return out
 
 
@@ -6733,6 +7499,7 @@ def _dispatch_run_auth_live(
     context: Any = "USIM",
     rand: Any = None,
     autn: Any = None,
+    reveal_sensitive: Any = False,
 ) -> dict[str, Any]:
     """Live AUTHENTICATE (0088) on USIM/ISIM/GSM with RAND (+ AUTN for UMTS)."""
     session, transporter, sid = _get_scp03_session(session_id)
@@ -6758,10 +7525,34 @@ def _dispatch_run_auth_live(
         apdu = f"0088008010{rand_hex}00"
 
     data, sw1, sw2 = transporter.transmit(apdu, silent=True)
-    ok, label = _classify_sw(sw1, sw2)
+    sw_ok, label = _classify_sw(sw1, sw2)
     parsed: dict[str, Any] = {}
     if data is not None:
         parsed = _decode_umts_auth_response(data)
+    response_valid = bool(parsed.get("valid", False))
+    ok = sw_ok and response_valid
+    if sw_ok and not response_valid:
+        label = "Malformed AUTHENTICATE response"
+    reveal_flag = (
+        bool(reveal_sensitive)
+        if not isinstance(reveal_sensitive, str)
+        else reveal_sensitive.strip().lower() in ("1", "true", "yes", "on")
+    )
+    if response_valid and not reveal_flag:
+        redacted_fields = [
+            field_name
+            for field_name in ("ck", "ik", "kc")
+            if field_name in parsed
+        ]
+        for field_name in redacted_fields:
+            parsed.pop(field_name, None)
+        if redacted_fields:
+            parsed["derived_keys_redacted"] = True
+            parsed["redacted_fields"] = [field_name.upper() for field_name in redacted_fields]
+            parsed.pop("raw_hex", None)
+            parsed["raw_response_redacted"] = True
+    elif response_valid:
+        parsed["derived_keys_revealed"] = True
     return {
         "session_id": sid,
         "ok": ok,
@@ -6772,6 +7563,7 @@ def _dispatch_run_auth_live(
         "rand": rand_hex,
         "autn": autn_hex or None,
         "response": parsed,
+        "reveal_sensitive":reveal_flag,
     }
 
 
@@ -6796,10 +7588,13 @@ PUT_KEY_SPEC = ActionSpec(
         ActionField(name="old_kvn", label="Old KVN (hex)", kind="hex", required=False,
                     default="00", help="KVN to replace; 00 = add new."),
         ActionField(name="enc_key", label="ENC key (hex)", kind="hex", required=True,
+                    secret=True,
                     help="32 / 48 / 64 hex chars (16 / 24 / 32 bytes)."),
         ActionField(name="mac_key", label="MAC key (hex)", kind="hex", required=True,
+                    secret=True,
                     help="32 / 48 / 64 hex chars (16 / 24 / 32 bytes)."),
         ActionField(name="dek_key", label="DEK key (hex)", kind="hex", required=True,
+                    secret=True,
                     help="32 / 48 / 64 hex chars (16 / 24 / 32 bytes)."),
         ActionField(name="algorithm", label="Algorithm", kind="enum",
                     choices=("AES", "3DES"), default="AES",
@@ -7074,10 +7869,10 @@ FS_RESIZE_SPEC = ActionSpec(
                     placeholder="6F07"),
         ActionField(name="new_file_size", label="New file size (hex)", kind="hex",
                     required=False, placeholder="0040",
-                    help="Tag 80 — new transparent body size in bytes."),
+                    help="Tag 80 — new body size in bytes (0001..FFFF)."),
         ActionField(name="new_total_size", label="New total size (hex)", kind="hex",
                     required=False, placeholder="0080",
-                    help="Tag 81 — new total file size."),
+                    help="Tag 81 — new total size in bytes (0001..FFFF)."),
         ActionField(name="parent_path", label="Parent path (hex, optional)", kind="hex",
                     required=False),
     ),
@@ -7167,13 +7962,13 @@ MANAGE_PIN_SPEC = ActionSpec(
         ActionField(name="op", label="Operation", kind="enum", required=True,
                     choices=("VERIFY", "CHANGE", "DISABLE", "ENABLE", "UNBLOCK")),
         ActionField(name="pin_ref", label="PIN reference (hex)", kind="hex",
-                    default="01", help="01 = PIN1, 02 = PIN2, 81 = ADM1, …"),
+                    default="01", help="01 = PIN1, 81 = PIN2, 0A = ADM1, …"),
         ActionField(name="pin", label="PIN (ASCII)", kind="string", required=False,
-                    placeholder="1234"),
+                    placeholder="1234", secret=True),
         ActionField(name="new_pin", label="New PIN (ASCII)", kind="string", required=False,
-                    placeholder="(for CHANGE / UNBLOCK)"),
+                    placeholder="(for CHANGE / UNBLOCK)", secret=True),
         ActionField(name="puk", label="PUK (ASCII)", kind="string", required=False,
-                    placeholder="(for UNBLOCK)"),
+                    placeholder="(for UNBLOCK)", secret=True),
         ActionField(
             name="confirm",
             label="I understand DISABLE/UNBLOCK can block the PIN",
@@ -7196,7 +7991,7 @@ MANAGE_CHANNEL_SPEC = ActionSpec(
     title="MANAGE CHANNEL",
     description=(
         "GP MANAGE CHANNEL (0070) — open a new logical channel (P1=00, "
-        "Lc=01) or close an existing one (P1=80, P2=channel)."
+        "Le=01) or close an existing one (P1=80, P2=channel 01..13 hex)."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -7228,6 +8023,17 @@ RUN_AUTH_LIVE_SPEC = ActionSpec(
         ActionField(name="rand", label="RAND (32 hex)", kind="hex", required=True),
         ActionField(name="autn", label="AUTN (32 hex, for USIM/ISIM)", kind="hex",
                     required=False),
+        ActionField(
+            name="reveal_sensitive",
+            label="Reveal derived CK / IK / Kc",
+            kind="bool",
+            required=False,
+            default=False,
+            help=(
+                "Off by default. Enabling this exposes usable derived "
+                "authentication keys in the browser result."
+            ),
+        ),
     ),
     output_kind="json",
     dispatcher=_dispatch_run_auth_live,

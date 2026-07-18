@@ -19,10 +19,10 @@ Each of those is published in two **flavors**:
 | `full`  | Yes | Yes | Linux x86_64 | core + `pyudev` + `osmo-remsim-client-st2` on host |
 
 The active flavor is controlled by the `YGGDRASIM_FLAVOR` environment
-variable at **build time**. The spec writes the resolved flavor into
-`yggdrasim_common/_build_flavor.py` so the **runtime** launcher can
-advertise the correct SKU in its banner, in `--version`, and in
-`--doctor` even when the env var is not set later.
+variable at **build time**. The spec generates a PyInstaller runtime hook
+under `build/` with the resolved flavor and version, so the **runtime**
+launcher can advertise the correct SKU in its banner, in `--version`,
+and in `--doctor` without modifying the source package.
 
 Operator install notes for each flavor live in dedicated guides:
 
@@ -43,21 +43,23 @@ flavor:
 
 | Extra          | Pulls in                                      | Used by                                        |
 |----------------|-----------------------------------------------|------------------------------------------------|
-| `[saip]`       | `pySim` from the upstream osmocom mirror      | SAIP transcode TUI, SCP11-local / eIM-local    |
+| `[saip]`       | Backwards-compatible no-op alias (`pySim` is core and commit-pinned) | Older install commands |
 | `[hil]`        | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
-| `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets` | Desktop Universal GUI Command Center (`--gui`) |
+| `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets`; Qt/WebEngine on Linux | Desktop Universal GUI Command Center (`--gui`) |
 | `[gui-server]` | `fastapi`, `uvicorn[standard]`, `websockets`  | Headless web Command Center (`--web-server`)   |
 | `[open5gs]` *(post-v1 staging)* | `pymongo>=4.5,<5.0`                           | YggdraCore BYO-Open5GS subscriber bridge       |
 | `[build]`      | `pyinstaller`                                 | Producing `dist/yggdrasim-*` bundles           |
 | `[test]`       | `pytest`, `httpx`                             | Running the `tests/` suite                     |
 | `[docs]`       | `mkdocs`, `mkdocs-material`, `pymdown-extensions` | Building / serving `site-docs/`             |
-| `[full]`       | `pyudev`, `pyinstaller`, `pytest`, `fastapi`, `uvicorn`, `websockets`, `pySim` | Full Linux maintainer profile |
+| `[full]`       | `pyudev`, `fastapi`, `uvicorn`, `websockets` | Full Linux runtime profile |
 
 Notes:
 
 - `[full]` includes the headless GUI server dependencies, but not
   `pywebview`. An operator who wants the desktop window on a `full`
   source install must add `[gui]`: `pip install -e '.[full,gui]'`.
+- Build and test tools are deliberately separate from `[full]`. A full
+  developer/build environment uses `.[full,build,test,gui]`.
 - The PyInstaller spec builds a paired CLI and desktop-GUI executable
   when the build environment has the `[gui]` extra installed. The CLI
   executable remains the shell/TUI surface; the GUI executable starts
@@ -73,12 +75,16 @@ following model:
 
 - bundled read-only assets come from the application bundle root
 - mutable state lives under the runtime root
+- non-editable wheel installs use the platform's per-user data directory and
+  do not write into `site-packages`
 - frozen builds use `YggdraSIM-data` next to the executable when writable, with
   `~/YggdraSIM-data` as fallback
 - `YGGDRASIM_RUNTIME_ROOT` can override the runtime location explicitly
 
 Packaging-sensitive areas addressed by the current layout:
 
+- frozen module discovery uses an explicit published-package list and refuses
+  ignored Python files or configured release canaries below those roots
 - SCP11 relay defaults no longer need to write back into `config.py`; they can
   persist through runtime module state instead
 - ProfilePackage now separates bundled seed content from writable runtime
@@ -95,9 +101,9 @@ External host dependencies still matter:
 ## Docker
 
 The Dockerfile is flavor-aware through the `YGGDRASIM_FLAVOR` build
-argument. `clean` is the default and installs `pip install -e .`;
-`full` installs the `[full]` extra so the HIL bridge runtime is
-available inside the image.
+argument. Both flavors install from the committed, hash-bearing
+`uv.lock`; `clean` omits udev entirely, while `full` installs the
+`[full]` runtime extra.
 
 ```bash
 # Clean (Windows / macOS / Linux hosts)
@@ -151,8 +157,8 @@ flavor.
 Install the build dependencies first:
 
 ```bash
-python -m pip install -e '.[build,test,gui]'   # clean + GUI companion
-python -m pip install -e '.[full,gui]'         # full + GUI companion (Linux)
+python -m pip install -e '.[saip,build,test,gui]'   # clean + GUI companion
+python -m pip install -e '.[full,saip,build,test,gui]' # full + GUI companion (Linux)
 ```
 
 Build a clean bundle:
@@ -181,14 +187,27 @@ Build notes:
 - Build on the target OS and architecture. There is no cross-compilation
   path; CI emulates arm64 through QEMU inside Docker Buildx to publish
   the Raspberry Pi bundle.
-- The spec writes `yggdrasim_common/_build_flavor.py` so the resulting
-  executable reports its own flavor in `--version`, in the banner, and
-  in `--doctor`. The stamp file is git-ignored.
+- The spec generates build metadata below `build/bundle-data/` and
+  compiles it as a runtime hook, so the resulting executable reports its
+  own flavor/version without leaving a stale stamp in an editable source
+  checkout.
 - The clean bundle explicitly excludes the local HIL supervisor/runtime
   (`yggdrasim_common.hil_bridge_runtime`, `pyudev`, and the Linux
   SIMtrace2/RemSIM modules) while retaining `Tools.CardBridge` plus the
   minimal APDU relay/PCSC helpers it uses. Tests and launcher logic handle
   direct HIL being absent at runtime.
+- Immutable runtime resources are selected file-by-file through
+  `scripts/release/bundle-data.json`. The build fails on symlinks,
+  repository escapes, missing resources, or release canaries; ignored
+  workspaces and local extensions are never recursively copied.
+- Release wheels are built from a freshly generated source distribution,
+  not a checkout's potentially stale `build/` tree. The wheel verifier
+  rejects every non-code resource that is not in the same allowlist.
+- Tagged releases must match `v<project.version>`. Windows and macOS jobs
+  require configured signing credentials, release assets carry a
+  CycloneDX SBOM plus `SHA256SUMS`, and GitHub publishes signed build
+  provenance. Install scripts verify checksums before publication and the
+  Windows installer additionally verifies Authenticode.
 - `yggdrasim-gui-*` prepends `--gui` unless the operator explicitly
   passes `--web-server`; flags such as `--port`, `--token-file`, and
   `--allow-origin` are still parsed by the shared launcher.
@@ -222,7 +241,7 @@ Package: yggdrasim
 Version: [ENTER VERSION HERE]
 Architecture: amd64
 Maintainer: [ENTER MAINTAINER HERE]
-Depends: libpcsclite1, pcscd, gpg
+Depends: libpcsclite1, pcscd, gpg, libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0
 Description: YggdraSIM secure-element and eUICC toolkit (clean build)
 ```
 

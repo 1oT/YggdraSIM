@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ============================================================
  * FCP cache status banners
  *
@@ -239,6 +240,8 @@
 }
 
 .cc-doc-modal-btn {
+  min-width: 36px;
+  min-height: 36px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--fg);
@@ -252,6 +255,17 @@
 
 .cc-doc-modal-btn:hover {
   background: var(--bg-hover);
+}
+
+.cc-doc-modal-btn:focus-visible,
+.cc-doc-modal-body:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 2px;
+}
+
+.cc-doc-modal-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .cc-doc-modal-btn.is-copied {
@@ -272,6 +286,29 @@
   padding: 18px 22px;
   color: var(--fg);
   line-height: 1.55;
+}
+
+@media (max-width: 760px) {
+  .cc-doc-modal-card {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    margin: 8px;
+  }
+
+  .cc-doc-modal-header {
+    align-items: flex-start;
+    padding: 10px 12px;
+  }
+
+  .cc-doc-modal-body {
+    padding: 14px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-doc-modal-btn {
+    transition: none;
+  }
 }
 
 .cc-doc-modal-body h1.cc-doc-h1,
@@ -407,4 +444,3 @@
 .cc-doc-error {
   color: var(--err, #d9534f);
 }
-

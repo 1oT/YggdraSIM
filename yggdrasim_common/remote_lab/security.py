@@ -9,10 +9,16 @@ import hashlib
 import hmac
 from pathlib import Path
 
-from yggdrasim_common.card_bridge_auth import generate_token, write_token_file
+from yggdrasim_common.card_bridge_auth import generate_token
+from yggdrasim_common.secure_files import (
+    atomic_write_bytes,
+    ensure_private_file,
+    read_bounded_private_file,
+)
 
 
 HASH_PREFIX = "sha256:"
+_MAX_TOKEN_FILE_BYTES = 64 * 1024
 
 
 def hash_token(token: str) -> str:
@@ -33,9 +39,15 @@ def verify_token(presented: str, token_hash: str) -> bool:
 
 def read_token_file(path: str | Path) -> str:
     resolved = Path(path).expanduser().resolve()
-    return resolved.read_text(encoding="utf-8").strip()
+    ensure_private_file(resolved)
+    encoded = read_bounded_private_file(resolved, _MAX_TOKEN_FILE_BYTES)
+    return encoded.decode("utf-8").strip()
 
 
 def write_new_token_file(path: str | Path) -> tuple[str, Path]:
     token = generate_token()
-    return token, write_token_file(Path(path).expanduser(), token)
+    written = atomic_write_bytes(
+        Path(path).expanduser(),
+        token.encode("utf-8") + b"\n",
+    )
+    return token, written

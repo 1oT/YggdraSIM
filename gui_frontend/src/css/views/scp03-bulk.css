@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ---------------------------------------------------------------------
  * Service-table staging popout — mock-edit a UST / IST / generic
  * bitmap EF without touching the card. Live hex preview at the top,
@@ -15,7 +16,7 @@
 }
 
 .cc-decoded-tools-btn--stage:hover {
-  background: rgba(136, 192, 208, 0.12);
+  background: var(--accent-soft);
 }
 
 .cc-svc-stage-preview {
@@ -119,6 +120,18 @@
   outline-offset: -2px;
 }
 
+.cc-stage-context-summary:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.cc-stage-context-summary:focus-visible,
+.cc-pv-collapsible-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  color: var(--fg);
+}
+
 .cc-stage-context[open] > .cc-stage-context-summary {
   color: var(--fg);
 }
@@ -190,6 +203,16 @@
   font-size: 12px;
 }
 
+.cc-svc-stage-search:hover {
+  border-color: var(--accent);
+}
+
+.cc-svc-stage-search:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
 .cc-svc-stage-mode {
   flex: 0 0 auto;
 }
@@ -199,7 +222,10 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(100%, 220px), 1fr)
+  );
   gap: 1px 8px;
   max-height: 420px;
   overflow-y: auto;
@@ -221,12 +247,12 @@
 }
 
 .cc-svc-stage-row.is-active {
-  background: rgba(136, 192, 208, 0.06);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
 }
 
 .cc-svc-stage-row.is-dirty {
-  background: rgba(235, 203, 139, 0.10);
-  outline: 1px dashed var(--ygg-amber, #ebcb8b);
+  background: var(--warn-soft);
+  outline: 1px dashed var(--warn);
 }
 
 .cc-svc-stage-cb {
@@ -360,6 +386,12 @@
   list-style: none;
 }
 
+.cc-pv-collapsible-head:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+}
+
 .cc-pv-collapsible-head::-webkit-details-marker {
   display: none;
 }
@@ -457,6 +489,22 @@
   overflow: auto;
   max-width: none;
   max-height: none;
+}
+
+@media (max-width: 640px) {
+  .cc-svc-stage-filter,
+  .cc-svc-stage-actions {
+    flex-wrap: wrap;
+  }
+
+  .cc-svc-stage-mode,
+  .cc-svc-stage-actions .btn {
+    flex: 1 1 140px;
+  }
+
+  .cc-max-backdrop {
+    padding: 10px;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {

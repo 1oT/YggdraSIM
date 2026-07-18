@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Catppuccin · Mocha (warm pastel dark, mauve accent) ---------- */
 html[data-theme="catppuccin-mocha"] {
   --bg: #1e1e2e;
@@ -15,7 +16,7 @@ html[data-theme="catppuccin-mocha"] {
   --border-strong: rgba(205, 214, 244, 0.28);
   --fg: #cdd6f4;
   --fg-dim: #a6adc8;
-  --fg-muted: #6c7086;
+  --fg-muted: var(--fg-dim);
   --accent: #cba6f7;
   --accent-strong: #b48ead;
   --accent-soft: rgba(203, 166, 247, 0.14);
@@ -40,4 +41,3 @@ html[data-theme="catppuccin-mocha"] {
     radial-gradient(circle at 6% 92%, rgba(245, 194, 231, 0.08), transparent 48%),
     radial-gradient(circle at 50% 45%, rgba(137, 180, 250, 0.04), transparent 56%);
 }
-

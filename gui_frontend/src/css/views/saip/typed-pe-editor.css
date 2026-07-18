@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ---- SA-G2: typed PE editor cards ---------------------------------- */
 
 .saip-editor {
@@ -451,6 +452,12 @@
   background: var(--surface, rgba(255, 255, 255, 0.04));
 }
 
+.saip-editor-files-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+}
+
 .saip-editor-files td,
 .saip-editor-keylist td {
   padding: 4px 8px;
@@ -474,6 +481,17 @@
   line-height: 1.5;
   letter-spacing: 0.03em;
   border: 1px solid transparent;
+}
+
+button.saip-chip {
+  min-height: 28px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button.saip-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .saip-chip-ok {
@@ -501,8 +519,7 @@
 }
 
 /* Template catalog tree — TCA SAIP §9 file-template registry projected
-   into a checkable tree. Mirrors the eUICC Profile Creator's *File
-   System Template* group. */
+   into a checkable tree. */
 
 .saip-template-tree,
 .saip-template-children,

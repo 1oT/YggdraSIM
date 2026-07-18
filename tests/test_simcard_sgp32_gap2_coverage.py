@@ -27,7 +27,7 @@ from __future__ import annotations
 import unittest
 
 from SIMCARD.sgp import SgpLogic
-from SIMCARD.state import SimCardState, SimEimEntry, SimProfileEntry
+from SIMCARD.state import SimEimEntry, SimProfileEntry
 from SIMCARD.utils import read_tlv, tlv
 
 from tests.test_simcard_sgp32_load_euicc_package import _build_state_with_test_eim
@@ -206,7 +206,7 @@ class EuiccMemoryResetBf64ExpandedTests(_Gap2Base):
         # second one so the bit-0 sweep clears at least two entries.
         operational_extra = SimProfileEntry(
             aid="A0000000871002FFFFFFFF8907090071",
-            iccid="894900000000000071",
+            iccid="8949000000000000710",
             state="disabled",
             profile_class="operational",
         )

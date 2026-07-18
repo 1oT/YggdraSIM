@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Command Center: key/value lines ------------------------------------ */
 
 .cc-kvl-meta {
@@ -67,4 +68,3 @@
   color: var(--fg);
   word-break: break-all;
 }
-

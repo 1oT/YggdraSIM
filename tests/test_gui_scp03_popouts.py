@@ -226,11 +226,11 @@ def test_drag_uses_pointer_events_with_capture() -> None:
     assert "pointerup" in block
     assert "setPointerCapture" in block
     assert "releasePointerCapture" in block
-    # Drag must clamp inside the viewport so the titlebar can't go
-    # off-screen — re-centering is otherwise a tab-close-and-reopen
-    # dance.
+    # Drag must clamp inside the usable viewport so the titlebar can't
+    # go off-screen or disappear behind the log dock — re-centering is
+    # otherwise a tab-close-and-reopen dance.
     assert "window.innerWidth" in block
-    assert "window.innerHeight" in block
+    assert "ccPopoutUsableBottom()" in block
 
 
 def test_titlebar_dblclick_toggles_maximize() -> None:

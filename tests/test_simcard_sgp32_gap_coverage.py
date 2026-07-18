@@ -26,11 +26,10 @@ import unittest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from SIMCARD.etsi_fs import build_default_state
 from SIMCARD.sgp import SgpLogic
 from SIMCARD.sgp32_packages import encode_der_integer
-from SIMCARD.state import SimCardState, SimEimEntry, SimProfileEntry
-from SIMCARD.utils import encode_iccid_ef, find_first_tlv, read_tlv, tlv
+from SIMCARD.state import SimCardState, SimProfileEntry
+from SIMCARD.utils import encode_iccid_ef, read_tlv, tlv
 
 from tests.test_simcard_sgp32_load_euicc_package import (
     _build_state_with_test_eim,

@@ -13,7 +13,6 @@ Covers: is_frozen, remap_legacy_workspace_relative, ensure_directory,
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 import unittest
 

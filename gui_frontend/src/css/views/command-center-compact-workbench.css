@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Compact workbench (SCP80 / eIM / eSIM Management / HIL / …) ---------------
    Shared chrome for every subsystem that isn't SCP03 (workbench v2) or
    SAIP (package workbench). Mirrors the Filesystem/Applications visual
@@ -489,10 +490,26 @@
 
 .cc-hil-action-icon {
   flex: 0 0 auto;
-  width: 14px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in oklab, currentColor, transparent 58%);
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in oklab, currentColor, transparent 92%);
   color: currentColor;
   font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.cc-hil-action-icon .cc-action-svg {
+  width: 12px;
+  height: 12px;
 }
 
 .cc-hil-action-label {
@@ -635,6 +652,9 @@
   align-items: center;
   gap: 5px;
   width: 100%;
+  box-sizing: border-box;
+  height: 26px;
+  min-height: 26px;
   padding: 5px 10px;
   color: var(--fg-dim);
   background: var(--bg);
@@ -694,6 +714,9 @@
   align-items: center;
   gap: 8px;
   width: 100%;
+  box-sizing: border-box;
+  height: 26px;
+  min-height: 26px;
   padding: 5px 10px;
   border: none;
   border-left: 3px solid transparent;
@@ -912,6 +935,28 @@
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
+}
+
+.cc-hil-modem-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg), var(--bg-elev) 42%);
+}
+
+.cc-hil-modem-actions .cc-hil-action-btn {
+  flex: 0 0 auto;
+}
+
+.cc-hil-modem-standard {
+  flex: 0 1 260px;
+  min-width: 180px;
+  max-width: 320px;
+  height: 30px;
+  font-size: 11.5px;
 }
 
 .cc-hil-modem-command {

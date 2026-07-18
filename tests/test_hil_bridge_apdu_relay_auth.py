@@ -25,6 +25,8 @@ import unittest
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+import pytest
+
 from Tools.HilBridge.apdu_relay import (
     ApduRelayConfig,
     HilBridgeApduRelayService,
@@ -89,6 +91,7 @@ class StartupGuardTests(unittest.TestCase):
         self.assertIn("0.0.0.0", str(ctx.exception))
         self.assertIn("bearer token", str(ctx.exception))
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_non_loopback_bind_with_token_starts_cleanly(self) -> None:
         service = HilBridgeApduRelayService(
             ApduRelayConfig(host="127.0.0.1", port=0, enabled=True, auth_token="token-xyz"),
@@ -102,6 +105,7 @@ class StartupGuardTests(unittest.TestCase):
             service.stop()
 
 
+@pytest.mark.usefixtures("require_loopback_socket")
 class TokenEnforcementTests(unittest.TestCase):
     def setUp(self) -> None:
         self._exchanges: list[bytes] = []
@@ -203,6 +207,7 @@ class PeerThrottleTests(unittest.TestCase):
         self.assertFalse(throttle.record_failure("192.0.2.4", now=130.0))
 
 
+@pytest.mark.usefixtures("require_loopback_socket")
 class AuditLogTests(unittest.TestCase):
     def setUp(self) -> None:
         self._records: list[logging.LogRecord] = []

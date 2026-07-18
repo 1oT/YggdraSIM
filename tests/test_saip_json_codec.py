@@ -23,6 +23,27 @@ from Tools.ProfilePackage.saip_json_codec import (
 )
 
 
+def _variable_catalog() -> dict:
+    return {
+        "schema_version": "yggdrasim.saip-variable-catalog/v1",
+        "selector_dialect": "YGGDRASIM_SAIP_SEMANTIC_SELECTOR_V1",
+        "variables": [
+            {
+                "id": "ICCID",
+                "classification": "IDENTIFIER",
+                "required": True,
+                "bindings": [
+                    {
+                        "selector": "PROFILE_HEADER.ICCID",
+                        "encoder": "ICCID_HEADER_BCD_V1",
+                        "output_length_bytes": 10,
+                    }
+                ],
+            }
+        ],
+    }
+
+
 class SaipJsonCodecTests(unittest.TestCase):
     def test_jsonify_dejsonify_nested(self) -> None:
         original = {
@@ -128,6 +149,73 @@ class SaipJsonCodecTests(unittest.TestCase):
         self.assertEqual(tagged["__ygg_token_defs__"]["a"], {"zero_len": 1})
         self.assertEqual(tagged["__ygg_placeholder_style__"], "bracket")
 
+    def test_variable_catalog_survives_tagged_json_roundtrip(self) -> None:
+        catalog = _variable_catalog()
+        document = {
+            "intro": ["catalog"],
+            "sections": {"header": {"iccid": b"\x00" * 10}},
+            "__ygg_variable_catalog__": catalog,
+        }
+
+        tagged = jsonify_document(document)
+        reopened = dejsonify_document(json.loads(json.dumps(tagged)))
+
+        self.assertEqual(tagged["__ygg_variable_catalog__"], catalog)
+        self.assertEqual(reopened["__ygg_variable_catalog__"], catalog)
+
+    def test_variable_catalog_must_be_an_object(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            r"__ygg_variable_catalog__ must be an object",
+        ):
+            dejsonify_document(
+                {
+                    "intro": [],
+                    "sections": {},
+                    "__ygg_variable_catalog__": [],
+                }
+            )
+
+    def test_inline_placeholder_sidecar_survives_tagged_json_roundtrip(self) -> None:
+        sidecar = {
+            "version": 1,
+            "placeholders": [
+                {
+                    "index": 0,
+                    "literal": "{ICCIDICCID10}",
+                    "variable": "ICCID",
+                    "type": "ICCID",
+                    "byte_length": 10,
+                    "modifier": None,
+                    "sentinel_hex": "AA" * 10,
+                }
+            ],
+        }
+        document = {
+            "intro": ["inline template"],
+            "sections": {"header": {"iccid": bytes.fromhex("AA" * 10)}},
+            "__ygg_inline_placeholders__": sidecar,
+        }
+
+        tagged = jsonify_document(document)
+        reopened = dejsonify_document(json.loads(json.dumps(tagged)))
+
+        self.assertEqual(tagged["__ygg_inline_placeholders__"], sidecar)
+        self.assertEqual(reopened["__ygg_inline_placeholders__"], sidecar)
+
+    def test_inline_placeholder_sidecar_must_be_an_object(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            r"__ygg_inline_placeholders__ must be an object",
+        ):
+            dejsonify_document(
+                {
+                    "intro": [],
+                    "sections": {},
+                    "__ygg_inline_placeholders__": [],
+                }
+            )
+
     def test_jsonify_document_adds_path_label_to_nested_bytes(self) -> None:
         doc = {
             "intro": [],
@@ -177,6 +265,23 @@ class SaipJsonCodecTests(unittest.TestCase):
         self.assertEqual(post_tagged["sections"]["s1"][_TAG_BYTES], "aa{tok}bb")
         self.assertEqual(post_tagged["__ygg_token_defs__"]["tok"], {"hex": "c1d1"})
         self.assertEqual(post_tagged["__ygg_placeholder_style__"], "brace")
+
+    def test_reapply_transcode_restores_variable_catalog(self) -> None:
+        catalog = _variable_catalog()
+        pre_loaded = {
+            "intro": ["before sequence rebuild"],
+            "sections": {"header": {"iccid": {_TAG_BYTES: "00" * 10}}},
+            "__ygg_variable_catalog__": catalog,
+        }
+        post_tagged = {
+            "intro": ["after sequence rebuild"],
+            "sections": {"header": {"iccid": {_TAG_BYTES: "00" * 10}}},
+        }
+
+        reapply_transcode_editor_placeholders(pre_loaded, post_tagged)
+
+        self.assertEqual(post_tagged["__ygg_variable_catalog__"], catalog)
+        self.assertIsNot(post_tagged["__ygg_variable_catalog__"], catalog)
 
     def test_reapply_does_not_restore_when_expansion_mismatches(self) -> None:
         pre_loaded = {
@@ -293,6 +398,44 @@ class SaipDerRoundTripIntegrationTests(unittest.TestCase):
         types0 = [pe.type for pe in pes0.pe_list]
         types1 = [pe.type for pe in pes1.pe_list]
         self.assertEqual(types1, types0)
+
+    def test_sequence_transcode_reapplies_variable_catalog(self) -> None:
+        raw = self._reference_profile_der()
+
+        from Tools.ProfilePackage.saip_json_codec import (
+            build_decoded_document_from_sequence,
+            build_profile_sequence_from_document,
+            ensure_workspace_pysim_on_path,
+        )
+
+        ensure_workspace_pysim_on_path(self.workspace)
+        from pySim.esim.saip import ProfileElementSequence
+
+        source_sequence = ProfileElementSequence.from_der(raw)
+        source_document = build_decoded_document_from_sequence(
+            source_sequence,
+            intro_lines=["catalog sequence roundtrip"],
+        )
+        catalog = _variable_catalog()
+        source_document["__ygg_variable_catalog__"] = catalog
+        pre_loaded = json.loads(document_to_pretty_json(source_document))
+        restored = dejsonify_document(pre_loaded)
+
+        rebuilt_sequence = build_profile_sequence_from_document(
+            restored,
+            self.workspace,
+        )
+        rebuilt_document = build_decoded_document_from_sequence(
+            rebuilt_sequence,
+            intro_lines=["rebuilt"],
+        )
+        post_tagged = jsonify_document(rebuilt_document)
+        self.assertNotIn("__ygg_variable_catalog__", post_tagged)
+
+        reapply_transcode_editor_placeholders(pre_loaded, post_tagged)
+        reopened = dejsonify_document(json.loads(json.dumps(post_tagged)))
+
+        self.assertEqual(reopened["__ygg_variable_catalog__"], catalog)
 
 
 if __name__ == "__main__":

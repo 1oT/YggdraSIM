@@ -82,7 +82,13 @@ def _large_realistic_notification_list_response(sequences):
         entry += _tlv(bytes.fromhex("5A"), bytes.fromhex("98010300004077369781"))
         entries += _tlv(bytes.fromhex("BF2F"), entry)
         entries += _tlv(bytes.fromhex("5F37"), bytes(range(64)))
-        entries += _tlv(bytes.fromhex("30"), b"X" * 300)
+        # SEQUENCE is constructed BER and must itself contain complete TLVs.
+        # Keep an unrelated large value in a primitive OCTET STRING so the
+        # decoder exercises long-form lengths without relying on malformed BER.
+        entries += _tlv(
+            bytes.fromhex("30"),
+            _tlv(bytes.fromhex("04"), b"X" * 296),
+        )
     payload = _tlv(bytes.fromhex("30"), entries)
     wrapped = _tlv(bytes.fromhex("A0"), payload)
     return _tlv(bytes.fromhex("BF2B"), wrapped)
@@ -1000,6 +1006,9 @@ class RelayShellHelpTests(unittest.TestCase):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
             console._style = module.ConsoleStyle("", "", "<G>", "", "<R>", "", "</>")
+            console._aid_registry = {
+                "ISDP1": "A0000005591010FFFFFFFF8900001100",
+            }
             rows = [
                 module.ProfileRow(
                     iccid="89883000000477637736",

@@ -8,6 +8,8 @@ import types
 import unittest
 from pathlib import Path
 
+from scripts.release.source_boundary import reviewed_python_sources
+
 
 def _install_smartcard_stubs() -> None:
     if "smartcard" in sys.modules:
@@ -71,17 +73,15 @@ class RepoModuleImportSmokeTests(unittest.TestCase):
 
     def test_import_all_repo_modules(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
-        include_roots = {"main", "SCP03", "SCP80", "SCP11", "Tools", "yggdrasim_common"}
         module_specs: list[tuple[str, Path]] = []
 
-        for file_path in repo_root.rglob("*.py"):
-            relative = file_path.relative_to(repo_root)
-            if len(relative.parts) == 0:
-                continue
-            if relative.parts[0] not in include_roots:
-                continue
-            if "__pycache__" in relative.parts:
-                continue
+        # Keep this smoke aligned with the exact publication boundary. Broadly
+        # walking roots such as ``Tools`` also imports ignored, local-only
+        # sibling namespaces and makes release health depend on their private
+        # optional dependencies.
+        for relative_text in reviewed_python_sources(repo_root):
+            relative = Path(relative_text)
+            file_path = repo_root / relative
             module_specs.append((".".join(relative.with_suffix("").parts), file_path))
 
         for module_name, file_path in sorted(set(module_specs)):

@@ -9,11 +9,18 @@ from typing import Any
 
 
 def encode_length(length: int) -> bytes:
+    """Encode a non-negative BER definite length using its minimal form."""
+    if isinstance(length, bool) or not isinstance(length, int):
+        raise TypeError("BER length must be an integer.")
+    if length < 0:
+        raise ValueError("BER length must not be negative.")
     if length < 0x80:
         return bytes([length])
-    if length <= 0xFF:
-        return bytes([0x81, length])
-    return bytes([0x82, (length >> 8) & 0xFF, length & 0xFF])
+    encoded = length.to_bytes((length.bit_length() + 7) // 8, "big")
+    if len(encoded) > 0x7E:
+        # 0xFF is reserved and 0x80 denotes indefinite length.
+        raise ValueError("BER length requires too many length octets.")
+    return bytes([0x80 | len(encoded)]) + encoded
 
 
 def tlv(tag: bytes | str, value: bytes) -> bytes:
@@ -145,33 +152,57 @@ def swap_bcd_nibbles(hex_text: str) -> str:
 def encode_iccid_ef(iccid_digits: str) -> bytes:
     """Encode an ICCID digit string into the 10-byte EF.ICCID body (ETSI TS 102 221 §13.2).
 
-    Pads to 20 nibbles with 0xF, then nibble-swaps each byte pair.
+    Accepts 19 or 20 decimal digits. A 19-digit representation may
+    optionally carry its terminal ``F`` filler explicitly. The result is
+    always exactly ten bytes.
     """
     cleaned = str(iccid_digits or "").strip().replace(" ", "").replace("-", "").upper()
-    if len(cleaned) == 0:
-        raise ValueError("ICCID must not be empty.")
-    if cleaned.endswith("F") is False and len(cleaned) % 2 == 1:
-        cleaned += "F"
-    return bytes.fromhex(swap_bcd_nibbles(cleaned))
+    if cleaned.endswith("F"):
+        if len(cleaned) != 20 or not cleaned[:-1].isdigit():
+            raise ValueError(
+                "ICCID filler form must contain exactly 19 decimal digits followed by F."
+            )
+        normalized = cleaned
+    elif cleaned.isdigit() and len(cleaned) == 19:
+        normalized = cleaned + "F"
+    elif cleaned.isdigit() and len(cleaned) == 20:
+        normalized = cleaned
+    else:
+        raise ValueError("ICCID must contain exactly 19 or 20 decimal digits.")
+    encoded = bytes.fromhex(swap_bcd_nibbles(normalized))
+    if len(encoded) != 10:  # Defensive invariant for future normalization changes.
+        raise ValueError("EF.ICCID encoding must be exactly 10 bytes.")
+    return encoded
 
 
 def encode_imsi_ef(imsi_digits: str) -> bytes:
     """Encode an IMSI digit string into the 9-byte EF.IMSI body (3GPP TS 31.102 §4.2.2).
 
-    Length nibble + parity nibble (0x9 = even, 0x1 = odd) + BCD-packed digits padded
-    with 0xF fillers.
+    The first byte is the fixed EF payload length (8), followed by the
+    parity/type nibble and BCD-packed digits padded with ``0xF``. IMSIs
+    are limited to 15 digits and the result is always exactly nine bytes.
     """
     digits = str(imsi_digits or "").strip().replace(" ", "").replace("-", "")
     if len(digits) == 0 or digits.isdigit() is False:
         raise ValueError("IMSI must contain decimal digits.")
-    if len(digits) > 16:
-        raise ValueError("IMSI longer than 16 digits is not supported.")
-    leading_nibble = "9" if len(digits) % 2 == 1 else "1"
-    swapped_digits = leading_nibble + digits
-    if len(swapped_digits) % 2 != 0:
-        swapped_digits += "F"
-    byte_length = len(swapped_digits) // 2
-    return bytes.fromhex(f"{byte_length:02X}" + swap_bcd_nibbles(swapped_digits))
+    if len(digits) > 15:
+        raise ValueError("IMSI must contain at most 15 decimal digits.")
+    odd_digit_count = len(digits) % 2 == 1
+    first_digit = int(digits[0])
+    body = bytearray([(first_digit << 4) | (0x09 if odd_digit_count else 0x01)])
+    remaining = digits[1:]
+    if len(remaining) % 2:
+        remaining += "F"
+    for offset in range(0, len(remaining), 2):
+        low_nibble = int(remaining[offset])
+        high_text = remaining[offset + 1]
+        high_nibble = 0x0F if high_text == "F" else int(high_text)
+        body.append((high_nibble << 4) | low_nibble)
+    body.extend(b"\xFF" * (8 - len(body)))
+    encoded = b"\x08" + bytes(body)
+    if len(encoded) != 9:  # Defensive invariant for future layout changes.
+        raise ValueError("EF.IMSI encoding must be exactly 9 bytes.")
+    return encoded
 
 
 def decode_bcd_digits(value: bytes) -> str:
@@ -288,24 +319,23 @@ def parse_apdu(apdu: bytes) -> dict[str, Any]:
         }
 
     lc = int.from_bytes(body[1:3], "big", signed=False)
+    if lc == 0:
+        raise ValueError(
+            "Extended Lc=0 is invalid outside the exact three-byte case 2E body."
+        )
     if len(body) < 3 + lc:
         raise ValueError("Extended APDU payload is truncated.")
     command_data = body[3 : 3 + lc]
     trailing = body[3 + lc :]
-    if len(trailing) == 1:
-        le = 256 if trailing[0] == 0 else trailing[0]
-    elif len(trailing) >= 2:
-        # When Lc is extended the trailing Le is 2 bytes (ISO 7816-4
-        # §5.1 Case 4E). Any bytes past trailing[:2] would be a
-        # malformed APDU; drop them rather than silently extend.
-        if len(trailing) > 2:
-            raise ValueError(
-                f"Extended APDU has {len(trailing)} trailing bytes after "
-                "data; expected 0 (case 3E) or 2 (case 4E)."
-            )
+    if len(trailing) == 2:
         le = int.from_bytes(trailing[:2], "big", signed=False)
         if le == 0:
             le = 65536
+    elif len(trailing) != 0:
+        raise ValueError(
+            f"Extended APDU has {len(trailing)} trailing bytes after "
+            "data; expected 0 (case 3E) or 2 (case 4E)."
+        )
     return {
         "cla": cla,
         "ins": ins,
@@ -340,6 +370,10 @@ def apdu_encoded_length(data: bytes) -> int:
     if len(body) == 3:
         return 7
     lc = int.from_bytes(body[1:3], "big", signed=False)
+    if lc == 0:
+        raise ValueError(
+            "Extended Lc=0 is invalid outside the exact three-byte case 2E body."
+        )
     need = 3 + lc
     if len(body) < need:
         raise ValueError("Extended APDU payload is truncated.")

@@ -59,6 +59,20 @@ class InstallScriptLayoutTests(unittest.TestCase):
         path = INSTALL_DIR / SHARED_HELPERS
         self.assertTrue(path.is_file(), f"missing: {path}")
 
+    def test_full_linux_installers_verify_exact_remsim_client_binary(self) -> None:
+        helpers = (INSTALL_DIR / SHARED_HELPERS).read_text(encoding="utf-8")
+        exact_package = helpers.index("yg_apt_install osmo-remsim-client-st2")
+        compatibility_package = helpers.index("yg_apt_install osmo-remsim-client || true")
+        self.assertLess(exact_package, compatibility_package)
+        self.assertIn("command -v osmo-remsim-client-st2", helpers)
+        self.assertIn(
+            "yg_die \"required HIL executable 'osmo-remsim-client-st2'",
+            helpers,
+        )
+        for script in ("install-linux.sh", "install-raspberrypi.sh"):
+            text = (INSTALL_DIR / script).read_text(encoding="utf-8")
+            self.assertIn("yg_install_remsim_client", text)
+
     def test_windows_script_present(self) -> None:
         path = INSTALL_DIR / WINDOWS_SCRIPT
         self.assertTrue(path.is_file(), f"missing: {path}")

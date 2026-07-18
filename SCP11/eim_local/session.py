@@ -1917,8 +1917,9 @@ class EimLocalSession(LocalIsdrSession):
                 count = len(handle.read().splitlines())
         except Exception:
             count = 0
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write("")
+        from yggdrasim_common.secure_files import atomic_write_bytes
+
+        atomic_write_bytes(path, b"", overwrite=True)
         return count
 
     def filter_response_log(self, query: str, limit: int = 50) -> list[dict[str, Any]]:

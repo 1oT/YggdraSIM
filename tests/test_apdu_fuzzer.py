@@ -34,7 +34,6 @@ from Tools.ApduFuzz.corpus import (
 )
 from Tools.ApduFuzz.mutators import (
     MUTATORS,
-    MutationResult,
     mutate_bit_flip,
     mutate_length_mangle,
     mutate_padding_bloat,

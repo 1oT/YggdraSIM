@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 import logging
 import os
 import queue
@@ -18,8 +17,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from yggdrasim_common.card_backend import describe_card_backend, is_simulated_card_backend
-from yggdrasim_common.runtime_paths import ensure_runtime_dir, runtime_path
+from yggdrasim_common.card_backend import (
+    card_relay_marker_path,
+    clear_card_relay_marker,
+    describe_card_backend,
+    is_simulated_card_backend,
+    read_card_relay_marker,
+    write_card_relay_marker,
+)
 
 from .apdu_relay import ApduRelayConfig, HilBridgeApduRelayService
 from .pcsc import DEFAULT_APDU_TIMEOUT_MS, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
@@ -62,7 +67,6 @@ from .protocol import (
 )
 
 LOGGER = logging.getLogger(__name__)
-CARD_RELAY_MARKER_FILENAME = "hil_bridge_card_relay.json"
 CARD_TRACE_ENV = "YGGDRASIM_HIL_CARD_TRACE"
 _MALFORMED_ENVELOPE_STATUS = b"\x6F\x00"
 
@@ -1232,8 +1236,7 @@ class HilBridgeServer:
         return payload
 
     def _card_relay_marker_path(self) -> str:
-        ensure_runtime_dir("state")
-        return runtime_path("state", CARD_RELAY_MARKER_FILENAME)
+        return card_relay_marker_path()
 
     def _publish_card_relay_marker(self) -> None:
         if self._config.apdu_relay_enabled is False:
@@ -1241,31 +1244,14 @@ class HilBridgeServer:
 
         marker_payload = self._build_relay_status_payload()
         marker_payload["pid"] = os.getpid()
-        marker_path = self._card_relay_marker_path()
-        with open(marker_path, "w", encoding="utf-8") as handle:
-            json.dump(marker_payload, handle, indent=2, sort_keys=True)
-            handle.write("\n")
+        write_card_relay_marker(marker_payload)
 
     def _remove_card_relay_marker(self) -> None:
-        marker_path = self._card_relay_marker_path()
-        if os.path.isfile(marker_path) is False:
+        payload = read_card_relay_marker()
+        marker_pid = int(payload.get("pid", 0) or 0)
+        if marker_pid not in (0, os.getpid()):
             return
-
-        try:
-            with open(marker_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            payload = {}
-
-        if isinstance(payload, dict):
-            marker_pid = int(payload.get("pid", 0) or 0)
-            if marker_pid not in (0, os.getpid()):
-                return
-
-        try:
-            os.remove(marker_path)
-        except OSError:
-            pass
+        clear_card_relay_marker()
 
     def _queue_rspro_pdu(self, context: ConnectionContext, pdu: dict[str, Any]) -> None:
         message_name = get_pdu_message_name(pdu)

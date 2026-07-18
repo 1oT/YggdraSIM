@@ -77,7 +77,7 @@ APDU-layer decoding must:
   `CMAC`, `KDF`, or `ECDSA` check with a no-op for convenience).
 
 For coordinated vulnerability disclosure, see
-[`.github/SECURITY.md`](https://github.com/1oT/YggdraSIM/blob/main/.github/SECURITY.md)
+[`SECURITY.md`](https://github.com/1oT/YggdraSIM/blob/main/SECURITY.md)
 at the repository root instead of opening a public issue.
 
 ## Licensing of contributions

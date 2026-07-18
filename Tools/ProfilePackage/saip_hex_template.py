@@ -36,6 +36,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
+from yggdrasim_common.secure_files import (
+    atomic_write_bytes,
+    read_bounded_regular_file,
+)
+
 
 _INLINE_PLACEHOLDER_RE = re.compile(
     r"\{"
@@ -65,6 +70,7 @@ _MAX_PLACEHOLDERS_PER_FILE = 2048
 
 _SIDECAR_VERSION = 1
 _SIDECAR_SUFFIX = ".placeholders.json"
+_MAX_SIDECAR_BYTES = 16 * 1024 * 1024
 
 # blake2s ``person`` argument is capped at 8 bytes.
 _SENTINEL_PERSON = b"ygghexph"
@@ -545,17 +551,23 @@ def sidecar_payload_to_records(payload: Any) -> list[InlinePlaceholderRecord]:
 def write_sidecar(path: Path, records: list[InlinePlaceholderRecord]) -> None:
     """Write a JSON sidecar capturing every placeholder in ``records``."""
     target = Path(path)
-    target.write_text(
+    payload = (
         json.dumps(records_to_sidecar_payload(records), indent=2, ensure_ascii=False)
-        + "\n",
-        encoding="utf-8",
+        + "\n"
+    ).encode("utf-8")
+    if len(payload) > _MAX_SIDECAR_BYTES:
+        raise ValueError("placeholder sidecar exceeds the safety limit")
+    atomic_write_bytes(
+        target,
+        payload,
     )
 
 
 def read_sidecar(path: Path) -> list[InlinePlaceholderRecord]:
     """Load placeholder records from a sidecar produced by :func:`write_sidecar`."""
     source = Path(path)
-    payload = json.loads(source.read_text(encoding="utf-8"))
+    encoded = read_bounded_regular_file(source, _MAX_SIDECAR_BYTES)
+    payload = json.loads(encoded.decode("utf-8"))
     return sidecar_payload_to_records(payload)
 
 

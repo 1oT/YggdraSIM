@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Solarized · light (base3 ground, classic operator palette) --- */
 html[data-theme="solarized-light"] {
   --bg: #fdf6e3;
@@ -14,20 +15,20 @@ html[data-theme="solarized-light"] {
   --border: rgba(101, 123, 131, 0.18);
   --border-strong: rgba(101, 123, 131, 0.32);
   --fg: #073642;
-  --fg-dim: #586e75;
-  --fg-muted: #839496;
-  --accent: #268bd2;
-  --accent-strong: #2aa198;
+  --fg-dim: #53686f;
+  --fg-muted: var(--fg-dim);
+  --accent: #176ea6;
+  --accent-strong: #145f8e;
   --accent-soft: rgba(38, 139, 210, 0.12);
   --accent-fg: #ffffff;
   --accent-glow: rgba(38, 139, 210, 0.34);
-  --gradient-accent: linear-gradient(135deg, #268bd2 0%, #2aa198 70%, #859900 130%);
-  --gradient-brand: linear-gradient(135deg, #268bd2 0%, #6c71c4 100%);
-  --ok: #859900;
+  --gradient-accent: linear-gradient(135deg, #176ea6 0%, #145f8e 70%, #5c6f00 130%);
+  --gradient-brand: linear-gradient(135deg, #176ea6 0%, #565bab 100%);
+  --ok: #5c6f00;
   --ok-soft: rgba(133, 153, 0, 0.14);
-  --warn: #b58900;
+  --warn: #786000;
   --warn-soft: rgba(181, 137, 0, 0.16);
-  --fail: #dc322f;
+  --fail: #c12522;
   --fail-soft: rgba(220, 50, 47, 0.14);
   --code-bg: #eee8d5;
   --kbd-bg: rgba(253, 246, 227, 0.98);
@@ -40,4 +41,3 @@ html[data-theme="solarized-light"] {
     radial-gradient(circle at 90% 100%, rgba(42, 161, 152, 0.08), transparent 46%),
     radial-gradient(circle at 60% 40%, rgba(133, 153, 0, 0.05), transparent 50%);
 }
-

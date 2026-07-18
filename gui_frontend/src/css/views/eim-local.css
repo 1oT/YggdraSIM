@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ----------------------------------------------------------------------
    FS-Admin guided wizards (CREATE FILE / lifecycle / resize / …)
    ---------------------------------------------------------------------- */
@@ -16,6 +17,9 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .cc-fs-mode-bar .btn {
@@ -92,6 +96,8 @@
 
 .cc-fs-breakdown-wrap {
   margin-top: 10px;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .cc-fs-breakdown-caption {
@@ -105,6 +111,7 @@
 
 .cc-fs-breakdown {
   width: 100%;
+  min-width: 440px;
   border-collapse: collapse;
   font-size: 12px;
   background: var(--bg-elev);
@@ -155,7 +162,7 @@
 }
 
 .cc-fs-op-hint.cc-fs-op-hint-danger {
-  border-left-color: var(--err, #d9534f);
+  border-left-color: var(--fail);
 }
 
 /* Hidden utility for wizards that toggle rows on/off. */
@@ -163,3 +170,13 @@
   display: none !important;
 }
 
+@media (max-width: 640px) {
+  .cc-fs-wizard,
+  .cc-fs-raw {
+    padding: 12px;
+  }
+
+  .cc-fs-wizard-fields {
+    padding: 10px;
+  }
+}

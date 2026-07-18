@@ -1,46 +1,39 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""HTTP-level integration tests for the Card Bridge actions (CB-4 frontend).
+"""Route-contract tests for the Card Bridge actions (CB-4 frontend).
 
 The frontend panel calls ``POST /api/actions/card_bridge.status/run``
 and ``POST /api/actions/card_bridge.probe/run``. These tests pin the
-wire shape that the JS expects (``ok`` / ``data`` / ``error`` envelope)
-so any future churn in the route layer or dispatcher is caught before
-the operator opens the browser.
+response shape that the JS expects (``ok`` / ``data`` / ``error``
+envelope) so any future churn in the route layer or dispatcher is caught
+before the operator opens the browser.
 
-Skips cleanly when FastAPI / Starlette / httpx aren't installed —
-matches the existing pattern in ``tests/test_yggdracore_http_app.py``.
+The action endpoint is invoked directly instead of through Starlette's
+threaded ``TestClient``. This keeps the tests deterministic on Python
+3.13 while still exercising request validation, dispatch, and the
+response model. The bearer gate is covered separately at its pure-ASGI
+boundary.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from unittest.mock import patch
+
+import pytest
 
 try:
-    import httpx  # noqa: F401  — required by starlette TestClient
-
-    _HAS_HTTPX = True
-except ImportError:  # pragma: no cover — environment-dependent
-    _HAS_HTTPX = False
-
-try:
-    from fastapi.testclient import TestClient  # type: ignore
+    from fastapi import HTTPException
 
     _HAS_FASTAPI = True
-except Exception:  # pragma: no cover — environment-dependent
+except ImportError:  # pragma: no cover — environment-dependent
     _HAS_FASTAPI = False
-
-if _HAS_FASTAPI and _HAS_HTTPX:
-    from yggdrasim_common.gui_server.app import create_app
-    from yggdrasim_common.gui_server.config import (
-        GuiServerConfig,
-        MODE_WEB_SERVER,
-    )
 
 from yggdrasim_common.card_backend import (
     CARD_RELAY_TOKEN_ENV,
@@ -48,6 +41,10 @@ from yggdrasim_common.card_backend import (
     CARD_RELAY_URL_ENV,
 )
 from yggdrasim_common.card_bridge_auth import fingerprint as _fingerprint
+from yggdrasim_common.gui_server.auth import AuthMiddleware
+
+if _HAS_FASTAPI:
+    from yggdrasim_common.gui_server.routes import actions as actions_routes
 
 
 _TEST_TOKEN = "test-bearer-32-bytes-long-padding-to-meet-floor"
@@ -93,7 +90,15 @@ def _make_handler(
 
 class _StubBridge:
     def __init__(self, **kwargs: Any) -> None:
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(**kwargs))
+        try:
+            self.server = ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                _make_handler(**kwargs),
+            )
+        except PermissionError as error:
+            raise unittest.SkipTest(
+                f"loopback sockets are unavailable in this environment: {error}"
+            ) from error
         self.thread = threading.Thread(
             target=self.server.serve_forever,
             kwargs={"poll_interval": 0.05},
@@ -113,25 +118,10 @@ class _StubBridge:
 
 
 @unittest.skipUnless(
-    _HAS_FASTAPI and _HAS_HTTPX,
-    "FastAPI + httpx required (install yggdrasim[gui-server,test])",
+    _HAS_FASTAPI,
+    "FastAPI required (install yggdrasim[gui-server,test])",
 )
 class CardBridgeActionsHttpTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        # Build a minimal GUI app so we can exercise the action route
-        # layer without spinning up uvicorn. ``port=0`` is fine because
-        # ``TestClient`` never opens a socket.
-        config = GuiServerConfig(
-            mode=MODE_WEB_SERVER,
-            host="127.0.0.1",
-            port=0,
-            token=_TEST_TOKEN,
-        )
-        cls.app = create_app(config)
-        cls.client = TestClient(cls.app)
-        cls.headers = {"Authorization": f"Bearer {_TEST_TOKEN}"}
-
     def setUp(self) -> None:
         import os as _os
         import tempfile
@@ -169,13 +159,26 @@ class CardBridgeActionsHttpTests(unittest.TestCase):
             pass
 
     def _post(self, action_id: str, inputs: dict[str, Any]) -> dict[str, Any]:
-        response = self.client.post(
-            f"/api/actions/{action_id}/run",
-            headers=self.headers,
-            json={"inputs": inputs},
-        )
-        self.assertEqual(response.status_code, 200, msg=response.text)
-        return response.json()
+        async def _invoke_inline(spec, ctx, coerced):
+            dispatcher = spec.dispatcher
+            if dispatcher is None:
+                raise AssertionError(f"{spec.id!r} has no dispatcher")
+            result = dispatcher(ctx, **coerced)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
+
+        # Dispatch inline so ``asyncio.run`` never has to tear down a
+        # one-shot default executor. The route's coercion, error mapping,
+        # result scrubbing, and response envelope remain under test.
+        with patch.object(actions_routes, "_invoke_dispatcher", _invoke_inline):
+            response = asyncio.run(
+                actions_routes.run_action(
+                    action_id,
+                    actions_routes.RunRequest(inputs=inputs),
+                )
+            )
+        return response.model_dump()
 
     def test_status_unconfigured(self) -> None:
         body = self._post("card_bridge.status", {})
@@ -211,6 +214,7 @@ class CardBridgeActionsHttpTests(unittest.TestCase):
         self.assertFalse(data["ok"])
         self.assertIn("no URL", data["reason"])
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_probe_explicit_url_happy_path(self) -> None:
         bridge = _StubBridge(
             status_payload={
@@ -235,6 +239,7 @@ class CardBridgeActionsHttpTests(unittest.TestCase):
         self.assertEqual(data["atr_hex"], "3B00")
         self.assertGreaterEqual(data["ping_latency_ms"], 0.0)
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_probe_token_rejected_returns_401_posture(self) -> None:
         bridge = _StubBridge(require_token="real")
         try:
@@ -250,19 +255,55 @@ class CardBridgeActionsHttpTests(unittest.TestCase):
         self.assertEqual(data["auth_posture"], "token-rejected")
 
     def test_unknown_action_returns_404(self) -> None:
-        response = self.client.post(
-            "/api/actions/card_bridge.does_not_exist/run",
-            headers=self.headers,
-            json={"inputs": {}},
-        )
-        self.assertEqual(response.status_code, 404)
+        with self.assertRaises(HTTPException) as raised:
+            self._post("card_bridge.does_not_exist", {})
+        self.assertEqual(raised.exception.status_code, 404)
 
     def test_action_endpoint_requires_token(self) -> None:
-        response = self.client.post(
-            "/api/actions/card_bridge.status/run",
-            json={"inputs": {}},
+        downstream_called = False
+        messages: list[dict[str, Any]] = []
+
+        async def downstream(scope, receive, send) -> None:
+            nonlocal downstream_called
+            del scope, receive, send
+            downstream_called = True
+
+        async def receive() -> dict[str, Any]:
+            return {
+                "type": "http.request",
+                "body": b"",
+                "more_body": False,
+            }
+
+        async def send(message: dict[str, Any]) -> None:
+            messages.append(message)
+
+        middleware = AuthMiddleware(
+            downstream,
+            expected_token=_TEST_TOKEN,
         )
-        self.assertEqual(response.status_code, 401)
+        asyncio.run(
+            middleware(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/api/actions/card_bridge.status/run",
+                    "headers": [],
+                    "client": ("127.0.0.1", 12345),
+                },
+                receive,
+                send,
+            )
+        )
+
+        starts = [
+            message
+            for message in messages
+            if message.get("type") == "http.response.start"
+        ]
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(starts[0]["status"], 401)
+        self.assertFalse(downstream_called)
 
 
 if __name__ == "__main__":

@@ -384,14 +384,16 @@ def test_streaming_flow_error_frames_are_debug_gated() -> None:
     assert 'String(level || "info").toLowerCase() !== "error"' in helper
     assert "ccIsGlobalDebugEnabled()" in helper
 
-    stream_start = js.index("function runStreamingAction(action, inputs, statusEl, resultEl, card)")
+    stream_start = js.index(
+        "function runStreamingAction(action, inputs, statusEl, resultEl, card, form)"
+    )
     stream_window = js[stream_start : js.index("function renderReportSummary", stream_start)]
     for token in (
         "ccRefreshGlobalDebugFlag().then(function ()",
         "var hiddenErrorCount = 0",
         "var showFrame = ccShouldShowStreamFrame(level)",
         "hiddenErrorCount += 1",
-        "if (showFrame) {\n              statusEl.textContent = \"error\";",
+        'if (showFrame) {\n              ccSetActionStatus(statusEl, "error");',
         "Flow stopped before completion. Enable debug for details.",
     ):
         assert token in stream_window

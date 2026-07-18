@@ -27,8 +27,10 @@ python -m pip install -e '.[gui]'        # desktop pywebview window
 python -m pip install -e '.[gui-server]' # browser / remote lab server
 ```
 
-The clean and full PyInstaller flavors do not include the GUI dependency
-stack by default. Source installs are the recommended path for GUI lab work.
+Release builds publish paired CLI and desktop-GUI executables for the clean
+flavor on Windows, macOS, Linux, and Raspberry Pi arm64, and for the full
+flavor on supported Linux targets. Source installs remain the most flexible
+path for GUI lab development.
 
 ## Launch modes
 

@@ -1434,7 +1434,7 @@ class OrchestratorFlowTests(unittest.TestCase):
                         wrap_tlv("82", b"\x03"),
                         wrap_tlv("83", b"\x04"),
                         wrap_tlv("84", bytes.fromhex("A1B2C3D4")),
-                        wrap_tlv("87", b"\x02"),
+                        wrap_tlv("87", bytes.fromhex("0780")),
                         wrap_tlv("88", bytes.fromhex("01020304")),
                         wrap_tlv("89", b"\x01"),
                         wrap_tlv("A6", wrap_tlv("A0", tls_key_material)),
@@ -1453,7 +1453,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(entries[0]["eim_id_type"], "eimIdTypeProprietary (3)")
         self.assertEqual(entries[0]["counter_value"], "4")
         self.assertEqual(entries[0]["association_token"], "2712847316")
-        self.assertEqual(entries[0]["supported_protocol"], "02 (set: none)")
+        self.assertIn("eimRetrieveHttps", entries[0]["supported_protocol"])
         self.assertEqual(entries[0]["euicc_ci_pkid"], "01020304")
         self.assertEqual(entries[0]["indirect_profile_download"], "Present")
         self.assertEqual(
@@ -1702,7 +1702,7 @@ class OrchestratorFlowTests(unittest.TestCase):
                             wrap_tlv("82", b"\x01"),
                             wrap_tlv("83", b"\x05"),
                             wrap_tlv("84", bytes.fromhex("DEADBEEF")),
-                            wrap_tlv("87", b"\x02"),
+                            wrap_tlv("87", bytes.fromhex("0780")),
                             wrap_tlv("88", bytes.fromhex("01020304")),
                             wrap_tlv("89", b"\x01"),
                             wrap_tlv("A6", wrap_tlv("A0", tls_key_material)),
@@ -2055,7 +2055,7 @@ class OrchestratorFlowTests(unittest.TestCase):
                 b"".join(
                     [
                         wrap_tlv("80", b"\x02"),
-                        wrap_tlv("81", b"\x80"),
+                        wrap_tlv("81", bytes.fromhex("0640")),
                         wrap_tlv("0C", b"rsp.example.com"),
                     ]
                 ),

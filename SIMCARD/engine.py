@@ -310,6 +310,7 @@ class SimulatedSimCardEngine:
 
     def reset(self) -> None:
         """Soft-reset the card: clears all sub-module state, queues, and SCP03 session."""
+        self.state.reset_counter += 1
         self.fs.reset()
         self.naa.reset()
         self.auth.reset()

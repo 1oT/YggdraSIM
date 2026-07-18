@@ -24,9 +24,12 @@ The Windows script is self-contained PowerShell.
 ## Modes
 
 - `release` (default) downloads the GitHub release asset that matches
-  `<os>/<arch>/<flavor>` and drops it into a user-local bin directory.
+  `<os>/<arch>/<flavor>`, verifies it against the release
+  `SHA256SUMS`, and drops it into a user-local bin directory. Windows
+  additionally requires a valid Authenticode signature.
 - `source` creates a virtualenv (unless `--no-venv`) next to the repo
-  checkout and runs `pip install -e '.'` or `pip install -e '.[full]'`.
+  checkout and runs `pip install -e '.[saip]'` for clean or
+  `pip install -e '.[full]'` for full.
 - Add `--with-gui` to install the companion desktop GUI executable in
   release mode, or the `[gui]` extra plus the installed GUI commands in
   source mode.
@@ -38,6 +41,10 @@ The Windows script is self-contained PowerShell.
 - `full` — direct SIMtrace2/RemSIM HIL runtime included; Linux only (including Raspberry Pi
   arm64). Any non-Linux installer will refuse `--flavor full` with a
   clear error.
+
+Unsupported release architectures are rejected before any package-manager
+or install-directory changes. Currently published binaries are Linux
+x86_64/arm64, macOS arm64, and Windows x86_64.
 
 ## Common flags
 
@@ -112,8 +119,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1 -Mo
 
 - They do not flash or update the SIMtrace2 firmware. Use
   `guides/SIMTRACE2_CARDEM_GUIDE.md` for that.
-- They do not build or install `osmo-remsim-client-st2` when your
-  distro does not package it.
+- They do not build `osmo-remsim-client-st2` from source. Full Linux
+  installs try the exact package (then a distribution compatibility
+  package) and fail fast if the executable is still unavailable.
 - They do not open SSH tunnels, copy Card Bridge bearer tokens, or
   install remote HIL `systemd --user` services.
 - They do not install system-wide (everything lands in user-local

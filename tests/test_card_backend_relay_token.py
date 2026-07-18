@@ -19,12 +19,13 @@ network IO happens.
 
 from __future__ import annotations
 
-import json
+import io
 import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from urllib import error as urllib_error
 from unittest.mock import patch
 
 from yggdrasim_common import card_backend
@@ -89,8 +90,8 @@ class RequestHelperHeaderTests(unittest.TestCase):
             def __exit__(self, *_args) -> None:
                 return None
 
-            def read(self) -> bytes:
-                return self._body
+            def read(self, size: int = -1) -> bytes:
+                return self._body if size < 0 else self._body[:size]
 
         def fake_urlopen(request, timeout=0):
             captured_request["headers"] = dict(request.header_items())
@@ -110,6 +111,74 @@ class RequestHelperHeaderTests(unittest.TestCase):
         # urllib lower-cases header names internally; iterate without assuming case.
         header_lookup = {key.lower(): value for key, value in captured_request["headers"].items()}
         self.assertEqual(header_lookup.get("authorization"), "Bearer bearer-value")
+
+    def test_helper_rejects_oversized_response(self) -> None:
+        class _OversizedResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args) -> None:
+                return None
+
+            def read(self, size: int = -1) -> bytes:
+                return b"x" * size
+
+        with patch.object(
+            card_backend.urllib_request,
+            "urlopen",
+            return_value=_OversizedResponse(),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "1 MiB safety limit"):
+                card_backend._request_card_relay_json(
+                    "http://127.0.0.1:8642/status",
+                    method="GET",
+                )
+
+    def test_timeout_error_does_not_echo_url_or_token(self) -> None:
+        secret_url = "http://127.0.0.1:8642/status?access_token=url-secret"
+        with patch.object(
+            card_backend.urllib_request,
+            "urlopen",
+            side_effect=TimeoutError(secret_url),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                card_backend._request_card_relay_json(
+                    secret_url,
+                    method="GET",
+                    auth_token="bearer-secret",
+                )
+
+        message = str(raised.exception)
+        self.assertEqual(message, "Card relay connection timed out.")
+        self.assertNotIn("url-secret", message)
+        self.assertNotIn("bearer-secret", message)
+
+    def test_http_error_redacts_presented_bearer(self) -> None:
+        token = "opaque-bearer-secret"
+        error = urllib_error.HTTPError(
+            "http://127.0.0.1:8642/status",
+            401,
+            "Unauthorized",
+            {},
+            io.BytesIO(
+                b'{"error":"Authorization: Bearer opaque-bearer-secret rejected"}'
+            ),
+        )
+        with patch.object(
+            card_backend.urllib_request,
+            "urlopen",
+            side_effect=error,
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                card_backend._request_card_relay_json(
+                    "http://127.0.0.1:8642/status",
+                    method="GET",
+                    auth_token=token,
+                )
+
+        message = str(raised.exception)
+        self.assertIn("<redacted>", message)
+        self.assertNotIn(token, message)
 
 
 class TokenResolutionTests(unittest.TestCase):

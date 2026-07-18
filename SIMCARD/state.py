@@ -1012,6 +1012,9 @@ class SimCardState:
     apdu_history: list[str] = field(default_factory=list)
     pending_fetch_queue: list[bytes] = field(default_factory=list)
     current_protocol: int | None = None
+    # Monotonic per-engine reset generation used by read-only validation to
+    # detect state changes between previewed APDU commands.
+    reset_counter: int = 0
     profiles: list[SimProfileEntry] = field(default_factory=list)
     nodes: dict[str, SimFileNode] = field(default_factory=dict)
     base_nodes: dict[str, SimFileNode] = field(default_factory=dict)
@@ -1021,10 +1024,9 @@ class SimCardState:
     # SGP.32 §2.11.2 stored eUICC Package Results (signed). Drained by the
     # IPA via ES10b.RemoveNotificationFromList referencing ``seq_number``.
     euicc_package_results: list[SimEuiccPackageResultEntry] = field(default_factory=list)
-    # SGP.22 §5.7.13 LoadCRL persistence. Each entry is the raw CRL DER
-    # bytes the eUICC accepted from the RSP server. The simulator does
-    # not enforce revocation today, but it persists the payloads so
-    # reports / GUIs can introspect "did the eIM push CRL N?".
+    # SGP.22 §5.7.13 LoadCRL persistence. Each entry is one canonical,
+    # signature-validated X.509 CRL in DER form. Server certificates are
+    # checked against current entries during authenticated RSP flows.
     loaded_crls: list[bytes] = field(default_factory=list)
     # SGP.32 §2.11.1 monotonic association-token allocator. Starts at 0 and
     # increments to produce the next association token; it MUST NOT be

@@ -514,12 +514,9 @@
   font-style: italic;
 }
 
-/* "Add file element" inline form mounted at the top of the GFM card.
-   See eUICC Profile Creator manual, "Profile Elements for File
-   System Creation" → "File System Creation by Generic File
-   Management" for the affordance this mirrors. The bar's parent
-   field hides automatically when the parent chip above shows
-   ``data-state="bound"`` — the dispatcher then reuses that path. */
+/* Inline file-creation form mounted at the top of the GFM card. The
+   bar's parent field hides automatically when the parent chip above
+   shows ``data-state="bound"`` — the dispatcher then reuses that path. */
 .saip-gfm-addbar {
   display: flex;
   flex-wrap: wrap;
@@ -632,9 +629,16 @@
 .saip-gfm-list-row {
   display: grid;
   grid-template-columns: 1fr 52px;
+  width: 100%;
   padding: 7px 10px;
   cursor: pointer;
+  border: 0;
   border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   transition: background 0.12s;
   align-items: center;
 }
@@ -644,6 +648,15 @@
 }
 
 .saip-gfm-list-row:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+}
+
+.saip-gfm-list-row:focus-visible,
+.saip-template-workbench-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
   background: var(--surface-hover, rgba(255, 255, 255, 0.06));
 }
 

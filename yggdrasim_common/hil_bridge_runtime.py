@@ -16,11 +16,18 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
+from .card_backend import (
+    CARD_RELAY_MARKER_FILENAME,
+    card_relay_marker_path,
+    clear_card_relay_marker,
+    read_card_relay_marker,
+)
+from .frozen_dispatch import build_module_command
 from .progress import progress_session
-from .runtime_paths import runtime_path
+from .runtime_paths import is_frozen, runtime_path
 
 SUPERVISOR_STATE_FILENAME = "hil_bridge_supervisor.json"
-CARD_RELAY_STATE_FILENAME = "hil_bridge_card_relay.json"
+CARD_RELAY_STATE_FILENAME = CARD_RELAY_MARKER_FILENAME
 DEFAULT_SERVICE_NAME = "yggdrasim-hil-supervisor.service"
 DEFAULT_USB_VIDPID = "1d50:60e3"
 DEFAULT_HTTP_TIMEOUT_SECONDS = 5.0
@@ -61,7 +68,7 @@ def supervisor_state_path() -> str:
 
 
 def card_relay_state_path() -> str:
-    return runtime_path("state", CARD_RELAY_STATE_FILENAME)
+    return card_relay_marker_path()
 
 
 def load_json_file(path: str) -> dict[str, Any]:
@@ -86,7 +93,7 @@ def read_supervisor_state() -> dict[str, Any]:
 
 
 def read_card_relay_state() -> dict[str, Any]:
-    return load_json_file(card_relay_state_path())
+    return read_card_relay_marker()
 
 
 def guess_bridge_python_executable(
@@ -178,21 +185,22 @@ def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
         assignment = f"{normalized_key}={str(value_text or '').strip()}"
         environment_lines += f"Environment={_systemd_quote(assignment)}\n"
 
-    command = [
-        str(options.python_executable or "").strip(),
-        "-m",
+    command = build_module_command(
         "Tools.HilBridge.supervisor",
-        "--reader-index",
-        str(int(options.reader_index)),
-        "--host",
-        str(options.host or "").strip(),
-        "--port",
-        str(int(options.port)),
-        "--advertise-host",
-        str(options.advertise_host or "").strip(),
-        "--usb-vidpid",
-        str(options.usb_vidpid or "").strip(),
-    ]
+        [
+            "--reader-index",
+            str(int(options.reader_index)),
+            "--host",
+            str(options.host or "").strip(),
+            "--port",
+            str(int(options.port)),
+            "--advertise-host",
+            str(options.advertise_host or "").strip(),
+            "--usb-vidpid",
+            str(options.usb_vidpid or "").strip(),
+        ],
+        source_python=str(options.python_executable or "").strip() or None,
+    )
     reader_name = str(options.reader_name or "").strip()
     if len(reader_name) > 0:
         command.extend(["--reader-name", reader_name])
@@ -221,7 +229,12 @@ def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
         command.append(f"--remsim-arg={str(remsim_arg or '').strip()}")
 
     exec_start = " ".join(_systemd_quote(part) for part in command if len(str(part or "").strip()) > 0)
-    working_directory = _systemd_quote(str(options.working_directory or "").strip())
+    working_directory_text = str(options.working_directory or "").strip()
+    if is_frozen():
+        working_directory_text = os.path.dirname(
+            os.path.abspath(str(sys.executable or ""))
+        )
+    working_directory = _systemd_quote(working_directory_text)
     return (
         "[Unit]\n"
         "Description=YggdraSIM HIL bridge supervisor\n"
@@ -309,13 +322,7 @@ def clear_card_relay_state() -> None:
     publishes a fresh marker once it is fully up. Missing files are
     tolerated quietly.
     """
-    relay_path = card_relay_state_path()
-    try:
-        os.remove(relay_path)
-    except FileNotFoundError:
-        return
-    except OSError:
-        return
+    clear_card_relay_marker()
 
 
 def clear_supervisor_state() -> None:

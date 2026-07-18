@@ -44,6 +44,18 @@ common troubleshooting paths.
   * The YggdraSIM toolchain.
   * SSH client with key access to the reader-side machine.
 
+### Windows/macOS versus the Linux HIL host
+
+CardBridge and the Remote Lab client are part of the clean Windows,
+macOS, and Linux builds. They do not import or require `pyudev`,
+SIMtrace2 tooling, or `osmo-remsim-client-st2`.
+
+When **Start full rig** targets a remote HIL machine, those dependencies
+belong to that remote Linux host. The desktop only needs a working
+PC/SC stack and OpenSSH. This separation lets the same clean GUI control
+a Linux/Raspberry Pi SIMtrace2 rig without installing Linux USB packages
+on Windows or macOS.
+
 ## Step 1 — Start the bridge on the reader machine
 
 ```bash
@@ -107,7 +119,7 @@ reader names.
 The simplest form:
 
 ```bash
-ssh -fN -L 8642:127.0.0.1:8642 hampus@pc-host
+ssh -fN -L 8642:127.0.0.1:8642 user@pc-host
 ```
 
 The `-fN` flags background the SSH process without running a remote
@@ -209,10 +221,10 @@ rig's loopback interface:
 
 ```bash
 # Run on the rig, connecting to the reader workstation:
-ssh -fN -L 8642:127.0.0.1:8642 hampus@pc-host
+ssh -fN -L 8642:127.0.0.1:8642 user@pc-host
 
 # Or run on the reader workstation, connecting to the rig:
-ssh -fN -R 8642:127.0.0.1:8642 hampus@rig-host
+ssh -fN -R 8642:127.0.0.1:8642 user@rig-host
 ```
 
 Then start HIL on the rig:
@@ -280,9 +292,10 @@ in a focused diagnostics surface:
   modem traffic the same way as a local HIL session.
 * Remote HIL modem shell. When the remote rig state contains an SSH
   target, the HIL module's **Modem shell** tab uses that target as its
-  default command and opens `sudo tio /dev/ttyUSB2` on the RPi through
-  `ssh -tt`. Custom modem-shell commands remain editable and are saved
-  by the browser.
+  default command and opens `tio /dev/ttyUSB2` on the RPi through
+  `ssh -tt`. Device permissions must be configured for the service
+  account; the GUI never inserts `sudo`. Custom modem-shell commands
+  remain editable and are saved by the browser.
 * Auto-refresh toggle (5 s) — pauses automatically when the operator
   navigates to another view so the GUI doesn't poll in the background.
 * Latency history sparkline (60-sample rolling buffer) with stacked
@@ -319,11 +332,30 @@ so SSH key login must already work from the PC account that launched
 the GUI. The action uses `BatchMode=yes`; it will not block on a
 password prompt.
 
+The **SSH executable** field is optional. macOS normally resolves
+`/usr/bin/ssh` from `PATH`. Windows first checks `PATH`, then the
+standard `%SystemRoot%\System32\OpenSSH\ssh.exe` location. Enter a full
+path only for a non-standard or portable OpenSSH installation; paths
+containing spaces are passed directly without a command shell.
+
 The RPi must have `osmo-remsim-client-st2` installed, or the **RPi
 REMSIM binary** field must point to an executable path such as
 `/usr/local/bin/osmo-remsim-client-st2`. The full-rig action resolves
 that path before writing the systemd unit so the service does not
 depend on systemd's default `PATH`.
+
+Before starting any workstation process, the full-rig action checks
+that the remote host is Linux, its `systemd --user` manager is
+reachable, and either `pyudev` or `lsusb` can detect SIMtrace2. It also
+discovers the HIL supervisor from the documented source-install path
+`~/YggdraSIM/.venv/bin/python`, an installed
+`yggdrasim-hil-supervisor` console script, or the allow-listed internal
+supervisor entry in a full Linux release executable. The **Remote
+Python** field remains available for non-standard source/wheel
+installations. Python 3 and `curl` are remote onboarding prerequisites
+even when the supervisor itself comes from the full frozen release;
+the Raspberry Pi installer installs both for dependency and readiness
+diagnostics.
 
 For unattended use, install the RPi service once from the GUI or by
 copying `guides/systemd/yggdrasim-hil-supervisor.service.example` and

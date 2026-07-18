@@ -6,12 +6,95 @@
 /* ---- SA-G1: placeholder lead sentence in empty tab body ------------ */
 
 .saip-placeholder--lead {
+  display: flex;
+  flex: 1;
+  min-height: 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font-size: 13px;
-  color: var(--fg-muted, #888);
+  line-height: 1.55;
+  color: var(--fg-dim, var(--fg-muted, #888));
   text-align: center;
-  padding: 36px 12px;
+  padding: 32px 24px;
   border: 1px dashed var(--border);
   border-radius: 8px;
-  margin: 12px;
+  margin: 0;
+  background:
+    radial-gradient(
+      circle at 50% 0,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 54%
+    ),
+    var(--surface, rgba(255, 255, 255, 0.02));
+  font-style: normal;
 }
 
+.saip-placeholder-icon {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.saip-placeholder-icon .cc-action-svg {
+  width: 20px;
+  height: 20px;
+}
+
+.saip-placeholder-title {
+  margin: 2px 0 0;
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.saip-placeholder-copy {
+  max-width: 520px;
+  margin: 0;
+}
+
+.saip-placeholder-action {
+  min-height: 32px;
+  margin-top: 4px;
+  padding: 6px 13px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--accent-fg, var(--bg));
+  background: var(--accent);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.saip-placeholder-action:hover {
+  filter: brightness(1.06);
+}
+
+.saip-placeholder-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.saip-placeholder-shortcut {
+  margin: 0;
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+}
+
+.saip-placeholder-shortcut kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 4px;
+  color: var(--fg);
+  background: var(--bg-elev-2, var(--surface-alt));
+  box-shadow: 0 1px 0 var(--border);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+}

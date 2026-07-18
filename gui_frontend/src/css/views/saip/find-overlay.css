@@ -39,9 +39,10 @@
   font-size: 12px;
 }
 
-.saip-find-input:focus {
+.saip-find-input:focus-visible {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .saip-find-toggle {
@@ -57,7 +58,19 @@
 }
 
 .saip-find-toggle input[type=checkbox] {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.saip-find-toggle:focus-within {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .saip-find-toggle:has(input:checked) {
@@ -99,6 +112,12 @@
   background: var(--surface-alt, rgba(255, 255, 255, 0.04));
 }
 
+.saip-find-result:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+}
+
 .saip-find-result.is-active {
   background: var(--accent, #5a8de0);
   color: var(--surface);
@@ -111,3 +130,19 @@
   border-radius: 2px;
 }
 
+@media (max-width: 560px) {
+  .saip-find-overlay {
+    top: 60px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+
+  .saip-find-bar {
+    flex-wrap: wrap;
+  }
+
+  .saip-find-input {
+    flex-basis: calc(100% - 16px);
+  }
+}

@@ -1032,11 +1032,11 @@ file.
 Regression coverage in `tests/test_simcard_saip_link_path.py` pins
 the OCTET-STRING decoder, the runtime resolver, the
 "USIM-only EF (no link, no peer) preserved verbatim" contract, and
-an end-to-end replay against the operator BPP fixture that asserts
+an optional end-to-end replay against a locally selected BPP that asserts
 every USIM-side EF.IMSI / EF.AD / EF.SPN / EF.SMS / EF.SMSP /
 EF.MSISDN bound to a DF.GSM or DF.TELECOM target now exposes the
 canonical bytes through the ADF SELECT path -- including the
-production SFI READ BINARY (`00B0870009`) that originally returned
+captured-style SFI READ BINARY (`00B0870009`) that returned
 `9000` with an empty body.
 
 ### TS 31.102 Annex H "shared EFs" (DF.GSM <-> ADF.USIM mirror)
@@ -1044,7 +1044,7 @@ production SFI READ BINARY (`00B0870009`) that originally returned
 3GPP TS 31.102 Annex H Table H.1 lists the Elementary Files that
 must surface identical content irrespective of whether the modem
 is reading them under DF.GSM (legacy SIM context) or ADF.USIM
-(modern UICC context). Real-world operator BPPs lean on this
+(modern UICC context). BPP issuers can lean on this
 contract heavily: a typical TCA Profile Interoperability §3.5.5
 profile only ships the canonical bytes of EF.IMSI (`6F07`),
 EF.AD (`6FAD`), EF.LOCI (`6F7E`), EF.FPLMN (`6F7B`), EF.SPN
@@ -1075,13 +1075,13 @@ happen to coexist under both DFs (vendor-private EFs, repurposed
 slots) are left untouched because they are not in the shared-EF
 table.
 
-This is the fix that unblocks the production HIL trace where
+This is the fix for the captured-style HIL trace where
 `READ BINARY` against EF.IMSI under ADF.USIM (issued by the modem
 via SFI=0x07 selection mode) used to return `9000` with no body
 once the operator BPP overrode the lab default. Regression
 coverage lives in `tests/test_simcard_shared_ef_mirror.py`,
-including a slot that replays the SFI READ BINARY against the
-real `89880000000466311335` BPP fixture.
+including an optional slot that replays SFI READ BINARY against a
+locally selected BPP. The tracked suite contains no operator identity.
 
 ### TCA Profile Interoperability §3.5 / §9 template default fill-in
 
@@ -1147,7 +1147,7 @@ Regression coverage in
 `tests/test_simcard_saip_template_defaults.py` pins the registry
 shape, the fill-in invariants (issuer wins, `content_rqd=True`
 never auto-populated, SFIs always synced), and an end-to-end
-replay of the `89880000000466311335` cold-attach SFI `READ BINARY`
+replay of a cold-attach SFI `READ BINARY`
 sequence (`00B0830004` -> EF.AD `00000002`, `00B0870009` ->
 EF.IMSI from BPP, `00B0920001` -> EF.HPPLMN).
 

@@ -13,21 +13,46 @@
  */
 .saip-ribbon {
   display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  padding: 10px 12px;
+  flex-wrap: nowrap;
+  gap: 10px;
+  padding: 8px 10px 6px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface, rgba(255, 255, 255, 0.025));
   align-items: stretch;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: var(--border-strong, var(--border)) transparent;
+  scrollbar-width: thin;
+}
+
+.saip-ribbon:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.saip-ribbon::-webkit-scrollbar {
+  height: 6px;
+}
+
+.saip-ribbon::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--border-strong, var(--border));
+}
+
+.saip-ribbon::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .saip-ribbon-group {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
-  padding-right: 14px;
+  flex: 0 0 auto;
+  gap: 3px;
+  padding-right: 10px;
   border-right: 1px solid var(--border);
 }
 
@@ -38,7 +63,7 @@
 
 .saip-ribbon-buttons {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   align-items: stretch;
 }
 
@@ -46,7 +71,7 @@
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-dim, var(--fg-muted, #888));
   text-align: center;
 }
 
@@ -56,8 +81,9 @@
   align-items: center;
   justify-content: flex-start;
   gap: 2px;
-  min-width: 56px;
-  padding: 6px 8px 4px;
+  min-width: 54px;
+  min-height: 52px;
+  padding: 5px 7px 4px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -69,9 +95,19 @@
     color 0.12s ease;
 }
 
+.saip-ribbon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
 .saip-ribbon-btn:hover:not(.is-disabled):not([disabled]) {
   background: var(--surface-alt, rgba(255, 255, 255, 0.05));
   border-color: var(--border);
+}
+
+.saip-ribbon-btn:hover:not(.is-disabled):not([disabled]) .saip-ribbon-btn-icon {
+  border-color: color-mix(in oklab, currentColor, transparent 34%);
+  background: color-mix(in oklab, currentColor, transparent 89%);
 }
 
 .saip-ribbon-btn:active:not(.is-disabled):not([disabled]) {
@@ -81,7 +117,7 @@
 
 .saip-ribbon-btn.is-disabled,
 .saip-ribbon-btn[disabled] {
-  opacity: 0.42;
+  opacity: 0.52;
   cursor: not-allowed;
 }
 
@@ -94,13 +130,25 @@
 }
 
 .saip-ribbon-btn-icon {
-  font-size: 16px;
-  line-height: 1.1;
-  font-family: var(--mono, "JetBrains Mono", monospace);
-  height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 25px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in oklab, currentColor, transparent 62%);
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in oklab, currentColor, transparent 94%);
+  font-family: var(--font-mono, var(--mono, "JetBrains Mono", monospace));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.saip-ribbon-btn-icon .cc-action-svg {
+  width: 14px;
+  height: 14px;
 }
 
 .saip-ribbon-btn-label {
@@ -108,4 +156,3 @@
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
-

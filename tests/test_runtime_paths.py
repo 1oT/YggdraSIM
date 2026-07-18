@@ -16,7 +16,7 @@ from SCP11.eim_local.config import EimLocalConfig
 from SCP11.live.config import SGPConfig as LiveRelayConfig
 from SCP11.local_access.config import LocalAccessConfig
 from SCP11.local_access.session import LocalIsdrSession
-from SCP11.test.config import SGPConfig as TestRelayConfig
+from SCP11.test.config import SGPConfig as CompatibilityRelayConfig
 
 
 class _DummyApduChannel:
@@ -86,7 +86,7 @@ class FrozenRuntimePathTests(unittest.TestCase):
                 ).exists()
             )
 
-    def test_scp03_config_seeds_shared_workspace_files_when_frozen(self) -> None:
+    def test_scp03_config_seeds_shared_workspace_files_only_after_explicit_init(self) -> None:
         import SCP03.config as scp03_config
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -103,6 +103,8 @@ class FrozenRuntimePathTests(unittest.TestCase):
                         Path(scp03_config.Config.AID_FILE),
                         runtime_root / "Workspace" / "SCP03" / "aid.txt",
                     )
+                    self.assertFalse((runtime_root / "Workspace" / "SCP03" / "keys.ini").exists())
+                    scp03_config.Config.initialize_workspace()
                     self.assertTrue((runtime_root / "Workspace" / "SCP03" / "keys.ini").exists())
                     self.assertTrue((runtime_root / "Workspace" / "SCP03" / "fids.txt").exists())
                     self.assertTrue((runtime_root / "Workspace" / "SCP03" / "aid.txt").exists())
@@ -117,7 +119,7 @@ class FrozenRuntimePathTests(unittest.TestCase):
             with patch_frozen, patch_executable, patch_env:
                 relay_cfg = RelayConfig()
                 live_cfg = LiveRelayConfig()
-                test_cfg = TestRelayConfig()
+                test_cfg = CompatibilityRelayConfig()
             self.assertEqual(relay_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "CERT.DPauth.ECDSA.der"))
             self.assertEqual(live_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "live" / "CERT.DPauth.ECDSA.der"))
             self.assertEqual(test_cfg.CERT_PATH_AUTH, live_cfg.CERT_PATH_AUTH)
@@ -165,6 +167,37 @@ class FrozenRuntimePathTests(unittest.TestCase):
             self.assertIn('"eim_hostname_fqdn": "eim.example.test"', addeim_template_text)
             self.assertIn('"tls_connection_certificate_choice": "server_certificate"', addeim_template_text)
             self.assertIn('"https_over_tcp_retrieval": true', addeim_template_text)
+
+    def test_eim_local_config_creates_required_dirs_without_seed_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            required_directories = {
+                "CERTS_DIR": root / "certs",
+                "PROFILE_DIR": root / "profile",
+                "METADATA_DIR": root / "profile" / "metadata",
+                "DEBUG_DIR": root / "debug",
+                "EIM_PACKAGES_DIR": root / "packages",
+                "EIM_PACKAGE_TEMPLATES_DIR": root / "packages" / "templates",
+                "EIM_HOTFOLDER_DIR": root / "packages" / "hotfolder",
+                "EIM_POLL_FIXTURES_DIR": root / "packages" / "fixtures",
+                "EIM_POLL_EIM_TO_ESIM_DIR": root / "packages" / "fixtures" / "eim_to_esim",
+                "EIM_POLL_ESIM_TO_EIM_DIR": root / "packages" / "fixtures" / "esim_to_eim",
+                "EIM_CERTS_DIR": root / "certs" / "eim",
+            }
+            with (
+                mock.patch("SCP11.eim_local.config.ensure_seeded_workspace_tree"),
+                mock.patch("SCP11.eim_local.config.ensure_seeded_workspace_file"),
+            ):
+                cfg = EimLocalConfig(
+                    **{
+                        field_name: str(directory)
+                        for field_name, directory in required_directories.items()
+                    }
+                )
+
+            for field_name, directory in required_directories.items():
+                self.assertEqual(getattr(cfg, field_name), str(directory))
+                self.assertTrue(directory.is_dir(), field_name)
 
     def test_local_access_session_resolves_repo_style_path_from_runtime_root_when_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -229,6 +262,39 @@ class FrozenRuntimePathTests(unittest.TestCase):
                 )
             importlib.reload(inventory_crypto)
             importlib.reload(device_inventory)
+
+
+class InstalledRuntimePathTests(unittest.TestCase):
+    def test_noneditable_wheel_uses_xdg_user_data_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            expected = Path(temp_dir) / "YggdraSIM"
+            with (
+                mock.patch.object(runtime_paths, "is_frozen", return_value=False),
+                mock.patch.object(runtime_paths, "_editable_source_root", return_value=None),
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "XDG_DATA_HOME": temp_dir,
+                        runtime_paths.RUNTIME_ROOT_ENV: "",
+                    },
+                    clear=False,
+                ),
+            ):
+                resolved = runtime_paths.runtime_root()
+            self.assertEqual(resolved, str(expected))
+            self.assertTrue(expected.is_dir())
+
+    def test_editable_checkout_keeps_repository_runtime_root(self) -> None:
+        repo_root = Path(runtime_paths.__file__).resolve().parent.parent
+        with (
+            mock.patch.object(runtime_paths, "is_frozen", return_value=False),
+            mock.patch.dict(
+                os.environ,
+                {runtime_paths.RUNTIME_ROOT_ENV: ""},
+                clear=False,
+            ),
+        ):
+            self.assertEqual(runtime_paths.runtime_root(), str(repo_root))
 
 
 if __name__ == "__main__":

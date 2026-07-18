@@ -96,13 +96,14 @@ def test_encode_service_table_auto_sizes_when_no_seed() -> None:
     assert len(out3) == 4, f"bit 9 needs two bytes, got {out3!r}"
 
 
-def test_encode_service_table_ignores_invalid_service_numbers() -> None:
-    """Service numbers below 1 are dropped, duplicates collapse."""
+def test_encode_service_table_rejects_invalid_service_numbers() -> None:
+    """Invalid service numbers are rejected instead of silently disappearing."""
 
     from SCP03.core.decoders import AdvancedDecoders
+    import pytest
 
-    out = AdvancedDecoders.encode_service_table([0, -3, 2, 2], total_bytes=1)
-    assert out == "02", f"expected 0x02, got {out!r}"
+    with pytest.raises(ValueError, match="at least 1"):
+        AdvancedDecoders.encode_service_table([0, -3, 2, 2], total_bytes=1)
 
 
 # ----------------------------------------------------------------------

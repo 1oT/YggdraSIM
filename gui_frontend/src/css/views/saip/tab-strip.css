@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ---- SA-G1: top-level tab strip ------------------------------------ */
 
 .saip-top-tabs {
@@ -35,6 +36,11 @@
   background: var(--surface-alt, rgba(255, 255, 255, 0.04));
 }
 
+.saip-top-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
 .saip-top-tab.is-active {
   color: var(--accent);
   background: var(--accent-soft);
@@ -44,7 +50,7 @@
 
 .saip-top-tab.is-disabled,
 .saip-top-tab[disabled] {
-  opacity: 0.45;
+  opacity: 0.52;
   cursor: not-allowed;
 }
 
@@ -70,4 +76,3 @@
   color: var(--accent-fg, #0b1015);
   border-color: var(--accent);
 }
-

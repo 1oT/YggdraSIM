@@ -9,12 +9,12 @@ Pinned contract:
    folds to upper-case, and rejects non-hex, odd-length, and short-header
    inputs.
 
-2. ``_parse_apdu_breakdown`` classifies APDUs as ISO 7816-4
-   case 1/2/3/4 (plus a "malformed" fallback) and returns the correct
-   slice of Data / Le given the declared Lc byte.
+2. ``_parse_apdu_breakdown`` classifies short case 1/2/3/4 and extended
+   case 2E/3E/4E framing (plus a "malformed" fallback), including the
+   special zero-Le values 256 and 65,536.
 
-3. ``_apdu_with_corrected_le`` implements the 6Cxx retry rule:
-   replace the trailing Le byte for case-2/4, append for case-1/3.
+3. ``_apdu_with_corrected_le`` implements the 6Cxx retry rule for short
+   and extended APDUs without corrupting malformed command data.
 
 4. ``_dispatch_send_apdu``:
    * Transmits the normalised APDU verbatim.
@@ -111,6 +111,7 @@ def test_normalise_accepts_spaces_and_dashes():
     assert _normalise_apdu_hex("00 A4 00 04 02 3F 00") == "00A40004023F00"
     assert _normalise_apdu_hex("00-A4-00-04-02-3F-00") == "00A40004023F00"
     assert _normalise_apdu_hex("00_A4_00_04_02_3F_00") == "00A40004023F00"
+    assert _normalise_apdu_hex("00 A4 00 04\n02 3F 00") == "00A40004023F00"
 
 
 def test_normalise_strips_0x_prefix_and_folds_upper():
@@ -200,6 +201,68 @@ def test_parse_malformed_lc_mismatch():
     apdu = "00A40404" + "05" + "A000"
     bd = _parse_apdu_breakdown(apdu)
     assert bd["case"] == "malformed"
+    assert bd["valid"] is False
+    assert "exceeds supplied data" in bd["error"]
+
+
+def test_parse_case2e_and_zero_le_semantics():
+    from yggdrasim_common.gui_server.actions.scp03 import _parse_apdu_breakdown
+
+    bd = _parse_apdu_breakdown("00C00000000100")
+    assert bd["case"] == "2E"
+    assert bd["extended"] is True
+    assert bd["lc"] == ""
+    assert bd["le"] == "0100"
+    assert bd["le_value"] == 256
+    assert bd["data_hex"] == ""
+
+    maximum = _parse_apdu_breakdown("00C00000000000")
+    assert maximum["case"] == "2E"
+    assert maximum["le"] == "0000"
+    assert maximum["le_value"] == 65536
+
+
+def test_parse_case3e_slices_two_byte_lc_and_data():
+    from yggdrasim_common.gui_server.actions.scp03 import _parse_apdu_breakdown
+
+    data_hex = "AB" * 256
+    bd = _parse_apdu_breakdown("00DA0000000100" + data_hex)
+    assert bd["case"] == "3E"
+    assert bd["lc"] == "0100"
+    assert bd["data_length"] == 256
+    assert bd["data_hex"] == data_hex
+    assert bd["le"] == ""
+
+
+def test_parse_case4e_requires_exactly_two_le_bytes():
+    from yggdrasim_common.gui_server.actions.scp03 import _parse_apdu_breakdown
+
+    bd = _parse_apdu_breakdown("00DA0000000002AABB0100")
+    assert bd["case"] == "4E"
+    assert bd["lc"] == "0002"
+    assert bd["data_hex"] == "AABB"
+    assert bd["le"] == "0100"
+    assert bd["le_value"] == 256
+
+    one_byte_le = _parse_apdu_breakdown("00DA0000000002AABB10")
+    assert one_byte_le["case"] == "malformed"
+    assert "expected 0 or 2" in one_byte_le["error"]
+
+
+@pytest.mark.parametrize(
+    ("apdu", "message"),
+    [
+        ("00DA00000001", "missing the two-byte"),
+        ("00DA0000000000AA", "extended Lc=0"),
+    ],
+)
+def test_parse_rejects_malformed_extended_framing(apdu, message):
+    from yggdrasim_common.gui_server.actions.scp03 import _parse_apdu_breakdown
+
+    bd = _parse_apdu_breakdown(apdu)
+    assert bd["case"] == "malformed"
+    assert bd["valid"] is False
+    assert message in bd["error"]
 
 
 # ----------------------------------------------------------------------
@@ -233,6 +296,34 @@ def test_corrected_le_case4_replaces_trailing_byte():
     apdu = "80E60C00" + "03" + "AABBCC" + "00"
     expected = "80E60C00" + "03" + "AABBCC" + "50"
     assert _apdu_with_corrected_le(apdu, 0x50) == expected
+
+
+def test_corrected_le_extended_cases_preserve_two_byte_framing():
+    from yggdrasim_common.gui_server.actions.scp03 import _apdu_with_corrected_le
+
+    case2e = "00C00000000010"
+    assert _apdu_with_corrected_le(case2e, 0x20) == "00C00000000020"
+
+    case3e = "00DA0000000002AABB"
+    assert _apdu_with_corrected_le(case3e, 0x20) == case3e + "0020"
+
+    case4e = case3e + "0100"
+    assert _apdu_with_corrected_le(case4e, 0x20) == case3e + "0020"
+
+
+def test_corrected_extended_le_6c00_encodes_256_not_65536():
+    from yggdrasim_common.gui_server.actions.scp03 import _apdu_with_corrected_le
+
+    # SW2=00 means exact Le=256. In extended framing that is 0100;
+    # 0000 would request 65,536 bytes.
+    assert _apdu_with_corrected_le("00C00000000010", 0x00) == "00C00000000100"
+
+
+def test_corrected_le_refuses_malformed_framing():
+    from yggdrasim_common.gui_server.actions.scp03 import _apdu_with_corrected_le
+
+    with pytest.raises(ValueError, match="malformed APDU"):
+        _apdu_with_corrected_le("00DA0000000002AABB10", 0x20)
 
 
 # ----------------------------------------------------------------------
@@ -423,6 +514,147 @@ def test_send_apdu_retry_6c_false_leaves_sw_as_is(monkeypatch):
     assert tp.calls == ["00B0000000"]
 
 
+def test_send_apdu_malformed_6c_does_not_corrupt_or_retry(monkeypatch):
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    tp = _FakeTransporter()
+    fs = _FakeFsController()
+    sess = _FakeSession(tp, fs)
+    malformed = "00DA0000000002AABB10"
+    tp.script[malformed] = (b"", 0x6C, 0x20)
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(
+        _Ctx(),
+        session_id=sess.id,
+        apdu=malformed,
+        retry_6c=True,
+    )
+
+    assert out["sw"] == "6C20"
+    assert out["chain"] == []
+    assert "malformed APDU" in out["retry_warning"]
+    assert tp.calls == [malformed]
+
+
+@pytest.mark.parametrize(
+    ("apdu", "get_response"),
+    [
+        ("01CA5A0000", "01C0000002"),
+        ("42CA5A0000", "42C0000002"),
+        ("80CA5A0000", "00C0000002"),
+        ("81CA5A0000", "01C0000002"),
+    ],
+)
+def test_send_apdu_get_response_preserves_logical_channel(
+    monkeypatch,
+    apdu,
+    get_response,
+):
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    tp = _FakeTransporter()
+    fs = _FakeFsController()
+    sess = _FakeSession(tp, fs)
+    tp.script[apdu] = (b"", 0x61, 0x02)
+    tp.script[get_response] = (bytes.fromhex("AABB"), 0x90, 0x00)
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(_Ctx(), session_id=sess.id, apdu=apdu)
+
+    assert out["response_hex"] == "AABB"
+    assert tp.calls == [apdu, get_response]
+
+
+def test_send_apdu_corrects_get_response_le_instead_of_replaying_original(
+    monkeypatch,
+):
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    tp = _FakeTransporter()
+    fs = _FakeFsController()
+    sess = _FakeSession(tp, fs)
+    original = "81CA5A0000"
+    first_get_response = "01C0000010"
+    corrected_get_response = "01C0000002"
+    tp.script[original] = (b"", 0x61, 0x10)
+    tp.script[first_get_response] = (b"", 0x6C, 0x02)
+    tp.script[corrected_get_response] = (bytes.fromhex("AABB"), 0x90, 0x00)
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(_Ctx(), session_id=sess.id, apdu=original)
+
+    assert out["response_hex"] == "AABB"
+    assert tp.calls == [original, first_get_response, corrected_get_response]
+    assert [step["reason"] for step in out["chain"]] == [
+        "GET RESPONSE",
+        "retry with corrected Le",
+    ]
+
+
+def test_send_apdu_follows_legacy_9f_continuation(monkeypatch):
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    tp = _FakeTransporter()
+    fs = _FakeFsController()
+    sess = _FakeSession(tp, fs)
+    tp.script["A0A40000023F00"] = (b"", 0x9F, 0x02)
+    tp.script["00C0000002"] = (bytes.fromhex("CAFE"), 0x90, 0x00)
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(
+        _Ctx(),
+        session_id=sess.id,
+        apdu="A0A40000023F00",
+    )
+
+    assert out["response_hex"] == "CAFE"
+    assert tp.calls == ["A0A40000023F00", "00C0000002"]
+
+
+def test_send_apdu_redacts_credential_command_from_result(monkeypatch):
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    tp = _FakeTransporter()
+    fs = _FakeFsController()
+    sess = _FakeSession(tp, fs)
+    verify = "002000010831323334FFFFFFFF"
+    tp.script[verify] = (b"", 0x90, 0x00)
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(_Ctx(), session_id=sess.id, apdu=verify)
+
+    assert tp.calls == [verify]
+    assert out["apdu_redacted"] is True
+    assert "31323334" not in out["apdu"]
+    assert "31323334" not in str(out["breakdown"])
+
+
+def test_send_apdu_redacts_authenticate_response_material(monkeypatch):
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    tp = _FakeTransporter()
+    fs = _FakeFsController()
+    sess = _FakeSession(tp, fs)
+    authenticate = "0088008010" + ("AA" * 16) + "00"
+    sensitive_response = bytes.fromhex(
+        "DB04A1A2A3A410" + ("11" * 16) + "10" + ("22" * 16)
+    )
+    tp.script[authenticate] = (sensitive_response, 0x90, 0x00)
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(
+        _Ctx(),
+        session_id=sess.id,
+        apdu=authenticate,
+    )
+
+    assert out["response_redacted"] is True
+    assert out["response_hex"] == ""
+    assert out["response_length"] == len(sensitive_response)
+    assert "A1A2A3A4" not in str(out)
+
+
 # ----------------------------------------------------------------------
 # _dispatch_send_apdu — result shape / metadata
 # ----------------------------------------------------------------------
@@ -518,4 +750,239 @@ def test_send_apdu_spec_registered():
     assert spec.subsystem == "SCP03"
     assert spec.requires_card is True
     field_names = {f.name for f in spec.inputs}
-    assert {"session_id", "apdu", "follow_61", "retry_6c"}.issubset(field_names)
+    assert {
+        "session_id",
+        "apdu",
+        "follow_61",
+        "retry_6c",
+        "include_wire_trace",
+    }.issubset(field_names)
+
+
+def test_send_apdu_uses_secure_transport_policy_for_followups(monkeypatch):
+    from types import SimpleNamespace
+
+    from SCP03.transport.card import ApduExchangeTrace, ApduTransmitResult
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    class _DetailedTransport:
+        def __init__(self) -> None:
+            self.session = SimpleNamespace(is_authenticated=True)
+            self.calls: list[str] = []
+            self.policy = None
+
+        def transmit_detailed(self, command: str, *, policy):
+            self.calls.append(command)
+            self.policy = policy
+            trace = (
+                ApduExchangeTrace(
+                    sequence=1,
+                    phase="command",
+                    command_length=5,
+                    wire_command_length=13,
+                    response_length=0,
+                    clear_response_length=0,
+                    sw1=0x61,
+                    sw2=0x02,
+                    secure_messaging=True,
+                    response_verified=True,
+                ),
+                ApduExchangeTrace(
+                    sequence=2,
+                    phase="get-response",
+                    command_length=5,
+                    wire_command_length=13,
+                    response_length=10,
+                    clear_response_length=2,
+                    sw1=0x90,
+                    sw2=0x00,
+                    secure_messaging=True,
+                    response_verified=True,
+                ),
+            )
+            return ApduTransmitResult(
+                data=bytes.fromhex("CAFE"),
+                sw1=0x90,
+                sw2=0x00,
+                trace=trace,
+            )
+
+    tp = _DetailedTransport()
+    sess = _FakeSession(tp, _FakeFsController())
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(
+        _Ctx(),
+        session_id=sess.id,
+        apdu="00CA5A0000",
+        follow_61=False,
+        retry_6c=False,
+    )
+
+    assert tp.calls == ["00CA5A0000"]
+    assert tp.policy.follow_response_data is False
+    assert tp.policy.retry_wrong_length is False
+    assert tp.policy.capture_apdu_bytes is False
+    assert out["response_hex"] == "CAFE"
+    assert out["chain"][0]["phase"] == "get-response"
+    assert out["chain"][0]["secure_messaging"] is True
+    assert out["chain"][0]["response_verified"] is True
+    assert out["chain"][0]["apdu"].endswith("bytes hidden]")
+
+
+def test_send_apdu_detailed_trace_redacts_pin_and_wire_command(monkeypatch):
+    from types import SimpleNamespace
+
+    from SCP03.transport.card import ApduExchangeTrace, ApduTransmitResult
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    verify = "002000010831323334FFFFFFFF"
+
+    class _DetailedTransport:
+        session = SimpleNamespace(is_authenticated=True)
+
+        def transmit_detailed(self, command: str, *, policy):
+            assert policy.capture_apdu_bytes is True
+            trace = (
+                ApduExchangeTrace(
+                    sequence=1,
+                    phase="command",
+                    command_length=len(bytes.fromhex(command)),
+                    wire_command_length=29,
+                    response_length=8,
+                    clear_response_length=0,
+                    sw1=0x90,
+                    sw2=0x00,
+                    secure_messaging=True,
+                    response_verified=True,
+                    command_hex=command,
+                    wire_command_hex="84" + ("AA" * 28),
+                    wire_response_hex="11" * 8,
+                    clear_response_hex="",
+                ),
+            )
+            return ApduTransmitResult(b"", 0x90, 0x00, trace)
+
+    tp = _DetailedTransport()
+    sess = _FakeSession(tp, _FakeFsController())
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(
+        _Ctx(),
+        session_id=sess.id,
+        apdu=verify,
+        include_wire_trace=True,
+    )
+
+    assert out["apdu_redacted"] is True
+    assert "31323334" not in str(out)
+    assert out["transport_trace"][0]["wire_apdu_hex"] == "[REDACTED]"
+
+
+def test_send_apdu_detailed_rmac_failure_is_fail_closed(monkeypatch):
+    from types import SimpleNamespace
+
+    from SCP03.transport.card import ApduExchangeTrace, ApduTransportError
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    class _DetailedTransport:
+        def __init__(self) -> None:
+            self.session = SimpleNamespace(is_authenticated=True)
+
+        def transmit_detailed(self, command: str, *, policy):
+            self.session.is_authenticated = False
+            trace = (
+                ApduExchangeTrace(
+                    sequence=1,
+                    phase="command",
+                    command_length=len(bytes.fromhex(command)),
+                    wire_command_length=13,
+                    response_length=12,
+                    clear_response_length=0,
+                    sw1=0x90,
+                    sw2=0x00,
+                    secure_messaging=True,
+                    response_verified=False,
+                    command_hex=command,
+                    wire_command_hex="84" + ("AA" * 12),
+                    wire_response_hex="DEADBEEF0011223344556677",
+                    clear_response_hex=None,
+                    error="Scp03ResponseProtectionError",
+                ),
+            )
+            raise ApduTransportError(
+                "R-MAC verification failed",
+                trace=trace,
+                cause_type="Scp03ResponseProtectionError",
+            )
+
+    tp = _DetailedTransport()
+    sess = _FakeSession(tp, _FakeFsController())
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(
+        _Ctx(),
+        session_id=sess.id,
+        apdu="00CA5A0000",
+        include_wire_trace=True,
+    )
+
+    assert out["ok"] is False
+    assert out["sw"] == "6F00"
+    assert out["response_hex"] == ""
+    assert "DEADBEEF" not in str(out)
+    assert out["transport_trace"][0]["response_verified"] is False
+    assert out["session_invalidated"] is True
+    assert "re-authentication" in out["session_invalidation_reason"]
+
+
+def test_send_apdu_reports_select_session_invalidation(monkeypatch):
+    from types import SimpleNamespace
+
+    from SCP03.transport.card import ApduExchangeTrace, ApduTransmitResult
+    from yggdrasim_common.gui_server.actions import scp03 as mod
+
+    reason = "Successful SELECT terminated SCP03; re-authentication is required."
+
+    class _DetailedTransport:
+        def __init__(self) -> None:
+            self.session = SimpleNamespace(is_authenticated=True)
+
+        def transmit_detailed(self, command: str, *, policy):
+            self.session.is_authenticated = False
+            trace = (
+                ApduExchangeTrace(
+                    sequence=1,
+                    phase="command",
+                    command_length=len(bytes.fromhex(command)),
+                    wire_command_length=13,
+                    response_length=0,
+                    clear_response_length=0,
+                    sw1=0x90,
+                    sw2=0x00,
+                    secure_messaging=True,
+                    response_verified=True,
+                ),
+            )
+            return ApduTransmitResult(
+                b"",
+                0x90,
+                0x00,
+                trace,
+                session_invalidated=True,
+                invalidation_reason=reason,
+            )
+
+    tp = _DetailedTransport()
+    sess = _FakeSession(tp, _FakeFsController())
+    _install_fake_manager(monkeypatch, sess)
+
+    out = mod._dispatch_send_apdu(
+        _Ctx(),
+        session_id=sess.id,
+        apdu="00A4040000",
+    )
+
+    assert out["ok"] is True
+    assert out["session_invalidated"] is True
+    assert out["session_invalidation_reason"] == reason

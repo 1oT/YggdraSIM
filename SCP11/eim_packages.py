@@ -24,6 +24,12 @@ Parses all EuiccPackage types and extracts activation code for indirect profile 
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from SCP11.shared.ber_tlv import (
+    read_ber_tlv,
+    read_single_ber_tlv,
+    validate_ber_tlv_tree,
+)
+
 # SGP.32 EuiccPackage choice tags (BER-TLV)
 TAG_BOUND_PROFILE_PACKAGE = bytes.fromhex("BF36")
 TAG_INDIRECT_PROFILE_DOWNLOAD_A1 = bytes([0xA1])
@@ -67,37 +73,7 @@ class ParsedEimPackage:
 
 
 def _read_tlv(data: bytes, offset: int) -> Tuple[bytes, bytes, bytes, int]:
-    if offset >= len(data):
-        raise ValueError("TLV offset out of range.")
-    tag_start = offset
-    offset += 1
-    if data[tag_start] & 0x1F == 0x1F:
-        while offset < len(data):
-            current = data[offset]
-            offset += 1
-            if current & 0x80 == 0:
-                break
-        else:
-            raise ValueError("Truncated multi-byte tag.")
-    tag_bytes = data[tag_start:offset]
-    length_byte = data[offset]
-    offset += 1
-    if length_byte & 0x80:
-        num_len = length_byte & 0x7F
-        if num_len > 2 or offset + num_len > len(data):
-            raise ValueError("Invalid long-form length.")
-        length = 0
-        for _ in range(num_len):
-            length = (length << 8) | data[offset]
-            offset += 1
-    else:
-        length = length_byte
-    value_start = offset
-    value_end = value_start + length
-    if value_end > len(data):
-        raise ValueError("TLV value overruns input.")
-    raw_tlv = data[tag_start:value_end]
-    return tag_bytes, data[value_start:value_end], raw_tlv, value_end
+    return read_ber_tlv(data, offset)
 
 
 def _find_activation_code_in_value(value: bytes) -> Optional[str]:
@@ -198,11 +174,15 @@ def _parse_tag_list(value: bytes) -> tuple[bytes, ...]:
         tag_start = offset
         offset += 1
         if value[tag_start] & 0x1F == 0x1F:
+            terminated = False
             while offset < len(value):
                 current = value[offset]
                 offset += 1
                 if current & 0x80 == 0:
+                    terminated = True
                     break
+            if terminated is False:
+                raise ValueError("Truncated multi-byte tag in requested tag list.")
         tags.append(value[tag_start:offset])
     return tuple(tags)
 
@@ -329,7 +309,7 @@ def _tag_of_tlv(raw_tlv: bytes) -> bytes:
     return tag_bytes
 
 
-def parse_eim_package(raw: bytes) -> ParsedEimPackage:
+def _parse_eim_package_validated(raw: bytes) -> ParsedEimPackage:
     """
     Parse a single eIM EuiccPackage (BER-TLV) and classify by SGP.32 type.
     Extracts activation code for indirect profile download.
@@ -338,7 +318,8 @@ def parse_eim_package(raw: bytes) -> ParsedEimPackage:
         return ParsedEimPackage(package_type=TYPE_GENERIC, raw=raw, root_tag=b"")
 
     try:
-        root_tag, root_value, _, _ = _read_tlv(raw, 0)
+        root_tag, root_value, _ = read_single_ber_tlv(raw)
+        validate_ber_tlv_tree(raw)
     except ValueError:
         return ParsedEimPackage(package_type=TYPE_GENERIC, raw=raw, root_tag=b"")
 
@@ -439,3 +420,21 @@ def parse_eim_package(raw: bytes) -> ParsedEimPackage:
             )
 
     return ParsedEimPackage(package_type=TYPE_GENERIC, raw=raw, root_tag=root_tag)
+
+
+def parse_eim_package(raw: bytes) -> ParsedEimPackage:
+    """Safely classify one complete eIM package.
+
+    Malformed external input always falls back to ``generic`` rather than
+    leaking low-level indexing or decoding exceptions into poll workflows.
+    """
+
+    normalized = bytes(raw or b"")
+    try:
+        return _parse_eim_package_validated(normalized)
+    except (IndexError, TypeError, UnicodeError, ValueError):
+        return ParsedEimPackage(
+            package_type=TYPE_GENERIC,
+            raw=normalized,
+            root_tag=b"",
+        )

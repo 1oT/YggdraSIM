@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: 1oT Light ---------------------------------------------------- */
 html[data-theme="oneot-light"] {
   --bg: #f5f8fb;
@@ -15,18 +16,18 @@ html[data-theme="oneot-light"] {
   --border-strong: rgba(194, 204, 215, 0.95);
   --fg: #0d1926;
   --fg-dim: #576675;
-  --accent: #02b480;
-  --accent-strong: #01d799;
+  --accent: #007f62;
+  --accent-strong: #006b52;
   --accent-soft: rgba(2, 180, 128, 0.12);
-  --accent-fg: #001b38;
+  --accent-fg: #ffffff;
   --accent-glow: rgba(1, 215, 153, 0.45);
-  --gradient-accent: linear-gradient(135deg, #01d799 0%, #02b480 100%);
-  --gradient-brand: linear-gradient(135deg, #02b480 0%, #6382ee 100%);
-  --ok: #02b480;
+  --gradient-accent: linear-gradient(135deg, #007f62 0%, #006b52 100%);
+  --gradient-brand: linear-gradient(135deg, #007f62 0%, #425fc0 100%);
+  --ok: #007f62;
   --ok-soft: rgba(2, 180, 128, 0.14);
-  --warn: #e89e00;
+  --warn: #875800;
   --warn-soft: rgba(232, 158, 0, 0.16);
-  --fail: #ee5d1f;
+  --fail: #ad3b0c;
   --fail-soft: rgba(238, 93, 31, 0.14);
   --code-bg: #f5f8fb;
   --kbd-bg: #ffffff;
@@ -39,4 +40,3 @@ html[data-theme="oneot-light"] {
     radial-gradient(circle at 8% 100%, rgba(99, 130, 238, 0.12), transparent 50%),
     radial-gradient(circle at 60% 40%, rgba(232, 158, 0, 0.06), transparent 46%);
 }
-

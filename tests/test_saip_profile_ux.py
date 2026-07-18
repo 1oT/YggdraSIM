@@ -28,8 +28,6 @@ from Tools.ProfilePackage.saip_profile_randomizer import (
     resolve_auto_value,
 )
 from Tools.ProfilePackage.saip_profile_scaffold import (
-    ProfilePreset,
-    default_preset_id,
     describe_menu_id,
     describe_preset,
     diff_presets,

@@ -201,6 +201,10 @@ class ActionRegistry:
     def clear(self) -> None:
         """Only used in tests."""
         self._specs.clear()
+        # ``PluginManager.extend_target`` records applied capability names on
+        # the target.  A test reset must clear that stamp as well, otherwise a
+        # freshly loaded provider cannot contribute its actions again.
+        self.__dict__.pop("_yggdrasim_applied_plugin_capabilities", None)
 
 
 _REGISTRY = ActionRegistry()
@@ -273,6 +277,21 @@ def ensure_builtin_actions_loaded() -> ActionRegistry:
                 type(load_error).__name__,
                 load_error,
             )
+    # Plugins are executable operator-supplied code and are already protected
+    # by the default-deny runtime gate.  Extend only after every built-in action
+    # has registered so normal ActionRegistry collision handling remains the
+    # single authority.  A broken optional provider must not hide the bundled
+    # catalogue.
+    try:
+        from yggdrasim_common.plugin_runtime import extend_target_with_plugins
+
+        extend_target_with_plugins(_REGISTRY)
+    except Exception as load_error:  # noqa: BLE001 - isolate optional plugins
+        log.warning(
+            "plugin action contribution failed (%s: %s)",
+            type(load_error).__name__,
+            load_error,
+        )
     return _REGISTRY
 
 
@@ -294,7 +313,15 @@ def coerce_input(field_spec: ActionField, raw: Any) -> Any:
     if kind in ("string", "text", "reader", "path", "directory", "save_path"):
         return str(raw)
     if kind == "hex":
-        cleaned = str(raw).replace(" ", "").replace(":", "").strip().upper()
+        # Accept the formats operators commonly paste from traces and
+        # datasheets: grouped spaces/newlines, colon/dash/underscore
+        # separators, and one leading ``0x`` prefix. Backend SCP03 hex
+        # helpers use the same normalisation contract.
+        cleaned = "".join(str(raw).split())
+        cleaned = cleaned.replace(":", "").replace("-", "").replace("_", "")
+        if cleaned.lower().startswith("0x"):
+            cleaned = cleaned[2:]
+        cleaned = cleaned.upper()
         if len(cleaned) == 0:
             if field_spec.required:
                 raise ValueError(f"{field_spec.name}: hex string is empty")

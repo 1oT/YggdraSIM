@@ -269,7 +269,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
 
 ```json
 {
-  "eid": "89049032123451234512345678901234",
+  "eid": "89049032123451234512345678901235",
   "atr_hex": "3B9F96801FC78031A073BE21136743200718000001A5",
   "default_dp_address": "rsp.example.com",
   "root_ci_pkid_hex": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
@@ -311,7 +311,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
 
 1. `eid` is the 32-hex-digit eUICC identifier (TS 23.003 §10). Choose a
    namespace your lab does not collide with. The shipped default
-   `89049032123451234512345678901234` uses the SGP.22 Annex A.2 test
+   `89049032123451234512345678901235` uses the SGP.22 Annex A.2 test
    EID prefix `89049032` and a valid Luhn check digit. Replace it before
    any production-adjacent run.
 2. `atr_hex` is replayed verbatim by the simulated reader. Match the
@@ -819,13 +819,16 @@ gate is missing or when the card identifier is not in the allow-list.
 
 **Loading model.**
 
-1. Plugins load by default since the loader-default flip; opt out with
-   `YGGDRASIM_ALLOW_PLUGINS=0` or hard-lock with
-   `YGGDRASIM_DISALLOW_PLUGINS=1` (intended for attestation / CI /
-   air-gapped builds).
-2. Each plugin lives in its own subdirectory with a manifest. See
+1. Plugins are refused by default. Explicitly opt in with
+   `YGGDRASIM_ALLOW_PLUGINS=1`; `YGGDRASIM_DISALLOW_PLUGINS=1` is a
+   hard-lock that wins even when the allow flag is also set (intended for
+   attestation / CI / air-gapped builds).
+2. The loader accepts a single `.py` file directly under `plugins/` or a
+   package subdirectory containing `__init__.py`. Each loaded module must
+   expose `register_plugins(manager)`; no plugin manifest is currently
+   required. See
    [`site-docs/how-to/write-a-plugin.md`](../../how-to/write-a-plugin.md)
-   for the manifest schema and lifecycle.
+   for the loader contract and an example.
 3. Plugins are imported at launcher startup. Changing the env flag in
    a running process does **not** retroactively load or unload plugins.
 
@@ -922,7 +925,10 @@ The runtime root is the writable parent of `plugins/`, `state/`, and
    `~/.yggdrasim/env_overrides.json` so the override survives across
    runs without creating a chicken-and-egg with the resolver).
 2. Source checkouts: the repository root.
-3. Frozen builds: a sibling directory called `YggdraSIM-data` next to
+3. Installed wheels: the platform per-user data directory
+   (`%LOCALAPPDATA%\YggdraSIM`, `~/Library/Application Support/YggdraSIM`,
+   or `$XDG_DATA_HOME/YggdraSIM`/`~/.local/share/YggdraSIM`).
+4. Frozen builds: a sibling directory called `YggdraSIM-data` next to
    the executable, falling back to `~/YggdraSIM-data`.
 
 **Why override.**

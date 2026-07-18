@@ -26,7 +26,7 @@ try:
         scan_json_object_member_entries,
         section_keys_touching_json_range,
     )
-    from textual.document._document import Location, Selection
+    from textual.document._document import Selection
     _IMPORT_OK = True
 except (ImportError, ModuleNotFoundError):
     _IMPORT_OK = False

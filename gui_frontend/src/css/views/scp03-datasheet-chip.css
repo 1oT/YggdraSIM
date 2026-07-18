@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* datasheet chip row (Reader / EID / Input / SW / note chips) */
 .cc-datasheet-chips {
   display: flex;
@@ -16,6 +17,8 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  max-width: 100%;
   background: var(--bg-hover);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -25,6 +28,7 @@
 }
 
 .cc-datasheet-chip-label {
+  flex: 0 0 auto;
   font-size: 10.5px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -37,9 +41,11 @@
 }
 
 .cc-datasheet-chip-value {
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--fg);
+  overflow-wrap: anywhere;
 }
 
 .cc-datasheet-chip--warn {
@@ -131,6 +137,17 @@
   padding: 10px 4px 8px;
   font-weight: 600;
   color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.cc-action-datasheet-raw.cc-details > summary:hover {
+  color: var(--fg);
+}
+
+.cc-action-datasheet-raw.cc-details > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  color: var(--fg);
 }
 
 .cc-action-datasheet-raw .cc-hex {
@@ -148,4 +165,3 @@
   margin: 8px 0 0;
   max-height: min(40vh, 420px);
 }
-

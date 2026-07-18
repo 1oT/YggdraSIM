@@ -39,13 +39,13 @@ below.
    ones. Follow the style already present in the neighbourhood of the
    change.
 4. Respect the coding standards captured in the docs:
-   [Coding Standards](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/site-docs/internals/coding-standards.md).
+   [Coding Standards](https://github.com/1oT/YggdraSIM/blob/main/site-docs/internals/coding-standards.md).
    Notably: never collapse `if` / `try` / `except` / `with` / `for` onto a
    single line with their block.
 5. Add or update tests for any behavioural change. Run the narrowest
    relevant `pytest` target. Do not run the full suite in CI-at-a-glance
    mode; see
-   [Testing Guide](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/site-docs/internals/testing-guide.md).
+   [Testing Guide](https://github.com/1oT/YggdraSIM/blob/main/site-docs/internals/testing-guide.md).
 6. Update documentation in the same PR. If you change a CLI surface or an
    operator flow, update at minimum:
    - the subsystem page under `site-docs/subsystems/`
@@ -77,7 +77,7 @@ APDU-layer decoding must:
   `CMAC`, `KDF`, or `ECDSA` check with a no-op for convenience).
 
 For coordinated vulnerability disclosure, see
-[`.github/SECURITY.md`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/.github/SECURITY.md)
+[`SECURITY.md`](https://github.com/1oT/YggdraSIM/blob/main/SECURITY.md)
 at the repository root instead of opening a public issue.
 
 ## Licensing of contributions

@@ -6,6 +6,8 @@ from __future__ import annotations
 import sys
 from collections.abc import Sequence
 
+from yggdrasim_common.frozen_dispatch import dispatch_internal_entry
+
 
 def _load_run_cli():
     try:
@@ -17,6 +19,9 @@ def _load_run_cli():
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    internal_exit = dispatch_internal_entry(args)
+    if internal_exit is not None:
+        return int(internal_exit)
     if not any(arg in ("--gui", "--web-server") for arg in args):
         args.insert(0, "--gui")
     return int(_load_run_cli()(args) or 0)

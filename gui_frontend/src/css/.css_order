@@ -62,6 +62,7 @@ views/scp03-datasheet-decoded.css
 views/scp03-datasheet-chip.css
 views/floating-action-popouts.css
 views/records-viewer.css
+views/remote-lab.css
 views/pretty-value-base.css
 views/pretty-value-chips.css
 views/pretty-value-ef.css

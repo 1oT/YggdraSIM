@@ -55,10 +55,10 @@ class _FakeCryptoManager:
 
 class DeviceInventoryTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.state_dir = Path(__file__).resolve().parents[1] / "state"
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        self.temp_dir = tempfile.TemporaryDirectory(dir=self.state_dir)
-        self.temp_path = Path(self.temp_dir.name)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.state_dir = Path(self.temp_dir.name)
+        self.temp_path = self.state_dir / "primary"
+        self.temp_path.mkdir()
         self.db_path = self.temp_path / "device_inventory.sqlite3"
 
     def tearDown(self) -> None:

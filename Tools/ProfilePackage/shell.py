@@ -6,7 +6,6 @@
 import atexit
 import ast
 import copy
-import ipaddress
 import json
 import os
 import re

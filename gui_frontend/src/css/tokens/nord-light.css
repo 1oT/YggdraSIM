@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Nord Light --------------------------------------------------- */
 html[data-theme="nord-light"] {
   --bg: #eceff4;
@@ -15,18 +16,18 @@ html[data-theme="nord-light"] {
   --border-strong: rgba(76, 86, 106, 0.32);
   --fg: #2e3440;
   --fg-dim: #4c566a;
-  --accent: #5e81ac;
-  --accent-strong: #81a1c1;
+  --accent: #496b96;
+  --accent-strong: #34547c;
   --accent-soft: rgba(94, 129, 172, 0.12);
   --accent-fg: #ffffff;
   --accent-glow: rgba(94, 129, 172, 0.35);
-  --gradient-accent: linear-gradient(135deg, #5e81ac 0%, #81a1c1 60%, #88c0d0 100%);
-  --gradient-brand: linear-gradient(135deg, #5e81ac 0%, #b48ead 100%);
-  --ok: #7ca063;
+  --gradient-accent: linear-gradient(135deg, #496b96 0%, #3f5f87 60%, #34547c 100%);
+  --gradient-brand: linear-gradient(135deg, #496b96 0%, #765a76 100%);
+  --ok: #52763f;
   --ok-soft: rgba(124, 160, 99, 0.16);
-  --warn: #d08770;
+  --warn: #985343;
   --warn-soft: rgba(208, 135, 112, 0.18);
-  --fail: #bf616a;
+  --fail: #9b3f48;
   --fail-soft: rgba(191, 97, 106, 0.18);
   --code-bg: #eceff4;
   --kbd-bg: rgba(236, 239, 244, 0.96);
@@ -66,4 +67,3 @@ html[data-theme="nord-light"] {
     radial-gradient(circle at 70% 20%,      rgba(126, 111, 160, 0.10), transparent 40%),
     radial-gradient(circle at 20% 80%,      rgba(185, 134, 63, 0.07), transparent 42%);
 }
-

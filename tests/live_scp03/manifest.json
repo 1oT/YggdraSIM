@@ -332,7 +332,7 @@
       "name": "REPORT",
       "script": "REPORT.in.txt",
       "category": "wizard",
-      "expected_substrings": ["File System Reporting Wizard", "EOF when reading a line"],
+      "expected_substrings": ["File System Reporting Wizard", "Wizard cancelled; no action taken"],
       "tolerate_failure": true,
       "notes": "Wizard receives EOF on stdin."
     },
@@ -340,35 +340,35 @@
       "name": "MANAGE-PROFILE",
       "script": "MANAGE-PROFILE.in.txt",
       "category": "wizard",
-      "expected_substrings": ["eSIM Profile Management", "EOF when reading a line"],
+      "expected_substrings": ["eSIM Profile Management", "Wizard cancelled; no action taken"],
       "tolerate_failure": true
     },
     {
       "name": "GET-DATA",
       "script": "GET-DATA.in.txt",
       "category": "wizard",
-      "expected_substrings": ["GP GET DATA Command", "EOF when reading a line"],
+      "expected_substrings": ["GP GET DATA Command", "Wizard cancelled; no action taken"],
       "tolerate_failure": true
     },
     {
       "name": "PUT-KEY",
       "script": "PUT-KEY.in.txt",
       "category": "wizard",
-      "expected_substrings": ["GP PUT KEY Command", "EOF when reading a line"],
+      "expected_substrings": ["GP PUT KEY Command", "Wizard cancelled; no action taken"],
       "tolerate_failure": true
     },
     {
       "name": "SET-STATUS",
       "script": "SET-STATUS.in.txt",
       "category": "wizard",
-      "expected_substrings": ["GP SET STATUS Command", "EOF when reading a line"],
+      "expected_substrings": ["GP SET STATUS Command", "Wizard cancelled; no action taken"],
       "tolerate_failure": true
     },
     {
       "name": "MANAGE-CHANNEL",
       "script": "MANAGE-CHANNEL.in.txt",
       "category": "wizard",
-      "expected_substrings": ["GP MANAGE CHANNEL Command", "EOF when reading a line"],
+      "expected_substrings": ["GP MANAGE CHANNEL Command", "Wizard cancelled; no action taken"],
       "tolerate_failure": true
     },
     {
@@ -382,28 +382,28 @@
       "name": "FS-ADMIN",
       "script": "FS-ADMIN.in.txt",
       "category": "wizard",
-      "expected_substrings": ["ETSI File System Administration", "EOF when reading a line"],
+      "expected_substrings": ["ETSI File System Administration", "Wizard cancelled; no action taken"],
       "tolerate_failure": true
     },
     {
       "name": "MANAGE-PIN",
       "script": "MANAGE-PIN.in.txt",
       "category": "wizard",
-      "expected_substrings": ["GP PIN Management Command", "EOF when reading a line"],
+      "expected_substrings": ["GP PIN Management Command", "Wizard cancelled; no action taken"],
       "tolerate_failure": true
     },
     {
       "name": "RUN-AUTH",
       "script": "RUN-AUTH.in.txt",
       "category": "wizard",
-      "expected_substrings": ["Telecom Authentication Command", "EOF when reading a line"],
+      "expected_substrings": ["Telecom Authentication Command", "Wizard cancelled; no action taken"],
       "tolerate_failure": true
     },
     {
       "name": "CONFIG",
       "script": "CONFIG.in.txt",
       "category": "wizard",
-      "expected_substrings": ["Environment Configuration", "EOF when reading a line"],
+      "expected_substrings": ["Environment Configuration", "Wizard cancelled; no action taken"],
       "tolerate_failure": true
     },
     {

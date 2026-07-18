@@ -37,10 +37,16 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
+from pydantic import BaseModel, Field
 
 from yggdrasim_common.apdu_recorder import ApduExchange, get_recorder
-from yggdrasim_common.gui_server.auth import compare_tokens, token_id
+from yggdrasim_common.gui_server.auth import (
+    compare_tokens,
+    token_id,
+    websocket_accept_protocol,
+    websocket_bearer,
+)
 
 
 _LOGGER = logging.getLogger("yggdrasim.gui.apdu_events")
@@ -55,20 +61,7 @@ _HEARTBEAT_SECONDS = 25.0
 
 
 def _extract_token(websocket: WebSocket) -> str:
-    header = websocket.headers.get("authorization") or ""
-    if header.lower().startswith("bearer "):
-        return header.split(" ", 1)[1].strip()
-
-    subproto = websocket.headers.get("sec-websocket-protocol") or ""
-    for fragment in (part.strip() for part in subproto.split(",")):
-        if fragment.lower().startswith("bearer."):
-            return fragment.split(".", 1)[1].strip()
-
-    qs_token = websocket.query_params.get("t")
-    if qs_token:
-        return str(qs_token)
-
-    return ""
+    return websocket_bearer(websocket)
 
 
 def _expected_token(websocket: WebSocket) -> str:
@@ -83,6 +76,37 @@ def _exchange_to_frame(exchange: ApduExchange) -> dict[str, Any]:
     payload = exchange.to_json()
     payload["event"] = "apdu"
     return payload
+
+
+class RawCaptureConsent(BaseModel):
+    scope: str = Field(min_length=1, max_length=256)
+    ttl_seconds: int = Field(default=60, ge=30, le=300)
+    consent: str
+
+
+@router.post("/api/events/apdu/raw-consent")
+def enable_raw_capture(body: RawCaptureConsent) -> dict[str, Any]:
+    """Enable diagnostic raw capture for one reader/source for at most 5 minutes."""
+    try:
+        get_recorder().enable_raw_capture(
+            body.scope,
+            ttl_seconds=body.ttl_seconds,
+            consent=body.consent,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {
+        "enabled": True,
+        "scope": body.scope,
+        "ttl_seconds": body.ttl_seconds,
+        "warning": "Raw APDU payloads can contain PINs, keys, and profile data.",
+    }
+
+
+@router.delete("/api/events/apdu/raw-consent/{scope}")
+def disable_raw_capture(scope: str) -> dict[str, Any]:
+    get_recorder().disable_raw_capture(scope)
+    return {"enabled": False, "scope": scope}
 
 
 # --- route -------------------------------------------------------------
@@ -106,21 +130,29 @@ async def apdu_event_stream(websocket: WebSocket) -> None:
         _LOGGER.info("gui.apdu_events.auth_rejected")
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
     _LOGGER.info(
         "gui.apdu_events.opened token=%s", token_id(provided)
     )
 
     recorder = get_recorder()
+    requested_scope = str(websocket.query_params.get("scope") or "").strip()
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[ApduExchange] = asyncio.Queue(maxsize=_QUEUE_CAP)
-    detach = recorder.attach_queue(queue, loop=loop)
+    detach = recorder.attach_queue(
+        queue,
+        loop=loop,
+        scope=requested_scope or None,
+    )
 
     try:
         # Replay recent buffer so a freshly-opened tab gets context
         # immediately. We keep the limit modest (200 rows) — enough to
         # show a typical scan + read loop without flooding the UI.
-        for past in recorder.snapshot(limit=200):
+        for past in recorder.snapshot(
+            limit=200,
+            scope=requested_scope or None,
+        ):
             await websocket.send_text(json.dumps(_exchange_to_frame(past)))
 
         while True:

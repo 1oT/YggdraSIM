@@ -36,15 +36,10 @@ from Tools.ProfilePackage.saip_asn1_decode import (
     _decode_ef_v2xp_pc5,
     _decode_ef_v2xp_uu,
     _decode_generic_tlv_ef,
-    _EF_IMPDF_TAGS,
     _EF_MCS_TAGS,
-    _EF_PKCS15_ACRF_TAGS,
     _EF_PROSE_PROVISIONED_TAGS,
     _EF_URSP_TAGS,
-    _EF_V2X_AUTHKEYS_TAGS,
-    _EF_V2X_CERT_TAGS,
     _EF_V2X_CFG_TAGS,
-    _EF_V2X_PRECFG_TAGS,
     _decode_ef_cc_counter,
     _decode_ef_cmi,
     _decode_ef_earfcn_list,
@@ -154,13 +149,15 @@ class Loci5GsDecoderTests:
     """Fixed 20-byte 5GS LOCI frames."""
 
     SAMPLE_HEX = (
-        # 5G-GUTI: PLMN 001-01 (00F110), AMF region AA, AMF set+pointer BBCC,
-        # 5G-TMSI 11223344, RFU 00FFEE
+        # 5G-GUTI mobile identity: length 000B, header F2,
+        # PLMN 001-01 (00F110), AMF region AA, AMF set+pointer BBCC,
+        # 5G-TMSI 11223344.
+        "000B"
+        "F2"
         "00F110"
         "AA"
         "BBCC"
         "11223344"
-        "00FFEE"
         # TAI: PLMN 001-01, TAC 000001
         "00F110"
         "000001"
@@ -176,6 +173,9 @@ class Loci5GsDecoderTests:
         )
         assert decoded is not None
         assert decoded["length"] == 20
+        assert decoded["guti"]["identityLength"] == 11
+        assert decoded["guti"]["identityHeaderHex"] == "F2"
+        assert decoded["guti"]["plmn"] == "001-01"
         assert decoded["guti"]["amfRegionId"] == "0xAA"
         assert decoded["guti"]["amfSetAndPointerHex"] == "BBCC"
         assert decoded["guti"]["tmsiHex"] == "11223344"

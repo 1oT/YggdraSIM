@@ -55,6 +55,11 @@ class CapParseResult:
 
 class CapFileParser:
 
+    # The load-file wrapper emitted by this parser currently supports a
+    # two-byte BER length, so reject oversized archives before reading their
+    # complete uncompressed contents into memory.
+    MAX_COMPONENT_BLOB_SIZE = 0xFFFF
+
     ORDER = [
         "Header.cap",
         "Directory.cap",
@@ -128,6 +133,8 @@ class CapFileParser:
             raise ValueError("Invalid BER length field.")
 
         length = int.from_bytes(data[offset:offset + num_bytes], "big")
+        if length <= 0x7F or data[offset] == 0x00:
+            raise ValueError("Non-minimal BER length field.")
         return length, offset + num_bytes
 
     @staticmethod
@@ -136,14 +143,14 @@ class CapFileParser:
 
     @staticmethod 
     def _unwrap_load_file_block(data: bytes) -> Tuple[bytes, int, int]:
-        if len(data) > 2 and data[0] == 0xC4:
-            try:
-                length, payload_offset = CapFileParser._decode_ber_length(data, 1)
-                end_offset = payload_offset + length
-                if end_offset <= len(data):
-                    return data[payload_offset:end_offset], payload_offset, end_offset
-            except Exception:
-                pass
+        if len(data) > 0 and data[0] == 0xC4:
+            length, payload_offset = CapFileParser._decode_ber_length(data, 1)
+            end_offset = payload_offset + length
+            if end_offset > len(data):
+                raise ValueError("Load-file block length exceeds available data.")
+            if end_offset != len(data):
+                raise ValueError("Load-file block contains trailing data.")
+            return data[payload_offset:end_offset], payload_offset, end_offset
         return data, 0, len(data)
 
     @staticmethod
@@ -404,6 +411,11 @@ class CapFileParser:
         with open(ijc_path, "rb") as file_obj:
             raw_data = file_obj.read()
 
+        if len(raw_data) > CapFileParser.MAX_COMPONENT_BLOB_SIZE + 4:
+            raise ValueError(
+                "IJC load file exceeds the supported 65535-byte component size."
+            )
+
         component_blob, _, load_end_offset = CapFileParser._unwrap_load_file_block(raw_data)
         load_block = raw_data[:load_end_offset]
         pkg_aid = b""
@@ -422,12 +434,16 @@ class CapFileParser:
                 raise ValueError("CAP component length exceeds available data.")
 
             comp_data = component_blob[offset:comp_end]
+            CapFileParser._validate_component(comp_data)
             if tag == 1:
                 pkg_aid = CapFileParser._extract_pkg_aid(comp_data)
             elif tag == 3:
                 applet_aids = CapFileParser._extract_applet_aids(comp_data)
 
             offset = comp_end
+
+        if len(pkg_aid) == 0:
+            raise ValueError("IJC load file is missing a valid Header.cap package AID.")
 
         return CapFileParser._build_parse_result(
             load_block=load_block,
@@ -449,17 +465,37 @@ class CapFileParser:
 
         try:
             with zipfile.ZipFile(cap_path, "r") as cap_zip:
-                all_files = cap_zip.namelist()
                 component_map: Dict[str, str] = {}
-                for file_name in all_files:
+                for member in cap_zip.infolist():
+                    file_name = member.filename
                     if file_name.lower().endswith(".cap"):
-                        base_name = os.path.basename(file_name)
-                        component_map[base_name] = file_name
+                        # ZIP member names are specified with '/', but a few
+                        # Windows-produced archives contain backslashes.
+                        base_name = file_name.replace("\\", "/").rsplit("/", 1)[-1]
+                        component_key = base_name.lower()
+                        if component_key in component_map:
+                            raise ValueError(
+                                f"CAP archive contains duplicate {base_name!r} components."
+                            )
+                        if member.file_size > CapFileParser.MAX_COMPONENT_BLOB_SIZE:
+                            raise ValueError(
+                                f"{base_name} exceeds the supported 65535-byte component size."
+                            )
+                        component_map[component_key] = file_name
 
                 for component_name in CapFileParser.ORDER:
-                    if component_name in component_map:
-                        path = component_map[component_name]
+                    component_key = component_name.lower()
+                    if component_key in component_map:
+                        path = component_map[component_key]
                         data = cap_zip.read(path)
+                        CapFileParser._validate_component(
+                            data,
+                            expected_name=component_name,
+                        )
+                        if len(blob) + len(data) > CapFileParser.MAX_COMPONENT_BLOB_SIZE:
+                            raise ValueError(
+                                "CAP component blob exceeds the supported 65535-byte size."
+                            )
                         blob.extend(data)
                         ordered_names.append(component_name)
 
@@ -472,6 +508,8 @@ class CapFileParser:
 
         if len(blob) == 0:
             raise ValueError("CAP file did not contain any recognized load components.")
+        if "header.cap" not in component_map:
+            raise ValueError("CAP archive is missing the mandatory Header.cap component.")
 
         component_blob = bytes(blob)
         load_block = CapFileParser._wrap_load_file_block(component_blob)
@@ -485,31 +523,84 @@ class CapFileParser:
 
     @staticmethod
     def _extract_pkg_aid(data: bytes) -> bytes:
-        try:
-            if len(data) > 13:
-                aid_len = data[12]
-                return data[13:13 + aid_len]
-        except Exception:
-            pass
-        return b""
+        if len(data) < 13:
+            raise ValueError("Header.cap is truncated before the package AID length.")
+        aid_len = data[12]
+        if not 5 <= aid_len <= 16:
+            raise ValueError(
+                f"Header.cap package AID length {aid_len} is outside 5..16 bytes."
+            )
+        aid_end = 13 + aid_len
+        if aid_end > len(data):
+            raise ValueError("Header.cap package AID exceeds the component boundary.")
+        return data[13:aid_end]
 
     @staticmethod
     def _extract_applet_aids(data: bytes) -> List[bytes]:
+        if len(data) < 4:
+            raise ValueError("Applet.cap is truncated before the applet count.")
+
         aids: List[bytes] = []
-        try:
-            if len(data) >= 4:
-                count = data[3]
-                offset = 4
-                for _ in range(count):
-                    if offset >= len(data):
-                        break
-
-                    aid_len = data[offset]
-                    offset += 1
-                    aid = data[offset:offset + aid_len]
-                    aids.append(aid)
-                    offset += aid_len + 2
-        except Exception:
-            pass
-
+        count = data[3]
+        offset = 4
+        for index in range(count):
+            if offset >= len(data):
+                raise ValueError(
+                    f"Applet.cap is truncated before applet {index + 1}."
+                )
+            aid_len = data[offset]
+            offset += 1
+            if not 5 <= aid_len <= 16:
+                raise ValueError(
+                    f"Applet.cap applet {index + 1} AID length {aid_len} "
+                    "is outside 5..16 bytes."
+                )
+            aid_end = offset + aid_len
+            install_offset_end = aid_end + 2
+            if install_offset_end > len(data):
+                raise ValueError(
+                    f"Applet.cap applet {index + 1} entry exceeds the component boundary."
+                )
+            aids.append(data[offset:aid_end])
+            offset = install_offset_end
+        if offset != len(data):
+            raise ValueError("Applet.cap contains trailing bytes after its applet entries.")
         return aids
+
+    @staticmethod
+    def _validate_component(
+        data: bytes,
+        *,
+        expected_name: Optional[str] = None,
+    ) -> None:
+        """Validate one CAP component header before metadata is decoded."""
+        if len(data) < 3:
+            label = expected_name or "CAP component"
+            raise ValueError(f"{label} is truncated before its component header.")
+
+        declared_length = int.from_bytes(data[1:3], "big")
+        actual_length = len(data) - 3
+        if declared_length != actual_length:
+            label = expected_name or CapFileParser.TAG_NAMES.get(
+                data[0],
+                f"tag {data[0]:02X}",
+            )
+            raise ValueError(
+                f"{label} declares {declared_length} payload bytes but contains "
+                f"{actual_length}."
+            )
+
+        if expected_name is not None:
+            expected_tag = next(
+                (
+                    tag
+                    for tag, component_name in CapFileParser.TAG_NAMES.items()
+                    if component_name.lower() == expected_name.lower()
+                ),
+                None,
+            )
+            if expected_tag is not None and data[0] != expected_tag:
+                raise ValueError(
+                    f"{expected_name} uses component tag {data[0]:02X}; "
+                    f"expected {expected_tag:02X}."
+                )

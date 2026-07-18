@@ -17,8 +17,9 @@ Security fixes are accepted on the actively-maintained line:
 
 | Version line | Supported | Notes |
 | --- | --- | --- |
-| `1.0.x` (released `v1.0.0`) | Yes | Tracked on the `release/1.0.x` branch and the `v1.0.0` tag. |
-| `main` (post-v1 R2 staging) | Yes | Pre-release work-in-progress; fixes that apply to v1 are back-ported. |
+| `2.0.x` (released `v2.0.0`) | Yes | Current release line, tracked on `release/2.0.x`. |
+| `1.0.x` (latest `v1.0.2`) | Yes | Security-maintenance line, tracked on `release/1.0.x`. |
+| `main` | Yes | Active development; applicable fixes are back-ported to supported release lines. |
 | Any earlier RC tag (`Feb 2026 RCs`) | No | Superseded by `v1.0.0`. Re-base onto a supported line. |
 
 ## How to report a vulnerability
@@ -27,7 +28,7 @@ Security fixes are accepted on the actively-maintained line:
 private channels below.
 
 - Preferred: GitHub private vulnerability report on
-  `https://github.com/hampushellsberg-dev/YggdraSIM/security/advisories/new`.
+  `https://github.com/1oT/YggdraSIM/security/advisories/new`.
 - Alternative: email **`security@1ot.com`** with the subject prefix
   `[YggdraSIM][SECURITY]` and a descriptive title.
 - For reports involving GSMA, SGP.02 / 22 / 32, or any disclosure that
@@ -110,4 +111,3 @@ For context, the following hardening landed before `v1.0.0`:
 - `pyscard`, `pysim`, and operator-only state directories are
   excluded from the published wheel and Docker image (see
   `.gitignore`, `.dockerignore`, `MANIFEST.in`).
-

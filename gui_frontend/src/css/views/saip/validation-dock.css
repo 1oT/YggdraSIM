@@ -210,7 +210,9 @@
   align-items: center;
   justify-content: center;
   margin-left: 4px;
-  padding: 0 3px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 5px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -222,8 +224,15 @@
   vertical-align: middle;
 }
 
-.saip-val-code-cell:hover .saip-val-copy-btn {
+.saip-val-code-cell:hover .saip-val-copy-btn,
+.saip-val-code-cell:focus-within .saip-val-copy-btn {
   opacity: 1;
+}
+
+.saip-val-copy-btn:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .saip-val-msg-cell--expandable {

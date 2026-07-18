@@ -51,6 +51,18 @@ to a subsystem or a cross-cutting concern. Representative file patterns:
 - Tests that require plugin runtime behavior should drop a temporary plugin
   through fixtures, not mutate the repository `plugins/` tree.
 
+The default test bootstrap redirects `HOME`, `USERPROFILE`, `GNUPGHOME`, XDG
+directories, and `YGGDRASIM_RUNTIME_ROOT` into a temporary session tree before
+test modules are imported. This prevents a developer's keyring, inventory, or
+runtime state from selecting test outcomes. Hardware/integration harnesses may
+opt into ambient operator state only with
+`YGGDRASIM_TEST_USE_AMBIENT_STATE=1`.
+
+Tests that bind a real loopback listener use the `require_loopback_socket`
+fixture. A sandbox policy that prohibits socket creation is then reported as
+an environment skip; protocol behavior is still tested normally on hosts that
+permit loopback networking.
+
 ## Running a single test
 
 Respect the repository's memory-safety rule. Target narrowly.

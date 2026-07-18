@@ -175,8 +175,12 @@ def _encode_ef_psloci(plmn_bytes: bytes) -> bytes:
 
 
 def _encode_ef_epsloci(plmn_bytes: bytes) -> bytes:
-    guti = bytes(plmn_bytes) + b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF"
-    tai = bytes(plmn_bytes) + b"\xFF\xFE"
+    # TS 31.102 §4.2.91 stores the TS 24.301 mobile-identity IE from
+    # octet 2 onwards.  An assigned GUTI would therefore start ``0B F6``;
+    # the standards-compliant default is the all-FF unassigned 12-byte
+    # form.  The last visited TAI is a separate field at bytes 13..17.
+    guti = b"\xFF" * 12
+    tai = bytes(plmn_bytes) + b"\x00\x00"
     status = b"\x01"
     return guti + tai + status
 
@@ -1116,7 +1120,16 @@ def _default_df_5gs_nodes(*, plmn_bytes: bytes) -> list[SimProfileFsNode]:
     # something deterministic instead of 6A82.
     suci_calc_info = bytes()  # populated when an SM-DP+ profile lands.
     routing_indicator = bytes.fromhex("00FF")  # default RI=0 + 0xFF padding
-    five_g_loci = bytes(plmn_bytes) + b"\xFF" * 13  # GUAMI placeholder + status
+    # TS 31.102 §4.4.11.2/.3: 5G-GUTI[13] || TAI[6] || status[1].
+    # An assigned 5G-GUTI begins with the TS 24.501 mobile-identity prefix
+    # ``00 0B F2``.  Defaults use the permitted all-FF unassigned GUTI,
+    # followed by the configured PLMN and an unknown TAC.
+    five_g_loci = (
+        (b"\xFF" * 13)
+        + bytes(plmn_bytes)
+        + b"\x00\x00\x00"
+        + b"\x01"
+    )
     five_g_nsc = b"\xFF" * 60
     return [
         SimProfileFsNode(
@@ -2581,18 +2594,18 @@ def _apply_security_domains_from_profile(
 def _hydrate_mno_scp03_keys(state: SimCardState, domain: SimProfileSecurityDomain) -> None:
     """Promote a SAIP SD's baseline keyset into ``state.scp03_keys``.
 
-    GP Card Spec v2.3.1 Amendment D §7.1.2 fixes the SCP03 baseline
-    keyset to KeyIdentifier 0x01 = ENC, 0x02 = MAC, 0x03 = DEK. The
-    KeyVersionNumber selects which baseline applies; SAIP profiles
-    typically place the live triplet at KVN 0x01 ("default keyset")
-    and any OTA / replacement keysets at KVN 0x40+ (e.g. SCP80 KICs
-    and KIDs). We promote the lowest-KVN triplet that supplies all
-    three keys so a profile that ships only SCP80 / SCP81 keys does
-    not silently zero the SCP03 keyset.
+    UICC Configuration v1.0.1 §4.3.2 reserves KVN ``0x30..0x3F``
+    for SCP03, with KeyIdentifier 0x01 = ENC, 0x02 = MAC and 0x03 =
+    DEK. Restricting candidates to that range prevents a complete
+    SCP80 triplet at KVN ``0x01..0x0F`` from being mistaken for the
+    card-administration keyset. Within the SCP03 range, promote the
+    lowest complete triplet.
     """
     candidates: dict[int, dict[int, bytes]] = {}
     for key_entry in domain.keys:
         key_version = int(key_entry.key_version) & 0xFF
+        if key_version < 0x30 or key_version > 0x3F:
+            continue
         key_id = int(key_entry.key_identifier) & 0xFF
         if key_id not in (0x01, 0x02, 0x03):
             continue
@@ -2612,15 +2625,16 @@ def _hydrate_mno_scp03_keys(state: SimCardState, domain: SimProfileSecurityDomai
         state.scp03_keys.kenc = selected_keys[0x01]
         state.scp03_keys.kmac = selected_keys[0x02]
         state.scp03_keys.dek = selected_keys[0x03]
-        state.scp03_keys.kvn = selected_kvn if selected_kvn != 0 else state.scp03_keys.kvn
+        state.scp03_keys.kvn = selected_kvn
 
 
 def _hydrate_mno_scp80_keys(state: SimCardState, domain: SimProfileSecurityDomain) -> None:
     """Promote a SAIP SD's SCP80 OTA keyset into ``state.scp80_security``.
 
-    GP Card Spec v2.3.1 Amendment B §B.4 reserves KeyVersionNumber
-    range ``0x40..0x4F`` for SCP80 ("OTA Master") keysets, and TS 102
-    225 §5.1 fixes the role of each key identifier inside the keyset:
+    UICC Configuration v1.0.1 §4.3.2 reserves KeyVersionNumber
+    range ``0x01..0x0F`` for SCP80. KVN ``0x40..0x4F`` belongs to
+    SCP81 and must not hydrate the SMS-PP OTA state. TS 102 225 §5.1
+    fixes the role of each key identifier inside an SCP80 keyset:
 
     - KeyIdentifier ``0x01`` → KIc (cipher / encryption key).
     - KeyIdentifier ``0x02`` → KID (signature / integrity key).
@@ -2637,7 +2651,7 @@ def _hydrate_mno_scp80_keys(state: SimCardState, domain: SimProfileSecurityDomai
     candidates: dict[int, dict[int, bytes]] = {}
     for key_entry in domain.keys:
         key_version = int(key_entry.key_version) & 0xFF
-        if key_version < 0x40 or key_version > 0x4F:
+        if key_version < 0x01 or key_version > 0x0F:
             continue
         key_id = int(key_entry.key_identifier) & 0xFF
         if key_id not in (0x01, 0x02):
@@ -2739,7 +2753,7 @@ def build_default_state() -> SimCardState:
     ]
     state = SimCardState(
         atr=DEFAULT_SIM_ATR,
-        eid="89049032123451234512345678901234",
+        eid="89049032123451234512345678901235",
         iccid=iccid,
         imsi=imsi,
         default_dp_address="rsp.example.com",

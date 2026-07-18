@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- destructive banner (C-3 mutation actions) -------------------------- */
 
 .cc-destructive-banner {
@@ -14,6 +15,34 @@
   color: var(--accent-danger, #ff6b6b);
   font-size: 12.5px;
   line-height: 1.4;
+  display: grid;
+  gap: 5px;
+}
+
+.cc-destructive-banner-title {
+  color: inherit;
+  font-size: 12.5px;
+}
+
+.cc-destructive-banner-text {
+  color: var(--fg-muted, currentColor);
+}
+
+.cc-destructive-confirm {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 3px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.cc-destructive-confirm input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent-danger, var(--fail));
 }
 
 .cc-empty {
@@ -102,5 +131,3 @@
 .cc-table {
   margin-top: 8px;
 }
-
-

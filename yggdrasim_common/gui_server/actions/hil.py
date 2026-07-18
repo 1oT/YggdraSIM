@@ -47,6 +47,8 @@ import sys
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from yggdrasim_common.frozen_dispatch import build_module_command
+
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
 
 
@@ -2354,10 +2356,9 @@ def _dispatch_bridge_launch(
         raise ValueError("confirm must be true — launching the bridge starts a long-running subprocess.")
 
     import subprocess
-    import sys
     import shlex
 
-    cmd = [sys.executable, "-m", "Tools.HilBridge.main"]
+    cmd = build_module_command("Tools.HilBridge.main")
     try:
         proc = subprocess.Popen(
             cmd,
@@ -2423,10 +2424,9 @@ def _dispatch_supervisor_launch(
         raise ValueError("confirm must be true — launching the supervisor starts a long-running subprocess.")
 
     import subprocess
-    import sys
     import shlex
 
-    cmd = [sys.executable, "-m", "Tools.HilBridge.supervisor"]
+    cmd = build_module_command("Tools.HilBridge.supervisor")
     try:
         proc = subprocess.Popen(
             cmd,

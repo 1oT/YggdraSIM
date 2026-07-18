@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Scope chip in the SCP03 session header. Neutral accent so the
    ATR / session / auth chips retain their semantic colours. */
 .cc-chip-scope {
@@ -39,4 +40,3 @@
   margin: 0 0 6px;
   color: var(--fg);
 }
-

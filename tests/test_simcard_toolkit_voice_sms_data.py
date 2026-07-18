@@ -46,7 +46,6 @@ from SIMCARD.toolkit import (
     SET_UP_IDLE_MODE_TEXT_COMMAND,
     SET_UP_MENU_COMMAND,
 )
-from SIMCARD.utils import read_tlv
 
 
 def _make_engine() -> SimulatedSimCardEngine:

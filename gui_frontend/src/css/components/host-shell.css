@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Advanced > Host shell -------------------------------------------------- */
 
 .host-shell-disabled {
@@ -126,4 +127,3 @@
 .host-shell-decoded-row:hover .host-shell-decoded-detail {
   display: block;
 }
-

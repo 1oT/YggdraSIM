@@ -17,7 +17,7 @@ Three endpoints:
   framing as ``/api/terminal/{module}``: binary frames carry raw PTY
   bytes; JSON text frames carry control messages
   (``{"type": "stdin" | "resize" | "signal" | "at_decode"}``).
-  ``?scope=hil-modem`` bypasses the general host-shell opt-in only for
+  ``?scope=hil-modem`` uses a separate full-HIL opt-in and accepts only
   validated serial terminal commands such as ``tio /dev/ttyUSB2``.
 
 The router is mounted unconditionally so the capability probe can
@@ -44,7 +44,12 @@ from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from yggdrasim_common.gui_server import at_decoder, host_shell as host_shell_module
-from yggdrasim_common.gui_server.auth import compare_tokens, token_id
+from yggdrasim_common.gui_server.auth import (
+    compare_tokens,
+    token_id,
+    websocket_accept_protocol,
+    websocket_bearer,
+)
 
 
 _LOGGER = logging.getLogger("yggdrasim.gui.host_shell.route")
@@ -85,20 +90,7 @@ def get_devices() -> dict:
 
 def _extract_token(websocket: WebSocket) -> str:
     """Mirror :func:`yggdrasim_common.gui_server.routes.terminal._extract_token`."""
-    header = websocket.headers.get("authorization") or ""
-    if header.lower().startswith("bearer "):
-        return header.split(" ", 1)[1].strip()
-
-    subproto = websocket.headers.get("sec-websocket-protocol") or ""
-    for fragment in (part.strip() for part in subproto.split(",")):
-        if fragment.lower().startswith("bearer."):
-            return fragment.split(".", 1)[1].strip()
-
-    qs_token = websocket.query_params.get("t")
-    if qs_token:
-        return str(qs_token)
-
-    return ""
+    return websocket_bearer(websocket)
 
 
 def _expected_token(websocket: WebSocket) -> str:
@@ -128,7 +120,7 @@ async def host_shell_socket(websocket: WebSocket) -> None:
         return
 
     if not host_shell_module.is_supported():
-        await websocket.accept()
+        await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
         await websocket.send_text(
             json.dumps({
                 "event": "error",
@@ -141,8 +133,22 @@ async def host_shell_socket(websocket: WebSocket) -> None:
     scope = str(websocket.query_params.get("scope") or "").strip().lower()
     hil_modem_scope = scope == "hil-modem"
 
+    if hil_modem_scope and not host_shell_module.is_hil_modem_enabled():
+        await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
+        await websocket.send_text(
+            json.dumps({
+                "event": "error",
+                "message": (
+                    "HIL modem terminal is disabled. It requires the full "
+                    "Linux/source HIL capability and YGGDRASIM_GUI_HIL_MODEM=1."
+                ),
+            })
+        )
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="disabled")
+        return
+
     if not host_shell_module.is_enabled() and not hil_modem_scope:
-        await websocket.accept()
+        await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
         await websocket.send_text(
             json.dumps({
                 "event": "error",
@@ -155,9 +161,32 @@ async def host_shell_socket(websocket: WebSocket) -> None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="disabled")
         return
 
-    rows = _safe_int(websocket.query_params.get("rows"), default=30, lo=1, hi=500)
-    cols = _safe_int(websocket.query_params.get("cols"), default=120, lo=1, hi=1000)
-    command = str(websocket.query_params.get("command") or "").strip()
+    await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
+    try:
+        start_raw = await websocket.receive_text()
+        if len(start_raw.encode("utf-8")) > 16_384:
+            raise ValueError("Host-shell start frame exceeds 16384 bytes.")
+        start_frame = json.loads(start_raw)
+        if not isinstance(start_frame, dict) or start_frame.get("type") != "start":
+            raise ValueError("First host-shell frame must have type=start.")
+        unknown = set(start_frame).difference({"type", "rows", "cols", "command"})
+        if unknown:
+            raise ValueError("Host-shell start frame contains unknown fields.")
+    except (UnicodeError, json.JSONDecodeError, ValueError) as error:
+        await websocket.send_text(
+            json.dumps({"event": "error", "message": str(error)})
+        )
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="bad-start-frame",
+        )
+        return
+    except WebSocketDisconnect:
+        return
+
+    rows = _safe_int(start_frame.get("rows"), default=30, lo=1, hi=500)
+    cols = _safe_int(start_frame.get("cols"), default=120, lo=1, hi=1000)
+    command = str(start_frame.get("command") or "").strip()
     spec = host_shell_module.HostShellStartSpec(
         rows=rows,
         cols=cols,
@@ -165,7 +194,6 @@ async def host_shell_socket(websocket: WebSocket) -> None:
         hil_modem=hil_modem_scope,
     )
 
-    await websocket.accept()
     peer = _peer_for_log(websocket)
     _LOGGER.warning(
         "gui.host_shell.opened token=%s peer=%s rows=%s cols=%s command=%s "
@@ -190,7 +218,7 @@ async def host_shell_socket(websocket: WebSocket) -> None:
         "event": "spawned",
         "pid": session.pid,
         "shell": None if command else host_shell_module.resolve_shell(),
-        "command": command,
+        "configured_command": bool(command),
     }))
 
     reader_task = asyncio.create_task(_pump_output(session, websocket, decoder_state))

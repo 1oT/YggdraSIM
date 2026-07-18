@@ -388,6 +388,11 @@ def _is_field_roundtrip(field_name: str) -> str | None:
         return CLASS_ROUNDTRIP_BYTES
     if capability == "scalar":
         return CLASS_ROUNDTRIP_SCALAR
+    if capability == "oid":
+        # Keep the historical non-byte editor taxonomy stable while the
+        # runtime registry correctly distinguishes OBJECT IDENTIFIER from
+        # ASN.1 INTEGER fields.
+        return CLASS_ROUNDTRIP_SCALAR
     if name in _AID_FIELD_NAMES:
         # AIDs are registered through a shared bytes encoder.
         return CLASS_ROUNDTRIP_BYTES

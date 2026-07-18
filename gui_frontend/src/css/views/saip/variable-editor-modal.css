@@ -65,8 +65,8 @@
 
 .saip-modal-close {
   margin-left: auto;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border: 1px solid var(--border);
   background: transparent;
   border-radius: 4px;
@@ -79,6 +79,11 @@
 .saip-modal-close:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.saip-modal-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .saip-modal-body {
@@ -98,8 +103,8 @@
   background: var(--surface-alt, rgba(255, 255, 255, 0.03));
 }
 
-/* Generic ribbon form modal (Batch personalize, Import PE, Export PE,
- * Batch validate, ARR sync). Stacked rows with label-on-top so picker
+/* Generic ribbon form modal (Batch generate, Import PE, Export PE,
+ * Batch lint, ARR sync). Stacked rows with label-on-top so picker
  * buttons sit beside the path field at any width. */
 .saip-form-row {
   display: flex;
@@ -141,6 +146,7 @@
 .saip-form-select:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .saip-form-text--invalid {
@@ -154,3 +160,91 @@
   color: var(--fg-muted, #888);
 }
 
+.saip-form-error {
+  color: var(--danger, #d97070);
+}
+
+.saip-action-palette {
+  width: min(860px, 94vw);
+  max-height: min(86vh, 900px);
+}
+
+.saip-action-palette .saip-modal-header {
+  align-items: flex-start;
+}
+
+.saip-action-palette .saip-modal-header .saip-edit-card-hint {
+  max-width: 680px;
+  margin: 4px 0 0;
+}
+
+.saip-action-palette-search {
+  flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.saip-action-palette-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 8px;
+  overflow: auto;
+}
+
+.saip-action-palette-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.saip-action-palette-row:hover:not([disabled]),
+.saip-action-palette-row:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.saip-action-palette-row[disabled] {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.saip-action-palette-row-title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saip-action-palette-row-id {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.saip-action-palette-row-description,
+.saip-action-palette-row-meta {
+  grid-column: 1 / -1;
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+}
+
+.saip-action-palette-row-description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+@media (max-width: 620px) {
+  .saip-action-palette-list {
+    grid-template-columns: 1fr;
+  }
+}

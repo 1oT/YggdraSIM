@@ -44,10 +44,10 @@ logs — operators retrieve it via `cat ~/.config/yggdrasim/card_bridge/8642.tok
 **2. On the Raspberry Pi (where the tool runs):**
 
 ```bash
-ssh -fN -L 8642:127.0.0.1:8642 hampus@pc-host
+ssh -fN -L 8642:127.0.0.1:8642 user@pc-host
 
 YGGDRASIM_CARD_RELAY_URL=http://127.0.0.1:8642/apdu \
-YGGDRASIM_CARD_RELAY_TOKEN_FILE=$(ssh hampus@pc-host \
+YGGDRASIM_CARD_RELAY_TOKEN_FILE=$(ssh user@pc-host \
     realpath ~/.config/yggdrasim/card_bridge/8642.token) \
 yggdrasim ...
 ```

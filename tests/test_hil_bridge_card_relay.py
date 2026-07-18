@@ -12,6 +12,8 @@ from pathlib import Path
 from unittest import mock
 from urllib import request as urllib_request
 
+import pytest
+
 from Tools.HilBridge.apdu_relay import (
     HilBridgeApduRelayService,
     ApduRelayConfig,
@@ -308,6 +310,7 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         self.assertEqual(fake_sim.last_apdu, bytes.fromhex("80CA005A00"))
         self.assertEqual(fake_sim.disconnect_calls, 2)
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_apdu_relay_service_handles_status_and_exchange(self) -> None:
         exchanges: list[tuple[str, bytes]] = []
 
@@ -353,6 +356,7 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         )
         self.assertEqual(exchanges, [("scp11-test", bytes.fromhex("00A4040000"))])
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_apdu_relay_service_exposes_card_reset_endpoint(self) -> None:
         reset_sessions: list[str] = []
 
@@ -427,6 +431,7 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         self.assertEqual(reset_payload["atr"], "3B9F")
         self.assertEqual(reset_payload["reset"]["mode"], "pcsc-reconnect-unpower")
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_create_card_connection_uses_bridge_marker_when_present(self) -> None:
         def exchange_callback(apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
             self.assertEqual(session_id, "")
@@ -479,6 +484,7 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         self.assertEqual(sw1, 0x90)
         self.assertEqual(sw2, 0x00)
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_apdu_relay_rejects_oversized_request_body(self) -> None:
         def exchange_callback(apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
             raise AssertionError(

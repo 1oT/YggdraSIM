@@ -3,7 +3,7 @@
 
 """Runtime mirror of TS 31.102 Annex H "EFs shared between SIM and USIM".
 
-A real-world operator BPP only ships the canonical bytes of EF.IMSI /
+A standards-conformant BPP may ship the canonical bytes of EF.IMSI /
 EF.AD / etc once -- under DF.GSM (FID 7F20) -- and leaves the
 same-FID Elementary File under ADF.USIM with an FCP only and no
 content. Real dual-mode UICCs satisfy reads in either DF context
@@ -14,10 +14,9 @@ The simulator emulates that contract in
 
 These tests pin the contract against:
 
-* the user's operator BPP (real bytes, real failure mode) when the
-  fixture is checked out;
-* a synthetic minimal profile so the regression survives even when
-  the operator fixture is absent.
+* an optional operator-owned BPP selected explicitly through an
+  environment variable;
+* a synthetic minimal profile used for the primary regression.
 
 Reference:
     3GPP TS 31.102 v17 Annex H, TCA Profile Interoperability §3.5.5
@@ -44,12 +43,18 @@ from SIMCARD.saip_profile import decode_profile_image
 from SIMCARD.state import (
     SimFileNode,
     SimProfileEntry,
-    SimProfileFsNode,
     SimProfileImage,
 )
 
 
-_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89880000000466311335_test.txt")
+_BPP_PATH = Path(
+    os.environ.get(
+        "YGGDRASIM_LOCAL_SAIP_BPP_FIXTURE",
+        "__optional_local_saip_bpp_fixture_not_configured__",
+    )
+)
+_SYNTHETIC_ICCID = "8901000000000000000"
+_SYNTHETIC_ICCID_20 = "89010000000000000000"
 
 
 def _walk_efs(state, root_node_id: str):
@@ -115,7 +120,7 @@ class TS31102AnnexHSharedEfMirrorTests(unittest.TestCase):
         state = SimCardState(
             atr=DEFAULT_SIM_ATR,
             eid="89049032000000000000000000000000",
-            iccid="89880000000000000000",
+            iccid=_SYNTHETIC_ICCID_20,
             imsi="001010000000001",
             default_dp_address="rsp.example.com",
             root_ci_pkid=b"\x00" * 20,
@@ -297,13 +302,12 @@ class TS31102AnnexHSharedEfMirrorTests(unittest.TestCase):
             self.assertIn(fid, _TS_31_102_ANNEX_H_SHARED_EFS)
 
 
-@unittest.skipUnless(_BPP_PATH.is_file(), "operator BPP fixture missing")
+@unittest.skipUnless(_BPP_PATH.is_file(), "optional local BPP fixture not configured")
 class OperatorBppRuntimeMirrorTests(unittest.TestCase):
-    """End-to-end: load the user's BPP, rebuild the runtime FS and
-    verify that EF.IMSI under ADF.USIM exposes the BPP-issued
-    contents (from DF.GSM) -- which is the exact byte the modem
-    READ BINARY (SFI 0x07) would have returned ``9000`` with no body
-    for, prior to the mirror fix.
+    """End-to-end: load an explicitly selected local BPP, rebuild the
+    runtime FS and verify that EF.IMSI under ADF.USIM exposes the
+    BPP-issued contents (from DF.GSM). This covers the empty-body
+    READ BINARY (SFI 0x07) failure shape.
     """
 
     def _activate_bpp(self, image: SimProfileImage):
@@ -314,7 +318,7 @@ class OperatorBppRuntimeMirrorTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8988000000000000000",
+                iccid=image.iccid or _SYNTHETIC_ICCID,
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name or "Annex-H probe",
@@ -359,7 +363,7 @@ class OperatorBppRuntimeMirrorTests(unittest.TestCase):
         self.assertEqual(usim_ad.data, df_gsm_ad.data)
 
     def test_read_binary_via_sfi_under_usim_returns_imsi_bytes(self) -> None:
-        # Reproduces the production trace: READ BINARY P1=0x87
+        # Reproduces a captured-style trace: READ BINARY P1=0x87
         # (SFI=0x07 select-and-read) P2=0x00 Le=0x09 should now
         # return 9 bytes of EF.IMSI rather than 9000 with empty body.
         upp = _decode_hex_text_upp(_BPP_PATH)

@@ -21,6 +21,8 @@ from typing import Any, Sequence
 
 import yaml
 
+from SIMCARD.utils import encode_iccid_ef, encode_imsi_ef
+
 from .saip_json_codec import (
     _META_PLACEHOLDER_STYLE,
     _META_TOKEN_DEFS,
@@ -173,7 +175,7 @@ def encode_iccid_ef_hex(value: str) -> str:
 
     ITU-T E.118 §3.3 stores each digit pair nibble-swapped on the wire.
     """
-    return _swap_bcd_nibbles(encode_iccid_header_hex(value))
+    return encode_iccid_ef(value).hex().upper()
 
 
 def encode_imsi_ef_hex(value: str) -> str:
@@ -183,22 +185,7 @@ def encode_imsi_ef_hex(value: str) -> str:
     (0x9 for odd digit count, 0x1 for even) + BCD digits nibble-swapped
     + optional trailing 0xF filler.  Returns a 18-nibble hex string.
     """
-    digits = _compact_user_value(value)
-    if digits.isdigit() is False:
-        raise ValueError("IMSI must contain decimal digits only.")
-    if len(digits) == 0:
-        raise ValueError("IMSI must not be empty.")
-    if len(digits) > 16:
-        raise ValueError("IMSI longer than 16 digits is not supported by template generation.")
-    odd_digit_count = len(digits) % 2 == 1
-    leading_nibble = "9"
-    if odd_digit_count is False:
-        leading_nibble = "1"
-    swapped_digits = leading_nibble + digits
-    if len(swapped_digits) % 2 != 0:
-        swapped_digits += "F"
-    byte_length = len(swapped_digits) // 2
-    return f"{byte_length:02X}" + _swap_bcd_nibbles(swapped_digits)
+    return encode_imsi_ef(value).hex().upper()
 
 
 def normalize_raw_hex_token_value(value: str, *, token_name: str) -> str:

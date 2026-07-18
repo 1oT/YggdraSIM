@@ -147,7 +147,11 @@ scripts/install/install-raspberrypi.sh --flavor full --mode source
 
 The script bootstraps the apt prerequisites, downloads the matching
 release asset (or sets up a `.venv` for source mode), and points at
-the SIMtrace2 guide when the full flavor is selected.
+the SIMtrace2 guide when the full flavor is selected. A normal full
+install tries the exact `osmo-remsim-client-st2` package first, verifies
+that executable after any compatibility-package fallback, and stops
+with an actionable error if it is still unavailable. `--no-deps` is the
+explicit opt-out for a host whose dependencies are managed separately.
 
 ## 5. `osmo-remsim-client-st2` on the Pi
 

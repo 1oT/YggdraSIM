@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ---------------------------------------------------------------------
  * Service-table checklist (EF.UST / EF.IST / EF_PSISMSC, …)
  *
@@ -168,4 +169,3 @@
 [data-theme="nord"] .cc-svc-table-col--active {
   border-color: rgba(136, 192, 208, 0.25);
 }
-

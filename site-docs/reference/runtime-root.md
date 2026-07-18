@@ -25,7 +25,9 @@ flowchart LR
     Start["launch"] --> Env{"YGGDRASIM_RUNTIME_ROOT set?"}
     Env -- yes --> UseEnv["use that directory"]
     Env -- no --> Frozen{"frozen build?"}
-    Frozen -- no --> Repo["use repository root"]
+    Frozen -- no --> Editable{"editable/source checkout?"}
+    Editable -- yes --> Repo["use repository root"]
+    Editable -- no --> UserData["use platform per-user data directory"]
     Frozen -- yes --> Next["YggdraSIM-data next to executable"]
     Next --> Writable{"writable?"}
     Writable -- yes --> UseNext["use YggdraSIM-data"]
@@ -36,6 +38,7 @@ flowchart LR
 | --- | --- |
 | `YGGDRASIM_RUNTIME_ROOT` is set | that path wins, always |
 | source run (editable install, in-repo) | the repository root is the runtime root |
+| non-editable wheel | platform per-user data directory; never `site-packages` |
 | frozen build, writable next-to-executable directory | `YggdraSIM-data/` next to the executable |
 | frozen build, not writable | `~/YggdraSIM-data/` |
 

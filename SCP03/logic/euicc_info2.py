@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """EUICCInfo2 TLV decoder: parses tag BF22 into a structured dict (SGP.22 §2.6.2)."""
 from typing import Dict, List, Optional, Tuple
 
@@ -114,30 +113,42 @@ EUICC_INFO2_MANDATORY_TAGS: tuple[int, ...] = (
     0xB4,
 )
 
+_MAX_BER_TAG_OCTETS = 8
+_MAX_BER_LENGTH_OCTETS = 8
+
 
 def parse_tlv_nodes(data: bytes) -> List[Tuple[int, bytes, bool]]:
-    """Parse a BER-TLV byte blob into a list of (tag, value, constructed) tuples."""
+    """Strictly parse BER-TLV nodes as ``(tag, value, constructed)`` tuples.
+
+    The previous implementation returned the valid prefix of malformed input.
+    That made a truncated SGP.22/SGP.32 response look like a valid response
+    with optional fields omitted. Protocol responses are security-sensitive,
+    so malformed, non-minimal, or trailing encodings now raise ``ValueError``
+    with the failing offset.
+    """
+    if not isinstance(data, (bytes, bytearray, memoryview)):
+        raise TypeError("BER-TLV input must be bytes-like.")
+    raw = bytes(data)
     nodes: List[Tuple[int, bytes, bool]] = []
     index = 0
-    while index < len(data):
-        tag, index_after_tag, constructed = _read_tag(data, index)
-        if index_after_tag <= index:
-            break
-        length, length_size = _decode_length(data, index_after_tag)
-        if length_size == 0:
-            break
+    while index < len(raw):
+        item_offset = index
+        tag, index_after_tag, constructed = _read_tag(raw, index)
+        length, length_size = _decode_length(raw, index_after_tag)
         value_start = index_after_tag + length_size
         value_end = value_start + length
-        if value_end > len(data):
-            break
-        value = data[value_start:value_end]
+        if value_end > len(raw):
+            raise ValueError(
+                f"BER-TLV error at offset {item_offset}: value overruns input buffer."
+            )
+        value = raw[value_start:value_end]
         nodes.append((tag, value, constructed))
         index = value_end
     return nodes
 
 
 def parse_tlv_simple(data: bytes) -> Dict[int, object]:
-    """Parse a BER-TLV blob into a flat tag→value dict, keeping only the last value per tag."""
+    """Parse a BER-TLV blob into a flat map while preserving duplicate tags."""
     parsed: Dict[int, object] = {}
     for tag, value, _constructed in parse_tlv_nodes(data):
         if tag in parsed:
@@ -312,7 +323,7 @@ def format_version_bytes(value: bytes) -> str:
 
 
 def decode_euicc_category(value: bytes) -> str:
-    """Map a single-byte euiccCategory value to its name string (SGP.22 §C.5 tag 0x87)."""
+    """Map a single-byte euiccCategory value to its name string (SGP.22 §C.5 tag 0x8B)."""
     if len(value) != 1:
         return value.hex().upper()
     categories = {
@@ -353,8 +364,14 @@ def decode_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> List[str
         return []
     unused_bits = value[0]
     payload = value[1:]
+    if unused_bits > 7:
+        raise ValueError("BIT STRING unused-bit count must be in range 0..7.")
     if len(payload) == 0:
+        if unused_bits != 0:
+            raise ValueError("Empty BIT STRING payload must have zero unused bits.")
         return []
+    if unused_bits and payload[-1] & ((1 << unused_bits) - 1):
+        raise ValueError("BIT STRING contains non-zero padding bits.")
 
     results: List[str] = []
     total_bits = (len(payload) * 8) - unused_bits
@@ -369,7 +386,7 @@ def decode_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> List[str
 
 
 def decode_ext_card_resource_value(tag: int, value: bytes) -> Optional[str]:
-    """Decode an ExtCardResource sub-TLV value to a human-readable string (SGP.22 §C.5 tag 0x86)."""
+    """Decode an ExtCardResource sub-TLV value (SGP.22 §C.5 tag 0x84)."""
     if tag == 0x81:
         return str(int.from_bytes(value, "big", signed=False))
     if tag in (0x82, 0x83):
@@ -384,6 +401,8 @@ def quote_text(value: bytes) -> str:
     try:
         decoded = value.decode("utf-8")
     except UnicodeDecodeError:
+        return value.hex().upper()
+    if decoded != "" and decoded.isprintable() is False:
         return value.hex().upper()
     return f"\"{decoded}\""
 
@@ -497,33 +516,94 @@ def _first_bytes(value: object) -> Optional[bytes]:
 
 
 def _read_tag(data: bytes, offset: int) -> Tuple[int, int, bool]:
-    if offset >= len(data):
-        return 0, offset, False
+    if offset < 0 or offset >= len(data):
+        raise ValueError(f"BER-TLV error at offset {offset}: missing tag.")
     first = data[offset]
+    if first == 0x00:
+        raise ValueError(
+            f"BER-TLV error at offset {offset}: reserved tag octet 0x{first:02X}."
+        )
     tag_value = first
     index = offset + 1
     constructed = (first & 0x20) != 0
 
     if (first & 0x1F) == 0x1F:
+        first_continuation = True
+        saw_terminal = False
+        tag_number = 0
+        tag_octets = 1
         while index < len(data):
             octet = data[index]
             tag_value = (tag_value << 8) | octet
             index += 1
+            tag_octets += 1
+            if tag_octets > _MAX_BER_TAG_OCTETS:
+                raise ValueError(
+                    f"BER-TLV error at offset {offset}: tag exceeds "
+                    f"{_MAX_BER_TAG_OCTETS} octets."
+                )
+            if first_continuation and (octet & 0x7F) == 0:
+                raise ValueError(
+                    f"BER-TLV error at offset {offset}: "
+                    "non-minimal high-tag-number encoding."
+                )
+            first_continuation = False
+            tag_number = (tag_number << 7) | (octet & 0x7F)
             if (octet & 0x80) == 0:
+                saw_terminal = True
                 break
+        if saw_terminal is False:
+            raise ValueError(
+                f"BER-TLV error at offset {offset}: truncated multi-byte tag."
+            )
+        if tag_number < 0x1F:
+            raise ValueError(
+                f"BER-TLV error at offset {offset}: "
+                "high-tag-number form used for a tag below 31."
+            )
     return tag_value, index, constructed
 
 
 def _decode_length(data: bytes, offset: int) -> Tuple[int, int]:
-    if offset >= len(data):
-        return 0, 0
+    if offset < 0 or offset >= len(data):
+        raise ValueError(f"BER-TLV error at offset {offset}: missing length field.")
     first = data[offset]
     if first < 0x80:
         return first, 1
     count = first & 0x7F
     if count == 0:
-        return 0, 0
+        raise ValueError(
+            f"BER-TLV error at offset {offset}: indefinite length is not supported."
+        )
+    if count == 0x7F:
+        raise ValueError(
+            f"BER-TLV error at offset {offset}: length octet 0xFF is reserved."
+        )
+    if count > _MAX_BER_LENGTH_OCTETS:
+        raise ValueError(
+            f"BER-TLV error at offset {offset}: length field exceeds "
+            f"{_MAX_BER_LENGTH_OCTETS} octets."
+        )
     end = offset + 1 + count
     if end > len(data):
-        return 0, 0
-    return int.from_bytes(data[offset + 1 : end], "big"), 1 + count
+        raise ValueError(
+            f"BER-TLV error at offset {offset}: truncated long-form length."
+        )
+    encoded = data[offset + 1 : end]
+    if encoded[0] == 0:
+        raise ValueError(
+            f"BER-TLV error at offset {offset}: "
+            "long-form length has a leading zero octet."
+        )
+    length = int.from_bytes(encoded, "big")
+    if length < 0x80:
+        raise ValueError(
+            f"BER-TLV error at offset {offset}: "
+            "long-form length used for a value shorter than 128 octets."
+        )
+    minimum_octets = max(1, (length.bit_length() + 7) // 8)
+    if count != minimum_octets:
+        raise ValueError(
+            f"BER-TLV error at offset {offset}: non-minimal long-form length."
+        )
+    return length, 1 + count

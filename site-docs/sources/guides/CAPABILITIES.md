@@ -35,9 +35,10 @@ YggdraSIM currently provides:
 - shared mutable state through SQLite, keyed by card identity or eIM identity
 - optional encryption for stored runtime payloads
 - a writable runtime-tree model for frozen executables
-- optional upstream `pySim` integration for SAIP and SCP11-related flows
-  (`pip install -e '.[saip]'` is the supported path; a local `pysim/`
-  developer checkout still takes priority when present)
+- commit-pinned upstream `pySim` integration for SAIP, SCP03/SCP80, and
+  SCP11-related flows; `[saip]` adds the optional spreadsheet extension
+  dependencies, while a local `pysim/` developer checkout still takes
+  priority when present
 - a repository-local registry for stable entry points and symbols
 - a first-party pytest suite covering module behavior and regressions
 

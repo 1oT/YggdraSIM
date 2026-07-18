@@ -17,9 +17,6 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-from Crypto .Cipher import AES ,DES3 
-from Crypto .Hash import CMAC 
-
 # TS 102 225 §5.1 / §5.2 cipher and CC primitives are routed through
 # pySim.ota so the spec citations (DES/3DES2/3DES3/AES algorithms,
 # CMAC truncation rules) live in one upstream place. The §5.1 envelope

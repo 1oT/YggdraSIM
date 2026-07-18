@@ -35,6 +35,161 @@
     };
   }
 
+  var SAIP_SPREADSHEET_SUFFIX_RE = /\.(?:xlsx|xlsm|xls|ods)$/i;
+  var SAIP_GENERATOR_WORKBOOK_SUFFIX_RE = /\.xlsx$/i;
+  var SAIP_WORKBOOK_GENERATOR_TAG = "saip-filesystem-workbook";
+  var SAIP_MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
+  var SAIP_MAX_WORKBOOK_UPLOAD_BYTES = 32 * 1024 * 1024;
+
+  function saipCatalogueActionsByTag(tag) {
+    var matches = [];
+    var catalogue = (typeof commandState !== "undefined" && commandState)
+      ? commandState.catalogue : null;
+    var subsystems = catalogue && catalogue.subsystems
+      ? catalogue.subsystems : {};
+    var names = Object.keys(subsystems);
+    for (var i = 0; i < names.length; i++) {
+      var actions = subsystems[names[i]] || [];
+      for (var j = 0; j < actions.length; j++) {
+        var tags = actions[j] && actions[j].tags;
+        if (Array.isArray(tags) && tags.indexOf(tag) !== -1) {
+          matches.push(actions[j]);
+        }
+      }
+    }
+    return matches;
+  }
+
+  function saipIsSpreadsheetInput(pathValue) {
+    return SAIP_SPREADSHEET_SUFFIX_RE.test(String(pathValue || "").trim());
+  }
+
+  function saipWorkbookGeneratorAction() {
+    var candidates = saipCatalogueActionsByTag(SAIP_WORKBOOK_GENERATOR_TAG);
+    for (var i = 0; i < candidates.length; i++) {
+      var fields = candidates[i] && candidates[i].inputs;
+      if (!Array.isArray(fields)) continue;
+      for (var j = 0; j < fields.length; j++) {
+        if (fields[j] && fields[j].name === "workbook_path") {
+          return candidates[i];
+        }
+      }
+    }
+    return candidates.length > 0 ? candidates[0] : null;
+  }
+
+  function saipWorkbookActionCanPrefill(action) {
+    var fields = action && action.inputs;
+    if (!Array.isArray(fields)) return false;
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i] || {};
+      if (field.name === "workbook_path"
+          && field.secret !== true
+          && (field.kind === "path" || field.kind === "string")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function saipWorkbookActionSupportsUpload(action) {
+    var fields = action && action.inputs;
+    if (!Array.isArray(fields)) return false;
+    var names = {};
+    fields.forEach(function (field) {
+      if (field && field.name) names[field.name] = true;
+    });
+    return names.workbook_filename === true
+      && names.workbook_content_base64 === true;
+  }
+
+  function saipSpreadsheetPluginUnavailable(pathValue) {
+    var message = "Spreadsheet inputs require the Excel → SAIP generator plug-in. "
+      + "Set YGGDRASIM_ALLOW_PLUGINS=1, clear YGGDRASIM_DISALLOW_PLUGINS, "
+      + "restart YggdraSIM, then use Excel → SAIP template.";
+    logBus.emit({
+      level: "error",
+      source: "saip.open_package",
+      message: message + " Workbook: " + String(pathValue || "(unknown)"),
+    });
+    if (typeof setStatusAction === "function") setStatusAction(message);
+  }
+
+  function saipRouteSpreadsheetToGenerator(pathValue, prefillPath, uploadValues) {
+    var displayPath = String(pathValue || "").trim();
+    if (!saipIsSpreadsheetInput(displayPath)) return false;
+    if (!SAIP_GENERATOR_WORKBOOK_SUFFIX_RE.test(displayPath)) {
+      var unsupportedMessage = "Excel → SAIP accepts .xlsx workbooks. "
+        + "Convert this workbook to .xlsx, then try again.";
+      if (typeof logBus !== "undefined" && logBus && typeof logBus.emit === "function") {
+        logBus.emit({
+          level: "error",
+          source: "saip.open_package",
+          message: unsupportedMessage + " Workbook: " + displayPath,
+        });
+      }
+      if (typeof setStatusAction === "function") setStatusAction(unsupportedMessage);
+      return true;
+    }
+    var action = saipWorkbookGeneratorAction();
+    if (!action || typeof _ccBuildActionPopout !== "function") {
+      saipSpreadsheetPluginUnavailable(displayPath);
+      return true;
+    }
+
+    var safePrefill = String(prefillPath || "").trim();
+    var initialValues = {};
+    if (safePrefill && saipWorkbookActionCanPrefill(action)) {
+      initialValues.workbook_path = safePrefill;
+    }
+    var upload = uploadValues && typeof uploadValues === "object"
+      ? uploadValues : null;
+    if (upload) {
+      if (!saipWorkbookActionSupportsUpload(action)) {
+        var oldPluginMessage = "This Excel → SAIP plug-in version cannot accept browser uploads. "
+          + "Update the plug-in or use Browse to select a server-visible .xlsx path.";
+        logBus.emit({
+          level: "error",
+          source: action.id || "saip-filesystem-workbook",
+          message: oldPluginMessage,
+        });
+        if (typeof setStatusAction === "function") setStatusAction(oldPluginMessage);
+        return true;
+      }
+      initialValues.workbook_filename = String(upload.workbook_filename || "");
+      initialValues.workbook_content_base64 = String(
+        upload.workbook_content_base64 || ""
+      );
+    }
+    _ccBuildActionPopout(action, initialValues);
+    logBus.emit({
+      level: safePrefill || upload ? "info" : "warn",
+      source: action.id || "saip-filesystem-workbook",
+      message: upload
+        ? "browser workbook upload prepared: upload:"
+          + String(upload.workbook_filename || "workbook.xlsx")
+        : (safePrefill
+          ? "workbook routed to the Excel → SAIP generator"
+          : "Excel → SAIP generator opened; choose the dropped workbook in its Workbook field"),
+    });
+    return true;
+  }
+
+  function saipRefreshCatalogueContributions() {
+    if (typeof commandState === "undefined"
+        || commandState.activeSubsystem !== "SAIP") return false;
+    var slots = saipResolveSlots();
+    if (!slots.ribbon) return false;
+    renderSaipRibbon(
+      slots.ribbon,
+      slots.drawer,
+      slots.peList,
+      slots.detail,
+      slots.validation
+    );
+    return true;
+  }
+
   function saipDropOpenPath(path) {
     if (!path) return false;
     var slots = saipResolveSlots();
@@ -162,6 +317,9 @@
     var ribbon = document.createElement("div");
     ribbon.className = "saip-ribbon";
     ribbon.setAttribute("data-saip-slot", "ribbon");
+    ribbon.setAttribute("role", "region");
+    ribbon.setAttribute("aria-label", "SAIP commands");
+    ribbon.setAttribute("tabindex", "0");
     wb.appendChild(ribbon);
 
     // Layout: package drawer (left) | main column (top-tab strip + tab body).
@@ -189,6 +347,9 @@
 
     var tabBody = document.createElement("div");
     tabBody.className = "saip-tab-body";
+    tabBody.id = "saip-tab-body";
+    tabBody.setAttribute("role", "tabpanel");
+    tabBody.setAttribute("aria-labelledby", "saip-top-tab-profile_elements");
     tabBody.setAttribute("data-saip-slot", "tab-body");
     main.appendChild(tabBody);
 
@@ -242,6 +403,7 @@
       validation: validation,
       modalHost: modalHost,
     };
+    wb.__saipActions = Array.isArray(actions) ? actions.slice() : [];
 
     renderSaipRibbon(ribbon, drawer, peList, detail, validation);
     renderSaipTopTabs(topTabs, drawer, peList, detail, validation);
@@ -289,6 +451,85 @@
     return Boolean(wb);
   }
 
+  function saipEventTargetIsEditable(target) {
+    if (!target || typeof target !== "object") return false;
+    if (target.isContentEditable) return true;
+    var tag = String(target.tagName || "").toUpperCase();
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  }
+
+  var _saipLocalTabsetSeq = 0;
+  var _saipDisclosureSeq = 0;
+  var _saipControlSeq = 0;
+
+  // Apply the WAI-ARIA tab contract to the workbench's secondary tab
+  // strips.  These panels are rendered in several PE/file editors; keeping
+  // the roving tabindex and Arrow/Home/End behaviour here prevents each
+  // editor from drifting into a slightly different keyboard interaction.
+  function saipConfigureLocalTabs(tablist, buttons, panels, label) {
+    if (!tablist || !Array.isArray(buttons) || buttons.length === 0) return;
+    var usable = buttons.filter(function (button) { return Boolean(button); });
+    if (usable.length === 0) return;
+    var panelList = Array.isArray(panels)
+      ? panels
+      : usable.map(function () { return panels || null; });
+    var tabsetId = "saip-local-tabs-" + String(++_saipLocalTabsetSeq);
+
+    tablist.setAttribute("role", "tablist");
+    tablist.setAttribute("aria-label", String(label || "Editor views"));
+    usable.forEach(function (button, index) {
+      button.setAttribute("role", "tab");
+      button.id = tabsetId + "-tab-" + String(index);
+      var panel = panelList[index] || panelList[0] || null;
+      if (panel) {
+        if (!panel.id) panel.id = tabsetId + "-panel-" + String(index);
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-labelledby", button.id);
+        button.setAttribute("aria-controls", panel.id);
+      }
+    });
+
+    function sync() {
+      var active = usable.filter(function (button) {
+        return button.classList.contains("is-active") && !button.disabled;
+      })[0] || usable.filter(function (button) { return !button.disabled; })[0];
+      usable.forEach(function (button) {
+        var selected = button === active;
+        button.setAttribute("aria-selected", selected ? "true" : "false");
+        button.tabIndex = selected ? 0 : -1;
+      });
+      var activeIndex = usable.indexOf(active);
+      var activePanel = panelList[activeIndex] || panelList[0] || null;
+      if (activePanel && active) {
+        activePanel.setAttribute("aria-labelledby", active.id);
+      }
+    }
+
+    tablist.__saipSyncTabs = sync;
+    tablist.addEventListener("keydown", function (event) {
+      if (event.target.getAttribute("role") !== "tab") return;
+      if (["ArrowLeft", "ArrowRight", "Home", "End"].indexOf(event.key) === -1) return;
+      var enabled = usable.filter(function (button) { return !button.disabled; });
+      if (enabled.length === 0) return;
+      event.preventDefault();
+      var current = Math.max(0, enabled.indexOf(event.target));
+      var next = current;
+      if (event.key === "ArrowLeft") {
+        next = (current - 1 + enabled.length) % enabled.length;
+      } else if (event.key === "ArrowRight") {
+        next = (current + 1) % enabled.length;
+      } else if (event.key === "Home") {
+        next = 0;
+      } else if (event.key === "End") {
+        next = enabled.length - 1;
+      }
+      enabled[next].focus();
+      enabled[next].click();
+      sync();
+    });
+    sync();
+  }
+
   function saipShortcutHandler(evt) {
     if (!saipShortcutsAreActive()) return;
     var ctrl = evt.ctrlKey || evt.metaKey;
@@ -307,6 +548,11 @@
       closeSaipVariableModal();
       return;
     }
+
+    // Editing controls retain their browser-native shortcuts. In
+    // particular, Ctrl/Cmd+Z must undo the current text edit instead
+    // of unexpectedly undoing a package mutation.
+    if (saipEventTargetIsEditable(evt.target)) return;
 
     if (!ctrl || alt) return;
 
@@ -408,31 +654,57 @@
 
   // Action button glue. Each helper drives one ribbon command, talks
   // to the matching ``saip.*`` dispatcher, then re-syncs the local
-  // package record + ribbon. Browser ``prompt`` / ``confirm`` are
-  // intentionally used for the lightweight inputs — operators get a
-  // working command immediately and the modal-quality polish can land
-  // later without changing the backend contract.
+  // package record + ribbon. Multi-field commands use the shared
+  // validated modal; one-value maintenance commands retain concise
+  // browser prompts where that keeps the interaction proportionate.
 
   async function saipRibbonNewPackage(drawer, peList, detail, validation) {
-    var versionInput = window.prompt(
-      "Profile version (M.m form, e.g. 2.3 or 3.3):",
-      "2.3"
-    );
-    if (versionInput === null) return;
-    var iccidInput = window.prompt(
-      "ICCID (even-length hex; leave blank for the all-zero placeholder):",
-      ""
-    );
-    if (iccidInput === null) return;
-    var typeInput = window.prompt(
-      "Profile type label (free-form; leave blank to skip):",
-      ""
-    );
-    if (typeInput === null) return;
+    var result = await saipShowFormModal({
+      title: "New SAIP package",
+      intro: "Create an in-memory ProfileHeader + PE-End scaffold. Save it before closing to keep the new profile.",
+      submitLabel: "Create",
+      fields: [
+        {
+          key: "profile_version",
+          label: "Profile version",
+          type: "text",
+          required: true,
+          default: "2.3",
+          placeholder: "2.3",
+          hint: "TCA SAIP M.m form, for example 2.3 or 3.3.",
+          validate: function (value) {
+            return /^\d+\.\d+$/.test(String(value || "").trim())
+              ? true : "Use M.m form, for example 2.3.";
+          },
+        },
+        {
+          key: "iccid",
+          label: "ICCID (hex, optional)",
+          type: "text",
+          default: "",
+          hint: "Even-length hexadecimal, up to 20 nibbles. Blank uses the all-zero placeholder.",
+          validate: function (value) {
+            var clean = String(value || "").replace(/[\s-]+/g, "");
+            if (!clean) return true;
+            if (!/^[0-9A-Fa-f]+$/.test(clean)) return "ICCID must contain hexadecimal characters only.";
+            if (clean.length > 20) return "ICCID must be at most 20 hexadecimal characters.";
+            return clean.length % 2 === 0 ? true : "ICCID must contain an even number of hexadecimal characters.";
+          },
+        },
+        {
+          key: "profile_type",
+          label: "Profile type label (optional)",
+          type: "text",
+          default: "",
+          placeholder: "Operational, Test, IoT…",
+        },
+      ],
+    });
+    if (!result.ok) return;
     var inputs = {
-      profile_version: String(versionInput || "").trim() || "2.3",
-      iccid: String(iccidInput || "").trim(),
-      profile_type: String(typeInput || "").trim(),
+      profile_version: String(result.values.profile_version || "").trim() || "2.3",
+      iccid: String(result.values.iccid || "").trim(),
+      profile_type: String(result.values.profile_type || "").trim(),
     };
     logBus.emit({
       level: "info",
@@ -452,26 +724,386 @@
         });
         return;
       }
-      var record = saipCreatePackageRecord(resp.data || {});
-      commandState.saipWorkbench.packages.push(record);
-      commandState.saipWorkbench.activePackageId = record.id;
-      logBus.emit({
-        level: "info",
-        source: "saip.create_package",
-        message: "session " + (record.sessionId || "?").substring(0, 8) +
-          " · " + record.filename + " · " + record.peCount + " PE(s)",
-      });
-      saipLoadPeRows(record).then(function () {
-        renderSaipActiveSlots(peList, detail, validation);
-      });
-      saipLoadFileRows(record);
-      renderSaipDrawer(drawer, peList, detail, validation);
-      renderSaipActiveSlots(peList, detail, validation);
+      saipActivateOpenedPackage(
+        resp.data || {},
+        "saip.create_package",
+        "",
+        drawer,
+        peList,
+        detail,
+        validation
+      );
     } catch (err) {
       logBus.emit({
         level: "error",
         source: "saip.create_package",
         message: String((err && err.message) || err),
+      });
+    }
+  }
+
+  async function saipRibbonRunSessionContribution(action, drawer, peList, detail, validation) {
+    if (!action || !action.id) return;
+    logBus.emit({
+      level: "info",
+      source: action.id,
+      message: "running " + (action.title || action.id),
+    });
+    try {
+      var resp = await apiFetch(
+        "/api/actions/" + encodeURIComponent(action.id) + "/run",
+        { method: "POST", body: JSON.stringify({ inputs: {} }) }
+      );
+      if (!resp.ok) {
+        logBus.emit({
+          level: "error",
+          source: action.id,
+          message: resp.error || ((action.title || action.id) + " failed"),
+        });
+        return;
+      }
+      saipActivateOpenedPackage(
+        resp.data || {},
+        action.id,
+        "",
+        drawer,
+        peList,
+        detail,
+        validation
+      );
+      var exportGuard = resp.data && resp.data.export_guard;
+      if (exportGuard && exportGuard.concrete_export_allowed === false) {
+        logBus.emit({
+          level: "warn",
+          source: action.id,
+          message: "authoring session opened; concrete export remains blocked",
+        });
+      }
+    } catch (err) {
+      logBus.emit({
+        level: "error",
+        source: action.id,
+        message: String((err && err.message) || err),
+      });
+    }
+  }
+
+  function saipActionAcceptsActiveSessionPrefill(action) {
+    var fields = action && Array.isArray(action.inputs) ? action.inputs : [];
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i] || {};
+      if (field.name === "session_id" && field.secret !== true) return true;
+    }
+    return false;
+  }
+
+  // These actions are already owned by workbench lifecycle or view controls.
+  // Launching them through the generic action form can create, close, or mutate
+  // a session without updating the mounted package record.
+  var SAIP_ACTION_PALETTE_EXCLUDED_IDS = {
+    "saip.open_package": true,
+    "saip.open_package_upload": true,
+    "saip.open_package_with_variables": true,
+    "saip.create_package": true,
+    "saip.close_package": true,
+    "saip.save_package": true,
+    "saip.revert_changes": true,
+    "saip.undo": true,
+    "saip.redo": true,
+    "saip.get_dirty": true,
+    "saip.list_pes": true,
+    "saip.show_pe": true,
+    "saip.list_files": true,
+    "saip.show_file": true,
+    "saip.list_variables": true,
+    "saip.validate": true,
+  };
+
+  function saipActionIsPaletteEligible(action) {
+    var id = String(action && action.id || "");
+    var tags = action && Array.isArray(action.tags) ? action.tags : [];
+    return Boolean(id)
+      && SAIP_ACTION_PALETTE_EXCLUDED_IDS[id] !== true
+      && tags.indexOf("deprecated") === -1;
+  }
+
+  function saipWorkbenchActions() {
+    var wb = saipWorkbenchEl();
+    var actions = wb && Array.isArray(wb.__saipActions)
+      ? wb.__saipActions : [];
+    var seen = {};
+    return actions.filter(function (action) {
+      var id = String(action && action.id || "");
+      if (!saipActionIsPaletteEligible(action) || seen[id]) return false;
+      seen[id] = true;
+      return true;
+    }).sort(function (a, b) {
+      return String(a.title || a.id || "").localeCompare(
+        String(b.title || b.id || "")
+      );
+    });
+  }
+
+  function saipActionSessionField(action) {
+    var fields = action && Array.isArray(action.inputs) ? action.inputs : [];
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i] && fields[i].name === "session_id"
+          && fields[i].secret !== true) return fields[i];
+    }
+    return null;
+  }
+
+  function saipActionNeedsActiveSession(action) {
+    var field = saipActionSessionField(action);
+    if (!field) return false;
+    var tags = Array.isArray(action.tags) ? action.tags : [];
+    return field.required === true
+      || tags.indexOf("saip-ribbon-active-session-form") !== -1;
+  }
+
+  function saipCloseActionPalette() {
+    var palette = commandState._saipActionPalette;
+    if (!palette) return;
+    commandState._saipActionPalette = null;
+    document.removeEventListener("keydown", palette.__saipKeyHandler, true);
+    if (palette.parentNode) palette.parentNode.removeChild(palette);
+    var returnFocus = palette.__saipReturnFocus;
+    if (returnFocus && typeof returnFocus.focus === "function"
+        && document.contains(returnFocus)) {
+      returnFocus.focus();
+    }
+  }
+
+  async function saipOpenAdvancedAction(action, pkg) {
+    if (!action || !action.id || typeof _ccBuildActionPopout !== "function") return;
+    var initialValues = {};
+    var sessionField = saipActionSessionField(action);
+    if (sessionField && pkg && pkg.sessionId && !pkg.sessionUnavailable) {
+      await saipFlushPendingAutoApplies(pkg);
+      initialValues.session_id = pkg.sessionId;
+    }
+    saipCloseActionPalette();
+    _ccBuildActionPopout(action, initialValues);
+  }
+
+  function saipOpenActionPalette(pkg) {
+    saipCloseActionPalette();
+    var actions = saipWorkbenchActions();
+    var returnFocus = document.activeElement;
+
+    var overlay = document.createElement("div");
+    overlay.className = "saip-modal-host saip-action-palette-host is-open";
+    overlay.setAttribute("aria-hidden", "false");
+    overlay.__saipReturnFocus = returnFocus;
+
+    var backdrop = document.createElement("div");
+    backdrop.className = "saip-modal-backdrop";
+    backdrop.addEventListener("click", saipCloseActionPalette);
+    overlay.appendChild(backdrop);
+
+    var card = document.createElement("div");
+    card.className = "saip-modal-card saip-action-palette";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    card.setAttribute("aria-labelledby", "saip-action-palette-title");
+    overlay.appendChild(card);
+
+    var header = document.createElement("header");
+    header.className = "saip-modal-header";
+    var titleWrap = document.createElement("div");
+    var title = document.createElement("h3");
+    title.id = "saip-action-palette-title";
+    title.textContent = "Advanced SAIP actions";
+    titleWrap.appendChild(title);
+    var lead = document.createElement("p");
+    lead.className = "saip-edit-card-hint";
+    lead.textContent = "Additional registered SAIP actions are available here. "
+      + "The active session is prefilled where required; refresh the workbench after a low-level write.";
+    titleWrap.appendChild(lead);
+    header.appendChild(titleWrap);
+    var close = document.createElement("button");
+    close.type = "button";
+    close.className = "saip-modal-close";
+    close.setAttribute("aria-label", "Close advanced actions");
+    close.textContent = "\u00D7";
+    close.addEventListener("click", saipCloseActionPalette);
+    header.appendChild(close);
+    card.appendChild(header);
+
+    var body = document.createElement("div");
+    body.className = "saip-modal-body saip-action-palette-body";
+    var search = document.createElement("input");
+    search.type = "search";
+    search.className = "saip-form-text saip-action-palette-search";
+    search.placeholder = "Filter by title, action ID, description, or tag…";
+    search.setAttribute("aria-label", "Filter advanced SAIP actions");
+    search.autocomplete = "off";
+    search.spellcheck = false;
+    body.appendChild(search);
+    var summary = document.createElement("p");
+    summary.className = "saip-form-hint";
+    body.appendChild(summary);
+    var list = document.createElement("div");
+    list.className = "saip-action-palette-list";
+    body.appendChild(list);
+    card.appendChild(body);
+
+    function renderActions() {
+      list.innerHTML = "";
+      var query = String(search.value || "").trim().toLowerCase();
+      var visible = actions.filter(function (action) {
+        if (!query) return true;
+        var haystack = [
+          action.id,
+          action.title,
+          action.description,
+          (action.tags || []).join(" "),
+        ].join(" ").toLowerCase();
+        return haystack.indexOf(query) !== -1;
+      });
+      summary.textContent = visible.length + " of " + actions.length + " action(s)";
+      if (visible.length === 0) {
+        var empty = document.createElement("p");
+        empty.className = "saip-empty";
+        empty.textContent = "No actions match this filter.";
+        list.appendChild(empty);
+        return;
+      }
+      visible.forEach(function (action) {
+        var needsSession = saipActionNeedsActiveSession(action);
+        var sessionReady = Boolean(pkg && pkg.sessionId && !pkg.sessionUnavailable);
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "saip-action-palette-row";
+        button.disabled = needsSession && !sessionReady;
+        var rowTitle = document.createElement("span");
+        rowTitle.className = "saip-action-palette-row-title";
+        rowTitle.textContent = String(action.title || action.id);
+        button.appendChild(rowTitle);
+        var rowId = document.createElement("code");
+        rowId.className = "saip-action-palette-row-id";
+        rowId.textContent = String(action.id || "");
+        button.appendChild(rowId);
+        if (action.description) {
+          var description = document.createElement("span");
+          description.className = "saip-action-palette-row-description";
+          description.textContent = String(action.description);
+          button.appendChild(description);
+        }
+        var meta = document.createElement("span");
+        meta.className = "saip-action-palette-row-meta";
+        meta.textContent = (action.streams ? "Streaming · " : "")
+          + (needsSession ? (sessionReady ? "Active session prefilled" : "Open a package first") : "Standalone");
+        button.appendChild(meta);
+        button.addEventListener("click", function () {
+          saipOpenAdvancedAction(action, pkg).catch(function (error) {
+            logBus.emit({
+              level: "error",
+              source: action.id,
+              message: String(error && error.message || error),
+            });
+          });
+        });
+        list.appendChild(button);
+      });
+    }
+
+    search.addEventListener("input", renderActions);
+    overlay.__saipKeyHandler = function (event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        saipCloseActionPalette();
+      } else if (event.key === "Tab") {
+        var focusable = card.querySelectorAll(
+          "button:not([disabled]), input:not([disabled]), select:not([disabled]), "
+            + "textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+        );
+        if (focusable.length === 0) {
+          event.preventDefault();
+          return;
+        }
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (!card.contains(document.activeElement)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", overlay.__saipKeyHandler, true);
+    commandState._saipActionPalette = overlay;
+    document.body.appendChild(overlay);
+    renderActions();
+    search.focus();
+  }
+
+  async function saipRefreshActivePackage(pkg, drawer, peList, detail, validation) {
+    if (!pkg || !pkg.sessionId || pkg.sessionUnavailable) return;
+    try {
+      await saipFlushPendingAutoApplies(pkg);
+      saipInvalidateStructuralCaches(pkg);
+      await Promise.all([
+        saipLoadPeRows(pkg),
+        saipLoadFileRows(pkg),
+        saipRefreshDirty(pkg),
+      ]);
+      if (Array.isArray(pkg.peRows)) {
+        pkg.peCount = pkg.peRows.length;
+      }
+      renderSaipDrawer(drawer, peList, detail, validation);
+      renderSaipActiveSlots(peList, detail, validation);
+      logBus.emit({
+        level: "info",
+        source: "saip.refresh",
+        message: "refreshed active SAIP session",
+      });
+    } catch (error) {
+      logBus.emit({
+        level: "error",
+        source: "saip.refresh",
+        message: String(error && error.message || error),
+      });
+    }
+  }
+
+  async function saipRibbonOpenActiveSessionContribution(action, pkg) {
+    if (!action || !action.id || !pkg || !pkg.sessionId) return;
+    if (!saipActionAcceptsActiveSessionPrefill(action)) {
+      logBus.emit({
+        level: "error",
+        source: action.id,
+        message: "active-session action is missing a non-secret session_id input",
+      });
+      return;
+    }
+    try {
+      if (typeof saipFlushPendingAutoApplies === "function") {
+        await saipFlushPendingAutoApplies(pkg);
+      }
+      if (pkg.autoApplyJobs && Object.keys(pkg.autoApplyJobs).length > 0) {
+        logBus.emit({
+          level: "error",
+          source: action.id,
+          message: "pending SAIP edits could not be applied; action form was not opened",
+        });
+        return;
+      }
+      if (typeof _ccBuildActionPopout !== "function") {
+        throw new Error("The action popout is unavailable.");
+      }
+      _ccBuildActionPopout(action, { session_id: pkg.sessionId });
+    } catch (err) {
+      logBus.emit({
+        level: "error",
+        source: action.id,
+        message: String(err && err.message || err),
       });
     }
   }
@@ -529,6 +1161,14 @@
       renderSaipActiveSlots(peList, detail, validation);
     });
     saipLoadFileRows(record);
+    // Generated/scaffold sessions arrive dirty before they have an on-disk
+    // source. Keep the response-provided state for the first paint, then
+    // reconcile it with the canonical session dirty endpoint.
+    saipRefreshDirty(record).then(function () {
+      if (drawer) renderSaipDrawer(drawer, peList, detail, validation);
+      renderSaipActiveSlots(peList, detail, validation);
+      renderSaipRibbon(saipRibbonEl(), drawer, peList, detail, validation);
+    });
     if (drawer) renderSaipDrawer(drawer, peList, detail, validation);
     renderSaipActiveSlots(peList, detail, validation);
     return record;
@@ -537,6 +1177,7 @@
   async function saipOpenPackageByPath(pathValue, drawer, peList, detail, validation) {
     var clean = String(pathValue || "").trim();
     if (clean.length === 0) return false;
+    if (saipRouteSpreadsheetToGenerator(clean, clean)) return true;
     logBus.emit({ level: "info", source: "saip.open_package", message: "open → " + clean });
     try {
       var resp = await apiFetch("/api/actions/saip.open_package/run", {
@@ -557,6 +1198,66 @@
 
   async function saipOpenPackageByDroppedFile(file, drawer, peList, detail, validation) {
     if (!file) return false;
+    var droppedName = String(file.name || "dropped-profile.der");
+    var droppedPath = String(file.path || "").trim();
+    if (saipIsSpreadsheetInput(droppedPath) || saipIsSpreadsheetInput(droppedName)) {
+      var spreadsheetLabel = saipIsSpreadsheetInput(droppedPath) ? droppedPath : droppedName;
+      if (droppedPath) {
+        saipRouteSpreadsheetToGenerator(spreadsheetLabel, droppedPath);
+        return true;
+      }
+      if (!SAIP_GENERATOR_WORKBOOK_SUFFIX_RE.test(droppedName)) {
+        saipRouteSpreadsheetToGenerator(spreadsheetLabel, "");
+        return true;
+      }
+      if (Number(file.size || 0) > SAIP_MAX_WORKBOOK_UPLOAD_BYTES) {
+        logBus.emit({
+          level: "error",
+          source: "saip-filesystem-workbook",
+          message: "Workbook is larger than the 32 MiB upload limit: "
+            + droppedName,
+        });
+        return false;
+      }
+      try {
+        var workbookBuffer = await file.arrayBuffer();
+        if (workbookBuffer.byteLength > SAIP_MAX_WORKBOOK_UPLOAD_BYTES) {
+          logBus.emit({
+            level: "error",
+            source: "saip-filesystem-workbook",
+            message: "Workbook is larger than the 32 MiB upload limit: "
+              + droppedName,
+          });
+          return false;
+        }
+        saipRouteSpreadsheetToGenerator(
+          spreadsheetLabel,
+          "",
+          {
+            workbook_filename: droppedName,
+            workbook_content_base64: saipBase64FromArrayBuffer(workbookBuffer),
+          }
+        );
+      } catch (workbookError) {
+        logBus.emit({
+          level: "error",
+          source: "saip-filesystem-workbook",
+          message: "Unable to read dropped workbook: "
+            + String(workbookError && workbookError.message || workbookError),
+        });
+        return false;
+      }
+      return true;
+    }
+    if (Number(file.size || 0) > SAIP_MAX_UPLOAD_BYTES) {
+      logBus.emit({
+        level: "error",
+        source: "saip.open_package_upload",
+        message: "Dropped package is larger than the 64 MiB upload limit: "
+          + droppedName,
+      });
+      return false;
+    }
     logBus.emit({
       level: "info",
       source: "saip.open_package_upload",
@@ -565,11 +1266,20 @@
     });
     try {
       var buffer = await file.arrayBuffer();
+      if (buffer.byteLength > SAIP_MAX_UPLOAD_BYTES) {
+        logBus.emit({
+          level: "error",
+          source: "saip.open_package_upload",
+          message: "Dropped package is larger than the 64 MiB upload limit: "
+            + droppedName,
+        });
+        return false;
+      }
       var resp = await apiFetch("/api/actions/saip.open_package_upload/run", {
         method: "POST",
         body: JSON.stringify({
           inputs: {
-            filename: file.name || "dropped-profile.der",
+            filename: droppedName,
             content_base64: saipBase64FromArrayBuffer(buffer),
           },
         }),
@@ -611,8 +1321,11 @@
     if (active && active.sourcePath) defaultPath = active.sourcePath;
     var fileTypes = [
       "SAIP profile/template (*.der;*.json;*.hex;*.txt;*.varder;*.asn;*.asn1)",
-      "All files (*.*)",
     ];
+    if (saipWorkbookGeneratorAction()) {
+      fileTypes.push("Excel workbook (*.xlsx)");
+    }
+    fileTypes.push("All files (*.*)");
     var chosen = "";
     try {
       chosen = await pathPicker.pickFile({
@@ -641,6 +1354,11 @@
       document.removeEventListener("keydown", commandState._saipRecentKeyHandler, true);
       commandState._saipRecentKeyHandler = null;
     }
+    var anchor = commandState._saipRecentAnchor;
+    commandState._saipRecentAnchor = null;
+    if (anchor && typeof anchor.focus === "function" && document.contains(anchor)) {
+      anchor.focus();
+    }
   }
 
   function saipRibbonOpenRecent(anchor, drawer, peList, detail, validation) {
@@ -652,6 +1370,7 @@
     pop.className = "saip-recent-block";
     pop.setAttribute("role", "dialog");
     pop.setAttribute("aria-label", "Recent profiles");
+    pop.setAttribute("aria-modal", "false");
     pop.style.position = "fixed";
     pop.style.zIndex = "5500";
     pop.style.minWidth = "340px";
@@ -722,6 +1441,7 @@
     pop.appendChild(list);
 
     commandState._saipRecentPopover = pop;
+    commandState._saipRecentAnchor = anchor || document.activeElement;
     document.body.appendChild(pop);
 
     // Position below the anchor button
@@ -752,6 +1472,8 @@
       };
       document.addEventListener("click", commandState._saipRecentDocHandler, true);
       document.addEventListener("keydown", commandState._saipRecentKeyHandler, true);
+      var firstOpen = pop.querySelector(".saip-recent-open");
+      if (firstOpen) firstOpen.focus();
     }, 0);
   }
 
@@ -764,13 +1486,42 @@
   async function saipRibbonSavePackage(pkg, drawer, peList, detail, validation, shiftToSaveAs) {
     if (!pkg || !pkg.sessionId) return;
     await saipFlushPendingAutoApplies(pkg);
-    var encoding = (pkg.encoding === "json") ? "json" : "der";
+    var rawEncoding = String(pkg.encoding || "").toLowerCase();
+    var encoding = (rawEncoding === "asn" || rawEncoding === "asn1")
+      ? "asn1"
+      : (rawEncoding === "varder" || rawEncoding === "json" || rawEncoding === "hex")
+        ? rawEncoding
+        : "der";
+    var hasInlineTemplate = Number(pkg.inlinePlaceholderCount || 0) > 0;
+    var generatedPartialMode = Boolean(
+      pkg.exportGuard && pkg.exportGuard.concrete_export_allowed === false
+    );
+    var templateMode = hasInlineTemplate || generatedPartialMode;
     var outPath = pkg.sourcePath || "";
+    if (String(outPath).toLowerCase().endsWith(".varder")) encoding = "varder";
     var needsPicker = shiftToSaveAs || !outPath;
     if (needsPicker) {
-      var fileTypes = (encoding === "json")
-        ? ["JSON profile (*.json)", "DER profile (*.der)", "All files (*.*)"]
-        : ["DER profile (*.der)", "JSON profile (*.json)", "All files (*.*)"];
+      var fileTypes = hasInlineTemplate
+        ? [
+          "Varder template (*.varder)",
+          "ASN.1 template (*.asn;*.asn1)",
+          "Tagged JSON template (*.json)",
+          "All files (*.*)",
+        ]
+        : generatedPartialMode
+          ? [
+            "Tagged JSON partial draft (*.json)",
+            "All files (*.*)",
+          ]
+        : [
+          "DER profile (*.der)",
+          "ASN.1 profile (*.asn;*.asn1)",
+          "JSON profile (*.json)",
+          "All files (*.*)",
+        ];
+      if (generatedPartialMode && !hasInlineTemplate) encoding = "json";
+      else if (templateMode && (encoding === "der" || encoding === "hex")) encoding = "json";
+      if (!templateMode && encoding === "varder") encoding = "der";
       var defaultName = pkg.filename || ("profile." + encoding);
       var picked = "";
       try {
@@ -795,8 +1546,44 @@
       var lower = picked.toLowerCase();
       if (lower.endsWith(".json")) encoding = "json";
       else if (lower.endsWith(".der")) encoding = "der";
+      else if (lower.endsWith(".asn") || lower.endsWith(".asn1")) encoding = "asn1";
+      else if (lower.endsWith(".varder")) encoding = "varder";
+      else if (lower.endsWith(".hex") || lower.endsWith(".txt")) encoding = "hex";
+      if (!templateMode && encoding === "varder") {
+        logBus.emit({
+          level: "error",
+          source: "saip.save_package",
+          message: ".varder is only available for templates with unresolved token placeholders.",
+        });
+        return;
+      }
     }
-    saipSavePackage(pkg, outPath, encoding, drawer, peList, detail, validation);
+    if (templateMode && (encoding === "der" || encoding === "hex")) {
+      logBus.emit({
+        level: "error",
+        source: "saip.save_package",
+        message: "DER/HEX are concrete-profile formats. Save this unresolved template as varder, ASN.1, or tagged JSON.",
+      });
+      return;
+    }
+    if (generatedPartialMode && !hasInlineTemplate && encoding !== "json") {
+      logBus.emit({
+        level: "error",
+        source: "saip.save_package",
+        message: "This generated partial draft has no unresolved inline template tokens. Save as tagged JSON until the explicit completion flow authorizes concrete profile output.",
+      });
+      return;
+    }
+    saipSavePackage(
+      pkg,
+      outPath,
+      encoding,
+      drawer,
+      peList,
+      detail,
+      validation,
+      !needsPicker
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -819,11 +1606,16 @@
   // empty (the field is highlighted; no pop-up alert).
   // ─────────────────────────────────────────────────────────────────
 
+  var saipFormModalSeq = 0;
+
   function saipShowFormModal(opts) {
     return new Promise(function (resolve) {
       var spec = opts || {};
       var fields = Array.isArray(spec.fields) ? spec.fields : [];
       var values = {};
+      var settled = false;
+      var returnFocus = document.activeElement;
+      var modalId = "saip-form-modal-" + (++saipFormModalSeq);
       fields.forEach(function (f) {
         if (f && f.key) {
           values[f.key] = (f.default !== undefined && f.default !== null)
@@ -844,17 +1636,20 @@
       var card = document.createElement("div");
       card.className = "saip-modal-card";
       card.setAttribute("role", "dialog");
-      card.setAttribute("aria-label", String(spec.title || "Form"));
+      card.setAttribute("aria-modal", "true");
+      card.setAttribute("aria-labelledby", modalId + "-title");
 
       var header = document.createElement("header");
       header.className = "saip-modal-header";
       var title = document.createElement("h3");
+      title.id = modalId + "-title";
       title.textContent = String(spec.title || "");
       header.appendChild(title);
       var closeBtn = document.createElement("button");
       closeBtn.type = "button";
       closeBtn.className = "saip-modal-close";
       closeBtn.title = "Close (Esc)";
+      closeBtn.setAttribute("aria-label", "Close " + String(spec.title || "form"));
       closeBtn.textContent = "\u00D7";
       closeBtn.addEventListener("click", function () { dismiss(false); });
       header.appendChild(closeBtn);
@@ -870,13 +1665,15 @@
       }
 
       var inputs = {};
-      fields.forEach(function (f) {
+      fields.forEach(function (f, fieldIndex) {
         if (!f || !f.key) return;
         var row = document.createElement("div");
         row.className = "saip-form-row";
         var lbl = document.createElement("label");
         lbl.className = "saip-form-label";
         lbl.textContent = String(f.label || f.key);
+        var fieldId = modalId + "-field-" + String(fieldIndex);
+        lbl.setAttribute("for", fieldId);
         if (f.required) {
           var star = document.createElement("span");
           star.className = "saip-form-required";
@@ -890,13 +1687,19 @@
 
         if (f.type === "checkbox") {
           var cb = document.createElement("input");
+          cb.id = fieldId;
           cb.type = "checkbox";
           cb.checked = !!values[f.key];
-          cb.addEventListener("change", function () { values[f.key] = cb.checked; });
+          cb.addEventListener("change", function () {
+            values[f.key] = cb.checked;
+            cb.classList.remove("saip-form-text--invalid");
+            if (cb.__saipErrorEl) cb.__saipErrorEl.hidden = true;
+          });
           inputWrap.appendChild(cb);
           inputs[f.key] = cb;
         } else if (f.type === "select") {
           var sel = document.createElement("select");
+          sel.id = fieldId;
           sel.className = "saip-form-select";
           (f.options || []).forEach(function (o) {
             var opt = document.createElement("option");
@@ -905,18 +1708,30 @@
             if (String(values[f.key]) === String(o.value)) opt.selected = true;
             sel.appendChild(opt);
           });
-          sel.addEventListener("change", function () { values[f.key] = sel.value; });
+          sel.addEventListener("change", function () {
+            values[f.key] = sel.value;
+            sel.classList.remove("saip-form-text--invalid");
+            if (sel.__saipErrorEl) sel.__saipErrorEl.hidden = true;
+          });
           inputWrap.appendChild(sel);
           inputs[f.key] = sel;
         } else {
           var inp = document.createElement("input");
-          inp.type = (f.type === "number") ? "number" : "text";
+          inp.id = fieldId;
+          inp.type = f.secret === true
+            ? "password"
+            : ((f.type === "number") ? "number" : "text");
           inp.className = "saip-form-text";
           inp.value = String(values[f.key] != null ? values[f.key] : "");
+          if (f.secret === true) inp.autocomplete = "new-password";
+          if (f.min !== undefined) inp.min = String(f.min);
+          if (f.max !== undefined) inp.max = String(f.max);
+          if (f.step !== undefined) inp.step = String(f.step);
           if (f.placeholder) inp.placeholder = String(f.placeholder);
           inp.addEventListener("input", function () {
             values[f.key] = inp.value;
             inp.classList.remove("saip-form-text--invalid");
+            if (inp.__saipErrorEl) inp.__saipErrorEl.hidden = true;
           });
           inputWrap.appendChild(inp);
           inputs[f.key] = inp;
@@ -965,6 +1780,12 @@
           hint.textContent = String(f.hint);
           row.appendChild(hint);
         }
+        var fieldError = document.createElement("p");
+        fieldError.className = "saip-form-hint saip-form-error";
+        fieldError.id = fieldId + "-error";
+        fieldError.hidden = true;
+        row.appendChild(fieldError);
+        inputs[f.key].__saipErrorEl = fieldError;
         body.appendChild(row);
       });
       card.appendChild(body);
@@ -991,28 +1812,87 @@
       function tryDismiss() {
         var bad = false;
         fields.forEach(function (f) {
-          if (!f || !f.required || f.type === "checkbox") return;
-          var v = String(values[f.key] || "").trim();
-          if (v.length === 0) {
+          if (!f || !f.key) return;
+          var node = inputs[f.key];
+          var errorEl = node && node.__saipErrorEl;
+          var v = f.type === "checkbox"
+            ? Boolean(values[f.key])
+            : String(values[f.key] == null ? "" : values[f.key]).trim();
+          var errorText = "";
+          if (f.required && f.type !== "checkbox" && String(v).length === 0) {
+            errorText = String(f.label || f.key) + " is required.";
+          } else if (typeof f.validate === "function") {
+            var validationResult = f.validate(values[f.key], values);
+            if (validationResult !== true && validationResult !== undefined
+                && validationResult !== null && validationResult !== "") {
+              errorText = validationResult === false
+                ? ("Check " + String(f.label || f.key) + ".")
+                : String(validationResult);
+            }
+          }
+          if (errorText) {
             bad = true;
-            var node = inputs[f.key];
             if (node) node.classList.add("saip-form-text--invalid");
+            if (errorEl) {
+              errorEl.textContent = errorText;
+              errorEl.hidden = false;
+            }
+          } else {
+            if (node) node.classList.remove("saip-form-text--invalid");
+            if (errorEl) {
+              errorEl.textContent = "";
+              errorEl.hidden = true;
+            }
           }
         });
-        if (bad) return;
+        if (bad) {
+          var firstInvalid = card.querySelector(".saip-form-text--invalid");
+          if (firstInvalid) firstInvalid.focus();
+          return;
+        }
         dismiss(true);
       }
 
       function dismiss(ok) {
+        if (settled) return;
+        settled = true;
         document.removeEventListener("keydown", esc);
         if (host.parentNode) host.parentNode.removeChild(host);
+        if (returnFocus && typeof returnFocus.focus === "function"
+            && document.contains(returnFocus)) {
+          returnFocus.focus();
+        }
         resolve({ ok: !!ok, values: values });
       }
       function esc(ev) {
-        if (ev.key === "Escape") { dismiss(false); }
+        if (ev.key === "Escape") {
+          ev.preventDefault();
+          ev.stopPropagation();
+          dismiss(false);
+        }
+        else if (ev.key === "Tab") {
+          var focusable = card.querySelectorAll(
+            "button:not([disabled]), input:not([disabled]), select:not([disabled]), "
+              + "textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+          );
+          if (focusable.length === 0) {
+            ev.preventDefault();
+            return;
+          }
+          var first = focusable[0];
+          var last = focusable[focusable.length - 1];
+          if (ev.shiftKey && document.activeElement === first) {
+            ev.preventDefault();
+            last.focus();
+          } else if (!ev.shiftKey && document.activeElement === last) {
+            ev.preventDefault();
+            first.focus();
+          }
+        }
         else if (ev.key === "Enter") {
           // Enter inside text fields commits; ignore on textareas (none here).
           if (ev.target && ev.target.tagName === "INPUT" && ev.target.type !== "checkbox") {
+            ev.preventDefault();
             tryDismiss();
           }
         }
@@ -1027,7 +1907,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // P0.2 — Batch personalization.
+  // P0.2 — Batch profile generation.
   //   Collects template + data + output dir, calls saip.batch_personalize,
   //   surfaces the per-record outcome through the action log.
   // ─────────────────────────────────────────────────────────────────
@@ -1035,7 +1915,7 @@
   async function saipRibbonBatchPersonalize(pkg) {
     var defaultTemplate = pkg && pkg.sourcePath ? pkg.sourcePath : "";
     var result = await saipShowFormModal({
-      title: "Batch personalize",
+      title: "Batch generate",
       intro: "Materialise N personalised DER profiles from one template + a data file. Column / key names must match template placeholder names 1:1.",
       submitLabel: "Generate",
       fields: [
@@ -1109,7 +1989,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // P1.4 — Import / Export PE, Move PE up/down, Batch validate.
+  // P1.4 — Import / Export PE, Move PE up/down, Batch lint.
   // ─────────────────────────────────────────────────────────────────
 
   async function saipRibbonImportPe(pkg, peList, detail, validation) {
@@ -1158,14 +2038,17 @@
         body: JSON.stringify({ inputs: inputs }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.import_pe");
         logBus.emit({ level: "error", source: "saip.import_pe", message: resp.error || "import_pe failed" });
         return;
       }
       var newIndex = resp.data && resp.data.pe_index;
-      pkg.peRows = null;
-      pkg.fileRows = null;
-      pkg.showPeCache = {};
+      saipInvalidateStructuralCaches(pkg);
+      if (typeof (resp.data && resp.data.pe_count) === "number") {
+        pkg.peCount = resp.data.pe_count;
+      }
       if (typeof newIndex === "number") pkg.selectedPeIndex = newIndex;
+      await saipRefreshDirty(pkg);
       logBus.emit({
         level: "info", source: "saip.import_pe",
         message: (resp.data && resp.data.summary) || "imported",
@@ -1222,6 +2105,7 @@
         body: JSON.stringify({ inputs: inputs }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.export_pe");
         logBus.emit({ level: "error", source: "saip.export_pe", message: resp.error || "export_pe failed" });
         return;
       }
@@ -1250,14 +2134,14 @@
         body: JSON.stringify({ inputs: inputs }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.reorder_pes");
         logBus.emit({ level: "error", source: "saip.reorder_pes", message: resp.error || "reorder failed" });
         return;
       }
       var d = resp.data || {};
-      pkg.peRows = null;
-      pkg.fileRows = null;
-      pkg.showPeCache = {};
+      saipInvalidateStructuralCaches(pkg);
       if (d.moved) pkg.selectedPeIndex = d.to_index;
+      await saipRefreshDirty(pkg);
       logBus.emit({
         level: "info", source: "saip.reorder_pes",
         message: d.summary || ("moved " + idx + " → " + to),
@@ -1283,6 +2167,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.reorder_pes");
         logBus.emit({
           level: "error",
           source: "saip.reorder_pes",
@@ -1291,12 +2176,9 @@
         return;
       }
       var d = resp.data || {};
-      pkg.peRows = null;
-      pkg.fileRows = null;
-      pkg.applications = null;
-      pkg.showPeCache = {};
-      pkg.showFileCache = {};
+      saipInvalidateStructuralCaches(pkg);
       if (d.moved) pkg.selectedPeIndex = d.to_index;
+      await saipRefreshDirty(pkg);
       logBus.emit({
         level: "info",
         source: "saip.reorder_pes",
@@ -1314,8 +2196,8 @@
 
   async function saipRibbonBatchValidate() {
     var result = await saipShowFormModal({
-      title: "Batch validate",
-      intro: "Lint multiple profile packages in one pass (mirrors epcval -p).",
+      title: "Batch lint",
+      intro: "Lint multiple profile packages in one pass (runs the batch linter).",
       submitLabel: "Validate",
       fields: [
         {
@@ -1392,6 +2274,14 @@
         || document.createElement("div");
       await saipRunValidation(pkg, host);
     }
+    if (!pkg.validation || !pkg.validation.summary) {
+      logBus.emit({
+        level: "error",
+        source: "saip.save_report",
+        message: "Validation did not complete; no report was written.",
+      });
+      return;
+    }
     var picked = "";
     try {
       picked = await pathPicker.saveFile({
@@ -1403,7 +2293,6 @@
     if (!picked) return;
     var report = {
       profile_label: pkg.filename || pkg.sourcePath || "",
-      session_id: pkg.sessionId,
       score: (pkg.validation && pkg.validation.score) || 0,
       summary: (pkg.validation && pkg.validation.summary) || {},
       findings: (pkg.validation && pkg.validation.findings) || [],
@@ -1460,6 +2349,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.sync_arr");
         logBus.emit({ level: "error", source: "saip.sync_arr", message: resp.error || "sync failed" });
         return;
       }
@@ -1484,6 +2374,12 @@
         pkg.peRows = null;
         pkg.fileRows = null;
         pkg.showPeCache = {};
+        pkg.showFileCache = {};
+        pkg.decodedFieldsCache = {};
+        pkg.applications = null;
+        pkg.variables = null;
+        saipInvalidateValidation(pkg);
+        await saipRefreshDirty(pkg);
         renderSaipActiveSlots(peList, detail, validation);
       }
     } catch (err) {
@@ -1505,6 +2401,7 @@
         body: JSON.stringify({ inputs: { session_id: pkg.sessionId } }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip." + action);
         logBus.emit({ level: "warn", source: "saip." + action, message: resp.error || (action + " failed") });
         return;
       }
@@ -1513,9 +2410,8 @@
         level: "info", source: "saip." + action,
         message: d.summary || (action + " ok"),
       });
-      pkg.peRows = null;
-      pkg.fileRows = null;
-      pkg.showPeCache = {};
+      saipInvalidateStructuralCaches(pkg);
+      await saipRefreshDirty(pkg);
       renderSaipActiveSlots(peList, detail, validation);
     } catch (err) {
       logBus.emit({ level: "error", source: "saip." + action, message: String(err && err.message || err) });
@@ -1557,6 +2453,7 @@
         body: JSON.stringify({ inputs: inputs }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.add_pe");
         logBus.emit({
           level: "error",
           source: "saip.add_pe",
@@ -1565,14 +2462,12 @@
         return;
       }
       var newIndex = resp.data && (resp.data.pe_index !== undefined ? resp.data.pe_index : null);
-      pkg.peRows = null;
-      pkg.fileRows = null;
-      pkg.showPeCache = {};
+      saipInvalidateStructuralCaches(pkg);
       pkg.peCount = (resp.data && resp.data.pe_count) || pkg.peCount;
       if (newIndex !== null) pkg.selectedPeIndex = newIndex;
       await saipLoadPeRows(pkg);
       saipLoadFileRows(pkg);
-      saipRefreshDirty(pkg);
+      await saipRefreshDirty(pkg);
       renderSaipActiveSlots(peList, detail, validation);
       logBus.emit({
         level: "info",
@@ -1650,6 +2545,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.delete_pe");
         logBus.emit({
           level: "error",
           source: "saip.delete_pe",
@@ -1657,14 +2553,12 @@
         });
         return;
       }
-      pkg.peRows = null;
-      pkg.fileRows = null;
-      pkg.showPeCache = {};
+      saipInvalidateStructuralCaches(pkg);
       pkg.selectedPeIndex = null;
       pkg.peCount = (resp.data && resp.data.pe_count) || Math.max(0, pkg.peCount - 1);
       await saipLoadPeRows(pkg);
       saipLoadFileRows(pkg);
-      saipRefreshDirty(pkg);
+      await saipRefreshDirty(pkg);
       renderSaipActiveSlots(peList, detail, validation);
       logBus.emit({
         level: "info",
@@ -1697,6 +2591,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.search_files");
         logBus.emit({
           level: "error",
           source: "saip.search_files",
@@ -1750,6 +2645,7 @@
   var _saipFindState = {
     overlayEl: null,
     pkg: null,
+    returnFocus: null,
     lastQuery: "",
     matches: [],
     activeMatchIndex: -1,
@@ -1810,14 +2706,20 @@
 
   function saipCloseFindOverlay() {
     var st = _saipFindState;
+    var returnFocus = st.returnFocus;
     if (st.overlayEl && st.overlayEl.parentNode) {
       st.overlayEl.parentNode.removeChild(st.overlayEl);
     }
     st.overlayEl = null;
     st.pkg = null;
+    st.returnFocus = null;
     st.matches = [];
     st.activeMatchIndex = -1;
     _saipFindHighlightDetail("");
+    if (returnFocus && typeof returnFocus.focus === "function"
+        && document.contains(returnFocus)) {
+      returnFocus.focus();
+    }
   }
 
   function saipOpenFindOverlay(pkg) {
@@ -1828,6 +2730,7 @@
       return;
     }
     _saipFindState.pkg = pkg;
+    _saipFindState.returnFocus = document.activeElement;
 
     var overlay = document.createElement("div");
     overlay.className = "saip-find-overlay";
@@ -1841,6 +2744,7 @@
     inp.type = "text";
     inp.className = "saip-find-input";
     inp.placeholder = "Find in PEs / JSON…";
+    inp.setAttribute("aria-label", "Find in package");
     inp.spellcheck = false;
     bar.appendChild(inp);
 
@@ -1849,6 +2753,7 @@
     caseBtn.title = "Case-sensitive search";
     var caseCb = document.createElement("input");
     caseCb.type = "checkbox";
+    caseCb.setAttribute("aria-label", "Case-sensitive search");
     caseBtn.appendChild(caseCb);
     var caseLbl = document.createElement("span");
     caseLbl.textContent = "Aa";
@@ -1860,6 +2765,7 @@
     regexBtn.title = "Regex mode";
     var regexCb = document.createElement("input");
     regexCb.type = "checkbox";
+    regexCb.setAttribute("aria-label", "Use regular expressions");
     regexBtn.appendChild(regexCb);
     var regexLbl = document.createElement("span");
     regexLbl.textContent = ".*";
@@ -1869,6 +2775,9 @@
     var status = document.createElement("span");
     status.className = "saip-find-status";
     status.textContent = "";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.setAttribute("aria-atomic", "true");
     bar.appendChild(status);
 
     var prevBtn = document.createElement("button");
@@ -1876,6 +2785,7 @@
     prevBtn.className = "btn btn-small";
     prevBtn.textContent = "↑";
     prevBtn.title = "Previous match (Shift+Enter)";
+    prevBtn.setAttribute("aria-label", "Previous match");
     bar.appendChild(prevBtn);
 
     var nextBtn = document.createElement("button");
@@ -1883,6 +2793,7 @@
     nextBtn.className = "btn btn-small";
     nextBtn.textContent = "↓";
     nextBtn.title = "Next match (Enter)";
+    nextBtn.setAttribute("aria-label", "Next match");
     bar.appendChild(nextBtn);
 
     var closeBtn = document.createElement("button");
@@ -1890,6 +2801,7 @@
     closeBtn.className = "btn btn-small saip-find-close";
     closeBtn.textContent = "×";
     closeBtn.title = "Close (Esc)";
+    closeBtn.setAttribute("aria-label", "Close find");
     closeBtn.addEventListener("click", saipCloseFindOverlay);
     bar.appendChild(closeBtn);
 
@@ -1897,7 +2809,15 @@
 
     var resultsEl = document.createElement("div");
     resultsEl.className = "saip-find-results";
+    resultsEl.setAttribute("aria-label", "Search results");
     overlay.appendChild(resultsEl);
+
+    overlay.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      saipCloseFindOverlay();
+    });
 
     document.body.appendChild(overlay);
     _saipFindState.overlayEl = overlay;
@@ -1955,6 +2875,7 @@
           }),
         });
         if (!resp.ok) {
+          saipMarkSessionUnavailable(pkg, resp, "saip.search_pe_text");
           status.textContent = "search failed: " + (resp.error || "unknown");
           return;
         }
@@ -2001,9 +2922,6 @@
       if (ev.key === "Enter") {
         ev.preventDefault();
         jumpTo(_saipFindState.activeMatchIndex + (ev.shiftKey ? -1 : 1));
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        saipCloseFindOverlay();
       }
     });
 
@@ -2025,6 +2943,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.pe_info");
         logBus.emit({
           level: "error",
           source: "saip.pe_info",
@@ -2054,12 +2973,20 @@
     ribbon.innerHTML = "";
     var pkg = saipActivePackage();
     var hasPkg = Boolean(pkg);
+    var hasLiveSession = Boolean(
+      pkg && pkg.sessionId && pkg.sessionUnavailable !== true
+    );
+    var hasSource = Boolean(pkg && String(pkg.sourcePath || "").trim());
     var hasMultiplePkgs =
-      commandState.saipWorkbench.packages.length > 1;
+      commandState.saipWorkbench.packages.filter(function (candidate) {
+        return candidate && candidate.sessionId && candidate.sessionUnavailable !== true;
+      }).length > 1;
 
     function mkGroup(label) {
       var group = document.createElement("div");
       group.className = "saip-ribbon-group";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", label + " commands");
       var inner = document.createElement("div");
       inner.className = "saip-ribbon-buttons";
       group.appendChild(inner);
@@ -2081,7 +3008,7 @@
       }
       var icon = document.createElement("span");
       icon.className = "saip-ribbon-btn-icon";
-      icon.textContent = spec.icon || "";
+      ccSetActionIcon(icon, spec.icon || "action");
       btn.appendChild(icon);
       var label = document.createElement("span");
       label.className = "saip-ribbon-btn-label";
@@ -2097,15 +3024,41 @@
     // -- Package commands (TCA SAIP §3 ProfilePackage) ---------------
     var pkgGrp = mkGroup("Package");
     pkgGrp.inner.appendChild(mkBtn({
-      icon: "+", label: "New",
+      icon: "new", label: "New",
       kind: "primary",
       title: "Scaffold a new empty profile (header + PE-End).",
       onClick: function () {
         saipRibbonNewPackage(drawer || saipDrawerEl(), peList, detail, validation);
       },
     }));
+    saipCatalogueActionsByTag("saip-ribbon-package-form").forEach(function (action) {
+      pkgGrp.inner.appendChild(mkBtn({
+        icon: _ccResolveIcon(action.id), label: action.title || action.id,
+        kind: "primary",
+        title: action.description || action.title || action.id,
+        onClick: function () {
+          _ccBuildActionPopout(action);
+        },
+      }));
+    });
+    saipCatalogueActionsByTag("saip-ribbon-package-session").forEach(function (action) {
+      pkgGrp.inner.appendChild(mkBtn({
+        icon: _ccResolveIcon(action.id), label: action.title || action.id,
+        kind: "primary",
+        title: action.description || action.title || action.id,
+        onClick: function () {
+          saipRibbonRunSessionContribution(
+            action,
+            drawer || saipDrawerEl(),
+            peList,
+            detail,
+            validation
+          );
+        },
+      }));
+    });
     pkgGrp.inner.appendChild(mkBtn({
-      icon: "↥", label: "Open",
+      icon: "open", label: "Open",
       kind: "primary",
       title: "Open a SAIP package from disk — drag-and-drop also works.  (Ctrl+O)",
       onClick: function () {
@@ -2113,14 +3066,14 @@
       },
     }));
     pkgGrp.inner.appendChild(mkBtn({
-      icon: "🕐", label: "Recent",
+      icon: "recent", label: "Recent",
       title: "Open a recently used profile.",
       onClick: function (ev) {
         saipRibbonOpenRecent(ev.currentTarget, drawer || saipDrawerEl(), peList, detail, validation);
       },
     }));
     pkgGrp.inner.appendChild(mkBtn({
-      icon: "✕", label: "Close",
+      icon: "close", label: "Close",
       disabled: !hasPkg,
       title: hasPkg
         ? "Close the active package."
@@ -2133,38 +3086,51 @@
           );
           if (!ok) return;
         }
-        saipClosePackage(pkg.id, drawer || saipDrawerEl(), peList, detail, validation);
+        saipClosePackage(
+          pkg.id,
+          drawer || saipDrawerEl(),
+          peList,
+          detail,
+          validation,
+          pkg.dirty === true
+        );
       },
     }));
     pkgGrp.inner.appendChild(mkBtn({
-      icon: "💾", label: "Save",
-      disabled: !hasPkg,
-      title: hasPkg
-        ? "Save back to the source path; format follows the package encoding.  (Ctrl+S — Ctrl+Shift+S forces Save as…)"
-        : "Open a package first.",
+      icon: "save", label: "Save",
+      disabled: !hasLiveSession,
+      title: !hasPkg
+        ? "Open a package first."
+        : (!hasLiveSession
+          ? "This session expired. Close and reopen the package before saving."
+          : "Save back to the source path; format follows the package encoding.  (Ctrl+S — Ctrl+Shift+S forces Save as…)"),
       onClick: function () {
         if (!pkg) return;
         saipRibbonSavePackage(pkg, drawer || saipDrawerEl(), peList, detail, validation, false);
       },
     }));
     pkgGrp.inner.appendChild(mkBtn({
-      icon: "💾⇲", label: "Save as…",
-      disabled: !hasPkg,
-      title: hasPkg
-        ? "Save the active package to a new path / format.  (Ctrl+Shift+S)"
-        : "Open a package first.",
+      icon: "save-as", label: "Save as…",
+      disabled: !hasLiveSession,
+      title: !hasPkg
+        ? "Open a package first."
+        : (!hasLiveSession
+          ? "This session expired. Close and reopen the package before exporting."
+          : "Save the active package to a new path / format.  (Ctrl+Shift+S)"),
       onClick: function () {
         if (!pkg) return;
         saipRibbonSavePackage(pkg, drawer || saipDrawerEl(), peList, detail, validation, true);
       },
     }));
     pkgGrp.inner.appendChild(mkBtn({
-      icon: "↺", label: "Revert",
-      disabled: !(hasPkg && pkg && pkg.dirty),
-      title: (hasPkg && pkg && pkg.dirty)
+      icon: "revert", label: "Revert",
+      disabled: !(hasLiveSession && pkg && pkg.dirty && hasSource),
+      title: (hasLiveSession && pkg && pkg.dirty && hasSource)
         ? "Drop in-memory edits and reload from the package source file."
         : (hasPkg
-          ? "No unsaved changes to revert."
+          ? (hasSource
+            ? "No unsaved changes to revert."
+            : "Save this in-memory profile as tagged JSON before reverting.")
           : "Open a package first."),
       onClick: function () {
         if (!pkg) return;
@@ -2174,19 +3140,21 @@
       },
     }));
     pkgGrp.inner.appendChild(mkBtn({
-      icon: "Δ", label: "Diff vs saved",
-      disabled: !hasPkg,
-      title: hasPkg
+      icon: "diff", label: "Diff vs saved",
+      disabled: !(hasLiveSession && hasSource),
+      title: hasLiveSession && hasSource
         ? "Show the semantic diff between this session's edits and the on-disk source."
-        : "Open a package first.",
+        : (hasPkg
+          ? "Save this in-memory profile as tagged JSON before comparing with disk."
+          : "Open a package first."),
       onClick: function () {
         if (!pkg) return;
         saipStartDiffVsSaved(pkg, drawer || saipDrawerEl(), peList, detail, validation);
       },
     }));
     pkgGrp.inner.appendChild(mkBtn({
-      icon: "⇄", label: "Compare",
-      disabled: !(hasPkg && hasMultiplePkgs),
+      icon: "compare", label: "Compare",
+      disabled: !(hasLiveSession && hasMultiplePkgs),
       title: hasMultiplePkgs
         ? "Diff this package against another open package."
         : "Open a second package to enable compare.",
@@ -2195,21 +3163,40 @@
         saipStartCompare(pkg, drawer || saipDrawerEl(), peList, detail, validation);
       },
     }));
-    pkgGrp.inner.appendChild(mkBtn({
-      icon: "⇡⇣", label: "Batch",
-      kind: "stub",
-      disabled: true,
-      title: "Batch personalisation runner (planned for SA-G6).",
-    }));
     ribbon.appendChild(pkgGrp.group);
+
+    // -- Plug-in actions bound to the active in-memory session --------
+    // These remain normal action forms/results.  They neither create nor
+    // activate a second SAIP package, and the injected session identifier is
+    // hidden by the shared form-prefill helper.
+    var activeSessionActions = saipCatalogueActionsByTag(
+      "saip-ribbon-active-session-form"
+    );
+    if (activeSessionActions.length > 0) {
+      var actionGrp = mkGroup("Actions");
+      activeSessionActions.forEach(function (action) {
+        actionGrp.inner.appendChild(mkBtn({
+          icon: _ccResolveIcon(action.id), label: action.title || action.id,
+          disabled: !hasLiveSession,
+          title: hasLiveSession
+            ? (action.description || action.title || action.id)
+            : "Open a package first.",
+          onClick: function () {
+            if (!pkg) return;
+            saipRibbonOpenActiveSessionContribution(action, pkg);
+          },
+        }));
+      });
+      ribbon.appendChild(actionGrp.group);
+    }
 
     // -- Element commands (SGP.22 §2.5.4 ProfileElement) -------------
     var peGrp = mkGroup("Element");
     var hasPeSelection =
-      hasPkg && typeof pkg.selectedPeIndex === "number" && pkg.selectedPeIndex >= 0;
+      hasLiveSession && typeof pkg.selectedPeIndex === "number" && pkg.selectedPeIndex >= 0;
     peGrp.inner.appendChild(mkBtn({
-      icon: "↑+", label: "Add above",
-      disabled: !hasPkg,
+      icon: "add-above", label: "Add above",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? (hasPeSelection
           ? "Insert a PE just before the selected one."
@@ -2221,8 +3208,8 @@
       },
     }));
     peGrp.inner.appendChild(mkBtn({
-      icon: "↓+", label: "Add below",
-      disabled: !hasPkg,
+      icon: "add-below", label: "Add below",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? (hasPeSelection
           ? "Insert a PE just after the selected one."
@@ -2234,7 +3221,7 @@
       },
     }));
     peGrp.inner.appendChild(mkBtn({
-      icon: "🗑", label: "Delete",
+      icon: "delete", label: "Delete",
       disabled: !hasPeSelection,
       title: hasPeSelection
         ? "Remove the selected PE (header / PE-End anchors are protected)."
@@ -2245,7 +3232,7 @@
       },
     }));
     peGrp.inner.appendChild(mkBtn({
-      icon: "↥", label: "Move up",
+      icon: "move-up", label: "Move up",
       disabled: !hasPeSelection,
       title: hasPeSelection
         ? "Move the selected PE one slot toward the front (header / PE-End anchors are protected)."
@@ -2256,7 +3243,7 @@
       },
     }));
     peGrp.inner.appendChild(mkBtn({
-      icon: "↧", label: "Move down",
+      icon: "move-down", label: "Move down",
       disabled: !hasPeSelection,
       title: hasPeSelection
         ? "Move the selected PE one slot toward the end (header / PE-End anchors are protected)."
@@ -2267,8 +3254,8 @@
       },
     }));
     peGrp.inner.appendChild(mkBtn({
-      icon: "⤓", label: "Import PE",
-      disabled: !hasPkg,
+      icon: "import", label: "Import PE",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? "Insert a PE from a .der / .asn / .json blob."
         : "Open a package first.",
@@ -2278,7 +3265,7 @@
       },
     }));
     peGrp.inner.appendChild(mkBtn({
-      icon: "⤒", label: "Export PE",
+      icon: "export", label: "Export PE",
       disabled: !hasPeSelection,
       title: hasPeSelection
         ? "Serialise the selected PE to disk (DER / HEX / JSON)."
@@ -2289,8 +3276,8 @@
       },
     }));
     peGrp.inner.appendChild(mkBtn({
-      icon: "↺", label: "Undo",
-      disabled: !hasPkg,
+      icon: "undo", label: "Undo",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? "Undo the last package edit  (Ctrl+Z)"
         : "Open a package first.",
@@ -2300,8 +3287,8 @@
       },
     }));
     peGrp.inner.appendChild(mkBtn({
-      icon: "↻", label: "Redo",
-      disabled: !hasPkg,
+      icon: "redo", label: "Redo",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? "Redo the last undone edit  (Ctrl+Shift+Z)"
         : "Open a package first.",
@@ -2313,10 +3300,10 @@
     ribbon.appendChild(peGrp.group);
 
     // -- Filesystem commands (ETSI TS 102 221 §8) --------------------
-    var fsGrp = mkGroup("Filesystem");
+    var fsGrp = mkGroup("File system");
     fsGrp.inner.appendChild(mkBtn({
-      icon: "🔍", label: "Find",
-      disabled: !hasPkg,
+      icon: "find", label: "Find",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? "Find files by name, FID, description, or translation."
         : "Open a package first.",
@@ -2326,8 +3313,8 @@
       },
     }));
     fsGrp.inner.appendChild(mkBtn({
-      icon: "↻", label: "Sync ARR",
-      disabled: !hasPkg,
+      icon: "sync", label: "Sync ARR",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? "Walk every PE that owns access-control file IDs and align them so file references match. Dry-run by default."
         : "Open a package first.",
@@ -2338,11 +3325,11 @@
     }));
     ribbon.appendChild(fsGrp.group);
 
-    // -- Token bindings ([NAME] placeholders, YggdraSIM-coined) ------
+    // -- Token bindings ([NAME] placeholders, YggdraSIM-owned) ------
     var varsGrp = mkGroup("Tokens");
     varsGrp.inner.appendChild(mkBtn({
-      icon: "{ }", label: "Token editor",
-      disabled: !hasPkg,
+      icon: "token", label: "Token editor",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? "Bind [NAME] placeholders to per-session values for the active package.  (Ctrl+E)"
         : "Open a package first.",
@@ -2351,9 +3338,18 @@
         openSaipVariableModal(pkg.id);
       },
     }));
+    saipCatalogueActionsByTag("saip-ribbon-tokens-form").forEach(function (action) {
+      varsGrp.inner.appendChild(mkBtn({
+        icon: _ccResolveIcon(action.id), label: action.title || action.id,
+        title: action.description || action.title || action.id,
+        onClick: function () {
+          _ccBuildActionPopout(action);
+        },
+      }));
+    });
     varsGrp.inner.appendChild(mkBtn({
-      icon: "📋", label: "Batch personalize",
-      disabled: !hasPkg,
+      icon: "personalize", label: "Batch generate",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? "Materialise N personalised DER profiles from one template + a data file (CSV / JSON / JSONL / YAML)."
         : "Open a package first.",
@@ -2367,8 +3363,8 @@
     // -- Lint commands (Tools/ProfilePackage/lint_engine) ------------
     var valGrp = mkGroup("Lint");
     valGrp.inner.appendChild(mkBtn({
-      icon: "✓", label: "Validate",
-      disabled: !hasPkg,
+      icon: "check", label: "Validate",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? "Run the SAIP linter against the active package.  (Ctrl+Shift+V)"
         : "Open a package first.",
@@ -2378,15 +3374,15 @@
       },
     }));
     valGrp.inner.appendChild(mkBtn({
-      icon: "📁", label: "Batch validate",
+      icon: "batch", label: "Batch lint",
       title: "Lint multiple SAIP packages by path / glob in one call.",
       onClick: function () {
         saipRibbonBatchValidate();
       },
     }));
     valGrp.inner.appendChild(mkBtn({
-      icon: "💾", label: "Save report",
-      disabled: !hasPkg,
+      icon: "report", label: "Save report",
+      disabled: !hasLiveSession,
       title: hasPkg
         ? "Save the validation report to a JSON file."
         : "Open a package first.",
@@ -2397,10 +3393,48 @@
     }));
     ribbon.appendChild(valGrp.group);
 
+    // -- Additional registry access -----------------------------------
+    // The custom workbench promotes common workflows into the ribbon,
+    // while the searchable palette retains specialist and plug-in actions.
+    // Lifecycle, view-plumbing, and deprecated endpoints stay out because
+    // launching them generically can desynchronise the mounted session.
+    var advancedGrp = mkGroup("Advanced");
+    var advancedActions = saipWorkbenchActions();
+    advancedGrp.inner.appendChild(mkBtn({
+      icon: "action",
+      label: "All actions",
+      disabled: advancedActions.length === 0,
+      title: advancedActions.length > 0
+        ? "Search " + advancedActions.length + " additional registered SAIP actions."
+        : "No SAIP actions are registered.",
+      onClick: function () {
+        saipOpenActionPalette(pkg);
+      },
+    }));
+    advancedGrp.inner.appendChild(mkBtn({
+      icon: "refresh",
+      label: "Refresh",
+      disabled: !hasLiveSession,
+      title: hasLiveSession
+        ? "Reload PE, file, token, application, dirty, and validation state from the active session."
+        : "Open a live SAIP package first.",
+      onClick: function () {
+        if (!pkg) return;
+        saipRefreshActivePackage(
+          pkg,
+          drawer || saipDrawerEl(),
+          peList,
+          detail,
+          validation
+        );
+      },
+    }));
+    ribbon.appendChild(advancedGrp.group);
+
     // -- Reference (spec citations + shipped guides) -----------------
     var helpGrp = mkGroup("Reference");
     helpGrp.inner.appendChild(mkBtn({
-      icon: "i", label: "Spec card",
+      icon: "reference", label: "Spec card",
       disabled: !hasPeSelection,
       title: hasPeSelection
         ? "Show the reference card (title, ASN.1 module, spec citation, summary) for the selected PE."
@@ -2411,7 +3445,7 @@
       },
     }));
     helpGrp.inner.appendChild(mkBtn({
-      icon: "?", label: "Guides",
+      icon: "guides", label: "Guides",
       title: "Open the YggdraSIM guides catalogue (under About).",
       onClick: function () {
         // Sends the operator to the About surface so they hit the
@@ -2459,6 +3493,8 @@
   function renderSaipTopTabs(topTabs, drawer, peList, detail, validation) {
     if (!topTabs) return;
     topTabs.innerHTML = "";
+    topTabs.setAttribute("role", "tablist");
+    topTabs.setAttribute("aria-label", "SAIP package views");
     var pkg = saipActivePackage();
     var activeId = pkg ? pkg.activeTopTab : "profile_elements";
     SAIP_TOP_TABS.forEach(function (spec) {
@@ -2468,6 +3504,11 @@
       if (spec.id === activeId) btn.classList.add("is-active");
       if (!pkg) btn.classList.add("is-disabled");
       btn.disabled = !pkg;
+      btn.setAttribute("role", "tab");
+      btn.setAttribute("aria-selected", spec.id === activeId ? "true" : "false");
+      btn.id = "saip-top-tab-" + spec.id;
+      btn.setAttribute("aria-controls", "saip-tab-body");
+      btn.tabIndex = spec.id === activeId ? 0 : -1;
       btn.setAttribute("data-tab-id", spec.id);
       btn.title = spec.hint;
       var label = document.createElement("span");
@@ -2500,8 +3541,30 @@
         renderSaipActiveSlots(peList, detail, validation);
         renderSaipRibbon(saipRibbonEl(), drawer, peList, detail, validation);
       });
+      btn.addEventListener("keydown", function (event) {
+        if (!pkg) return;
+        var keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+        if (keys.indexOf(event.key) === -1) return;
+        event.preventDefault();
+        var tabs = Array.prototype.slice.call(
+          topTabs.querySelectorAll(".saip-top-tab:not([disabled])")
+        );
+        var current = tabs.indexOf(btn);
+        if (current < 0 || tabs.length === 0) return;
+        var next = current;
+        if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+        else if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = tabs.length - 1;
+        tabs[next].focus();
+        tabs[next].click();
+      });
       topTabs.appendChild(btn);
     });
+    var tabBody = saipTabBodyEl();
+    if (tabBody) {
+      tabBody.setAttribute("aria-labelledby", "saip-top-tab-" + activeId);
+    }
   }
 
   function saipApplicationsCount(pkg) {
@@ -2557,18 +3620,69 @@
     return saipFindPackage(commandState.saipWorkbench.activePackageId);
   }
 
+  function saipSessionErrorText(response) {
+    return String(response && response.error || "").trim();
+  }
+
+  function saipResponseSaysSessionGone(response) {
+    if (!response || response.ok !== false) return false;
+    return /(unknown session|session (?:was )?not found|no such session|session expired|closed session)/i
+      .test(saipSessionErrorText(response));
+  }
+
+  function saipMarkSessionUnavailable(pkg, response, source) {
+    if (!pkg || !saipResponseSaysSessionGone(response)) return false;
+    var firstNotice = pkg.sessionUnavailable !== true;
+    pkg.sessionUnavailable = true;
+    pkg.sessionError = saipSessionErrorText(response)
+      || "The backend no longer has this SAIP session.";
+    pkg.validationError = pkg.sessionError;
+    pkg.valAutoRunPending = false;
+    saipCancelPendingAutoApplies(pkg);
+    if (firstNotice && typeof logBus !== "undefined" && logBus
+        && typeof logBus.emit === "function") {
+      logBus.emit({
+        level: "error",
+        source: source || "saip.session",
+        message: "SAIP session expired. Cached data remains visible; close and reopen the package to continue editing.",
+      });
+    }
+    var slots = saipResolveSlots();
+    var drawer = slots.drawer;
+    if (drawer) {
+      renderSaipDrawer(drawer, slots.peList, slots.detail, slots.validation);
+    }
+    var ribbon = saipRibbonEl();
+    if (ribbon) {
+      renderSaipRibbon(
+        ribbon,
+        drawer,
+        slots.peList,
+        slots.detail,
+        slots.validation
+      );
+    }
+    return true;
+  }
+
   function saipCreatePackageRecord(resp) {
     var wb = commandState.saipWorkbench;
     var id = "saip-pkg-" + (wb.packageSeq++);
     return {
       id: id,
       sessionId: resp.session_id || null,
+      sessionUnavailable: false,
+      sessionError: "",
       filename: resp.file_name || "(unnamed)",
       sourcePath: resp.source_path || "",
       sizeBytes: resp.size_bytes || 0,
       encoding: resp.encoding || "",
       peCount: resp.pe_count || 0,
       peTypes: Array.isArray(resp.pe_types) ? resp.pe_types.slice() : [],
+      generation: resp.generation || null,
+      scopeLock: resp.scope_lock || "",
+      exportGuard: resp.export_guard || null,
+      inlinePlaceholderCount: Number(resp.inline_placeholder_count || 0),
       peRows: null,             // populated after saip.list_pes
       peRowsError: null,
       selectedPeIndex: null,
@@ -2591,10 +3705,11 @@
       fileDataViewMode: "split",
       validation: null,
       validationError: null,
+      validationRequestSeq: 0,
       // SA-G1: ``activeTopTab`` replaces the legacy ``activeDetailTab``
       // tri-state ("pe" | "file" | "vars"). Variables now live in a
       // ribbon-launched modal so the package itself only has the three
-      // structural views Comprion exposes as siblings.
+      // structural package surfaces.
       activeTopTab: "profile_elements",  // "profile_elements" | "file_system" | "applications"
       // SA-G3: file detail sub-tab + file-tree expand/collapse memory.
       // ``fileTreeCollapsed`` keys are the synthetic node ids minted in
@@ -2622,9 +3737,10 @@
       valSeverityFilter: { fail: true, warn: true, info: true, pass: false },
       valAutoRunPending: true,
       // SA-3 dirty-state tracking
-      dirty: false,
-      dirtyPeIndices: [],
-      dirtySequenceWide: false,
+      dirty: Boolean(resp.dirty),
+      dirtyPeIndices: Array.isArray(resp.dirty_pe_indices)
+        ? resp.dirty_pe_indices.slice() : [],
+      dirtySequenceWide: Boolean(resp.dirty_sequence_wide),
       saveStatus: "",
       // SA-4 compare mode
       compareWithId: null,       // package id to compare against
@@ -2675,7 +3791,7 @@
   function saipRecentRecord(path) {
     var trimmed = String(path || "").trim();
     if (trimmed.length === 0) return;
-    var basename = trimmed.split("/").pop() || trimmed;
+    var basename = trimmed.split(/[\\/]/).pop() || trimmed;
     var existing = saipRecentLoad();
     // Dedupe by absolute path; bump matching entry to the top so
     // the most-recently-used file is always first in the list.
@@ -2714,11 +3830,19 @@
     var lines = [String(pkg && pkg.filename || "(unnamed)")];
     if (pkg && pkg.sourcePath) lines.push(String(pkg.sourcePath));
     if (pkg && pkg.dirty) lines.push("Unsaved changes");
+    if (pkg && pkg.sessionUnavailable) {
+      lines.push("Session expired — cached data is read-only");
+    }
+    if (pkg && pkg.exportGuard && pkg.exportGuard.concrete_export_allowed === false) {
+      lines.push("Authoring only — concrete DER/HEX export blocked");
+    }
     return lines.join("\n");
   }
 
   function saipSelectPackage(packageId, drawer, peList, detail, validation) {
-    commandState.saipWorkbench.activePackageId = packageId;
+    var wb = commandState.saipWorkbench;
+    wb.activePackageId = packageId;
+    if (wb.variableModalOpen) wb.variableModalPackageId = packageId;
     renderSaipDrawer(drawer, peList, detail, validation);
     renderSaipActiveSlots(peList, detail, validation);
     renderSaipRibbon(saipRibbonEl(), drawer, peList, detail, validation);
@@ -2798,11 +3922,13 @@
     }
     var ul = document.createElement("ul");
     ul.className = "saip-pkg-list";
+    ul.setAttribute("aria-label", "Open packages");
     wb.packages.forEach(function (pkg) {
       var li = document.createElement("li");
       li.className = "saip-pkg-row";
       if (pkg.id === wb.activePackageId) li.classList.add("is-active");
       if (pkg.dirty) li.classList.add("is-dirty");
+      if (pkg.sessionUnavailable) li.classList.add("is-unavailable");
       var name = document.createElement("span");
       name.className = "saip-pkg-name";
       name.textContent = pkg.filename;
@@ -2820,12 +3946,29 @@
       var dirtyCount = (pkg.dirtyPeIndices || []).length
         + (pkg.dirtySequenceWide ? 1 : 0);
       sub.textContent = encoding + " \u00B7 " + pkg.peCount + " PE"
-        + (dirtyCount > 0 ? " \u00B7 " + dirtyCount + " dirty" : "");
+        + (dirtyCount > 0 ? " \u00B7 " + dirtyCount + " dirty" : "")
+        + (pkg.sessionUnavailable ? " \u00B7 session expired" : "");
+      var select = document.createElement("button");
+      select.type = "button";
+      select.className = "saip-pkg-select";
+      select.setAttribute(
+        "aria-label",
+        "Activate package " + String(pkg.filename || "unnamed package")
+      );
+      select.appendChild(name);
+      select.appendChild(sub);
+      select.addEventListener("click", function () {
+        saipSelectPackage(pkg.id, drawer, peList, detail, validation);
+      });
       var close = document.createElement("button");
       close.type = "button";
       close.className = "saip-pkg-close";
       close.textContent = "\u00D7";
       close.title = "Close this package";
+      close.setAttribute(
+        "aria-label",
+        "Close package " + String(pkg.filename || "unnamed package")
+      );
       close.addEventListener("click", function (event) {
         event.stopPropagation();
         if (pkg.dirty) {
@@ -2834,13 +3977,16 @@
           );
           if (!ok) return;
         }
-        saipClosePackage(pkg.id, drawer, peList, detail, validation);
+        saipClosePackage(
+          pkg.id,
+          drawer,
+          peList,
+          detail,
+          validation,
+          pkg.dirty === true
+        );
       });
-      li.addEventListener("click", function () {
-        saipSelectPackage(pkg.id, drawer, peList, detail, validation);
-      });
-      li.appendChild(name);
-      li.appendChild(sub);
+      li.appendChild(select);
       li.appendChild(close);
       ul.appendChild(li);
     });
@@ -2850,6 +3996,21 @@
     // result of a Save / Revert / Diff vs saved triggered from the
     // ribbon, since the drawer no longer carries those buttons.
     var active = saipActivePackage();
+    if (active && active.exportGuard
+        && active.exportGuard.concrete_export_allowed === false) {
+      var guardEcho = document.createElement("p");
+      guardEcho.className = "saip-save-status";
+      guardEcho.textContent = "AUTHORING ONLY — DER/HEX export blocked · "
+        + String(active.scopeLock || "generated partial profile");
+      drawer.appendChild(guardEcho);
+    }
+    if (active && active.sessionUnavailable) {
+      var sessionEcho = document.createElement("p");
+      sessionEcho.className = "saip-save-status saip-session-unavailable";
+      sessionEcho.textContent =
+        "SESSION EXPIRED — cached data is read-only. Close and reopen this package to continue.";
+      drawer.appendChild(sessionEcho);
+    }
     if (active && active.saveStatus) {
       var savEcho = document.createElement("p");
       savEcho.className = "saip-save-status";
@@ -2863,42 +4024,73 @@
   // from ``pkg.sourcePath`` (with a Save-as picker fallback), and
   // the format follows ``pkg.encoding``. See ``saipRibbonSavePackage``.
 
-  async function saipSavePackage(pkg, outputPath, fmt, drawer, peList, detail, validation) {
+  async function saipSavePackage(
+    pkg, outputPath, fmt, drawer, peList, detail, validation, overwriteExisting
+  ) {
     await saipFlushPendingAutoApplies(pkg);
     pkg.saveStatus = "Saving…";
     renderSaipDrawer(drawer, peList, detail, validation);
     logBus.emit({ level: "info", source: "saip.save_package", message: "save → " + outputPath + " (" + fmt + ")" });
     try {
-      var resp = await apiFetch("/api/actions/saip.save_package/run", {
-        method: "POST",
-        body: JSON.stringify({
-          inputs: {
-            session_id: pkg.sessionId,
-            output_path: outputPath,
-            format: fmt,
-            overwrite: true,
-            clear_dirty: true,
-          },
-        }),
-      });
+      async function runSave(allowOverwrite) {
+        return apiFetch("/api/actions/saip.save_package/run", {
+          method: "POST",
+          body: JSON.stringify({
+            inputs: {
+              session_id: pkg.sessionId,
+              output_path: outputPath,
+              format: fmt,
+              overwrite: Boolean(allowOverwrite),
+              clear_dirty: true,
+            },
+          }),
+        });
+      }
+
+      var resp = await runSave(overwriteExisting === true);
+      if (!resp.ok && overwriteExisting !== true
+          && /target already exists/i.test(String(resp.error || ""))) {
+        var replace = window.confirm(
+          "The selected file already exists:\n\n" + outputPath
+            + "\n\nReplace it with the current SAIP package?"
+        );
+        if (replace) {
+          resp = await runSave(true);
+        } else {
+          pkg.saveStatus = "Save cancelled — target already exists.";
+          logBus.emit({
+            level: "warn",
+            source: "saip.save_package",
+            message: pkg.saveStatus,
+          });
+        }
+      }
       if (!resp.ok) {
-        pkg.saveStatus = "Error: " + (resp.error || "save failed");
-        logBus.emit({ level: "error", source: "saip.save_package", message: pkg.saveStatus });
-        return;
+        saipMarkSessionUnavailable(pkg, resp, "saip.save_package");
+        if (pkg.saveStatus === "Saving…") {
+          pkg.saveStatus = "Error: " + (resp.error || "save failed");
+          logBus.emit({ level: "error", source: "saip.save_package", message: pkg.saveStatus });
+        }
+      } else {
+        var data = resp.data || {};
+        pkg.sourcePath = data.source_path || data.output_path || outputPath;
+        pkg.encoding = data.encoding || fmt;
+        if (typeof data.remaining_inline_placeholder_count === "number") {
+          pkg.inlinePlaceholderCount = data.remaining_inline_placeholder_count;
+        } else if (typeof data.inline_placeholder_count === "number") {
+          pkg.inlinePlaceholderCount = data.inline_placeholder_count;
+        }
+        if (pkg.sourcePath) {
+          pkg.filename = String(pkg.sourcePath).split(/[\\/]/).pop() || pkg.filename;
+        }
+        pkg.saveStatus = "Saved " + (data.size_bytes || 0) + " bytes.";
+        logBus.emit({
+          level: "info",
+          source: "saip.save_package",
+          message: "saved " + data.output_path + " (" + (data.size_bytes || 0) + " bytes)",
+        });
+        await saipRefreshDirty(pkg);
       }
-      var data = resp.data || {};
-      pkg.sourcePath = data.output_path || outputPath;
-      pkg.encoding = fmt;
-      if (pkg.sourcePath) {
-        pkg.filename = String(pkg.sourcePath).split(/[\\/]/).pop() || pkg.filename;
-      }
-      pkg.saveStatus = "Saved " + (data.size_bytes || 0) + " bytes.";
-      logBus.emit({
-        level: "info",
-        source: "saip.save_package",
-        message: "saved " + data.output_path + " (" + (data.size_bytes || 0) + " bytes)",
-      });
-      await saipRefreshDirty(pkg);
     } catch (err) {
       pkg.saveStatus = "Error: " + String(err && err.message || err);
       logBus.emit({ level: "error", source: "saip.save_package", message: pkg.saveStatus });
@@ -2909,6 +4101,14 @@
   }
 
   async function saipRevertPackage(pkg, drawer, peList, detail, validation) {
+    if (!pkg || !String(pkg.sourcePath || "").trim()) {
+      logBus.emit({
+        level: "warn",
+        source: "saip.revert_changes",
+        message: "Save this in-memory profile as tagged JSON before reverting.",
+      });
+      return;
+    }
     saipCancelPendingAutoApplies(pkg);
     pkg.saveStatus = "Reverting…";
     renderSaipDrawer(drawer, peList, detail, validation);
@@ -2919,9 +4119,14 @@
         body: JSON.stringify({ inputs: { session_id: pkg.sessionId } }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.revert_changes");
         pkg.saveStatus = "Error: " + (resp.error || "revert failed");
         logBus.emit({ level: "error", source: "saip.revert_changes", message: pkg.saveStatus });
         return;
+      }
+      var data = resp.data || {};
+      if (typeof data.remaining_inline_placeholder_count === "number") {
+        pkg.inlinePlaceholderCount = data.remaining_inline_placeholder_count;
       }
       pkg.saveStatus = "Reverted to source.";
       // Drop caches so GUI re-fetches everything.
@@ -2932,12 +4137,11 @@
       pkg.decodedFieldsCache = {};
       pkg.decodedEditOpen = {};
       pkg.decodedPristine = {};
-      pkg.validation = null;
+      saipInvalidateValidation(pkg);
       pkg.variables = null;
       pkg.compareResult = null;
       pkg.applications = null;
       pkg.applicationsError = null;
-      pkg.valAutoRunPending = true;
       await saipRefreshDirty(pkg);
     } catch (err) {
       pkg.saveStatus = "Error: " + String(err && err.message || err);
@@ -2955,7 +4159,10 @@
         method: "POST",
         body: JSON.stringify({ inputs: { session_id: pkg.sessionId } }),
       });
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.get_dirty");
+        return;
+      }
       var data = resp.data || {};
       pkg.dirty = Boolean(data.dirty);
       pkg.dirtyPeIndices = Array.isArray(data.pe_indices) ? data.pe_indices.slice() : [];
@@ -2963,6 +4170,32 @@
     } catch (_err) {
       // Network hiccup — leave previous state intact.
     }
+  }
+
+  function saipInvalidateStructuralCaches(pkg) {
+    if (!pkg) return;
+    pkg.peRows = null;
+    pkg.fileRows = null;
+    pkg.peRowsError = null;
+    pkg.fileRowsError = null;
+    pkg.showPeCache = {};
+    pkg.showFileCache = {};
+    pkg.decodedFieldsCache = {};
+    pkg.decodedEditOpen = {};
+    pkg.decodedPristine = {};
+    pkg.peTemplateCache = {};
+    pkg.applications = null;
+    pkg.applicationsError = null;
+    pkg.variables = null;
+    pkg.variablesError = null;
+    pkg.selectedFileKey = null;
+    pkg.fileTreeCollapsed = {};
+    pkg.compareResult = null;
+    pkg.compareError = null;
+    pkg.semanticDiff = null;
+    pkg.diffVsSaved = null;
+    pkg.diffVsSavedError = null;
+    saipInvalidateValidation(pkg);
   }
 
   // Light-touch dirty-marker refresh for the ribbon "save" badge —
@@ -2985,26 +4218,70 @@
     }
   }
 
-  async function saipClosePackage(packageId, drawer, peList, detail, validation) {
+  async function saipClosePackage(
+    packageId, drawer, peList, detail, validation, discardChanges
+  ) {
     var wb = commandState.saipWorkbench;
     var pkg = saipFindPackage(packageId);
-    if (!pkg) return;
-    saipCancelPendingAutoApplies(pkg);
-    if (pkg.sessionId) {
+    if (!pkg) return false;
+    var backendAlreadyGone = pkg.sessionUnavailable === true;
+    if (pkg.sessionId && !backendAlreadyGone) {
       try {
-        await apiFetch("/api/actions/saip.close_package/run", {
+        if (discardChanges === true) {
+          // The operator explicitly chose to discard. Do not let a queued
+          // debounced edit run while the close request is in flight.
+          saipCancelPendingAutoApplies(pkg);
+        } else {
+          await saipFlushPendingAutoApplies(pkg);
+        }
+        var response = await apiFetch("/api/actions/saip.close_package/run", {
           method: "POST",
-          body: JSON.stringify({ inputs: { session_id: pkg.sessionId } }),
+          body: JSON.stringify({
+            inputs: {
+              session_id: pkg.sessionId,
+              discard_changes: discardChanges === true,
+            },
+          }),
         });
-      } catch (_err) {
-        // Best-effort; backend close is idempotent.
+        if (!response.ok || !response.data || response.data.closed !== true) {
+          backendAlreadyGone = saipResponseSaysSessionGone(response);
+          if (!backendAlreadyGone) {
+            pkg.saveStatus = "Close failed: "
+              + (response.error || "the backend did not confirm session closure");
+            logBus.emit({
+              level: "error",
+              source: "saip.close_package",
+              message: pkg.saveStatus,
+            });
+            renderSaipDrawer(drawer, peList, detail, validation);
+            return false;
+          }
+        }
+      } catch (error) {
+        pkg.saveStatus = "Close failed: " + String(error && error.message || error);
+        logBus.emit({
+          level: "error",
+          source: "saip.close_package",
+          message: pkg.saveStatus,
+        });
+        renderSaipDrawer(drawer, peList, detail, validation);
+        return false;
       }
       logBus.emit({
         level: "info",
         source: "saip.close_package",
-        message: "closed " + (pkg.sessionId || "").substring(0, 8),
+        message: backendAlreadyGone
+          ? "removed cached package for an expired backend session"
+          : "closed " + (pkg.sessionId || "").substring(0, 8),
+      });
+    } else if (backendAlreadyGone) {
+      logBus.emit({
+        level: "info",
+        source: "saip.close_package",
+        message: "removed cached package for an expired backend session",
       });
     }
+    saipCancelPendingAutoApplies(pkg);
     wb.packages = wb.packages.filter(function (p) { return p.id !== packageId; });
     if (wb.activePackageId === packageId) {
       wb.activePackageId = wb.packages.length > 0 ? wb.packages[0].id : null;
@@ -3018,6 +4295,7 @@
     }
     renderSaipDrawer(drawer, peList, detail, validation);
     renderSaipActiveSlots(peList, detail, validation);
+    return true;
   }
 
   async function saipLoadPeRows(pkg) {
@@ -3028,6 +4306,7 @@
         body: JSON.stringify({ inputs: { session_id: pkg.sessionId } }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.list_pes");
         pkg.peRowsError = resp.error || "list_pes failed";
         return;
       }
@@ -3046,6 +4325,7 @@
         body: JSON.stringify({ inputs: { session_id: pkg.sessionId } }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.list_files");
         pkg.fileRowsError = resp.error || "list_files failed";
         return;
       }
@@ -3083,10 +4363,50 @@
 
     if (!pkg) {
       if (tabBody) {
-        tabBody.innerHTML =
-          '<p class="saip-placeholder saip-placeholder--lead">'
-          + 'Open a SAIP package from the drawer (or the ribbon\u2019s '
-          + 'Open command) to begin exploring.</p>';
+        tabBody.innerHTML = "";
+        var emptyState = document.createElement("div");
+        emptyState.className = "saip-placeholder saip-placeholder--lead";
+        emptyState.setAttribute("role", "region");
+        emptyState.setAttribute("aria-labelledby", "saip-empty-state-title");
+
+        var emptyIcon = document.createElement("span");
+        emptyIcon.className = "saip-placeholder-icon";
+        emptyIcon.setAttribute("aria-hidden", "true");
+        ccSetActionIcon(emptyIcon, "package");
+        emptyState.appendChild(emptyIcon);
+
+        var emptyTitle = document.createElement("h3");
+        emptyTitle.className = "saip-placeholder-title";
+        emptyTitle.id = "saip-empty-state-title";
+        emptyTitle.textContent = "Open a SAIP package";
+        emptyState.appendChild(emptyTitle);
+
+        var emptyCopy = document.createElement("p");
+        emptyCopy.className = "saip-placeholder-copy";
+        emptyCopy.textContent =
+          "Inspect and edit a .der, .json, or .hex package. "
+          + "You can also drop a file anywhere in this workspace.";
+        emptyState.appendChild(emptyCopy);
+
+        var openButton = document.createElement("button");
+        openButton.type = "button";
+        openButton.className = "saip-placeholder-action";
+        openButton.textContent = "Open package";
+        openButton.addEventListener("click", function () {
+          saipRibbonOpenPackage(
+            saipDrawerEl(),
+            peList,
+            detail,
+            validation
+          );
+        });
+        emptyState.appendChild(openButton);
+
+        var shortcut = document.createElement("p");
+        shortcut.className = "saip-placeholder-shortcut";
+        shortcut.innerHTML = "Keyboard shortcut: <kbd>Ctrl</kbd> + <kbd>O</kbd>";
+        emptyState.appendChild(shortcut);
+        tabBody.appendChild(emptyState);
       }
       if (validation) {
         validation.innerHTML =
@@ -3205,6 +4525,7 @@
         body: JSON.stringify({ inputs: { session_id: pkg.sessionId } }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.list_applications");
         pkg.applicationsError = resp.error || "list_applications failed";
         pkg.applications = [];
         return;
@@ -3430,6 +4751,11 @@
     var inlineHost = document.createElement("div");
     inlineHost.className = "saip-app-card-inline";
     inlineHost.hidden = true;
+    // Inline inputs belong to this card; interacting with them must not
+    // bubble into the card's convenience navigation handler below.
+    inlineHost.addEventListener("click", function (event) {
+      event.stopPropagation();
+    });
     card.appendChild(inlineHost);
 
     var inlineRendered = false;
@@ -3448,9 +4774,13 @@
           saipLoadShowPe(pkg, row.pe_index).then(function () {
             var pe = pkg.showPeCache && pkg.showPeCache[row.pe_index];
             if (!pe || pe.error || !pe.section_key) {
-              inlineHost.innerHTML =
-                '<p class="saip-decoded-error">Unable to resolve section_key for PE #'
-                + row.pe_index + '.</p>';
+              inlineHost.innerHTML = "";
+              var resolutionError = document.createElement("p");
+              resolutionError.className = "saip-decoded-error";
+              resolutionError.textContent =
+                "Unable to resolve section_key for PE #"
+                  + String(row.pe_index) + ".";
+              inlineHost.appendChild(resolutionError);
               return;
             }
             saipRenderDecodedEditPanel(
@@ -3521,6 +4851,7 @@
 
   function openSaipVariableModal(packageId) {
     var wb = commandState.saipWorkbench;
+    if (!wb.variableModalOpen) wb.variableModalReturnFocus = document.activeElement;
     wb.variableModalOpen = true;
     wb.variableModalPackageId = packageId || wb.activePackageId;
     renderSaipModalHost();
@@ -3528,9 +4859,15 @@
 
   function closeSaipVariableModal() {
     var wb = commandState.saipWorkbench;
+    var returnFocus = wb.variableModalReturnFocus;
     wb.variableModalOpen = false;
     wb.variableModalPackageId = null;
+    wb.variableModalReturnFocus = null;
     renderSaipModalHost();
+    if (returnFocus && typeof returnFocus.focus === "function"
+        && document.contains(returnFocus)) {
+      returnFocus.focus();
+    }
   }
 
   function renderSaipModalHost() {
@@ -3565,7 +4902,8 @@
     var card = document.createElement("div");
     card.className = "saip-modal-card saip-token-modal";
     card.setAttribute("role", "dialog");
-    card.setAttribute("aria-label", "Token editor");
+    card.setAttribute("aria-modal", "true");
+    card.setAttribute("aria-labelledby", "saip-token-modal-title");
 
     var header = document.createElement("header");
     header.className = "saip-modal-header saip-token-modal-header";
@@ -3579,12 +4917,13 @@
     titleGlyph.setAttribute("aria-hidden", "true");
     titleRow.appendChild(titleGlyph);
     var title = document.createElement("h3");
+    title.id = "saip-token-modal-title";
     title.textContent = "Token editor";
     titleRow.appendChild(title);
     titleWrap.appendChild(titleRow);
     var sub = document.createElement("span");
     sub.className = "saip-modal-sub";
-    sub.textContent = "Bind ``[NAME]`` placeholders to per-session values · "
+    sub.textContent = "Set catalog variables and inline ``[NAME]`` placeholders · "
       + pkg.filename;
     titleWrap.appendChild(sub);
     // Surface override count, total token count, and the embedding
@@ -3597,7 +4936,7 @@
     var totalCount = pkg.variables ? pkg.variables.count || 0 : 0;
     var styleText = pkg.variables ? (pkg.variables.style || "brace") : "—";
     var overrideWord = overridesCount === 1 ? "override" : "overrides";
-    var placeholderWord = totalCount === 1 ? "token" : "tokens";
+    var placeholderWord = totalCount === 1 ? "variable" : "variables";
     stats.innerHTML =
       '<span class="saip-modal-stat-chip">'
       + escapeHtml(String(overridesCount)) + " " + overrideWord + "</span>"
@@ -3616,6 +4955,26 @@
     closeBtn.addEventListener("click", function () { closeSaipVariableModal(); });
     header.appendChild(closeBtn);
     card.appendChild(header);
+    card.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Tab") return;
+      var focusable = card.querySelectorAll(
+        "button:not([disabled]), input:not([disabled]), select:not([disabled]), "
+          + "textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+      );
+      if (focusable.length === 0) {
+        ev.preventDefault();
+        return;
+      }
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (ev.shiftKey && document.activeElement === first) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && document.activeElement === last) {
+        ev.preventDefault();
+        first.focus();
+      }
+    });
 
     var body = document.createElement("div");
     body.className = "saip-modal-body";
@@ -3636,6 +4995,18 @@
     }
     if (pkg.variablesError) {
       body.appendChild(renderErrorBlock(pkg.variablesError));
+      if (!pkg.sessionUnavailable) {
+        var retryVariables = document.createElement("button");
+        retryVariables.type = "button";
+        retryVariables.className = "btn btn-small";
+        retryVariables.textContent = "Retry";
+        retryVariables.addEventListener("click", function () {
+          pkg.variables = null;
+          pkg.variablesError = null;
+          renderSaipModalHost();
+        });
+        body.appendChild(retryVariables);
+      }
       return;
     }
     // Re-use the pre-existing variable pane renderer so we keep one
@@ -3685,6 +5056,17 @@
     renderSaipPeListPane(scroll, pkg, peList, detail, validation);
   }
 
+  function saipAppendRetryableError(host, message, retry) {
+    host.appendChild(renderErrorBlock(message));
+    if (typeof retry !== "function") return;
+    var retryBtn = document.createElement("button");
+    retryBtn.type = "button";
+    retryBtn.className = "btn btn-small saip-retry";
+    retryBtn.textContent = "Retry";
+    retryBtn.addEventListener("click", retry);
+    host.appendChild(retryBtn);
+  }
+
   // SA-G2: vertical card list. Each PE renders as a stacked card with a
   // type-derived icon glyph on the left, a friendly name + sub-label
   // in the middle, chips for FS / APP / dirty state, and an
@@ -3693,6 +5075,18 @@
   // subtle warning border so the operator sees pending edits at a
   // glance without having to jump to the dirty-state ribbon chip.
   function renderSaipPeListPane(scroll, pkg, peList, detail, validation) {
+    if (pkg.peRowsError) {
+      saipAppendRetryableError(
+        scroll,
+        pkg.peRowsError,
+        pkg.sessionUnavailable ? null : function () {
+          pkg.peRowsError = null;
+          pkg.peRows = null;
+          renderSaipPeList(peList, pkg, detail, validation);
+        }
+      );
+      return;
+    }
     if (!pkg.peRows) {
       scroll.innerHTML = '<p class="loading">Loading PEs…</p>';
       saipLoadPeRows(pkg).then(function () {
@@ -3700,10 +5094,6 @@
         renderSaipDetail(detail, pkg, peList, validation);
         renderSaipTopTabs(saipTopTabsEl(), saipDrawerEl(), peList, detail, validation);
       });
-      return;
-    }
-    if (pkg.peRowsError) {
-      scroll.appendChild(renderErrorBlock(pkg.peRowsError));
       return;
     }
 
@@ -3721,8 +5111,10 @@
     list.addEventListener("dragleave", function () {
       saipClearPeDropMarkers(list);
     });
-    (pkg.peRows || []).forEach(function (row) {
+    (pkg.peRows || []).forEach(function (row, rowPosition) {
       var card = saipBuildPeCard(row, pkg, dirtySet, peWorstSev);
+      card.tabIndex = pkg.selectedPeIndex === row.index
+        || (pkg.selectedPeIndex === null && rowPosition === 0) ? 0 : -1;
       saipWirePeCardDragDrop(card, row, pkg, list, peList, detail, validation);
       card.addEventListener("click", function () {
         saipSelectPeRow(row, pkg, list, peList, detail, validation);
@@ -3732,6 +5124,28 @@
         event.stopPropagation();
         saipSelectPeRow(row, pkg, list, peList, detail, validation);
         saipShowPeContextMenu(row, pkg, peList, detail, validation, event.clientX, event.clientY);
+      });
+      card.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          card.click();
+          return;
+        }
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown"
+            && event.key !== "Home" && event.key !== "End") return;
+        event.preventDefault();
+        var cards = Array.prototype.slice.call(
+          list.querySelectorAll(".saip-pe-card")
+        );
+        var current = cards.indexOf(card);
+        if (current < 0 || cards.length === 0) return;
+        var next = current;
+        if (event.key === "ArrowUp") next = Math.max(0, current - 1);
+        else if (event.key === "ArrowDown") next = Math.min(cards.length - 1, current + 1);
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = cards.length - 1;
+        cards[next].focus();
+        cards[next].click();
       });
       list.appendChild(card);
     });
@@ -3757,6 +5171,7 @@
       var isActive = Number(el.getAttribute("data-pe-index")) === Number(selectedIndex);
       el.classList.toggle("is-active", isActive);
       el.setAttribute("aria-selected", isActive ? "true" : "false");
+      el.tabIndex = isActive ? 0 : -1;
     });
   }
 
@@ -3809,7 +5224,7 @@
     if (spec.disabled) btn.disabled = true;
     var icon = document.createElement("span");
     icon.className = "ctx-menu-icon";
-    icon.textContent = spec.icon || ">";
+    ccSetActionIcon(icon, spec.icon || "action");
     var label = document.createElement("span");
     label.className = "ctx-menu-label";
     label.textContent = spec.label || "";
@@ -3844,48 +5259,48 @@
     var canMoveDown = !anchor && index < lastBodyIndex;
     var items = [
       {
-        icon: "↑+",
+        icon: "add-above",
         label: "Add PE above",
         onClick: function () { saipRibbonAddPe(pkg, "above", peList, detail, validation); },
       },
       {
-        icon: "↓+",
+        icon: "add-below",
         label: "Add PE below",
         onClick: function () { saipRibbonAddPe(pkg, "below", peList, detail, validation); },
       },
       {
-        icon: "in",
+        icon: "import",
         label: "Import PE below",
         onClick: function () { saipRibbonImportPe(pkg, peList, detail, validation); },
       },
       { divider: true },
       {
-        icon: "up",
+        icon: "move-up",
         label: "Move up",
         disabled: !canMoveUp,
         onClick: function () { saipRibbonMovePe(pkg, "up", peList, detail, validation); },
       },
       {
-        icon: "dn",
+        icon: "move-down",
         label: "Move down",
         disabled: !canMoveDown,
         onClick: function () { saipRibbonMovePe(pkg, "down", peList, detail, validation); },
       },
       {
-        icon: "out",
+        icon: "export",
         label: "Export PE",
         disabled: !Number.isFinite(index),
         onClick: function () { saipRibbonExportPe(pkg); },
       },
       {
-        icon: "i",
+        icon: "reference",
         label: "Reference card",
         disabled: !Number.isFinite(index),
         onClick: function () { saipRibbonShowPeInfo(pkg); },
       },
       { divider: true },
       {
-        icon: "x",
+        icon: "delete",
         label: anchor ? "Delete PE (anchor)" : "Delete PE",
         danger: true,
         disabled: anchor,
@@ -4202,6 +5617,18 @@
   // it survives PE-list / file-list refreshes triggered by edits or
   // package switches.
   function renderSaipFileListPane(scroll, pkg, peList, detail, validation) {
+    if (pkg.fileRowsError) {
+      saipAppendRetryableError(
+        scroll,
+        pkg.fileRowsError,
+        pkg.sessionUnavailable ? null : function () {
+          pkg.fileRowsError = null;
+          pkg.fileRows = null;
+          renderSaipPeList(peList, pkg, detail, validation);
+        }
+      );
+      return;
+    }
     if (!pkg.fileRows) {
       scroll.innerHTML = '<p class="loading">Loading files…</p>';
       saipLoadFileRows(pkg).then(function () {
@@ -4209,10 +5636,6 @@
         renderSaipDetail(detail, pkg, peList, validation);
         renderSaipTopTabs(saipTopTabsEl(), saipDrawerEl(), peList, detail, validation);
       });
-      return;
-    }
-    if (pkg.fileRowsError) {
-      scroll.appendChild(renderErrorBlock(pkg.fileRowsError));
       return;
     }
     if (pkg.fileRows.length === 0) {
@@ -4230,6 +5653,7 @@
     search.className = "saip-file-tree-search";
     search.placeholder = "Search FID or filename";
     search.title = "Search by FID, sFID, FID path, filename, or EF key. Example: IMSI or 6F07.";
+    search.setAttribute("aria-label", "Search files by FID or name");
     search.spellcheck = false;
     search.value = pkg.fileTreeSearch || "";
     controls.appendChild(search);
@@ -4237,6 +5661,7 @@
     var sort = document.createElement("select");
     sort.className = "saip-file-tree-sort";
     sort.title = "Sort sibling files in the tree.";
+    sort.setAttribute("aria-label", "File tree sort order");
     [
       { value: "fid", label: "Sort: FID" },
       { value: "name", label: "Sort: Name" },
@@ -4253,6 +5678,7 @@
     clear.type = "button";
     clear.className = "btn btn-small saip-file-tree-clear";
     clear.textContent = "Clear";
+    clear.setAttribute("aria-label", "Clear file search");
     clear.disabled = search.value.trim().length === 0;
     controls.appendChild(clear);
 
@@ -4287,6 +5713,7 @@
       var ul = document.createElement("ul");
       ul.className = "saip-file-tree saip-file-tree--root";
       ul.setAttribute("role", "tree");
+      ul.setAttribute("aria-label", "Profile file system");
       filterResult.roots.forEach(function (rootNode) {
         ul.appendChild(saipBuildFileTreeNode(
           rootNode, pkg, peList, detail, validation, 0,
@@ -4294,6 +5721,15 @@
         ));
       });
       treeHost.appendChild(ul);
+      var treeItems = Array.prototype.slice.call(
+        ul.querySelectorAll("li[role='treeitem']")
+      );
+      var preferred = treeItems.filter(function (item) {
+        return item.dataset.fileNodeId === pkg.fileTreeFocusId;
+      })[0] || treeItems[0] || null;
+      treeItems.forEach(function (item) {
+        item.tabIndex = item === preferred ? 0 : -1;
+      });
     }
 
     search.addEventListener("input", function () {
@@ -4414,10 +5850,8 @@
     // ``parent_path`` is the same chain minus the file's own FID,
     // ``kind`` carries the file type (mf/df/adf/ef-trans/...). We
     // render that as a single tree rooted at MF so template files
-    // and GFM-created files mix structurally — matching the
-    // ``File System tab`` described in the eUICC Profile Creator
-    // manual ("combined file system for the selected profile
-    // package and its file system-related profile elements").
+    // and GFM-created files mix structurally in one package-level
+    // filesystem view.
     var nodesByChain = {};
     function _ensureNode(chain, label, kind, row) {
       if (!chain) chain = "";
@@ -4515,8 +5949,7 @@
       }
     });
     // Deterministic ordering: containers (DF / MF / ADF) before EFs,
-    // then lexical by hex FID. Matches the eUICC Profile Creator
-    // ordering (DFs grouped, then EFs in numeric order).
+    // then lexical by hex FID.
     function _sortKey(node) {
       if (sortMode === "name") {
         return String(node.label || "").toLowerCase() + "::" + String(node.chain || "");
@@ -4545,9 +5978,13 @@
     var li = document.createElement("li");
     li.className = "saip-file-node saip-file-node--" + node.kind;
     li.setAttribute("role", "treeitem");
+    li.dataset.fileNodeId = String(node.id || "");
     var hasChildren = Array.isArray(node.children) && node.children.length > 0;
     var collapsed = opts.searchActive ? false : Boolean(pkg.fileTreeCollapsed[node.id]);
-    li.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    li.tabIndex = -1;
+    if (hasChildren) {
+      li.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    }
 
     var row = document.createElement("div");
     row.className = "saip-file-node-row";
@@ -4559,20 +5996,26 @@
 
     function toggleNodeCollapsed() {
       if (!hasChildren) return;
+      var restoreFocus = li.contains(document.activeElement);
+      pkg.fileTreeFocusId = node.id;
       pkg.fileTreeCollapsed[node.id] = !collapsed;
       renderSaipPeList(peList, pkg, detail, validation);
+      if (restoreFocus && peList) {
+        var items = Array.prototype.slice.call(
+          peList.querySelectorAll("li[role='treeitem']")
+        );
+        var restored = items.filter(function (item) {
+          return item.dataset.fileNodeId === String(node.id || "");
+        })[0];
+        if (restored) restored.focus();
+      }
     }
 
     if (hasChildren) {
-      var caret = document.createElement("button");
-      caret.type = "button";
+      var caret = document.createElement("span");
       caret.className = "saip-file-caret";
       caret.textContent = collapsed ? "▶" : "▼";
-      caret.title = collapsed ? "Expand" : "Collapse";
-      caret.addEventListener("click", function (evt) {
-        evt.stopPropagation();
-        toggleNodeCollapsed();
-      });
+      caret.setAttribute("aria-hidden", "true");
       row.appendChild(caret);
     } else {
       var spacer = document.createElement("span");
@@ -4657,6 +6100,65 @@
       row.classList.add("saip-file-tree-row--clickable");
     }
     li.appendChild(row);
+    li.addEventListener("focus", function () {
+      pkg.fileTreeFocusId = node.id;
+      var tree = li.closest("ul[role='tree']");
+      if (!tree) return;
+      Array.prototype.slice.call(
+        tree.querySelectorAll("li[role='treeitem']")
+      ).forEach(function (item) {
+        item.tabIndex = item === li ? 0 : -1;
+      });
+    });
+    li.addEventListener("keydown", function (event) {
+      if (event.target !== li) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        row.click();
+        return;
+      }
+      if (event.key === "ArrowRight" && hasChildren) {
+        event.preventDefault();
+        if (collapsed) {
+          toggleNodeCollapsed();
+        } else {
+          var firstChild = li.querySelector("ul[role='group'] > li[role='treeitem']");
+          if (firstChild) firstChild.focus();
+        }
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        if (hasChildren && !collapsed) {
+          event.preventDefault();
+          toggleNodeCollapsed();
+          return;
+        }
+        var parentGroup = li.parentElement;
+        var parentItem = parentGroup && parentGroup.closest("li[role='treeitem']");
+        if (parentItem) {
+          event.preventDefault();
+          parentItem.focus();
+        }
+        return;
+      }
+      if (event.key === "ArrowUp" || event.key === "ArrowDown"
+          || event.key === "Home" || event.key === "End") {
+        var tree = li.closest("ul[role='tree']");
+        if (!tree) return;
+        var visibleItems = Array.prototype.slice.call(
+          tree.querySelectorAll("li[role='treeitem']")
+        );
+        var current = visibleItems.indexOf(li);
+        if (current < 0 || visibleItems.length === 0) return;
+        event.preventDefault();
+        var next = current;
+        if (event.key === "ArrowUp") next = Math.max(0, current - 1);
+        else if (event.key === "ArrowDown") next = Math.min(visibleItems.length - 1, current + 1);
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = visibleItems.length - 1;
+        visibleItems[next].focus();
+      }
+    });
 
     if (hasChildren && !collapsed) {
       var sub = document.createElement("ul");
@@ -4692,9 +6194,21 @@
     pkg.selectedFileKey = sectionKey + "::" + fieldPath;
     pkg.activeTopTab = "file_system";
     saipExpandFileTreePath(pkg, row);
+    var restoreTreeFocus = Boolean(
+      peList && document.activeElement && peList.contains(document.activeElement)
+    );
     saipLoadShowFile(pkg, sectionKey, fieldPath).then(function () {
       renderSaipPeList(peList, pkg, detail, validation);
       renderSaipDetail(detail, pkg, peList, validation);
+      if (restoreTreeFocus && peList && pkg.fileTreeFocusId) {
+        var items = Array.prototype.slice.call(
+          peList.querySelectorAll("li[role='treeitem']")
+        );
+        var restored = items.filter(function (item) {
+          return item.dataset.fileNodeId === String(pkg.fileTreeFocusId);
+        })[0];
+        if (restored) restored.focus();
+      }
     });
   }
 
@@ -4747,6 +6261,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.show_pe");
         pkg.showPeCache[peIndex] = { error: resp.error || "show_pe failed" };
         return;
       }
@@ -4768,8 +6283,7 @@
   // TCA SAIP §9 file template catalog for one PE. Loaded on demand
   // so the PE Editor can render a checkable tree of ALL DFs/EFs the
   // template defines, not just the ones the package currently
-  // materialises. Mirrors the eUICC Profile Creator's *File System
-  // Template* group.
+  // materialises.
   async function saipLoadPeTemplate(pkg, sectionKey) {
     if (!pkg || !pkg.sessionId) return;
     if (!pkg.peTemplateCache) pkg.peTemplateCache = {};
@@ -4782,6 +6296,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.list_pe_template");
         pkg.peTemplateCache[sectionKey] = {
           error: resp.error || "list_pe_template failed",
           supported: false,
@@ -4823,6 +6338,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.show_file");
         pkg.showFileCache[key] = { error: resp.error || "show_file failed" };
         return;
       }
@@ -4840,6 +6356,7 @@
         body: JSON.stringify({ inputs: { session_id: pkg.sessionId } }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.list_variables");
         pkg.variablesError = resp.error || "list_variables failed";
         pkg.variables = { count: 0, variables: [], style: "brace" };
         return;
@@ -4890,7 +6407,22 @@
         return;
       }
       if (cached.error) {
-        detail.appendChild(renderErrorBlock(cached.error));
+        var selectedFileKey = pkg.selectedFileKey;
+        saipAppendRetryableError(
+          detail,
+          cached.error,
+          pkg.sessionUnavailable ? null : function () {
+            delete pkg.showFileCache[selectedFileKey];
+            var divider = selectedFileKey.indexOf("::");
+            var sectionKey = divider >= 0
+              ? selectedFileKey.substring(0, divider) : "";
+            var fieldPath = divider >= 0
+              ? selectedFileKey.substring(divider + 2) : "";
+            saipLoadShowFile(pkg, sectionKey, fieldPath).then(function () {
+              renderSaipDetail(detail, pkg, peList, validation);
+            });
+          }
+        );
         return;
       }
       // Backend signals ``not_found`` for stale clicks / synthetic
@@ -4921,7 +6453,17 @@
       return;
     }
     if (peCached.error) {
-      detail.appendChild(renderErrorBlock(peCached.error));
+      var selectedPeIndex = pkg.selectedPeIndex;
+      saipAppendRetryableError(
+        detail,
+        peCached.error,
+        pkg.sessionUnavailable ? null : function () {
+          delete pkg.showPeCache[selectedPeIndex];
+          saipLoadShowPe(pkg, selectedPeIndex).then(function () {
+            renderSaipDetail(detail, pkg, peList, validation);
+          });
+        }
+      );
       return;
     }
     renderSaipPeDetail(detail, peCached, pkg, peList, validation);
@@ -4967,7 +6509,7 @@
       addBtn.className = "btn btn-small saip-add-file-btn";
       addBtn.textContent = "Add file\u2026";
       addBtn.title = "Materialise a DF / EF from this PE's pySim "
-        + "filesystem template (TCA SAIP catalog).";
+        + "file system template (TCA SAIP catalog).";
       addBtn.addEventListener("click", function () {
         saipOpenAddFileModal(pkg, data.section_key, data.pe_index);
       });
@@ -4981,8 +6523,7 @@
     var bodyHost = document.createElement("div");
     bodyHost.className = "saip-detail-body";
 
-    // PE detail tabs — YggdraSIM voice, deliberately not the
-    // "PE-<Type> Editor" label the Comprion ePC ribbon ships.
+    // PE detail tabs — YggdraSIM voice with local labels.
     var editorLabel = "Decoded view";
     var tabEditor = document.createElement("button");
     tabEditor.type = "button";
@@ -5013,6 +6554,7 @@
       [tabEditor, tabJson].forEach(function (t) {
         t.classList.toggle("is-active", t === active);
       });
+      if (tabs.__saipSyncTabs) tabs.__saipSyncTabs();
     }
     function showEditor() {
       activate(tabEditor);
@@ -5026,6 +6568,12 @@
     }
     tabEditor.addEventListener("click", showEditor);
     tabJson.addEventListener("click", showJson);
+    saipConfigureLocalTabs(
+      tabs,
+      [tabEditor, tabJson],
+      [bodyHost, bodyHost],
+      "Profile element views",
+    );
     showEditor();
   }
 
@@ -5165,6 +6713,7 @@
     ta.spellcheck = false;
     ta.autocomplete = "off";
     ta.readOnly = true;
+    ta.setAttribute("aria-label", "Profile element JSON");
     ta.rows = Math.min(40, Math.max(8, jsonText.split("\n").length));
     ta.value = jsonText;
     card.appendChild(ta);
@@ -6240,6 +7789,13 @@
       var lbl = document.createElement("label");
       lbl.className = "saip-fd-label";
       lbl.textContent = label;
+      if (label && controlEl
+          && ["INPUT", "SELECT", "TEXTAREA"].indexOf(controlEl.tagName) !== -1) {
+        if (!controlEl.id) {
+          controlEl.id = "saip-fd-control-" + String(++_saipControlSeq);
+        }
+        lbl.setAttribute("for", controlEl.id);
+      }
       r.appendChild(lbl);
       r.appendChild(controlEl);
       return r;
@@ -6352,7 +7908,7 @@
       // Byte 1 is the data-coding byte. Default 0x21 ("compact" coding,
       // tolerated by all SAIP-aware eUICC stacks observed). Preserve
       // any prior value the package carried so we don't clobber a
-      // vendor-specific byte (e.g. 0x42 on some cards).
+      // implementation-specific byte (e.g. 0x42 on some cards).
       var byte1 = 0x21;
       if (initialHex) {
         var raw = String(initialHex).replace(/\s+/g, "");
@@ -6657,57 +8213,59 @@
     return lines.join("\n");
   }
 
-  // 3GPP TS 31.102 §4.2.76 — EPS Location Information (EF.EPSLOCI).
-  // Bytes: GUTI[0-9] (MCC/MNC 3B + MME-GI 2B + MME-C 1B + M-TMSI 4B)
-  //      + Last-Visited-TAI[10-14] (MCC/MNC 3B + TAC 2B)
-  //      + EPS-Update-Status[15] + RFU[16-17]
+  // 3GPP TS 31.102 §4.2.91 — EPS Location Information (EF.EPSLOCI).
+  // Bytes 1-12 are the TS 24.301 EPS mobile-identity IE beginning at
+  // octet 2: length 0B + GUTI identity header F6 + PLMN(3) + MME-GI(2)
+  // + MME-C(1) + M-TMSI(4). Bytes 13-17 are the last visited TAI and
+  // byte 18 is the EPS update status. All-FF GUTI means "not assigned".
   var _EPSLOCI_EUS_LABELS = {
     0: "updated",
     1: "not updated",
-    2: "PLMN not allowed",
-    3: "tracking area not allowed",
+    2: "roaming not allowed",
+    3: "reserved",
   };
 
   function saipDecodeEfEpsLoci(hex) {
     var clean = String(hex || "").replace(/\s+/g, "").toUpperCase();
-    if (clean.length < 36) return null; // need 18 bytes
+    if (!/^[0-9A-F]{36}$/.test(clean)) return null;
+    var bytes = _saipHexToBytes(clean);
     var lines = [];
-    // GUTI: bytes 0-2 = MCC/MNC (same BCD as LAI), bytes 3-4 = MME Group ID,
-    // byte 5 = MME Code, bytes 6-9 = M-TMSI.
-    var b0 = parseInt(clean.slice(0, 2), 16);
-    var b1 = parseInt(clean.slice(2, 4), 16);
-    var b2 = parseInt(clean.slice(4, 6), 16);
-    var mcc1g = b0 & 0x0F, mcc2g = (b0 >> 4) & 0x0F, mcc3g = b1 & 0x0F;
-    var mnc3g = (b1 >> 4) & 0x0F, mnc1g = b2 & 0x0F, mnc2g = (b2 >> 4) & 0x0F;
-    if (mcc1g === 0xF) {
+    var guti = bytes.slice(0, 12);
+    var gutiAssigned = !guti.every(function (b) { return b === 0xFF; });
+    if (!gutiAssigned) {
       lines.push("GUTI: not assigned");
     } else {
-      var mccG = "" + mcc1g + mcc2g + mcc3g;
-      var mncG = "" + mnc1g + mnc2g + (mnc3g === 0xF ? "" : mnc3g);
-      var mmegi = parseInt(clean.slice(6, 10), 16);
-      var mmec  = parseInt(clean.slice(10, 12), 16);
-      var mtmsi = clean.slice(12, 20);
-      lines.push("GUTI: MCC=" + mccG + " MNC=" + mncG
-        + " MMEGI=" + mmegi + " MMEC=" + mmec + " M-TMSI=0x" + mtmsi);
+      if (guti[0] !== 0x0B) {
+        lines.push("⚠ GUTI identity length is 0x" + _saipHexPad2(guti[0])
+          + "; expected 0B.");
+      }
+      if (guti[1] !== 0xF6) {
+        lines.push("⚠ GUTI identity header is 0x" + _saipHexPad2(guti[1])
+          + "; expected F6.");
+      }
+      var gutiPlmn = _saipPlmnDecode(guti.slice(2, 5));
+      var gutiPlmnText = gutiPlmn
+        ? ("MCC=" + gutiPlmn.mcc + " MNC=" + gutiPlmn.mnc)
+        : ("PLMN=0x" + _saipBytesToHex(guti.slice(2, 5)) + " ⚠");
+      var mmegi = (guti[5] << 8) | guti[6];
+      lines.push("GUTI: " + gutiPlmnText
+        + " MMEGI=" + mmegi + " MMEC=" + guti[7]
+        + " M-TMSI=0x" + _saipBytesToHex(guti.slice(8, 12)));
     }
-    // Last Visited TAI: bytes 10-14 (MCC/MNC 3B + TAC 2B)
-    var b10 = parseInt(clean.slice(20, 22), 16);
-    var b11 = parseInt(clean.slice(22, 24), 16);
-    var b12 = parseInt(clean.slice(24, 26), 16);
-    var tac  = parseInt(clean.slice(26, 30), 16);
-    var mcc1t = b10 & 0x0F, mcc2t = (b10 >> 4) & 0x0F, mcc3t = b11 & 0x0F;
-    var mnc3t = (b11 >> 4) & 0x0F, mnc1t = b12 & 0x0F, mnc2t = (b12 >> 4) & 0x0F;
-    if (mcc1t === 0xF) {
+    var taiPlmn = _saipPlmnDecode(bytes.slice(12, 15));
+    var tac = (bytes[15] << 8) | bytes[16];
+    if (!taiPlmn) {
       lines.push("Last Visited TAI: not set");
     } else {
-      var mccT = "" + mcc1t + mcc2t + mcc3t;
-      var mncT = "" + mnc1t + mnc2t + (mnc3t === 0xF ? "" : mnc3t);
-      lines.push("Last Visited TAI: MCC=" + mccT + " MNC=" + mncT
+      lines.push("Last Visited TAI: MCC=" + taiPlmn.mcc + " MNC=" + taiPlmn.mnc
         + " TAC=0x" + ("000" + tac.toString(16).toUpperCase()).slice(-4));
     }
-    var eus = parseInt(clean.slice(30, 32), 16) & 0x03;
+    var eus = bytes[17] & 0x07;
     var eusLabel = _EPSLOCI_EUS_LABELS[eus] || "reserved";
     lines.push("EPS Update Status: " + eusLabel + " (0x" + eus + ")");
+    if ((bytes[17] & 0xF8) !== 0) {
+      lines.push("⚠ EPS update-status RFU bits 4..8 are non-zero.");
+    }
     return lines.join("\n");
   }
 
@@ -7135,29 +8693,81 @@
     return "Routing Indicator: " + digits;
   }
 
-  // 3GPP TS 31.102 §4.4.11 — 5GS 3GPP Location Info (EF.5GS3GPPLOCI / EF.5GSNGPPLOCI).
-  // Variable-length; first byte = EPS update status; remaining = SUPI/GUTI5G context.
+  // 3GPP TS 31.102 §4.4.11.2/.3 — 5GS Location Information.
+  // Fixed 20-byte layout: 5G-GUTI(13) + last-visited TAI(6) + status(1).
+  // The assigned 5G-GUTI starts with the TS 24.501 mobile-identity IE
+  // length/header bytes 00 0B F2; all-FF means "not assigned".
   var _5GS_UPDATE_STATUS = {
     0: "5GU1 updated",
     1: "5GU2 not updated",
-    2: "5GU3 PLMN not allowed",
-    3: "5GU4 tracking area not allowed",
+    2: "5GU3 roaming not allowed",
+    3: "reserved",
   };
 
   function saipDecodeEf5gsLoci(hex) {
     var clean = String(hex || "").replace(/\s+/g, "").toUpperCase();
-    var byteLen = Math.floor(clean.length / 2);
-    if (byteLen < 1) return null;
+    if (!/^[0-9A-F]{40}$/.test(clean)) return null;
+    var bytes = _saipHexToBytes(clean);
     var lines = [];
-    lines.push("Length: " + byteLen + " B");
-    var statusNibble = parseInt(clean.slice(0, 2), 16) & 0x07;
-    var statusLabel = _5GS_UPDATE_STATUS[statusNibble] || "reserved";
-    lines.push("5GS Update Status: " + statusLabel + " (0x" + statusNibble + ")");
-    if (byteLen >= 13) {
-      // Bytes 2-13 = GUTI-5G or SUPI context (MCC/MNC 3B + AMF region/set/ptr 3B + 5G-TMSI 4B + spare 2B)
-      lines.push("5G context present (" + (byteLen - 1) + " payload bytes)");
+    var guti = bytes.slice(0, 13);
+    var gutiAssigned = !guti.every(function (b) { return b === 0xFF; });
+    if (!gutiAssigned) {
+      lines.push("5G-GUTI: not assigned");
     } else {
-      lines.push("No 5G context (or partially initialised)");
+      var identityLength = (guti[0] << 8) | guti[1];
+      if (identityLength !== 11) {
+        lines.push("⚠ 5G-GUTI identity length is " + identityLength
+          + "; expected 11 (00 0B).");
+      }
+      if (guti[2] !== 0xF2) {
+        lines.push("⚠ 5G-GUTI identity header is 0x" + _saipHexPad2(guti[2])
+          + "; expected F2.");
+      }
+      var gutiPlmn = _saipPlmnDecode(guti.slice(3, 6));
+      var gutiPlmnText = gutiPlmn
+        ? ("MCC=" + gutiPlmn.mcc + " MNC=" + gutiPlmn.mnc)
+        : ("PLMN=0x" + _saipBytesToHex(guti.slice(3, 6)) + " ⚠");
+      var setAndPointer = (guti[7] << 8) | guti[8];
+      lines.push("5G-GUTI: " + gutiPlmnText
+        + " AMF Region=0x" + _saipHexPad2(guti[6])
+        + " AMF Set=" + ((setAndPointer >> 6) & 0x03FF)
+        + " AMF Pointer=" + (setAndPointer & 0x3F)
+        + " 5G-TMSI=0x" + _saipBytesToHex(guti.slice(9, 13)));
+    }
+    var taiPlmn = _saipPlmnDecode(bytes.slice(13, 16));
+    var tac = (bytes[16] << 16) | (bytes[17] << 8) | bytes[18];
+    if (!taiPlmn) {
+      lines.push("Last Visited TAI: not set");
+    } else {
+      lines.push("Last Visited TAI: MCC=" + taiPlmn.mcc
+        + " MNC=" + taiPlmn.mnc
+        + " TAC=0x" + ("00000" + tac.toString(16).toUpperCase()).slice(-6));
+    }
+    var statusValue = bytes[19] & 0x07;
+    var statusLabel = _5GS_UPDATE_STATUS[statusValue] || "reserved";
+    lines.push("5GS Update Status: " + statusLabel + " (0x" + statusValue + ")");
+    if ((bytes[19] & 0xF8) !== 0) {
+      lines.push("⚠ 5GS update-status RFU bits 4..8 are non-zero.");
+    }
+    return lines.join("\n");
+  }
+
+  function saipDecodeEf5gsNsc(hex) {
+    var clean = String(hex || "").replace(/\s+/g, "").toUpperCase();
+    if (clean.length === 0 || (clean.length % 2) !== 0
+        || !/^[0-9A-F]+$/.test(clean)) return null;
+    var bytes = _saipHexToBytes(clean);
+    if (bytes.every(function (b) { return b === 0xFF; })) {
+      return "5GS NAS security context: not provisioned (" + bytes.length
+        + " B all-FF record)";
+    }
+    var lines = [
+      "5GS NAS security context: present (" + bytes.length + " B)",
+      "Sensitive key material is intentionally not displayed.",
+    ];
+    if (bytes[0] !== 0xA0) {
+      lines.push("⚠ First TLV tag is 0x" + _saipHexPad2(bytes[0])
+        + "; expected 5GS NAS Security Context tag A0.");
     }
     return lines.join("\n");
   }
@@ -8041,8 +9651,7 @@
   // pySim only emits inline ``fileID`` when the package overrides the
   // template default; for files that match the template, the FID lives
   // implicitly in the template OID. We surface the spec-known FID with
-  // a "(template)" badge so the FILES table reads the way a Comprion /
-  // Telna operator expects.
+  // a "(template)" badge so the FILES table reads the way a operator can scan.
   //
   // Sources: ETSI TS 102 221 §13 (MF / DF.TELECOM), 3GPP TS 31.102 §4
   // (ADF.USIM EFs), 3GPP TS 31.103 §4 (ADF.ISIM EFs), 3GPP TS 31.121 §4
@@ -8147,10 +9756,10 @@
       "ef-arr": ["6F06", null],
     },
     "df-5gs": {
-      "ef-5gs3gppguti": ["4F01", null],
-      "ef-5gsn3gppguti": ["4F02", null],
-      "ef-5gs3gpploci": ["4F03", null],
-      "ef-5gsn3gpploci": ["4F04", null],
+      "ef-5gs3gpploci": ["4F01", null],
+      "ef-5gsn3gpploci": ["4F02", null],
+      "ef-5gs3gppnsc": ["4F03", null],
+      "ef-5gsn3gppnsc": ["4F04", null],
       "ef-uac-aic": ["4F06", null],
       "ef-suci-calc-info": ["4F07", null],
       "ef-routing-indicator": ["4F0A", null],
@@ -8846,6 +10455,7 @@
     rawDetails.appendChild(rawSummary);
     var rawInput = document.createElement("textarea");
     rawInput.className = "saip-profile-header-textarea saip-profile-header-input--mono";
+    rawInput.setAttribute("aria-label", "Connectivity parameters raw TLV hex");
     rawInput.spellcheck = false;
     rawInput.rows = 4;
     rawInput.value = initialHex ? saipFormatHexPretty(initialHex) : "";
@@ -8991,10 +10601,9 @@
     }
     pkg.peRows = null;
     pkg.fileRows = null;
-    pkg.validation = null;
+    saipInvalidateValidation(pkg);
     pkg.applications = null;
     pkg.applicationsError = null;
-    pkg.valAutoRunPending = true;
     await saipRefreshDirty(pkg);
     if (typeof peIndex === "number") {
       await saipLoadShowPe(pkg, peIndex);
@@ -9024,6 +10633,9 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(
+          pkg, resp, "saip.update_profile_header_field"
+        );
         saipHeaderSetStatus(statusEl, resp.error || "Apply failed.", "error");
         return false;
       }
@@ -9054,6 +10666,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.set_mandatory_services");
         saipHeaderSetStatus(statusEl, resp.error || "Apply failed.", "error");
         return false;
       }
@@ -9084,6 +10697,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.set_mandatory_gfste");
         saipHeaderSetStatus(statusEl, resp.error || "Apply failed.", "error");
         return false;
       }
@@ -9106,6 +10720,16 @@
     var label = document.createElement("label");
     label.className = "saip-profile-header-label";
     label.textContent = labelText;
+    if (controlEl
+        && ["INPUT", "SELECT", "TEXTAREA"].indexOf(controlEl.tagName) !== -1) {
+      if (!controlEl.id) {
+        controlEl.id = "saip-profile-control-" + String(++_saipControlSeq);
+      }
+      label.setAttribute("for", controlEl.id);
+    } else if (controlEl && labelText) {
+      controlEl.setAttribute("role", "group");
+      controlEl.setAttribute("aria-label", labelText);
+    }
     row.appendChild(label);
     var body = document.createElement("div");
     body.className = "saip-profile-header-control";
@@ -9141,12 +10765,14 @@
     majorInput.min = "0";
     majorInput.max = "255";
     majorInput.className = "saip-profile-header-input saip-profile-header-input--short";
+    majorInput.setAttribute("aria-label", "SAIP major version");
     majorInput.value = saipHeaderDecodedValue(decoded, "major-version", "");
     var minorInput = document.createElement("input");
     minorInput.type = "number";
     minorInput.min = "0";
     minorInput.max = "255";
     minorInput.className = "saip-profile-header-input saip-profile-header-input--short";
+    minorInput.setAttribute("aria-label", "SAIP minor version");
     minorInput.value = saipHeaderDecodedValue(decoded, "minor-version", "");
     var versionWrap = document.createElement("div");
     versionWrap.className = "saip-profile-header-inline";
@@ -9300,6 +10926,7 @@
     gfsteCard.classList.add("saip-profile-header-editor");
     var gfsteInput = document.createElement("textarea");
     gfsteInput.className = "saip-profile-header-textarea saip-profile-header-input--mono";
+    gfsteInput.setAttribute("aria-label", "Mandatory GFSTE OIDs");
     gfsteInput.spellcheck = false;
     gfsteInput.rows = 5;
     gfsteInput.value = saipHeaderGfsteText(decoded);
@@ -9565,7 +11192,10 @@
         + '<td><code>' + escapeHtml(saipFormatHexPretty(size)) + '</code></td>'
         + '<td><code>' + escapeHtml(saipFormatHexPretty(link)) + '</code></td>';
       tr.title = key + " — click for File System tab";
-      tr.addEventListener("click", function () {
+      tr.setAttribute("role", "button");
+      tr.setAttribute("aria-label", "Open " + key + " in the File System tab");
+      tr.tabIndex = 0;
+      function openFileFromSummary() {
         var pkg = saipActivePackage();
         if (!pkg) return;
         // Find the matching row in pkg.fileRows so we can drive the
@@ -9587,6 +11217,12 @@
             renderSaipActiveSlots(peListEl, detailEl, validationEl);
           });
         }
+      }
+      tr.addEventListener("click", openFileFromSummary);
+      tr.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        openFileFromSummary();
       });
       tbody.appendChild(tr);
     });
@@ -9902,6 +11538,8 @@
     leftPane.appendChild(listHdr);
     var listBody = document.createElement("div");
     listBody.className = "saip-gfm-list-body saip-template-workbench-list-body";
+    listBody.setAttribute("role", "list");
+    listBody.setAttribute("aria-label", "Template files");
     leftPane.appendChild(listBody);
 
     var rightPane = document.createElement("div");
@@ -10042,6 +11680,7 @@
       tabData.classList.toggle("is-active", activeTab === "data");
       tabTemplate.classList.toggle("is-active", activeTab === "template");
       tabJson.classList.toggle("is-active", activeTab === "json");
+      if (detailTabs.__saipSyncTabs) detailTabs.__saipSyncTabs();
 
       if (activeTab === "template") {
         renderTemplateOnly(row, current);
@@ -10099,7 +11738,10 @@
       selectedKey = key;
       pkg.templateWorkbenchSelection[sectionKey] = key;
       rowEls.forEach(function (entry) {
-        entry.el.classList.toggle("is-active", entry.key === key);
+        var selected = entry.key === key;
+        entry.el.classList.toggle("is-active", selected);
+        entry.el.setAttribute("aria-current", selected ? "true" : "false");
+        entry.el.tabIndex = selected ? 0 : -1;
       });
       renderDetail();
     }
@@ -10119,6 +11761,12 @@
         var node = row.node || {};
         var rowEl = document.createElement("div");
         rowEl.className = "saip-gfm-list-row saip-template-workbench-row";
+        rowEl.setAttribute("role", "listitem");
+        rowEl.setAttribute(
+          "aria-label",
+          "Select template file " + String(node.name || node.pe_name || row.key),
+        );
+        rowEl.tabIndex = row.key === selectedKey ? 0 : -1;
         if (!row.inPe) rowEl.classList.add("saip-template-workbench-row--absent");
         rowEl.style.setProperty("--saip-template-depth", String(row.depth || 0));
 
@@ -10129,6 +11777,11 @@
         cb.className = "saip-template-check";
         cb.checked = row.inPe;
         cb.title = row.inPe ? "Uncheck to remove from PE" : "Tick to add with template defaults";
+        cb.setAttribute(
+          "aria-label",
+          (row.inPe ? "Remove " : "Add ")
+            + String(node.name || node.pe_name || row.key),
+        );
         cb.addEventListener("click", function (ev) { ev.stopPropagation(); });
         cb.addEventListener("change", function () {
           saipApplyTemplateFileToggle(pkg, sectionKey, peIndex, node, cb.checked, null);
@@ -10148,11 +11801,35 @@
         fid.textContent = saipTemplateFidText(node, row.meta);
         rowEl.appendChild(fid);
         rowEl.addEventListener("click", function () { selectKey(row.key); });
+        rowEl.addEventListener("keydown", function (event) {
+          if (event.target !== rowEl) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            selectKey(row.key);
+            return;
+          }
+          if (event.key !== "ArrowUp" && event.key !== "ArrowDown"
+              && event.key !== "Home" && event.key !== "End") return;
+          event.preventDefault();
+          var rows = rowEls.map(function (entry) { return entry.el; });
+          var current = rows.indexOf(rowEl);
+          if (current < 0) return;
+          var next = current;
+          if (event.key === "ArrowUp") next = Math.max(0, current - 1);
+          else if (event.key === "ArrowDown") next = Math.min(rows.length - 1, current + 1);
+          else if (event.key === "Home") next = 0;
+          else if (event.key === "End") next = rows.length - 1;
+          rows[next].focus();
+          selectKey(currentRows[next].key);
+        });
         listBody.appendChild(rowEl);
         rowEls.push({ key: row.key, el: rowEl });
       });
       rowEls.forEach(function (entry) {
-        entry.el.classList.toggle("is-active", entry.key === selectedKey);
+        var selected = entry.key === selectedKey;
+        entry.el.classList.toggle("is-active", selected);
+        entry.el.setAttribute("aria-current", selected ? "true" : "false");
+        entry.el.tabIndex = selected ? 0 : -1;
       });
       renderDetail();
     }
@@ -10166,6 +11843,12 @@
     tabData.addEventListener("click", function () { setTab("data"); });
     tabTemplate.addEventListener("click", function () { setTab("template"); });
     tabJson.addEventListener("click", function () { setTab("json"); });
+    saipConfigureLocalTabs(
+      detailTabs,
+      [tabGeneral, tabData, tabTemplate, tabJson],
+      [detailPanel, detailPanel, detailPanel, detailPanel],
+      "Template file views",
+    );
 
     if (pkg && sectionKey && !(pkg.peTemplateCache || {})[sectionKey]) {
       renderRows();
@@ -10182,9 +11865,8 @@
   // ``ProfileTemplateRegistry``). Lists every DF/EF the active
   // template defines, with checkboxes that route into
   // ``saip.add_template_file`` / ``saip.remove_template_file``.
-  // Mirrors the eUICC Profile Creator's *File System Template* group
-  // so operators can see the full catalog and add/remove files
-  // without hand-editing the JSON tree.
+  // Gives operators the full catalog and add/remove controls without
+  // hand-editing the JSON tree.
   // ─────────────────────────────────────────────────────────────────
 
   function saipEditorRenderTemplateCatalogCard(host, pkg, sectionKey, peIndex) {
@@ -10411,6 +12093,9 @@
       },
     );
     if (!resp.ok) {
+      saipMarkSessionUnavailable(
+        pkg, resp, "saip.list_addable_files_for_pe"
+      );
       logBus.emit({
         level: "error",
         source: "saip.list_addable_files_for_pe",
@@ -10538,8 +12223,19 @@
 
   function saipCloseAddFileModal() {
     var existing = document.querySelector(".saip-add-file-modal");
-    if (existing && existing.parentNode) {
+    if (!existing) return;
+    if (existing.__saipKeyHandler) {
+      document.removeEventListener(
+        "keydown", existing.__saipKeyHandler, true
+      );
+    }
+    var returnFocus = existing.__saipReturnFocus;
+    if (existing.parentNode) {
       existing.parentNode.removeChild(existing);
+    }
+    if (returnFocus && typeof returnFocus.focus === "function"
+        && document.contains(returnFocus)) {
+      returnFocus.focus();
     }
   }
 
@@ -10562,9 +12258,11 @@
 
   function saipOpenAddFileModal(pkg, sectionKey, peIndex) {
     saipCloseAddFileModal();
+    var returnFocus = document.activeElement;
     var host = document.createElement("div");
     host.className = "saip-modal-host saip-add-file-modal";
     host.setAttribute("aria-hidden", "false");
+    host.__saipReturnFocus = returnFocus;
 
     var backdrop = document.createElement("div");
     backdrop.className = "saip-modal-backdrop";
@@ -10575,11 +12273,13 @@
     var card = document.createElement("div");
     card.className = "saip-modal-card";
     card.setAttribute("role", "dialog");
-    card.setAttribute("aria-label", "Add file from template");
+    card.setAttribute("aria-modal", "true");
+    card.setAttribute("aria-labelledby", "saip-add-file-modal-title");
 
     var header = document.createElement("header");
     header.className = "saip-modal-header";
     var title = document.createElement("h3");
+    title.id = "saip-add-file-modal-title";
     title.textContent = "Add file from template";
     header.appendChild(title);
     var closeBtn = document.createElement("button");
@@ -10602,16 +12302,41 @@
 
     function escListener(ev) {
       if (ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopPropagation();
         saipCloseAddFileModal();
-        document.removeEventListener("keydown", escListener);
+      } else if (ev.key === "Tab") {
+        var focusable = card.querySelectorAll(
+          "button:not([disabled]), input:not([disabled]), select:not([disabled]), "
+            + "textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+        );
+        if (focusable.length === 0) {
+          ev.preventDefault();
+          return;
+        }
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (!card.contains(document.activeElement)) {
+          ev.preventDefault();
+          (ev.shiftKey ? last : first).focus();
+        } else if (ev.shiftKey && document.activeElement === first) {
+          ev.preventDefault();
+          last.focus();
+        } else if (!ev.shiftKey && document.activeElement === last) {
+          ev.preventDefault();
+          first.focus();
+        }
       }
     }
-    document.addEventListener("keydown", escListener);
+    host.__saipKeyHandler = escListener;
+    document.addEventListener("keydown", escListener, true);
+    closeBtn.focus();
 
     var ctx = {
       addOne: async function (node) {
         var resp = await saipAddTemplateFile(pkg, sectionKey, node.pe_name);
         if (!resp.ok) {
+          saipMarkSessionUnavailable(pkg, resp, "saip.add_template_file");
           logBus.emit({
             level: "error",
             source: "saip.add_template_file",
@@ -10635,6 +12360,9 @@
         });
         var resp = await saipAddTemplateSubtree(pkg, sectionKey, names);
         if (!resp.ok) {
+          saipMarkSessionUnavailable(
+            pkg, resp, "saip.add_template_subtree"
+          );
           logBus.emit({
             level: "error",
             source: "saip.add_template_subtree",
@@ -10703,6 +12431,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, endpoint);
         logBus.emit({
           level: "error",
           source: endpoint,
@@ -11646,6 +13375,7 @@
       }),
     });
     if (!resp.ok) {
+      saipMarkSessionUnavailable(pkg, resp, "saip.update_sd_parameters");
       throw new Error(resp.error || "saip.update_sd_parameters failed");
     }
     var data = resp.data || {};
@@ -11656,7 +13386,7 @@
     if (pkg.decodedFieldsCache && sectionKey) delete pkg.decodedFieldsCache[sectionKey];
     pkg.peRows = null;
     pkg.fileRows = null;
-    pkg.validation = null;
+    saipInvalidateValidation(pkg);
     pkg.applications = null;
     pkg.applicationsError = null;
     await saipRefreshDirty(pkg);
@@ -13587,11 +15317,12 @@
         ok.textContent = "OK";
         badgeWrap.appendChild(ok);
       } else {
-        var warn = document.createElement("span");
+        var warn = document.createElement("button");
+        warn.type = "button";
         warn.className = "saip-chip saip-chip-warn";
         warn.textContent = String(issues.length) + " issue" + (issues.length === 1 ? "" : "s");
         warn.title = issues.join(" | ");
-        warn.style.cursor = "pointer";
+        warn.setAttribute("aria-label", "Open issues for " + label + " entry " + String(idx + 1));
         warn.addEventListener("click", function (ev) {
           ev.preventDefault();
           ev.stopPropagation();
@@ -14151,14 +15882,13 @@
     };
   }
 
-  // SA-G9: PE-GenericFileManagement "Add file element" inline form.
-  // The eUICC Profile Creator manual splits this into "Add select
-  // element" (filePath) + "Add file element" (createFCP). The backend
-  // dispatcher merges them into a single atomic transaction. When
-  // the GFM is already bound to a single parent path the bar omits
-  // the parent input entirely — every Add file then lands under
-  // that parent. To use a different parent path the operator adds a
-  // new GFM PE (Profile Element ribbon → Add below → genericFileManagement).
+  // SA-G9: PE-GenericFileManagement inline file-creation form.
+  // The backend dispatcher appends a ``filePath`` selector and a
+  // ``createFCP`` payload as one atomic transaction. When the GFM is
+  // already bound to a single parent path the bar omits the parent
+  // input entirely — every Add file then lands under that parent.
+  // To use a different parent path the operator adds a new GFM PE
+  // (Profile Element ribbon -> Add below -> genericFileManagement).
   // This keeps each GFM's diff readable as "files added under one DF".
   // defaults that the FCP editor can refine afterwards.
   function saipGfmBuildAddFileBar(pkg, sectionKey, summary) {
@@ -14170,11 +15900,11 @@
     var heading = document.createElement("div");
     heading.className = "saip-gfm-addbar-heading";
     if (pState === "bound") {
-      heading.textContent = "Add file under " + summary.pretty;
+      heading.textContent = "Append GFM file under " + summary.pretty;
     } else if (pState === "mixed") {
-      heading.textContent = "Add file element (mixed parents — pick one)";
+      heading.textContent = "Append GFM file (mixed parents — pick one)";
     } else {
-      heading.textContent = "Add file element (sets the GFM parent path)";
+      heading.textContent = "Append GFM file (sets the GFM parent path)";
     }
     bar.appendChild(heading);
 
@@ -14273,6 +16003,7 @@
           { method: "POST", body: JSON.stringify({ inputs: inputs }) },
         );
         if (!resp.ok) {
+          saipMarkSessionUnavailable(pkg, resp, "saip.gfm_add_file_element");
           throw new Error(String(resp.error || "request failed"));
         }
         var data = resp.data || {};
@@ -14447,11 +16178,10 @@
     }
     card.appendChild(summaryChip);
 
-    // "Add file element" affordance per the manual's "File System
-    // Creation by Generic File Management" flow. Inline form invoking
-    // saip.gfm_add_file_element. The bar is parent-aware: when the
-    // GFM is bound it reuses ``parentSummary.path`` and hides the
-    // input entirely; otherwise it accepts a free-form parent path.
+    // Inline form invoking saip.gfm_add_file_element. The bar is
+    // parent-aware: when the GFM is bound it reuses
+    // ``parentSummary.path`` and hides the input entirely; otherwise
+    // it accepts a free-form parent path.
     if (pkg && sectionKey) {
       var addBar = saipGfmBuildAddFileBar(pkg, sectionKey, parentSummary);
       if (addBar) {
@@ -14489,11 +16219,17 @@
 
     var listBody = document.createElement("div");
     listBody.className = "saip-gfm-list-body";
+    listBody.setAttribute("role", "listbox");
+    listBody.setAttribute("aria-label", "Generic file-management commands");
     var rowEls = [];
 
     cmdViews.forEach(function (v, i) {
-      var rowEl = document.createElement("div");
+      var rowEl = document.createElement("button");
+      rowEl.type = "button";
       rowEl.className = "saip-gfm-list-row";
+      rowEl.setAttribute("role", "option");
+      rowEl.setAttribute("aria-selected", i === 0 ? "true" : "false");
+      rowEl.tabIndex = i === 0 ? 0 : -1;
       var nameEl = document.createElement("span");
       nameEl.className = "saip-gfm-row-name";
       nameEl.textContent = v.displayName || ("Command #" + (i + 1));
@@ -14596,13 +16332,28 @@
     function selectRow(idx) {
       selectedIdx = idx;
       rowEls.forEach(function (el, i) {
-        el.classList.toggle("is-active", i === idx);
+        var selected = i === idx;
+        el.classList.toggle("is-active", selected);
+        el.setAttribute("aria-selected", selected ? "true" : "false");
+        el.tabIndex = selected ? 0 : -1;
       });
       renderDetail();
     }
 
     rowEls.forEach(function (el, i) {
       el.addEventListener("click", function () { selectRow(i); });
+      el.addEventListener("keydown", function (event) {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown"
+            && event.key !== "Home" && event.key !== "End") return;
+        event.preventDefault();
+        var next = i;
+        if (event.key === "ArrowUp") next = Math.max(0, i - 1);
+        else if (event.key === "ArrowDown") next = Math.min(rowEls.length - 1, i + 1);
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = rowEls.length - 1;
+        rowEls[next].focus();
+        selectRow(next);
+      });
     });
 
     function setTab(which) {
@@ -14610,12 +16361,19 @@
       tabGen.classList.toggle("is-active", which === "general");
       tabData.classList.toggle("is-active", which === "data");
       tabJson.classList.toggle("is-active", which === "json");
+      if (detailTabs.__saipSyncTabs) detailTabs.__saipSyncTabs();
       renderDetail();
     }
 
     tabGen.addEventListener("click", function () { setTab("general"); });
     tabData.addEventListener("click", function () { setTab("data"); });
     tabJson.addEventListener("click", function () { setTab("json"); });
+    saipConfigureLocalTabs(
+      detailTabs,
+      [tabGen, tabData, tabJson],
+      [detailPanel, detailPanel, detailPanel],
+      "Generic file-management views",
+    );
 
     selectRow(0);
     host.appendChild(card);
@@ -14692,6 +16450,7 @@
       }),
     });
     if (!resp.ok) {
+      saipMarkSessionUnavailable(pkg, resp, "saip.update_rfm_tars");
       throw new Error(resp.error || "saip.update_rfm_tars failed");
     }
     var data = resp.data || {};
@@ -14702,7 +16461,7 @@
     if (pkg.decodedFieldsCache && sectionKey) delete pkg.decodedFieldsCache[sectionKey];
     pkg.peRows = null;
     pkg.fileRows = null;
-    pkg.validation = null;
+    saipInvalidateValidation(pkg);
     pkg.applications = null;
     pkg.applicationsError = null;
     await saipRefreshDirty(pkg);
@@ -15017,11 +16776,12 @@
         ok.textContent = "OK";
         badgeWrap.appendChild(ok);
       } else {
-        var warn = document.createElement("span");
+        var warn = document.createElement("button");
+        warn.type = "button";
         warn.className = "saip-chip saip-chip-warn";
         warn.textContent = String(issues.length) + " issue" + (issues.length === 1 ? "" : "s");
         warn.title = issues.join(" | ");
-        warn.style.cursor = "pointer";
+        warn.setAttribute("aria-label", "Open issues for application entry " + String(idx + 1));
         warn.addEventListener("click", function (ev) {
           ev.preventDefault();
           ev.stopPropagation();
@@ -15777,8 +17537,7 @@
       "File Control Parameters",
       "FCP metadata + access rules (TS 102 221 §11.1.1 / §9.2.4). Decoded-first controls — pick structure / file type from dropdowns instead of editing the descriptor byte directly.",
     );
-    // ePC §"File Content" → "Edit the file content in hexadecimal or
-    // interpreted representation." The Data tab folds both views so
+    // The Data tab folds raw hexadecimal and interpreted views The Data tab folds both views so
     // operators do not bounce between two siblings to read the same
     // bytes. Record-fixed files expose a single-record navigator
     // (dropdown + prev/next, PageUp / PageDown keys) instead of a
@@ -15828,6 +17587,7 @@
         if (!b) return;
         b.classList.toggle("is-active", b.dataset.fileTab === id);
       });
+      if (tabs.__saipSyncTabs) tabs.__saipSyncTabs();
       bodyHost.innerHTML = "";
       bodyHost.classList.toggle("saip-detail-body--data-view", id === "data");
       if (id === "data") {
@@ -15853,6 +17613,15 @@
       tabTemplate.addEventListener("click", function () { activate("template"); });
     }
     tabJson.addEventListener("click", function () { activate("json"); });
+    var fileTabs = [tabGeneral, tabData];
+    if (tabTemplate) fileTabs.push(tabTemplate);
+    fileTabs.push(tabJson);
+    saipConfigureLocalTabs(
+      tabs,
+      fileTabs,
+      fileTabs.map(function () { return bodyHost; }),
+      "File detail views",
+    );
     activate(pkg.activeFileTab);
   }
 
@@ -17464,9 +19233,8 @@
     // need to enumerate each row — that is what the Data and Hex
     // tabs are for. Render a one-line summary instead and surface a
     // clickable "show all" toggle for the rare operator who wants
-    // the full list inline. This matches the eUICC Profile Creator
-    // UX where the FCP / metadata column never carries a full
-    // record dump.
+    // the full list inline. The FCP / metadata column stays compact
+    // instead of carrying a full record dump.
     var COMPACT_THRESHOLD = 5;
     var compactMode = totalRecords > COMPACT_THRESHOLD;
     var summaryRow = null;
@@ -17785,7 +19553,7 @@
     }
 
     // Per-record structured wizard hook. EFs registered in
-    // ``_SAIP_RECORD_WIZARDS`` get a Comprion-style form for each
+    // ``_SAIP_RECORD_WIZARDS`` get a structured form for each
     // record. The wizard owns layout + encoding and routes Apply
     // through ``saip.update_record_bytes`` (same write path as the
     // raw-hex editor below).
@@ -17903,9 +19671,9 @@
   //
   // Replaces the legacy "drop every record card into the host" pattern
   // that flooded the Data tab on phonebooks and EF.ARRs with 22+ slots
-  // open at once. Operator workflow now matches eUICC Profile Creator
-  // §"File Content" — pick the record from the dropdown, page through
-  // with prev/next, PageUp / PageDown keys also jump records.
+  // open at once. Operators pick the record from the dropdown, page
+  // through with prev/next, and can use PageUp / PageDown as keyboard
+  // shortcuts.
   //
   // ``opts`` accepts:
   //   { records, recordSize, efKey, sectionKey, fieldPath,
@@ -18156,7 +19924,7 @@
     return wrap;
   }
 
-  // ── Comprion-style wizard framework ────────────────────────────
+  // ── structured wizard framework ────────────────────────────
   //
   // Each wizard targets a single transparent EF and exposes a
   // ``render(host, currentHex, applyHex)`` function. The wizard
@@ -18193,6 +19961,17 @@
       out.push(parseInt(clean.slice(i, i + 2), 16));
     }
     return out;
+  }
+
+  function _saipRequireHexBytes(value, expectedLength, label) {
+    var clean = String(value || "").replace(/\s+/g, "").toUpperCase();
+    var expectedNibbles = expectedLength * 2;
+    if (clean.length !== expectedNibbles
+        || !new RegExp("^[0-9A-F]{" + expectedNibbles + "}$").test(clean)) {
+      throw new Error(label + " must be exactly " + expectedLength
+        + " byte" + (expectedLength === 1 ? "" : "s") + " of hex.");
+    }
+    return _saipHexToBytes(clean);
   }
 
   // BCD-swap encode for digit strings. Each pair of digits is
@@ -21395,24 +23174,26 @@
     },
   };
 
-  // 3GPP TS 31.102 §4.4.11.4 — EF.5GS3GPPLOCI / 5GSN3GPPLOCI.
+  // 3GPP TS 31.102 §4.4.11.2/.3 — EF.5GS3GPPLOCI / 5GSN3GPPLOCI.
   // 20-byte transparent EF:
   //   bytes 1-13 : 5G-GUTI
+  //                  Identity length + header (00 0B F2)
   //                  PLMN (3 B)
   //                  AMF Region ID (1 B)
   //                  AMF Set ID + Pointer (2 B; 10 + 6 bits)
   //                  5G-TMSI (4 B)
-  //                  Reserved/padding (3 B)
   //   bytes 14-19: Last visited registered TAI (PLMN 3 B + TAC 3 B)
   //   byte 20    : 5GS update status
-  //                  0=updated, 1=not updated, 2=PLMN not allowed,
-  //                  3=TA not allowed, 4=Roaming not allowed, 7=reserved
+  //                  0=updated, 1=not updated, 2=roaming not allowed,
+  //                  3..7=reserved
   var _SAIP_5GS_LOCI_STATUS_LABELS = {
     0: "Updated",
     1: "Not updated",
-    2: "PLMN not allowed",
-    3: "Tracking Area not allowed",
-    4: "Roaming not allowed",
+    2: "Roaming not allowed",
+    3: "Reserved",
+    4: "Reserved",
+    5: "Reserved",
+    6: "Reserved",
     7: "Reserved",
   };
 
@@ -21423,20 +23204,29 @@
       render: function (host, currentHex, applyFn) {
         var bytes = _saipHexToBytes(currentHex);
         while (bytes.length < 20) bytes.push(0xFF);
-        var gutiPlmn = _saipPlmnDecode(bytes.slice(0, 3));
-        var amfRegion = bytes[3] & 0xFF;
-        var amfSetPtr = ((bytes[4] & 0xFF) << 8) | (bytes[5] & 0xFF);
+        var gutiAssigned = !bytes.slice(0, 13).every(function (b) {
+          return b === 0xFF;
+        });
+        var gutiPlmn = _saipPlmnDecode(bytes.slice(3, 6));
+        var amfRegion = bytes[6] & 0xFF;
+        var amfSetPtr = ((bytes[7] & 0xFF) << 8) | (bytes[8] & 0xFF);
         var amfSet = (amfSetPtr >> 6) & 0x03FF;
         var amfPtr = amfSetPtr & 0x003F;
-        var tmsiHex = _saipBytesToHex(bytes.slice(6, 10));
+        var tmsiHex = _saipBytesToHex(bytes.slice(9, 13));
         var taiPlmn = _saipPlmnDecode(bytes.slice(13, 16));
         var tacHex = _saipBytesToHex(bytes.slice(16, 19));
         var statusInit = bytes[19] & 0x07;
 
         var gutiHdr = document.createElement("h6");
         gutiHdr.className = "saip-edit-card-hint";
-        gutiHdr.textContent = "5G-GUTI (octets 1-13)";
+        gutiHdr.textContent = "5G-GUTI (octets 1-13; 00 0B F2 identity prefix)";
         host.appendChild(gutiHdr);
+
+        var assignedInput = document.createElement("input");
+        assignedInput.type = "checkbox";
+        assignedInput.checked = gutiAssigned;
+        _saipWizardRow(host, "5G-GUTI assigned", assignedInput,
+          "Clear this for the standards-defined all-FF unassigned identity.");
 
         var gpMcc = document.createElement("input");
         gpMcc.type = "text";
@@ -21521,7 +23311,7 @@
 
         var status = document.createElement("select");
         status.className = "saip-wizard-text";
-        [0, 1, 2, 3, 4, 7].forEach(function (v) {
+        [0, 1, 2, 3, 4, 5, 6, 7].forEach(function (v) {
           var opt = document.createElement("option");
           opt.value = String(v);
           opt.textContent = v + " — " + (_SAIP_5GS_LOCI_STATUS_LABELS[v] || "RFU");
@@ -21536,34 +23326,33 @@
         _saipWizardRow(host, "Encoded hex", preview, "Always 20 bytes.");
 
         function compute() {
-          var gp = (gpMcc.value || gpMnc.value)
-            ? _saipPlmnEncode(gpMcc.value, gpMnc.value)
-            : [0xFF, 0xFF, 0xFF];
-          var reg = parseInt(regInput.value, 16);
-          if (!Number.isFinite(reg) || reg < 0 || reg > 0xFF) {
-            throw new Error("AMF Region must be a hex byte.");
+          var guti = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+          if (assignedInput.checked) {
+            var gp = _saipPlmnEncode(gpMcc.value, gpMnc.value);
+            var reg = _saipRequireHexBytes(
+              regInput.value, 1, "AMF Region"
+            )[0];
+            var sset = parseInt(setInput.value, 10);
+            var sptr = parseInt(ptrInput.value, 10);
+            if (!Number.isFinite(sset) || sset < 0 || sset > 0x3FF) {
+              throw new Error("AMF Set ID must be 0..1023.");
+            }
+            if (!Number.isFinite(sptr) || sptr < 0 || sptr > 0x3F) {
+              throw new Error("AMF Pointer must be 0..63.");
+            }
+            var setPtrPacked = ((sset & 0x3FF) << 6) | (sptr & 0x3F);
+            var tmsiB = _saipRequireHexBytes(
+              tmsiInput.value, 4, "5G-TMSI"
+            );
+            guti = [0x00, 0x0B, 0xF2].concat(gp).concat([reg])
+              .concat([(setPtrPacked >> 8) & 0xFF, setPtrPacked & 0xFF])
+              .concat(tmsiB);
           }
-          var sset = parseInt(setInput.value, 10);
-          var sptr = parseInt(ptrInput.value, 10);
-          if (!Number.isFinite(sset) || sset < 0 || sset > 0x3FF) {
-            throw new Error("AMF Set ID must be 0..1023.");
-          }
-          if (!Number.isFinite(sptr) || sptr < 0 || sptr > 0x3F) {
-            throw new Error("AMF Pointer must be 0..63.");
-          }
-          var setPtrPacked = ((sset & 0x3FF) << 6) | (sptr & 0x3F);
-          var tmsiB = _saipHexToBytes(tmsiInput.value);
-          if (tmsiB.length !== 4) throw new Error("5G-TMSI must be 4 B.");
-          // octets 11-13 reserved (FF padding)
-          var guti = gp.concat([reg])
-            .concat([(setPtrPacked >> 8) & 0xFF, setPtrPacked & 0xFF])
-            .concat(tmsiB)
-            .concat([0xFF, 0xFF, 0xFF]);
           var tp = (tpMcc.value || tpMnc.value)
             ? _saipPlmnEncode(tpMcc.value, tpMnc.value)
             : [0xFF, 0xFF, 0xFF];
-          var tacB = _saipHexToBytes(tacInput.value);
-          if (tacB.length !== 3) throw new Error("TAC must be 3 B.");
+          var tacB = _saipRequireHexBytes(tacInput.value, 3, "TAC");
           var st = parseInt(status.value, 10) & 0x07;
           return guti.concat(tp).concat(tacB).concat([st]);
         }
@@ -21580,6 +23369,7 @@
          tpMcc, tpMnc, tacInput].forEach(function (el) {
           el.addEventListener("input", refresh);
         });
+        assignedInput.addEventListener("change", refresh);
         status.addEventListener("change", refresh);
         refresh();
 
@@ -21591,9 +23381,9 @@
   }
 
   var _SAIP_WIZARD_5GS3GPPLOCI = _saip5gsLociWizard("5GS3GPPLOCI",
-    "3GPP TS 31.102 §4.4.11.4 — 5GS Location Information for 3GPP access (20 B).");
+    "3GPP TS 31.102 §4.4.11.2 — 5GS Location Information for 3GPP access (20 B).");
   var _SAIP_WIZARD_5GSN3GPPLOCI = _saip5gsLociWizard("5GSN3GPPLOCI",
-    "3GPP TS 31.102 §4.4.11.6 — 5GS Location Information for non-3GPP access (20 B).");
+    "3GPP TS 31.102 §4.4.11.3 — 5GS Location Information for non-3GPP access (20 B).");
 
   // 3GPP TS 31.102 §4.2.45 — EF.CBMI (Cell Broadcast Message
   // Identifier list). Each entry is a 2-byte big-endian message
@@ -22086,12 +23876,12 @@
     "3GPP TS 31.102 §4.2.9b — GPRS Ciphering Key and CKSN.",
   );
 
-  // 3GPP TS 31.102 §4.2.51 — EF.EPSLOCI (18 B):
+  // 3GPP TS 31.102 §4.2.91 — EF.EPSLOCI (18 B):
   // GUTI/TAI/status fields. Wizard surfaces key sub-fields and keeps
   // unknown bytes preserved through explicit hex slices.
   var _SAIP_WIZARD_EPSLOCI = {
     title: "EF.EPSLOCI wizard",
-    spec: "3GPP TS 31.102 §4.2.51 — EPS Location Information.",
+    spec: "3GPP TS 31.102 §4.2.91 — EPS Location Information.",
     render: function (host, currentHex, applyFn) {
       var bytes = _saipHexToBytes(currentHex);
       while (bytes.length < 18) bytes.push(0xFF);
@@ -22101,8 +23891,8 @@
       gutiInput.className = "saip-wizard-text saip-wizard-text--mono";
       gutiInput.maxLength = 24;
       gutiInput.value = _saipBytesToHex(bytes.slice(0, 12));
-      _saipWizardRow(host, "GUTI area (12 B)", gutiInput,
-        "M-TMSI/MME+PLMN region bytes.");
+      _saipWizardRow(host, "GUTI mobile identity (12 B)", gutiInput,
+        "Assigned GUTI starts 0BF6; use 24 Fs for the unassigned identity.");
 
       var taiInput = document.createElement("input");
       taiInput.type = "text";
@@ -22121,10 +23911,14 @@
       _saipWizardRow(host, "EPS update status", stInput, "0..7 status code.");
 
       _saipWizardApplyButton(host, "Apply EPSLOCI", function () {
-        var g = _saipHexToBytes(gutiInput.value);
-        if (g.length !== 12) throw new Error("GUTI area must be 12 bytes.");
-        var t = _saipHexToBytes(taiInput.value);
-        if (t.length !== 5) throw new Error("TAI must be 5 bytes.");
+        var g = _saipRequireHexBytes(
+          gutiInput.value, 12, "GUTI mobile identity"
+        );
+        var assigned = !g.every(function (b) { return b === 0xFF; });
+        if (assigned && (g[0] !== 0x0B || g[1] !== 0xF6)) {
+          throw new Error("Assigned EPS GUTI must start with identity bytes 0B F6.");
+        }
+        var t = _saipRequireHexBytes(taiInput.value, 5, "TAI");
         var s = parseInt(stInput.value, 10);
         if (!Number.isFinite(s) || s < 0 || s > 7) throw new Error("Status must be 0..7.");
         return { hex: _saipBytesToHex(g.concat(t).concat([s & 0x07])) };
@@ -22382,8 +24176,6 @@
   _SAIP_WIZARDS["ef-spdi"]        = _SAIP_WIZARD_SPDI;
   _SAIP_WIZARDS["ef-5gs3gpploci"] = _SAIP_WIZARD_5GS3GPPLOCI;
   _SAIP_WIZARDS["ef-5gsn3gpploci"] = _SAIP_WIZARD_5GSN3GPPLOCI;
-  _SAIP_WIZARDS["ef-5gs3gppguti"] = _SAIP_WIZARD_5GS3GPPLOCI;
-  _SAIP_WIZARDS["ef-5gsn3gppguti"] = _SAIP_WIZARD_5GSN3GPPLOCI;
   _SAIP_WIZARDS["ef-epsloci"]      = _SAIP_WIZARD_EPSLOCI;
   _SAIP_WIZARDS["ef-epsnsc"]       = _SAIP_WIZARD_EPSNSC;
   _SAIP_WIZARDS["ef-suci-calc-info"] = _SAIP_WIZARD_SUCI_CALC_INFO;
@@ -22416,12 +24208,11 @@
   _SAIP_RECORD_WIZARDS["ef-ext4"] = _SAIP_RECORD_WIZARD_EXT;
   _SAIP_RECORD_WIZARDS["ef-ext5"] = _SAIP_RECORD_WIZARD_EXT;
 
-  // ── Manual-list parity wizards. Reference: TCA eUICC Profile
-  // Creator manual §"Interpreted EFs with GUI Editor". Each EF
-  // below was previously surfaced as a typed payload through the
-  // generic decoded-edit panel; the wizards below replace that with
-  // a structured form so the operator never sees opaque hex for a
-  // reference-listed EF.
+  // ── Structured EF wizards.
+  // Each EF below was previously surfaced as a typed payload through
+  // the generic decoded-edit panel; the wizards below replace that
+  // with a structured form so the operator does not have to edit
+  // opaque hex for a known EF layout.
 
   // EF.SUCI-CALC-INFO-USIM (TS 31.102 §4.4.11.13). The 4F01 USIM-
   // computed variant uses the same protection-scheme + HNPK + key
@@ -23031,7 +24822,7 @@
       2: "ProSe direct discovery (restricted)",
       3: "ProSe direct communication (one-to-many)",
       4: "ProSe direct communication (one-to-one)",
-      5: "EPC-level ProSe discovery",
+      5: "Evolved Packet Core ProSe discovery",
       6: "ProSe UE-to-network relay (Layer-3)",
       7: "ProSe UE-to-UE relay (Layer-3)",
       8: "ProSe UE-to-network relay (Layer-2)",
@@ -24329,8 +26120,7 @@
         riCard.appendChild(riP);
         host.appendChild(riCard);
       }
-    } else if (efKey === "ef-5gs3gpploci" || efKey === "ef-5gsn3gpploci"
-               || efKey === "ef-5gs3gppguti" || efKey === "ef-5gsn3gppguti") {
+    } else if (efKey === "ef-5gs3gpploci" || efKey === "ef-5gsn3gpploci") {
       var loci5gDecoded = saipDecodeEf5gsLoci(efImageHex);
       if (loci5gDecoded) {
         var loci5gCard = saipEditorCard(
@@ -24344,6 +26134,21 @@
           loci5gCard.appendChild(p);
         });
         host.appendChild(loci5gCard);
+      }
+    } else if (efKey === "ef-5gs3gppnsc" || efKey === "ef-5gsn3gppnsc") {
+      var nsc5gDecoded = saipDecodeEf5gsNsc(efImageHex);
+      if (nsc5gDecoded) {
+        var nsc5gCard = saipEditorCard(
+          "5GS NAS Security Context decoded",
+          "3GPP TS 31.102 §4.4.11.4/.5 — redacted security-context metadata."
+        );
+        nsc5gDecoded.split("\n").forEach(function (ln) {
+          var p = document.createElement("p");
+          p.className = "saip-edit-card-hint";
+          p.textContent = ln;
+          nsc5gCard.appendChild(p);
+        });
+        host.appendChild(nsc5gCard);
       }
     } else if (efKey === "ef-suci-calc-info") {
       var suciDecoded = saipDecodeEfSuciCalcInfo(efImageHex);
@@ -25197,6 +27002,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.update_file_decoded");
         logBus.emit({
           level: "error",
           source: "saip.update_file_decoded",
@@ -25212,10 +27018,9 @@
       }
       pkg.fileRows = null;
       pkg.peRows = null;
-      pkg.validation = null;
+      saipInvalidateValidation(pkg);
       pkg.applications = null;
       pkg.applicationsError = null;
-      pkg.valAutoRunPending = true;
       await saipRefreshDirty(pkg);
       await saipLoadShowFile(pkg, sectionKey, fieldPath);
       saipRedrawFileDetail(pkg, sectionKey, fieldPath, null, null);
@@ -25273,6 +27078,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.update_file_content");
         logBus.emit({
           level: "error",
           source: "saip.update_file_content",
@@ -25288,10 +27094,9 @@
       }
       pkg.fileRows = null;
       pkg.peRows = null;
-      pkg.validation = null;
+      saipInvalidateValidation(pkg);
       pkg.applications = null;
       pkg.applicationsError = null;
-      pkg.valAutoRunPending = true;
       // Light-touch refresh: dirty markers + show_file cache only.
       // The detail panel is redrawn in place; the drawer / ribbon /
       // validation slot are NOT torn down (that path was the source
@@ -25355,6 +27160,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.update_record_bytes");
         logBus.emit({
           level: "error",
           source: "saip.update_record_bytes",
@@ -25370,10 +27176,9 @@
       }
       pkg.fileRows = null;
       pkg.peRows = null;
-      pkg.validation = null;
+      saipInvalidateValidation(pkg);
       pkg.applications = null;
       pkg.applicationsError = null;
-      pkg.valAutoRunPending = true;
       // Light-touch refresh: dirty markers + show_file cache, then
       // an in-place file-detail redraw. The drawer / ribbon /
       // validation / PE-list panels stay untouched (re-rendering
@@ -25431,6 +27236,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.update_file_field");
         logBus.emit({
           level: "error",
           source: "saip.update_file_field",
@@ -25449,10 +27255,9 @@
       // Reset the file rows list so dirty-reflecting values re-populate.
       pkg.fileRows = null;
       pkg.peRows = null;
-      pkg.validation = null;
+      saipInvalidateValidation(pkg);
       pkg.applications = null;
       pkg.applicationsError = null;
-      pkg.valAutoRunPending = true;
       // In-place refresh: dirty + show_file cache + targeted detail
       // redraw. The drawer / ribbon / validation panels stay put.
       await saipRefreshDirty(pkg);
@@ -25927,6 +27732,7 @@
         body: JSON.stringify({ inputs: inputs }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.pin_puk_mutate_entry");
         logBus.emit({
           level: "error",
           source: "saip.pin_puk_mutate_entry",
@@ -25948,8 +27754,7 @@
       }
       pkg.peRows = null;
       pkg.fileRows = null;
-      pkg.validation = null;
-      pkg.valAutoRunPending = true;
+      saipInvalidateValidation(pkg);
       await saipRefreshDirty(pkg);
       if (peList && peList.parentNode) {
         var detail = peList.parentNode.querySelector(".saip-detail");
@@ -25984,6 +27789,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.list_decoded_fields");
         var entry = { fields: [], error: resp.error || "List decoded fields failed." };
         pkg.decodedFieldsCache[sectionKey] = entry;
         logBus.emit({
@@ -26394,6 +28200,7 @@
     filterInput.className = "saip-decoded-filter";
     filterInput.placeholder = "Filter by name, path, kind, or EF…";
     filterInput.title = "Substring match on name, path, editor kind, or EF key.";
+    filterInput.setAttribute("aria-label", "Filter decoded fields");
     filterInput.spellcheck = false;
     toolbar.appendChild(filterInput);
 
@@ -27116,15 +28923,32 @@
       if (rowOpts.startCollapsed === true) {
         row.classList.add("is-collapsed");
       }
+      form.id = "saip-decoded-disclosure-" + String(++_saipDisclosureSeq);
+      head.setAttribute("role", "button");
+      head.setAttribute("tabindex", "0");
+      head.setAttribute("aria-controls", form.id);
+      head.setAttribute(
+        "aria-expanded",
+        row.classList.contains("is-collapsed") ? "false" : "true",
+      );
       head.style.cursor = "pointer";
-      head.title = "Click to expand / collapse this decoded card.";
+      head.title = "Expand or collapse this decoded card.";
+      function toggleDecodedCard() {
+        var collapsed = row.classList.toggle("is-collapsed");
+        caret.textContent = collapsed ? "▸" : "▾";
+        head.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      }
       head.addEventListener("click", function (ev) {
         // Don't toggle when the operator clicks the Revert button or
         // any other interactive element nested in the head.
         var t = ev.target;
         if (t && (t.tagName === "BUTTON" || t.tagName === "INPUT" || t.tagName === "A")) return;
-        var collapsed = row.classList.toggle("is-collapsed");
-        caret.textContent = collapsed ? "▸" : "▾";
+        toggleDecodedCard();
+      });
+      head.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleDecodedCard();
       });
     }
     return row;
@@ -27619,6 +29443,9 @@
     try {
       var resp = await saipDecodedApplyPayload(pkg, job);
       if (!resp || !resp.ok) {
+        if (resp) {
+          saipMarkSessionUnavailable(pkg, resp, "saip.apply_decoded_edit");
+        }
         job.status = resp && resp.error ? resp.error : "Auto-apply failed";
         if (job.statusEl) {
           job.statusEl.textContent = job.status;
@@ -27638,10 +29465,9 @@
       }
       pkg.fileRows = null;
       pkg.peRows = null;
-      pkg.validation = null;
+      saipInvalidateValidation(pkg);
       pkg.applications = null;
       pkg.applicationsError = null;
-      pkg.valAutoRunPending = true;
       if (pkg.decodedFieldsCache && sectionKey) delete pkg.decodedFieldsCache[sectionKey];
       await saipRefreshDirty(pkg);
       if (job.statusEl) {
@@ -27690,6 +29516,7 @@
         body: JSON.stringify({ inputs: inputs }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.apply_decoded_edit");
         logBus.emit({
           level: "error",
           source: "saip.apply_decoded_edit",
@@ -27711,10 +29538,9 @@
       }
       pkg.fileRows = null;
       pkg.peRows = null;
-      pkg.validation = null;
+      saipInvalidateValidation(pkg);
       pkg.applications = null;
       pkg.applicationsError = null;
-      pkg.valAutoRunPending = true;
       if (pkg.decodedFieldsCache) delete pkg.decodedFieldsCache[sectionKey];
       await saipRefreshDirty(pkg);
       if (fieldPath) await saipLoadShowFile(pkg, sectionKey, fieldPath);
@@ -27849,6 +29675,7 @@
           body: JSON.stringify({ inputs: inputs }),
         });
         if (!resp.ok) {
+          saipMarkSessionUnavailable(pkg, resp, "saip.apply_decoded_edit");
           status.textContent = resp.error || "Apply failed.";
           status.dataset.tone = "error";
           logBus.emit({
@@ -27876,10 +29703,9 @@
         }
         pkg.fileRows = null;
         pkg.peRows = null;
-        pkg.validation = null;
+        saipInvalidateValidation(pkg);
         pkg.applications = null;
         pkg.applicationsError = null;
-        pkg.valAutoRunPending = true;
         if (pkg.decodedFieldsCache) delete pkg.decodedFieldsCache[sectionKey];
         await saipRefreshDirty(pkg);
         if (fieldPath) await saipLoadShowFile(pkg, sectionKey, fieldPath);
@@ -28440,8 +30266,8 @@
     return String(text || "").replace(/\s+/g, "").replace(/^0[xX]/, "").toUpperCase();
   }
 
-  // Enum registries for fields that the manual / TCA SAIP spec
-  // restricts to a fixed set of string tokens. Disambiguation between
+  // Enum registries for fields that TCA SAIP or related standards
+  // restrict to a fixed set of string tokens. Disambiguation between
   // overlapping field names (e.g. ``keyReference`` carries different
   // tokens for PIN vs PUK PEs) goes through ``peTypeHint`` which is
   // derived from the section key. Lookup is case-insensitive.
@@ -29462,8 +31288,8 @@
       || fn === "highupdateactivity"
       || fn === "readwhendeactivated"
       || fn === "readwhendeactived"
-      // PE-PINcodes / PE-PUKcodes — single-bit knobs the manual
-      // models as booleans even though SAIP encodes them as bytes.
+      // PE-PINcodes / PE-PUKcodes — single-bit knobs modelled as
+      // booleans even though SAIP encodes them as bytes.
       || fn === "userverificationpin"
       || fn === "ondemandverification"
     ) {
@@ -31526,6 +33352,9 @@
     }).then(function (resp) {
       pkg.pinPukReferenceCatalogPending = null;
       if (!resp.ok) {
+        saipMarkSessionUnavailable(
+          pkg, resp, "saip.pin_puk_reference_catalog"
+        );
         pkg.pinPukReferenceCatalogError = resp.error || "pin/puk catalog failed";
         return null;
       }
@@ -31685,15 +33514,97 @@
     return true;
   }
 
+  function saipVariableName(row) {
+    if (!row || typeof row !== "object") return "";
+    return String(row.name || row.id || "").trim();
+  }
+
+  function saipFindVariableRow(pkg, name) {
+    var wanted = String(name || "").trim().toUpperCase();
+    if (!wanted || !pkg || !pkg.variables) return null;
+    var rows = pkg.variables.variables || [];
+    for (var i = 0; i < rows.length; i++) {
+      if (saipVariableName(rows[i]).toUpperCase() === wanted) return rows[i];
+    }
+    return null;
+  }
+
+  function saipVariableNameIsSecret(name) {
+    var normalized = String(name || "").trim().toUpperCase();
+    if (!normalized) return false;
+    return /^(?:K|KI|OP|OPC|TOP|TOPC|PIN\d*|PUK\d*|ADM\d*|SCP\d+_.+)$/.test(normalized)
+      || /(?:^|_)(?:PASSWORD|PRIVATE_KEY|TRANSPORT_KEY|AUTHENTICATION_KEY|PSK|SECRET)$/.test(normalized)
+      || /_(?:KEY|KIC|KID|KIK|KEK|PSK|SECRET)$/.test(normalized);
+  }
+
+  function saipVariableIsSecret(row) {
+    if (!row || typeof row !== "object") return false;
+    var name = saipVariableName(row).toUpperCase();
+    if (typeof row.secret === "boolean") {
+      return row.secret || saipVariableNameIsSecret(name);
+    }
+    if (typeof row.secret === "string") {
+      var explicit = row.secret.trim().toLowerCase();
+      if (["true", "yes", "1", "secret"].indexOf(explicit) !== -1) return true;
+      if (["false", "no", "0", "public"].indexOf(explicit) !== -1) {
+        return saipVariableNameIsSecret(name);
+      }
+    }
+    var classification = String(row.classification || "").toUpperCase();
+    var inputShape = [row.input_kind, row.input_format, row.kind]
+      .map(function (value) { return String(value || "").toUpperCase(); })
+      .join(" ");
+    if (/(SECRET|CREDENTIAL|AUTHENTICATION_KEY|TRANSPORT_KEY)/.test(classification)) return true;
+    if (/(PASSWORD|SECRET|PSK|PRIVATE_KEY|PIN|PUK)/.test(inputShape)) return true;
+    return saipVariableNameIsSecret(name);
+  }
+
+  function saipVariableSourceFlags(row) {
+    row = row || {};
+    var raw = row.source;
+    var sourceText = "";
+    if (Array.isArray(raw)) {
+      sourceText = raw.join(" ");
+    } else if (raw && typeof raw === "object") {
+      sourceText = Object.keys(raw).filter(function (key) { return Boolean(raw[key]); }).join(" ");
+    } else {
+      sourceText = String(raw || "");
+    }
+    sourceText = sourceText.toUpperCase();
+    var hasCatalogMetadata = [
+      "label", "input_kind", "input_format", "classification", "status", "required", "secret",
+    ].some(function (key) { return Object.prototype.hasOwnProperty.call(row, key); });
+    return {
+      catalog: sourceText.indexOf("CATALOG") !== -1 || hasCatalogMetadata,
+      inline: sourceText.indexOf("INLINE") !== -1
+        || sourceText.indexOf("VARDER") !== -1
+        || row.used_in_document === true,
+    };
+  }
+
+  function saipVariableFriendlyMeta(value) {
+    return String(value || "").trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  }
+
+  function saipVariableRedactMessage(message, submittedValue) {
+    var text = String(message == null ? "" : message);
+    var value = String(submittedValue == null ? "" : submittedValue);
+    if (!value) return text;
+    return text.split(value).join("[value redacted]");
+  }
+
   // Token-defs lookup. ``saipLoadVariables`` populates
   // ``pkg.variables.variables`` as ``[{name, value, kind, ...}]``;
-  // we collapse it to a name → value map for fast resolution.
+  // we collapse it to a name → presentation-value map for fast
+  // resolution. Secret bytes never enter decoded-field display text.
   function saipFormTokenDefs(pkg) {
     var out = {};
     if (!pkg || !pkg.variables) return out;
     var rows = pkg.variables.variables || [];
     rows.forEach(function (row) {
-      if (row && row.name) out[String(row.name)] = String(row.value || "");
+      var name = saipVariableName(row);
+      if (!name) return;
+      out[name] = saipVariableIsSecret(row) ? "••••••••" : String(row.value || "");
     });
     return out;
   }
@@ -31701,8 +33612,8 @@
   // Detect a placeholder marker. SAIP carries two shapes:
   //   * dict-marker {"__ygg_placeholder__": NAME, "encoding": ENC}
   //     — the form stamps this when ``saip.add_variable_to_pe`` runs;
-  //   * bracket-string "[NAME]" — the manual's textual placeholder
-  //     syntax used in CSV personalisation lists.
+  //   * bracket-string "[NAME]" — textual placeholder syntax used
+  //     in CSV personalisation lists.
   function saipFormPlaceholderInfo(value) {
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if (typeof value.__ygg_placeholder__ === "string"
@@ -31841,6 +33752,9 @@
           }),
         });
         if (!resp.ok) {
+          saipMarkSessionUnavailable(
+            ctx.pkg, resp, "saip.add_variable_to_pe"
+          );
           alert("Tokenize failed: " + (resp.error || "unknown error"));
           logBus.emit({
             level: "error",
@@ -31873,6 +33787,20 @@
   // Variable-edit prompt invoked from the token chip's Edit button.
   // Mirrors the Token-editor inline edit flow but without the modal.
   async function saipPromptSetVariable(pkg, name, currentValue) {
+    var variableRow = saipFindVariableRow(pkg, name);
+    if (saipVariableIsSecret(variableRow) || saipVariableNameIsSecret(name)) {
+      openSaipVariableModal(pkg.id);
+      setTimeout(function () {
+        var nameInput = document.getElementById("saip-vars-name");
+        var valueInput = document.getElementById("saip-vars-value");
+        if (!nameInput || !valueInput) return;
+        nameInput.value = name;
+        nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+        valueInput.value = "";
+        valueInput.focus();
+      }, 0);
+      return;
+    }
     var newVal = window.prompt(
       "New value for [" + name + "]:",
       currentValue || "",
@@ -31890,13 +33818,18 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.set_variable");
         alert("set_variable failed: " + (resp.error || "unknown error"));
         return;
+      }
+      var data = resp.data || {};
+      if (typeof data.remaining_inline_placeholder_count === "number") {
+        pkg.inlinePlaceholderCount = data.remaining_inline_placeholder_count;
       }
       logBus.emit({
         level: "info",
         source: "saip.set_variable",
-        message: "[" + name + "] ← " + String(newVal),
+        message: "[" + name + "] updated",
       });
       await saipLoadVariables(pkg);
       var drawer = saipDrawerEl();
@@ -32851,6 +34784,7 @@
     function activateForm() {
       btnDecoded.classList.add("is-active");
       btnJson.classList.remove("is-active");
+      if (tabBar.__saipSyncTabs) tabBar.__saipSyncTabs();
       panelForm.hidden = false;
       panelJson.hidden = true;
       // If the JSON textarea was edited, parse it back into ``mutable``
@@ -32875,6 +34809,7 @@
     function activateJson() {
       btnJson.classList.add("is-active");
       btnDecoded.classList.remove("is-active");
+      if (tabBar.__saipSyncTabs) tabBar.__saipSyncTabs();
       panelForm.hidden = true;
       panelJson.hidden = false;
       syncTaFromMutable();
@@ -32882,6 +34817,12 @@
 
     btnDecoded.addEventListener("click", activateForm);
     btnJson.addEventListener("click", activateJson);
+    saipConfigureLocalTabs(
+      tabBar,
+      [btnDecoded, btnJson],
+      [panelForm, panelJson],
+      "Decoded field views",
+    );
 
     var hint = document.createElement("p");
     hint.className = "saip-decoded-form-hint";
@@ -32930,6 +34871,14 @@
       ".log-dock-tab[data-log-tab=\"validation\"]"
     );
     if (tab) tab.classList.toggle("has-items", n > 0);
+  }
+
+  function saipInvalidateValidation(pkg) {
+    if (!pkg) return;
+    pkg.validationRequestSeq = Number(pkg.validationRequestSeq || 0) + 1;
+    pkg.validation = null;
+    pkg.validationError = null;
+    pkg.valAutoRunPending = pkg.sessionUnavailable !== true;
   }
 
   // SA-G5: validation console panel.
@@ -32986,8 +34935,12 @@
       var sev = String(f.severity || "INFO").toLowerCase();
       return Boolean(pkg.valSeverityFilter[sev]);
     }).slice().sort(function (a, b) {
-      var sa = _SEV_ORDER[String(a.severity || "INFO").toUpperCase()] || 99;
-      var sb = _SEV_ORDER[String(b.severity || "INFO").toUpperCase()] || 99;
+      var aKey = String(a.severity || "INFO").toUpperCase();
+      var bKey = String(b.severity || "INFO").toUpperCase();
+      var sa = Object.prototype.hasOwnProperty.call(_SEV_ORDER, aKey)
+        ? _SEV_ORDER[aKey] : 99;
+      var sb = Object.prototype.hasOwnProperty.call(_SEV_ORDER, bKey)
+        ? _SEV_ORDER[bKey] : 99;
       if (sa !== sb) return sa - sb;
       return String(a.code || "").localeCompare(String(b.code || ""));
     });
@@ -33103,9 +35056,10 @@
   }
 
   function saipBuildValDockHeader(pkg, host) {
-    var header = document.createElement("button");
-    header.type = "button";
+    var header = document.createElement("div");
     header.className = "saip-val-dock-header";
+    header.setAttribute("role", "button");
+    header.setAttribute("tabindex", "0");
     header.title = "Show or hide findings. Severity chips stay visible when collapsed.";
     header.setAttribute("aria-expanded", pkg.valDockCollapsed ? "false" : "true");
 
@@ -33162,6 +35116,9 @@
     tools.addEventListener("click", function (evt) {
       evt.stopPropagation();
     });
+    tools.addEventListener("keydown", function (evt) {
+      evt.stopPropagation();
+    });
 
     var runBtn = document.createElement("button");
     runBtn.type = "button";
@@ -33192,6 +35149,12 @@
     header.appendChild(tools);
 
     header.addEventListener("click", function () {
+      pkg.valDockCollapsed = !pkg.valDockCollapsed;
+      renderSaipValidation(host, pkg);
+    });
+    header.addEventListener("keydown", function (event) {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
       pkg.valDockCollapsed = !pkg.valDockCollapsed;
       renderSaipValidation(host, pkg);
     });
@@ -33232,7 +35195,9 @@
   }
 
   function saipBuildValRow(finding, pkg) {
-    var sev = String(finding.severity || "INFO").toLowerCase();
+    var rawSeverity = String(finding.severity || "INFO").toLowerCase();
+    var sev = ["fail", "warn", "info", "pass"].indexOf(rawSeverity) !== -1
+      ? rawSeverity : "info";
     var colCount = 6;   // sev · code · spec · path · message · jump
 
     var tr = document.createElement("tr");
@@ -33240,8 +35205,10 @@
 
     // Severity chip
     var sevCell = document.createElement("td");
-    sevCell.innerHTML = '<span class="saip-val-sev saip-val-sev--' + sev + '">'
-      + escapeHtml(String(finding.severity || "INFO")) + '</span>';
+    var severityChip = document.createElement("span");
+    severityChip.className = "saip-val-sev saip-val-sev--" + sev;
+    severityChip.textContent = sev.toUpperCase();
+    sevCell.appendChild(severityChip);
     tr.appendChild(sevCell);
 
     // Code + copy button
@@ -33255,6 +35222,7 @@
       copyBtn.type = "button";
       copyBtn.className = "saip-val-copy-btn";
       copyBtn.title = "Copy code to clipboard";
+      copyBtn.setAttribute("aria-label", "Copy validation code " + finding.code);
       copyBtn.textContent = "⎘";
       copyBtn.addEventListener("click", function (ev) {
         ev.stopPropagation();
@@ -33296,6 +35264,9 @@
       expandCaret.textContent = " ▸";
       expandCaret.title = "Click to show recommendation / evidence";
       msgCell.appendChild(expandCaret);
+      msgCell.setAttribute("role", "button");
+      msgCell.setAttribute("tabindex", "0");
+      msgCell.setAttribute("aria-expanded", "false");
     }
     tr.appendChild(msgCell);
 
@@ -33356,8 +35327,14 @@
         detailTr.classList.toggle("saip-val-detail-row--hidden", !expanded);
         expandCaret.textContent = expanded ? " ▾" : " ▸";
         tr.classList.toggle("saip-val-row--expanded", expanded);
+        msgCell.setAttribute("aria-expanded", expanded ? "true" : "false");
       };
       msgCell.addEventListener("click", toggle);
+      msgCell.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggle();
+      });
       tr.setAttribute("data-expandable", "true");
 
       // Return both rows as a fragment so the tbody gets them together.
@@ -33513,6 +35490,9 @@
 
   async function saipRunValidation(pkg, host) {
     if (!pkg || !pkg.sessionId) return;
+    if (pkg.sessionUnavailable) return;
+    var requestSeq = Number(pkg.validationRequestSeq || 0) + 1;
+    pkg.validationRequestSeq = requestSeq;
     pkg.validationError = null;
     host.innerHTML = '<p class="loading">Running linter…</p>';
     logBus.emit({
@@ -33530,7 +35510,10 @@
           },
         }),
       });
+      if (requestSeq !== pkg.validationRequestSeq
+          || saipFindPackage(pkg.id) !== pkg) return;
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.validate");
         pkg.validationError = resp.error || "validate failed";
         logBus.emit({ level: "error", source: "saip.validate", message: pkg.validationError });
       } else {
@@ -33546,10 +35529,15 @@
         });
       }
     } catch (err) {
+      if (requestSeq !== pkg.validationRequestSeq
+          || saipFindPackage(pkg.id) !== pkg) return;
       pkg.validationError = String(err && err.message || err);
       logBus.emit({ level: "error", source: "saip.validate", message: pkg.validationError });
     }
-    renderSaipValidation(host, pkg);
+    if (requestSeq === pkg.validationRequestSeq
+        && saipFindPackage(pkg.id) === pkg) {
+      renderSaipValidation(host, pkg);
+    }
   }
 
   // ------------------------------------------------------------------
@@ -33592,13 +35580,13 @@
     listTitleWrap.className = "saip-token-list-title-wrap";
     var listTitle = document.createElement("h5");
     listTitle.className = "saip-token-list-title";
-    listTitle.textContent = "Tokens in this package";
+    listTitle.textContent = "Variables in this package";
     listTitleWrap.appendChild(listTitle);
     var listLead = document.createElement("p");
     listLead.className = "saip-token-list-lead";
     listLead.textContent =
-      "Each row binds one ``[NAME]`` placeholder to the value the next "
-      + "save / personalisation pass will write in.";
+      "Catalog rows describe typed profile inputs; Inline rows are ``[NAME]`` "
+      + "placeholders embedded in the package. Secret values stay hidden.";
     listTitleWrap.appendChild(listLead);
     listHead.appendChild(listTitleWrap);
 
@@ -33609,7 +35597,7 @@
     exportJsonBtn.className = "btn btn-small saip-token-export-json";
     exportJsonBtn.textContent = "Export JSON";
     exportJsonBtn.title =
-      "Download the current token definitions as a reusable .tokens.json sidecar.";
+      "Download reusable non-secret token definitions as a .tokens.json sidecar. Secret values are omitted.";
     exportJsonBtn.disabled = vars.count === 0 && overrideNames.length === 0;
     exportJsonBtn.addEventListener("click", function () {
       saipExportVariablesJson(pkg, vars);
@@ -33620,8 +35608,10 @@
       resetAllBtn.type = "button";
       resetAllBtn.className = "btn btn-small saip-token-reset-all";
       resetAllBtn.textContent = "Reset all (" + overrideNames.length + ")";
-      resetAllBtn.title =
-        "Drop every override and restore the package's source template values.";
+      resetAllBtn.disabled = !String(pkg.sourcePath || "").trim();
+      resetAllBtn.title = resetAllBtn.disabled
+        ? "Save this in-memory profile as tagged JSON before resetting overrides."
+        : "Drop every override and restore the package's source template values.";
       resetAllBtn.addEventListener("click", function () {
         saipResetAllVariables(pkg, overrideNames, drawer, peList, detail, validation);
       });
@@ -33634,20 +35624,20 @@
       var empty = document.createElement("p");
       empty.className = "saip-token-empty";
       empty.textContent =
-        "No tokens declared in this package yet. Use the Bind form on "
+        "No variables declared in this package yet. Use the Set form on "
         + "the right to register one — ICCID / IMSI route through the "
         + "structural injectors, anything else lands in the package's "
-        + "token definitions sidecar.";
+        + "legacy token definitions sidecar.";
       listCol.appendChild(empty);
     } else {
       var table = document.createElement("table");
       table.className = "saip-vars-table saip-token-table";
       var thead = document.createElement("thead");
       thead.innerHTML = "<tr>"
-        + "<th>Token</th>"
+        + "<th>Variable</th>"
         + "<th>Bound value</th>"
-        + "<th>Kind</th>"
-        + "<th>State</th>"
+        + "<th>Type</th>"
+        + "<th>Source / state</th>"
         + "<th class=\"saip-vars-actions-col\"></th>"
         + "</tr>";
       table.appendChild(thead);
@@ -33655,7 +35645,8 @@
 
       var seen = {};
       (vars.variables || []).forEach(function (v) {
-        seen[v.name] = true;
+        var variableName = saipVariableName(v);
+        seen[variableName] = true;
         tbody.appendChild(saipBuildVariableRow(v, overrides, pkg, drawer, peList, detail, validation));
       });
       overrideNames.forEach(function (name) {
@@ -33681,14 +35672,13 @@
 
     var bindTitle = document.createElement("h5");
     bindTitle.className = "saip-token-bind-title";
-    bindTitle.textContent = "Bind a token";
+    bindTitle.textContent = "Set a variable";
     bindCard.appendChild(bindTitle);
     var bindLead = document.createElement("p");
     bindLead.className = "saip-token-bind-lead";
     bindLead.textContent =
-      "Pick an existing token from the list (autocompletes) or type a "
-      + "new name. Values are interpreted as hex by default; the "
-      + "structural injectors (ICCID, IMSI) accept BCD too.";
+      "Pick a catalog or inline variable (autocompletes), or type a legacy "
+      + "token name. The selected row supplies its expected input format.";
     bindCard.appendChild(bindLead);
 
     var form = document.createElement("form");
@@ -33712,7 +35702,8 @@
     dataList.id = "saip-vars-name-list";
     (vars.variables || []).forEach(function (v) {
       var opt = document.createElement("option");
-      opt.value = v.name || "";
+      opt.value = saipVariableName(v);
+      if (v.label) opt.label = String(v.label);
       dataList.appendChild(opt);
     });
     row1.appendChild(l1);
@@ -33736,13 +35727,18 @@
     row2.appendChild(valInp);
     form.appendChild(row2);
 
+    var selectionMeta = document.createElement("p");
+    selectionMeta.className = "saip-vars-hint";
+    selectionMeta.textContent = "Legacy token · value is interpreted by the existing token encoder.";
+    form.appendChild(selectionMeta);
+
     var btnRow = document.createElement("div");
     btnRow.className = "inline-actions saip-vars-actions";
     var apply = document.createElement("button");
     apply.type = "submit";
     apply.className = "btn btn-primary";
-    apply.textContent = "Bind";
-    apply.title = "Register or update this token's value for the active session.";
+    apply.textContent = "Set";
+    apply.title = "Set this variable for the active session.";
     btnRow.appendChild(apply);
     var hint = document.createElement("span");
     hint.className = "saip-vars-hint";
@@ -33750,14 +35746,52 @@
     btnRow.appendChild(hint);
     form.appendChild(btnRow);
 
-    form.addEventListener("submit", function (evt) {
+    form.addEventListener("submit", async function (evt) {
       evt.preventDefault();
-      saipApplyVariable(pkg, nameInp.value, valInp.value, drawer, peList, detail, validation);
+      var selected = saipFindVariableRow(pkg, nameInp.value);
+      var secret = saipVariableIsSecret(selected)
+        || saipVariableNameIsSecret(nameInp.value);
+      try {
+        await saipApplyVariable(
+          pkg, nameInp.value, valInp.value, drawer, peList, detail, validation, secret
+        );
+      } finally {
+        if (secret) valInp.value = "";
+      }
     });
 
+    var previousSelection = "";
     nameInp.addEventListener("input", function () {
       var current = String(nameInp.value || "").trim();
-      if (current.length > 0 && Object.prototype.hasOwnProperty.call(overrides, current)) {
+      var selected = saipFindVariableRow(pkg, current);
+      var selectedName = saipVariableName(selected);
+      var secret = saipVariableIsSecret(selected)
+        || saipVariableNameIsSecret(current);
+      if (selectedName !== previousSelection) valInp.value = "";
+      previousSelection = selectedName;
+      valInp.type = secret ? "password" : "text";
+      valInp.autocomplete = secret ? "new-password" : "off";
+      valInp.setAttribute("aria-label", secret ? "Secret variable value" : "Variable value");
+      var inputKind = saipVariableFriendlyMeta(selected && selected.input_kind);
+      var inputFormat = saipVariableFriendlyMeta(selected && selected.input_format);
+      var classification = saipVariableFriendlyMeta(selected && selected.classification);
+      var status = saipVariableFriendlyMeta(selected && selected.status);
+      var metadata = [];
+      if (selected) metadata.push(saipVariableSourceFlags(selected).catalog ? "Catalog" : "Inline");
+      if (inputKind) metadata.push(inputKind);
+      if (inputFormat && inputFormat.toLowerCase() !== inputKind.toLowerCase()) metadata.push(inputFormat);
+      if (classification) metadata.push(classification);
+      if (status) metadata.push(status);
+      if (selected && selected.required === true) metadata.push("required");
+      if (secret) metadata.push("secret value hidden");
+      selectionMeta.textContent = metadata.length > 0
+        ? metadata.join(" · ")
+        : "Legacy token · value is interpreted by the existing token encoder.";
+      valInp.placeholder = secret
+        ? "Enter secret value (hidden)"
+        : (inputFormat ? "Enter " + inputFormat.toLowerCase() : "8988201234567890123 (BCD) or raw hex");
+      if (!secret && current.length > 0
+          && Object.prototype.hasOwnProperty.call(overrides, current)) {
         if (valInp.value === "") valInp.value = String(overrides[current] || "");
       }
     });
@@ -33805,12 +35839,27 @@
 
     var tokenDefs = {};
     var variableRows = [];
+    var secretOmittedCount = 0;
     rows.forEach(function (row) {
       var name = String(row && row.name || "").trim();
       if (name.length === 0) return;
       var hasOverride = Object.prototype.hasOwnProperty.call(overrides, name);
       var value = hasOverride ? overrides[name] : row.value;
       var valueText = String(value == null ? "" : value);
+      var secret = saipVariableIsSecret(row) || saipVariableNameIsSecret(name);
+      if (secret) {
+        secretOmittedCount += 1;
+        variableRows.push({
+          name: name,
+          kind: String(row.kind || ""),
+          defined: row.defined === true,
+          used_in_document: row.used_in_document === true,
+          overridden: hasOverride,
+          secret: true,
+          value_omitted: true,
+        });
+        return;
+      }
       var hexValue = saipTokenExportHexValue(valueText);
       tokenDefs[name] = hexValue ? { hex: hexValue } : valueText;
       variableRows.push({
@@ -33820,6 +35869,7 @@
         defined: row.defined === true,
         used_in_document: row.used_in_document === true,
         overridden: hasOverride,
+        secret: false,
       });
     });
 
@@ -33830,6 +35880,7 @@
         schema: "ygg.token_sidecar.v1",
         created_from: String(pkg && pkg.filename || ""),
         token_count: Object.keys(tokenDefs).length,
+        secret_omitted_count: secretOmittedCount,
         variables: variableRows,
       },
     };
@@ -33854,11 +35905,17 @@
   function saipExportVariablesJson(pkg, vars) {
     var payload = saipBuildTokenExportDocument(pkg, vars);
     var tokenCount = Object.keys(payload.__ygg_token_defs__ || {}).length;
+    var secretOmittedCount = Number(
+      payload.__ygg_sidecar_meta__
+        && payload.__ygg_sidecar_meta__.secret_omitted_count || 0
+    );
     if (tokenCount === 0) {
       logBus.emit({
         level: "warn",
         source: "saip.export_tokens_json",
-        message: "no tokens to export",
+        message: secretOmittedCount > 0
+          ? "all available token values are secret; no sidecar was downloaded"
+          : "no tokens to export",
       });
       return;
     }
@@ -33866,9 +35923,11 @@
     try {
       saipDownloadJsonDocument(filename, payload);
       logBus.emit({
-        level: "info",
+        level: secretOmittedCount > 0 ? "warn" : "info",
         source: "saip.export_tokens_json",
-        message: "exported " + tokenCount + " token(s) -> " + filename,
+        message: "exported " + tokenCount + " non-secret token(s) -> " + filename
+          + (secretOmittedCount > 0
+            ? " (" + secretOmittedCount + " secret value(s) omitted)" : ""),
       });
     } catch (err) {
       logBus.emit({
@@ -33880,27 +35939,53 @@
   }
 
   function saipBuildVariableRow(v, overrides, pkg, drawer, peList, detail, validation) {
-    var hasOverride = Object.prototype.hasOwnProperty.call(overrides, v.name || "");
+    var variableName = saipVariableName(v);
+    var hasOverride = Object.prototype.hasOwnProperty.call(overrides, variableName);
+    var secret = saipVariableIsSecret(v);
+    var sourceFlags = saipVariableSourceFlags(v);
     var tr = document.createElement("tr");
     tr.className = "saip-vars-row" + (hasOverride ? " is-overridden" : "");
+    tr.dataset.variableSecret = secret ? "true" : "false";
 
     var nameCell = document.createElement("td");
-    nameCell.innerHTML = '<code>' + escapeHtml(v.name || "") + '</code>';
+    var nameCode = document.createElement("code");
+    nameCode.textContent = variableName;
+    nameCell.appendChild(nameCode);
+    var label = String(v.label || "").trim();
+    if (label && label !== variableName) {
+      var labelLine = document.createElement("div");
+      labelLine.className = "saip-vars-hint";
+      labelLine.textContent = label;
+      nameCell.appendChild(labelLine);
+    }
     tr.appendChild(nameCell);
 
     var valCell = document.createElement("td");
     valCell.className = "saip-vars-val";
-    valCell.innerHTML = '<code>' + escapeHtml(v.value || "") + '</code>';
+    var valueCode = document.createElement("code");
+    var visibleValue = hasOverride ? overrides[variableName] : v.value;
+    valueCode.textContent = secret
+      ? (String(visibleValue || "") ? "••••••••" : "Hidden")
+      : String(visibleValue == null || visibleValue === "" ? "—" : visibleValue);
+    if (secret) valueCode.title = "Secret value hidden.";
+    valCell.appendChild(valueCode);
     tr.appendChild(valCell);
 
     var kindCell = document.createElement("td");
-    var kindLabel = saipVariableKindLabel(v.name || "", v.kind || "");
+    var kindLabel = saipVariableKindLabel(variableName, v.kind || "", v);
     if (kindLabel) {
       var kindChip = document.createElement("span");
       kindChip.className = "saip-vars-kind saip-vars-kind--"
         + saipVariableKindClass(kindLabel);
       kindChip.textContent = kindLabel;
       kindCell.appendChild(kindChip);
+    }
+    var classification = saipVariableFriendlyMeta(v.classification);
+    if (classification) {
+      var classLine = document.createElement("div");
+      classLine.className = "saip-vars-hint";
+      classLine.textContent = classification;
+      kindCell.appendChild(classLine);
     }
     tr.appendChild(kindCell);
 
@@ -33910,11 +35995,28 @@
     if (hasOverride) {
       stateChips.push('<span class="saip-vars-state-chip is-override" title="Override is applied; Reset rolls this name back to the source value.">Override</span>');
     }
+    if (sourceFlags.catalog) {
+      stateChips.push('<span class="saip-vars-state-chip is-defined" title="Typed metadata comes from the profile variable catalog.">Catalog</span>');
+    }
+    if (sourceFlags.inline) {
+      stateChips.push('<span class="saip-vars-state-chip is-used" title="Variable has an inline placeholder occurrence in the package.">Inline</span>');
+    }
     if (v.defined) {
       stateChips.push('<span class="saip-vars-state-chip is-defined" title="Name appears in the package token table.">Defined</span>');
     }
-    if (v.used_in_document) {
+    if (v.used_in_document && !sourceFlags.inline) {
       stateChips.push('<span class="saip-vars-state-chip is-used" title="Placeholder is referenced in the decoded document.">Used</span>');
+    }
+    if (v.required === true) {
+      stateChips.push('<span class="saip-vars-state-chip is-override" title="Completion requires this variable.">Required</span>');
+    }
+    if (secret) {
+      stateChips.push('<span class="saip-vars-state-chip is-override" title="Value is security-sensitive and is never shown.">Secret</span>');
+    }
+    var status = saipVariableFriendlyMeta(v.status);
+    if (status) {
+      stateChips.push('<span class="saip-vars-state-chip" title="Catalog status">'
+        + escapeHtml(status) + '</span>');
     }
     stateCell.innerHTML = stateChips.join("");
     tr.appendChild(stateCell);
@@ -33926,9 +36028,12 @@
       resetBtn.type = "button";
       resetBtn.className = "btn btn-small saip-vars-reset";
       resetBtn.textContent = "Reset";
-      resetBtn.title = "Roll '" + (v.name || "") + "' back to its source value.";
+      resetBtn.disabled = !String(pkg.sourcePath || "").trim();
+      resetBtn.title = resetBtn.disabled
+        ? "Save this in-memory profile as tagged JSON before resetting overrides."
+        : "Roll '" + variableName + "' back to its source value.";
       resetBtn.addEventListener("click", function () {
-        saipResetVariable(pkg, v.name, drawer, peList, detail, validation);
+        saipResetVariable(pkg, variableName, drawer, peList, detail, validation);
       });
       actCell.appendChild(resetBtn);
     }
@@ -33942,10 +36047,17 @@
   // injectors. Surface a recognisable label so operators don't have
   // to read the placeholder template module to know what kind of
   // bytes they're shipping.
-  function saipVariableKindLabel(name, kind) {
+  function saipVariableKindLabel(name, kind, row) {
     var n = String(name || "").toUpperCase();
     if (n === "ICCID") return "ICCID (BCD)";
     if (n === "IMSI") return "IMSI (BCD)";
+    var inputKind = saipVariableFriendlyMeta(row && row.input_kind);
+    var inputFormat = saipVariableFriendlyMeta(row && row.input_format);
+    if (inputKind && inputFormat && inputKind.toLowerCase() !== inputFormat.toLowerCase()) {
+      return inputKind + " / " + inputFormat;
+    }
+    if (inputFormat) return inputFormat;
+    if (inputKind) return inputKind;
     if (kind) return String(kind);
     return "";
   }
@@ -33964,6 +36076,14 @@
   // the same caches the apply path drops so the GUI re-syncs.
   async function saipResetVariable(pkg, name, drawer, peList, detail, validation) {
     if (!pkg || !pkg.sessionId) return;
+    if (!String(pkg.sourcePath || "").trim()) {
+      logBus.emit({
+        level: "warn",
+        source: "saip.reset_variable",
+        message: "Save this in-memory profile as tagged JSON before resetting overrides.",
+      });
+      return;
+    }
     var n = String(name || "").trim();
     if (n.length === 0) return;
     logBus.emit({
@@ -33979,6 +36099,7 @@
         }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.reset_variable");
         logBus.emit({
           level: "error",
           source: "saip.reset_variable",
@@ -33987,6 +36108,9 @@
         return;
       }
       var data = resp.data || {};
+      if (typeof data.remaining_inline_placeholder_count === "number") {
+        pkg.inlinePlaceholderCount = data.remaining_inline_placeholder_count;
+      }
       (data.summaries || []).forEach(function (s) {
         logBus.emit({ level: "info", source: "saip.reset_variable", message: s });
       });
@@ -33997,11 +36121,10 @@
       pkg.fileRows = null;
       pkg.showPeCache = {};
       pkg.showFileCache = {};
-      pkg.validation = null;
+      saipInvalidateValidation(pkg);
       pkg.variables = null;
       pkg.applications = null;
       pkg.applicationsError = null;
-      pkg.valAutoRunPending = true;
       await saipRefreshDirty(pkg);
       renderSaipDrawer(drawer, peList, detail, validation);
       renderSaipActiveSlots(peList, detail, validation);
@@ -34021,6 +36144,14 @@
   // ``handle["applied_overrides"]`` map.)
   async function saipResetAllVariables(pkg, names, drawer, peList, detail, validation) {
     if (!pkg || !pkg.sessionId || !names || names.length === 0) return;
+    if (!String(pkg.sourcePath || "").trim()) {
+      logBus.emit({
+        level: "warn",
+        source: "saip.reset_variable",
+        message: "Save this in-memory profile as tagged JSON before resetting overrides.",
+      });
+      return;
+    }
     if (!window.confirm("Reset " + names.length + " override(s) back to source values?")) return;
     for (var i = 0; i < names.length; i++) {
       // Sequentially — each call rebuilds the document, so concurrent
@@ -34030,9 +36161,12 @@
     }
   }
 
-  async function saipApplyVariable(pkg, name, value, drawer, peList, detail, validation) {
+  async function saipApplyVariable(
+    pkg, name, value, drawer, peList, detail, validation, secret
+  ) {
     var n = String(name || "").trim();
     var v = String(value || "");
+    secret = secret === true || saipVariableNameIsSecret(n);
     if (n.length === 0) {
       logBus.emit({
         level: "warn",
@@ -34044,7 +36178,7 @@
     logBus.emit({
       level: "info",
       source: "saip.set_variable",
-      message: n + " <- " + v,
+      message: n + (secret ? " secret value submitted" : " value submitted"),
     });
     try {
       var resp = await apiFetch("/api/actions/saip.set_variable/run", {
@@ -34054,26 +36188,41 @@
         }),
       });
       if (!resp.ok) {
-        logBus.emit({ level: "error", source: "saip.set_variable", message: resp.error || "set_variable failed" });
+        saipMarkSessionUnavailable(pkg, resp, "saip.set_variable");
+        logBus.emit({
+          level: "error",
+          source: "saip.set_variable",
+          message: saipVariableRedactMessage(resp.error || "set_variable failed", v),
+        });
         return;
       }
       var data = resp.data || {};
+      if (typeof data.remaining_inline_placeholder_count === "number") {
+        pkg.inlinePlaceholderCount = data.remaining_inline_placeholder_count;
+      }
       (data.summaries || []).forEach(function (s) {
-        logBus.emit({ level: "info", source: "saip.set_variable", message: s });
+        logBus.emit({
+          level: "info",
+          source: "saip.set_variable",
+          message: saipVariableRedactMessage(s, v),
+        });
       });
       (data.warnings || []).forEach(function (w) {
-        logBus.emit({ level: "warn", source: "saip.set_variable", message: w });
+        logBus.emit({
+          level: "warn",
+          source: "saip.set_variable",
+          message: saipVariableRedactMessage(w, v),
+        });
       });
       // Re-encoding may have shuffled state; drop caches.
       pkg.peRows = null;
       pkg.fileRows = null;
       pkg.showPeCache = {};
       pkg.showFileCache = {};
-      pkg.validation = null;
+      saipInvalidateValidation(pkg);
       pkg.variables = null;
       pkg.applications = null;
       pkg.applicationsError = null;
-      pkg.valAutoRunPending = true;
       await saipRefreshDirty(pkg);
       renderSaipDrawer(drawer, peList, detail, validation);
       renderSaipActiveSlots(peList, detail, validation);
@@ -34082,7 +36231,11 @@
       // new override row + state chips.
       renderSaipModalHost();
     } catch (err) {
-      logBus.emit({ level: "error", source: "saip.set_variable", message: String(err && err.message || err) });
+      logBus.emit({
+        level: "error",
+        source: "saip.set_variable",
+        message: saipVariableRedactMessage(String(err && err.message || err), v),
+      });
     }
   }
 
@@ -34185,6 +36338,14 @@
       window.alert("No active session — open a package first.");
       return;
     }
+    if (!String(pkg.sourcePath || "").trim()) {
+      logBus.emit({
+        level: "warn",
+        source: "saip.diff_against_source",
+        message: "Save this in-memory profile as tagged JSON before comparing with disk.",
+      });
+      return;
+    }
     pkg.diffVsSaved = null;
     pkg.diffVsSavedError = null;
     pkg.diffVsSavedActive = true;
@@ -34204,6 +36365,7 @@
         body: JSON.stringify({ inputs: { session_id: pkg.sessionId } }),
       });
       if (!resp.ok) {
+        saipMarkSessionUnavailable(pkg, resp, "saip.diff_against_source");
         pkg.diffVsSavedError = resp.error || "Diff vs saved failed.";
         logBus.emit({
           level: "error",
@@ -34643,11 +36805,23 @@
         if (canJump) {
           tr.classList.add("saip-cmp-sem-row--clickable");
           tr.title = "Jump to PE: " + (e.section_label || e.section_key);
-          tr.addEventListener("click", (function (sk) {
+          tr.setAttribute("role", "button");
+          tr.setAttribute(
+            "aria-label",
+            "Jump to profile element " + String(e.section_label || e.section_key),
+          );
+          tr.tabIndex = 0;
+          var jumpToSemanticSection = (function (sk) {
             return function () {
               saipJumpToSectionKey(pkg, sk, peListEl, detailEl, validationEl);
             };
-          })(e.section_key));
+          })(e.section_key);
+          tr.addEventListener("click", jumpToSemanticSection);
+          tr.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            jumpToSemanticSection();
+          });
         }
 
         var sevCell = document.createElement("td");

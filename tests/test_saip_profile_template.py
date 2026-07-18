@@ -24,12 +24,12 @@ class SaipProfileTemplateTests(unittest.TestCase):
         assignments = parse_placeholder_assignment_tokens(
             [
                 "{ICCID}=89461111111111111112",
-                "[IMSI]=1234567812345678",
+                "[IMSI]=123456781234567",
             ]
         )
 
         self.assertEqual(assignments["ICCID"], "89461111111111111112")
-        self.assertEqual(assignments["IMSI"], "1234567812345678")
+        self.assertEqual(assignments["IMSI"], "123456781234567")
 
     def test_encode_iccid_helpers(self) -> None:
         self.assertEqual(
@@ -41,10 +41,10 @@ class SaipProfileTemplateTests(unittest.TestCase):
             "98641111111111111121",
         )
 
-    def test_encode_imsi_helper_accepts_even_digit_count(self) -> None:
+    def test_encode_imsi_helper_accepts_standard_maximum(self) -> None:
         self.assertEqual(
-            encode_imsi_ef_hex("1234567812345678"),
-            "091132547618325476F8",
+            encode_imsi_ef_hex("123456781234567"),
+            "081932547618325476",
         )
 
     def test_build_placeholder_template_document_injects_iccid_and_imsi(self) -> None:
@@ -61,7 +61,7 @@ class SaipProfileTemplateTests(unittest.TestCase):
                 },
                 "usim": {
                     "ef-imsi": [
-                        ("fillFileContent", bytes.fromhex("091132547618325476F8")),
+                        ("fillFileContent", bytes.fromhex("081932547618325476")),
                     ],
                 },
             },
@@ -71,7 +71,7 @@ class SaipProfileTemplateTests(unittest.TestCase):
             document,
             {
                 "ICCID": "89461111111111111112",
-                "IMSI": "1234567812345678",
+                "IMSI": "123456781234567",
             },
         )
 
@@ -80,7 +80,7 @@ class SaipProfileTemplateTests(unittest.TestCase):
         self.assertIn("IMSI", tagged["__ygg_token_defs__"])
         self.assertEqual(tagged["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
         self.assertEqual(tagged["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
-        self.assertEqual(tagged["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
+        self.assertEqual(tagged["__ygg_token_defs__"]["IMSI"]["hex"], "081932547618325476")
         self.assertEqual(tagged["__ygg_placeholder_style__"], "brace")
         self.assertEqual(tagged["sections"]["header"]["iccid"]["hex"], "{ICCID}")
         self.assertEqual(
@@ -154,21 +154,21 @@ class SaipProfileTemplateTests(unittest.TestCase):
 
     def test_validate_batch_record_assignments_accepts_typed_iccid_mapping(self) -> None:
         assignments = validate_batch_record_assignments(
-            {"ICCID": "89461111111111111112", "IMSI": "1234567812345678"},
+            {"ICCID": "89461111111111111112", "IMSI": "123456781234567"},
             template_placeholders={"ICCID", "ICCID_EF", "IMSI"},
             template_token_defs={},
         )
 
         self.assertEqual(assignments["ICCID"], "89461111111111111112")
-        self.assertEqual(assignments["IMSI"], "1234567812345678")
+        self.assertEqual(assignments["IMSI"], "123456781234567")
 
     def test_load_batch_placeholder_records_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_path = Path(temp_dir) / "batch.csv"
             data_path.write_text(
                 "ICCID,IMSI\n"
-                "89461111111111111112,1234567812345678\n"
-                "89461111111111111113,1234567812345679\n",
+                "89461111111111111112,123456781234567\n"
+                "89461111111111111113,123456781234568\n",
                 encoding="utf-8",
             )
 
@@ -177,11 +177,11 @@ class SaipProfileTemplateTests(unittest.TestCase):
         self.assertEqual(len(records), 2)
         self.assertEqual(records[0].label, "csv row 2")
         self.assertEqual(records[0].values["ICCID"], "89461111111111111112")
-        self.assertEqual(records[1].values["IMSI"], "1234567812345679")
+        self.assertEqual(records[1].values["IMSI"], "123456781234568")
 
     def test_batch_output_stem_prefers_iccid(self) -> None:
         stem = batch_output_stem(
-            {"ICCID": "89461111111111111112", "IMSI": "1234567812345678"},
+            {"ICCID": "89461111111111111112", "IMSI": "123456781234567"},
             index=7,
         )
 

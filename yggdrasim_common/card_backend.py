@@ -8,7 +8,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
+import tempfile
 import time
 from typing import Any, Callable
 from urllib import error as urllib_error
@@ -57,6 +59,8 @@ SETTING_SOURCE_SAVED_SELECTION = "saved selection"
 SETTING_SOURCE_DISABLED = "disabled"
 CARD_RELAY_MARKER_FILENAME = "hil_bridge_card_relay.json"
 DEFAULT_CARD_RELAY_TIMEOUT_SECONDS = 30
+MAX_CARD_RELAY_RESPONSE_BYTES = 1024 * 1024
+MAX_CARD_RELAY_ERROR_DETAIL_CHARS = 512
 
 
 def normalize_card_backend(value: Any, default: str = CARD_BACKEND_READER) -> str:
@@ -524,8 +528,59 @@ def get_sim_quirks_source() -> str:
     return SETTING_SOURCE_WORKSPACE_DEFAULT
 
 
-def _card_relay_marker_path() -> str:
+def card_relay_marker_path() -> str:
+    """Return the shared Card Bridge/HIL relay marker path.
+
+    This lives in the portable card-backend module because clean desktop
+    bundles intentionally omit the Linux-only HIL runtime.
+    """
     return runtime_path("state", CARD_RELAY_MARKER_FILENAME)
+
+
+def write_card_relay_marker(payload: dict[str, Any]) -> str:
+    """Atomically publish *payload* and return the relay marker path."""
+    if isinstance(payload, dict) is False:
+        raise TypeError("card relay marker payload must be a dictionary")
+    marker_path = card_relay_marker_path()
+    marker_directory = os.path.dirname(marker_path)
+    os.makedirs(marker_directory, exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f".{CARD_RELAY_MARKER_FILENAME}.",
+        suffix=".tmp",
+        dir=marker_directory,
+    )
+    try:
+        try:
+            os.chmod(temporary_path, 0o600)
+        except OSError:
+            pass
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary_path, marker_path)
+    except Exception:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.remove(temporary_path)
+        except OSError:
+            pass
+        raise
+    return marker_path
+
+
+def clear_card_relay_marker() -> None:
+    """Remove the relay marker, tolerating a missing or locked file."""
+    try:
+        os.remove(card_relay_marker_path())
+    except (FileNotFoundError, OSError):
+        return
+
+
+def _card_relay_marker_path() -> str:
+    """Compatibility alias for older private callers."""
+    return card_relay_marker_path()
 
 
 def _normalize_card_relay_url(value: Any) -> str:
@@ -551,9 +606,9 @@ def _build_card_relay_status_url(apdu_url: str) -> str:
     return urlunparse((parsed.scheme, parsed.netloc, status_path, "", "", ""))
 
 
-def _read_card_relay_marker_payload() -> dict[str, Any]:
+def read_card_relay_marker() -> dict[str, Any]:
     """Return the parsed marker payload, or an empty dict on any failure."""
-    marker_path = _card_relay_marker_path()
+    marker_path = card_relay_marker_path()
     if os.path.isfile(marker_path) is False:
         return {}
     try:
@@ -570,6 +625,11 @@ def _read_card_relay_marker_payload() -> dict[str, Any]:
     if isinstance(payload, dict) is False:
         return {}
     return payload
+
+
+def _read_card_relay_marker_payload() -> dict[str, Any]:
+    """Compatibility alias for older private callers."""
+    return read_card_relay_marker()
 
 
 def _resolve_card_relay_url() -> tuple[str, str]:
@@ -660,24 +720,74 @@ def _request_card_relay_json(
             request,
             timeout=max(1, int(timeout_seconds or DEFAULT_CARD_RELAY_TIMEOUT_SECONDS)),
         ) as response:
-            raw_payload = response.read().decode("utf-8")
+            raw_bytes = response.read(MAX_CARD_RELAY_RESPONSE_BYTES + 1)
+            if len(raw_bytes) > MAX_CARD_RELAY_RESPONSE_BYTES:
+                raise RuntimeError(
+                    "Card relay response exceeds the 1 MiB safety limit."
+                )
+            raw_payload = raw_bytes.decode("utf-8", errors="replace")
     except urllib_error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace").strip()
-        detail = error_body or str(exc.reason)
-        raise RuntimeError(f"Card relay HTTP {exc.code}: {detail}") from exc
+        try:
+            error_bytes = exc.read(MAX_CARD_RELAY_RESPONSE_BYTES + 1)
+        except OSError:
+            error_bytes = b""
+        if len(error_bytes) > MAX_CARD_RELAY_RESPONSE_BYTES:
+            detail = "error response exceeded the 1 MiB safety limit"
+        else:
+            detail = _safe_card_relay_error_detail(
+                error_bytes.decode("utf-8", errors="replace"),
+                auth_token=auth_token,
+            )
+        raise RuntimeError(
+            f"Card relay HTTP {exc.code}: {detail or 'request rejected'}"
+        ) from exc
     except urllib_error.URLError as exc:
-        raise RuntimeError(f"Card relay connection failed: {exc}") from exc
+        reason = getattr(exc, "reason", exc)
+        raise RuntimeError(
+            f"Card relay connection failed ({type(reason).__name__})."
+        ) from exc
+    except TimeoutError as exc:
+        raise RuntimeError("Card relay connection timed out.") from exc
+    except OSError as exc:
+        raise RuntimeError(
+            f"Card relay connection failed ({type(exc).__name__})."
+        ) from exc
 
     try:
         payload = json.loads(raw_payload) if len(raw_payload) > 0 else {}
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Card relay returned invalid JSON: {raw_payload}") from exc
+        raise RuntimeError("Card relay returned invalid JSON.") from exc
     if isinstance(payload, dict) is False:
         raise RuntimeError("Card relay response is not a JSON object.")
     error_text = str(payload.get("error", "") or "").strip()
     if len(error_text) > 0:
-        raise RuntimeError(error_text)
+        raise RuntimeError(
+            _safe_card_relay_error_detail(error_text, auth_token=auth_token)
+            or "Card relay rejected the request."
+        )
     return payload
+
+
+def _safe_card_relay_error_detail(raw_text: str, *, auth_token: str = "") -> str:
+    """Return a short single-line relay error without credentials."""
+
+    text = str(raw_text or "").strip()
+    if len(text) == 0:
+        return ""
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        text = str(parsed.get("error") or parsed.get("message") or "").strip()
+    token = str(auth_token or "").strip()
+    if token:
+        text = text.replace(token, "<redacted>")
+    text = re.sub(r"(?i)(authorization\s*:\s*bearer|bearer)\s+\S+", r"\1 <redacted>", text)
+    text = " ".join(text.split())
+    if len(text) > MAX_CARD_RELAY_ERROR_DETAIL_CHARS:
+        text = text[:MAX_CARD_RELAY_ERROR_DETAIL_CHARS].rstrip() + "…"
+    return text
 
 
 class RelayCardConnection:
