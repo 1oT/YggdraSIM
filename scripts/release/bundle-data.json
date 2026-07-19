@@ -6,8 +6,6 @@
     {"path": "SCP03/seeds/fids.txt"},
     {"path": "SCP03/seeds/keys.ini"},
     {"path": "SCP80/ota_config.ini"},
-    {"path": "SCP11/es9_ca_lookup.json"},
-    {"path": "SCP11/live/es9_ca_lookup.json"},
     {"path": "SCP11/eim_local/eim_identity.json"},
     {"path": "SCP11/eim_local/eim_packages/default_eim_package.json"},
     {"path": "SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json"},

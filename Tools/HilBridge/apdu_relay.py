@@ -37,6 +37,10 @@ _APDU_RELAY_MAX_BODY_BYTES = 1 * 1024 * 1024
 DEFAULT_AUDIT_LOGGER_NAME = "yggdrasim.card_bridge.audit"
 
 
+class _OversizedRequestBodyError(ValueError):
+    """Raised when Content-Length exceeds the relay's request-body cap."""
+
+
 @dataclass(frozen=True, slots=True)
 class ApduRelayConfig:
     """Bind + security configuration for the APDU relay HTTP service.
@@ -189,11 +193,24 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
         # is far too noisy for a smartcard relay.
         return
 
-    def _send_json_response(self, status: int, payload: dict[str, Any]) -> None:
+    def _send_json_response(
+        self,
+        status: int,
+        payload: dict[str, Any],
+        *,
+        close_connection: bool = False,
+    ) -> None:
         encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+        if close_connection is True:
+            # The rejected request body remains unread. HTTP/1.1
+            # keep-alive would otherwise interpret those bytes as the
+            # next request on this connection.
+            self.close_connection = True
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
+        if close_connection is True:
+            self.send_header("Connection", "close")
         self.end_headers()
         if len(encoded) > 0:
             self.wfile.write(encoded)
@@ -266,7 +283,7 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
         if content_length < 0:
             raise ValueError("Negative Content-Length header.")
         if content_length > _APDU_RELAY_MAX_BODY_BYTES:
-            raise ValueError(
+            raise _OversizedRequestBodyError(
                 f"Request body of {content_length} bytes exceeds the "
                 f"{_APDU_RELAY_MAX_BODY_BYTES}-byte cap."
             )
@@ -283,6 +300,13 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
         started_at = time.monotonic()
         try:
             request_json = self._read_request_json()
+        except _OversizedRequestBodyError as exc:
+            self._send_json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": str(exc)},
+                close_connection=True,
+            )
+            return
         except ValueError as exc:
             self._send_json_response(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
@@ -337,6 +361,13 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
     def _handle_card_reset_post(self) -> None:
         try:
             request_json = self._read_request_json()
+        except _OversizedRequestBodyError as exc:
+            self._send_json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": str(exc)},
+                close_connection=True,
+            )
+            return
         except ValueError as exc:
             self._send_json_response(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return

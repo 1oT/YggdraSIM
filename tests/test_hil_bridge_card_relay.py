@@ -8,8 +8,10 @@ import tempfile
 import threading
 import types
 import unittest
+from http import client as http_client
 from pathlib import Path
 from unittest import mock
+from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 import pytest
@@ -486,11 +488,7 @@ class HilBridgeCardRelayTests(unittest.TestCase):
 
     @pytest.mark.usefixtures("require_loopback_socket")
     def test_apdu_relay_rejects_oversized_request_body(self) -> None:
-        def exchange_callback(apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
-            raise AssertionError(
-                "exchange_callback must not be reached when a body-size "
-                "rejection happens before the JSON is parsed."
-            )
+        exchange_callback = mock.Mock()
 
         def status_callback() -> dict[str, str]:
             return {"reader": "Mock Reader", "atr": "3B00"}
@@ -503,23 +501,30 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         relay.start()
         try:
             oversized = _APDU_RELAY_MAX_BODY_BYTES + 1
-            payload = b"x" * oversized
-            request = urllib_request.Request(
-                relay.apdu_url,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            parsed_url = urllib_parse.urlsplit(relay.apdu_url)
+            connection = http_client.HTTPConnection(
+                parsed_url.hostname,
+                parsed_url.port,
+                timeout=5,
             )
             try:
-                urllib_request.urlopen(request, timeout=5)
-            except urllib_request.HTTPError as http_error:
-                status_code = http_error.code
-            else:
-                self.fail("Oversized request body was accepted.")
+                connection.putrequest("POST", parsed_url.path)
+                connection.putheader("Content-Type", "application/json")
+                connection.putheader("Content-Length", str(oversized))
+                connection.endheaders()
+                response = connection.getresponse()
+                status_code = response.status
+                connection_header = response.getheader("Connection")
+                response_payload = json.loads(response.read().decode("utf-8"))
+            finally:
+                connection.close()
         finally:
             relay.stop()
 
         self.assertEqual(status_code, 400)
+        self.assertEqual(connection_header, "close")
+        self.assertIn("exceeds", response_payload["error"])
+        exchange_callback.assert_not_called()
 
     def test_create_card_connection_falls_back_to_direct_reader_when_marker_is_stale(self) -> None:
         fake_connection = _FakeReaderConnection()

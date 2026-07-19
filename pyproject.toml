@@ -162,11 +162,15 @@ gui = [
     "fastapi>=0.110,<1.0",
     "uvicorn[standard]>=0.27,<1.0",
     # pywebview does not install a Linux web-engine backend by default.
-    # The Qt extra is pip-installable and therefore works in an isolated
-    # venv and in the frozen-build matrix. macOS and Windows use the native
-    # Cocoa/WebView2 dependencies declared by pywebview itself.
-    "pywebview[qt]>=5.0,<6.0; sys_platform == 'linux'",
-    "pywebview>=5.0,<6.0; sys_platform != 'linux'",
+    # PyPI's Qt 6 arm64 runtime currently requires a newer glibc than
+    # Debian Bookworm provides, so x86_64 keeps the self-contained Qt
+    # extra while arm64 uses Debian's PyQt5 bindings through a
+    # system-site-packages build environment. qtpy is still installed
+    # from PyPI so pywebview can select that binding.
+    # macOS and Windows use pywebview's native Cocoa/WebView2 backends.
+    "pywebview[qt]>=5.0,<6.0; sys_platform == 'linux' and platform_machine != 'aarch64' and platform_machine != 'arm64'",
+    "pywebview>=5.0,<6.0; sys_platform != 'linux' or platform_machine == 'aarch64' or platform_machine == 'arm64'",
+    "qtpy>=2.4,<3; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'arm64')",
     "websockets>=12.0,<14.0",
 ]
 gui-server = [
@@ -246,8 +250,6 @@ include-package-data = true
     "seeds/keys.ini",
 ]
 "SCP80" = ["ota_config.ini"]
-"SCP11" = ["es9_ca_lookup.json"]
-"SCP11.live" = ["es9_ca_lookup.json"]
 "SCP11.local_access" = [
     "profile/metadata/default_profile_metadata.json",
     "profile/test_profile.txt",
@@ -294,6 +296,13 @@ include-package-data = true
     "static/vendor/xterm/xterm.css",
     "static/vendor/xterm/xterm.js",
 ]
+
+[tool.setuptools.exclude-package-data]
+# These mutable discovery caches can contain operator endpoints and
+# certificate metadata. Keep them out even when a local ignored copy is
+# present or setuptools is reusing stale egg-info.
+"SCP11" = ["es9_ca_lookup.json"]
+"SCP11.live" = ["es9_ca_lookup.json"]
 
 [tool.black]
 # Canonical formatter target for the "style only" sweep flagged by audit

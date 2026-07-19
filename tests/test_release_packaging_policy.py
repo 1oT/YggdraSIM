@@ -47,6 +47,52 @@ sbom_generator = _load(
     "test_generate_sbom",
 )
 class BundleDataPolicyTests(unittest.TestCase):
+    def test_manifest_sources_are_git_tracked_in_checkout(self) -> None:
+        """Keep operator-local or ignored files out of release manifests."""
+
+        manifest = json.loads(
+            (REPO_ROOT / "scripts/release/bundle-data.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        manifest_paths = {entry["path"] for entry in manifest["entries"]}
+
+        try:
+            checkout = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+        except FileNotFoundError:
+            self.skipTest("Git is unavailable; source archives have no index")
+        if checkout.returncode != 0 or checkout.stdout.strip() != "true":
+            self.skipTest("not running from a Git checkout")
+
+        tracked_result = subprocess.run(
+            ["git", "ls-files", "-z", "--", *sorted(manifest_paths)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        self.assertEqual(
+            tracked_result.returncode,
+            0,
+            msg=tracked_result.stderr,
+        )
+        tracked_paths = {
+            path for path in tracked_result.stdout.split("\0") if path
+        }
+        self.assertEqual(
+            sorted(manifest_paths - tracked_paths),
+            [],
+            msg="bundle-data sources must be committed before publication",
+        )
+
     def test_clean_and_full_stage_only_manifest_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             stage_root = Path(temp_dir)
@@ -229,6 +275,26 @@ class BundleDataPolicyTests(unittest.TestCase):
 
 
 class ReleaseMetadataTests(unittest.TestCase):
+    def test_operator_ca_lookup_caches_are_explicitly_excluded(self) -> None:
+        manifest_lines = {
+            line.strip()
+            for line in (REPO_ROOT / "MANIFEST.in")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip()
+        }
+        self.assertIn("exclude SCP11/es9_ca_lookup.json", manifest_lines)
+        self.assertIn(
+            "exclude SCP11/live/es9_ca_lookup.json",
+            manifest_lines,
+        )
+
+        with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
+            pyproject = tomllib.load(handle)
+        excluded = pyproject["tool"]["setuptools"]["exclude-package-data"]
+        self.assertEqual(excluded["SCP11"], ["es9_ca_lookup.json"])
+        self.assertEqual(excluded["SCP11.live"], ["es9_ca_lookup.json"])
+
     def test_stale_ipad_discovery_fixture_is_excluded_from_sdist(self) -> None:
         manifest_lines = {
             line.strip()

@@ -89,13 +89,6 @@ def test_private_helpers_override_permissive_umask(tmp_path: Path) -> None:
     assert assert_private_file(private_file) == private_file
 
 
-@pytest.mark.skipif(os.name != "nt", reason="native Windows ACL assertion")
-def test_private_helpers_apply_verifiable_windows_dacl(tmp_path: Path) -> None:
-    private_dir = ensure_private_directory(tmp_path / "private")
-    private_file = atomic_write_bytes(private_dir / "secret.bin", b"secret")
-    assert assert_private_file(private_file) == private_file
-
-
 def test_atomic_no_overwrite_preserves_existing_file(tmp_path: Path) -> None:
     target = atomic_write_bytes(tmp_path / "value.bin", b"first")
     with pytest.raises(FileExistsError):

@@ -15,6 +15,7 @@ import errno
 import os
 import stat
 import tempfile
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Union
 
@@ -22,6 +23,23 @@ from typing import Union
 Pathish = Union[str, os.PathLike[str]]
 PRIVATE_DIRECTORY_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
+_WINDOWS_TRUSTED_BUILTIN_SIDS = (
+    "S-1-5-18",  # LocalSystem
+    "S-1-5-32-544",  # BUILTIN\Administrators
+)
+
+
+def _windows_sid_is_trusted(
+    candidate_sid: object,
+    trusted_sids: Iterable[object],
+    *,
+    equal_sid: Callable[[object, object], object],
+) -> bool:
+    """Return whether *candidate_sid* matches one explicitly trusted SID."""
+    return any(
+        bool(equal_sid(candidate_sid, trusted_sid))
+        for trusted_sid in trusted_sids
+    )
 
 
 def _path(value: Pathish) -> Path:
@@ -394,23 +412,31 @@ def _assert_private_windows_dacl(path: Path) -> None:
             current_sid = ctypes.c_void_p(token_user.User.Sid)
             if not current_sid.value:
                 raise PermissionError("current Windows user SID is unavailable")
-            if not advapi32.EqualSid(owner_sid, current_sid):
-                raise PermissionError(
-                    "secret file is not owned by the current Windows user"
-                )
 
             trusted_sids: list[ctypes.c_void_p] = [current_sid]
             allocated_sids: list[ctypes.c_void_p] = []
-            for sid_text in ("S-1-5-18", "S-1-5-32-544"):
-                sid_pointer = ctypes.c_void_p()
-                if not advapi32.ConvertStringSidToSidW(
-                    wintypes.LPWSTR(sid_text),
-                    ctypes.byref(sid_pointer),
-                ):
-                    raise PermissionError("could not construct a trusted Windows SID")
-                allocated_sids.append(sid_pointer)
-                trusted_sids.append(sid_pointer)
             try:
+                for sid_text in _WINDOWS_TRUSTED_BUILTIN_SIDS:
+                    sid_pointer = ctypes.c_void_p()
+                    if not advapi32.ConvertStringSidToSidW(
+                        wintypes.LPWSTR(sid_text),
+                        ctypes.byref(sid_pointer),
+                    ):
+                        raise PermissionError(
+                            "could not construct a trusted Windows SID"
+                        )
+                    allocated_sids.append(sid_pointer)
+                    trusted_sids.append(sid_pointer)
+
+                if not _windows_sid_is_trusted(
+                    owner_sid,
+                    trusted_sids,
+                    equal_sid=advapi32.EqualSid,
+                ):
+                    raise PermissionError(
+                        "secret file is not owned by a trusted Windows principal"
+                    )
+
                 class _AclSizeInformation(ctypes.Structure):
                     _fields_ = [
                         ("AceCount", wintypes.DWORD),
@@ -442,9 +468,10 @@ def _assert_private_windows_dacl(path: Path) -> None:
                     if ace_type != 0:  # ACCESS_ALLOWED_ACE_TYPE
                         continue
                     ace_sid = ctypes.c_void_p(int(ace.value) + 8)
-                    if not any(
-                        bool(advapi32.EqualSid(ace_sid, trusted_sid))
-                        for trusted_sid in trusted_sids
+                    if not _windows_sid_is_trusted(
+                        ace_sid,
+                        trusted_sids,
+                        equal_sid=advapi32.EqualSid,
                     ):
                         raise PermissionError(
                             "secret file grants access to an untrusted Windows principal"

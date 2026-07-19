@@ -23,6 +23,15 @@ sudo apt-get install --no-install-recommends \
     gpg usbutils python3-venv
 ```
 
+For a desktop GUI source build, use Debian's arm64 Qt bindings. The
+current PyPI Qt 6 arm64 runtime requires a newer glibc than Debian
+Bookworm provides:
+
+```bash
+sudo apt-get install --no-install-recommends \
+    python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel
+```
+
 Optional (useful even on a headless Pi):
 
 ```bash
@@ -118,10 +127,16 @@ sudo apt-get install --no-install-recommends \
 git clone https://github.com/<your-org>/YggdraSIM.git
 cd YggdraSIM
 
+# Include Debian's PyQt5 packages when the desktop GUI is required.
+# Headless or 32-bit source install:
 python3 -m venv .venv
+# For a 64-bit desktop GUI, use this instead:
+# python3 -m venv --system-site-packages .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[full]'
+# On 64-bit with the PyQt5 packages from section 1:
+# python -m pip install -e '.[full,gui]'
 ```
 
 Verify:
@@ -205,7 +220,8 @@ section 3. The Pi-specific differences are:
 The on-device build produces an arm64 binary you can copy to another Pi:
 
 ```bash
-# inside the cloned repo with .[build,gui] or .[full,gui] installed
+# inside the cloned repo with .[build,gui] or .[full,build,gui] installed
+# and a --system-site-packages venv that can see Debian's PyQt5
 YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 # or, with HIL:
 YGGDRASIM_FLAVOR=full python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
