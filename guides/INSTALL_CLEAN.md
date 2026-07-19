@@ -146,6 +146,14 @@ sudo apt-get install --no-install-recommends \
     libpcsclite1 pcscd pcsc-tools gpg
 ```
 
+For the desktop GUI bundle, also install its Qt/X11 host libraries:
+
+```bash
+sudo apt-get install --no-install-recommends \
+    libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+    libxcb-keysyms1 libxcb-shape0 libxcb-icccm4
+```
+
 Check that your user is in the `pcscd` or equivalent group used by your
 distribution for reader access.
 

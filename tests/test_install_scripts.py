@@ -36,6 +36,15 @@ POSIX_SCRIPTS = (
 )
 WINDOWS_SCRIPT = "install-windows.ps1"
 SHARED_HELPERS = "_common.sh"
+LINUX_GUI_RUNTIME_PACKAGES = (
+    "libegl1",
+    "libgl1",
+    "libxkbcommon-x11-0",
+    "libxcb-cursor0",
+    "libxcb-keysyms1",
+    "libxcb-shape0",
+    "libxcb-icccm4",
+)
 
 
 class InstallScriptLayoutTests(unittest.TestCase):
@@ -72,6 +81,12 @@ class InstallScriptLayoutTests(unittest.TestCase):
         for script in ("install-linux.sh", "install-raspberrypi.sh"):
             text = (INSTALL_DIR / script).read_text(encoding="utf-8")
             self.assertIn("yg_install_remsim_client", text)
+
+    def test_linux_gui_installers_include_qt_xcb_runtime_dependencies(self) -> None:
+        for script in ("install-linux.sh", "install-raspberrypi.sh"):
+            text = (INSTALL_DIR / script).read_text(encoding="utf-8")
+            for package in LINUX_GUI_RUNTIME_PACKAGES:
+                self.assertIn(package, text, f"{script} missing {package}")
 
     def test_windows_script_present(self) -> None:
         path = INSTALL_DIR / WINDOWS_SCRIPT
@@ -236,6 +251,25 @@ class CiWorkflowCoverageTests(unittest.TestCase):
             "yggdrasim-gui-windows-x86_64-clean.exe",
         ):
             self.assertIn(asset, text)
+
+    def test_workflow_builds_and_packages_linux_gui_runtime_dependencies(
+        self,
+    ) -> None:
+        workflow = (
+            REPO_ROOT / ".github" / "workflows" / "build.yml"
+        ).read_text(encoding="utf-8")
+        x86_job = workflow.split("build-linux-x86_64:", 1)[1].split(
+            "build-linux-arm64-clean:",
+            1,
+        )[0]
+        deb_job = workflow.split("build-linux-deb-clean:", 1)[1].split(
+            "publish-release:",
+            1,
+        )[0]
+
+        for package in LINUX_GUI_RUNTIME_PACKAGES:
+            self.assertIn(package, x86_job)
+            self.assertIn(package, deb_job)
 
     def test_workflow_artifacts_use_short_retention(self) -> None:
         build_workflow = (

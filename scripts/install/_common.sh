@@ -307,19 +307,37 @@ yg_install_executable() {
 # ---------------------------------------------------------------------------
 
 yg_source_install() {
-    # $1 = repo root, $2 = flavor, $3 = venv path ("" to skip venv creation), $4 = with GUI (0|1)
+    # $1 = repo root, $2 = flavor, $3 = venv path ("" to skip venv
+    # creation), $4 = with GUI (0|1), $5 = expose system site packages
+    # to the venv (0|1; required for Debian's ARM PyQt5 binding).
     local repo_root="${1}"
     local flavor="${2}"
     local venv_dir="${3}"
     local with_gui="${4:-0}"
+    local system_site_packages="${5:-0}"
     yg_need_cmd "${YGGDRASIM_PYTHON}"
     if [ -n "${venv_dir}" ]; then
         if [ ! -d "${venv_dir}" ]; then
             yg_emit "creating virtualenv at ${venv_dir}"
-            "${YGGDRASIM_PYTHON}" -m venv "${venv_dir}"
+            if [ "${system_site_packages}" = "1" ]; then
+                "${YGGDRASIM_PYTHON}" -m venv --system-site-packages "${venv_dir}"
+            else
+                "${YGGDRASIM_PYTHON}" -m venv "${venv_dir}"
+            fi
+        elif [ "${system_site_packages}" = "1" ]; then
+            if ! grep -Eiq \
+                '^include-system-site-packages[[:space:]]*=[[:space:]]*true$' \
+                "${venv_dir}/pyvenv.cfg"; then
+                yg_die "ARM GUI source installs require a system-site-packages virtualenv; choose a fresh --venv path or remove ${venv_dir}"
+            fi
         fi
         # shellcheck source=/dev/null
         . "${venv_dir}/bin/activate"
+    fi
+    if [ "${system_site_packages}" = "1" ]; then
+        if ! python -c "from PyQt5 import QtWebEngineWidgets" >/dev/null 2>&1; then
+            yg_die "ARM GUI source install cannot import Debian PyQt5 QtWebEngineWidgets"
+        fi
     fi
     (
         cd "${repo_root}"

@@ -187,7 +187,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libpcsclite-dev pcscd swig pkg-config gpg \
-            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 xauth xvfb
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-keysyms1 libxcb-shape0 libxcb-icccm4 xauth xvfb
 
       - name: Set up locked resolver
         uses: astral-sh/setup-uv@v7
@@ -685,7 +686,7 @@ jobs:
           Priority: optional
           Architecture: ${ARCH}
           Maintainer: GitHub Actions
-          Depends: libpcsclite1, pcscd, gpg, libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0
+          Depends: libpcsclite1, pcscd, gpg, libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0, libxcb-keysyms1, libxcb-shape0, libxcb-icccm4
           Description: YggdraSIM secure-element and eUICC toolkit (clean flavor, no HIL bridge)
           EOF
           dpkg-deb --build "$PKGROOT" "dist/${DEB_NAME}"

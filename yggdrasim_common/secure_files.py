@@ -64,7 +64,12 @@ def _reject_final_symlink(path: Path) -> None:
         )
 
 
-def _chmod_private(path: Path, mode: int) -> None:
+def _chmod_private(
+    path: Path,
+    mode: int,
+    *,
+    is_directory: bool = False,
+) -> None:
     """Apply *mode* without dereferencing a final symlink."""
     _reject_final_symlink(path)
     try:
@@ -75,10 +80,25 @@ def _chmod_private(path: Path, mode: int) -> None:
         # the normal accidental-link case.
         os.chmod(path, mode)
     if os.name == "nt":
-        _set_private_windows_dacl(path)
+        _set_private_windows_dacl(path, is_directory=is_directory)
 
 
-def _set_private_windows_dacl(path: Path) -> None:
+def _private_windows_sddl(sid_text: str, *, is_directory: bool) -> str:
+    """Build a protected DACL for one private Windows file-system object."""
+    inheritance = "OICI" if is_directory else ""
+    return (
+        "D:P"
+        f"(A;{inheritance};FA;;;SY)"
+        f"(A;{inheritance};FA;;;BA)"
+        f"(A;{inheritance};FA;;;{sid_text})"
+    )
+
+
+def _set_private_windows_dacl(
+    path: Path,
+    *,
+    is_directory: bool = False,
+) -> None:
     """Apply a protected user/System/Administrators-only Windows DACL."""
     from ctypes import wintypes
 
@@ -191,11 +211,9 @@ def _set_private_windows_dacl(path: Path) -> None:
 
     if not sid_text:
         raise PermissionError("current Windows user SID is unavailable")
-    sddl = (
-        "D:P"
-        "(A;;FA;;;SY)"
-        "(A;;FA;;;BA)"
-        f"(A;;FA;;;{sid_text})"
+    sddl = _private_windows_sddl(
+        sid_text,
+        is_directory=is_directory,
     )
     descriptor = ctypes.c_void_p()
     if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
@@ -242,7 +260,11 @@ def ensure_private_directory(path: Pathish) -> Path:
     target.mkdir(mode=PRIVATE_DIRECTORY_MODE, parents=True, exist_ok=True)
     if not target.is_dir():
         raise NotADirectoryError(str(target))
-    _chmod_private(target, PRIVATE_DIRECTORY_MODE)
+    _chmod_private(
+        target,
+        PRIVATE_DIRECTORY_MODE,
+        is_directory=True,
+    )
     return target
 
 

@@ -246,7 +246,7 @@ Package: yggdrasim
 Version: [ENTER VERSION HERE]
 Architecture: amd64
 Maintainer: [ENTER MAINTAINER HERE]
-Depends: libpcsclite1, pcscd, gpg, libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0
+Depends: libpcsclite1, pcscd, gpg, libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0, libxcb-keysyms1, libxcb-shape0, libxcb-icccm4
 Description: YggdraSIM secure-element and eUICC toolkit (clean build)
 ```
 

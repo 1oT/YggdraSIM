@@ -103,6 +103,15 @@ sudo apt-get install --no-install-recommends \
     wireshark tshark termshark
 ```
 
+When installing the GUI companion without the installer script, add the
+Qt/X11 host libraries used by the frozen desktop bundle:
+
+```bash
+sudo apt-get install --no-install-recommends \
+    libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+    libxcb-keysyms1 libxcb-shape0 libxcb-icccm4
+```
+
 Add yourself to the `wireshark` group (or equivalent) if you want
 non-root access to `dumpcap`:
 

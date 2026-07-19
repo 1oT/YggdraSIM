@@ -48,7 +48,7 @@ def test_linux_x86_64_gui_keeps_self_contained_qt_extra() -> None:
 
 
 def test_linux_arm64_gui_uses_system_binding_bridge_without_qt6_extra() -> None:
-    for machine in ("aarch64", "arm64"):
+    for machine in ("aarch64", "arm64", "armv7l"):
         selected = _selected_gui_requirements(machine)
         pywebview = [
             requirement
@@ -59,6 +59,25 @@ def test_linux_arm64_gui_uses_system_binding_bridge_without_qt6_extra() -> None:
         assert len(pywebview) == 1
         assert pywebview[0].extras == set()
         assert any(requirement.name == "qtpy" for requirement in selected)
+
+
+def test_arm_source_gui_installers_expose_debian_pyqt5() -> None:
+    common = (ROOT / "scripts" / "install" / "_common.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "-m venv --system-site-packages" in common
+    assert "from PyQt5 import QtWebEngineWidgets" in common
+    assert "include-system-site-packages" in common
+
+    for script_name in ("install-linux.sh", "install-raspberrypi.sh"):
+        installer = (
+            ROOT / "scripts" / "install" / script_name
+        ).read_text(encoding="utf-8")
+        assert (
+            "python3-pyqt5 python3-pyqt5.qtwebengine "
+            "python3-pyqt5.qtwebchannel"
+        ) in installer
+        assert '"${YG_WITH_GUI}" "${system_site_packages}"' in installer
 
 
 def test_arm64_bundle_jobs_provide_and_verify_system_pyqt5() -> None:

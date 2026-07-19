@@ -47,7 +47,8 @@ install_linux_prereqs() {
     local common_packages="python3 python3-pip python3-venv libpcsclite1 pcscd gpg curl"
     local build_packages="libpcsclite-dev swig pkg-config build-essential"
     local hil_packages="libudev-dev dfu-util usbutils"
-    local gui_packages="libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0"
+    local gui_packages="libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-keysyms1 libxcb-shape0 libxcb-icccm4"
+    local arm_gui_packages="python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel"
 
     case "${YG_MODE}:${YG_FLAVOR}" in
         release:clean)
@@ -67,6 +68,11 @@ install_linux_prereqs() {
     esac
     if [ "${YG_WITH_GUI}" = "1" ]; then
         yg_apt_install ${gui_packages}
+        if [ "${YG_MODE}" = "source" ]; then
+            case "${YG_HOST_ARCH}" in
+                arm64|armv7) yg_apt_install ${arm_gui_packages} ;;
+            esac
+        fi
     fi
 }
 
@@ -98,7 +104,15 @@ install_from_release() {
 
 
 install_from_source() {
-    yg_source_install "${YG_REPO_ROOT}" "${YG_FLAVOR}" "${YG_VENV_DIR}" "${YG_WITH_GUI}"
+    local system_site_packages="0"
+    if [ "${YG_WITH_GUI}" = "1" ]; then
+        case "${YG_HOST_ARCH}" in
+            arm64|armv7) system_site_packages="1" ;;
+        esac
+    fi
+    yg_source_install \
+        "${YG_REPO_ROOT}" "${YG_FLAVOR}" "${YG_VENV_DIR}" \
+        "${YG_WITH_GUI}" "${system_site_packages}"
     if [ -n "${YG_VENV_DIR}" ]; then
         yg_emit "activate later with: source \"${YG_VENV_DIR}/bin/activate\""
     fi

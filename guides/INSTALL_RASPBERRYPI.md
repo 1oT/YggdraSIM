@@ -23,14 +23,23 @@ sudo apt-get install --no-install-recommends \
     gpg usbutils python3-venv
 ```
 
-For a desktop GUI source build, use Debian's arm64 Qt bindings. The
+For a desktop GUI source build, use Debian's ARM Qt bindings. The
 current PyPI Qt 6 arm64 runtime requires a newer glibc than Debian
-Bookworm provides:
+Bookworm provides, and the 32-bit ARM path likewise relies on the
+distribution binding:
 
 ```bash
 sudo apt-get install --no-install-recommends \
-    python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel
+    python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel \
+    libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+    libxcb-keysyms1 libxcb-shape0 libxcb-icccm4
 ```
+
+The installer creates the ARM GUI virtual environment with
+`--system-site-packages` so this Debian PyQt5 binding remains visible.
+If you supply an existing `--venv`, it must have been created with the
+same option; the installer refuses an incompatible environment instead
+of producing a GUI without a usable backend.
 
 Optional (useful even on a headless Pi):
 

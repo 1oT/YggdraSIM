@@ -164,13 +164,13 @@ gui = [
     # pywebview does not install a Linux web-engine backend by default.
     # PyPI's Qt 6 arm64 runtime currently requires a newer glibc than
     # Debian Bookworm provides, so x86_64 keeps the self-contained Qt
-    # extra while arm64 uses Debian's PyQt5 bindings through a
-    # system-site-packages build environment. qtpy is still installed
+    # extra while ARM uses Debian's PyQt5 bindings through a
+    # system-site-packages environment. qtpy is still installed
     # from PyPI so pywebview can select that binding.
     # macOS and Windows use pywebview's native Cocoa/WebView2 backends.
-    "pywebview[qt]>=5.0,<6.0; sys_platform == 'linux' and platform_machine != 'aarch64' and platform_machine != 'arm64'",
-    "pywebview>=5.0,<6.0; sys_platform != 'linux' or platform_machine == 'aarch64' or platform_machine == 'arm64'",
-    "qtpy>=2.4,<3; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'arm64')",
+    "pywebview[qt]>=5.0,<6.0; sys_platform == 'linux' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'armv7l'",
+    "pywebview>=5.0,<6.0; sys_platform != 'linux' or platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'armv7l'",
+    "qtpy>=2.4,<3; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'armv7l')",
     "websockets>=12.0,<14.0",
 ]
 gui-server = [
