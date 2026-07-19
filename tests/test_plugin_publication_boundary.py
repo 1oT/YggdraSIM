@@ -80,6 +80,8 @@ class SourcePackagingBoundaryTests(unittest.TestCase):
     def test_docker_build_context_excludes_plugin_trees(self) -> None:
         dockerignore_lines = _lines(".dockerignore")
 
+        self.assertIn(".?*", dockerignore_lines)
+        self.assertNotIn(".*", dockerignore_lines)
         self.assertIn("plugins/", dockerignore_lines)
         self.assertIn("tests/plugins/", dockerignore_lines)
         self.assertIn("Tools/*MCP*/", dockerignore_lines)
