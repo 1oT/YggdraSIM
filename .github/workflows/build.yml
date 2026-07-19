@@ -247,6 +247,7 @@ jobs:
             dist/yggdrasim-${{ matrix.flavor }}
             dist/yggdrasim-gui-${{ matrix.flavor }}
           if-no-files-found: error
+          retention-days: 7
 
   build-linux-arm64-clean:
     name: Linux arm64 clean (Raspberry Pi)
@@ -288,6 +289,7 @@ jobs:
                 libpcsclite-dev pcscd swig pkg-config gpg git \
                 libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
                 build-essential
+              git config --global --add safe.directory /src
               python3 -m venv /opt/uv
               /opt/uv/bin/pip install "uv==0.5.9"
               python3 -m venv --system-site-packages /opt/venv
@@ -316,6 +318,7 @@ jobs:
             dist/yggdrasim-clean
             dist/yggdrasim-gui-clean
           if-no-files-found: error
+          retention-days: 7
 
   build-linux-arm64-full:
     name: Linux arm64 full (Raspberry Pi + HIL)
@@ -357,6 +360,7 @@ jobs:
                 libpcsclite-dev pcscd swig pkg-config gpg git \
                 libudev-dev libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
                 build-essential
+              git config --global --add safe.directory /src
               python3 -m venv /opt/uv
               /opt/uv/bin/pip install "uv==0.5.9"
               python3 -m venv --system-site-packages /opt/venv
@@ -385,6 +389,7 @@ jobs:
             dist/yggdrasim-full
             dist/yggdrasim-gui-full
           if-no-files-found: error
+          retention-days: 7
 
   build-windows-clean:
     name: Windows x86_64 clean
@@ -498,6 +503,7 @@ jobs:
             dist/yggdrasim-clean.exe
             dist/yggdrasim-gui-clean.exe
           if-no-files-found: error
+          retention-days: 7
 
   build-macos-clean:
     name: macOS ${{ matrix.arch }} clean
@@ -644,6 +650,7 @@ jobs:
             dist/yggdrasim-clean
             dist/yggdrasim-gui-clean
           if-no-files-found: error
+          retention-days: 7
 
   build-linux-deb-clean:
     name: Debian package (clean)
@@ -691,6 +698,7 @@ jobs:
           name: ${{ steps.deb.outputs.artifact_name }}
           path: ${{ steps.deb.outputs.artifact_path }}
           if-no-files-found: error
+          retention-days: 7
 
   publish-release:
     name: Publish GitHub Release

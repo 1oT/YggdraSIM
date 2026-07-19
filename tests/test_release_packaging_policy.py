@@ -459,14 +459,109 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_archive_listing_scan_matches_real_directory_components(self) -> None:
         listing = (
-            "123, 42, 42, 1, 'plugins/local_operator.py'\n"
-            "456, 42, 42, 1, 'myplugins/public.py'\n"
-            "789, 42, 42, 1, 'pySim/esim/asn1/saip.asn'\n"
+            "Contents of 'app' (PKG/CArchive):\n"
+            "position, length, uncompressed_length, is_compressed, typecode, name\n"
+            "123, 42, 42, 1, 'x', 'plugins/local_operator.py'\n"
+            "456, 42, 42, 1, 'x', 'myplugins/public.py'\n"
+            "789, 42, 42, 1, 'x', 'pySim/esim/asn1/saip.asn'\n"
         )
         self.assertEqual(
             release_validation._forbidden_listing_components(listing),
             ["plugins"],
         )
+
+    def test_archive_listing_allows_known_qt_plugin_directories(self) -> None:
+        listing = (
+            "Contents of 'app' (PKG/CArchive):\n"
+            "position, length, uncompressed_length, is_compressed, typecode, name\n"
+            "123, 42, 42, 1, 'x', 'PyQt6/Qt6/plugins/platforms/libqxcb.so'\n"
+            "456, 42, 42, 1, 'x', 'PyQt5/Qt5/plugins/webview/libqt.so'\n"
+            "789, 42, 42, 1, 'x', 'pySim/esim/asn1/saip.asn'\n"
+        )
+        self.assertEqual(
+            release_validation._forbidden_listing_components(listing),
+            [],
+        )
+
+    def test_archive_listing_rejects_other_nested_sensitive_directories(
+        self,
+    ) -> None:
+        listing = (
+            "Contents of 'app' (PKG/CArchive):\n"
+            "position, length, uncompressed_length, is_compressed, typecode, name\n"
+            "123, 42, 42, 1, 'x', 'package/plugins/operator.py'\n"
+            "456, 42, 42, 1, 'x', 'vendor/reports/schema.json'\n"
+            "789, 42, 42, 1, 'x', 'package/state/defaults.json'\n"
+            "101, 42, 42, 1, 'x', 'public/workspace/index.html'\n"
+            "112, 42, 42, 1, 'x', 'assets/yggdrasim-data/icon.svg'\n"
+        )
+        self.assertEqual(
+            release_validation._forbidden_listing_components(listing),
+            [
+                "plugins",
+                "reports",
+                "state",
+                "workspace",
+                "yggdrasim-data",
+            ],
+        )
+
+    def test_archive_listing_normalizes_windows_separators(self) -> None:
+        listing = (
+            "Contents of 'app' (PKG/CArchive):\n"
+            "position, length, uncompressed_length, is_compressed, typecode, name\n"
+            r"123, 42, 42, 1, 'x', 'plugins\\local_operator.py'" "\n"
+            r"456, 42, 42, 1, 'x', 'STATE\\remote-rig.json'" "\n"
+            r"789, 42, 42, 1, 'x', 'package\\plugins\\platform.dll'" "\n"
+        )
+        self.assertEqual(
+            release_validation._forbidden_listing_components(listing),
+            ["plugins", "state"],
+        )
+
+    def test_archive_listing_rejects_unsafe_member_paths(self) -> None:
+        header = (
+            "Contents of 'app' (PKG/CArchive):\n"
+            "position, length, uncompressed_length, is_compressed, typecode, name\n"
+        )
+        for member_path in (
+            "../plugins/operator.py",
+            "safe/../plugins/operator.py",
+            r".\plugins\operator.py",
+            "/plugins/operator.py",
+            r"C:\plugins\operator.py",
+            r"\\server\share\operator.py",
+        ):
+            with self.subTest(member_path=member_path):
+                row = f"123, 42, 42, 1, 'x', {member_path!r}\n"
+                with self.assertRaisesRegex(
+                    release_validation.ReleaseValidationError,
+                    "unsafe path",
+                ):
+                    release_validation._forbidden_listing_components(header + row)
+
+    def test_archive_listing_parser_fails_closed(self) -> None:
+        header = (
+            "Contents of 'app' (PKG/CArchive):\n"
+            "position, length, uncompressed_length, is_compressed, typecode, name\n"
+        )
+        with self.assertRaisesRegex(
+            release_validation.ReleaseValidationError,
+            "unsupported .* format",
+        ):
+            release_validation._forbidden_listing_components("unexpected output")
+        with self.assertRaisesRegex(
+            release_validation.ReleaseValidationError,
+            "no member records",
+        ):
+            release_validation._forbidden_listing_components(header)
+        with self.assertRaisesRegex(
+            release_validation.ReleaseValidationError,
+            "malformed .* row",
+        ):
+            release_validation._forbidden_listing_components(
+                header + "this is not a member row\n"
+            )
 
     def test_archive_listing_uses_active_python_instead_of_path_launcher(self) -> None:
         completed = mock.Mock(returncode=0, stdout="archive listing", stderr="")

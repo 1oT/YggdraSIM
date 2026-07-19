@@ -87,6 +87,8 @@ jobs:
       - name: Build and push Docker image
         if: github.event_name == 'push'
         uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_RECORD_RETENTION_DAYS: "7"
         with:
           context: .
           file: ./Dockerfile

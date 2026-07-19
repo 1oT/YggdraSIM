@@ -77,3 +77,29 @@ def test_arm64_bundle_jobs_provide_and_verify_system_pyqt5() -> None:
     ) == 2
     assert "DOCTOR_OUTPUT=$(dist/yggdrasim-clean --doctor || true)" in workflow
     assert "DOCTOR_OUTPUT=$(dist/yggdrasim-full --doctor || true)" in workflow
+
+
+def test_arm64_bundle_jobs_trust_only_the_container_checkout() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "build.yml").read_text(
+        encoding="utf-8"
+    )
+    safe_directory_command = "git config --global --add safe.directory /src"
+    job_boundaries = (
+        ("build-linux-arm64-clean:", "build-linux-arm64-full:"),
+        ("build-linux-arm64-full:", "build-windows-clean:"),
+    )
+
+    for start_marker, end_marker in job_boundaries:
+        job = workflow.split(start_marker, 1)[1].split(end_marker, 1)[0]
+        assert job.count(safe_directory_command) == 1
+        assert job.index("build-essential") < job.index(safe_directory_command)
+        assert job.index(safe_directory_command) < job.index(
+            "/opt/uv/bin/uv sync --frozen"
+        )
+
+    safe_directory_lines = [
+        line.strip()
+        for line in workflow.splitlines()
+        if "git config" in line and "safe.directory" in line
+    ]
+    assert safe_directory_lines == [safe_directory_command] * 2

@@ -396,12 +396,39 @@ class RemoteRigActionHelperTests(unittest.TestCase):
         with patch.object(cb.os, "name", "posix"):
             self.assertEqual(cb._detached_subprocess_kwargs(), {"start_new_session": True})
 
-    def test_detached_subprocess_kwargs_use_windows_process_group(self) -> None:
+    def test_detached_subprocess_kwargs_use_windows_process_group_without_console(
+        self,
+    ) -> None:
         from unittest.mock import patch
 
         with patch.object(cb.os, "name", "nt"):
             with patch.object(cb.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True):
-                self.assertEqual(cb._detached_subprocess_kwargs(), {"creationflags": 512})
+                with patch.object(
+                    cb,
+                    "hidden_window_subprocess_kwargs",
+                    return_value={"creationflags": 0x08000000},
+                ):
+                    self.assertEqual(
+                        cb._detached_subprocess_kwargs(),
+                        {"creationflags": 0x08000000 | 512},
+                    )
+
+    def test_detached_subprocess_kwargs_keep_windows_process_group_fallback(
+        self,
+    ) -> None:
+        from unittest.mock import patch
+
+        with patch.object(cb.os, "name", "nt"):
+            with patch.object(cb.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True):
+                with patch.object(
+                    cb,
+                    "hidden_window_subprocess_kwargs",
+                    return_value={},
+                ):
+                    self.assertEqual(
+                        cb._detached_subprocess_kwargs(),
+                        {"creationflags": 512},
+                    )
 
     def test_remote_rig_state_updates_are_atomic_under_concurrency(self) -> None:
         from pathlib import Path

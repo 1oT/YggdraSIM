@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import re
 import subprocess
@@ -19,6 +20,15 @@ FORBIDDEN_ARCHIVE_COMPONENTS = (
     "state",
     "workspace",
     "yggdrasim-data",
+)
+ALLOWED_QT_PLUGIN_PREFIXES = frozenset(
+    {
+        ("pyqt5", "qt5", "plugins"),
+        ("pyqt6", "qt6", "plugins"),
+    }
+)
+ARCHIVE_LISTING_HEADER = (
+    "position, length, uncompressed_length, is_compressed, typecode, name"
 )
 VERSION_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+){2}(?:[a-zA-Z0-9.-]+)?$")
 
@@ -70,15 +80,78 @@ def _archive_listing(artifact: Path) -> str:
 
 
 def _forbidden_listing_components(listing: str) -> list[str]:
-    """Return prohibited directory components in a PyInstaller listing."""
-    normalized = listing.replace("\\", "/").casefold()
+    """Return prohibited paths in a PyInstaller CArchive listing."""
+    lines = listing.splitlines()
+    try:
+        header_index = next(
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == ARCHIVE_LISTING_HEADER
+        )
+    except StopIteration as error:
+        raise ReleaseValidationError(
+            "unsupported PyInstaller archive listing format"
+        ) from error
+
+    member_paths: list[str] = []
+    for line_number, line in enumerate(lines[header_index + 1 :], header_index + 2):
+        if not line.strip():
+            continue
+        try:
+            row = ast.literal_eval(line.strip())
+        except (SyntaxError, ValueError) as error:
+            raise ReleaseValidationError(
+                f"malformed PyInstaller archive listing row at line {line_number}"
+            ) from error
+        if (
+            not isinstance(row, tuple)
+            or len(row) != 6
+            or not isinstance(row[4], str)
+            or not isinstance(row[5], str)
+        ):
+            raise ReleaseValidationError(
+                f"malformed PyInstaller archive listing row at line {line_number}"
+            )
+        member_paths.append(row[5])
+
+    if not member_paths:
+        raise ReleaseValidationError(
+            "PyInstaller archive listing contains no member records"
+        )
+
+    prohibited: set[str] = set()
+    for member_path in member_paths:
+        normalized = member_path.replace("\\", "/")
+        if (
+            not normalized
+            or "\x00" in normalized
+            or normalized.startswith("/")
+            or re.match(r"^[a-zA-Z]:", normalized)
+        ):
+            raise ReleaseValidationError(
+                f"unsafe path in PyInstaller archive listing: {member_path!r}"
+            )
+        components = normalized.split("/")
+        if any(component in {"", ".", ".."} for component in components):
+            raise ReleaseValidationError(
+                f"unsafe path in PyInstaller archive listing: {member_path!r}"
+            )
+
+        lowered = tuple(component.casefold() for component in components)
+        for index, component in enumerate(lowered):
+            if component not in FORBIDDEN_ARCHIVE_COMPONENTS:
+                continue
+            if (
+                component == "plugins"
+                and lowered[: index + 1] in ALLOWED_QT_PLUGIN_PREFIXES
+            ):
+                continue
+            prohibited.add(component)
+
     return [
         component
         for component in FORBIDDEN_ARCHIVE_COMPONENTS
-        if re.search(
-            rf"(?<![a-z0-9_-]){re.escape(component.casefold())}/",
-            normalized,
-        )
+        if component.casefold() in prohibited
     ]
 
 

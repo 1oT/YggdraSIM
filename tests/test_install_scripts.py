@@ -237,6 +237,53 @@ class CiWorkflowCoverageTests(unittest.TestCase):
         ):
             self.assertIn(asset, text)
 
+    def test_workflow_artifacts_use_short_retention(self) -> None:
+        build_workflow = (
+            REPO_ROOT / ".github" / "workflows" / "build.yml"
+        ).read_text(encoding="utf-8")
+        docker_workflow = (
+            REPO_ROOT / ".github" / "workflows" / "docker.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(
+            build_workflow.count("uses: actions/upload-artifact@v6"),
+            6,
+        )
+        build_lines = build_workflow.splitlines()
+        upload_indexes = [
+            index
+            for index, line in enumerate(build_lines)
+            if "uses: actions/upload-artifact@v6" in line
+        ]
+        for upload_index in upload_indexes:
+            next_step = next(
+                (
+                    index
+                    for index in range(upload_index + 1, len(build_lines))
+                    if build_lines[index].startswith("      - name:")
+                ),
+                len(build_lines),
+            )
+            upload_step = "\n".join(build_lines[upload_index:next_step])
+            self.assertIn("retention-days: 7", upload_step)
+
+        docker_lines = docker_workflow.splitlines()
+        build_index = next(
+            index
+            for index, line in enumerate(docker_lines)
+            if "uses: docker/build-push-action@v7" in line
+        )
+        next_step = next(
+            (
+                index
+                for index in range(build_index + 1, len(docker_lines))
+                if docker_lines[index].startswith("      - name:")
+            ),
+            len(docker_lines),
+        )
+        docker_step = "\n".join(docker_lines[build_index:next_step])
+        self.assertIn('DOCKER_BUILD_RECORD_RETENTION_DAYS: "7"', docker_step)
+
 
 if __name__ == "__main__":
     unittest.main()
