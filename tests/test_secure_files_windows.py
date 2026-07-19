@@ -77,6 +77,7 @@ def test_private_directory_keeps_existing_child_accessible(tmp_path: Path) -> No
     ensure_private_directory(private_dir)
 
     assert marker.read_text(encoding="utf-8") == "{}"
+    assert assert_private_file(marker) == marker
     marker.unlink()
     child_dir.rmdir()
 
@@ -85,5 +86,6 @@ def test_private_directory_keeps_existing_child_accessible(tmp_path: Path) -> No
     inherited_child.mkdir()
     inherited_marker.write_text("{}", encoding="utf-8")
     assert inherited_marker.read_text(encoding="utf-8") == "{}"
+    assert assert_private_file(inherited_marker) == inherited_marker
     inherited_marker.unlink()
     inherited_child.rmdir()

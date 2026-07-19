@@ -136,15 +136,15 @@ sudo apt-get install --no-install-recommends \
 git clone https://github.com/<your-org>/YggdraSIM.git
 cd YggdraSIM
 
-# Include Debian's PyQt5 packages when the desktop GUI is required.
-# Headless or 32-bit source install:
+# Headless source install:
 python3 -m venv .venv
-# For a 64-bit desktop GUI, use this instead:
+# For a desktop GUI on either 64-bit or 32-bit ARM, include Debian's
+# PyQt5 packages from section 1 and use this instead:
 # python3 -m venv --system-site-packages .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[full]'
-# On 64-bit with the PyQt5 packages from section 1:
+# For a desktop GUI on either ARM variant:
 # python -m pip install -e '.[full,gui]'
 ```
 

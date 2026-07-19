@@ -45,7 +45,7 @@ flavor:
 |----------------|-----------------------------------------------|------------------------------------------------|
 | `[saip]`       | Backwards-compatible no-op alias (`pySim` is core and commit-pinned) | Older install commands |
 | `[hil]`        | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
-| `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets`; pip Qt/WebEngine on Linux x86_64, `qtpy` plus system PyQt5 on Linux arm64 | Desktop Universal GUI Command Center (`--gui`) |
+| `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets`; pip Qt/WebEngine on Linux x86_64, `qtpy` plus system PyQt5 on Linux ARM | Desktop Universal GUI Command Center (`--gui`) |
 | `[gui-server]` | `fastapi`, `uvicorn[standard]`, `websockets`  | Headless web Command Center (`--web-server`)   |
 | `[open5gs]` *(post-v1 staging)* | `pymongo>=4.5,<5.0`                           | YggdraCore BYO-Open5GS subscriber bridge       |
 | `[build]`      | `pyinstaller`                                 | Producing `dist/yggdrasim-*` bundles           |
@@ -67,11 +67,11 @@ Notes:
 - `[gui]` is a strict superset of `[gui-server]`; you only need
   `[gui-server]` on headless servers where `pywebview` would just fail
   to import a desktop toolkit.
-- Linux arm64 builds must install Debian's `python3-pyqt5`,
+- Linux ARM desktop source builds (`arm64` and `armv7l`) must install Debian's `python3-pyqt5`,
   `python3-pyqt5.qtwebengine`, and `python3-pyqt5.qtwebchannel` packages
   and create their build venv with `--system-site-packages`. This avoids
-  the Qt 6 arm64 runtime's newer-glibc requirement on Debian Bookworm
-  while retaining a native desktop backend.
+  the Qt 6 arm64 runtime's newer-glibc requirement on Debian Bookworm,
+  supports the 32-bit ARM path, and retains a native desktop backend.
 
 ## Current structure status
 
