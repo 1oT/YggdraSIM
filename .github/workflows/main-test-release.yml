@@ -811,7 +811,6 @@ jobs:
             --jq '.tagName')" = "${TEST_TAG}"
           test "$(gh release view "${TEST_TAG}" --json targetCommitish \
             --jq '.targetCommitish')" = "${EXPECTED_SHA}"
-          test "$(git rev-list -n 1 "${TEST_TAG}")" = "${EXPECTED_SHA}"
 
           EXPECTED_NAMES="${RUNNER_TEMP}/expected-initial.txt"
           SERVER_NAMES="${RUNNER_TEMP}/server-initial.txt"

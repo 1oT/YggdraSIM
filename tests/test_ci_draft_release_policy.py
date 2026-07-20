@@ -230,6 +230,22 @@ class DraftReleaseFallbackPolicyTests(unittest.TestCase):
             r'--target\s+["\']?\$\{?GITHUB_SHA\}?["\']?',
         )
         self.assertIn("UNSIGNED TEST BUILD", create_step)
+        finalize = self.jobs.get("finalize", "")
+        self.assertIn(
+            "--json targetCommitish",
+            finalize,
+            "finalizer must verify the draft's exact target commit",
+        )
+        self.assertNotIn(
+            'git rev-list -n 1 "${TEST_TAG}"',
+            finalize,
+            "a tag created after checkout is not guaranteed to exist locally",
+        )
+        self.assertNotIn(
+            "git/ref/tags/${TEST_TAG}",
+            finalize,
+            "a draft tag identifier is not a Git ref until publication",
+        )
 
     def test_fallback_has_no_overwrite_force_delete_or_publish_escape_hatch(
         self,
