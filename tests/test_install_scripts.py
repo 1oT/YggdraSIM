@@ -279,15 +279,16 @@ class CiWorkflowCoverageTests(unittest.TestCase):
             REPO_ROOT / ".github" / "workflows" / "docker.yml"
         ).read_text(encoding="utf-8")
 
-        self.assertEqual(
-            build_workflow.count("uses: actions/upload-artifact@v6"),
-            6,
+        upload_action = (
+            "uses: actions/upload-artifact@"
+            "b7c566a772e6b6bfb58ed0dc250532a479d7789f"
         )
+        self.assertEqual(build_workflow.count(upload_action), 6)
         build_lines = build_workflow.splitlines()
         upload_indexes = [
             index
             for index, line in enumerate(build_lines)
-            if "uses: actions/upload-artifact@v6" in line
+            if upload_action in line
         ]
         for upload_index in upload_indexes:
             next_step = next(

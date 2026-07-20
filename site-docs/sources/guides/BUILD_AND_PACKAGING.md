@@ -209,8 +209,9 @@ Build notes:
   not a checkout's potentially stale `build/` tree. The wheel verifier
   rejects every non-code resource that is not in the same allowlist.
 - Tagged releases must match `v<project.version>`. Windows and macOS jobs
-  require configured signing credentials, release assets carry a
-  CycloneDX SBOM plus `SHA256SUMS`, and GitHub publishes signed build
+  require an annotated tag whose exact commit is reachable from
+  `origin/main`, plus configured signing credentials. Release assets carry
+  a CycloneDX SBOM plus `SHA256SUMS`, and GitHub publishes signed build
   provenance. Install scripts verify checksums before publication and the
   Windows installer additionally verifies Authenticode.
 - `yggdrasim-gui-*` prepends `--gui` unless the operator explicitly
@@ -218,6 +219,41 @@ Build notes:
   `--allow-origin` are still parsed by the shared launcher.
 - Console-script entry points such as `yggdrasim-scp11-live` remain the
   simpler operator surface for editable installs and Docker usage.
+
+## Manual unsigned main-branch test drafts
+
+The **Main Test Draft Release** workflow is a manual fallback for collecting
+cross-platform test builds when ordinary GitHub Actions artifact storage is
+unavailable. It is deliberately separate from the production release path:
+
+- it can only be started with `workflow_dispatch` against `main`;
+- pull requests and ordinary pushes never create or update a release;
+- each run creates its own draft with the transient tag
+  `ci-main-<run-id>-<attempt>`, targeted at the exact tested commit;
+- the draft title, notes, and bundled notices identify every output as an
+  **UNSIGNED TEST BUILD** and record both the commit SHA and Actions run;
+- the draft is not marked as the latest release, and the install scripts do
+  not consume `ci-main-*` drafts or their non-canonical asset names.
+
+These assets are suitable for controlled build and smoke testing only.
+Windows executables are not Authenticode-signed and can trigger Microsoft
+Defender SmartScreen. macOS executables are unsigned and unnotarized and can
+trigger Gatekeeper. Do not redistribute either as a production installer or
+use the draft as evidence that the production signing gates passed.
+
+Each primary test asset has a matching `.sha256` sidecar. After all build legs
+finish, the workflow verifies the complete expected asset set and those
+sidecars, then adds a CycloneDX SBOM and a global `SHA256SUMS` manifest. A
+successfully verified draft is marked **COMPLETE**; a failed or partial run is
+marked **INCOMPLETE** and remains a draft for diagnosis. Before testing an
+asset, verify it against its sidecar or the global manifest.
+
+Drafts are not removed automatically. Periodically delete stale
+`ci-main-*` draft releases and their transient tags after they are no longer
+needed. The annotated `v*` production path remains unchanged: it is
+signed/notarized where required, publishes canonical installer-facing names,
+and fails closed if its signing, provenance, checksum, or build gates do not
+pass.
 
 ## Debian package path
 

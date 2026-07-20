@@ -1,0 +1,959 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+name: Main Test Draft Release
+
+# This workflow deliberately has no push or pull_request trigger. Repository
+# write tokens are used only after an operator explicitly dispatches the exact
+# main-branch revision.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: main-test-draft-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.5.9"
+
+jobs:
+  quality-gate:
+    name: Main revision quality gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Require an exact main-branch dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${GITHUB_SHA}" = "${{ github.sha }}"
+
+      - name: Checkout the dispatched revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install Linux test dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpcsclite-dev pcscd swig pkg-config gpg libudev-dev \
+            build-essential
+
+      - name: Verify the lock and frozen bundle inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv lock --check --python 3.11
+          python scripts/release/prepare_bundle_data.py \
+            --flavor clean --stage-dir "${RUNNER_TEMP}/bundle-data-clean"
+          python scripts/release/prepare_bundle_data.py \
+            --flavor full --stage-dir "${RUNNER_TEMP}/bundle-data-full"
+
+      - name: Verify source, sdist, and wheel boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/release/source_boundary.py
+          uv build --sdist --out-dir "${RUNNER_TEMP}/sdist"
+          SDIST="$(find "${RUNNER_TEMP}/sdist" -maxdepth 1 \
+            -name '*.tar.gz' -print -quit)"
+          test -n "${SDIST}"
+          python scripts/release/verify_sdist.py "${SDIST}"
+          uv build --wheel --out-dir "${RUNNER_TEMP}/wheel" "${SDIST}"
+          WHEEL="$(find "${RUNNER_TEMP}/wheel" -maxdepth 1 \
+            -name '*.whl' -print -quit)"
+          test -n "${WHEEL}"
+          python scripts/release/verify_wheel.py "${WHEEL}"
+
+      - name: Sync the locked full test environment
+        shell: bash
+        run: uv sync --frozen --extra full --extra test
+
+      - name: Run fatal Python static analysis
+        shell: bash
+        run: |
+          uv run ruff check \
+            main SCP03 SCP80 SCP11 SIMCARD Tools yggdrasim_common scripts tests \
+            --select E9,F
+
+      - name: Run the regression suite
+        shell: bash
+        env:
+          PYTHONUNBUFFERED: "1"
+          YGGDRASIM_ALLOW_PLUGINS: "0"
+        run: |
+          uv run python -m pytest -q --tb=short --disable-warnings \
+            --no-header --maxfail=5 tests/
+
+      - name: Install locked documentation dependencies
+        shell: bash
+        run: uv pip install --system -r requirements-docs.txt
+
+      - name: Build strict documentation from mirrored sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python site-docs/_tools/mirror_source_docs.py
+          git diff --exit-code -- site-docs/sources
+          mkdocs build --strict
+
+  bootstrap:
+    name: Create isolated unsigned draft
+    if: github.ref == 'refs/heads/main'
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      sha: ${{ steps.meta.outputs.sha }}
+
+    steps:
+      - name: Checkout the tested revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve immutable draft metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          VERSION="$(python3 -c \
+            "import tomllib; from pathlib import Path; print(tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])")"
+          if [[ ! "${VERSION}" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]; then
+            echo "project version is unsafe for a GitHub asset name" >&2
+            exit 2
+          fi
+          SHORT_SHA="${GITHUB_SHA:0:12}"
+          TAG="ci-main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          case "${TAG}" in
+            v*) echo "test draft tag must never resemble a production tag" >&2; exit 2 ;;
+          esac
+          printf 'version=%s\n' "${VERSION}" >> "${GITHUB_OUTPUT}"
+          printf 'short_sha=%s\n' "${SHORT_SHA}" >> "${GITHUB_OUTPUT}"
+          printf 'tag=%s\n' "${TAG}" >> "${GITHUB_OUTPUT}"
+          printf 'sha=%s\n' "${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create the private unsigned test draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          NOTES="${RUNNER_TEMP}/draft-notes.md"
+          cat > "${NOTES}" <<EOF
+          # INCOMPLETE — UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+
+          This private draft is an operator-requested test build of the exact
+          \`${GITHUB_SHA}\` revision from:
+          ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}
+
+          The build is still in progress. Do not use any asset unless this
+          heading changes to **COMPLETE**.
+
+          - Windows executables are not Authenticode-signed and may trigger
+            Microsoft Defender SmartScreen.
+          - macOS executables are neither signed nor notarized and may be
+            blocked by Gatekeeper.
+          - This draft is not a production release, is not marked latest, and
+            is never consumed by the release installers.
+          EOF
+          gh release create "${TEST_TAG}" \
+            --draft \
+            --prerelease \
+            --latest=false \
+            --target "${GITHUB_SHA}" \
+            --title "INCOMPLETE — UNSIGNED TEST BUILD ${TEST_TAG}" \
+            --notes-file "${NOTES}"
+
+  build-linux-x86_64:
+    name: Linux x86_64 unsigned test (${{ matrix.flavor }})
+    if: github.ref == 'refs/heads/main'
+    needs: bootstrap
+    # PyInstaller bundles must be built on the oldest supported glibc.
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [clean, full]
+
+    steps:
+      - name: Checkout the tested revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.bootstrap.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpcsclite-dev pcscd swig pkg-config gpg \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-keysyms1 libxcb-shape0 libxcb-icccm4 xauth xvfb
+
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install clean build dependencies
+        if: matrix.flavor == 'clean'
+        shell: bash
+        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
+
+      - name: Install full build dependencies
+        if: matrix.flavor == 'full'
+        shell: bash
+        run: |
+          uv sync --frozen --extra full --extra saip --extra build \
+            --extra test --extra gui
+
+      - name: Build Linux bundle
+        shell: bash
+        env:
+          YGGDRASIM_FLAVOR: ${{ matrix.flavor }}
+        run: |
+          test "$(uname -m)" = "x86_64"
+          uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      - name: Smoke test Linux bundle
+        shell: bash
+        env:
+          YGGDRASIM_FLAVOR: ${{ matrix.flavor }}
+        run: |
+          set -euo pipefail
+          BIN="dist/yggdrasim-${{ matrix.flavor }}"
+          GUI_BIN="dist/yggdrasim-gui-${{ matrix.flavor }}"
+          chmod +x "${BIN}" "${GUI_BIN}"
+          "${BIN}" --version
+          "${GUI_BIN}" --version
+          DOCTOR_OUTPUT="$("${BIN}" --doctor || true)"
+          printf '%s\n' "${DOCTOR_OUTPUT}"
+          printf '%s\n' "${DOCTOR_OUTPUT}" | grep -E 'usable backends:.*qt'
+          uv run python scripts/release/validate_release.py \
+            artifact "${BIN}" "${GUI_BIN}"
+          set +e
+          timeout 12s xvfb-run -a "${GUI_BIN}" \
+            > "${RUNNER_TEMP}/yggdrasim-gui-smoke.log" 2>&1
+          GUI_STATUS=$?
+          set -e
+          case "${GUI_STATUS}" in
+            0|124) ;;
+            *)
+              cat "${RUNNER_TEMP}/yggdrasim-gui-smoke.log"
+              echo "GUI exited before the Xvfb smoke window stayed open" >&2
+              exit "${GUI_STATUS}"
+              ;;
+          esac
+
+      - name: Package unsigned Linux test assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.bootstrap.outputs.version }}
+          SHORT_SHA: ${{ needs.bootstrap.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          FLAVOR="${{ matrix.flavor }}"
+          STAGE="${RUNNER_TEMP}/release-assets"
+          BUNDLE="${RUNNER_TEMP}/linux-${FLAVOR}-bundle"
+          mkdir -p "${STAGE}" "${BUNDLE}"
+          install -m 0755 "dist/yggdrasim-${FLAVOR}" \
+            "${BUNDLE}/yggdrasim-${FLAVOR}"
+          install -m 0755 "dist/yggdrasim-gui-${FLAVOR}" \
+            "${BUNDLE}/yggdrasim-gui-${FLAVOR}"
+          cat > "${BUNDLE}/UNSIGNED-TEST-BUILD.txt" <<EOF
+          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          Commit: ${GITHUB_SHA}
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Flavor: ${FLAVOR}
+          Platform: Linux x86_64
+          EOF
+          ASSET="yggdrasim-linux-x86_64-${FLAVOR}-UNSIGNED-TEST-${SHORT_SHA}.tar.gz"
+          tar -C "${BUNDLE}" -czf "${STAGE}/${ASSET}" .
+          (
+            cd "${STAGE}"
+            sha256sum "${ASSET}" > "${ASSET}.sha256"
+          )
+
+          if [ "${FLAVOR}" = "clean" ]; then
+            ARCH="$(dpkg --print-architecture)"
+            test "${ARCH}" = "amd64"
+            # ``~ci`` sorts below the matching production version so a test
+            # package never blocks the later official upgrade.
+            DEB_VERSION="${VERSION}~ci.${SHORT_SHA}"
+            DEB_ASSET="yggdrasim-clean_${VERSION}-ci.${SHORT_SHA}_${ARCH}-UNSIGNED-TEST.deb"
+            PKGROOT="${RUNNER_TEMP}/yggdrasim-deb"
+            mkdir -p \
+              "${PKGROOT}/DEBIAN" \
+              "${PKGROOT}/usr/lib/yggdrasim" \
+              "${PKGROOT}/usr/bin" \
+              "${PKGROOT}/usr/share/doc/yggdrasim-clean"
+            install -m 0755 dist/yggdrasim-clean \
+              "${PKGROOT}/usr/lib/yggdrasim/yggdrasim"
+            install -m 0755 dist/yggdrasim-gui-clean \
+              "${PKGROOT}/usr/lib/yggdrasim/yggdrasim-gui"
+            ln -s ../lib/yggdrasim/yggdrasim \
+              "${PKGROOT}/usr/bin/yggdrasim"
+            ln -s ../lib/yggdrasim/yggdrasim-gui \
+              "${PKGROOT}/usr/bin/yggdrasim-gui"
+            install -m 0644 "${BUNDLE}/UNSIGNED-TEST-BUILD.txt" \
+              "${PKGROOT}/usr/share/doc/yggdrasim-clean/UNSIGNED-TEST-BUILD.txt"
+            cat > "${PKGROOT}/DEBIAN/control" <<EOF
+          Package: yggdrasim-clean
+          Version: ${DEB_VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: ${ARCH}
+          Maintainer: GitHub Actions
+          Depends: libpcsclite1, pcscd, gpg, libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0, libxcb-keysyms1, libxcb-shape0, libxcb-icccm4
+          Description: YggdraSIM unsigned test toolkit bundle (clean flavor, no HIL bridge)
+          EOF
+            dpkg-deb --build --root-owner-group \
+              "${PKGROOT}" "${STAGE}/${DEB_ASSET}"
+            dpkg-deb --info "${STAGE}/${DEB_ASSET}"
+            dpkg-deb --contents "${STAGE}/${DEB_ASSET}"
+            test "$(dpkg-deb --field "${STAGE}/${DEB_ASSET}" Package)" = \
+              "yggdrasim-clean"
+            test "$(dpkg-deb --field "${STAGE}/${DEB_ASSET}" Version)" = \
+              "${DEB_VERSION}"
+            EXTRACTED="${RUNNER_TEMP}/deb-extracted"
+            dpkg-deb --extract "${STAGE}/${DEB_ASSET}" "${EXTRACTED}"
+            "${EXTRACTED}/usr/lib/yggdrasim/yggdrasim" --version
+            "${EXTRACTED}/usr/lib/yggdrasim/yggdrasim-gui" --version
+            test -f \
+              "${EXTRACTED}/usr/share/doc/yggdrasim-clean/UNSIGNED-TEST-BUILD.txt"
+            docker run --rm --platform linux/amd64 \
+              -e "DEB_ASSET=${DEB_ASSET}" \
+              -v "${STAGE}:/assets:ro" \
+              debian:bookworm-slim bash -lc '
+                set -eux
+                apt-get update
+                DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                  --no-install-recommends "/assets/${DEB_ASSET}"
+                /usr/bin/yggdrasim --version
+                /usr/bin/yggdrasim-gui --version
+              '
+            (
+              cd "${STAGE}"
+              sha256sum "${DEB_ASSET}" > "${DEB_ASSET}.sha256"
+            )
+          fi
+
+      - name: Upload exact Linux assets to the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ needs.bootstrap.outputs.tag }}
+        run: |
+          set -euo pipefail
+          STAGE="${RUNNER_TEMP}/release-assets"
+          mapfile -t ASSETS < <(find "${STAGE}" -maxdepth 1 -type f \
+            -print | sort)
+          EXPECTED=2
+          if [ "${{ matrix.flavor }}" = "clean" ]; then
+            EXPECTED=4
+          fi
+          test "${#ASSETS[@]}" -eq "${EXPECTED}"
+          gh release upload "${TEST_TAG}" "${ASSETS[@]}"
+
+  build-linux-arm64:
+    name: Linux arm64 unsigned test (${{ matrix.flavor }})
+    if: github.ref == 'refs/heads/main'
+    needs: bootstrap
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [clean, full]
+
+    steps:
+      - name: Checkout the tested revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.bootstrap.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up QEMU for arm64
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+        with:
+          platforms: arm64
+
+      - name: Build and validate arm64 bundle in Debian
+        shell: bash
+        run: |
+          set -euo pipefail
+          FLAVOR="${{ matrix.flavor }}"
+          EXTRA_ARGS="--extra saip --extra build --extra test --extra gui"
+          FULL_APT=""
+          if [ "${FLAVOR}" = "full" ]; then
+            EXTRA_ARGS="--extra full ${EXTRA_ARGS}"
+            FULL_APT="libudev-dev"
+          fi
+          mkdir -p dist
+          docker run --rm --platform linux/arm64 \
+            -v "${PWD}:/src" -w /src \
+            -e "YGGDRASIM_FLAVOR=${FLAVOR}" \
+            -e "EXTRA_ARGS=${EXTRA_ARGS}" \
+            -e "FULL_APT=${FULL_APT}" \
+            debian:bookworm-slim bash -lc '
+              set -eux
+              test "$(uname -m)" = "aarch64"
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                python3 python3-pip python3-venv python3-dev \
+                python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel \
+                libpcsclite-dev pcscd swig pkg-config gpg git \
+                libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+                libxcb-keysyms1 libxcb-shape0 libxcb-icccm4 \
+                build-essential ${FULL_APT}
+              git config --global --add safe.directory /src
+              python3 -m venv /opt/uv
+              /opt/uv/bin/pip install "uv==0.5.9"
+              python3 -m venv --system-site-packages /opt/venv
+              export UV_PROJECT_ENVIRONMENT=/opt/venv
+              /opt/uv/bin/uv sync --frozen ${EXTRA_ARGS}
+              /opt/uv/bin/uv run python -c \
+                "from qtpy import QtWebEngineWidgets; print(QtWebEngineWidgets.__name__)"
+              /opt/uv/bin/uv run python -m PyInstaller \
+                --noconfirm --clean yggdrasim_main.spec
+              chmod +x "dist/yggdrasim-${YGGDRASIM_FLAVOR}"
+              chmod +x "dist/yggdrasim-gui-${YGGDRASIM_FLAVOR}"
+              "dist/yggdrasim-${YGGDRASIM_FLAVOR}" --version
+              "dist/yggdrasim-gui-${YGGDRASIM_FLAVOR}" --version
+              DOCTOR_OUTPUT=$("dist/yggdrasim-${YGGDRASIM_FLAVOR}" --doctor || true)
+              printf "%s\n" "${DOCTOR_OUTPUT}"
+              printf "%s\n" "${DOCTOR_OUTPUT}" | grep -E "usable backends:.*qt"
+              /opt/uv/bin/uv run python scripts/release/validate_release.py \
+                artifact "dist/yggdrasim-${YGGDRASIM_FLAVOR}" \
+                "dist/yggdrasim-gui-${YGGDRASIM_FLAVOR}"
+            '
+
+      - name: Package unsigned arm64 test asset
+        shell: bash
+        env:
+          SHORT_SHA: ${{ needs.bootstrap.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          FLAVOR="${{ matrix.flavor }}"
+          STAGE="${RUNNER_TEMP}/release-assets"
+          BUNDLE="${RUNNER_TEMP}/linux-arm64-${FLAVOR}-bundle"
+          mkdir -p "${STAGE}" "${BUNDLE}"
+          install -m 0755 "dist/yggdrasim-${FLAVOR}" \
+            "${BUNDLE}/yggdrasim-${FLAVOR}"
+          install -m 0755 "dist/yggdrasim-gui-${FLAVOR}" \
+            "${BUNDLE}/yggdrasim-gui-${FLAVOR}"
+          cat > "${BUNDLE}/UNSIGNED-TEST-BUILD.txt" <<EOF
+          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          Commit: ${GITHUB_SHA}
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Flavor: ${FLAVOR}
+          Platform: Linux arm64
+          EOF
+          ASSET="yggdrasim-linux-arm64-${FLAVOR}-UNSIGNED-TEST-${SHORT_SHA}.tar.gz"
+          tar -C "${BUNDLE}" -czf "${STAGE}/${ASSET}" .
+          (
+            cd "${STAGE}"
+            sha256sum "${ASSET}" > "${ASSET}.sha256"
+          )
+
+      - name: Upload exact arm64 assets to the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ needs.bootstrap.outputs.tag }}
+        run: |
+          set -euo pipefail
+          STAGE="${RUNNER_TEMP}/release-assets"
+          mapfile -t ASSETS < <(find "${STAGE}" -maxdepth 1 -type f \
+            -print | sort)
+          test "${#ASSETS[@]}" -eq 2
+          gh release upload "${TEST_TAG}" "${ASSETS[@]}"
+
+  build-windows-clean:
+    name: Windows x86_64 unsigned test
+    if: github.ref == 'refs/heads/main'
+    needs: bootstrap
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout the tested revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.bootstrap.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Windows build dependencies
+        shell: pwsh
+        run: choco install swig -y
+
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
+
+      - name: Verify portable Remote Lab and Card Bridge contracts
+        shell: pwsh
+        run: |
+          uv run python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=1 `
+            tests/test_remote_cross_platform_boundary.py `
+            tests/test_remote_lab.py `
+            tests/test_gui_card_bridge_actions.py `
+            tests/test_gui_card_bridge_actions_http.py `
+            tests/test_apdu_relay_service.py `
+            tests/test_card_backend_relay_token.py `
+            tests/test_hil_bridge_card_relay.py `
+            tests/test_secure_files_windows.py
+
+      - name: Build Windows bundle without signing
+        shell: pwsh
+        env:
+          YGGDRASIM_FLAVOR: clean
+        run: uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      - name: Smoke test Windows bundle
+        shell: pwsh
+        run: |
+          .\dist\yggdrasim-clean.exe --version
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows CLI --version smoke test failed.'
+          }
+          .\dist\yggdrasim-gui-clean.exe --version
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows GUI --version smoke test failed.'
+          }
+          uv run python scripts/release/validate_release.py artifact `
+            .\dist\yggdrasim-clean.exe .\dist\yggdrasim-gui-clean.exe
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows release validation failed.'
+          }
+
+      - name: Package unsigned Windows test asset
+        shell: pwsh
+        env:
+          SHORT_SHA: ${{ needs.bootstrap.outputs.short_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'release-assets'
+          $bundle = Join-Path $env:RUNNER_TEMP 'windows-clean-bundle'
+          New-Item -ItemType Directory -Force -Path $stage, $bundle | Out-Null
+          Copy-Item -LiteralPath '.\dist\yggdrasim-clean.exe' `
+            -Destination (Join-Path $bundle 'yggdrasim-clean.exe')
+          Copy-Item -LiteralPath '.\dist\yggdrasim-gui-clean.exe' `
+            -Destination (Join-Path $bundle 'yggdrasim-gui-clean.exe')
+          @"
+          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          Commit: $env:GITHUB_SHA
+          Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          Platform: Windows x86_64
+          These executables are not Authenticode-signed and Microsoft Defender
+          SmartScreen may warn or block them.
+          "@ | Set-Content -Encoding utf8 `
+            -LiteralPath (Join-Path $bundle 'UNSIGNED-TEST-BUILD.txt')
+          $asset = "yggdrasim-windows-x86_64-clean-UNSIGNED-TEST-$env:SHORT_SHA.zip"
+          $archive = Join-Path $stage $asset
+          Compress-Archive -Path (Join-Path $bundle '*') `
+            -DestinationPath $archive
+          $hash = (Get-FileHash -Algorithm SHA256 `
+            -LiteralPath $archive).Hash.ToLowerInvariant()
+          "$hash  $asset" | Set-Content -Encoding ascii `
+            -LiteralPath "$archive.sha256"
+
+      - name: Upload exact Windows assets to the draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ needs.bootstrap.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'release-assets'
+          $assets = @(Get-ChildItem -LiteralPath $stage -File | Sort-Object Name)
+          if ($assets.Count -ne 2) {
+            throw "Expected two Windows release files; found $($assets.Count)."
+          }
+          $assetPaths = @($assets | ForEach-Object { $_.FullName })
+          & gh release upload $env:TEST_TAG @assetPaths
+          if ($LASTEXITCODE -ne 0) {
+            throw 'GitHub Release upload failed.'
+          }
+
+  build-macos-clean:
+    name: macOS arm64 unsigned and unnotarized test
+    if: github.ref == 'refs/heads/main'
+    needs: bootstrap
+    runs-on: macos-14
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout the tested revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.bootstrap.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install macOS build dependencies
+        shell: bash
+        run: |
+          brew update
+          brew install swig || true
+
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install Python dependencies
+        shell: bash
+        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
+
+      - name: Verify portable Remote Lab and Card Bridge contracts
+        shell: bash
+        run: |
+          uv run python -m pytest -q --tb=short --disable-warnings \
+            --no-header --maxfail=1 \
+            tests/test_remote_cross_platform_boundary.py \
+            tests/test_remote_lab.py \
+            tests/test_gui_card_bridge_actions.py \
+            tests/test_gui_card_bridge_actions_http.py \
+            tests/test_apdu_relay_service.py \
+            tests/test_card_backend_relay_token.py \
+            tests/test_hil_bridge_card_relay.py
+
+      - name: Build macOS bundle without signing or notarization
+        shell: bash
+        env:
+          YGGDRASIM_FLAVOR: clean
+        run: |
+          test "$(uname -m)" = "arm64"
+          uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      - name: Smoke test macOS bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x dist/yggdrasim-clean dist/yggdrasim-gui-clean
+          dist/yggdrasim-clean --version
+          dist/yggdrasim-gui-clean --version
+          uv run python scripts/release/validate_release.py \
+            artifact dist/yggdrasim-clean dist/yggdrasim-gui-clean
+
+      - name: Package unsigned macOS test asset
+        shell: bash
+        env:
+          SHORT_SHA: ${{ needs.bootstrap.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          STAGE="${RUNNER_TEMP}/release-assets"
+          BUNDLE="${RUNNER_TEMP}/macos-arm64-clean-bundle"
+          mkdir -p "${STAGE}" "${BUNDLE}"
+          install -m 0755 dist/yggdrasim-clean \
+            "${BUNDLE}/yggdrasim-clean"
+          install -m 0755 dist/yggdrasim-gui-clean \
+            "${BUNDLE}/yggdrasim-gui-clean"
+          cat > "${BUNDLE}/UNSIGNED-TEST-BUILD.txt" <<EOF
+          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          Commit: ${GITHUB_SHA}
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Platform: macOS arm64
+          These executables are neither signed nor notarized. Gatekeeper may
+          warn or block them.
+          EOF
+          ASSET="yggdrasim-macos-arm64-clean-UNSIGNED-UNNOTARIZED-TEST-${SHORT_SHA}.tar.gz"
+          tar -C "${BUNDLE}" -czf "${STAGE}/${ASSET}" .
+          (
+            cd "${STAGE}"
+            shasum -a 256 "${ASSET}" > "${ASSET}.sha256"
+          )
+
+      - name: Upload exact macOS assets to the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ needs.bootstrap.outputs.tag }}
+        run: |
+          set -euo pipefail
+          STAGE="${RUNNER_TEMP}/release-assets"
+          # macOS ships Bash 3.2, which has no ``mapfile`` builtin.
+          ASSETS=("${STAGE}"/*)
+          test "${#ASSETS[@]}" -eq 2
+          gh release upload "${TEST_TAG}" "${ASSETS[@]}"
+
+  finalize:
+    name: Verify and finalize unsigned draft
+    if: ${{ always() && github.ref == 'refs/heads/main' && needs.bootstrap.result == 'success' }}
+    needs:
+      - bootstrap
+      - build-linux-x86_64
+      - build-linux-arm64
+      - build-windows-clean
+      - build-macos-clean
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout the tested revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.bootstrap.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require every platform build to succeed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ needs.build-linux-x86_64.result }}" = "success"
+          test "${{ needs.build-linux-arm64.result }}" = "success"
+          test "${{ needs.build-windows-clean.result }}" = "success"
+          test "${{ needs.build-macos-clean.result }}" = "success"
+
+      - name: Verify the exact initial release assets and sidecars
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ needs.bootstrap.outputs.tag }}
+          VERSION: ${{ needs.bootstrap.outputs.version }}
+          SHORT_SHA: ${{ needs.bootstrap.outputs.short_sha }}
+          EXPECTED_SHA: ${{ needs.bootstrap.outputs.sha }}
+        run: |
+          set -euo pipefail
+          EXPECTED_PRIMARY_ASSETS=(
+            "yggdrasim-linux-x86_64-clean-UNSIGNED-TEST-${SHORT_SHA}.tar.gz"
+            "yggdrasim-linux-x86_64-full-UNSIGNED-TEST-${SHORT_SHA}.tar.gz"
+            "yggdrasim-clean_${VERSION}-ci.${SHORT_SHA}_amd64-UNSIGNED-TEST.deb"
+            "yggdrasim-linux-arm64-clean-UNSIGNED-TEST-${SHORT_SHA}.tar.gz"
+            "yggdrasim-linux-arm64-full-UNSIGNED-TEST-${SHORT_SHA}.tar.gz"
+            "yggdrasim-windows-x86_64-clean-UNSIGNED-TEST-${SHORT_SHA}.zip"
+            "yggdrasim-macos-arm64-clean-UNSIGNED-UNNOTARIZED-TEST-${SHORT_SHA}.tar.gz"
+          )
+          test "${#EXPECTED_PRIMARY_ASSETS[@]}" -eq 7
+          EXPECTED_SIDECARS=()
+          for asset in "${EXPECTED_PRIMARY_ASSETS[@]}"; do
+            EXPECTED_SIDECARS+=("${asset}.sha256")
+          done
+          EXPECTED_INITIAL=(
+            "${EXPECTED_PRIMARY_ASSETS[@]}"
+            "${EXPECTED_SIDECARS[@]}"
+          )
+          test "${#EXPECTED_INITIAL[@]}" -eq 14
+
+          test "$(gh release view "${TEST_TAG}" --json isDraft \
+            --jq '.isDraft')" = "true"
+          test "$(gh release view "${TEST_TAG}" --json isPrerelease \
+            --jq '.isPrerelease')" = "true"
+          test "$(gh release view "${TEST_TAG}" --json tagName \
+            --jq '.tagName')" = "${TEST_TAG}"
+          test "$(gh release view "${TEST_TAG}" --json targetCommitish \
+            --jq '.targetCommitish')" = "${EXPECTED_SHA}"
+          test "$(git rev-list -n 1 "${TEST_TAG}")" = "${EXPECTED_SHA}"
+
+          EXPECTED_NAMES="${RUNNER_TEMP}/expected-initial.txt"
+          SERVER_NAMES="${RUNNER_TEMP}/server-initial.txt"
+          printf '%s\n' "${EXPECTED_INITIAL[@]}" | sort > "${EXPECTED_NAMES}"
+          gh release view "${TEST_TAG}" --json assets \
+            --jq '.assets[].name' | sort > "${SERVER_NAMES}"
+          diff -u "${EXPECTED_NAMES}" "${SERVER_NAMES}"
+
+          ASSET_DIR="${RUNNER_TEMP}/initial-assets"
+          mkdir -p "${ASSET_DIR}"
+          gh release download "${TEST_TAG}" --dir "${ASSET_DIR}"
+          for asset in "${EXPECTED_PRIMARY_ASSETS[@]}"; do
+            test -s "${ASSET_DIR}/${asset}"
+            test -s "${ASSET_DIR}/${asset}.sha256"
+          done
+          (
+            cd "${ASSET_DIR}"
+            for sidecar in "${EXPECTED_SIDECARS[@]}"; do
+              sha256sum -c "${sidecar}"
+            done
+          )
+
+      - name: Generate the draft SBOM and global checksum manifest
+        shell: bash
+        env:
+          VERSION: ${{ needs.bootstrap.outputs.version }}
+          SHORT_SHA: ${{ needs.bootstrap.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          ASSET_DIR="${RUNNER_TEMP}/initial-assets"
+          SBOM="yggdrasim-${VERSION}-UNSIGNED-TEST-${SHORT_SHA}.cdx.json"
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+            python3 scripts/release/generate_sbom.py \
+              --version "${VERSION}" \
+              --output "${ASSET_DIR}/${SBOM}"
+          (
+            cd "${ASSET_DIR}"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS
+          )
+          test -s "${ASSET_DIR}/${SBOM}"
+          test -s "${ASSET_DIR}/SHA256SUMS"
+
+      - name: Upload the SBOM and global checksum manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ needs.bootstrap.outputs.tag }}
+          VERSION: ${{ needs.bootstrap.outputs.version }}
+          SHORT_SHA: ${{ needs.bootstrap.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          ASSET_DIR="${RUNNER_TEMP}/initial-assets"
+          SBOM="${ASSET_DIR}/yggdrasim-${VERSION}-UNSIGNED-TEST-${SHORT_SHA}.cdx.json"
+          gh release upload "${TEST_TAG}" \
+            "${SBOM}" "${ASSET_DIR}/SHA256SUMS"
+
+      - name: Redownload and verify the complete draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ needs.bootstrap.outputs.tag }}
+          VERSION: ${{ needs.bootstrap.outputs.version }}
+          SHORT_SHA: ${{ needs.bootstrap.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          VERIFY_DIR="${RUNNER_TEMP}/verified-assets"
+          mkdir -p "${VERIFY_DIR}"
+          gh release download "${TEST_TAG}" --dir "${VERIFY_DIR}"
+          SERVER_NAMES="${RUNNER_TEMP}/server-final.txt"
+          LOCAL_NAMES="${RUNNER_TEMP}/local-final.txt"
+          gh release view "${TEST_TAG}" --json assets \
+            --jq '.assets[].name' | sort > "${SERVER_NAMES}"
+          find "${VERIFY_DIR}" -maxdepth 1 -type f -printf '%f\n' \
+            | sort > "${LOCAL_NAMES}"
+          diff -u "${SERVER_NAMES}" "${LOCAL_NAMES}"
+          test "$(wc -l < "${SERVER_NAMES}")" -eq 16
+          test -s \
+            "${VERIFY_DIR}/yggdrasim-${VERSION}-UNSIGNED-TEST-${SHORT_SHA}.cdx.json"
+          (
+            cd "${VERIFY_DIR}"
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Mark the verified draft complete
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ needs.bootstrap.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.bootstrap.outputs.sha }}
+        run: |
+          set -euo pipefail
+          NOTES="${RUNNER_TEMP}/complete-notes.md"
+          cat > "${NOTES}" <<EOF
+          # COMPLETE — UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+
+          All seven primary assets, seven individual SHA-256 sidecars, the
+          CycloneDX SBOM, and the global \`SHA256SUMS\` manifest were
+          redownloaded and verified for exact revision \`${EXPECTED_SHA}\`.
+
+          Workflow run:
+          ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}
+
+          - Windows executables are not Authenticode-signed and may trigger
+            Microsoft Defender SmartScreen.
+          - macOS executables are neither signed nor notarized and may be
+            blocked by Gatekeeper.
+          - This private draft is not a production release, is not latest, and
+            is never consumed by the release installers.
+          EOF
+          gh release edit "${TEST_TAG}" \
+            --title "COMPLETE — UNSIGNED TEST BUILD ${TEST_TAG}" \
+            --notes-file "${NOTES}"
+          gh release view "${TEST_TAG}" --json url \
+            --jq '"Draft release: " + .url' >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Mark the draft incomplete after any finalization failure
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ needs.bootstrap.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.bootstrap.outputs.sha }}
+        run: |
+          NOTES="${RUNNER_TEMP}/incomplete-notes.md"
+          cat > "${NOTES}" <<EOF
+          # INCOMPLETE — UNSIGNED TEST BUILD — DO NOT USE
+
+          A build, upload, integrity check, or finalization step failed for
+          exact revision \`${EXPECTED_SHA}\`.
+
+          Inspect:
+          ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}
+
+          This draft deliberately remains available for diagnosis. It is not a
+          production release and its assets must not be used.
+          EOF
+          gh release edit "${TEST_TAG}" \
+            --title "INCOMPLETE — UNSIGNED TEST BUILD ${TEST_TAG}" \
+            --notes-file "${NOTES}" || true

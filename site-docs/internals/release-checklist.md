@@ -98,6 +98,38 @@ Do not mass-run. Redirect noisy runs to a log file and inspect with `rg`.
 - [ ] nav entries that reference new pages exist and resolve
 - [ ] nav entries for removed pages are removed
 
+## Manual unsigned test draft
+
+Use the **Main Test Draft Release** workflow only when a cross-platform test
+bundle is needed before a production release. It is a manual
+`workflow_dispatch` flow restricted to `main`; pull requests and ordinary
+pushes never publish test assets.
+
+- [ ] dispatch the workflow from `main` and confirm its recorded commit SHA is
+      the exact revision you intend to test
+- [ ] confirm the workflow creates a new draft tagged
+      `ci-main-<run-id>-<attempt>` and records both the exact SHA and Actions
+      run in its notes
+- [ ] confirm the draft is not the latest release and remains a draft; install
+      scripts must not consume `ci-main-*` tags or the test-only asset names
+- [ ] treat every asset as an **UNSIGNED TEST BUILD**: Windows may display a
+      Microsoft Defender SmartScreen warning, while the unsigned and
+      unnotarized macOS build may be blocked by Gatekeeper
+- [ ] confirm every primary asset has a `.sha256` sidecar
+- [ ] for a successful run, confirm the final asset set also contains a
+      CycloneDX SBOM and a global `SHA256SUMS`, and that the draft is marked
+      **COMPLETE**
+- [ ] if any build or verification leg fails, confirm the draft is marked
+      **INCOMPLETE**; do not mistake partial assets for a complete test set
+- [ ] verify downloaded assets against their sidecars or `SHA256SUMS` before
+      testing them
+- [ ] manually remove stale `ci-main-*` drafts and their transient tags after
+      diagnosis/testing; the workflow intentionally does not auto-delete them
+
+This draft flow does not replace or weaken the production flow below. It never
+publishes a signed release, and it is not evidence that Windows signing,
+macOS signing/notarization, provenance, or production publication gates pass.
+
 ## Tagging and publishing
 
 The publish flow is wired end-to-end in `.github/workflows/build.yml`. Pushing
@@ -116,6 +148,14 @@ Windows x86_64 clean, Debian package) and the `publish-release` job. The
   list before calling `gh release create`;
 - calls `gh release create <tag> --notes-from-tag --verify-tag …`, which
   reuses the annotated tag message as the public release notes.
+
+The annotated `v*` path remains the only production publication path. It uses
+canonical installer-facing asset names, requires Windows signing and macOS
+signing/notarization, and fails closed if any required build, signing,
+checksum, provenance, or publication gate does not pass.
+Before any platform build or signing step, CI also requires the tag to match
+`v<project.version>`, verifies that it is annotated, and confirms that its
+exact commit is reachable from `origin/main`.
 
 ### Annotated-tag-message contract
 
@@ -139,6 +179,9 @@ The release page's body comes from the **annotated** tag message via
     git push origin vX.Y.Z
     ```
 
+- [ ] confirm the tagged commit is already reachable from `origin/main`;
+      the release policy gate rejects production tags made from arbitrary
+      commits or unmerged branches before any signing job starts
 - [ ] watch the workflow at `https://github.com/<repo>/actions`. The
       `publish-release` job only runs on `refs/tags/v*`; failures in
       `docs-strict`, `pytest-suite`, or any build leg short-circuit the
