@@ -303,10 +303,14 @@ class CiWorkflowCoverageTests(unittest.TestCase):
             self.assertIn("retention-days: 7", upload_step)
 
         docker_lines = docker_workflow.splitlines()
+        docker_build_action = (
+            "uses: docker/build-push-action@"
+            "53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
+        )
         build_index = next(
             index
             for index, line in enumerate(docker_lines)
-            if "uses: docker/build-push-action@v7" in line
+            if docker_build_action in line
         )
         next_step = next(
             (
@@ -317,7 +321,26 @@ class CiWorkflowCoverageTests(unittest.TestCase):
             len(docker_lines),
         )
         docker_step = "\n".join(docker_lines[build_index:next_step])
-        self.assertIn('DOCKER_BUILD_RECORD_RETENTION_DAYS: "7"', docker_step)
+        self.assertIn('DOCKER_BUILD_RECORD_UPLOAD: "false"', docker_step)
+        self.assertNotIn("DOCKER_BUILD_RECORD_RETENTION_DAYS", docker_step)
+
+    def test_docker_publish_actions_are_immutable(self) -> None:
+        workflow = (
+            REPO_ROOT / ".github" / "workflows" / "docker.yml"
+        ).read_text(encoding="utf-8")
+        for action in (
+            "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
+            "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
+            "docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0",
+            "docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302",
+            "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a",
+        ):
+            self.assertIn(action, workflow)
+        checkout_step = workflow.split("- name: Checkout code", 1)[1].split(
+            "- name: Set up Docker Buildx",
+            1,
+        )[0]
+        self.assertIn("persist-credentials: false", checkout_step)
 
 
 if __name__ == "__main__":
