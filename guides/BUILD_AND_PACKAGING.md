@@ -255,6 +255,26 @@ signed/notarized where required, publishes canonical installer-facing names,
 and fails closed if its signing, provenance, checksum, or build gates do not
 pass.
 
+### Windows-only artifact test
+
+Use the manual **Windows Test Artifact** workflow when only the Windows x86_64
+clean bundle is needed. It is restricted to the exact revision dispatched
+from `main` and does not start any Linux, macOS, Debian, or Docker build.
+
+The workflow first attempts a one-day GitHub Actions artifact containing the
+ZIP and its `.sha256` sidecar. That upload is a best-effort storage probe: an
+account-level artifact-quota error is recorded in the run summary but does not
+discard the build. Independently, every run creates a unique, private draft
+prerelease tagged `ci-windows-main-<run-id>-<attempt>`. The workflow uploads,
+redownloads, checksum-verifies, extracts, and smoke-tests that draft's Windows
+bundle before changing the draft title from **INCOMPLETE** to **COMPLETE**.
+
+The ZIP contains `yggdrasim-clean.exe`, `yggdrasim-gui-clean.exe`, and an
+`UNSIGNED-TEST-BUILD.txt` notice. The executables are not Authenticode-signed,
+so use them only for controlled testing and expect Microsoft Defender
+SmartScreen warnings. The draft flow never publishes a production release,
+overwrites assets, or deletes an earlier run.
+
 ## Debian package path
 
 The cleanest `.deb` path is:

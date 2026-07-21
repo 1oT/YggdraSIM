@@ -130,6 +130,22 @@ This draft flow does not replace or weaken the production flow below. It never
 publishes a signed release, and it is not evidence that Windows signing,
 macOS signing/notarization, provenance, or production publication gates pass.
 
+### Windows-only test artifact
+
+Use **Windows Test Artifact** when a single Windows x86_64 clean bundle is
+enough. It is a manual, `main`-only flow and does not start the other platform
+jobs.
+
+- [ ] confirm the run attempts one Actions artifact with one-day retention;
+      quota failure is visible but does not prevent the draft fallback
+- [ ] confirm the unique `ci-windows-main-<run-id>-<attempt>` draft remains a
+      draft prerelease targeted at the dispatched SHA
+- [ ] confirm the draft has exactly one Windows ZIP and its `.sha256` sidecar
+- [ ] confirm a **COMPLETE** draft was redownloaded, checksum-verified,
+      extracted, and smoke-tested; never use an **INCOMPLETE** draft
+- [ ] treat both executables as unsigned test builds that may trigger
+      Microsoft Defender SmartScreen
+
 ## Tagging and publishing
 
 The publish flow is wired end-to-end in `.github/workflows/build.yml`. Pushing
