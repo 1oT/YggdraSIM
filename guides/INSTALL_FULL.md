@@ -139,7 +139,8 @@ YGGDRASIM_FLAVOR=full python -m PyInstaller --noconfirm --clean yggdrasim_main.s
 The `[full]` extra covers:
 
 - `pyudev; sys_platform == 'linux'`
-- `openpyxl` and `defusedxml` for optional SAIP spreadsheet extensions
+- `openpyxl` and `defusedxml` for SAIP spreadsheet extensions, which are
+  plugins supplied separately rather than shipped in this repository
 - `fastapi`, `uvicorn[standard]`, and `websockets` for headless
   `--web-server`
 

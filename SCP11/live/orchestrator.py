@@ -4268,16 +4268,18 @@ class SGP22Orchestrator:
                 bootstrap_end = next_offset + (len(bpp_bytes) - len(root_value))
                 segments.append(bpp_bytes[:bootstrap_end])
             elif child_tag in [b"\xA0", b"\xA1", b"\xA2", b"\xA3"]:
-                if len(child_value) > 0:
-                    if use_section_framing:
-                        if child_tag == b"\xA0":
-                            segments.append(child_raw)
-                        else:
-                            segments.append(self._encode_tlv_header(child_tag, len(child_value)))
-                            segments.extend(self._extract_sequence_members(child_value))
+                if use_section_framing:
+                    # An empty container still ships its header, matching the
+                    # segmenters in SCP11/orchestrator.py and
+                    # SCP11/local_access/session.py byte for byte.
+                    if child_tag == b"\xA0":
+                        segments.append(child_raw)
                     else:
-                        members = self._extract_sequence_members(child_value)
-                        segments.extend(members)
+                        segments.append(self._encode_tlv_header(child_tag, len(child_value)))
+                        if len(child_value) > 0:
+                            segments.extend(self._extract_sequence_members(child_value))
+                elif len(child_value) > 0:
+                    segments.extend(self._extract_sequence_members(child_value))
             else:
                 raise ValueError(f"Unexpected Bound Profile Package child tag: {child_tag.hex().upper()}")
             child_offset = next_offset

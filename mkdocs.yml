@@ -163,6 +163,7 @@ nav:
       - Enable, Disable, Delete a Profile: how-to/enable-disable-delete-profile.md
       - Inspect and Transcode SAIP: how-to/inspect-and-transcode-saip.md
       - Remote APDU Streaming: how-to/remote-apdu-streaming.md
+      - Run a Remote Lab Agent: how-to/run-a-remote-lab-agent.md
       - Install RemSIM / APDU Streaming: how-to/install-remsim-apdu-streaming.md
       - Run a HIL Capture: how-to/run-hil-capture.md
       - Replay a HIL pcap offline: how-to/replay-hil-pcap-offline.md

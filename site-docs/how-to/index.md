@@ -75,6 +75,15 @@ subsystem page that contains the full surface.
 
     [Open recipe](remote-apdu-streaming.md)
 
+-   :material-server-network: __Run a Remote Lab Agent__
+
+    ---
+
+    Publish rigs to a team with per-person tokens and exclusive session
+    locking in front of Card Bridge.
+
+    [Open recipe](run-a-remote-lab-agent.md)
+
 -   :material-lan: __Install RemSIM / APDU Streaming__
 
     ---

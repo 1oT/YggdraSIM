@@ -38,12 +38,19 @@ exactly that case.
 
 The base dependency set already installs the commit-pinned upstream `pySim`
 used by SAIP, SCP03/SCP80, and SCP11-local flows. Add the `[saip]` extra on
-workstations that host optional Excel import/export extensions; it installs
-the reviewed `openpyxl` and hardened XML parser dependency stack:
+workstations that host an Excel import/export extension; it installs the
+reviewed `openpyxl` and hardened XML parser dependency stack:
 
 ```bash
 python -m pip install -e '.[saip]'
 ```
+
+The extra supplies dependencies only. The Excel-to-SAIP generator itself is
+a plugin supplied separately, so on a plain checkout this extra adds no new
+operator surface -- `Package > Open` still refuses workbooks and points at
+the plugin action. Driving many profiles from a `.csv`, `.json`, `.jsonl`,
+or `.yaml` record set needs no extra and no plugin; see
+`guides/TEMPLATE_AND_TOKENS.md`.
 
 `yggdrasim --doctor` reports `pySim: OK` once the core dependency import
 probe succeeds. Spreadsheet extensions publish their GUI actions only when

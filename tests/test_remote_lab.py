@@ -942,3 +942,60 @@ def test_failed_remote_attach_releases_without_starting_heartbeat(
         )
     assert client.release_calls == 1
     assert client.heartbeat_calls == 0
+
+
+REMOTE_LAB_HOWTO = (
+    Path(__file__).resolve().parents[1]
+    / "site-docs"
+    / "how-to"
+    / "run-a-remote-lab-agent.md"
+)
+
+
+def _documented_example_config() -> dict[str, Any]:
+    """Return the first YAML block from the Remote Lab how-to page."""
+
+    import re
+
+    import yaml
+
+    text = REMOTE_LAB_HOWTO.read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^```yaml\n(?P<body>.*?)^```\s*$", text)
+    assert match is not None, "how-to page no longer carries a YAML example"
+    return yaml.safe_load(match.group("body"))
+
+
+def test_documented_example_config_parses_and_matches_its_field_table() -> None:
+    """The how-to page is the only Remote Lab config schema reference."""
+
+    config = parse_config(_documented_example_config())
+
+    assert config.agent.id == "lab-01"
+    assert config.agent.bind_host == "127.0.0.1"
+    assert config.agent.control_port == 8700
+    assert config.defaults.reservation_timeout_seconds == 30
+    assert config.defaults.heartbeat_timeout_seconds == 60
+    assert config.defaults.max_session_seconds == 14_400
+
+    roles = {token.id: token.role for token in config.access_tokens}
+    assert roles == {"alice": "user", "lab-admin": "admin"}
+
+    assert len(config.rigs) == 1
+    rig = config.rigs[0]
+    assert rig.id == "bench-a"
+    assert rig.enabled is True
+    assert rig.stream_proxy.external_port == 8801
+    assert rig.upstream.url == "http://127.0.0.1:8642/apdu"
+    # The page documents this default rather than spelling it in the example.
+    assert rig.locks == ("rig:bench-a",)
+
+
+def test_documented_example_config_rejects_a_port_collision() -> None:
+    """The page claims the loader refuses an agent/rig port overlap."""
+
+    payload = _documented_example_config()
+    payload["rigs"][0]["stream_proxy"]["external_port"] = payload["agent"][
+        "control_port"
+    ]
+    with pytest.raises(ValueError, match="conflicts with agent control port"):
+        parse_config(payload)

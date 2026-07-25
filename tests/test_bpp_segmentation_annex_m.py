@@ -117,6 +117,56 @@ class SegmenterAnnexMComplianceTests(unittest.TestCase):
         segments = session._segment_bound_profile_package(_build_reference_bpp())
         self._assert_v1_pattern(segments)
 
+    def test_every_segmenter_agrees_byte_for_byte_including_empty_containers(self):
+        # An empty A0/A1/A2/A3 is unusual but structurally legal, and it is
+        # where the four copies previously drifted: the live segmenter used
+        # to drop the container entirely instead of emitting its header.
+        bf23_tlv = wrap_tlv("BF23", wrap_tlv("80", b"\x10" * 16))
+        packages = (
+            _build_reference_bpp(),
+            wrap_tlv(
+                "BF36",
+                bf23_tlv + wrap_tlv("A0", wrap_tlv("87", b"\xAA")) + wrap_tlv("A1", b""),
+            ),
+            wrap_tlv(
+                "BF36",
+                bf23_tlv + wrap_tlv("A0", b"") + wrap_tlv("A1", wrap_tlv("88", b"\x01" * 8)),
+            ),
+        )
+        segmenters = (
+            self._make_main_orchestrator(),
+            self._make_test_orchestrator(),
+            self._make_live_orchestrator(),
+            LocalIsdrSession(apdu_channel=FakeApduChannel()),
+        )
+        for package in packages:
+            outputs = [
+                segmenter._segment_bound_profile_package(package)
+                for segmenter in segmenters
+            ]
+            for other in outputs[1:]:
+                self.assertEqual(outputs[0], other, package.hex().upper())
+
+    def test_live_legacy_flattened_mode_drops_container_headers(self):
+        # The opt-out exists for physical cards that reject section-framed
+        # payloads. It is pinned here so nobody mistakes it for the default:
+        # it emits exactly the bare members that leave a section-framing
+        # eUICC reporting a spurious early ProfileInstallationResult.
+        class LegacyCfg(FakeCfg):
+            BPP_INSTALL_USE_SECTION_FRAMING: bool = False
+
+        orchestrator = LiveOrchestrator(
+            cfg=LegacyCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=None,
+        )
+        self.assertFalse(orchestrator._bpp_install_uses_section_framing())
+        segments = orchestrator._segment_bound_profile_package(_build_reference_bpp())
+        self.assertEqual(
+            [_tag_of_segment(segment) for segment in segments],
+            [b"\xBF\x36", b"\x87", b"\x88", b"\x89", b"\x86", b"\x86"],
+        )
+
     def test_rejects_bpp_whose_first_child_is_not_bf23(self):
         malformed_bpp = wrap_tlv("BF36", wrap_tlv("A0", wrap_tlv("87", b"\x00")))
         orchestrator = self._make_main_orchestrator()

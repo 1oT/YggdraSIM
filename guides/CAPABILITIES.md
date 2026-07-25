@@ -36,9 +36,9 @@ YggdraSIM currently provides:
 - optional encryption for stored runtime payloads
 - a writable runtime-tree model for frozen executables
 - commit-pinned upstream `pySim` integration for SAIP, SCP03/SCP80, and
-  SCP11-related flows; `[saip]` adds the optional spreadsheet extension
-  dependencies, while a local `pysim/` developer checkout still takes
-  priority when present
+  SCP11-related flows; `[saip]` adds dependencies for spreadsheet extensions
+  that are supplied as plugins rather than shipped here, while a local
+  `pysim/` developer checkout still takes priority when present
 - a repository-local registry for stable entry points and symbols
 - a first-party pytest suite covering module behavior and regressions
 

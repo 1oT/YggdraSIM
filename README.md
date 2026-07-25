@@ -5,7 +5,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 # YggdraSIM
 
-YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. Upstream `pySim` is a commit-pinned core dependency; install `pip install -e '.[saip]'` when optional SAIP spreadsheet import/export extensions are also required.
+YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. Upstream `pySim` is a commit-pinned core dependency; install `pip install -e '.[saip]'` when you are also hosting a spreadsheet import/export extension, which is a separately supplied plugin rather than part of this repository.
 
 > **Releases.** v1.0.1 was tagged on 2026-06-05 for SCP11 notification
 > recovery fixes on the v1 line. Check out the frozen v1.0.0 footprint
@@ -132,9 +132,12 @@ python -m pip install -e '.[saip]'
 
 The base install resolves the commit-pinned upstream `pySim` dependency used
 by SAIP, SCP03/SCP80, and SCP11-local flows. The `[saip]` extra adds
-`openpyxl` and `defusedxml`, which are required by optional spreadsheet
-import/export extensions. This keeps a bare runtime lean without leaving the
-documented SAIP workstation install partially functional.
+`openpyxl` and `defusedxml` for spreadsheet import/export extensions to
+build on. No shipped module imports them: the Excel-to-SAIP generator itself
+is a plugin supplied separately, and without one this extra adds no operator
+surface. Batch profile generation from `.csv`, `.json`, `.jsonl`, `.yaml`
+files needs no extra at all -- see
+[guides/TEMPLATE_AND_TOKENS.md](guides/TEMPLATE_AND_TOKENS.md).
 
 If you are working against an unreleased upstream pySim branch you can
 still drop a developer checkout at `<repo>/pysim` (`git clone
