@@ -338,3 +338,6 @@ jobs:
           & gh release edit $env:TEST_TAG `
             --title "INCOMPLETE — WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
             --notes-file $notes
+          # Best effort: the run has already failed, and a cleanup blip must
+          # not mask the real failure with a second red step.
+          exit 0

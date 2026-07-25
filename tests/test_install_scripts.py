@@ -20,6 +20,7 @@ so the test suite stays runnable on Linux / macOS CI hosts.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import unittest
@@ -28,6 +29,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALL_DIR = REPO_ROOT / "scripts" / "install"
+PINNED_ACTION = re.compile(r"[^@\s]+@[0-9a-f]{40}")
 
 POSIX_SCRIPTS = (
     "install-linux.sh",
@@ -341,6 +343,24 @@ class CiWorkflowCoverageTests(unittest.TestCase):
             1,
         )[0]
         self.assertIn("persist-credentials: false", checkout_step)
+
+    def test_every_workflow_action_is_pinned_to_a_commit_sha(self) -> None:
+        workflow_dir = REPO_ROOT / ".github" / "workflows"
+        workflows = sorted(workflow_dir.glob("*.yml"))
+        self.assertTrue(workflows, "no workflows found to audit")
+        unpinned: list[str] = []
+        for workflow in workflows:
+            text = workflow.read_text(encoding="utf-8")
+            for match in re.finditer(r"(?m)^\s*uses:\s*([^\s#]+)", text):
+                action_ref = match.group(1)
+                if not PINNED_ACTION.fullmatch(action_ref):
+                    unpinned.append(f"{workflow.name}: {action_ref}")
+        self.assertEqual(
+            unpinned,
+            [],
+            "a mutable tag lets an upstream retag change what CI runs: "
+            + ", ".join(unpinned),
+        )
 
 
 if __name__ == "__main__":

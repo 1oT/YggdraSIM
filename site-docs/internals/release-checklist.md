@@ -123,8 +123,11 @@ pushes never publish test assets.
       **INCOMPLETE**; do not mistake partial assets for a complete test set
 - [ ] verify downloaded assets against their sidecars or `SHA256SUMS` before
       testing them
-- [ ] manually remove stale `ci-main-*` drafts and their transient tags after
-      diagnosis/testing; the workflow intentionally does not auto-delete them
+- [ ] remove a stale `ci-main-*` draft yourself once diagnosis is done. The
+      build workflow carries no delete path by design; `CI Draft Cleanup`
+      (`.github/workflows/ci-draft-cleanup.yml`) reaps `ci-main-*` and
+      `ci-windows-main-*` drafts older than seven days on a daily schedule,
+      so anything worth keeping must be published or copied before then
 
 This draft flow does not replace or weaken the production flow below. It never
 publishes a signed release, and it is not evidence that Windows signing,

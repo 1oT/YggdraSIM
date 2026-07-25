@@ -11,14 +11,21 @@ production publishing path.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
+import textwrap
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DRAFT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "main-test-release.yml"
 PRODUCTION_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
+CLEANUP_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-draft-cleanup.yml"
 
 PINNED_ACTION = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
 TAG_ONLY_CONDITION = "if: startsWith(github.ref, 'refs/tags/v')"
@@ -459,6 +466,99 @@ class ProductionReleaseIsolationTests(unittest.TestCase):
             3,
             "tag identity must be checked before and after release creation",
         )
+
+
+GH_STUB = """#!/bin/sh
+case "$1 $2" in
+  "release list") cat "$GH_FIXTURE" ;;
+  "release view") echo true ;;
+  "release delete") echo "$3" >> "$GH_DELETED" ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+def _cleanup_script() -> str:
+    """Return the reaper's shell body, dedented out of the workflow YAML."""
+
+    text = _read(CLEANUP_WORKFLOW)
+    _, _, body = text.partition("        run: |\n")
+    if not body:
+        raise AssertionError("cleanup workflow has no run block")
+    return textwrap.dedent(body)
+
+
+def _retention_days() -> int:
+    """Read the configured window so the fixture ages cannot drift from it."""
+
+    match = re.search(
+        r'(?m)^\s*RETENTION_DAYS:\s*"(\d+)"\s*$',
+        _read(CLEANUP_WORKFLOW),
+    )
+    if match is None:
+        raise AssertionError("cleanup workflow does not set RETENTION_DAYS")
+    return int(match.group(1))
+
+
+@unittest.skipUnless(shutil.which("bash"), "bash is required")
+class CleanupReaperTargetingTests(unittest.TestCase):
+    """The reaper holds the only delete path, so its filter is exercised."""
+
+    def _run(self, releases: list[tuple[str, int]]) -> list[str]:
+        now = datetime.now(timezone.utc)
+        fixture = "".join(
+            "{}\t{}\n".format(
+                tag,
+                (now - timedelta(days=age)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            )
+            for tag, age in releases
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            stub = bin_dir / "gh"
+            stub.write_text(GH_STUB, encoding="utf-8")
+            stub.chmod(0o755)
+            (root / "fixture.tsv").write_text(fixture, encoding="utf-8")
+            deleted = root / "deleted.txt"
+            deleted.touch()
+
+            env = dict(os.environ)
+            env.update(
+                PATH=f"{bin_dir}{os.pathsep}{env['PATH']}",
+                GH_FIXTURE=str(root / "fixture.tsv"),
+                GH_DELETED=str(deleted),
+                RUNNER_TEMP=str(root),
+                GITHUB_STEP_SUMMARY=str(root / "summary.md"),
+                RETENTION_DAYS=str(_retention_days()),
+            )
+            result = subprocess.run(
+                ["bash", "-c", _cleanup_script()],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return deleted.read_text(encoding="utf-8").split()
+
+    def test_only_aged_run_scoped_ci_drafts_are_deleted(self) -> None:
+        aged = _retention_days() * 2
+        deleted = self._run(
+            [
+                ("ci-main-123-1", aged),
+                ("ci-windows-main-456-2", aged),
+                ("ci-main-789-1", 0),
+                ("v1.2.3", aged),
+                ("ci-main-nightly", aged),
+                ("ci-main-123-1-extra", aged),
+                ("release-ci-main-1-1", aged),
+            ]
+        )
+        self.assertEqual(deleted, ["ci-main-123-1", "ci-windows-main-456-2"])
+
+    def test_nothing_is_deleted_when_no_draft_is_aged(self) -> None:
+        self.assertEqual(self._run([("ci-main-123-1", 0)]), [])
 
 
 if __name__ == "__main__":

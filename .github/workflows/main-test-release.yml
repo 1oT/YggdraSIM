@@ -738,7 +738,10 @@ jobs:
           set -euo pipefail
           STAGE="${RUNNER_TEMP}/release-assets"
           # macOS ships Bash 3.2, which has no ``mapfile`` builtin.
-          ASSETS=("${STAGE}"/*)
+          ASSETS=()
+          while IFS= read -r ASSET; do
+            ASSETS+=("${ASSET}")
+          done < <(find "${STAGE}" -maxdepth 1 -type f | sort)
           test "${#ASSETS[@]}" -eq 2
           gh release upload "${TEST_TAG}" "${ASSETS[@]}"
 
@@ -801,7 +804,12 @@ jobs:
             "${EXPECTED_PRIMARY_ASSETS[@]}"
             "${EXPECTED_SIDECARS[@]}"
           )
-          test "${#EXPECTED_INITIAL[@]}" -eq 14
+          test "${#EXPECTED_INITIAL[@]}" -eq \
+            "$(( ${#EXPECTED_PRIMARY_ASSETS[@]} * 2 ))"
+          # Carried to the redownload step, which also sees the SBOM and the
+          # global SHA256SUMS manifest added by the two steps in between.
+          printf 'FINAL_ASSET_COUNT=%s\n' \
+            "$(( ${#EXPECTED_INITIAL[@]} + 2 ))" >> "${GITHUB_ENV}"
 
           test "$(gh release view "${TEST_TAG}" --json isDraft \
             --jq '.isDraft')" = "true"
@@ -890,7 +898,7 @@ jobs:
           find "${VERIFY_DIR}" -maxdepth 1 -type f -printf '%f\n' \
             | sort > "${LOCAL_NAMES}"
           diff -u "${SERVER_NAMES}" "${LOCAL_NAMES}"
-          test "$(wc -l < "${SERVER_NAMES}")" -eq 16
+          test "$(wc -l < "${SERVER_NAMES}")" -eq "${FINAL_ASSET_COUNT}"
           test -s \
             "${VERIFY_DIR}/yggdrasim-${VERSION}-UNSIGNED-TEST-${SHORT_SHA}.cdx.json"
           (
@@ -911,9 +919,9 @@ jobs:
           cat > "${NOTES}" <<EOF
           # COMPLETE — UNSIGNED TEST BUILD — NOT FOR PRODUCTION
 
-          All seven primary assets, seven individual SHA-256 sidecars, the
-          CycloneDX SBOM, and the global \`SHA256SUMS\` manifest were
-          redownloaded and verified for exact revision \`${EXPECTED_SHA}\`.
+          Every primary asset, its individual SHA-256 sidecar, the CycloneDX
+          SBOM, and the global \`SHA256SUMS\` manifest were redownloaded and
+          verified for exact revision \`${EXPECTED_SHA}\`.
 
           Workflow run:
           ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}
