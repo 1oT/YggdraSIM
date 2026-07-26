@@ -229,6 +229,7 @@ decodes too.
 | `metadata_lint` | lint an SGP.22 profile metadata document |
 | `eim_package_lint` | validate an SGP.32 eIM package against the ES2+ schema |
 | `plugin_status` | report which optional plugin-backed capabilities are available |
+| `runtime_status` | report the runtime root, build flavor, and live service state |
 | `session_diff` | diff the APDU traces of two session recordings |
 | `scan_identifiers` | sweep a file for telecom identifiers |
 
@@ -261,6 +262,16 @@ behind the same opt-in as `pcsc_transmit`. Enabling card access is
 therefore not only a statement about the reader on this machine; it is a
 statement about every relay this host can reach. For a Remote Lab rig the
 token file holds the session token, not the bridge's own token.
+
+### Service state is read-only
+
+`runtime_status` reports the runtime root, build flavor, and whether the
+HIL bridge and Remote Lab have live state. It does not start or stop
+anything. Stopping a rig mid-session is a different class of risk from a
+bad APDU, and the value does not justify handing that to an agent.
+
+Rig entries come back through the registry's redacted view: it reports
+whether a token file exists, never its path or contents.
 
 ## Resources
 

@@ -169,6 +169,7 @@ def test_registered_tools_cover_the_documented_surface(server) -> None:
         "saip_diff",
         "metadata_lint",
         "eim_package_lint",
+        "runtime_status",
     }
     assert expected <= registered, expected - registered
 
@@ -976,3 +977,64 @@ def test_upstream_debug_logging_is_quietened(server) -> None:
 
     for name in ("pySim", "osmocom", "construct"):
         assert logging.getLogger(name).level >= logging.WARNING, name
+
+
+# --------------------------------------------------------------------------
+# Tier 3: read-only service state
+# --------------------------------------------------------------------------
+
+
+def test_runtime_status_reports_the_runtime_and_flavor(server) -> None:
+    payload = json.loads(server.runtime_status())
+    assert payload["runtime_root"]
+    assert payload["flavor"]
+    assert set(payload["services"]) == {"hil_bridge", "remote_lab"}
+
+
+def test_runtime_status_says_when_a_service_is_not_running(server) -> None:
+    payload = json.loads(server.runtime_status())
+    hil = payload["services"]["hil_bridge"]
+    assert hil["running"] is False
+    assert "not running" in hil.get("note", "")
+
+
+def test_runtime_status_never_leaks_a_rig_token(server, monkeypatch, tmp_path) -> None:
+    """A rig token reaching the model would be a credential disclosure."""
+
+    import yggdrasim_common.remote_lab.registry as registry
+
+    secret = tmp_path / "rig.token"
+    secret.write_text("s3cret-rig-token", encoding="utf-8")
+    device = {
+        "id": "bench-a",
+        "name": "Bench A",
+        "auth": {"token_file": str(secret), "scheme": "bearer"},
+        "agent_host": "127.0.0.1",
+    }
+    monkeypatch.setattr(registry, "list_devices", lambda: [
+        {**device, "auth": {"scheme": "bearer", "token_present": True}},
+    ])
+    rendered = server.runtime_status()
+    assert "s3cret-rig-token" not in rendered
+    assert str(secret) not in rendered
+    assert json.loads(rendered)["services"]["remote_lab"]["count"] == 1
+
+
+def test_runtime_status_survives_an_unreadable_registry(server, monkeypatch) -> None:
+    import yggdrasim_common.remote_lab.registry as registry
+
+    def _boom():
+        raise RuntimeError("registry is corrupt")
+
+    monkeypatch.setattr(registry, "list_devices", _boom)
+    payload = json.loads(server.runtime_status())
+    assert "registry is corrupt" in payload["services"]["remote_lab"]["note"]
+
+
+def test_runtime_status_is_read_only(server) -> None:
+    """It reports service state; it must not offer lifecycle control."""
+
+    source = (REPO_ROOT / "Tools" / "YggdraMCP" / "server.py").read_text(encoding="utf-8")
+    body = source.split("def runtime_status(", 1)[1].split("\n@mcp.tool", 1)[0]
+    for forbidden in ("subprocess", "Popen", ".start(", ".stop(", "kill", "terminate"):
+        assert forbidden not in body, forbidden

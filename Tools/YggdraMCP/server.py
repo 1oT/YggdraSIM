@@ -1492,6 +1492,83 @@ def eim_package_lint(file_path: str) -> str:
         return json.dumps({"error": f"eIM package lint failed: {exc}"})
 
 
+@mcp.tool(annotations=PROBES_WORLD)
+def runtime_status() -> str:
+    """Report the runtime root, build flavor, and any live service state.
+
+    Read-only. Services are started and stopped by an operator, not from
+    here: stopping a rig mid-session is a different class of risk from a
+    bad APDU and the value does not justify it.
+
+    Secrets are never included. Remote Lab devices come back through the
+    registry's redacted view, which reports only whether a token file
+    exists rather than where it is or what it contains.
+    """
+    report: dict[str, Any] = {"services": {}}
+
+    try:
+        from yggdrasim_common.runtime_paths import runtime_path, runtime_root
+
+        report["runtime_root"] = runtime_root()
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Runtime paths unavailable: {exc}"})
+
+    try:
+        from yggdrasim_common.flavor import get_flavor, get_flavor_source
+
+        report["flavor"] = get_flavor()
+        report["flavor_source"] = get_flavor_source()
+    except Exception:  # noqa: BLE001
+        report["flavor"] = "unknown"
+
+    try:
+        from yggdrasim_common.__about__ import __version__
+
+        report["version"] = __version__
+    except Exception:  # noqa: BLE001
+        pass
+
+    # HIL supervisor: a status document written by the running supervisor.
+    hil: dict[str, Any] = {"running": False}
+    try:
+        from Tools.HilBridge.supervisor import SUPERVISOR_STATE_FILENAME
+
+        state_file = Path(runtime_path("state", SUPERVISOR_STATE_FILENAME))
+        hil["state_path"] = str(state_file)
+        if state_file.is_file():
+            payload = json.loads(state_file.read_text(encoding="utf-8"))
+            hil["running"] = True
+            for key in ("pid", "status", "started_at", "usb_vidpid", "host", "port"):
+                if key in payload:
+                    hil[key] = payload[key]
+        else:
+            hil["note"] = "No supervisor state document; the HIL bridge is not running."
+    except ImportError as exc:
+        hil["note"] = f"HIL support unavailable: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        hil["note"] = f"Could not read supervisor state: {exc}"
+    report["services"]["hil_bridge"] = hil
+
+    # Remote Lab: registry of known rigs, tokens redacted by the registry.
+    lab: dict[str, Any] = {"devices": [], "count": 0}
+    try:
+        from yggdrasim_common.remote_lab.registry import list_devices, registry_path
+
+        lab["registry_path"] = registry_path()
+        devices = list_devices()
+        lab["devices"] = devices
+        lab["count"] = len(devices)
+        if not devices:
+            lab["note"] = "No rigs registered."
+    except ImportError as exc:
+        lab["note"] = f"Remote Lab support unavailable: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        lab["note"] = f"Could not read the rig registry: {exc}"
+    report["services"]["remote_lab"] = lab
+
+    return json.dumps(report, indent=2, default=str)
+
+
 @mcp.tool(annotations=READ_ONLY)
 def plugin_status() -> str:
     """Report which optional plugin-backed capabilities this server has.
