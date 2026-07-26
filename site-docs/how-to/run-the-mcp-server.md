@@ -230,7 +230,7 @@ decodes too.
 | `eim_package_lint` | validate an SGP.32 eIM package against the ES2+ schema |
 | `plugin_status` | report which optional plugin-backed capabilities are available |
 | `runtime_status` | report the runtime root, build flavor, and live service state |
-| `profile_package_run` | run a batch of SAIP Profile Package shell commands |
+| `shell_run` | run a batch of operator-shell commands; **two shells drive a real card** |
 | `session_diff` | diff the APDU traces of two session recordings |
 | `scan_identifiers` | sweep a file for telecom identifiers |
 
@@ -266,34 +266,90 @@ token file holds the session token, not the bridge's own token.
 
 ### Running shell commands
 
-`profile_package_run` executes a non-interactive batch in the SAIP Profile
-Package shell, so an agent can drive the profile workflow rather than only
-inspect single files:
+!!! danger "Two of these shells drive a real card"
+
+    With every opt-in set, verbs reachable through `shell_run` can install
+    applets, write keys, export a key bag, and disable or delete a profile.
+    **None of that can be undone.** Use a throwaway test card, never one
+    carrying live credentials.
+
+    Nothing reaches a card unless *you* set the environment variables
+    below. They are off by default and stay off until an operator turns
+    them on deliberately.
+
+`shell_run` executes a non-interactive batch in an operator shell, so an
+agent can drive a workflow rather than only inspect single files:
 
 ```text
-USE /abs/path/profile.der; INFO; TREE; LINT; EXIT
+shell="profile_package"     USE /abs/profile.der; INFO; TREE; LINT; EXIT
+shell="scp03"               SELECT 3F00; READ; INFO; EXIT
+shell="scp11_local_access"  LIST; PROFILE; METADATA; EXIT
 ```
 
-Three rules make that safe to offer.
+| Shell | Drives a card | Purpose |
+| --- | --- | --- |
+| `profile_package` | no | SAIP package inspection and authoring |
+| `scp03` | **yes** | card admin: filesystem, registry, GlobalPlatform |
+| `scp11_local_access` | **yes** | local eUICC profile management over ES10 |
 
-**Only file-backed shells.** SCP03 opens a PC/SC reader during startup,
-before any verb runs, so exposing it would put card access behind a tool
-whose name says nothing about cards. It is deliberately absent.
+### The four gates
 
-**Verbs are allow-listed, not deny-listed.** The shell carries 77 verbs.
-Read verbs run by default; verbs that write a file need
-`YGGDRASIM_MCP_ALLOW_SHELL_WRITE=1`; interactive verbs are always refused
-because a batch has no terminal and they would hang until the timeout. An
-unrecognised verb is refused rather than assumed harmless, and a refusal
-anywhere in the batch blocks the whole batch before anything runs.
+**A card-driving shell needs `YGGDRASIM_MCP_ALLOW_CARD`**, checked before
+the process starts. SCP03 connects to a reader during startup, so even
+`HELP` would touch hardware; refusing early means it never gets that far.
 
-**Pass absolute paths.** The shell resolves a relative path against its own
-profile and transcode directories, not the working directory, so a relative
-argument can silently act on a different package. The tool flags any
-relative path argument and reports when the shell logged a missing path.
+**Verbs are allow-listed, not deny-listed.** SCP03 alone carries 62 verbs.
+Read verbs run once the shell itself is permitted; verbs that write need
+`YGGDRASIM_MCP_ALLOW_SHELL_WRITE`; destructive verbs additionally need
+`YGGDRASIM_MCP_ALLOW_DESTRUCTIVE`. An unrecognised verb is refused rather
+than assumed harmless, and a refusal anywhere blocks the whole batch
+before the process starts.
 
-State does not survive between calls, since each batch is a fresh process.
-Put a whole flow in one batch.
+**Verbs that execute a command file are always refused.** `RUN` and
+`SCRIPT` take a file of commands, and the classifier cannot see inside it.
+Allowing them would let a caller smuggle any verb past every other rule.
+
+**Verbs taking a secret as an argument are always refused.** A tool
+argument reaches the model provider, so `DERIVE-OPC` would put a Ki in a
+transcript.
+
+### Enabling it
+
+Opt in on the MCP server entry, so the choice is persistent and visible
+rather than made per call:
+
+```json
+{
+  "mcpServers": {
+    "yggdrasim": {
+      "command": "yggdrasim-mcp",
+      "env": {
+        "YGGDRASIM_MCP_ALLOW_CARD": "1",
+        "YGGDRASIM_MCP_ALLOW_SHELL_WRITE": "1"
+      }
+    }
+  }
+}
+```
+
+Add `YGGDRASIM_MCP_ALLOW_DESTRUCTIVE` only when you specifically intend an
+agent to be able to delete a profile or install an applet unattended.
+
+### Two things to know
+
+**Pass absolute paths.** A shell resolves a relative path against its own
+profile and transcode directories, not the working directory, so a
+relative argument can silently act on a different package. The tool flags
+any relative path argument and reports when the shell logged a missing
+path.
+
+**State does not survive between calls**, since each batch is a fresh
+process. Put a whole flow in one batch.
+
+Only shells whose verbs were enumerated in full are offered. SCP80,
+SCP11-live, and SCP11-eIM register their commands differently and are
+absent until their verbs can be classified from evidence: guessing a
+classification for a card shell is how an agent wipes one.
 
 ### Service state is read-only
 

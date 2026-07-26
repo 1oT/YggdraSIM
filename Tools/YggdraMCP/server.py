@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -1538,31 +1539,111 @@ def _relative_path_arguments(batch: list[str]) -> list[str]:
 
 SHELL_WRITE_ENV = "YGGDRASIM_MCP_ALLOW_SHELL_WRITE"
 
-#: Verbs that only read: inspect, report, or print. Safe by default.
-_SHELL_READ_VERBS = frozenset({
-    "CHECK", "DIFF", "DIFF-PRESET", "DUMP", "HELP", "INFO", "INSPECT",
-    "LINT", "LIST", "LIST-AKA", "LIST-TOKENS", "PRESETS", "PREVIEW-PRESET",
-    "PROFILE-DIR", "PWD", "RELEASE-GATE", "STATUS", "TOKENS", "TREE",
-    "TYPE", "USE", "OPEN", "EXIT", "QUIT",
-})
+#: Refused in every shell: these execute a file of commands, so nothing
+#: inside them ever reaches the verb gate.
+_COMMAND_FILE_VERBS = frozenset({"RUN", "SCRIPT"})
 
-#: Verbs that write a file or mutate the open package. Second opt-in.
-_SHELL_WRITE_VERBS = frozenset({
-    "ADD", "ADD-TOKEN", "APPLY", "APPLY-SIDECAR", "APPLY-TEMPLATE",
-    "APPLY-TOKENS", "DELETE", "ENCODE-JSON", "EXPORT", "EXPORT-CSV",
-    "EXPORT-SIDECAR", "EXPORT-TOKENS", "EXPORT-TOKENS-CSV", "EXTRACT-APPS",
-    "GENERATE-BATCH", "GENERATE-PROFILE", "GENERATE-TEMPLATE", "IMPORT-CSV",
-    "IMPORT-TOKENS-CSV", "NEW-PROFILE", "NEW-TEMPLATE", "PROVISION-AKA",
-    "RANDOMIZE-AKA", "REMOVE", "REMOVE-NAA", "REMOVE-TOKEN", "RENAME",
-    "RENAME-TOKEN", "RETOKENISE", "RETOKENISE-LENGTHS", "RETOKENIZE",
-    "RETOKENIZE-LENGTHS", "SET", "SET-TOKEN", "SPLIT", "TRANSCODE-DIR",
-})
+#: Refused in every shell: a tool argument reaches the model provider, so a
+#: verb taking key material would put a Ki in a transcript.
+_SECRET_ARGUMENT_VERBS = frozenset({"DERIVE-OPC"})
 
-#: Interactive verbs. Always refused: a batch has no terminal, so these hang.
-_SHELL_INTERACTIVE_VERBS = frozenset({
-    "DIFF-TUI", "NEW-PROFILE-WIZARD", "TRANSCODE-TUI", "TUI", "WIZARD",
-    "WATCH-SIMCARD", "QA",
-})
+
+@dataclass(frozen=True)
+class _ShellSpec:
+    """One exposed shell and how each of its verbs is treated."""
+
+    module: str
+    summary: str
+    #: True when the shell opens a PC/SC reader during startup.
+    card: bool
+    read: frozenset
+    write: frozenset
+    destructive: frozenset
+    interactive: frozenset = frozenset()
+
+
+#: Only shells whose verbs were enumerated in full appear here. Guessing a
+#: classification for a card shell is how an agent wipes a card.
+_SHELLS: dict[str, _ShellSpec] = {
+    "profile_package": _ShellSpec(
+        module="Tools.ProfilePackage.main",
+        summary="SAIP profile package inspection and authoring (files only)",
+        card=False,
+        read=frozenset({
+            "CHECK", "DIFF", "DIFF-PRESET", "DUMP", "HELP", "INFO", "INSPECT",
+            "LINT", "LIST", "LIST-AKA", "LIST-TOKENS", "PRESETS",
+            "PREVIEW-PRESET", "PROFILE-DIR", "PWD", "RELEASE-GATE", "STATUS",
+            "TOKENS", "TREE", "TYPE", "USE", "OPEN", "EXIT", "QUIT",
+        }),
+        write=frozenset({
+            "ADD", "ADD-TOKEN", "APPLY", "APPLY-SIDECAR", "APPLY-TEMPLATE",
+            "APPLY-TOKENS", "ENCODE-JSON", "EXPORT", "EXPORT-CSV",
+            "EXPORT-SIDECAR", "EXPORT-TOKENS", "EXPORT-TOKENS-CSV",
+            "EXTRACT-APPS", "GENERATE-BATCH", "GENERATE-PROFILE",
+            "GENERATE-TEMPLATE", "IMPORT-CSV", "IMPORT-TOKENS-CSV",
+            "NEW-PROFILE", "NEW-TEMPLATE", "RENAME", "RENAME-TOKEN",
+            "RETOKENISE", "RETOKENISE-LENGTHS", "RETOKENIZE",
+            "RETOKENIZE-LENGTHS", "SET", "SET-TOKEN", "SPLIT", "TRANSCODE-DIR",
+        }),
+        destructive=frozenset({
+            "DELETE", "REMOVE", "REMOVE-NAA", "REMOVE-TOKEN",
+            "PROVISION-AKA", "RANDOMIZE-AKA",
+        }),
+        interactive=frozenset({
+            "DIFF-TUI", "NEW-PROFILE-WIZARD", "TRANSCODE-TUI", "TUI",
+            "WIZARD", "WATCH-SIMCARD", "QA",
+        }),
+    ),
+    "scp03": _ShellSpec(
+        module="SCP03",
+        summary="Card admin: filesystem, registry, GlobalPlatform (DRIVES A CARD)",
+        card=True,
+        read=frozenset({
+            "AIDS", "ARR", "ATR", "BINDS", "CERT-INFO", "GET-IOT", "GUIDE",
+            "HELP", "INFO", "KEYS", "LIST", "LIST-IOT", "OTA", "PROFILE-DIFF",
+            "READ", "RECORD", "SCAN", "SELECT", "SHOW", "VALIDATE", "EXIT",
+            "QA", "DEBUG", "VERBOSE",
+        }),
+        write=frozenset({
+            "AUTH-SD", "CLEAR-GOLD-PROFILE", "DUMP-FS", "EXPORT-EUICC",
+            "GOLD-PROFILE", "LOGOUT", "RESET", "SCP02-SD", "SCP03-SD",
+            "SET-AID-ALIAS", "SET-DEFAULT", "SET-GOLD-PROFILE", "STK",
+            "UPDATE",
+        }),
+        destructive=frozenset({
+            # Applet lifecycle, raw card writes, and key-bag export.
+            "EXTRADITE", "INSTALL", "INSTALL-APP", "INSTALL-CAP",
+            "INSTALL-EXTRADITION", "INSTALL-FILE", "INSTALL-FOR-INSTALL",
+            "INSTALL-FOR-LOAD", "INSTALL-INSTALL", "INSTALL-INSTANCE",
+            "INSTALL-LOAD", "INSTALL-PERSONALIZE", "INSTALL-REGISTRY",
+            "INSTALL-SELECTABLE", "LOAD", "LOAD-CAP", "MAKE-SELECTABLE",
+            "PERSONALIZE", "REGISTRY-UPDATE", "STORE-DATA", "EXPORT-KEYBAG",
+        }),
+    ),
+    "scp11_local_access": _ShellSpec(
+        module="SCP11.local_access.main",
+        summary="Local eUICC profile management over ES10 (DRIVES A CARD)",
+        card=True,
+        read=frozenset({
+            "CERTS", "DISCOVER", "DISCOVER-VIA-LOCAL-SNAPSHOT",
+            "DISCOVER-VIA-SGP22-MANAGER", "EID", "EIM-DISCOVER", "ENABLED",
+            "EXPLAIN-LAST", "GET-METADATA", "HELP", "INFO", "LIST", "METADATA",
+            "METADATA-LINT", "PROFILE", "SCAN", "SMDP-CERTS", "STATUS",
+            "EXIT", "QUIT", "QA",
+        }),
+        write=frozenset({
+            "CANCEL", "DISABLE", "DISABLE-PROFILE", "ENABLE", "ENABLE-PROFILE",
+            "RECORD", "START", "STOP", "STORE-METADATA",
+            "STORE-METADATA-CUSTOM", "STORE-METADATA-CUSTOM-ALL",
+            "UPDATE-METADATA",
+        }),
+        destructive=frozenset({
+            "DELETE", "DELETE-PROFILE", "LOAD-PROFILE", "METADATA-CLEAR",
+            "METADATA-RESET", "PROFILE-CLEAR", "PROFILE-RESET",
+            "EXPORT-KEYBAG",
+        }),
+    ),
+}
 
 _SHELL_TIMEOUT_SECONDS = 120
 _SHELL_OUTPUT_LIMIT = 60_000
@@ -1574,29 +1655,77 @@ def shell_write_allowed() -> bool:
     return _env_on(SHELL_WRITE_ENV)
 
 
-def classify_shell_command(command: str) -> dict[str, Any]:
+def classify_shell_command(command: str, shell: str = "profile_package") -> dict[str, Any]:
     """Classify one shell command by its leading verb."""
 
+    spec = _SHELLS.get(shell)
     verb = str(command or "").strip().split()[0].upper() if command.strip() else ""
     if not verb:
         return {"verb": "", "risk": "empty"}
-    if verb in _SHELL_INTERACTIVE_VERBS:
+    if spec is None:
+        return {"verb": verb, "risk": "unknown_shell"}
+    if verb in _COMMAND_FILE_VERBS:
+        return {"verb": verb, "risk": "command_file"}
+    if verb in _SECRET_ARGUMENT_VERBS:
+        return {"verb": verb, "risk": "secret_argument"}
+    if verb in spec.interactive:
         return {"verb": verb, "risk": "interactive"}
-    if verb in _SHELL_READ_VERBS:
+    if verb in spec.destructive:
+        return {"verb": verb, "risk": "destructive"}
+    if verb in spec.read:
         return {"verb": verb, "risk": "read"}
-    if verb in _SHELL_WRITE_VERBS:
+    if verb in spec.write:
         return {"verb": verb, "risk": "write"}
     return {"verb": verb, "risk": "unknown"}
 
 
-def _shell_batch_refusal(commands: list[str]) -> str | None:
+def _shell_batch_refusal(commands: list[str], shell: str = "profile_package") -> str | None:
     """Return a refusal for the first command that may not run, else None."""
 
+    spec = _SHELLS[shell]
+    # Checked before the process starts: SCP03 connects to a reader during
+    # startup, so even HELP would touch hardware.
+    if spec.card and not card_access_allowed():
+        return json.dumps({
+            "error": (
+                f"Refused: the {shell} shell opens a card reader during "
+                f"startup, so it needs {CARD_ACCESS_ENV}=1 even to run HELP."
+            ),
+            "shell": shell,
+            "drives_a_card": True,
+        })
+
     for command in commands:
-        verdict = classify_shell_command(command)
+        verdict = classify_shell_command(command, shell)
         risk = verdict["risk"]
         if risk == "empty":
             continue
+        if risk == "command_file":
+            return json.dumps({
+                "error": (
+                    f"Refused: {verdict['verb']} executes a file of commands, "
+                    "which would carry any verb past this gate unchecked."
+                ),
+                "verb": verdict["verb"],
+            })
+        if risk == "secret_argument":
+            return json.dumps({
+                "error": (
+                    f"Refused: {verdict['verb']} takes key material as an "
+                    "argument, and a tool argument reaches the model provider."
+                ),
+                "verb": verdict["verb"],
+            })
+        if risk == "destructive" and not destructive_allowed():
+            return json.dumps({
+                "error": (
+                    f"Refused: {verdict['verb']} is destructive and cannot be "
+                    f"undone. It needs {CARD_ACCESS_ENV}=1 and "
+                    f"{DESTRUCTIVE_ENV}=1."
+                ),
+                "verb": verdict["verb"],
+                "risk": "destructive",
+            })
         if risk == "interactive":
             return json.dumps({
                 "error": (
@@ -1609,8 +1738,8 @@ def _shell_batch_refusal(commands: list[str]) -> str | None:
             return json.dumps({
                 "error": (
                     f"Refused: {verdict['verb']} is not a recognised verb for "
-                    "this shell. Unknown verbs are refused rather than assumed "
-                    "safe; call it with HELP to see what is available."
+                    f"the {shell} shell. Unknown verbs are refused rather than "
+                    "assumed safe; run HELP to see what is available."
                 ),
                 "verb": verdict["verb"],
             })
@@ -1627,36 +1756,56 @@ def _shell_batch_refusal(commands: list[str]) -> str | None:
 
 
 @mcp.tool(annotations=ToolAnnotations(
-    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False,
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True,
 ))
-def profile_package_run(commands: str, timeout_seconds: int = _SHELL_TIMEOUT_SECONDS) -> str:
-    """Run a batch of SAIP Profile Package shell commands and return the output.
+def shell_run(
+    shell: str,
+    commands: str,
+    timeout_seconds: int = _SHELL_TIMEOUT_SECONDS,
+) -> str:
+    """Run a batch of operator-shell commands and return the output.
 
-    This is the file-based profile shell: open a package, inspect it, lint
-    it, diff it, export it. Commands run left to right, separated by ';',
-    in one non-interactive process. State does not survive between calls,
-    so put a whole flow in one batch, for example:
-    "USE profile.der; INFO; TREE; LINT; EXIT".
+    WARNING: two of these shells drive a real card. With the opt-ins set,
+    verbs reachable here can install applets, write keys, disable or delete
+    a profile, and export a key bag. None of that can be undone. Use a
+    throwaway test card, never one carrying live credentials.
 
-    Read verbs run by default. Verbs that write a file need
-    YGGDRASIM_MCP_ALLOW_SHELL_WRITE. Interactive and unrecognised verbs are
-    always refused. Card-driving shells are deliberately not exposed here.
-
-    commands: semicolon-separated batch.
+    shell: one of profile_package (files only), scp03 (DRIVES A CARD),
+        scp11_local_access (DRIVES A CARD). Run "HELP; EXIT" against a
+        shell to see its verbs.
+    commands: semicolon-separated batch, executed left to right in one
+        non-interactive process. State does not survive between calls, so
+        put a whole flow in one batch and pass absolute paths, for example
+        "USE /abs/profile.der; INFO; TREE; LINT; EXIT".
     timeout_seconds: how long to allow the batch (default 120).
+
+    Gating, in order. A card-driving shell needs YGGDRASIM_MCP_ALLOW_CARD,
+    checked before the process starts because those shells connect to a
+    reader during startup. Verbs that write need
+    YGGDRASIM_MCP_ALLOW_SHELL_WRITE. Destructive verbs additionally need
+    YGGDRASIM_MCP_ALLOW_DESTRUCTIVE. Unknown verbs, interactive verbs, and
+    verbs that execute a command file are always refused.
     """
+    shell = str(shell or "").strip().lower()
+    spec = _SHELLS.get(shell)
+    if spec is None:
+        return json.dumps({
+            "error": f"Unknown shell {shell!r}.",
+            "known": {name: entry.summary for name, entry in _SHELLS.items()},
+        })
+
     batch = [part.strip() for part in str(commands or "").split(";")]
     if not any(batch):
         return json.dumps({"error": "No commands given."})
 
-    refusal = _shell_batch_refusal(batch)
+    refusal = _shell_batch_refusal(batch, shell)
     if refusal is not None:
         return refusal
 
     import subprocess
 
     argv = [sys.executable, "-W", "ignore::RuntimeWarning", "-m",
-            "Tools.ProfilePackage.main", "--cmd", str(commands)]
+            spec.module, "--cmd", str(commands)]
     try:
         completed = subprocess.run(
             argv,
@@ -1669,15 +1818,18 @@ def profile_package_run(commands: str, timeout_seconds: int = _SHELL_TIMEOUT_SEC
     except subprocess.TimeoutExpired:
         return json.dumps({"error": f"Batch timed out after {timeout_seconds}s."})
     except Exception as exc:  # noqa: BLE001
-        return json.dumps({"error": f"Could not run the shell: {exc}"})
+        return json.dumps({"error": f"Could not run the {shell} shell: {exc}"})
 
     # The shell paints its output; colour codes are noise to a caller.
     stdout = _ANSI_ESCAPE.sub("", completed.stdout or "")
     stderr = _ANSI_ESCAPE.sub("", completed.stderr or "")
     payload: dict[str, Any] = {
+        "shell": shell,
+        "drives_a_card": spec.card,
         "exit_code": completed.returncode,
-        "verbs": [classify_shell_command(c)["verb"] for c in batch if c.strip()],
+        "verbs": [classify_shell_command(c, shell)["verb"] for c in batch if c.strip()],
         "write_enabled": shell_write_allowed(),
+        "destructive_enabled": destructive_allowed(),
         "output": stdout[:_SHELL_OUTPUT_LIMIT],
         "output_truncated": max(0, len(stdout) - _SHELL_OUTPUT_LIMIT),
     }

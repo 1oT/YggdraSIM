@@ -170,7 +170,7 @@ def test_registered_tools_cover_the_documented_surface(server) -> None:
         "metadata_lint",
         "eim_package_lint",
         "runtime_status",
-        "profile_package_run",
+        "shell_run",
     }
     assert expected <= registered, expected - registered
 
@@ -1050,22 +1050,21 @@ def test_runtime_status_is_read_only(server) -> None:
     "command, risk",
     [
         ("INFO", "read"), ("LINT", "read"), ("TREE", "read"), ("USE p.der", "read"),
-        ("GENERATE-BATCH t.json r.csv out/", "write"), ("DELETE x", "write"),
+        ("GENERATE-BATCH t.json r.csv out/", "write"), ("DELETE x", "destructive"),
         ("SET-TOKEN a b", "write"), ("DIFF-TUI", "interactive"),
         ("NEW-PROFILE-WIZARD", "interactive"), ("WATCH-SIMCARD", "interactive"),
         ("RM -rf /", "unknown"), ("", "empty"),
     ],
 )
 def test_shell_command_classification(server, command: str, risk: str) -> None:
-    assert server.classify_shell_command(command)["risk"] == risk
+    assert server.classify_shell_command(command, "profile_package")["risk"] == risk
 
 
 def test_classification_sets_do_not_overlap(server) -> None:
     """A verb in two sets would make its treatment depend on check order."""
 
-    read = server._SHELL_READ_VERBS
-    write = server._SHELL_WRITE_VERBS
-    interactive = server._SHELL_INTERACTIVE_VERBS
+    spec = server._SHELLS["profile_package"]
+    read, write, interactive = spec.read, spec.write, spec.interactive
     assert not (read & write)
     assert not (read & interactive)
     assert not (write & interactive)
@@ -1076,13 +1075,13 @@ def test_no_write_verb_is_classified_as_read(server) -> None:
 
     mutating_prefixes = ("GENERATE", "IMPORT", "APPLY", "NEW-", "SET", "REMOVE",
                          "RENAME", "DELETE", "RETOKENI", "PROVISION", "RANDOMIZE")
-    for verb in server._SHELL_READ_VERBS:
+    for verb in server._SHELLS["profile_package"].read:
         assert not verb.startswith(mutating_prefixes), verb
 
 
 def test_write_verbs_are_refused_without_the_opt_in(server, monkeypatch) -> None:
     monkeypatch.delenv(server.SHELL_WRITE_ENV, raising=False)
-    payload = json.loads(server.profile_package_run("GENERATE-BATCH a b c; EXIT"))
+    payload = json.loads(server.shell_run("profile_package", "GENERATE-BATCH a b c; EXIT"))
     assert server.SHELL_WRITE_ENV in payload["error"]
     assert payload["risk"] == "write"
 
@@ -1091,13 +1090,13 @@ def test_interactive_verbs_are_always_refused(server, monkeypatch) -> None:
     """A TUI has no terminal in a batch and would hang until timeout."""
 
     monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
-    payload = json.loads(server.profile_package_run("DIFF-TUI; EXIT"))
+    payload = json.loads(server.shell_run("profile_package", "DIFF-TUI; EXIT"))
     assert "interactive" in payload["error"]
 
 
 def test_unknown_verbs_are_refused_rather_than_passed_through(server, monkeypatch) -> None:
     monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
-    payload = json.loads(server.profile_package_run("RM -rf /; EXIT"))
+    payload = json.loads(server.shell_run("profile_package", "RM -rf /; EXIT"))
     assert "not a recognised verb" in payload["error"]
 
 
@@ -1105,19 +1104,20 @@ def test_a_refused_verb_anywhere_blocks_the_whole_batch(server, monkeypatch) -> 
     """Refusal must precede execution; a later write must not run either."""
 
     monkeypatch.delenv(server.SHELL_WRITE_ENV, raising=False)
-    payload = json.loads(server.profile_package_run("INFO; DELETE x; EXIT"))
+    monkeypatch.delenv(server.DESTRUCTIVE_ENV, raising=False)
+    payload = json.loads(server.shell_run("profile_package", "INFO; DELETE x; EXIT"))
     assert payload["verb"] == "DELETE"
     assert "output" not in payload
 
 
 def test_empty_batch_is_rejected(server) -> None:
-    assert "No commands given" in json.loads(server.profile_package_run("  ;  "))["error"]
+    assert "No commands given" in json.loads(server.shell_run("profile_package", "  ;  "))["error"]
 
 
 def test_relative_path_arguments_are_flagged(server) -> None:
     """The shell resolves relative paths against its own directories."""
 
-    payload = json.loads(server.profile_package_run("USE some/profile.der; EXIT"))
+    payload = json.loads(server.shell_run("profile_package", "USE some/profile.der; EXIT"))
     assert "Relative path argument" in payload["warning"]
     assert "absolute paths" in payload["warning"]
 
@@ -1125,14 +1125,14 @@ def test_relative_path_arguments_are_flagged(server) -> None:
 def test_absolute_paths_are_not_flagged(server, tmp_path) -> None:
     package = tmp_path / "p.der"
     package.write_bytes(b"\\x00")
-    payload = json.loads(server.profile_package_run(f"USE {package}; EXIT"))
+    payload = json.loads(server.shell_run("profile_package", f"USE {package}; EXIT"))
     assert "warning" not in payload
 
 
 def test_shell_output_carries_no_ansi_escapes(server, tmp_path) -> None:
     """The shell paints its output; colour codes are noise to a caller."""
 
-    payload = json.loads(server.profile_package_run("HELP; EXIT"))
+    payload = json.loads(server.shell_run("profile_package", "HELP; EXIT"))
     assert "\\x1b[" not in payload["output"]
     assert payload["output"]
 
@@ -1141,5 +1141,104 @@ def test_card_driving_shells_are_not_exposed(server) -> None:
     """SCP03 opens a PC/SC reader during startup, before any verb runs."""
 
     registered = set(server.mcp.tools)
-    for forbidden in ("scp03_run", "scp11_run", "scp80_run", "shell_run"):
+    for forbidden in ("scp03_run", "scp11_run", "scp80_run", "profile_package_run"):
         assert forbidden not in registered
+
+
+# --------------------------------------------------------------------------
+# Card-driving shells
+# --------------------------------------------------------------------------
+
+
+def _all_env_off(monkeypatch, server) -> None:
+    for name in (server.CARD_ACCESS_ENV, server.DESTRUCTIVE_ENV, server.SHELL_WRITE_ENV):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize("shell", ["scp03", "scp11_local_access"])
+def test_card_shells_refuse_before_starting_the_process(server, monkeypatch, shell) -> None:
+    """These connect to a reader during startup, so even HELP touches hardware."""
+
+    _all_env_off(monkeypatch, server)
+    payload = json.loads(server.shell_run(shell, "HELP; EXIT"))
+    assert payload["drives_a_card"] is True
+    assert server.CARD_ACCESS_ENV in payload["error"]
+    assert "output" not in payload
+
+
+@pytest.mark.parametrize("verb", ["RUN evil.txt", "SCRIPT batch.txt"])
+def test_command_file_verbs_are_always_refused(server, monkeypatch, verb) -> None:
+    """These execute a file, so nothing inside ever reaches the verb gate."""
+
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
+    monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
+    payload = json.loads(server.shell_run("scp03", f"{verb}; EXIT"))
+    assert "executes a file of commands" in payload["error"]
+
+
+def test_secret_bearing_verbs_are_always_refused(server, monkeypatch) -> None:
+    """A tool argument reaches the model provider; a Ki must not."""
+
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
+    monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
+    payload = json.loads(server.shell_run("scp03", "DERIVE-OPC AABB CCDD; EXIT"))
+    assert "key material as an argument" in payload["error"]
+
+
+@pytest.mark.parametrize(
+    "shell, command",
+    [
+        ("scp03", "INSTALL-CAP applet.cap"),
+        ("scp03", "EXPORT-KEYBAG keys.json"),
+        ("scp03", "STORE-DATA AABB"),
+        ("scp11_local_access", "DELETE-PROFILE 1"),
+        ("scp11_local_access", "PROFILE-RESET"),
+    ],
+)
+def test_destructive_card_verbs_need_their_own_opt_in(
+    server, monkeypatch, shell: str, command: str
+) -> None:
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.delenv(server.DESTRUCTIVE_ENV, raising=False)
+    payload = json.loads(server.shell_run(shell, f"{command}; EXIT"))
+    assert payload["risk"] == "destructive"
+    assert server.DESTRUCTIVE_ENV in payload["error"]
+
+
+def test_every_shell_classifies_its_verbs_consistently(server) -> None:
+    """A verb in two sets would make its treatment depend on check order."""
+
+    for name, spec in server._SHELLS.items():
+        sets = {
+            "read": spec.read,
+            "write": spec.write,
+            "destructive": spec.destructive,
+            "interactive": spec.interactive,
+        }
+        for left, first in sets.items():
+            for right, second in sets.items():
+                if left < right:
+                    assert not (first & second), f"{name}: {left} overlaps {right}"
+
+
+def test_no_shell_readmits_a_command_file_or_secret_verb(server) -> None:
+    """A shell spec must not route RUN, SCRIPT, or a Ki-bearing verb back in."""
+
+    for name, spec in server._SHELLS.items():
+        runnable = spec.read | spec.write | spec.destructive
+        assert not (runnable & server._COMMAND_FILE_VERBS), name
+        assert not (runnable & server._SECRET_ARGUMENT_VERBS), name
+
+
+def test_card_shells_are_marked_as_such(server) -> None:
+    assert server._SHELLS["scp03"].card is True
+    assert server._SHELLS["scp11_local_access"].card is True
+    assert server._SHELLS["profile_package"].card is False
+
+
+def test_unknown_shell_is_rejected_with_the_known_list(server) -> None:
+    payload = json.loads(server.shell_run("scp99", "HELP; EXIT"))
+    assert "Unknown shell" in payload["error"]
+    assert set(payload["known"]) == set(server._SHELLS)
