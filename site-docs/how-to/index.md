@@ -102,6 +102,15 @@ subsystem page that contains the full surface.
 
     [Open recipe](diff-two-session-recordings.md)
 
+-   :material-robot-outline: __Run the MCP Server__
+
+    ---
+
+    Expose the decode and lint tools to an AI assistant, with card access
+    off by default.
+
+    [Open recipe](run-the-mcp-server.md)
+
 -   :material-lan: __Install RemSIM / APDU Streaming__
 
     ---

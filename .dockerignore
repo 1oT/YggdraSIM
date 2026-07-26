@@ -85,9 +85,6 @@ pyscard/
 # Docker build context. The public loader contract remains in source docs.
 plugins/
 tests/plugins/
-# Local ignored tool namespaces are never part of a public image. Public
-# ``Tools.*`` packages are installed from the reviewed package manifest.
-Tools/*MCP*/
 
 # Documentation output and ephemeral reports.
 reports/

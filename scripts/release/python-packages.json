@@ -50,6 +50,7 @@
     "Tools.ProfilePackage.saip_pe_editors",
     "Tools.SuciTool",
     "Tools.YggdraCore",
+    "Tools.YggdraMCP",
     "yggdrasim_common",
     "yggdrasim_common.gui_server",
     "yggdrasim_common.gui_server.actions",

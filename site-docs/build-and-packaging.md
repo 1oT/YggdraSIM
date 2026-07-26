@@ -30,6 +30,7 @@ each published flavor when the build environment includes `[gui]`.
 | Extra | Adds | Use when |
 | --- | --- | --- |
 | `[saip]` | `openpyxl`, `defusedxml` | hosting a spreadsheet import/export plugin; the generator itself is supplied separately |
+| `[mcp]` | `mcp` | serving the decode and lint tools to an AI agent (`yggdrasim-mcp`) |
 | `[hil]` | `pyudev`, `pyserial`, etc. | enabling the HIL bridge on a source install |
 | `[gui]` | `pywebview` | desktop Universal GUI (`--gui`) |
 | `[gui-server]` | `fastapi`, `uvicorn` | web-served Universal GUI (`--web-server`) |

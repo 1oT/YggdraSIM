@@ -81,7 +81,6 @@ prune docs
 prune Legal
 prune Latjo
 prune plugins
-prune Tools/*MCP*
 prune pyscard
 prune pysim
 prune reports
