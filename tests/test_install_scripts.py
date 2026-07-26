@@ -344,6 +344,26 @@ class CiWorkflowCoverageTests(unittest.TestCase):
         )[0]
         self.assertIn("persist-credentials: false", checkout_step)
 
+    def test_full_suite_jobs_install_every_extra_a_reviewed_module_needs(self) -> None:
+        """Reviewed packages must be importable in the CI test environment.
+
+        ``tests/test_repo_module_import_smoke.py`` imports every module on the
+        publication boundary. ``Tools.YggdraMCP.server`` needs the ``mcp``
+        extra the same way ``Tools.YggdraCore`` needs ``fastapi`` from
+        ``full``, so a job that runs the whole suite has to sync it.
+        """
+        for name in ("build.yml", "main-test-release.yml"):
+            workflow = (REPO_ROOT / ".github" / "workflows" / name).read_text(
+                encoding="utf-8"
+            )
+            sync = [
+                line.strip()
+                for line in workflow.splitlines()
+                if "uv sync --frozen --extra full --extra test" in line
+            ]
+            self.assertEqual(len(sync), 1, f"{name}: expected one full-suite sync")
+            self.assertIn("--extra mcp", sync[0], name)
+
     def test_every_workflow_action_is_pinned_to_a_commit_sha(self) -> None:
         workflow_dir = REPO_ROOT / ".github" / "workflows"
         workflows = sorted(workflow_dir.glob("*.yml"))

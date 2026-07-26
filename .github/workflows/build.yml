@@ -173,7 +173,7 @@ jobs:
 
       - name: Sync locked full test environment
         shell: bash
-        run: uv sync --frozen --extra full --extra test
+        run: uv sync --frozen --extra full --extra test --extra mcp
 
       - name: Run fatal Python static-analysis gate
         shell: bash
