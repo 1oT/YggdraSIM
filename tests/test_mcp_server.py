@@ -717,3 +717,90 @@ def test_confirmation_never_asks_for_a_secret(server) -> None:
     for forbidden in ("pin", "puk", "adm", "password", "secret", "passphrase"):
         assert forbidden not in confirm.lower(), forbidden
     assert "proceed" in confirm
+
+
+# --------------------------------------------------------------------------
+# scan_identifiers: the IPv4 rule must not drown real leaks in citations
+# --------------------------------------------------------------------------
+
+
+def _ip_rule(server):
+    return next(e for e in server.REAL_IDENTIFIER_PATTERNS if "IP" in e["name"])
+
+
+def _reported(server, text: str) -> list[str]:
+    rule = _ip_rule(server)
+    keep = rule.get("filter")
+    return [
+        m.group()
+        for m in rule["regex"].finditer(text)
+        if keep is None or keep(m, text)
+    ]
+
+
+@pytest.mark.parametrize(
+    "text, value",
+    [
+        ('smsc = "93.184.216.34"', "93.184.216.34"),
+        ("relay host 8.8.8.8 configured", "8.8.8.8"),
+        # Prose between a spec marker and an address must not suppress it.
+        ("TS 102 221 and 8.8.8.8", "8.8.8.8"),
+    ],
+)
+def test_routable_addresses_are_reported(server, text: str, value: str) -> None:
+    assert value in _reported(server, text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "3GPP TS 31.102 §4.4.11.9 EF.OPL5G",       # section sign
+        "# TS 33.501 \\u00a76.1.1.4 canonical SN-name",  # escaped section sign
+        "INSTALL [for load] (GPCS 11.5.2.3.1)",          # five-part clause
+        "Per Table 4.2.20.1, each cyclic record",        # table reference
+        '"package_version": "2.1.2.1"',                  # version field
+        "GPC_CardSpecification_v2.3.1.49_PublicRvw.pdf",  # version in a filename
+        "ETSI TS 102 221 §§4.4.11.2-4.4.11.5", # clause range
+        '"2.5.4.3": "commonName"',                       # X.500 OID
+        '"2.5.29.35": "authorityKeyIdentifier"',         # X.509 extension OID
+    ],
+)
+def test_citations_and_oids_are_not_reported(server, text: str) -> None:
+    assert _reported(server, text) == []
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["127.0.0.1", "10.5.4.7", "192.168.1.20", "172.16.0.9", "169.254.1.1",
+     "0.0.0.0", "255.255.255.255", "224.0.0.251", "100.64.0.1",
+     "192.0.2.10", "198.51.100.7", "203.0.113.9"],
+)
+def test_non_routable_and_documentation_ranges_are_not_reported(server, address: str) -> None:
+    """Loopback, private, link-local, multicast, CGNAT and RFC 5737 are not leaks."""
+
+    assert _reported(server, f"addr = {address}") == []
+
+
+def test_the_tracked_tree_reports_no_address_leaks(server) -> None:
+    """The rule is only useful if a clean tree is quiet."""
+
+    import subprocess
+
+    files = subprocess.run(
+        ["git", "ls-files"], capture_output=True, text=True, cwd=REPO_ROOT
+    ).stdout.split()
+    assert files, "expected a git checkout"
+    # This file deliberately carries routable addresses as true-positive
+    # fixtures, and the SGP.26 certificate corpus is upstream test material.
+    skip = {"uv.lock", "tests/test_mcp_server.py"}
+    noisy: list[str] = []
+    for name in files:
+        if name in skip or name.startswith("SCP11/SGP.26_test_Certs"):
+            continue
+        try:
+            text = (REPO_ROOT / name).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for value in _reported(server, text):
+            noisy.append(f"{name}: {value}")
+    assert noisy == [], noisy[:10]

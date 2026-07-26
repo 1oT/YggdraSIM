@@ -271,13 +271,82 @@ TEST_IDENTIFIER_RANGES: dict[str, dict[str, Any]] = {
     },
 }
 
+# A dotted quad is only a leak when it is routable and is not a spec clause.
+# Spec section numbers are numerically valid IPv4 addresses, so matching on
+# shape alone reports thousands of spec citations as if they were hosts.
+#
+# The negative lookarounds stop a longer dotted chain yielding a false quad:
+# without them a five-part clause number yields a quad from its first four.
+_IPV4_CANDIDATE = re.compile(
+    r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
+    r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)(?![\d.])"
+)
+
+# Ranges that cannot identify a real-world host: loopback, RFC 1918 private,
+# link-local, CGNAT, multicast, unspecified, broadcast, and the RFC 5737
+# documentation ranges this rule exists to steer people towards.
+_NON_ROUTABLE_IPV4 = re.compile(
+    r"""^(?:
+          0\.
+        | 10\.
+        | 127\.
+        | 169\.254\.
+        | 172\.(?:1[6-9]|2\d|3[01])\.
+        | 192\.168\.
+        | 192\.0\.2\.
+        | 198\.51\.100\.
+        | 203\.0\.113\.
+        | 100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.
+        | (?:22[4-9]|23\d)\.
+        | 255\.255\.255\.255$
+    )""",
+    re.VERBOSE,
+)
+
+# A citation marker immediately before the match. Covers a section sign both
+# literally and as a "\\u00a7" escape, spec and table references, and version
+# strings such as "v2.3.1.49" or a "package_version" field.
+_SPEC_CITATION_BEFORE = re.compile(
+    "(?:\u00a7"
+    "|\\\\u00a"
+    "|\\bTS\\b|\\bGPCS?\\b|\\bSGP\\b|\\bETSI\\b|\\bISO\\b|\\b3GPP\\b"
+    "|\\bclause\\b|\\bsection\\b|\\bAnnex\\b|\\bTable\\b|\\bFigure\\b"
+    "|version|(?<![A-Za-z0-9])v"
+    # Digits and dots may sit between the marker and the match, so a section
+    # range written as two clause numbers joined by a dash is recognised. Any
+    # letter breaks the run, so an address after prose stays reportable.
+    ")[\\s.:\"'_\\-\\d]*$",
+    re.IGNORECASE,
+)
+
+# Object identifier arcs. An OID is a valid dotted quad numerically, and the
+# X.500 and ISO arcs below are the ones this tree actually carries, so a quad
+# inside them is a certificate OID rather than a host address.
+_OID_ARC = re.compile(r"^(?:0\.|1\.[023]\.|2\.(?:5|16|23)\.)")
+
+
+def _is_public_ipv4_leak(match: "re.Match[str]", content: str) -> bool:
+    """Whether a dotted quad is a routable address rather than a citation."""
+
+    value = match.group()
+    if _NON_ROUTABLE_IPV4.match(value) or _OID_ARC.match(value):
+        return False
+    preceding = content[max(0, match.start() - 24) : match.start()]
+    return _SPEC_CITATION_BEFORE.search(preceding) is None
+
+
 REAL_IDENTIFIER_PATTERNS: list[dict[str, Any]] = [
     {"name": "Real SE MCC 240", "regex": re.compile(r"240\s*/\s*\d{2,3}"), "fix": "Use 001/01 (test PLMN per 3GPP TS 23.003 §2.2)"},
     {"name": "Real NO MCC 242", "regex": re.compile(r"242\s*/\s*\d{2,3}"), "fix": "Use 001/01 (test PLMN per 3GPP TS 23.003 §2.2)"},
     {"name": "Real EE MCC 248", "regex": re.compile(r"248\s*/\s*\d{2,3}"), "fix": "Use 001/01 (test PLMN per 3GPP TS 23.003 §2.2)"},
     {"name": "Real SE IIN 8946", "regex": re.compile(r"8946\d{14,15}"), "fix": "Use 8988 prefix (ITU-T E.118 test range)"},
     {"name": "Real NO IIN 8937", "regex": re.compile(r"8937\d{14,15}"), "fix": "Use 8988 prefix (ITU-T E.118 test range)"},
-    {"name": "Real non-RFC 5737 IP", "regex": re.compile(r"\b(?!192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"), "fix": "Use 192.0.2.0/24, 198.51.100.0/24, or 203.0.113.0/24 (RFC 5737)"},
+    {
+        "name": "Real non-RFC 5737 IP",
+        "regex": _IPV4_CANDIDATE,
+        "filter": _is_public_ipv4_leak,
+        "fix": "Use 192.0.2.0/24, 198.51.100.0/24, or 203.0.113.0/24 (RFC 5737)",
+    },
 ]
 
 BANNED_PHRASES: list[str] = [
@@ -540,7 +609,10 @@ def scan_identifiers(file_path: str) -> str:
     findings: list[dict[str, Any]] = []
 
     for entry in REAL_IDENTIFIER_PATTERNS:
+        keep = entry.get("filter")
         for match in entry["regex"].finditer(content):
+            if keep is not None and not keep(match, content):
+                continue
             ctx_start = max(0, match.start() - 40)
             ctx_end = min(len(content), match.end() + 40)
             findings.append({"type": "identifier_leak", "rule": entry["name"], "match": match.group(), "fix": entry["fix"], "context": content[ctx_start:ctx_end]})
