@@ -1927,38 +1927,56 @@ class ShellDispatcher :
 
     def _handle_validate (self ,arg :str =""):
         scope ="ALL"
-        metadata =None 
+        metadata =None
+        policy =None
         parts =shlex .split (arg .strip ())
-        if len (parts )>0 :
-            first_token =parts [0 ].strip ()
+        positional =[]
+        for token in parts :
+            if token .upper ().startswith ("POLICY="):
+                policy =self ._load_validate_policy (token .partition ("=")[2 ])
+            else :
+                positional .append (token )
+        if len (positional )>0 :
+            first_token =positional [0 ].strip ()
             first_upper =first_token .upper ()
             if first_upper in ("ALL","MF","USIM","ISIM"):
-                scope =first_upper 
-                if len (parts )>1 :
-                    metadata =self ._load_validate_metadata (parts [1 ])
+                scope =first_upper
+                if len (positional )>1 :
+                    metadata =self ._load_validate_metadata (positional [1 ])
             else :
                 metadata =self ._load_validate_metadata (first_token )
 
-        from SCP03 .logic .profile_validator import ProfileValidator 
+        from SCP03 .logic .profile_validator import ProfileValidator
 
-        validator =ProfileValidator (self .fs_ctrl ,profile_metadata =metadata )
+        validator =ProfileValidator (self .fs_ctrl ,profile_metadata =metadata ,policy =policy )
         validator .run (scope =scope )
 
-    def _load_validate_metadata (self ,metadata_path :str )->dict :
+    def _resolve_workspace_path (self ,candidate :str ,label :str )->Path :
+        """Resolve a caller-supplied path, refusing anything outside the workspace."""
         workspace_root =Path (Config .BASE_DIR ).resolve ().parent
-        candidate_path =Path (metadata_path ).expanduser ()
+        candidate_path =Path (candidate ).expanduser ()
         if candidate_path .is_absolute ()==False :
             candidate_path =workspace_root /candidate_path
         resolved_path =candidate_path .resolve ()
         try :
             resolved_path .relative_to (workspace_root )
         except ValueError as error :
-            raise ValueError (f"Metadata path is outside workspace root: {resolved_path}")from error
+            raise ValueError (f"{label} path is outside workspace root: {resolved_path}")from error
         if resolved_path .exists ()==False :
-            raise FileNotFoundError (f"Metadata path not found: {resolved_path}")
-        from SCP03 .logic .profile_validator import ProfileValidator 
+            raise FileNotFoundError (f"{label} path not found: {resolved_path}")
+        return resolved_path
+
+    def _load_validate_metadata (self ,metadata_path :str )->dict :
+        resolved_path =self ._resolve_workspace_path (metadata_path ,"Metadata")
+        from SCP03 .logic .profile_validator import ProfileValidator
         print (f"{Config.Colors.CYAN}[*] Using profile metadata: {resolved_path}{Config.Colors.ENDC}")
         return ProfileValidator .load_profile_metadata (str (resolved_path ))
+
+    def _load_validate_policy (self ,policy_path :str ):
+        resolved_path =self ._resolve_workspace_path (policy_path ,"Policy pack")
+        from SCP03 .logic .profile_validator import load_policy_pack
+        print (f"{Config.Colors.CYAN}[*] Using policy pack: {resolved_path}{Config.Colors.ENDC}")
+        return load_policy_pack (str (resolved_path ))
 
     def _handle_derive_opc (self ,arg :str ):
         """Derive OPc from Ki and OP (3GPP TS 35.206). Usage: DERIVE-OPC <Ki_hex> <OP_hex>."""

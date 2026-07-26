@@ -1,12 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""SAIP profile static validator: runs rule-based checks on a loaded profile and returns YRL-* findings."""
+"""SAIP profile static validator: runs rule-based checks on a loaded profile and returns YRL-* findings.
+
+The built-in expectations encode the 3GPP/ETSI baseline. Operators whose
+profiles carry house rules on top can pass a policy pack instead of
+patching this module; see :func:`load_policy_pack`.
+"""
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
@@ -44,6 +48,128 @@ class ValidationFinding:
     severity: str
     path: str
     message: str
+
+
+# Policy-pack group name -> the class attribute it replaces. The names are
+# the stable contract an operator pack is written against; the attribute
+# names are an implementation detail.
+POLICY_GROUPS: Dict[str, str] = {
+    "mf": "MF_EXPECTATIONS",
+    "usim": "USIM_EXPECTATIONS",
+    "usim_gsm_access": "USIM_GSM_ACCESS_EXPECTATIONS",
+    "usim_5gs": "USIM_5GS_EXPECTATIONS",
+    "isim": "ISIM_EXPECTATIONS",
+    "isim_optional": "ISIM_OPTIONAL_EXPECTATIONS",
+}
+
+_EXPECTATION_FIELDS = {field.name for field in fields(FileExpectation)}
+_REQUIRED_EXPECTATION_FIELDS = ("path", "expected_type", "expected_structure")
+
+
+class PolicyPackError(ValueError):
+    """A policy pack is malformed. Carries the offending key path."""
+
+
+def _expectation_from_mapping(raw: Any, where: str) -> FileExpectation:
+    if not isinstance(raw, dict):
+        raise PolicyPackError(f"{where} must be a mapping")
+
+    unknown = sorted(set(raw) - _EXPECTATION_FIELDS)
+    if unknown:
+        # A silently ignored typo would weaken a check without telling anyone.
+        raise PolicyPackError(
+            f"{where} has unknown field(s): {', '.join(unknown)}. "
+            f"Known fields: {', '.join(sorted(_EXPECTATION_FIELDS))}"
+        )
+    for name in _REQUIRED_EXPECTATION_FIELDS:
+        if not str(raw.get(name) or "").strip():
+            raise PolicyPackError(f"{where}.{name} is required")
+
+    values = dict(raw)
+    if "service_any" in values:
+        services = values["service_any"]
+        if not isinstance(services, (list, tuple)):
+            raise PolicyPackError(f"{where}.service_any must be a list of integers")
+        try:
+            values["service_any"] = tuple(int(item) for item in services)
+        except (TypeError, ValueError) as exc:
+            raise PolicyPackError(
+                f"{where}.service_any must be a list of integers"
+            ) from exc
+    for name in ("required", "require_security", "require_lcs"):
+        if name in values:
+            values[name] = bool(values[name])
+    return FileExpectation(**values)
+
+
+def parse_policy_pack(payload: Any) -> Dict[str, Tuple[FileExpectation, ...]]:
+    """Turn a decoded policy-pack mapping into expectation tuples."""
+
+    if not isinstance(payload, dict):
+        raise PolicyPackError("policy pack root must be a mapping")
+    groups = payload.get("groups")
+    if not isinstance(groups, dict) or not groups:
+        raise PolicyPackError("policy pack must carry a non-empty 'groups' mapping")
+
+    unknown = sorted(set(groups) - set(POLICY_GROUPS))
+    if unknown:
+        raise PolicyPackError(
+            f"unknown policy group(s): {', '.join(unknown)}. "
+            f"Known groups: {', '.join(sorted(POLICY_GROUPS))}"
+        )
+
+    parsed: Dict[str, Tuple[FileExpectation, ...]] = {}
+    for name, entries in groups.items():
+        if not isinstance(entries, list):
+            raise PolicyPackError(f"groups.{name} must be a list")
+        parsed[name] = tuple(
+            _expectation_from_mapping(entry, f"groups.{name}[{index}]")
+            for index, entry in enumerate(entries)
+        )
+    return parsed
+
+
+def load_policy_pack(path: str | Path) -> Dict[str, Tuple[FileExpectation, ...]]:
+    """Load a YAML policy pack.
+
+    A pack replaces whole groups, not individual entries: a group present in
+    the pack wins outright, and a group left out keeps the built-in table.
+    Partial merging would make it hard to tell, reading the pack, which
+    checks are actually in force.
+    """
+
+    resolved = Path(path).expanduser()
+    try:
+        payload = yaml.safe_load(resolved.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise PolicyPackError(f"cannot read policy pack {resolved}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise PolicyPackError(f"policy pack {resolved} is not valid YAML: {exc}") from exc
+    return parse_policy_pack(payload)
+
+
+def export_default_policy_pack() -> Dict[str, Any]:
+    """Return the built-in expectations as a policy-pack mapping.
+
+    Round-trips through :func:`parse_policy_pack`, so it doubles as the
+    starting point an operator edits.
+    """
+
+    defaults = FileExpectation("x", "y", "z")
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for group, attribute in POLICY_GROUPS.items():
+        rows: List[Dict[str, Any]] = []
+        for expectation in getattr(ProfileValidator, attribute):
+            row: Dict[str, Any] = {}
+            for field in fields(FileExpectation):
+                value = getattr(expectation, field.name)
+                if field.name in _REQUIRED_EXPECTATION_FIELDS or value != getattr(
+                    defaults, field.name
+                ):
+                    row[field.name] = list(value) if isinstance(value, tuple) else value
+            rows.append(row)
+        groups[group] = rows
+    return {"version": 1, "groups": groups}
 
 
 class ProfileValidator:
@@ -339,10 +465,25 @@ class ProfileValidator:
         ),
     )
 
-    def __init__(self, fs_controller, profile_metadata: Optional[dict] = None):
+    def __init__(
+        self,
+        fs_controller,
+        profile_metadata: Optional[dict] = None,
+        policy: Optional[Dict[str, Tuple[FileExpectation, ...]]] = None,
+    ):
         self.fs = fs_controller
         self.findings: List[ValidationFinding] = []
         self.profile_metadata = dict(profile_metadata) if isinstance(profile_metadata, dict) else {}
+        self.policy_groups: Tuple[str, ...] = ()
+        if policy:
+            unknown = sorted(set(policy) - set(POLICY_GROUPS))
+            if unknown:
+                raise PolicyPackError(f"unknown policy group(s): {', '.join(unknown)}")
+            # Shadow the class tables per instance; groups the pack omits keep
+            # the built-in baseline.
+            for group, expectations in policy.items():
+                setattr(self, POLICY_GROUPS[group], tuple(expectations))
+            self.policy_groups = tuple(sorted(policy))
 
     def run(self, scope: str = "ALL") -> List[ValidationFinding]:
         """Run all registered validation rules against the loaded profile and return findings."""
@@ -380,6 +521,13 @@ class ProfileValidator:
     def _print_intro(self, scope: str) -> None:
         print(f"\n{Config.Colors.HEADER}=== PROFILE VALIDATION ==={Config.Colors.ENDC}")
         print(f"{Config.Colors.CYAN}[*] Scope: {scope}{Config.Colors.ENDC}")
+        if self.policy_groups:
+            # A reader of the output must never have to guess whether the
+            # baseline or an operator pack produced a finding.
+            print(
+                f"{Config.Colors.CYAN}[*] Policy pack overrides: "
+                f"{', '.join(self.policy_groups)}{Config.Colors.ENDC}"
+            )
         print(
             f"{Config.Colors.CYAN}[*] Missing or wrong mandatory files/FCP are failures. "
             f"SFI and length mismatches are warnings. Fixed-value content mismatches may be hard failures.{Config.Colors.ENDC}"
@@ -712,3 +860,17 @@ class ProfileValidator:
         print(f"{Config.Colors.WARNING}WARN{Config.Colors.ENDC}: {warn_count}")
         print(f"{Config.Colors.FAIL}FAIL{Config.Colors.ENDC}: {fail_count}")
 
+
+
+if __name__ == "__main__":
+    # ``python -m SCP03.logic.profile_validator > house-rules.yaml`` gives an
+    # operator a starting pack that is generated from the live tables, so it
+    # cannot drift the way a checked-in template would.
+    import sys
+
+    yaml.safe_dump(
+        export_default_policy_pack(),
+        sys.stdout,
+        sort_keys=False,
+        default_flow_style=False,
+    )

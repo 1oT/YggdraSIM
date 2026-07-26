@@ -4138,7 +4138,7 @@ class LocalIsdrSession:
             raise ValueError("Bound Profile Package is empty.")
         root_tag, root_value, _, _ = self._read_tlv(bpp_bytes, 0)
         if root_tag != bytes.fromhex("BF36"):
-            raise ValueError(f"Unexpected BPP root tag: {root_tag.hex().upper()}")
+            raise ValueError(f"Unexpected Bound Profile Package root tag: {root_tag.hex().upper()}")
         segments: list[bytes] = []
         child_offset = 0
         first_child = True
@@ -4156,7 +4156,7 @@ class LocalIsdrSession:
                 if len(child_value) > 0:
                     segments.extend(self._extract_sequence_members(child_value))
             else:
-                raise ValueError(f"Unexpected BPP child tag: {child_tag.hex().upper()}")
+                raise ValueError(f"Unexpected Bound Profile Package child tag: {child_tag.hex().upper()}")
             child_offset = next_offset
             first_child = False
         if len(segments) == 0:

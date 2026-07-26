@@ -162,6 +162,7 @@ nav:
       - Download a Profile (Local Access): how-to/download-a-profile-local.md
       - Enable, Disable, Delete a Profile: how-to/enable-disable-delete-profile.md
       - Inspect and Transcode SAIP: how-to/inspect-and-transcode-saip.md
+      - Write a Profile Policy Pack: how-to/write-a-profile-policy-pack.md
       - Remote APDU Streaming: how-to/remote-apdu-streaming.md
       - Run a Remote Lab Agent: how-to/run-a-remote-lab-agent.md
       - Install RemSIM / APDU Streaming: how-to/install-remsim-apdu-streaming.md
@@ -172,6 +173,8 @@ nav:
       - Write a Plugin: how-to/write-a-plugin.md
       - Build a Bundled Executable: how-to/build-a-bundled-exe.md
       - Run in Docker: how-to/run-in-docker.md
+      - Run the MCP Server: how-to/run-the-mcp-server.md
+      - Diff Two Session Recordings: how-to/diff-two-session-recordings.md
       - Diagnostics Toolbox: how-to/diagnostics-toolbox.md
   - Shell Guides:
       - Overview: shell-guides/index.md

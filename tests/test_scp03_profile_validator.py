@@ -1,9 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
+import tempfile
 import unittest
+from pathlib import Path
 
-from SCP03.logic.profile_validator import ProfileValidator
+import yaml
+
+from SCP03.logic.profile_validator import (
+    POLICY_GROUPS,
+    FileExpectation,
+    PolicyPackError,
+    ProfileValidator,
+    export_default_policy_pack,
+    load_policy_pack,
+    parse_policy_pack,
+)
 
 
 class DummyTransport:
@@ -247,6 +259,171 @@ class ProfileValidatorTests(unittest.TestCase):
 
         fail_paths = [finding.path for finding in findings if finding.severity == "FAIL"]
         self.assertIn("EF_ARR", fail_paths)
+
+
+class PolicyPackTests(unittest.TestCase):
+    """A pack must be able to express the baseline before it can replace it."""
+
+    def test_exported_defaults_round_trip_to_the_built_in_tables(self) -> None:
+        # The load-bearing test: if this holds, shipping the pack loader
+        # cannot have changed what the built-in validator checks.
+        parsed = parse_policy_pack(export_default_policy_pack())
+        self.assertEqual(set(parsed), set(POLICY_GROUPS))
+        for group, attribute in POLICY_GROUPS.items():
+            self.assertEqual(
+                parsed[group],
+                getattr(ProfileValidator, attribute),
+                f"policy group {group} does not reproduce {attribute}",
+            )
+
+    def test_exported_defaults_survive_a_yaml_file_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = Path(tmp) / "house-rules.yaml"
+            pack.write_text(
+                yaml.safe_dump(export_default_policy_pack(), sort_keys=False),
+                encoding="utf-8",
+            )
+            loaded = load_policy_pack(pack)
+        for group, attribute in POLICY_GROUPS.items():
+            self.assertEqual(loaded[group], getattr(ProfileValidator, attribute))
+
+    def test_a_pack_group_replaces_the_built_in_table(self) -> None:
+        policy = {"mf": (FileExpectation("MF", "DF", "Tree", require_security=False),)}
+        validator = ProfileValidator(None, policy=policy)
+        self.assertEqual(len(validator.MF_EXPECTATIONS), 1)
+        self.assertEqual(validator.policy_groups, ("mf",))
+
+    def test_groups_absent_from_the_pack_keep_the_baseline(self) -> None:
+        policy = {"mf": (FileExpectation("MF", "DF", "Tree"),)}
+        validator = ProfileValidator(None, policy=policy)
+        self.assertEqual(
+            validator.USIM_EXPECTATIONS,
+            ProfileValidator.USIM_EXPECTATIONS,
+        )
+
+    def test_a_pack_never_mutates_the_class_tables(self) -> None:
+        baseline = ProfileValidator.MF_EXPECTATIONS
+        ProfileValidator(None, policy={"mf": (FileExpectation("MF", "DF", "Tree"),)})
+        self.assertEqual(ProfileValidator.MF_EXPECTATIONS, baseline)
+
+    def test_unknown_group_is_rejected(self) -> None:
+        with self.assertRaises(PolicyPackError) as raised:
+            parse_policy_pack({"groups": {"usim": [], "wishful": []}})
+        self.assertIn("wishful", str(raised.exception))
+
+    def test_unknown_field_is_rejected_rather_than_ignored(self) -> None:
+        # A silently dropped typo would quietly weaken a check.
+        with self.assertRaises(PolicyPackError) as raised:
+            parse_policy_pack(
+                {
+                    "groups": {
+                        "mf": [
+                            {
+                                "path": "EF_ICCID",
+                                "expected_type": "EF",
+                                "expected_structure": "Transparent",
+                                "sizee": 10,
+                            }
+                        ]
+                    }
+                }
+            )
+        self.assertIn("sizee", str(raised.exception))
+
+    def test_missing_required_field_is_rejected(self) -> None:
+        with self.assertRaises(PolicyPackError) as raised:
+            parse_policy_pack({"groups": {"mf": [{"path": "EF_ICCID"}]}})
+        self.assertIn("expected_type", str(raised.exception))
+
+    def test_service_any_is_coerced_to_a_tuple_of_ints(self) -> None:
+        parsed = parse_policy_pack(
+            {
+                "groups": {
+                    "usim": [
+                        {
+                            "path": "ADF_USIM/EF_X",
+                            "expected_type": "EF",
+                            "expected_structure": "Transparent",
+                            "service_any": [2, "6"],
+                        }
+                    ]
+                }
+            }
+        )
+        self.assertEqual(parsed["usim"][0].service_any, (2, 6))
+
+    def test_service_any_rejects_a_non_list(self) -> None:
+        with self.assertRaises(PolicyPackError):
+            parse_policy_pack(
+                {
+                    "groups": {
+                        "usim": [
+                            {
+                                "path": "ADF_USIM/EF_X",
+                                "expected_type": "EF",
+                                "expected_structure": "Transparent",
+                                "service_any": 2,
+                            }
+                        ]
+                    }
+                }
+            )
+
+    def test_empty_or_malformed_pack_is_rejected(self) -> None:
+        for payload in ([], {}, {"groups": {}}, {"groups": []}):
+            with self.assertRaises(PolicyPackError):
+                parse_policy_pack(payload)
+
+    def test_missing_pack_file_reports_the_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(PolicyPackError) as raised:
+                load_policy_pack(Path(tmp) / "absent.yaml")
+        self.assertIn("absent.yaml", str(raised.exception))
+
+
+class ValidateCommandPolicyWiringTests(unittest.TestCase):
+    """The shell must accept POLICY= and keep the workspace containment check."""
+
+    def setUp(self) -> None:
+        from SCP03.config import Config
+        from SCP03.interface.shell import ShellDispatcher
+
+        self.dispatcher = ShellDispatcher
+        self.workspace_root = Path(Config.BASE_DIR).resolve().parent
+
+    def test_policy_pack_outside_the_workspace_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as outside:
+            stray = Path(outside) / "house-rules.yaml"
+            stray.write_text(
+                yaml.safe_dump(export_default_policy_pack()), encoding="utf-8"
+            )
+            with self.assertRaises(ValueError) as raised:
+                self.dispatcher._resolve_workspace_path(
+                    None, str(stray), "Policy pack"
+                )
+        self.assertIn("outside workspace root", str(raised.exception))
+
+    def test_missing_policy_pack_names_the_label(self) -> None:
+        with self.assertRaises(FileNotFoundError) as raised:
+            self.dispatcher._resolve_workspace_path(
+                None, "absent-policy-pack.yaml", "Policy pack"
+            )
+        self.assertIn("Policy pack", str(raised.exception))
+
+    def test_a_pack_inside_the_workspace_loads(self) -> None:
+        pack_dir = self.workspace_root / "Workspace"
+        pack_dir.mkdir(parents=True, exist_ok=True)
+        pack = pack_dir / "test-policy-pack.yaml"
+        pack.write_text(
+            yaml.safe_dump(export_default_policy_pack()), encoding="utf-8"
+        )
+        try:
+            loaded = load_policy_pack(
+                self.dispatcher._resolve_workspace_path(None, str(pack), "Policy pack")
+            )
+            self.assertEqual(loaded["mf"], ProfileValidator.MF_EXPECTATIONS)
+        finally:
+            pack.unlink()
 
 
 if __name__ == "__main__":

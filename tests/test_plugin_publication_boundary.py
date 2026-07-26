@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import fnmatch
 import importlib.util
+import json
 import re
 import tempfile
 import tomllib
@@ -56,10 +58,24 @@ class SourcePackagingBoundaryTests(unittest.TestCase):
         self.assertIn("prune plugins", manifest_lines)
         self.assertIn("prune tests", manifest_lines)
         self.assertIn("prune tests/plugins", manifest_lines)
-        self.assertIn("prune Tools/*MCP*", manifest_lines)
         self.assertFalse(
             any(line.startswith("recursive-include scripts/release") for line in manifest_lines)
         )
+
+    def test_shipped_tool_packages_are_not_pruned_from_the_sdist(self) -> None:
+        """A reviewed package must reach the sdist, or the wheel build differs.
+
+        ``Tools.YggdraMCP`` was local-only before the MCP server shipped.
+        Pruning a package that the reviewed manifest lists makes
+        ``scripts/release/source_boundary.py`` fail inside the Docker build.
+        """
+        manifest_lines = _lines("MANIFEST.in")
+        self.assertNotIn("prune Tools/*MCP*", manifest_lines)
+        for line in manifest_lines:
+            self.assertFalse(
+                line.startswith("prune Tools/YggdraMCP"),
+                msg=f"reviewed package pruned from the sdist: {line}",
+            )
 
     def test_wheel_package_discovery_cannot_select_plugins(self) -> None:
         with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
@@ -84,7 +100,29 @@ class SourcePackagingBoundaryTests(unittest.TestCase):
         self.assertNotIn(".*", dockerignore_lines)
         self.assertIn("plugins/", dockerignore_lines)
         self.assertIn("tests/plugins/", dockerignore_lines)
-        self.assertIn("Tools/*MCP*/", dockerignore_lines)
+
+    def test_docker_context_keeps_every_reviewed_package(self) -> None:
+        """The build context must carry whatever the reviewed manifest lists.
+
+        The Dockerfile runs ``source_boundary.py`` after ``COPY .``, and that
+        check fails on a reviewed package whose directory is absent. Excluding
+        one here breaks the image build rather than trimming it.
+        """
+        manifest = json.loads(
+            (REPO_ROOT / "scripts" / "release" / "python-packages.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        dockerignore_lines = _lines(".dockerignore")
+        for package in manifest["packages"]:
+            directory = package.replace(".", "/")
+            for line in dockerignore_lines:
+                pattern = line.rstrip("/")
+                self.assertFalse(
+                    fnmatch.fnmatch(directory, pattern)
+                    or fnmatch.fnmatch(directory.split("/")[0], pattern),
+                    msg=f".dockerignore rule {line!r} excludes reviewed package {package}",
+                )
 
     def test_final_docker_image_does_not_copy_the_source_checkout(self) -> None:
         dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")

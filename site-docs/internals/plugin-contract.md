@@ -66,6 +66,44 @@ Reserved names are private extension contracts. Public distributions should
 document only the generic loader behavior and keep undistributed capability
 names out of shipped docs.
 
+### `mcp_extensions`
+
+The one capability whose name is published, because the consumer that reads
+it ships too. It lets a private plugin add tools, resources, and prompts to
+the MCP server without any operator specifics entering this tree.
+
+A provider exposes `register(mcp)` and may expose the usual `health()`:
+
+```python
+class OperatorMcpExtensions:
+    def health(self) -> dict:
+        return {"actions_available": True, "dependency_issues": []}
+
+    def register(self, mcp) -> None:
+        @mcp.prompt()
+        def house_profile_review(file_path: str = "") -> str:
+            return f"Review {file_path} against the house profile rules ..."
+
+        @mcp.tool()
+        def operator_plmn_lookup(mccmnc: str) -> str:
+            ...
+
+
+def register_plugins(manager) -> None:
+    manager.register_capability("mcp_extensions", OperatorMcpExtensions())
+```
+
+`Tools/YggdraMCP/server.py::load_plugin_extensions` calls it at startup and
+reports rather than raises at every step: a provider that is absent,
+declares itself unavailable, raises from `health()`, lacks `register`, or
+raises from `register` is logged and skipped, and the server still serves
+its built-in surface.
+
+A plugin tool that drives a card must call `card_access_allowed()` from the
+server module and refuse when it returns `False`. The loader cannot enforce
+that on a plugin's behalf, and a plugin that ignores it silently widens the
+gate the built-in card tools sit behind.
+
 ## Absent-plugin behavior
 
 The contract says:

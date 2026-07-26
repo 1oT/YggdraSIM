@@ -109,7 +109,7 @@ class CommandRegistry :
         'RECORD':(shell ._handle_read_record ,"<N/ALL/Start-End> [Path]"),
         'UPDATE':(shell ._handle_update ,"BINARY/RECORD <Data>"),
         'DUMP-FS':(shell .do_dump_fs ,"[OutputDir]"),
-        'VALIDATE':(shell ._handle_validate ,"[ALL|MF|USIM|ISIM] [ProfileDump.yaml|ProfileDump.json]"),
+        'VALIDATE':(shell ._handle_validate ,"[ALL|MF|USIM|ISIM] [ProfileDump.yaml|ProfileDump.json] [POLICY=pack.yaml]"),
 
 
         'MANAGE-PIN':(lambda x ="":ShellInteractiveWizards .run_manage_pin_wizard (shell ,x ),"[Args]"),

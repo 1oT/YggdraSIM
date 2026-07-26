@@ -139,6 +139,29 @@ When adding a new test:
 - state persistence and migration behavior
 - HIL protocol framing where the hardware is emulated
 
+## Conformance vectors for duplicated wire logic
+
+Some wire-format logic exists in more than one place. `SCP11` carries three
+BPP segmenter definitions plus an inheriting shim, and they drifted once
+before anyone noticed, because each was asserted against separately.
+
+Where that happens, do not write one test per copy. Write one vector table
+and run every implementation over it:
+
+1. A table of `(label, input, expected output)`, with the bytes that carry
+   the wire risk spelled as explicit hex rather than rebuilt by a helper.
+2. A registry of implementations, since construction usually differs.
+3. An AST sweep asserting the registry covers every definition in the tree,
+   so a new copy fails the suite instead of drifting quietly beside it.
+
+`tests/test_bpp_segmentation_annex_m.py` is the worked example. Validate a
+table like this by mutation: reintroduce the bug it exists to prevent and
+confirm the vectors fail and name the implementation. A vector table that
+survives its own bug is decoration.
+
+The same shape applies to the pinned upstream divergences in
+`tests/test_scp03_pysim_parity.py` and `tests/test_scp80_pysim_parity.py`.
+
 ## Related pages
 
 - [Coding Standards](coding-standards.md)

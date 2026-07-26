@@ -83,7 +83,6 @@ prune Latjo
 prune plugins
 prune pyscard
 prune pysim
-prune Tools/*MCP*
 prune reports
 prune scripts/docs
 prune site

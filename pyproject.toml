@@ -152,6 +152,12 @@ saip = [
     "openpyxl>=3.1,<4",
     "defusedxml>=0.7,<1",
 ]
+# Model Context Protocol server, so an AI agent can drive the decode and
+# lint surfaces. Card-touching tools stay gated behind
+# ``YGGDRASIM_MCP_ALLOW_CARD``; see site-docs/how-to/run-the-mcp-server.md.
+mcp = [
+    "mcp>=1.2,<2",
+]
 # ``gui`` pulls the FastAPI + uvicorn + pywebview stack for the
 # desktop ``--gui`` flow. ``gui-server`` intentionally omits
 # pywebview so a headless lab server (``--web-server``) does not need
@@ -213,6 +219,8 @@ yggdrasim-profile-autoload = "yggdrasim_common.console_scripts:profile_autoload"
 yggdrasim-apdu-fuzzer = "yggdrasim_common.console_scripts:apdu_fuzzer"
 yggdrasim-eum-diag = "yggdrasim_common.console_scripts:eum_diag"
 yggdrasim-asn1 = "yggdrasim_common.console_scripts:asn1_tlv_decode"
+yggdrasim-mcp = "yggdrasim_common.console_scripts:mcp_server"
+yggdrasim-session-diff = "yggdrasim_common.console_scripts:session_diff"
 
 [project.urls]
 Homepage = "https://github.com/1oT/YggdraSIM"
@@ -383,6 +391,7 @@ include = [
     "Tools.ProfilePackage.saip_pe_editors",
     "Tools.SuciTool",
     "Tools.YggdraCore",
+    "Tools.YggdraMCP",
     "yggdrasim_common",
     "yggdrasim_common.gui_server",
     "yggdrasim_common.gui_server.actions",

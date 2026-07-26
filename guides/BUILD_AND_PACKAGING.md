@@ -43,7 +43,8 @@ flavor:
 
 | Extra          | Pulls in                                      | Used by                                        |
 |----------------|-----------------------------------------------|------------------------------------------------|
-| `[saip]`       | Backwards-compatible no-op alias (`pySim` is core and commit-pinned) | Older install commands |
+| `[saip]`       | `openpyxl`, `defusedxml`                      | Hosting a spreadsheet import/export plugin (generator supplied separately) |
+| `[mcp]`        | `mcp`                                         | Serving decode/lint tools to an AI agent (`yggdrasim-mcp`)   |
 | `[hil]`        | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
 | `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets`; pip Qt/WebEngine on Linux x86_64, `qtpy` plus system PyQt5 on Linux ARM | Desktop Universal GUI Command Center (`--gui`) |
 | `[gui-server]` | `fastapi`, `uvicorn[standard]`, `websockets`  | Headless web Command Center (`--web-server`)   |
