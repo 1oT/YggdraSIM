@@ -405,8 +405,8 @@ class TokenListEditTests(unittest.TestCase):
 
     def test_parse_token_value_hex_string(self) -> None:
         self.assertEqual(
-            parse_token_value_argument("89 46 11"),
-            "894611",
+            parse_token_value_argument("89 88 11"),
+            "898811",
         )
 
     def test_parse_token_value_json_object(self) -> None:

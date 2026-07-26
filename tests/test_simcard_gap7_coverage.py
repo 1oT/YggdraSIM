@@ -225,7 +225,7 @@ class TimerManagementProactiveTests(unittest.TestCase):
         self.state = SimCardState(
             atr=b"",
             eid="89049032123451234512345678901235",
-            iccid="8949000000000000001",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",
@@ -358,7 +358,7 @@ class TimerExpirationEnvelopeTests(unittest.TestCase):
         self.state = SimCardState(
             atr=b"",
             eid="89049032123451234512345678901235",
-            iccid="8949000000000000001",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",
@@ -407,7 +407,7 @@ class MoreTimePollingOffDeclareServiceTests(unittest.TestCase):
         self.state = SimCardState(
             atr=b"",
             eid="89049032123451234512345678901235",
-            iccid="8949000000000000001",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",

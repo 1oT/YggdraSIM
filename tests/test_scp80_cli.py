@@ -363,7 +363,7 @@ class OtaShellTests(unittest.TestCase):
             "valid": True,
             "status_code": "00",
             "command_count": 2,
-            "command_response": "900098648011111111111121",
+            "command_response": "900098888011111111111111",
             "command_sw": None,
         }
 
@@ -372,7 +372,7 @@ class OtaShellTests(unittest.TestCase):
                 with redirect_stdout(io.StringIO()):
                     decoder.try_decode("2FE2", 10, "D02E", por_info)
 
-        self.assertEqual(decode_calls, [("2FE2", "98648011111111111121")])
+        self.assertEqual(decode_calls, [("2FE2", "98888011111111111111")])
 
     def test_do_set_updates_config_and_saves(self) -> None:
         shell = self._make_shell()
@@ -472,7 +472,7 @@ class OtaShellTests(unittest.TestCase):
         payload = "00A4080C022FE200B000000A"
         por = (
             "D0388103011300820281830500860280018B27410005811250F341F61D"
-            "02710000180AB000010000010006000002900098648011111111111121"
+            "02710000180AB000010000010006000002900098888011111111111111"
         )
         shell.builder = SimpleNamespace(
             build_plan=lambda verbose=False, override_payload=None: SimpleNamespace(

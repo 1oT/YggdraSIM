@@ -735,7 +735,7 @@ class SimulatedConnectionTests(unittest.TestCase):
 
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex("00B000000A")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(bytes(data).hex().upper(), "98641111111111111121")
+            self.assertEqual(bytes(data).hex().upper(), "98881111111111111121")
 
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex("00A40004022F00")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
@@ -1884,7 +1884,7 @@ metadata_overrides = {{
 
             first, second = decoded["notifications"]
             self.assertEqual(first.get("seqNumber"), "1")
-            self.assertEqual(first.get("iccid"), "89461111111111111112")
+            self.assertEqual(first.get("iccid"), "89881111111111111112")
             self.assertEqual(first.get("notificationAddress"), '"rsp.example.com"')
             self.assertEqual(second.get("seqNumber"), "2")
             self.assertEqual(second.get("iccid"), "89881111111111111129")
@@ -2592,7 +2592,7 @@ metadata_overrides = {{
                 euicc_otpk_raw=euicc_otpk_raw,
                 eid_hex="89049032123451234512345678901235",
                 cert_private_key=cert_private_key,
-                iccid="89461111111111111112",
+                iccid="89881111111111111112",
                 provider_name="Duplicate Provider",
                 profile_name="Duplicate ICCID",
                 upp_payload=b"\x01",

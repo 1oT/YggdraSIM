@@ -500,7 +500,7 @@ def _transform_swap_nibbles(raw: bytes) -> bytes:
     Mirrors the nibble-swap step that ETSI TS 102 221 §13.2 (EF.ICCID)
     and 3GPP TS 31.102 BCD encodings require when carrying an upright
     digit string through to on-card storage. Example:
-    ``8949001304080000016F`` → ``989400314080000010F6``.
+    ``8988001304080000014F`` → ``988800314080000010F4``.
     """
     return bytes(((b & 0x0F) << 4) | ((b & 0xF0) >> 4) for b in raw)
 
@@ -603,7 +603,7 @@ class TokenExpansionContext:
 
     - ``SwapNibbles``: byte-wise nibble swap, mirroring the ETSI TS 102 221
       §13.2 EF.ICCID and 3GPP TS 31.102 BCD encodings
-      (``8949...01..0F`` → ``9894...10..F0``).
+      (``8988...01..0F`` → ``9888...10..F0``).
     - ``EncodeEfImsi``: takes an IMSI of up to 15 digits and produces the
       EF.IMSI content per 3GPP TS 31.102 §4.2.2 (length byte + parity-tagged
       first digit + nibble-swapped digit pairs, ``F``-padded for odd digit

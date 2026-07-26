@@ -223,7 +223,7 @@ def test_location_fids_use_their_own_fixed_layouts() -> None:
 
 
 def test_iccid_and_imsi_decoders_roundtrip_standard_encoders() -> None:
-    iccid = "8949000000000000001"
+    iccid = "8988000000000000001"
     imsi = "001010123456789"
     assert ContentDecoder.decode_iccid(encode_iccid_ef(iccid).hex())["iccid"] == iccid
     assert ContentDecoder.decode_imsi(encode_imsi_ef(imsi).hex())["imsi"] == imsi
@@ -231,7 +231,7 @@ def test_iccid_and_imsi_decoders_roundtrip_standard_encoders() -> None:
 
 def test_identity_decoders_reject_bad_bcd_length_and_parity() -> None:
     assert "Invalid ICCID Length" in ContentDecoder.decode_iccid("98")["Error"]
-    invalid_iccid = bytearray(encode_iccid_ef("8949000000000000001"))
+    invalid_iccid = bytearray(encode_iccid_ef("8988000000000000001"))
     invalid_iccid[0] = 0x9A
     assert "Invalid low BCD" in ContentDecoder.decode_iccid(invalid_iccid.hex())["Error"]
 

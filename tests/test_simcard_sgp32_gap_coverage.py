@@ -44,7 +44,7 @@ def _add_secondary_profile(state: SimCardState) -> SimProfileEntry:
     primary = state.profiles[0]
     secondary = SimProfileEntry(
         aid="A0000000871002FFFFFFFF8907090000",
-        iccid="8949000000000000200",
+        iccid="8988000000000000200",
         state="disabled",
         profile_class=primary.profile_class,
         profile_name="Secondary Test Profile",

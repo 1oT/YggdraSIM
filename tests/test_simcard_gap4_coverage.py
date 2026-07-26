@@ -192,7 +192,7 @@ class GetDataExtendedTagTests(unittest.TestCase):
         self.state = SimCardState(
             atr=b"",
             eid="89049032123451234512345678901235",
-            iccid="8949000000000000001",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="testsmdpplus.example.com",
             root_ci_pkid=b"",
@@ -246,7 +246,7 @@ class EnvelopeDispatchTests(unittest.TestCase):
         self.state = SimCardState(
             atr=b"",
             eid="89049032123451234512345678901235",
-            iccid="8949000000000000001",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",
@@ -321,14 +321,14 @@ class SaipConnectivityParametersTests(unittest.TestCase):
         image = SimProfileImage()
         decoded = {
             "profileType": "Test Profile",
-            "iccid": bytes.fromhex("8949000000000000001F"),
+            "iccid": bytes.fromhex("8988000000000000001F"),
             "connectivityParameters": bytes.fromhex(
                 "A118350702000003000002470D085465726D696E616C0361706E"
             ),
         }
         _consume_profile_element(image, "header", decoded)
         self.assertEqual(image.profile_name, "Test Profile")
-        self.assertTrue(image.iccid.startswith("89490000"))
+        self.assertTrue(image.iccid.startswith("89880000"))
         self.assertEqual(
             image.connectivity_params_http,
             bytes.fromhex(
@@ -340,7 +340,7 @@ class SaipConnectivityParametersTests(unittest.TestCase):
         image = SimProfileImage()
         decoded = {
             "profileType": "Test Profile",
-            "iccid": bytes.fromhex("8949000000000000001F"),
+            "iccid": bytes.fromhex("8988000000000000001F"),
         }
         _consume_profile_element(image, "header", decoded)
         self.assertEqual(image.connectivity_params_http, b"")

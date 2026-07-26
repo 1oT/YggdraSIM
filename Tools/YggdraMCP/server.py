@@ -568,7 +568,7 @@ def aide_registry_lookup(query: str) -> str:
     matches: list[dict[str, str]] = []
     query_upper = query.strip().upper()
     try:
-        for line in aid_path.read_text().splitlines():
+        for line in aid_path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or ":" not in line:
                 continue

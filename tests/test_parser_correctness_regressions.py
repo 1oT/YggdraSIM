@@ -49,7 +49,7 @@ def _state() -> SimCardState:
     return SimCardState(
         atr=b"",
         eid="89049032123451234512345678901235",
-        iccid="8949000000000000001",
+        iccid="8988000000000000001",
         imsi="001010000000001",
         default_dp_address="",
         root_ci_pkid=b"",
@@ -85,9 +85,9 @@ def test_ber_length_roundtrips_across_large_boundaries() -> None:
 
 
 def test_identity_encoders_enforce_standard_sizes() -> None:
-    assert len(encode_iccid_ef("8949000000000000001")) == 10
-    assert len(encode_iccid_ef("8949000000000000001F")) == 10
-    assert len(encode_iccid_ef("89490000000000000010")) == 10
+    assert len(encode_iccid_ef("8988000000000000001")) == 10
+    assert len(encode_iccid_ef("8988000000000000001F")) == 10
+    assert len(encode_iccid_ef("89880000000000000010")) == 10
     for invalid in ("", "123456789012345678", "123456789012345678901", "12A4567890123456789"):
         with pytest.raises(ValueError):
             encode_iccid_ef(invalid)

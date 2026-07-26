@@ -178,8 +178,10 @@ class ConfigManager :
         if has_bundled_default ==False :
             return 
         try :
-            self .file_path .write_text (bundled_default .read_text ())
-        except OSError :
+            self .file_path .write_text (
+                bundled_default .read_text (encoding ="utf-8"),encoding ="utf-8"
+            )
+        except (OSError ,ValueError ):
             pass 
 
     def load (self ):

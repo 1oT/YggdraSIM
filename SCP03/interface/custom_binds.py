@@ -43,7 +43,7 @@ class CommandBinder :
 
         if has_file :
             try :
-                with open (self .filepath ,'r')as f :
+                with open (self .filepath ,'r',encoding ="utf-8")as f :
                     self .binds =json .load (f )
             except Exception as e :
                 print (f"[-] Failed to load binds: {e}")
@@ -60,7 +60,7 @@ class CommandBinder :
 
     def _save (self ):
         try :
-            with open (self .filepath ,'w')as f :
+            with open (self .filepath ,'w',encoding ="utf-8")as f :
                 json .dump (self .binds ,f ,indent =4 )
         except Exception :
             pass 

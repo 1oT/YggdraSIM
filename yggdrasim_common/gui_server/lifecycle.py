@@ -17,6 +17,12 @@ from typing import Any
 
 _LOGGER = logging.getLogger("yggdrasim.gui.lifecycle")
 
+# Windows has no ``signal.SIGKILL``. Referencing it there raises
+# AttributeError at the call site, before any guard inside the callee can
+# run, which left a child that ignored SIGTERM alive. Keep a distinct
+# sentinel so the escalation still reaches ``process.kill()``.
+_SIGKILL = getattr(signal, "SIGKILL", "kill")
+
 _PROCESS_TERM_TIMEOUT_SECONDS = 1.0
 _PROCESS_KILL_TIMEOUT_SECONDS = 1.0
 
@@ -205,7 +211,7 @@ def _terminate_registered_processes() -> list[dict[str, Any]]:
             _send_process_signal(process, signal.SIGTERM)
             _wait_process(process, _PROCESS_TERM_TIMEOUT_SECONDS)
             if _process_still_running(process):
-                _send_process_signal(process, signal.SIGKILL)
+                _send_process_signal(process, _SIGKILL)
                 _wait_process(process, _PROCESS_KILL_TIMEOUT_SECONDS)
                 status_text = "killed"
             if _process_still_running(process):
@@ -247,7 +253,7 @@ def _send_process_signal(process: Any, signum: int) -> None:
         if callable(terminate):
             terminate()
             return
-    if signum == signal.SIGKILL:
+    if signum == _SIGKILL:
         kill = getattr(process, "kill", None)
         if callable(kill):
             kill()

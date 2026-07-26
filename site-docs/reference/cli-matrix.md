@@ -98,7 +98,7 @@ METADATA Workspace/LocalSMDPP/profile/metadata/test_metadata.json
 LOAD-PROFILE
 EXIT
 EOF
-python -m SCP80 --cmd "iccid 8946...; show; exit"
+python -m SCP80 --cmd "iccid 8988...; show; exit"
 python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 ```
 

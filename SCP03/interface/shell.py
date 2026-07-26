@@ -1789,7 +1789,7 @@ class ShellDispatcher :
         print (f"{Config.Colors.CYAN}[*] Generating eUICC report ({std})...{Config.Colors.ENDC}")
         try :
             report =self ._build_euicc_export_report (standard =std )
-            with open (out_path ,"w")as f :
+            with open (out_path ,"w",encoding ="utf-8")as f :
                 yaml .dump (report ,f ,default_flow_style =False ,allow_unicode =True ,sort_keys =False )
             print (f"{Config.Colors.GREEN}[+] Report written to {out_path}{Config.Colors.ENDC}")
         except Exception as e :
@@ -2197,7 +2197,7 @@ class ShellDispatcher :
                 self ._exec_line (line )
         if yaml_out and results :
             try :
-                with open (yaml_out ,"w")as f :
+                with open (yaml_out ,"w",encoding ="utf-8")as f :
                     f .write ("# YggdraSIM CLI Report\n")
                     f .write (f"# Date: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n\n")
                     f .write ("steps:\n")
@@ -2260,7 +2260,7 @@ class ShellDispatcher :
         results =[]
 
         try :
-            with open (filename ,'r')as f :
+            with open (filename ,'r',encoding ="utf-8")as f :
                 lines =f .readlines ()
 
             for i ,line in enumerate (lines ):
@@ -2335,7 +2335,7 @@ class ShellDispatcher :
 
             if has_res :
                 try :
-                    with open (yaml_out ,'w')as f :
+                    with open (yaml_out ,'w',encoding ="utf-8")as f :
                         f .write ("# YggdraSIM Script Report\n")
                         f .write (f"# Date: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
                         f .write (f"# Script: {filename}\n\n")
@@ -3076,7 +3076,7 @@ class ShellDispatcher :
 
         if is_exists :
             try :
-                with open (Config .AID_FILE ,'r')as f :
+                with open (Config .AID_FILE ,'r',encoding ="utf-8")as f :
                     for line in f :
                         name ,aid ,role_name =self ._parse_aid_registry_line (line )
                         if len (name )==0 :
@@ -3230,7 +3230,7 @@ class ShellDispatcher :
                 del self .aid_rule_roles [name ]
         self .aid_lookup ={bytes .fromhex (v ):k for k ,v in self .aid_registry .items ()}
         try :
-            with open (Config .AID_FILE ,'w')as f :
+            with open (Config .AID_FILE ,'w',encoding ="utf-8")as f :
                 for n ,a in sorted (self .aid_registry .items ()):
                     f .write (f"{n}:{a}\n")
             print (f"{Config.Colors.GREEN}[+] AID alias '{name}' saved.{Config.Colors.ENDC}")

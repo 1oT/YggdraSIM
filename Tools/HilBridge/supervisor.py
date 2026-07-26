@@ -19,6 +19,10 @@ from datetime import datetime, timezone
 from threading import Event
 from typing import Any, Protocol
 
+# ``signal.SIGKILL`` is POSIX-only and is evaluated at the call site, so it
+# cannot sit behind the platform guard inside the callee.
+_SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
 from yggdrasim_common.card_backend import CARD_RELAY_MARKER_FILENAME, is_simulated_card_backend
 from yggdrasim_common.frozen_dispatch import build_module_command
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
@@ -740,7 +744,7 @@ class HilBridgeSupervisor:
         try:
             child.wait(timeout=max(1.0, float(self.config.termination_timeout_seconds)))
         except (subprocess.TimeoutExpired, OSError):
-            killed_group = self._signal_child_process_group(pid, signal.SIGKILL)
+            killed_group = self._signal_child_process_group(pid, _SIGKILL)
             if killed_group is False:
                 try:
                     child.kill()
@@ -771,7 +775,7 @@ class HilBridgeSupervisor:
         try:
             child.wait(timeout=max(1.0, float(self.config.termination_timeout_seconds)))
         except (subprocess.TimeoutExpired, OSError):
-            killed_group = self._signal_child_process_group(pid, signal.SIGKILL)
+            killed_group = self._signal_child_process_group(pid, _SIGKILL)
             if killed_group is False:
                 try:
                     child.kill()

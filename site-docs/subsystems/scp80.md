@@ -39,7 +39,7 @@ OTA sequence against a per-ICCID state.
 
     ```bash
     python -m SCP80
-    python -m SCP80 --cmd "show; iccid 8946xxx; build A0D6...; send; EXIT"
+    python -m SCP80 --cmd "show; iccid 8988xxx; build A0D6...; send; EXIT"
     ```
 
 === "Console script"

@@ -112,6 +112,13 @@ Tools/ProfilePackage/profile/transcode/example_test_profile.transcode.txt
 Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.txt
 *.transcode.txt
 Tools/ProfilePackage/transcode/_external/
+
+# Generated transcode artefacts. Only the reviewed example fixture is tracked;
+# anything else emitted here is operator output and must not be committed.
+Tools/ProfilePackage/transcode/*.transcode.json
+Tools/ProfilePackage/transcode/*.transcode.der
+Tools/ProfilePackage/transcode/*.transcode.txt
+!Tools/ProfilePackage/transcode/example_test_profile.transcode.json
 state/gpg_key.fingerprint
 SCP11/local_access/profile/Test_Profile_dummyvalues.txt
 plugins/*

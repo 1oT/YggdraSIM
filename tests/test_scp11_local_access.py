@@ -510,12 +510,12 @@ class LocalAccessSessionTests(unittest.TestCase):
         session.collect_profile_metadata = lambda: []  # type: ignore[method-assign]
         session._sync_pending_notifications = lambda response=b"": None  # type: ignore[method-assign]
 
-        response = session.delete_profile("89460811111111111112")
+        response = session.delete_profile("89880811111111111111")
 
         expected_payload = session._build_profile_state_payload(
             session.TAG_DELETE_PROFILE,
             session.TAG_ICCID,
-            "98648011111111111121",
+            "98888011111111111111",
         )
         expected_apdu = bytes([0x80, 0xE2, 0x91, 0x00, len(expected_payload)]) + expected_payload
 

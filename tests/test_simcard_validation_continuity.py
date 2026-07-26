@@ -23,7 +23,7 @@ def _minimal_engine() -> SimulatedSimCardEngine:
     engine = object.__new__(SimulatedSimCardEngine)
     engine.state = SimpleNamespace(
         eid="89001012012341234012345678901234",
-        iccid="8946000000000000001",
+        iccid="8988000000000000001",
         current_protocol=None,
         reset_counter=0,
         pending_fetch_queue=[],

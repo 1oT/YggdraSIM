@@ -254,7 +254,7 @@ class FileSystemController :
 
         if os .path .exists (Config .FIDS_FILE ):
             try :
-                with open (Config .FIDS_FILE ,'r')as f :
+                with open (Config .FIDS_FILE ,'r',encoding ="utf-8")as f :
                     for line in f :
                         stripped =line .strip ()
                         if not stripped or stripped .startswith ('#'):continue 
@@ -304,7 +304,7 @@ class FileSystemController :
         roots =[]
         stack =[(-1 ,roots )]
         if not os .path .exists (Config .FIDS_FILE ):return roots 
-        with open (Config .FIDS_FILE ,'r')as f :
+        with open (Config .FIDS_FILE ,'r',encoding ="utf-8")as f :
             for line in f :
                 expanded =line .expandtabs (4 )
                 stripped =expanded .strip ()
@@ -2218,7 +2218,7 @@ class FileSystemController :
                 finally :
                     self ._report_scan_progress_cb =None 
             clean_data =self ._sanitize_yaml (report_data )
-            with open (filename ,'w')as outfile :yaml .dump (clean_data ,outfile ,default_flow_style =False ,sort_keys =False )
+            with open (filename ,'w',encoding ="utf-8")as outfile :yaml .dump (clean_data ,outfile ,default_flow_style =False ,sort_keys =False )
             print (f"{Config.Colors.GREEN}[+] Report saved to {filename}{Config.Colors.ENDC}")
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Report Generation Failed: {e}{Config.Colors.ENDC}")
         finally :self .tp .transmit ("00A40004023F00",silent =True );self .current_fid ="3F00"
@@ -2312,7 +2312,7 @@ class FileSystemController :
             struct =self .current_fcp .get ('structure','Unknown')
             content_file =file_path_base .with_suffix ('.txt')
 
-            with open (content_file ,'w')as f :
+            with open (content_file ,'w',encoding ="utf-8")as f :
                 f .write ("--- File Metadata ---\n")
                 f .write (f"FID: {fid}\n")
                 f .write (f"Type: {self.current_fcp.get('type')} ({struct})\n\n")

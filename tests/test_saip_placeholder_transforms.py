@@ -18,23 +18,23 @@ from Tools.ProfilePackage.saip_json_codec import TokenExpansionContext
 
 
 class SwapNibblesTransformTests(unittest.TestCase):
-    """Byte-wise nibble swap: 8949...0F → 9894...F0 (ETSI TS 102 221 §13.2 BCD)."""
+    """Byte-wise nibble swap: 8988...0F → 9888...F0 (ETSI TS 102 221 §13.2 BCD)."""
 
     def test_bracket_form_swaps_nibbles(self) -> None:
         ctx = TokenExpansionContext(
-            defs={"ICCID": {"hex": "8949001304080000016F"}},
+            defs={"ICCID": {"hex": "8988001304080000014F"}},
             style="bracket",
         )
         out = ctx.expand_mixed_hex("[SwapNibbles(ICCID)]").hex().upper()
-        self.assertEqual(out, "989400314080000010F6")
+        self.assertEqual(out, "988800314080000010F4")
 
     def test_brace_form_swaps_nibbles(self) -> None:
         ctx = TokenExpansionContext(
-            defs={"ICCID": {"hex": "8949001304080000016F"}},
+            defs={"ICCID": {"hex": "8988001304080000014F"}},
             style="brace",
         )
         out = ctx.expand_mixed_hex("{SwapNibbles(ICCID)}").hex().upper()
-        self.assertEqual(out, "989400314080000010F6")
+        self.assertEqual(out, "988800314080000010F4")
 
     def test_transform_composes_with_literal_hex(self) -> None:
         ctx = TokenExpansionContext(

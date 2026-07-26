@@ -145,8 +145,8 @@ Two functions are bundled:
 
 - `SwapNibbles(NAME)` — byte-wise nibble swap, mirroring the
   ETSI TS 102 221 §13.2 (EF.ICCID) and 3GPP TS 31.102 BCD encodings.
-  Example: token value `8949001304080000016F` expands to
-  `989400314080000010F6`. Useful for feeding nibble-swapped EF.ICCID
+  Example: token value `8988001304080000014F` expands to
+  `988800314080000010F4`. Useful for feeding nibble-swapped EF.ICCID
   content from an upright ICCID source.
 - `EncodeEfImsi(NAME)` — wraps an ASCII IMSI (1..15 digits) into the
   EF.IMSI body per 3GPP TS 31.102 §4.2.2: length byte, then a

@@ -251,7 +251,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
     def test_resolve_profile_target_by_decimal_iccid_prefers_encoded_metadata_value(self):
         self.console._fetch_profiles = lambda: [
             console_module.ProfileMetadataView(
-                iccid="89460811111111111112",
+                iccid="89880811111111111111",
                 aid="A0000005591010FFFFFFFF8900001303",
                 state="DISABLED",
                 profile_class="OPER",
@@ -262,11 +262,11 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             )
         ]
 
-        resolved = self.console._resolve_profile_target("89460811111111111112")
+        resolved = self.console._resolve_profile_target("89880811111111111111")
 
         self.assertEqual(
             resolved,
-            (self.console.TAG_ICCID, "98648011111111111121"),
+            (self.console.TAG_ICCID, "98888011111111111111"),
         )
 
     def test_live_and_test_console_resolve_decimal_and_encoded_iccid_consistently(self):
@@ -280,7 +280,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             }
             console._fetch_profiles = lambda module=module: [
                 module.ProfileMetadataView(
-                    iccid="89460811111111111112",
+                    iccid="89880811111111111111",
                     aid="A0000005591010FFFFFFFF8900001303",
                     state="DISABLED",
                     profile_class="OPER",
@@ -292,12 +292,12 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ]
 
             self.assertEqual(
-                console._resolve_profile_target("89460811111111111112"),
-                (console.TAG_ICCID, "98648011111111111121"),
+                console._resolve_profile_target("89880811111111111111"),
+                (console.TAG_ICCID, "98888011111111111111"),
             )
             self.assertEqual(
-                console._resolve_profile_target("98648011111111111121"),
-                (console.TAG_ICCID, "98648011111111111121"),
+                console._resolve_profile_target("98888011111111111111"),
+                (console.TAG_ICCID, "98888011111111111111"),
             )
             self.assertEqual(
                 console._resolve_profile_target("A0000005591010FFFFFFFF8900001303"),
