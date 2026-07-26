@@ -225,6 +225,7 @@ decodes too.
 | Tool | Purpose |
 | --- | --- |
 | `saip_lint` | lint a SAIP package and return the `YRL-*` findings |
+| `plugin_status` | report which optional plugin-backed capabilities are available |
 | `session_diff` | diff the APDU traces of two session recordings |
 | `scan_identifiers` | sweep a file for telecom identifiers |
 
@@ -308,6 +309,30 @@ The server starts either way. A plugin that is absent, unhealthy, or raises
 is logged and skipped rather than taking the server down with it. A plugin
 tool that drives a card must call `card_access_allowed()` itself; see
 [Plugin Contract](../internals/plugin-contract.md).
+
+### Capabilities are gated on the plugin being there
+
+An agent should not have to discover a missing capability by failing. Call
+`plugin_status` to see what is available:
+
+```json
+{"extensions_active": true,
+ "plugin_tools": ["workbook_to_saip", "operator_plmn_lookup"],
+ "plugin_loading_enabled": true}
+```
+
+Built-in tools that depend on a plugin answer differently in each case
+rather than emitting one fixed refusal. `saip_lint` on a workbook is the
+worked example, because Excel-to-SAIP generation is not part of the
+published core:
+
+- **no plugin** -- reports `plugin_available: false` and how to install one
+- **plugin loaded** -- reports `plugin_available: true` and names the tool
+  to call
+
+A provider can set a `workbook_tool` attribute naming its converter, and
+that tool is listed first. Without it the core lists every tool the plugin
+added, since it cannot know which one handles a workbook.
 
 ## Validation
 

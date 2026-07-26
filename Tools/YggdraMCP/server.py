@@ -844,6 +844,59 @@ async def pcsc_transmit(
 # ---------------------------------------------------------------------------
 
 
+_WORKBOOK_SUFFIXES = frozenset({".xlsx", ".xlsm", ".xls", ".ods"})
+
+
+def _workbook_needs_a_plugin(path: Path) -> str:
+    """Explain the workbook route, gated on whether a plugin supplies it.
+
+    Excel-to-SAIP generation is not part of the published core. Whether an
+    agent can proceed depends entirely on a private plugin being present,
+    so say which case this is rather than emitting one fixed refusal.
+    """
+
+    state = ensure_plugin_extensions()
+    plugin_tools = list(state.get("tools") or [])
+    # A provider may name its converter via ``workbook_tool``; without that
+    # the core cannot know which of its tools handles a workbook, so it
+    # lists them all and lets the caller read the descriptions.
+    named = state.get("workbook_tool")
+    if named:
+        plugin_tools = [named] + [t for t in plugin_tools if t != named]
+    if plugin_tools:
+        return json.dumps(
+            {
+                "error": (
+                    f"{path.name!r} is a workbook, not a SAIP package, so it "
+                    "cannot be linted directly."
+                ),
+                "plugin_available": True,
+                "next_step": (
+                    "A generator plugin is loaded. Convert the workbook with "
+                    "one of its tools, then lint the SAIP package it writes."
+                ),
+                "plugin_tools": plugin_tools,
+            },
+            indent=2,
+        )
+    return json.dumps(
+        {
+            "error": (
+                f"{path.name!r} is a workbook, not a SAIP package, and no "
+                "Excel-to-SAIP generator plugin is loaded."
+            ),
+            "plugin_available": False,
+            "plugin_loading_enabled": _plugin_loading_enabled(),
+            "next_step": (
+                "Install a generator plugin under the runtime root and start "
+                f"the server with {'' if _plugin_loading_enabled() else 'YGGDRASIM_ALLOW_PLUGINS=1, then '}"
+                "call plugin_status to confirm it registered."
+            ),
+        },
+        indent=2,
+    )
+
+
 @mcp.tool(annotations=READS_FILES)
 def saip_lint(file_path: str, strict: bool = False) -> str:
     """Lint a SAIP profile package and return the YRL-* findings as JSON.
@@ -860,6 +913,12 @@ def saip_lint(file_path: str, strict: bool = False) -> str:
     resolved = Path(file_path).expanduser()
     if not resolved.is_file():
         return json.dumps({"error": f"No such file: {resolved}"})
+
+    # A workbook is not a SAIP package. Converting one needs a generator
+    # plugin, so answer differently depending on whether that plugin is
+    # actually installed instead of refusing identically either way.
+    if resolved.suffix.lower() in _WORKBOOK_SUFFIXES:
+        return _workbook_needs_a_plugin(resolved)
 
     try:
         from yggdrasim_common.gui_server.actions.saip import _load_package_payload_impl
@@ -1275,6 +1334,38 @@ def apdu_risk(hex_apdu: str) -> str:
     )
 
 
+@mcp.tool(annotations=READ_ONLY)
+def plugin_status() -> str:
+    """Report which optional plugin-backed capabilities this server has.
+
+    Call this before assuming a capability exists. Tools that depend on a
+    private plugin refuse when it is absent, and this says which of them
+    are usable right now and which extra tools a plugin has contributed.
+
+    Nothing here loads or executes a plugin beyond what the server already
+    did at startup.
+    """
+    state = ensure_plugin_extensions()
+    extra = list(state.get("tools") or [])
+    return json.dumps(
+        {
+            "extensions_active": bool(state.get("registered")),
+            "capability": MCP_EXTENSION_CAPABILITY,
+            "plugin_tools": extra,
+            "plugin_loading_enabled": _plugin_loading_enabled(),
+            "errors": state.get("errors") or {},
+            "note": (
+                "Plugin-provided tools are listed above and can be called "
+                "directly."
+                if extra
+                else "No plugin extensions are registered; only the built-in "
+                "tools are available."
+            ),
+        },
+        indent=2,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Private extensions
 #
@@ -1285,6 +1376,9 @@ def apdu_risk(hex_apdu: str) -> str:
 # ---------------------------------------------------------------------------
 
 MCP_EXTENSION_CAPABILITY = "mcp_extensions"
+
+#: Populated by :func:`ensure_plugin_extensions`; read by the gate below.
+_EXTENSION_STATE: dict[str, Any] = {}
 
 
 def load_plugin_extensions(server: Any = None) -> dict[str, Any]:
@@ -1345,6 +1439,7 @@ def load_plugin_extensions(server: Any = None) -> dict[str, Any]:
         )
         return report
 
+    before = set(_tool_names(target))
     try:
         register(target)
     except Exception as exc:  # noqa: BLE001
@@ -1352,7 +1447,56 @@ def load_plugin_extensions(server: Any = None) -> dict[str, Any]:
         return report
 
     report["registered"] = True
+    report["tools"] = sorted(set(_tool_names(target)) - before)
+    hinted = getattr(provider, "workbook_tool", "")
+    if isinstance(hinted, str) and hinted:
+        report["workbook_tool"] = hinted
+    _EXTENSION_STATE.update(report)
     return report
+
+
+def _plugin_loading_enabled() -> bool:
+    """Whether the runtime is allowed to import plugins at all."""
+
+    try:
+        from yggdrasim_common.plugin_runtime import _plugin_loading_allowed
+
+        return bool(_plugin_loading_allowed())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _tool_names(server: Any) -> list[str]:
+    """Best-effort tool inventory across FastMCP versions and test stubs."""
+
+    registry = getattr(server, "tools", None)
+    if isinstance(registry, dict):
+        return list(registry)
+    manager = getattr(server, "_tool_manager", None)
+    listing = getattr(manager, "list_tools", None)
+    if callable(listing):
+        try:
+            return [getattr(t, "name", "") for t in listing()]
+        except Exception:  # noqa: BLE001
+            return []
+    return []
+
+
+def ensure_plugin_extensions(server: Any = None) -> dict[str, Any]:
+    """Load private extensions once, and report the same state to every caller.
+
+    ``run_cli`` is not the only entry point: a client may list tools without
+    ever reaching it, and a tool needs to know whether a plugin-backed path
+    exists before refusing work. Loading here keeps those answers consistent.
+    """
+
+    if _EXTENSION_STATE.get("loaded"):
+        return dict(_EXTENSION_STATE)
+    report = load_plugin_extensions(server)
+    report["loaded"] = True
+    _EXTENSION_STATE.clear()
+    _EXTENSION_STATE.update(report)
+    return dict(_EXTENSION_STATE)
 
 
 # ---------------------------------------------------------------------------

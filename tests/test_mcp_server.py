@@ -165,6 +165,7 @@ def test_registered_tools_cover_the_documented_surface(server) -> None:
         "session_diff",
         "card_bridge_transmit",
         "apdu_risk",
+        "plugin_status",
     }
     assert expected <= registered, expected - registered
 
@@ -804,3 +805,91 @@ def test_the_tracked_tree_reports_no_address_leaks(server) -> None:
         for value in _reported(server, text):
             noisy.append(f"{name}: {value}")
     assert noisy == [], noisy[:10]
+
+
+# --------------------------------------------------------------------------
+# Plugin gating: absent means unusable, present means usable
+# --------------------------------------------------------------------------
+
+
+def _reset_extension_state(server) -> None:
+    server._EXTENSION_STATE.clear()
+
+
+def test_plugin_status_reports_nothing_when_no_extension_is_present(
+    server, monkeypatch
+) -> None:
+    _reset_extension_state(server)
+    _patch_capability(monkeypatch, None)
+    payload = json.loads(server.plugin_status())
+    assert payload["extensions_active"] is False
+    assert payload["plugin_tools"] == []
+    assert "No plugin extensions are registered" in payload["note"]
+
+
+def test_plugin_status_names_the_tools_an_extension_added(server, monkeypatch) -> None:
+    _reset_extension_state(server)
+    _patch_capability(monkeypatch, _Provider())
+    payload = json.loads(server.plugin_status())
+    assert payload["extensions_active"] is True
+    assert payload["capability"] == server.MCP_EXTENSION_CAPABILITY
+
+
+def test_a_workbook_is_refused_differently_without_a_plugin(server, monkeypatch, tmp_path) -> None:
+    """Absent plugin: the agent must be told it cannot proceed."""
+
+    _reset_extension_state(server)
+    _patch_capability(monkeypatch, None)
+    book = tmp_path / "operator.xlsx"
+    book.write_bytes(b"PK\x03\x04stub")
+    payload = json.loads(server.saip_lint(str(book)))
+    assert payload["plugin_available"] is False
+    assert "no Excel-to-SAIP generator plugin is loaded" in payload["error"]
+
+
+def test_a_workbook_points_at_the_plugin_tool_when_present(server, monkeypatch, tmp_path) -> None:
+    """Present plugin: the agent must be told how to proceed."""
+
+    class Converting(_Provider):
+        workbook_tool = "workbook_to_saip"
+
+        def _register(self, srv):
+            @srv.tool()
+            def workbook_to_saip(file_path: str) -> str:
+                return "{}"
+
+            @srv.tool()
+            def unrelated_tool() -> str:
+                return "{}"
+
+    _reset_extension_state(server)
+    _patch_capability(monkeypatch, Converting())
+    book = tmp_path / "operator.xlsx"
+    book.write_bytes(b"PK\x03\x04stub")
+    payload = json.loads(server.saip_lint(str(book)))
+    assert payload["plugin_available"] is True
+    # The declared converter leads, so the agent is not left guessing.
+    assert payload["plugin_tools"][0] == "workbook_to_saip"
+    assert "unrelated_tool" in payload["plugin_tools"]
+
+
+def test_workbook_gate_covers_every_spreadsheet_suffix(server, monkeypatch, tmp_path) -> None:
+    _reset_extension_state(server)
+    _patch_capability(monkeypatch, None)
+    for suffix in (".xlsx", ".xlsm", ".xls", ".ods"):
+        book = tmp_path / f"book{suffix}"
+        book.write_bytes(b"PK\x03\x04stub")
+        payload = json.loads(server.saip_lint(str(book)))
+        assert payload.get("plugin_available") is False, suffix
+
+
+def test_extension_loading_is_idempotent(server, monkeypatch) -> None:
+    """Every caller must see the same state, not re-register tools."""
+
+    _reset_extension_state(server)
+    provider = _Provider()
+    _patch_capability(monkeypatch, provider)
+    first = server.ensure_plugin_extensions()
+    second = server.ensure_plugin_extensions()
+    assert first["registered"] is True
+    assert second == first
