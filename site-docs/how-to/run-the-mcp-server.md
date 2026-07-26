@@ -225,6 +225,9 @@ decodes too.
 | Tool | Purpose |
 | --- | --- |
 | `saip_lint` | lint a SAIP package and return the `YRL-*` findings |
+| `saip_diff` | structurally diff two SAIP packages: added, removed, changed, moved |
+| `metadata_lint` | lint an SGP.22 profile metadata document |
+| `eim_package_lint` | validate an SGP.32 eIM package against the ES2+ schema |
 | `plugin_status` | report which optional plugin-backed capabilities are available |
 | `session_diff` | diff the APDU traces of two session recordings |
 | `scan_identifiers` | sweep a file for telecom identifiers |
@@ -236,6 +239,14 @@ extensions in [Build and Packaging](../build-and-packaging.md).
 
 `session_diff` takes two recordings written by the shell recorder; see
 [Diff Two Session Recordings](diff-two-session-recordings.md).
+
+`saip_diff` bounds its response at 200 entries and reports how many were
+dropped; a whole-package diff can run to thousands of nodes.
+
+Upstream pySim logs the construction of every file in a profile at DEBUG,
+which is over a hundred kilobytes of stderr per package load. Those
+loggers are raised to WARNING; set `YGGDRASIM_MCP_UPSTREAM_LOG_LEVEL=DEBUG`
+when actually debugging a decode.
 
 ### Card
 

@@ -166,6 +166,9 @@ def test_registered_tools_cover_the_documented_surface(server) -> None:
         "card_bridge_transmit",
         "apdu_risk",
         "plugin_status",
+        "saip_diff",
+        "metadata_lint",
+        "eim_package_lint",
     }
     assert expected <= registered, expected - registered
 
@@ -893,3 +896,83 @@ def test_extension_loading_is_idempotent(server, monkeypatch) -> None:
     second = server.ensure_plugin_extensions()
     assert first["registered"] is True
     assert second == first
+
+
+# --------------------------------------------------------------------------
+# Tier 1: stateless wrappers over existing path-in / data-out APIs
+# --------------------------------------------------------------------------
+
+_PACKAGE = "Tools/ProfilePackage/transcode/example_test_profile.transcode.json"
+_METADATA = "SCP11/local_access/profile/metadata/default_profile_metadata.json"
+_EIM = "SCP11/eim_local/eim_packages/templates/template_eim_package_request.json"
+
+
+def test_saip_diff_reports_no_change_against_itself(server) -> None:
+    payload = json.loads(server.saip_diff(_PACKAGE, _PACKAGE))
+    assert payload["identical"] is True
+    assert payload["counts"]["total"] == 0
+
+
+def test_saip_diff_pinpoints_a_single_changed_node(server, tmp_path: Path) -> None:
+    original = (REPO_ROOT / _PACKAGE).read_text(encoding="utf-8")
+    modified = tmp_path / "modified.transcode.json"
+    modified.write_text(
+        original.replace("89880811111111111112", "89880811111111119999"),
+        encoding="utf-8",
+    )
+    payload = json.loads(server.saip_diff(str(REPO_ROOT / _PACKAGE), str(modified)))
+    assert payload["identical"] is False
+    assert payload["counts"]["changed"] == 1
+    assert payload["entries"][0]["path"] == "sections.header.iccid"
+
+
+def test_saip_diff_reports_a_missing_side(server, tmp_path: Path) -> None:
+    payload = json.loads(server.saip_diff(_PACKAGE, str(tmp_path / "absent.json")))
+    assert "No such file" in payload["error"]
+
+
+def test_saip_diff_routes_a_workbook_through_the_plugin_gate(server, monkeypatch, tmp_path) -> None:
+    """A workbook is not a package on either side of the diff."""
+
+    _reset_extension_state(server)
+    _patch_capability(monkeypatch, None)
+    book = tmp_path / "operator.xlsx"
+    book.write_bytes(b"PK\x03\x04stub")
+    payload = json.loads(server.saip_diff(_PACKAGE, str(book)))
+    assert payload["plugin_available"] is False
+
+
+def test_metadata_lint_reports_the_encoded_lengths(server) -> None:
+    payload = json.loads(server.metadata_lint(_METADATA))
+    assert payload["store_metadata_len"] > 0
+    assert payload["update_metadata_len"] > 0
+    # A relative path is resolved against the runtime metadata directory, so
+    # the wrapper resolves first and confirms the requested file was linted.
+    assert "warning" not in payload
+
+
+def test_metadata_lint_reports_a_missing_file(server, tmp_path: Path) -> None:
+    payload = json.loads(server.metadata_lint(str(tmp_path / "absent.json")))
+    assert "No such file" in payload["error"]
+
+
+def test_eim_package_lint_accepts_a_real_package(server) -> None:
+    payload = json.loads(server.eim_package_lint(_EIM))
+    assert payload["ok"] is True
+    assert payload["package_type"] == "eim_package_request"
+    assert payload["errors"] == []
+
+
+def test_eim_package_lint_rejects_a_non_eim_document(server) -> None:
+    payload = json.loads(server.eim_package_lint(_PACKAGE))
+    assert payload["ok"] is False
+    assert any("package_type" in e for e in payload["errors"])
+
+
+def test_upstream_debug_logging_is_quietened(server) -> None:
+    """Loading one package emitted over 140 KB of pySim DEBUG to stderr."""
+
+    import logging
+
+    for name in ("pySim", "osmocom", "construct"):
+        assert logging.getLogger(name).level >= logging.WARNING, name

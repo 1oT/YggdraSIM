@@ -26,6 +26,15 @@ from pydantic import BaseModel, Field
 
 _LOGGER = logging.getLogger(__name__)
 
+# pySim logs the construction of every file in a profile at DEBUG. Loading one
+# package emits well over a hundred kilobytes, which reaches the client as
+# noise on stderr and buries anything that matters. Quieten the upstream
+# loggers, overridable when actually debugging a decode.
+for _noisy in ("pySim", "osmocom", "construct"):
+    logging.getLogger(_noisy).setLevel(
+        os.environ.get("YGGDRASIM_MCP_UPSTREAM_LOG_LEVEL", "WARNING").upper()
+    )
+
 #: Lookup and decode tools: no side effects, same answer every time.
 READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
 #: Reads a path from the local filesystem, but changes nothing.
@@ -1332,6 +1341,155 @@ def apdu_risk(hex_apdu: str) -> str:
         },
         indent=2,
     )
+
+
+#: A whole-package diff can exceed a useful response size.
+_MAX_DIFF_ENTRIES = 200
+
+
+def _clip_value(value: Any, limit: int = 120) -> Any:
+    """Keep one changed node from dominating the response."""
+
+    text = value if isinstance(value, str) else repr(value)
+    if len(text) <= limit:
+        return value
+    return f"{text[:limit]}... ({len(text)} chars)"
+
+
+@mcp.tool(annotations=READS_FILES)
+def saip_diff(left_path: str, right_path: str) -> str:
+    """Diff two SAIP profile packages structurally.
+
+    Reports what changed between two packages: added, removed, changed,
+    and moved nodes, each with a dotted path into the decoded tree.
+    Accepts the same inputs as saip_lint.
+
+    left_path: baseline package.
+    right_path: package to compare against the baseline.
+    """
+    left = Path(left_path).expanduser()
+    right = Path(right_path).expanduser()
+    for candidate in (left, right):
+        if not candidate.is_file():
+            return json.dumps({"error": f"No such file: {candidate}"})
+        if candidate.suffix.lower() in _WORKBOOK_SUFFIXES:
+            return _workbook_needs_a_plugin(candidate)
+
+    try:
+        from yggdrasim_common.gui_server.actions.saip import _load_package_payload_impl
+        from Tools.ProfilePackage.saip_diff_engine import diff_saip_documents
+    except ImportError as exc:
+        return json.dumps({"error": f"SAIP support is unavailable: {exc}"})
+
+    documents = []
+    for candidate in (left, right):
+        try:
+            documents.append(
+                (_load_package_payload_impl(candidate) or {}).get("decoded_document") or {}
+            )
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"error": f"Could not load {candidate.name}: {exc}"})
+
+    try:
+        summary = diff_saip_documents(documents[0], documents[1])
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Diff failed: {exc}"})
+
+    return json.dumps(
+        {
+            "left": left.name,
+            "right": right.name,
+            "identical": summary.is_empty,
+            "counts": {
+                "added": summary.added,
+                "removed": summary.removed,
+                "changed": summary.changed,
+                "moved": summary.moved,
+                "total": summary.total,
+            },
+            # Bounded: a full package diff can run to thousands of nodes.
+            "entries": [
+                {
+                    "path": entry.path,
+                    "op": entry.op,
+                    "left": _clip_value(entry.value_a),
+                    "right": _clip_value(entry.value_b),
+                }
+                for entry in summary.entries[:_MAX_DIFF_ENTRIES]
+            ],
+            "entries_truncated": max(0, summary.total - _MAX_DIFF_ENTRIES),
+        },
+        indent=2,
+        default=str,
+    )
+
+
+@mcp.tool(annotations=READS_FILES)
+def metadata_lint(file_path: str) -> str:
+    """Lint an SGP.22 profile metadata document.
+
+    Reports the StoreMetadata and UpdateMetadata encodings the document
+    produces, plus any custom tags it carries.
+
+    file_path: path to the metadata JSON.
+    """
+    resolved = Path(file_path).expanduser()
+    if not resolved.is_file():
+        return json.dumps({"error": f"No such file: {resolved}"})
+
+    try:
+        from SCP11.local_access.session import LocalIsdrSession
+    except ImportError as exc:
+        return json.dumps({"error": f"SCP11 support is unavailable: {exc}"})
+
+    try:
+        # Resolve first: a relative path is interpreted against the runtime
+        # metadata directory, which would silently lint a different file.
+        session = LocalIsdrSession(apdu_channel=None)
+        report = session.lint_metadata(str(resolved.resolve()))
+    except FileNotFoundError as exc:
+        return json.dumps({"error": str(exc)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Metadata lint failed: {exc}"})
+
+    linted = str(report.get("metadata_path") or "")
+    if linted and Path(linted).resolve() != resolved.resolve():
+        report["warning"] = (
+            f"Runtime resolution linted {linted} rather than the requested path."
+        )
+    return json.dumps(report, indent=2, default=str)
+
+
+@mcp.tool(annotations=READS_FILES)
+def eim_package_lint(file_path: str) -> str:
+    """Validate an SGP.32 eIM package document against the ES2+ schema.
+
+    Reports errors, warnings, the package type and version, and the
+    per-check spec results.
+
+    file_path: path to the eIM package JSON.
+    """
+    resolved = Path(file_path).expanduser()
+    if not resolved.is_file():
+        return json.dumps({"error": f"No such file: {resolved}"})
+
+    try:
+        from SCP11.eim_local.eim_package_codec import (
+            lint_eim_package_document,
+            load_eim_package_document,
+        )
+    except ImportError as exc:
+        return json.dumps({"error": f"eIM support is unavailable: {exc}"})
+
+    try:
+        document = load_eim_package_document(str(resolved))
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Could not load {resolved.name}: {exc}"})
+
+    try:
+        return json.dumps(lint_eim_package_document(document), indent=2, default=str)
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"eIM package lint failed: {exc}"})
 
 
 @mcp.tool(annotations=READ_ONLY)
