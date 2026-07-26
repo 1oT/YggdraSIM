@@ -230,6 +230,7 @@ decodes too.
 | `eim_package_lint` | validate an SGP.32 eIM package against the ES2+ schema |
 | `plugin_status` | report which optional plugin-backed capabilities are available |
 | `runtime_status` | report the runtime root, build flavor, and live service state |
+| `profile_package_run` | run a batch of SAIP Profile Package shell commands |
 | `session_diff` | diff the APDU traces of two session recordings |
 | `scan_identifiers` | sweep a file for telecom identifiers |
 
@@ -262,6 +263,37 @@ behind the same opt-in as `pcsc_transmit`. Enabling card access is
 therefore not only a statement about the reader on this machine; it is a
 statement about every relay this host can reach. For a Remote Lab rig the
 token file holds the session token, not the bridge's own token.
+
+### Running shell commands
+
+`profile_package_run` executes a non-interactive batch in the SAIP Profile
+Package shell, so an agent can drive the profile workflow rather than only
+inspect single files:
+
+```text
+USE /abs/path/profile.der; INFO; TREE; LINT; EXIT
+```
+
+Three rules make that safe to offer.
+
+**Only file-backed shells.** SCP03 opens a PC/SC reader during startup,
+before any verb runs, so exposing it would put card access behind a tool
+whose name says nothing about cards. It is deliberately absent.
+
+**Verbs are allow-listed, not deny-listed.** The shell carries 77 verbs.
+Read verbs run by default; verbs that write a file need
+`YGGDRASIM_MCP_ALLOW_SHELL_WRITE=1`; interactive verbs are always refused
+because a batch has no terminal and they would hang until the timeout. An
+unrecognised verb is refused rather than assumed harmless, and a refusal
+anywhere in the batch blocks the whole batch before anything runs.
+
+**Pass absolute paths.** The shell resolves a relative path against its own
+profile and transcode directories, not the working directory, so a relative
+argument can silently act on a different package. The tool flags any
+relative path argument and reports when the shell logged a missing path.
+
+State does not survive between calls, since each batch is a fresh process.
+Put a whole flow in one batch.
 
 ### Service state is read-only
 

@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -1490,6 +1491,213 @@ def eim_package_lint(file_path: str) -> str:
         return json.dumps(lint_eim_package_document(document), indent=2, default=str)
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"error": f"eIM package lint failed: {exc}"})
+
+
+# ---------------------------------------------------------------------------
+# Shell batch execution
+#
+# The operator shells accept a non-interactive ``--cmd "A; B; EXIT"`` batch,
+# which is a far smaller surface than reimplementing them. Two constraints
+# make it safe to hand an agent.
+#
+# Only file-backed shells are offered. SCP03 opens a PC/SC reader during
+# startup, before any verb runs, so exposing it would put card access behind
+# a tool whose name says nothing about cards.
+#
+# Verbs are allow-listed rather than deny-listed. The shell carries 77 of
+# them, several of which launch a TUI that would hang a batch, so an unknown
+# verb is refused instead of assumed harmless.
+# ---------------------------------------------------------------------------
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _looks_like_a_relative_path(token: str) -> bool:
+    """A bare or relative path argument, which the shell resolves its own way."""
+
+    candidate = token.strip().strip("'\"")
+    if not candidate or candidate.startswith("-"):
+        return False
+    if Path(candidate).is_absolute():
+        return False
+    return "/" in candidate or Path(candidate).suffix.lower() in {
+        ".der", ".json", ".txt", ".hex", ".asn", ".asn1", ".csv", ".yaml", ".yml",
+    }
+
+
+def _relative_path_arguments(batch: list[str]) -> list[str]:
+    """Path-shaped arguments the shell may resolve against its own directories."""
+
+    flagged: list[str] = []
+    for command in batch:
+        for token in command.split()[1:]:
+            if _looks_like_a_relative_path(token):
+                flagged.append(token)
+    return flagged
+
+
+SHELL_WRITE_ENV = "YGGDRASIM_MCP_ALLOW_SHELL_WRITE"
+
+#: Verbs that only read: inspect, report, or print. Safe by default.
+_SHELL_READ_VERBS = frozenset({
+    "CHECK", "DIFF", "DIFF-PRESET", "DUMP", "HELP", "INFO", "INSPECT",
+    "LINT", "LIST", "LIST-AKA", "LIST-TOKENS", "PRESETS", "PREVIEW-PRESET",
+    "PROFILE-DIR", "PWD", "RELEASE-GATE", "STATUS", "TOKENS", "TREE",
+    "TYPE", "USE", "OPEN", "EXIT", "QUIT",
+})
+
+#: Verbs that write a file or mutate the open package. Second opt-in.
+_SHELL_WRITE_VERBS = frozenset({
+    "ADD", "ADD-TOKEN", "APPLY", "APPLY-SIDECAR", "APPLY-TEMPLATE",
+    "APPLY-TOKENS", "DELETE", "ENCODE-JSON", "EXPORT", "EXPORT-CSV",
+    "EXPORT-SIDECAR", "EXPORT-TOKENS", "EXPORT-TOKENS-CSV", "EXTRACT-APPS",
+    "GENERATE-BATCH", "GENERATE-PROFILE", "GENERATE-TEMPLATE", "IMPORT-CSV",
+    "IMPORT-TOKENS-CSV", "NEW-PROFILE", "NEW-TEMPLATE", "PROVISION-AKA",
+    "RANDOMIZE-AKA", "REMOVE", "REMOVE-NAA", "REMOVE-TOKEN", "RENAME",
+    "RENAME-TOKEN", "RETOKENISE", "RETOKENISE-LENGTHS", "RETOKENIZE",
+    "RETOKENIZE-LENGTHS", "SET", "SET-TOKEN", "SPLIT", "TRANSCODE-DIR",
+})
+
+#: Interactive verbs. Always refused: a batch has no terminal, so these hang.
+_SHELL_INTERACTIVE_VERBS = frozenset({
+    "DIFF-TUI", "NEW-PROFILE-WIZARD", "TRANSCODE-TUI", "TUI", "WIZARD",
+    "WATCH-SIMCARD", "QA",
+})
+
+_SHELL_TIMEOUT_SECONDS = 120
+_SHELL_OUTPUT_LIMIT = 60_000
+
+
+def shell_write_allowed() -> bool:
+    """Whether verbs that write files may run."""
+
+    return _env_on(SHELL_WRITE_ENV)
+
+
+def classify_shell_command(command: str) -> dict[str, Any]:
+    """Classify one shell command by its leading verb."""
+
+    verb = str(command or "").strip().split()[0].upper() if command.strip() else ""
+    if not verb:
+        return {"verb": "", "risk": "empty"}
+    if verb in _SHELL_INTERACTIVE_VERBS:
+        return {"verb": verb, "risk": "interactive"}
+    if verb in _SHELL_READ_VERBS:
+        return {"verb": verb, "risk": "read"}
+    if verb in _SHELL_WRITE_VERBS:
+        return {"verb": verb, "risk": "write"}
+    return {"verb": verb, "risk": "unknown"}
+
+
+def _shell_batch_refusal(commands: list[str]) -> str | None:
+    """Return a refusal for the first command that may not run, else None."""
+
+    for command in commands:
+        verdict = classify_shell_command(command)
+        risk = verdict["risk"]
+        if risk == "empty":
+            continue
+        if risk == "interactive":
+            return json.dumps({
+                "error": (
+                    f"Refused: {verdict['verb']} opens an interactive view and "
+                    "would hang a non-interactive batch."
+                ),
+                "verb": verdict["verb"],
+            })
+        if risk == "unknown":
+            return json.dumps({
+                "error": (
+                    f"Refused: {verdict['verb']} is not a recognised verb for "
+                    "this shell. Unknown verbs are refused rather than assumed "
+                    "safe; call it with HELP to see what is available."
+                ),
+                "verb": verdict["verb"],
+            })
+        if risk == "write" and not shell_write_allowed():
+            return json.dumps({
+                "error": (
+                    f"Refused: {verdict['verb']} writes files. Set "
+                    f"{SHELL_WRITE_ENV}=1 to permit it."
+                ),
+                "verb": verdict["verb"],
+                "risk": "write",
+            })
+    return None
+
+
+@mcp.tool(annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False,
+))
+def profile_package_run(commands: str, timeout_seconds: int = _SHELL_TIMEOUT_SECONDS) -> str:
+    """Run a batch of SAIP Profile Package shell commands and return the output.
+
+    This is the file-based profile shell: open a package, inspect it, lint
+    it, diff it, export it. Commands run left to right, separated by ';',
+    in one non-interactive process. State does not survive between calls,
+    so put a whole flow in one batch, for example:
+    "USE profile.der; INFO; TREE; LINT; EXIT".
+
+    Read verbs run by default. Verbs that write a file need
+    YGGDRASIM_MCP_ALLOW_SHELL_WRITE. Interactive and unrecognised verbs are
+    always refused. Card-driving shells are deliberately not exposed here.
+
+    commands: semicolon-separated batch.
+    timeout_seconds: how long to allow the batch (default 120).
+    """
+    batch = [part.strip() for part in str(commands or "").split(";")]
+    if not any(batch):
+        return json.dumps({"error": "No commands given."})
+
+    refusal = _shell_batch_refusal(batch)
+    if refusal is not None:
+        return refusal
+
+    import subprocess
+
+    argv = [sys.executable, "-W", "ignore::RuntimeWarning", "-m",
+            "Tools.ProfilePackage.main", "--cmd", str(commands)]
+    try:
+        completed = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=max(1, min(int(timeout_seconds), 600)),
+            cwd=str(REPO_ROOT),
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": f"Batch timed out after {timeout_seconds}s."})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Could not run the shell: {exc}"})
+
+    # The shell paints its output; colour codes are noise to a caller.
+    stdout = _ANSI_ESCAPE.sub("", completed.stdout or "")
+    stderr = _ANSI_ESCAPE.sub("", completed.stderr or "")
+    payload: dict[str, Any] = {
+        "exit_code": completed.returncode,
+        "verbs": [classify_shell_command(c)["verb"] for c in batch if c.strip()],
+        "write_enabled": shell_write_allowed(),
+        "output": stdout[:_SHELL_OUTPUT_LIMIT],
+        "output_truncated": max(0, len(stdout) - _SHELL_OUTPUT_LIMIT),
+    }
+    if stderr.strip():
+        payload["stderr"] = stderr[:4000]
+
+    # A relative path is resolved against the shell's own profile and
+    # transcode directories, not the working directory. Left unflagged, a
+    # caller can ask about one package and be answered about another.
+    relative = _relative_path_arguments(batch)
+    if relative:
+        payload["warning"] = (
+            "Relative path argument(s) "
+            + ", ".join(sorted(set(relative))[:4])
+            + ": this shell resolves those against its own directories, so it "
+            "may act on a different file. Pass absolute paths."
+        )
+    if "Path not found" in stdout:
+        payload["path_not_found"] = True
+    return json.dumps(payload, indent=2)
 
 
 @mcp.tool(annotations=PROBES_WORLD)

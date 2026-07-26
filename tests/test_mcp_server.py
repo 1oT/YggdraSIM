@@ -170,6 +170,7 @@ def test_registered_tools_cover_the_documented_surface(server) -> None:
         "metadata_lint",
         "eim_package_lint",
         "runtime_status",
+        "profile_package_run",
     }
     assert expected <= registered, expected - registered
 
@@ -1038,3 +1039,107 @@ def test_runtime_status_is_read_only(server) -> None:
     body = source.split("def runtime_status(", 1)[1].split("\n@mcp.tool", 1)[0]
     for forbidden in ("subprocess", "Popen", ".start(", ".stop(", "kill", "terminate"):
         assert forbidden not in body, forbidden
+
+
+# --------------------------------------------------------------------------
+# Tier 2: gated shell batch execution
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command, risk",
+    [
+        ("INFO", "read"), ("LINT", "read"), ("TREE", "read"), ("USE p.der", "read"),
+        ("GENERATE-BATCH t.json r.csv out/", "write"), ("DELETE x", "write"),
+        ("SET-TOKEN a b", "write"), ("DIFF-TUI", "interactive"),
+        ("NEW-PROFILE-WIZARD", "interactive"), ("WATCH-SIMCARD", "interactive"),
+        ("RM -rf /", "unknown"), ("", "empty"),
+    ],
+)
+def test_shell_command_classification(server, command: str, risk: str) -> None:
+    assert server.classify_shell_command(command)["risk"] == risk
+
+
+def test_classification_sets_do_not_overlap(server) -> None:
+    """A verb in two sets would make its treatment depend on check order."""
+
+    read = server._SHELL_READ_VERBS
+    write = server._SHELL_WRITE_VERBS
+    interactive = server._SHELL_INTERACTIVE_VERBS
+    assert not (read & write)
+    assert not (read & interactive)
+    assert not (write & interactive)
+
+
+def test_no_write_verb_is_classified_as_read(server) -> None:
+    """A misfiled verb would run unguarded."""
+
+    mutating_prefixes = ("GENERATE", "IMPORT", "APPLY", "NEW-", "SET", "REMOVE",
+                         "RENAME", "DELETE", "RETOKENI", "PROVISION", "RANDOMIZE")
+    for verb in server._SHELL_READ_VERBS:
+        assert not verb.startswith(mutating_prefixes), verb
+
+
+def test_write_verbs_are_refused_without_the_opt_in(server, monkeypatch) -> None:
+    monkeypatch.delenv(server.SHELL_WRITE_ENV, raising=False)
+    payload = json.loads(server.profile_package_run("GENERATE-BATCH a b c; EXIT"))
+    assert server.SHELL_WRITE_ENV in payload["error"]
+    assert payload["risk"] == "write"
+
+
+def test_interactive_verbs_are_always_refused(server, monkeypatch) -> None:
+    """A TUI has no terminal in a batch and would hang until timeout."""
+
+    monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
+    payload = json.loads(server.profile_package_run("DIFF-TUI; EXIT"))
+    assert "interactive" in payload["error"]
+
+
+def test_unknown_verbs_are_refused_rather_than_passed_through(server, monkeypatch) -> None:
+    monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
+    payload = json.loads(server.profile_package_run("RM -rf /; EXIT"))
+    assert "not a recognised verb" in payload["error"]
+
+
+def test_a_refused_verb_anywhere_blocks_the_whole_batch(server, monkeypatch) -> None:
+    """Refusal must precede execution; a later write must not run either."""
+
+    monkeypatch.delenv(server.SHELL_WRITE_ENV, raising=False)
+    payload = json.loads(server.profile_package_run("INFO; DELETE x; EXIT"))
+    assert payload["verb"] == "DELETE"
+    assert "output" not in payload
+
+
+def test_empty_batch_is_rejected(server) -> None:
+    assert "No commands given" in json.loads(server.profile_package_run("  ;  "))["error"]
+
+
+def test_relative_path_arguments_are_flagged(server) -> None:
+    """The shell resolves relative paths against its own directories."""
+
+    payload = json.loads(server.profile_package_run("USE some/profile.der; EXIT"))
+    assert "Relative path argument" in payload["warning"]
+    assert "absolute paths" in payload["warning"]
+
+
+def test_absolute_paths_are_not_flagged(server, tmp_path) -> None:
+    package = tmp_path / "p.der"
+    package.write_bytes(b"\\x00")
+    payload = json.loads(server.profile_package_run(f"USE {package}; EXIT"))
+    assert "warning" not in payload
+
+
+def test_shell_output_carries_no_ansi_escapes(server, tmp_path) -> None:
+    """The shell paints its output; colour codes are noise to a caller."""
+
+    payload = json.loads(server.profile_package_run("HELP; EXIT"))
+    assert "\\x1b[" not in payload["output"]
+    assert payload["output"]
+
+
+def test_card_driving_shells_are_not_exposed(server) -> None:
+    """SCP03 opens a PC/SC reader during startup, before any verb runs."""
+
+    registered = set(server.mcp.tools)
+    for forbidden in ("scp03_run", "scp11_run", "scp80_run", "shell_run"):
+        assert forbidden not in registered
