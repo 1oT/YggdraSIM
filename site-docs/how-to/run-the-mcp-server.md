@@ -123,6 +123,33 @@ python -m pip install -e '.[mcp]'
 The `mcp` extra is opt-in: neither the base install nor `[full]` pulls it
 in, so a normal runtime never carries the server.
 
+### Standalone, without the rest of YggdraSIM
+
+Most of the tools decode bytes and resolve identifiers, which needs no
+card stack. `scripts/release/build_mcp_standalone.py` generates a separate
+`yggdrasim-mcp` distribution carrying just those:
+
+```bash
+python scripts/release/build_mcp_standalone.py --wheel-out dist/
+pip install dist/yggdrasim_mcp-*.whl          # decode, lookup, diff tools
+pip install 'yggdrasim_mcp-*.whl[card]'       # adds the PC/SC tools
+```
+
+It declares only `mcp`, `pyyaml`, and `asn1crypto`, with `pyscard`
+optional because it needs a compiler and the PCSC headers. No Git
+dependencies, so a plain `pip` resolves it.
+
+Twelve of the sixteen tools work from that install alone, thirteen with
+`[card]`. `saip_lint` and `bpp_segment` report that they are unavailable,
+because they need the pySim profile stack and the SCP11 session code
+respectively.
+
+The distribution publishes a single `yggdrasim_mcp` package rather than
+re-providing `Tools` or `SCP03`, so it can be installed alongside the full
+`yggdrasim` without a file collision. The tree is generated on demand from
+these sources and is never committed, so it cannot drift from the code it
+is cut from.
+
 `saip_lint` additionally needs the SAIP stack, which is part of the base
 install. If it is somehow unavailable the tool reports that rather than
 raising.
