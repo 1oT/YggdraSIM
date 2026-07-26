@@ -173,7 +173,6 @@ nav:
       - Write a Plugin: how-to/write-a-plugin.md
       - Build a Bundled Executable: how-to/build-a-bundled-exe.md
       - Run in Docker: how-to/run-in-docker.md
-      - Run the MCP Server: how-to/run-the-mcp-server.md
       - Diff Two Session Recordings: how-to/diff-two-session-recordings.md
       - Diagnostics Toolbox: how-to/diagnostics-toolbox.md
   - Shell Guides:

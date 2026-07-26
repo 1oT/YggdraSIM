@@ -98,11 +98,6 @@ clips payloads to 32 hex characters and tells you the true length:
 Pass `--full` to print them untruncated. Do that only when you know what
 is in the trace and where the output is going.
 
-## From an AI assistant
-
-The same comparison is available as the `session_diff` MCP tool; see
-[Run the MCP Server](run-the-mcp-server.md).
-
 ## From Python
 
 ```python
@@ -128,6 +123,5 @@ inside a response, a counter) rather than the tool being wrong.
 
 ## Related pages
 
-- [Run the MCP Server](run-the-mcp-server.md)
 - [Diagnostics Toolbox](diagnostics-toolbox.md)
 - [Replay a HIL pcap offline](replay-hil-pcap-offline.md)

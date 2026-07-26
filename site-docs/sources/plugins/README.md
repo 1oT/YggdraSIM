@@ -77,14 +77,7 @@ all of the following callables:
 
 - `extend_target(target)`
 - `handle_command(surface, command_name, target, argument)`
-- `register(mcp)` for the `mcp_extensions` capability, which adds tools,
-  resources, and prompts to the MCP server
 - any capability-specific parser or dispatcher the owning surface documents
-
-`mcp_extensions` is the route for operator-specific MCP surfaces: real PLMNs,
-house profile rules, and rig inventory stay here rather than in the published
-server. See `site-docs/internals/plugin-contract.md` for the provider shape and
-the failure handling around it.
 
 Capabilities may expose additional methods, but the core must always treat them
 as optional and capability-scoped.

@@ -156,13 +156,3 @@ def asn1_tlv_decode() -> int:
 def session_diff() -> int:
     return _invoke("yggdrasim_common.session_diff", "run_cli")
 
-
-def mcp_server() -> int:
-    try:
-        return _invoke("Tools.YggdraMCP.server", "run_cli")
-    except ImportError as exc:
-        print(
-            f"The MCP server needs the 'mcp' extra: pip install 'yggdrasim[mcp]' ({exc})",
-            file=sys.stderr,
-        )
-        return 1
