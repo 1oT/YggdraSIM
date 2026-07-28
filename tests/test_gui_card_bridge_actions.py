@@ -25,6 +25,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -1149,6 +1150,58 @@ class RemoteRigActionHelperTests(unittest.TestCase):
             "--gsmtap-capture-path %h/YggdraSIM/state/hil_termshark/live_capture.pcap",
             unit_text,
         )
+
+    def test_remote_hil_unit_forwards_simtrace_reset_knobs(self) -> None:
+        unit_text = cb._render_remote_hil_unit(
+            remote_workdir="~/YggdraSIM",
+            remote_python="~/YggdraSIM/.venv/bin/python",
+            simtrace_reset="auto",
+            uhubctl_binary="~/bin/uhubctl",
+            uhubctl_location="1-1",
+            uhubctl_port="2",
+        )
+        self.assertIn("--simtrace-reset auto", unit_text)
+        self.assertIn("--uhubctl-binary %h/bin/uhubctl", unit_text)
+        self.assertIn("--uhubctl-location 1-1", unit_text)
+        self.assertIn("--uhubctl-port 2", unit_text)
+
+    def test_remote_hil_unit_omits_unset_simtrace_reset_knobs(self) -> None:
+        # Unset leaves the remote supervisor on its own default
+        # (usb-reset) and keeps the unit stable across reinstalls.
+        with mock.patch.dict("os.environ", {}, clear=True):
+            unit_text = cb._render_remote_hil_unit(
+                remote_workdir="~/YggdraSIM",
+                remote_python="~/YggdraSIM/.venv/bin/python",
+            )
+        self.assertNotIn("--simtrace-reset", unit_text)
+        self.assertNotIn("--uhubctl", unit_text)
+
+    def test_remote_hil_unit_rejects_an_unknown_reset_mode(self) -> None:
+        # A bogus mode must never render a unit the remote supervisor
+        # would refuse to start.
+        with mock.patch.dict("os.environ", {}, clear=True):
+            unit_text = cb._render_remote_hil_unit(
+                remote_workdir="~/YggdraSIM",
+                remote_python="~/YggdraSIM/.venv/bin/python",
+                simtrace_reset="power-cycle-please",
+            )
+        self.assertNotIn("--simtrace-reset", unit_text)
+
+    def test_remote_hil_unit_falls_back_to_the_local_environment(self) -> None:
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "YGGDRASIM_HIL_SIMTRACE_RESET": "port-power",
+                "YGGDRASIM_HIL_UHUBCTL_LOCATION": "2-1",
+            },
+            clear=True,
+        ):
+            unit_text = cb._render_remote_hil_unit(
+                remote_workdir="~/YggdraSIM",
+                remote_python="~/YggdraSIM/.venv/bin/python",
+            )
+        self.assertIn("--simtrace-reset port-power", unit_text)
+        self.assertIn("--uhubctl-location 2-1", unit_text)
 
     def test_remote_hil_unit_accepts_frozen_supervisor_command(self) -> None:
         unit_text = cb._render_remote_hil_unit(

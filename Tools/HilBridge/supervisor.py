@@ -997,6 +997,8 @@ class HilBridgeSupervisor:
             command.append("--no-gsmtap")
         if bridge.card_trace_enabled:
             command.append("--card-trace")
+        if getattr(bridge, "relay_session_reset_enabled", True) is False:
+            command.append("--no-relay-session-reset")
         # Card-source overrides — when the operator has pinned a remote
         # ``yggdrasim-card-bridge`` URL on the supervisor, propagate it
         # to the spawned bridge subprocess so the card-stream feature

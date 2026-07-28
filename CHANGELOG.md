@@ -32,6 +32,19 @@ file) may change without notice between minor releases.
   board's new USB address. A new `yggdrasim-hil-reset` console script
   performs the same reset on demand, and the supervisor state file
   reports the result under `simtraceReset`.
+- HIL bridge: relay sessions now power-cycle the physical card at their
+  boundaries. Operator shells transact under a relay session id, and the
+  bridge cold-resets the card (`SCARD_UNPOWER_CARD`) when that id first
+  appears, when another shell replaces it, and when the shell
+  disconnects — so a selected AID, an open logical channel, or an
+  established SCP03 / SCP11 secure channel can no longer leak into the
+  modem session. Because a power-cycle invalidates every view of the
+  card, the bankd side is dropped too and `osmo-remsim-client-st2`
+  re-handshakes against the post-power-up ATR. Disable with
+  `YGGDRASIM_HIL_RELAY_SESSION_RESET=0` or `--no-relay-session-reset`.
+  The remote-rig systemd unit also gained the SIMtrace2 reset knobs, and
+  `PcscCardChannel.disconnect()` now pins `SCARD_UNPOWER_CARD` instead
+  of inheriting whatever disposition was last set.
 - Post-v1 Tools tier staging (not part of this release):
   in-process `Tools/YggdraCore/` stubs (subscription store, AUSF
   stub, AAnF stub, FastAPI loopback, BYO Open5GS bridge);

@@ -511,9 +511,15 @@ Modes, selected with `--simtrace-reset` or `YGGDRASIM_HIL_SIMTRACE_RESET`:
 | Mode | What it does | Needs |
 |------|--------------|-------|
 | `usb-reset` *(default)* | `USBDEVFS_RESET` on `/dev/bus/usb/BBB/DDD` — the kernel drives a port reset, the firmware reboots | write access to the device node |
-| `port-power` | VBUS cycle through `uhubctl`; a true unplug/replug that also power-cycles the SIM card in the slot | `uhubctl` plus a hub with per-port power switching |
+| `port-power` | VBUS cycle through `uhubctl`; a true unplug/replug of the board | `uhubctl` plus a hub with per-port power switching |
 | `auto` | `usb-reset`, falling back to `port-power` when it fails | as above |
 | `off` | no automatic reset | — |
+
+> **This resets the board, not the card.** In this topology the SIM
+> lives in the PC/SC reader; the SIMtrace2 only emulates a card toward
+> the modem. Neither mode touches the card unless the reader happens to
+> hang off the same switched hub port. Card state is cleared separately
+> — see [5.2](#52-card-session-hygiene).
 
 Ordering inside the supervisor is deliberate:
 
@@ -574,6 +580,47 @@ jq .simtraceReset ~/.local/state/yggdrasim/state/hil_bridge_supervisor.json
 > and the SIMtrace2 bootloader has no auto-boot timeout — the board
 > parks in DFU mode (`1d50:4004`) until somebody physically power-cycles
 > it. That is precisely the situation a remote rig cannot recover from.
+
+### 5.2 Card-session hygiene
+
+Rebooting the board does not clear the card. The SIM sits in the PC/SC
+reader and keeps its state across a SIMtrace2 reset exactly as it does
+when you press the reset button: selected AID, open logical channels,
+an established SCP03 / SCP11 secure channel, PIN verification status.
+
+Two mechanisms clear it, both power-cycling the card with
+`SCardReconnect(..., SCARD_UNPOWER_CARD)` and re-reading the ATR:
+
+**Modem sessions.** When `osmo-remsim-client-st2` attaches — or
+re-attaches after the board reset — the bridge power-cycles the card
+and pushes the fresh ATR to the modem with `setAtrReq`. So every modem
+session starts from a card that just came up.
+
+**Relay sessions.** Operator shells (SCP03, SCP80, SCP11) drive the same
+card through the APDU relay, potentially while a modem session is live.
+Each shell transacts under its own relay session id, and the bridge
+power-cycles the card when that id first appears, when it is replaced by
+another shell's, and when the shell disconnects. Without this the
+secure channel an SCP11 session left open would still be there when the
+modem next read the SIM.
+
+A card power-cycle invalidates everyone's view of the card, so it also
+drops the bankd side: `osmo-remsim-client-st2` re-handshakes and re-reads
+the ATR rather than transacting against state that no longer exists.
+Expect a modem re-attach whenever you start or finish shell work — that
+is the mechanism working, not a fault.
+
+Watch it in the bridge log:
+
+```text
+Card power-cycled (relay session start (ygg-4213-9f2ab117)); reader … ATR 3B9F…
+Reset card for modem session; reader … ATR 3B9F… reset={'mode': 'pcsc-reconnect-unpower'}
+```
+
+Set `YGGDRASIM_HIL_RELAY_SESSION_RESET=0` (or pass
+`--no-relay-session-reset`) only for workflows that deliberately carry
+card state across sessions — for example driving a secure channel from
+a shell and then inspecting it from another tool.
 
 ## 6. Attach Wireshark
 
@@ -838,9 +885,15 @@ jq .simtraceReset ~/.local/state/yggdrasim/state/hil_bridge_supervisor.json
   as well.
 
 If the board still misbehaves after a confirmed `usb-reset`, the state
-that is going stale is not on the microcontroller — the SIM card itself
-keeps power across a `NVIC_SystemReset()`. `port-power` removes that
-too and is the closest remote equivalent of unplugging everything.
+going stale is not on the microcontroller. The card keeps its power and
+its session across a board reset, so look at
+[5.2](#52-card-session-hygiene) next: check the bridge log for a
+`Card power-cycled` or `Reset card for modem session` line covering the
+session that failed. If neither appears, the card was never cleared.
+
+Note that `port-power` does not help here either unless the PC/SC
+reader shares the switched hub port with the board — the card is behind
+the reader, not the SIMtrace2.
 
 ### YggdraSIM falls back to direct PC/SC
 

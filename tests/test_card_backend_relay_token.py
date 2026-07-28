@@ -55,7 +55,10 @@ class RelayCardConnectionAuthHeaderTests(unittest.TestCase):
         self.assertEqual(data, [0xDE, 0xAD, 0xBE, 0xEF])
         self.assertEqual((sw1, sw2), (0x90, 0x00))
         self.assertEqual(captured["auth_token"], "my-token")
-        self.assertEqual(captured["request_json"], {"apdu": "00A40400"})
+        self.assertEqual(
+            captured["request_json"],
+            {"apdu": "00A40400", "sessionId": connection.session_id},
+        )
 
     def test_transmit_omits_bearer_when_no_token(self) -> None:
         captured: dict[str, Any] = {}

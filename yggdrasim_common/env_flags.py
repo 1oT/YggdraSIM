@@ -577,6 +577,22 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_RUNTIME,
     ),
     EnvFlag(
+        name="YGGDRASIM_HIL_RELAY_SESSION_RESET",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Power-cycle the card at relay-session boundaries",
+        description=(
+            "The bridge cold-resets the physical card when an operator\n"
+            "shell's relay session starts, is replaced, or ends, so a\n"
+            "selected AID, an open logical channel, or an established\n"
+            "SCP03 / SCP11 secure channel cannot leak into the modem\n"
+            "session. Set to 0 only for workflows that deliberately\n"
+            "carry card state across sessions."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="enabled",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
         name="YGGDRASIM_HIL_SIMTRACE_RESET",
         category=CATEGORY_HIL_BRIDGE,
         summary="How the supervisor clears the SIMtrace2 board before a session",

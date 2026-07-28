@@ -247,11 +247,24 @@ for the modes, the udev rule, and the `uhubctl` VBUS variant.
 
 ### What a reset does *not* clear
 
-`NVIC_SystemReset()` reboots the SAM3 only. The SIM card in the slot
-keeps its power and therefore its session state across the reboot,
-exactly as it does when the button is pressed. Cutting VBUS with
-`uhubctl` (the `port-power` mode) is the only remote action that also
-power-cycles the card.
+`NVIC_SystemReset()` reboots the SAM3 only, and in the YggdraSIM
+cardem/remsim topology that is further from the card than it looks:
+
+```text
+modem ← SIMtrace2 (emulates a card) ← osmo-remsim-client-st2
+      → RSPRO → YggdraSIM HIL bridge → PC/SC reader → real SIM
+```
+
+The board never holds the card. Resetting it — by button, by
+`usb-reset`, or by cutting its VBUS with `uhubctl` — leaves the SIM in
+the reader powered, with its selected AID, open logical channels, and
+any established secure channel intact. `port-power` only reaches the
+card if the reader shares the switched hub port.
+
+Card state is cleared by the bridge instead, with
+`SCardReconnect(..., SCARD_UNPOWER_CARD)` at modem- and relay-session
+boundaries. See
+[`HIL_BRIDGE_GUIDE.md` §5.2](HIL_BRIDGE_GUIDE.md#52-card-session-hygiene).
 
 Note also that the same firmware check fires on USB *suspend*
 (`USBD_STATE_SUSPENDED` sorts below `USBD_STATE_CONFIGURED`). If a host

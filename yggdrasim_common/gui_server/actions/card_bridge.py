@@ -77,6 +77,15 @@ _DEFAULT_CARD_PORT = 8642
 _DEFAULT_HIL_PORT = 9997
 _DEFAULT_APDU_TIMEOUT_MS = 30000
 _DEFAULT_USB_VIDPID = "1d50:60e3"
+# Pre-session SIMtrace2 reset knobs. Mirrored from
+# ``Tools.HilBridge.device_reset`` / ``yggdrasim_common.hil_bridge_runtime``
+# rather than imported: this module stays importable in the clean
+# cross-platform bundle, which excludes the local HIL stack entirely.
+_SIMTRACE_RESET_ENV = "YGGDRASIM_HIL_SIMTRACE_RESET"
+_UHUBCTL_BINARY_ENV = "YGGDRASIM_HIL_UHUBCTL_BINARY"
+_UHUBCTL_LOCATION_ENV = "YGGDRASIM_HIL_UHUBCTL_LOCATION"
+_UHUBCTL_PORT_ENV = "YGGDRASIM_HIL_UHUBCTL_PORT"
+_SIMTRACE_RESET_MODES = ("off", "usb-reset", "port-power", "auto")
 _SERVICE_NAME_RE = re.compile(r"^[A-Za-z0-9_.@-]+\.service$")
 _REMOTE_RIG_STATE_LOCK = threading.RLock()
 
@@ -581,6 +590,43 @@ def _build_ssh_tunnel_command(
     return command
 
 
+def _normalize_simtrace_reset_mode(value: Any) -> str:
+    """Return a known SIMtrace2 reset mode, or ``""`` to omit the flag.
+
+    Omitting leaves the remote supervisor on its own default
+    (``usb-reset``), so an unset or bogus value never renders a unit
+    the remote supervisor would refuse to start.
+    """
+    text = str(value or "").strip().lower().replace("_", "-")
+    if text in _SIMTRACE_RESET_MODES:
+        return text
+    return ""
+
+
+def _resolve_remote_simtrace_reset_settings(
+    *,
+    simtrace_reset: Any = None,
+    uhubctl_binary: Any = None,
+    uhubctl_location: Any = None,
+    uhubctl_port: Any = None,
+    environ: Any = None,
+) -> tuple[str, str, str, str]:
+    """Resolve the reset knobs for the remote rig's supervisor unit.
+
+    Explicit arguments win; anything left blank falls back to the
+    operator's local environment, so a rig configured once from the
+    workstation keeps its setting across reinstalls of the unit.
+    """
+    source = environ if environ is not None else os.environ
+    mode = _normalize_simtrace_reset_mode(simtrace_reset)
+    if len(mode) == 0:
+        mode = _normalize_simtrace_reset_mode(source.get(_SIMTRACE_RESET_ENV, ""))
+    binary = str(uhubctl_binary or "").strip() or str(source.get(_UHUBCTL_BINARY_ENV, "") or "").strip()
+    location = str(uhubctl_location or "").strip() or str(source.get(_UHUBCTL_LOCATION_ENV, "") or "").strip()
+    port = str(uhubctl_port or "").strip() or str(source.get(_UHUBCTL_PORT_ENV, "") or "").strip()
+    return mode, binary, location, port
+
+
 def _render_remote_hil_unit(
     *,
     remote_workdir: Any,
@@ -594,6 +640,10 @@ def _render_remote_hil_unit(
     hil_port: Any = None,
     apdu_timeout_ms: Any = None,
     gsmtap_capture_path: Any = None,
+    simtrace_reset: Any = None,
+    uhubctl_binary: Any = None,
+    uhubctl_location: Any = None,
+    uhubctl_port: Any = None,
 ) -> str:
     del service_name
     workdir = str(remote_workdir or "").strip()
@@ -649,6 +699,28 @@ def _render_remote_hil_unit(
                 _systemd_path(capture_path),
             ]
         )
+    # Pre-session SIMtrace2 reset. Unset knobs are omitted so the
+    # remote supervisor keeps its own default (usb-reset) and the
+    # rendered unit stays stable across reinstalls.
+    (
+        reset_mode,
+        reset_uhubctl_binary,
+        reset_uhubctl_location,
+        reset_uhubctl_port,
+    ) = _resolve_remote_simtrace_reset_settings(
+        simtrace_reset=simtrace_reset,
+        uhubctl_binary=uhubctl_binary,
+        uhubctl_location=uhubctl_location,
+        uhubctl_port=uhubctl_port,
+    )
+    if len(reset_mode) > 0:
+        exec_parts.extend(["--simtrace-reset", reset_mode])
+    if len(reset_uhubctl_binary) > 0:
+        exec_parts.extend(["--uhubctl-binary", _systemd_path(reset_uhubctl_binary)])
+    if len(reset_uhubctl_location) > 0:
+        exec_parts.extend(["--uhubctl-location", reset_uhubctl_location])
+    if len(reset_uhubctl_port) > 0:
+        exec_parts.extend(["--uhubctl-port", reset_uhubctl_port])
     exec_start = " ".join(_systemd_quote(part) for part in exec_parts)
     return (
         "[Unit]\n"
@@ -2271,6 +2343,10 @@ def _dispatch_install_remote_service(
     hil_port: Any = None,
     apdu_timeout_ms: Any = None,
     gsmtap_capture_path: Any = None,
+    simtrace_reset: Any = None,
+    uhubctl_binary: Any = None,
+    uhubctl_location: Any = None,
+    uhubctl_port: Any = None,
     start_now: Any = None,
     confirm: Any = None,
     _dependency_status: dict[str, Any] | None = None,
@@ -2333,6 +2409,10 @@ def _dispatch_install_remote_service(
         hil_port=hil_port,
         apdu_timeout_ms=apdu_timeout_ms,
         gsmtap_capture_path=capture_path,
+        simtrace_reset=simtrace_reset,
+        uhubctl_binary=uhubctl_binary,
+        uhubctl_location=uhubctl_location,
+        uhubctl_port=uhubctl_port,
     )
     unit_path = f"~/.config/systemd/user/{service}"
     quoted_unit_path = _remote_shell_path_expr(unit_path)
@@ -3515,6 +3595,16 @@ INSTALL_REMOTE_SERVICE_SPEC = ActionSpec(
         ActionField(name="hil_port", label="HIL port", kind="int", required=False, default=_DEFAULT_HIL_PORT, min_value=1),
         ActionField(name="apdu_timeout_ms", label="APDU timeout (ms)", kind="int", required=False, default=_DEFAULT_APDU_TIMEOUT_MS, min_value=1),
         ActionField(name="gsmtap_capture_path", label="RPi GSMTAP capture path", kind="string", required=False),
+        ActionField(
+            name="simtrace_reset",
+            label="Pre-session SIMtrace2 reset",
+            kind="string",
+            required=False,
+            placeholder="usb-reset | port-power | auto | off",
+        ),
+        ActionField(name="uhubctl_binary", label="RPi uhubctl binary", kind="string", required=False),
+        ActionField(name="uhubctl_location", label="RPi hub location (uhubctl -l)", kind="string", required=False, placeholder="1-1"),
+        ActionField(name="uhubctl_port", label="RPi hub port (uhubctl -p)", kind="string", required=False),
         ActionField(name="start_now", label="Restart after install", kind="bool", required=False, default=True),
         ActionField(name="confirm", label="Install remote service", kind="bool", required=True, default=False),
     ),
