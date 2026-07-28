@@ -480,6 +480,101 @@ Practical notes:
 - when forwarding remsim flags that start with `-`, prefer `--remsim-arg=<value>` form
 - if you want to run the remsim client by hand for debugging, disable supervisor management with `--no-remsim-client`
 
+### 5.1 Pre-session board reset (remote reset-button equivalent)
+
+A SIMtrace2 that has been through a few sessions can wedge: the cardem
+state machine keeps stale ATR / PTS state, or `osmo-remsim-client-st2`
+inherits a half-open USB endpoint. On a desk that is fixed by pressing
+the board's reset button. On a rig in another building, needing a human
+to press a button defeats the point of a remote rig.
+
+The supervisor therefore reboots the board itself before every session,
+without any firmware modification. Osmocom's cardem firmware already
+resets its own microcontroller when USB drops below the `CONFIGURED`
+state — see `firmware/apps/cardem/main.c` upstream:
+
+```c
+if (USBD_GetState() < USBD_STATE_CONFIGURED) {
+    /* HACK: we don't really deal with USB disconnect yet,
+     * so let's just reset the entire uC if this happens */
+    TRACE_INFO("Resetting uC on USB disconnect\n\r");
+    NVIC_SystemReset();
+}
+```
+
+`NVIC_SystemReset()` is exactly what the physical reset button
+triggers, so any host-side action that de-configures the device gives
+the same clean slate.
+
+Modes, selected with `--simtrace-reset` or `YGGDRASIM_HIL_SIMTRACE_RESET`:
+
+| Mode | What it does | Needs |
+|------|--------------|-------|
+| `usb-reset` *(default)* | `USBDEVFS_RESET` on `/dev/bus/usb/BBB/DDD` — the kernel drives a port reset, the firmware reboots | write access to the device node |
+| `port-power` | VBUS cycle through `uhubctl`; a true unplug/replug that also power-cycles the SIM card in the slot | `uhubctl` plus a hub with per-port power switching |
+| `auto` | `usb-reset`, falling back to `port-power` when it fails | as above |
+| `off` | no automatic reset | — |
+
+Ordering inside the supervisor is deliberate:
+
+1. the remsim client is stopped, so the bus is never reset underneath an
+   open libusb handle
+2. the board is reset and the supervisor waits for it to re-enumerate
+3. the USB snapshot is re-read — **a reset changes the device's USB
+   address**, and the generated remsim command pins it with `-A`, so the
+   bridge and client are always started from the post-reset snapshot
+
+`--simtrace-reset-min-interval` (default 30 s) is a floor between two
+automatic resets inside one supervisor lifetime, so a crash-looping
+bridge child cannot power-cycle the board in a tight loop. It does not
+throttle operator-driven session starts: those restart the supervisor,
+which starts the interval fresh.
+
+Give the operator's account access to the device node once, so the
+unprivileged `systemd --user` supervisor can issue the ioctl:
+
+```bash
+sudo tee /etc/udev/rules.d/60-simtrace2.rules >/dev/null <<'EOF'
+SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="60e3", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+EOF
+sudo usermod -a -G plugdev "$USER"
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+For the VBUS variant, find the hub location with `uhubctl` and pin it:
+
+```bash
+uhubctl                                   # prints e.g. "Current status for hub 1-1"
+export YGGDRASIM_HIL_SIMTRACE_RESET=auto
+export YGGDRASIM_HIL_UHUBCTL_LOCATION=1-1
+export YGGDRASIM_HIL_UHUBCTL_PORT=2
+```
+
+The launcher and the GUI copy these into the generated `systemd --user`
+unit, so the setting survives service restarts.
+
+To reset the board by hand — the remote equivalent of walking over and
+pressing the button:
+
+```bash
+yggdrasim-hil-reset --usb-vidpid 1d50:60e3
+```
+
+Stop the session first; the reset refuses nothing, but resetting the bus
+while a session holds the device only moves the problem.
+
+The supervisor state file records what happened, under `simtraceReset`:
+
+```bash
+jq .simtraceReset ~/.local/state/yggdrasim/state/hil_bridge_supervisor.json
+```
+
+> **Do not use `dfu-util --detach` for this.** The DFU runtime interface
+> in the application firmware latches `USB_DFU_MAGIC` before resetting,
+> and the SIMtrace2 bootloader has no auto-boot timeout — the board
+> parks in DFU mode (`1d50:4004`) until somebody physically power-cycles
+> it. That is precisely the situation a remote rig cannot recover from.
+
 ## 6. Attach Wireshark
 
 The bridge mirrors card traffic to GSMTAP on UDP `4729` by default.
@@ -722,6 +817,30 @@ Try the explicit USB selectors:
 - `-V 0x1d50 -P 0x60e3 -C 1 -I 0 -S 0`
 
 Also confirm the board is really in the relay / card-emulation firmware mode.
+
+### The board only behaves again after a physical reset
+
+That is what the pre-session reset in [5.1](#51-pre-session-board-reset-remote-reset-button-equivalent)
+is for. Check whether it is actually running:
+
+```bash
+jq .simtraceReset ~/.local/state/yggdrasim/state/hil_bridge_supervisor.json
+```
+
+- `"enabled": false` — the mode is `off`; set `YGGDRASIM_HIL_SIMTRACE_RESET=usb-reset`
+  and restart the supervisor.
+- `last.error` mentioning *Permission denied* — the supervisor cannot
+  open `/dev/bus/usb/BBB/DDD`. Install the udev rule from 5.1.
+- `last.reenumerated: false` — the reset was issued but the board did
+  not come back within the settle window. Raise
+  `--simtrace-reset-settle-timeout`, and if the board is genuinely dead
+  on the bus after a USB reset, switch to `port-power` so VBUS is cut
+  as well.
+
+If the board still misbehaves after a confirmed `usb-reset`, the state
+that is going stale is not on the microcontroller — the SIM card itself
+keeps power across a `NVIC_SystemReset()`. `port-power` removes that
+too and is the closest remote equivalent of unplugging everything.
 
 ### YggdraSIM falls back to direct PC/SC
 

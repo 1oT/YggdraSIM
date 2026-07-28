@@ -20,6 +20,18 @@ file) may change without notice between minor releases.
 
 ### Added
 
+- HIL bridge: the supervisor now reboots the SIMtrace2 board before
+  every session, replacing the trip to the rig to press the physical
+  reset button. The cardem firmware resets its own microcontroller when
+  USB drops below `CONFIGURED`, so `Tools/HilBridge/device_reset.py`
+  forces that from the host — `USBDEVFS_RESET` on the usbfs node by
+  default, or a `uhubctl` VBUS cycle that also power-cycles the SIM.
+  Selected with `--simtrace-reset` / `YGGDRASIM_HIL_SIMTRACE_RESET`
+  (`usb-reset`, `port-power`, `auto`, `off`); the USB snapshot is
+  re-read afterwards so `osmo-remsim-client-st2` is pinned to the
+  board's new USB address. A new `yggdrasim-hil-reset` console script
+  performs the same reset on demand, and the supervisor state file
+  reports the result under `simtraceReset`.
 - Post-v1 Tools tier staging (not part of this release):
   in-process `Tools/YggdraCore/` stubs (subscription store, AUSF
   stub, AAnF stub, FastAPI loopback, BYO Open5GS bridge);

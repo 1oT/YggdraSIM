@@ -99,6 +99,11 @@ _CALLABLE_ENTRIES: Mapping[str, _CallableEntry] = MappingProxyType(
             "run_standalone",
             "Tools.HilBridge.supervisor",
         ),
+        "hil-reset": _CallableEntry(
+            "Tools.HilBridge.device_reset",
+            "run_standalone",
+            "Tools.HilBridge.device_reset",
+        ),
     }
 )
 
@@ -117,6 +122,7 @@ _MODULE_ENTRY_IDS: Mapping[str, str] = MappingProxyType(
         "Tools.SuciTool": "suci-tool",
         "Tools.HilBridge.main": "hil-bridge",
         "Tools.HilBridge.supervisor": "hil-supervisor",
+        "Tools.HilBridge.device_reset": "hil-reset",
     }
 )
 

@@ -37,6 +37,10 @@ DEFAULT_BRIDGE_READY_POLL_SECONDS = 0.25
 REMSIM_BINARY_ENV = "YGGDRASIM_HIL_REMSIM_BINARY"
 REMSIM_ARGS_ENV = "YGGDRASIM_HIL_REMSIM_ARGS"
 CARD_TRACE_ENV = "YGGDRASIM_HIL_CARD_TRACE"
+SIMTRACE_RESET_ENV = "YGGDRASIM_HIL_SIMTRACE_RESET"
+UHUBCTL_LOCATION_ENV = "YGGDRASIM_HIL_UHUBCTL_LOCATION"
+UHUBCTL_PORT_ENV = "YGGDRASIM_HIL_UHUBCTL_PORT"
+UHUBCTL_BINARY_ENV = "YGGDRASIM_HIL_UHUBCTL_BINARY"
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on", "debug"}
 _REMSIM_VALUE_FLAGS = {"-i", "-p", "-c", "-n", "-V", "-P", "-C", "-I", "-S", "-A", "-H"}
 
@@ -58,6 +62,10 @@ class HilBridgeUserServiceOptions:
     remote_card_token_file: str = ""
     remsim_binary: str = ""
     remsim_args: tuple[str, ...] = ()
+    simtrace_reset_mode: str = ""
+    uhubctl_binary: str = ""
+    uhubctl_location: str = ""
+    uhubctl_port: str = ""
     service_name: str = DEFAULT_SERVICE_NAME
     documentation_path: str = ""
     environment_overrides: tuple[tuple[str, str], ...] = ()
@@ -153,6 +161,45 @@ def split_shell_like_arguments(argument_text: str) -> tuple[str, ...]:
     return tuple(shlex.split(normalized_text))
 
 
+def normalize_simtrace_reset_mode(value: Any) -> str:
+    """Normalise a SIMtrace2 reset-mode string, or return ``""``.
+
+    An empty result means "leave the supervisor on its own default"
+    (``usb-reset``) so the rendered unit stays free of redundant flags.
+    Validation is delegated to the HIL bridge module that owns the mode
+    vocabulary; when that module is unavailable — clean-flavor bundles
+    exclude it — nothing is emitted rather than a possibly bogus flag.
+    """
+    text = str(value or "").strip().lower()
+    if len(text) == 0:
+        return ""
+    try:
+        from Tools.HilBridge.device_reset import RESET_MODES, normalize_reset_mode
+    except ImportError:
+        return ""
+    normalized = normalize_reset_mode(text)
+    if normalized not in RESET_MODES:
+        return ""
+    return normalized
+
+
+def resolve_simtrace_reset_service_settings(
+    environ: Any = None,
+) -> tuple[str, str, str, str]:
+    """Read the pre-session reset settings that belong in the service unit.
+
+    Returns ``(mode, uhubctl_binary, uhubctl_location, uhubctl_port)``
+    with empty strings for anything the operator has not configured.
+    """
+    source = environ if environ is not None else os.environ
+    return (
+        normalize_simtrace_reset_mode(source.get(SIMTRACE_RESET_ENV, "")),
+        str(source.get(UHUBCTL_BINARY_ENV, "") or "").strip(),
+        str(source.get(UHUBCTL_LOCATION_ENV, "") or "").strip(),
+        str(source.get(UHUBCTL_PORT_ENV, "") or "").strip(),
+    )
+
+
 def resolve_card_trace_enabled(value: Any = None) -> bool:
     if value is not None:
         return bool(value)
@@ -227,6 +274,22 @@ def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
         command.extend(["--remsim-binary", remsim_binary])
     for remsim_arg in options.remsim_args:
         command.append(f"--remsim-arg={str(remsim_arg or '').strip()}")
+    # Pre-session SIMtrace2 reset. The supervisor defaults to
+    # ``usb-reset`` on its own, so these only appear once the operator
+    # has picked a non-default mode or configured a uhubctl port; a
+    # blank value keeps the rendered unit byte-identical to before.
+    simtrace_reset_mode = str(options.simtrace_reset_mode or "").strip()
+    if len(simtrace_reset_mode) > 0:
+        command.extend(["--simtrace-reset", simtrace_reset_mode])
+    uhubctl_binary = str(options.uhubctl_binary or "").strip()
+    if len(uhubctl_binary) > 0:
+        command.extend(["--uhubctl-binary", uhubctl_binary])
+    uhubctl_location = str(options.uhubctl_location or "").strip()
+    if len(uhubctl_location) > 0:
+        command.extend(["--uhubctl-location", uhubctl_location])
+    uhubctl_port = str(options.uhubctl_port or "").strip()
+    if len(uhubctl_port) > 0:
+        command.extend(["--uhubctl-port", uhubctl_port])
 
     exec_start = " ".join(_systemd_quote(part) for part in command if len(str(part or "").strip()) > 0)
     working_directory_text = str(options.working_directory or "").strip()

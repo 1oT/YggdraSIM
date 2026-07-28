@@ -167,6 +167,7 @@ yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
 yggdrasim-hil-bridge
 yggdrasim-hil-supervisor
+yggdrasim-hil-reset
 yggdrasim-profile-package
 yggdrasim-profile-autoload
 yggdrasim-apdu-fuzzer
@@ -282,6 +283,7 @@ yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
 yggdrasim-hil-bridge
 yggdrasim-hil-supervisor
+yggdrasim-hil-reset
 yggdrasim-profile-package
 yggdrasim-profile-autoload
 yggdrasim-apdu-fuzzer

@@ -76,6 +76,61 @@ class HilBridgeRuntimeTests(unittest.TestCase):
         )
         self.assertIn("--remsim-arg=-H --remsim-arg=3-3", unit_text)
 
+    def test_render_user_service_unit_can_forward_simtrace_reset_settings(self) -> None:
+        options = hil_bridge_runtime.HilBridgeUserServiceOptions(
+            python_executable="/opt/ygg/bin/python3",
+            working_directory="/work/YggdraSIM",
+            simtrace_reset_mode="auto",
+            uhubctl_binary="/opt/bin/uhubctl",
+            uhubctl_location="1-1",
+            uhubctl_port="2",
+        )
+
+        unit_text = hil_bridge_runtime.render_user_service_unit(options)
+
+        self.assertIn("--simtrace-reset auto", unit_text)
+        self.assertIn("--uhubctl-binary /opt/bin/uhubctl", unit_text)
+        self.assertIn("--uhubctl-location 1-1", unit_text)
+        self.assertIn("--uhubctl-port 2", unit_text)
+
+    def test_render_user_service_unit_omits_unset_simtrace_reset_settings(self) -> None:
+        # Unset settings must leave the unit byte-identical to the
+        # previous generation so an upgrade does not force a restart.
+        options = hil_bridge_runtime.HilBridgeUserServiceOptions(
+            python_executable="/opt/ygg/bin/python3",
+            working_directory="/work/YggdraSIM",
+        )
+
+        unit_text = hil_bridge_runtime.render_user_service_unit(options)
+
+        self.assertNotIn("--simtrace-reset", unit_text)
+        self.assertNotIn("--uhubctl", unit_text)
+
+    def test_normalize_simtrace_reset_mode_rejects_unknown_values(self) -> None:
+        self.assertEqual(hil_bridge_runtime.normalize_simtrace_reset_mode("port-power"), "port-power")
+        self.assertEqual(hil_bridge_runtime.normalize_simtrace_reset_mode("off"), "off")
+        self.assertEqual(hil_bridge_runtime.normalize_simtrace_reset_mode(""), "")
+        # Anything unrecognised is dropped rather than emitted into the
+        # unit, where it would make the supervisor fail to start.
+        self.assertEqual(hil_bridge_runtime.normalize_simtrace_reset_mode("   "), "")
+
+    def test_resolve_simtrace_reset_service_settings_reads_the_environment(self) -> None:
+        settings = hil_bridge_runtime.resolve_simtrace_reset_service_settings(
+            environ={
+                hil_bridge_runtime.SIMTRACE_RESET_ENV: "auto",
+                hil_bridge_runtime.UHUBCTL_BINARY_ENV: "/opt/bin/uhubctl",
+                hil_bridge_runtime.UHUBCTL_LOCATION_ENV: "1-1",
+                hil_bridge_runtime.UHUBCTL_PORT_ENV: "2",
+            }
+        )
+        self.assertEqual(settings, ("auto", "/opt/bin/uhubctl", "1-1", "2"))
+
+    def test_resolve_simtrace_reset_service_settings_defaults_to_blank(self) -> None:
+        self.assertEqual(
+            hil_bridge_runtime.resolve_simtrace_reset_service_settings(environ={}),
+            ("", "", "", ""),
+        )
+
     def test_render_user_service_unit_can_disable_gsmtap(self) -> None:
         options = hil_bridge_runtime.HilBridgeUserServiceOptions(
             python_executable="/opt/ygg/bin/python3",
