@@ -1,28 +1,38 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 #
-# Internal build pipeline. GitLab produces the artefacts that carry
-# operator-supplied material (plugins, private fixtures); GitHub keeps
-# publishing the sanitised public releases from .github/workflows/.
+# Internal build pipeline. GitLab produces artefacts that behave exactly
+# like a local dev checkout — plugins, certificates, keysets, workspace
+# state — while GitHub keeps publishing the sanitised public releases
+# from .github/workflows/.
 #
-# The split is enforced by the repository's own boundary, not by
-# convention:
+# The split rests on the repository's own boundary, not on convention:
 #
-#   * ``plugins/*`` is gitignored, so plugin implementations are never
-#     in git and never reach a public checkout.
-#   * ``plugins`` appears nowhere in ``yggdrasim_main.spec``, so no
-#     PyInstaller bundle can contain plugin code — the bundle this
-#     pipeline builds is byte-for-byte the bundle GitHub builds.
-#   * plugins load at runtime from a directory, gated behind
-#     ``YGGDRASIM_ALLOW_PLUGINS=1`` and hard-lockable with
-#     ``YGGDRASIM_DISALLOW_PLUGINS=1``.
+#   * every ignore rule that hides operator material (``plugins/*``,
+#     ``*.pem``, ``*.der``, ``*.crt``, ``*.key``, ``*.p12``, ``*.secret``)
+#     keeps it out of git, so a public checkout never has it.
+#   * none of that material is package-relative. It all resolves through
+#     ``runtime_root()`` / ``workspace_path()``, and the runtime root is
+#     the writable parent of plugins/, state/, and Workspace/.
+#   * ``plugins`` appears nowhere in ``yggdrasim_main.spec``, and the
+#     bundle data allowlist excludes the rest, so no PyInstaller bundle
+#     can contain any of it — the bundle built here is the bundle GitHub
+#     builds.
 #
 # So the internal artefact is deliberately *the same bundle plus a
-# separate plugin payload*, never a fused binary. A fused build would
-# put private code inside a file that looks exactly like the public
-# one, which is the failure this separation exists to prevent. The
-# `verify:no-private-material` job proves the property on every run
-# rather than trusting it.
+# runtime-root overlay*, never a fused binary. For a frozen build
+# ``runtime_root()`` resolves to a sibling directory called
+# YggdraSIM-data, so unpacking the overlay beside the executable
+# reproduces the dev environment with no env vars and no code changes.
+#
+# Fusing would instead put private keys inside a file indistinguishable
+# from the public one — the exact failure this separation prevents.
+# `verify:no-private-material` proves the property on every run rather
+# than trusting it.
+#
+# The overlay is key material. Anyone with read access to this project's
+# package registry can fetch it; scope that accordingly, and prefer a
+# short `expire_in` over an indefinite one.
 
 stages:
   - gate
@@ -85,21 +95,36 @@ default:
     - export PATH="$HOME/.local/bin:$PATH"
     - uv --version
 
-# Materialise the operator-supplied plugin payload from a protected CI
-# variable. PLUGIN_PAYLOAD_B64 is a base64 tarball of plugins/ — mark it
-# Protected + Masked, and File type is fine too. Absent means the job
-# proceeds with no plugins, which keeps forks and MR pipelines working
-# without the private material.
-.load_plugins: &load_plugins
+# Materialise the internal runtime-root overlay from a protected CI
+# variable (File type, base64 tarball). This is the whole untracked
+# half of a local dev checkout — plugins/, state/, and Workspace/ —
+# which is where every subsystem actually resolves its material:
+#
+#   plugins            runtime_path("plugins")
+#   SCP11 DPauth/DPpb  workspace_path("LocalSMDPP", "certs", …)
+#   SGP.26 test certs  workspace_path("SCP11", "SGP.26_test_Certs", …)
+#   eIM signing certs  workspace_path(…)
+#   supervisor state   runtime_path("state", …)
+#
+# Nothing here is package-relative, so one overlay reproduces a dev
+# checkout exactly. In a source checkout the runtime root is the repo
+# root, which is why this extracts in place for the test jobs.
+#
+# Absent means the job proceeds with the tracked tree only, which keeps
+# MR pipelines and forks working without any private material.
+.load_overlay: &load_overlay
   - |
-    if [ -n "${PLUGIN_PAYLOAD_B64:-}" ]; then
-      echo "$PLUGIN_PAYLOAD_B64" | base64 -d > /tmp/plugins.tar.gz
-      tar -xzf /tmp/plugins.tar.gz -C .
-      rm -f /tmp/plugins.tar.gz
-      echo "plugin payload extracted:"
-      find plugins -name '*.py' | head -20
+    if [ -n "${INTERNAL_OVERLAY_B64:-}" ]; then
+      base64 -d < "${INTERNAL_OVERLAY_B64}" > /tmp/overlay.tar.gz 2>/dev/null \
+        || echo "$INTERNAL_OVERLAY_B64" | base64 -d > /tmp/overlay.tar.gz
+      tar -xzf /tmp/overlay.tar.gz -C .
+      rm -f /tmp/overlay.tar.gz
+      echo "internal overlay extracted:"
+      for d in plugins state Workspace; do
+        [ -d "$d" ] && echo "  $d/ ($(find "$d" -type f | wc -l) files)"
+      done
     else
-      echo "no PLUGIN_PAYLOAD_B64 set; building without plugin material"
+      echo "no INTERNAL_OVERLAY_B64 set; using the tracked tree only"
     fi
 
 # ---------------------------------------------------------------------
@@ -161,7 +186,7 @@ test:with-plugins:
     YGGDRASIM_ALLOW_PLUGINS: "1"
     PYTHONUNBUFFERED: "1"
   script:
-    - *load_plugins
+    - *load_overlay
     - uv sync --frozen --extra full --extra test --extra mcp
     - uv run python -m pytest -q --tb=short --disable-warnings
       --no-header --junitxml=report-internal.xml tests/
@@ -324,32 +349,52 @@ build:macos-clean:
 # package — the internal-only half, shipped beside the bundles
 # ---------------------------------------------------------------------
 
-package:plugin-payload:
+# Ships the overlay in the layout a frozen bundle already looks for.
+# runtime_root() resolves, for a frozen build, to a sibling directory
+# called YggdraSIM-data next to the executable — so unpacking this
+# beside the binary makes the artefact behave exactly like the dev
+# checkout, with no env vars and no code changes.
+package:runtime-overlay:
   <<: *linux_base
   stage: package
   rules:
     - if: $CI_COMMIT_REF_PROTECTED == "true"
   script:
-    - *load_plugins
+    - *load_overlay
     - |
-      if [ -z "$(find plugins -name '*.py' -print -quit)" ]; then
-        echo "no plugin material present; nothing to package"
+      set -euo pipefail
+      if [ ! -d plugins ] && [ ! -d Workspace ] && [ ! -d state ]; then
+        echo "no internal material present; nothing to package"
         exit 0
       fi
-    - mkdir -p dist-internal
-    - tar -czf dist-internal/yggdrasim-plugins-$CI_COMMIT_SHORT_SHA.tar.gz plugins
-    - sha256sum dist-internal/*.tar.gz | tee dist-internal/SHA256SUMS
+      STAGE="YggdraSIM-data"
+      mkdir -p "$STAGE" dist-internal
+      for d in plugins state Workspace; do
+        [ -d "$d" ] && cp -a "$d" "$STAGE/"
+      done
+      # Never ship the tracked sample material as if it were operator
+      # material, and never ship a stale supervisor socket/marker.
+      rm -f "$STAGE/state/hil_bridge_card_relay.json" || true
+      tar -czf "dist-internal/YggdraSIM-data-$CI_COMMIT_SHORT_SHA.tar.gz" "$STAGE"
+      rm -rf "$STAGE"
+      sha256sum dist-internal/*.tar.gz | tee dist-internal/SHA256SUMS
     - |
       cat > dist-internal/INTERNAL-ONLY.txt <<EOF
       INTERNAL ARTEFACT — NOT FOR PUBLIC RELEASE
-      Contains operator-supplied plugin material.
-      Commit: ${CI_COMMIT_SHA}
+
+      Contains operator material: plugins, certificates, private keys,
+      keysets, and workspace state. Treat as key material, not as a build
+      output. Do not attach to a GitHub release.
+
+      Commit:   ${CI_COMMIT_SHA}
       Pipeline: ${CI_PIPELINE_URL}
-      Pair with the matching yggdrasim bundle and run with
-      YGGDRASIM_ALLOW_PLUGINS=1.
+
+      Usage: unpack beside the yggdrasim executable so the tree sits at
+      ./YggdraSIM-data, which is where runtime_root() looks for a frozen
+      build. Run with YGGDRASIM_ALLOW_PLUGINS=1 to enable plugin loading.
       EOF
   artifacts:
-    name: "yggdrasim-plugins-$CI_COMMIT_SHORT_SHA"
+    name: "yggdrasim-internal-overlay-$CI_COMMIT_SHORT_SHA"
     paths:
       - dist-internal/
     expire_in: 4 weeks
@@ -370,7 +415,7 @@ verify:no-private-material:
   needs:
     - job: build:linux-amd64
       artifacts: true
-    - job: package:plugin-payload
+    - job: package:runtime-overlay
       artifacts: false
       optional: true
   variables:
@@ -379,7 +424,7 @@ verify:no-private-material:
     # and this becomes a genuine tripwire rather than a formality.
     YGGDRASIM_RELEASE_CANARIES: "$RELEASE_CANARIES"
   script:
-    - *load_plugins
+    - *load_overlay
     - uv sync --frozen --extra saip --extra build --extra test --extra gui
     # Two separate properties keep private code out of a bundle:
     #
@@ -435,7 +480,7 @@ publish:internal-packages:
       artifacts: true
     - job: build:deb
       artifacts: true
-    - job: package:plugin-payload
+    - job: package:runtime-overlay
       artifacts: true
       optional: true
   rules:
