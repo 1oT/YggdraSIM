@@ -1,0 +1,21 @@
+# Tracked paths that legitimately match a .gitignore rule on the public
+# branch — SGP.26 test vectors and test key material that ship publicly.
+#
+# The pre-push hook blocks any OTHER tracked path matching an ignore
+# rule, because that is the signature of force-added operator material.
+# Adding a line here is a deliberate, reviewable act.
+SCP03/script.txt
+SCP11/CERT.DPauth.ECDSA.der
+SCP11/CERT.DPpb.ECDSA.der
+SCP11/ES9_TEST_CI_CA.pem
+SCP11/SGP.26_test_Certs/Valid Test Cases/Variant O/CI/CERT_CI_SIG_NIST.der
+SCP11/SGP.26_test_Certs/Valid Test Cases/Variant O/CI/CERT_CI_SIG_NIST.pem
+SCP11/SGP.26_test_Certs/Valid Test Cases/Variant O/CI/SK_CI_SIG_NIST.pem
+SCP11/SGP.26_test_Certs/Valid Test Cases/Variant O/EUM/SK_EUM_SIG_NIST.pem
+SCP11/SGP.26_test_Certs/Valid Test Cases/Variant O/SM-DP+/SM_DPauth/CERT_S_SM_DPauth_VARO_SIG_NIST.der
+SCP11/SGP.26_test_Certs/Valid Test Cases/Variant O/SM-DP+/SM_DPauth/SK_S_SM_DPauth_SIG_NIST.pem
+SCP11/SGP.26_test_Certs/Valid Test Cases/Variant O/SM-DP+/SM_DPpb/CERT_S_SM_DPpb_VARO_SIG_NIST.der
+SCP11/SGP.26_test_Certs/Valid Test Cases/Variant O/SM-DP+/SM_DPpb/SK_S_SM_DPpb_SIG_NIST.pem
+SCP11/SGP.26_test_Certs/Valid Test Cases/Variant O/eUICC/SK_EUICC_SIG_NIST.pem
+SCP11/SK.DPauth.ECDSA.pem
+SCP11/SK.DPpb.ECDSA.pem
