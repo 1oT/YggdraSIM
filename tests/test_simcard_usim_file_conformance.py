@@ -68,9 +68,11 @@ class UsimFileStructureConformance(unittest.TestCase):
         ("DF.PHONEBOOK", "4F4A"): ("linear-fixed", "§4.4.2 EF_AAS"),
         ("DF.PHONEBOOK", "4F23"): ("transparent", "§4.4.2.12.3 EF_CC"),
         ("DF.PHONEBOOK", "4F24"): ("transparent", "§4.4.2.12.4 EF_PUID"),
-        # '4F01' carries nine definitions in TS 31.102 alone.
+        # '4F01' carries nine definitions in TS 31.102 alone, and a tenth
+        # in the SAIP DF.GRAPHICS template, where it is EF.LAUNCH-SCWS.
         ("DF.5GS", "4F01"): ("transparent", "§4.4.11.2 EF_5GS3GPPLOCI"),
         ("DF.SNPN", "4F01"): ("transparent", "§4.4.12.2 EF_PWS_SNPN"),
+        ("DF.TELECOM", "4F01"): ("transparent", "SAIP DF.GRAPHICS EF_LAUNCH-SCWS"),
     }
 
     def _by_df_and_fid(self) -> dict[tuple[str, str], dict]:

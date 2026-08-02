@@ -531,9 +531,12 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-mmsup": {"name": "EF.MMSUP", "fid": "6FD1", "structure": "linear-fixed", "sfi": None},
     "ef-mmsucp": {"name": "EF.MMSUCP", "fid": "6FD2", "structure": "transparent", "sfi": None},
     # DF.TELECOM / DF.GRAPHICS (TS 31.102 §4.6.1, SAIP §3.4.4).
+    # EF.IIDF and EF.ICON are assigned ranges rather than single ids
+    # (4F40..4F7F and 4F80..4FBF), so neither carries a canonical FID.
+    # 4F01 in this DF is EF.LAUNCH-SCWS.
     "ef-img": {"name": "EF.IMG", "fid": "4F20", "structure": "linear-fixed", "sfi": None},
-    "ef-iidf": {"name": "EF.IIDF", "fid": "4F02", "structure": "transparent", "sfi": None},
-    "ef-icon": {"name": "EF.ICON", "fid": "4F01", "structure": "transparent", "sfi": None},
+    "ef-iidf": {"name": "EF.IIDF", "fid": "", "structure": "transparent", "sfi": None},
+    "ef-icon": {"name": "EF.ICON", "fid": "", "structure": "transparent", "sfi": None},
     "ef-launchpad": {
         "name": "EF.LAUNCHPAD",
         "fid": "",
@@ -542,7 +545,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     },
     "ef-launch-scws": {
         "name": "EF.LAUNCH-SCWS",
-        "fid": "",
+        "fid": "4F01",
         "structure": "transparent",
         "sfi": None,
     },
