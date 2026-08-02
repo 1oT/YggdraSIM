@@ -236,7 +236,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-ecc": {"name": "EF.ECC", "fid": "6FB7", "structure": "linear-fixed", "sfi": None},
     "ef-netpar": {"name": "EF.NETPAR", "fid": "6FC4", "structure": "transparent", "sfi": None},
     "ef-epsloci": {"name": "EF.EPSLOCI", "fid": "6FE3", "structure": "transparent", "sfi": None},
-    "ef-epsnsc": {"name": "EF.EPSNSC", "fid": "6FE4", "structure": "transparent", "sfi": None},
+    "ef-epsnsc": {"name": "EF.EPSNSC", "fid": "6FE4", "structure": "linear-fixed", "sfi": None},
     # ADF.USIM optional (PE-OPT-USIM, TS 31.102 §4.2.x).
     "ef-li": {"name": "EF.LI", "fid": "6F05", "structure": "transparent", "sfi": None},
     "ef-acmax": {"name": "EF.ACMAX", "fid": "6F37", "structure": "transparent", "sfi": None},
@@ -261,7 +261,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-cbmir": {"name": "EF.CBMIR", "fid": "6F50", "structure": "transparent", "sfi": None},
     "ef-ext4": {"name": "EF.EXT4", "fid": "6F55", "structure": "linear-fixed", "sfi": None},
     "ef-acl": {"name": "EF.ACL", "fid": "6F57", "structure": "transparent", "sfi": None},
-    "ef-cmi": {"name": "EF.CMI", "fid": "6F58", "structure": "transparent", "sfi": None},
+    "ef-cmi": {"name": "EF.CMI", "fid": "6F58", "structure": "linear-fixed", "sfi": None},
     "ef-adn": {"name": "EF.ADN", "fid": "6F3A", "structure": "linear-fixed", "sfi": None},
     "ef-fdn": {"name": "EF.FDN", "fid": "6F3B", "structure": "linear-fixed", "sfi": None},
     "ef-ccp1": {"name": "EF.CCP1", "fid": "6F3D", "structure": "linear-fixed", "sfi": None},
@@ -274,12 +274,12 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-oci": {"name": "EF.OCI", "fid": "6F81", "structure": "cyclic", "sfi": None},
     "ef-ict": {"name": "EF.ICT", "fid": "6F82", "structure": "cyclic", "sfi": None},
     "ef-oct": {"name": "EF.OCT", "fid": "6F83", "structure": "cyclic", "sfi": None},
-    "ef-vgcs": {"name": "EF.VGCS", "fid": "6FB1", "structure": "linear-fixed", "sfi": None},
+    "ef-vgcs": {"name": "EF.VGCS", "fid": "6FB1", "structure": "transparent", "sfi": None},
     "ef-vgcss": {"name": "EF.VGCSS", "fid": "6FB2", "structure": "transparent", "sfi": None},
-    "ef-vbs": {"name": "EF.VBS", "fid": "6FB3", "structure": "linear-fixed", "sfi": None},
+    "ef-vbs": {"name": "EF.VBS", "fid": "6FB3", "structure": "transparent", "sfi": None},
     "ef-vbss": {"name": "EF.VBSS", "fid": "6FB4", "structure": "transparent", "sfi": None},
     "ef-emlpp": {"name": "EF.EMLPP", "fid": "6FB5", "structure": "transparent", "sfi": None},
-    "ef-aaem": {"name": "EF.AAEM", "fid": "6FB6", "structure": "linear-fixed", "sfi": None},
+    "ef-aaem": {"name": "EF.AAEM", "fid": "6FB6", "structure": "transparent", "sfi": None},
     "ef-hiddenkey": {"name": "EF.HIDDENKEY", "fid": "6FC3", "structure": "transparent", "sfi": None},
     "ef-pnn": {"name": "EF.PNN", "fid": "6FC5", "structure": "linear-fixed", "sfi": None},
     "ef-opl": {"name": "EF.OPL", "fid": "6FC6", "structure": "linear-fixed", "sfi": None},
@@ -291,9 +291,9 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-ext7": {"name": "EF.EXT7", "fid": "6FCC", "structure": "linear-fixed", "sfi": None},
     "ef-spdi": {"name": "EF.SPDI", "fid": "6FCD", "structure": "transparent", "sfi": None},
     "ef-nia": {"name": "EF.NIA", "fid": "6FD3", "structure": "linear-fixed", "sfi": None},
-    "ef-vgcsca": {"name": "EF.VGCSCA", "fid": "6FD4", "structure": "linear-fixed", "sfi": None},
+    "ef-vgcsca": {"name": "EF.VGCSCA", "fid": "6FD4", "structure": "transparent", "sfi": None},
     "ef-vbsca": {"name": "EF.VBSCA", "fid": "6FD2", "structure": "linear-fixed", "sfi": None},
-    "ef-gbabp": {"name": "EF.GBABP", "fid": "6FD7", "structure": "transparent", "sfi": None},
+    "ef-gbabp": {"name": "EF.GBABP", "fid": "6FD7", "structure": "linear-fixed", "sfi": None},
     "ef-msk": {"name": "EF.MSK", "fid": "6FD5", "structure": "transparent", "sfi": None},
     "ef-muk": {"name": "EF.MUK", "fid": "6FD6", "structure": "transparent", "sfi": None},
     "ef-ehplmn": {"name": "EF.EHPLMN", "fid": "6FD9", "structure": "transparent", "sfi": None},
@@ -428,7 +428,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-impu": {"name": "EF.IMPU", "fid": "6F04", "structure": "linear-fixed", "sfi": None},
     "ef-ist": {"name": "EF.IST", "fid": "6F07", "structure": "transparent", "sfi": None},
     "ef-pcscf": {"name": "EF.PCSCF", "fid": "6F09", "structure": "linear-fixed", "sfi": None},
-    "ef-uicciari": {"name": "EF.UICCIARI", "fid": "6FE7", "structure": "transparent", "sfi": None},
+    "ef-uicciari": {"name": "EF.UICCIARI", "fid": "6FE7", "structure": "linear-fixed", "sfi": None},
     # DF.EAP (TS 31.102 §4.4.x, DF 7F20).
     "ef-eapkeys": {"name": "EF.EAPKEYS", "fid": "4F01", "structure": "transparent", "sfi": None},
     "ef-eapstatus": {
@@ -588,7 +588,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "structure": "transparent",
         "sfi": None,
     },
-    "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "transparent", "sfi": None},
+    "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "linear-fixed", "sfi": None},
     # OPT-USIM Rel-17/18 extras and misc EFs referenced by SAIP. Some
     # (pnni/ncp-ip/ial/ipd/ufc) do not have a single authoritative FID in
     # TS 31.102 so they carry a blank FID; others align with TS 31.102
