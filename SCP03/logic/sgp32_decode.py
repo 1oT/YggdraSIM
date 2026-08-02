@@ -17,11 +17,11 @@ NOTIFICATION_EVENT_FLAGS: dict[int, str] = {
     3: "notificationDelete",
 }
 
+# SGP.22 PprIds defines three bits. Bit 3 is not allocated.
 PPR_FLAGS: dict[int, str] = {
     0: "pprUpdateControl",
     1: "ppr1-disable-not-allowed",
     2: "ppr2-delete-not-allowed",
-    3: "ppr3-delete-after-disable",
 }
 
 RAT_FLAG_NAMES: dict[int, str] = {

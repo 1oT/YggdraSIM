@@ -56,13 +56,38 @@ EUICC_INFO2_NESTED_TAG_NAMES: dict[int, dict[int, str]] = {
     },
 }
 
+# SGP.22 v3.1 EuiccRspCapability. Names are the ASN.1 identifiers so a
+# reader can grep the spec for them.
 RSP_CAPABILITY_FLAGS: dict[int, str] = {
     0: "additionalProfile",
-    1: "crlSupport",
+    1: "loadCrlSupport",
     2: "rpmSupport",
     3: "testProfileSupport",
+    4: "deviceInfoExtensibilitySupport",
+    5: "serviceSpecificDataSupport",
+    6: "hriServerAddressSupport",
+    7: "serviceProviderMessageSupport",
+    8: "lpaProxySupport",
+    9: "enterpriseProfilesSupport",
+    10: "serviceDescriptionSupport",
+    11: "deviceChangeSupport",
+    12: "encryptedDeviceChangeDataSupport",
+    13: "estimatedProfileSizeIndicationSupport",
+    14: "profileSizeInProfilesInfoSupport",
+    15: "crlStaplingV3Support",
+    16: "certChainV3VerificationSupport",
+    17: "signedSmdsResponseV3Support",
+    18: "euiccRspCapInInfo1",
+    19: "osUpdateSupport",
+    20: "cancelForEmptySpnPnSupport",
+    21: "updateNotifConfigInfoSupport",
+    22: "updateMetadataV3Support",
+    23: "v3ObjectsInCtxParamsCASupport",
+    24: "pushServiceRegistrationSupport",
 }
 
+# UICCCapability is imported by SGP.22 from the SAIP PEDefinitions module,
+# so the SAIP Profile Interoperability specification owns these bits.
 UICC_CAPABILITY_FLAGS: dict[int, str] = {
     0: "contactlessSupport",
     1: "usimSupport",
@@ -72,7 +97,7 @@ UICC_CAPABILITY_FLAGS: dict[int, str] = {
     5: "akaCave",
     6: "akaTuak128",
     7: "akaTuak256",
-    8: "rfu1",
+    8: "usimTestAlgorithm",
     9: "rfu2",
     10: "gbaAuthenUsim",
     11: "gbaAuthenISim",
@@ -83,13 +108,34 @@ UICC_CAPABILITY_FLAGS: dict[int, str] = {
     16: "multipleUsimSupport",
     17: "multipleIsimSupport",
     18: "multipleCsimSupport",
+    19: "berTlvFileSupport",
+    20: "dfLinkSupport",
+    21: "catTp",
+    22: "getIdentity",
+    23: "profile-a-x25519",
+    24: "profile-b-p256",
+    25: "suciCalculatorApi",
+    26: "dns-resolution",
+    27: "scp11ac",
+    28: "scp11c-authorization-mechanism",
+    29: "s16mode",
+    30: "eaka",
+    31: "iotminimal",
+    32: "suci-nswo",
+    33: "network-id",
+    34: "coap",
+    35: "gbauApi",
+    36: "uir5GProSe",
+    37: "ssim-Eap-Tls",
+    38: "ssim-Eap-Aka-prime",
+    39: "usatAppPairing",
 }
 
+# SGP.22 PprIds defines three bits. Bit 3 is not allocated.
 PPR_FLAGS: dict[int, str] = {
     0: "pprUpdateControl",
     1: "ppr1 (disable not allowed)",
     2: "ppr2 (delete not allowed)",
-    3: "ppr3 (delete required after disable)",
 }
 
 TRE_PROPERTY_FLAGS: dict[int, str] = {
