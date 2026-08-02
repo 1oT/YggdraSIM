@@ -166,6 +166,7 @@ class InteractiveWizards :
         label :str ,
         *,
         exact_bytes :int |None =None ,
+        allowed_bytes :tuple [int ,...]|None =None ,
         minimum_bytes :int |None =None ,
         maximum_bytes :int |None =None ,
         multiple_bytes :int |None =None ,
@@ -179,6 +180,9 @@ class InteractiveWizards :
             byte_len =len (raw )
             if exact_bytes is not None and byte_len !=exact_bytes :
                 return f"{label} must be exactly {exact_bytes} byte(s)."
+            if allowed_bytes is not None and byte_len not in allowed_bytes :
+                choices =", ".join (str (item )for item in allowed_bytes )
+                return f"{label} must be {choices} byte(s)."
             if minimum_bytes is not None and byte_len <minimum_bytes :
                 return f"{label} must be at least {minimum_bytes} byte(s)."
             if maximum_bytes is not None and byte_len >maximum_bytes :
@@ -992,7 +996,7 @@ class InteractiveWizards :
         wiz .add_step (
         "raw_priv","Privileges [Raw Hex bitmask, default 00]:",
         default ="00",condition =priv_cond,input_kind ="hex",
-        validator =lv_validator ("Privileges",minimum_bytes =1,maximum_bytes =3 ),
+        validator =lv_validator ("Privileges",allowed_bytes =(1 ,3 )),
         )
         wiz .add_step ("params","Launch Install Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
@@ -1091,7 +1095,7 @@ class InteractiveWizards :
         wiz .add_step (
         "raw_priv","Privileges [Raw Hex bitmask, default 00]:",
         default ="00",condition =priv_cond,input_kind ="hex",
-        validator =lv_validator ("Privileges",minimum_bytes =1,maximum_bytes =3 ),
+        validator =lv_validator ("Privileges",allowed_bytes =(1 ,3 )),
         )
         wiz .add_step ("params","Launch Install Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
@@ -1224,7 +1228,7 @@ class InteractiveWizards :
         wiz .add_step (
         "raw_priv","Privileges [Raw Hex bitmask, default 00]:",
         default ="00",condition =priv_cond,input_kind ="hex",
-        validator =lv_validator ("Privileges",minimum_bytes =1,maximum_bytes =3 ),
+        validator =lv_validator ("Privileges",allowed_bytes =(1 ,3 )),
         )
         wiz .add_step ("params","Launch Install Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 

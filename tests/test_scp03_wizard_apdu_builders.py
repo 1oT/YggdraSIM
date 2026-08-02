@@ -105,3 +105,46 @@ class CapInstallWizardExecutionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InstallPrivilegesConformance(unittest.TestCase):
+    """GPCS 2.3.1 permits Privileges of one or three bytes, never two.
+
+    Section 11.1.2 codes Privileges on three bytes, and the INSTALL data
+    field tables (11-43 for install, 11-44 for make selectable, 11-47 for
+    registry update) all give "Length of Privileges" the values '01' or
+    '03'. Only the one-byte form is allowed as a backward-compatibility
+    case, which OPEN extends to three. A two-byte value is not a short
+    form of anything and would build a malformed INSTALL command.
+    """
+
+    def _validator(self):
+        from SCP03.interface.wizards import InteractiveWizards
+
+        return InteractiveWizards._hex_size_validator("Privileges", allowed_bytes=(1, 3))
+
+    def test_one_and_three_byte_privileges_are_accepted(self) -> None:
+        validate = self._validator()
+        self.assertIsNone(validate("00"))
+        self.assertIsNone(validate("80"))
+        self.assertIsNone(validate("000000"))
+
+    def test_two_byte_privileges_are_rejected(self) -> None:
+        validate = self._validator()
+        self.assertIsNotNone(validate("0000"))
+        self.assertIsNotNone(validate("00000000"))
+
+    def test_every_install_wizard_constrains_privileges(self) -> None:
+        """install, make selectable and registry update all carry the rule."""
+
+        source = Path(
+            __file__
+        ).resolve().parents[1].joinpath("SCP03/interface/wizards.py").read_text(encoding="utf-8")
+        self.assertEqual(
+            source.count('validator =lv_validator ("Privileges",allowed_bytes =(1 ,3 ))'),
+            3,
+        )
+        self.assertNotIn(
+            'lv_validator ("Privileges",minimum_bytes =1,maximum_bytes =3 )',
+            source,
+        )
