@@ -1263,7 +1263,7 @@ class ShellInteractiveWizards :
         """Run the interactive SET STATUS wizard: prompts for target, scope, and lifecycle state."""
         wiz =InteractiveWizard ("GP SET STATUS Command (GPCS 11.10)",Config .Colors ,"WARNING: Irreversible operation.")
         wiz .add_step (
-        "target","Target [1=ISD, 2=App, 3=ELF]:",
+        "target","Target [1=ISD, 2=App/SSD, 3=SD + associated Apps]:",
         default ="1",choices =("1","2","3"),
         )
         one_byte =ShellInteractiveWizards ._hex_size_validator
@@ -1314,7 +1314,11 @@ class ShellInteractiveWizards :
         if target_choice =='3':
             is_three =True 
         if is_three :
-            p1 ="20"
+            # GPCS Table 11-86 defines only '80', '40' and '60'; the rest of
+            # the Status Type byte is RFU, and SET STATUS does not apply to
+            # an Executable Load File at all (section 11.10.1 covers the
+            # card and Application life cycles only).
+            p1 ="60"
 
         p2_hex =res .get ("state").replace (" ","").upper ()
         is_p2_short =False 
@@ -1328,7 +1332,7 @@ class ShellInteractiveWizards :
         if p1 =="40":
             is_app =True 
         is_elf =False 
-        if p1 =="20":
+        if p1 =="60":
             is_elf =True 
 
         is_app_or_elf =False 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import io
 import tempfile
+import re
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -148,3 +149,49 @@ class InstallPrivilegesConformance(unittest.TestCase):
             'lv_validator ("Privileges",minimum_bytes =1,maximum_bytes =3 )',
             source,
         )
+
+
+class SetStatusConformance(unittest.TestCase):
+    """GPCS 2.3.1 Table 11-85 makes P1 the Status Type, not a filler byte.
+
+    Table 11-86 defines exactly three values: '80' Issuer Security Domain,
+    '40' Application or Supplementary Security Domain, '60' Security Domain
+    and its associated Applications. Everything else is RFU. Section 11.10.1
+    scopes the command to the card and Application life cycles, so an
+    Executable Load File is not a target at all.
+    """
+
+    DEFINED_STATUS_TYPES = {"80", "40", "60"}
+
+    def _gp_source(self) -> str:
+        return Path(__file__).resolve().parents[1].joinpath(
+            "SCP03/logic/gp.py"
+        ).read_text(encoding="utf-8")
+
+    def test_set_status_sends_a_status_type_in_p1(self) -> None:
+        source = self._gp_source()
+        self.assertIn(
+            'cmd =f"80F0{status_type:02X}{state_byte:02X}',
+            source,
+            "P1 must carry the Status Type",
+        )
+        self.assertNotIn('cmd =f"80F000{state_byte:02X}', source)
+
+    def test_the_default_status_type_suits_an_application_aid(self) -> None:
+        """LOCK and UNLOCK pass an application AID, so '40' is the right default."""
+
+        self.assertIn("status_type :int =0x40", self._gp_source())
+
+    def test_the_wizard_offers_only_defined_status_types(self) -> None:
+        source = Path(__file__).resolve().parents[1].joinpath(
+            "SCP03/interface/shell_wizards.py"
+        ).read_text(encoding="utf-8")
+        start = source.index("def run_set_status")
+        body = source[start:start + 2600]
+        offered = set(re.findall(r'p1 ="([0-9A-F]{2})"', body))
+        offered.discard("00")          # the pre-selection placeholder
+        self.assertTrue(
+            offered <= self.DEFINED_STATUS_TYPES,
+            f"wizard offers undefined Status Types: {sorted(offered - self.DEFINED_STATUS_TYPES)}",
+        )
+        self.assertNotIn("20", offered, "'20' is RFU in Table 11-86")

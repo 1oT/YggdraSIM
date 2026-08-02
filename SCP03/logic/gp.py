@@ -1207,8 +1207,15 @@ class GlobalPlatformManager :
 
                 print (f"{indent_str}Tag {tag_hex} (L={len(val)}): {val_hex}{ascii_str}")
 
-    def set_status (self ,target_aid ,state_byte :int ):
-        """Send SET STATUS (GP Card Spec v2.3 §11.9) to transition the target application life-cycle state."""
+    def set_status (self ,target_aid ,state_byte :int ,status_type :int =0x40 ):
+        """Send SET STATUS (GPCS 2.3.1 §11.10) to transition a life-cycle state.
+
+        P1 carries the Status Type of Table 11-86, not zero: '80' for the
+        Issuer Security Domain, '40' for an Application or Supplementary
+        Security Domain, '60' for a Security Domain and its associated
+        Applications. Callers targeting an application AID want '40',
+        which is the default here.
+        """
         target =HexUtils .to_bytes (target_aid )
         state_name =f"{state_byte:02X}"
         if state_byte ==0x80 :
@@ -1217,7 +1224,7 @@ class GlobalPlatformManager :
             state_name ="SELECTABLE"
 
         print (f"{Config.Colors.CYAN}[*] Setting Status of {target.hex().upper()} to {state_name}...{Config.Colors.ENDC}")
-        cmd =f"80F000{state_byte:02X}{len(target):02X}{target.hex()}"
+        cmd =f"80F0{status_type:02X}{state_byte:02X}{len(target):02X}{target.hex()}"
         _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
         if sw1 ==0x90 :
             print (f"{Config.Colors.GREEN}[+] Status Updated.{Config.Colors.ENDC}")
