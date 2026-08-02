@@ -1599,6 +1599,29 @@ def build_decoded_document_from_sequence(pes: Any, intro_lines: list[str] | None
     return {"intro": intro, "sections": sections}
 
 
+def _identifications_are_usable(pes: Any) -> bool:
+    """Whether every PE header already carries a distinct, positive identification.
+
+    Renumbering is what makes authoring safe: a PE added through quick-add
+    arrives with identification 0 and has to be assigned one. It is also
+    lossy, because it rewrites numbering the issuer chose -- real packages
+    carry gaps, and at least one in this tree is deliberately
+    non-monotonic. Renumber only when the existing numbering cannot stand.
+    """
+    seen: set[int] = set()
+    for pe in getattr(pes, "pe_list", []):
+        header = getattr(pe, "header", None)
+        if not header:
+            continue
+        identification = header.get("identification")
+        if not isinstance(identification, int) or identification <= 0:
+            return False
+        if identification in seen:
+            return False
+        seen.add(identification)
+    return True
+
+
 def build_profile_sequence_from_document(
     document: dict[str, Any],
     workspace_root: Path,
@@ -1647,7 +1670,8 @@ def build_profile_sequence_from_document(
 
     try:
         pes._process_pelist()
-        pes.renumber_identification()
+        if _identifications_are_usable(pes) is False:
+            pes.renumber_identification()
     except Exception as error:
         detail = str(error).strip() or error.__class__.__name__
         raise ValueError(f"PE sequence processing failed: {detail}") from error

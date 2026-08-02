@@ -440,3 +440,78 @@ class SaipDerRoundTripIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TranscodeRoundTripFidelity(unittest.TestCase):
+    """A profile opened and saved without edits must come back byte for byte.
+
+    build_profile_sequence_from_document used to renumber every PE header
+    identification to a dense 1..N. That is what makes authoring safe -- a
+    PE added through quick-add arrives with identification 0 -- but it also
+    rewrote numbering the issuer chose. A real package in this tree carries
+    identifications [2, 5, 6, ..., 20, 19, 21]: gapped, and deliberately
+    non-monotonic. Renumbering silently replaced them with [1, 4, 5, ...].
+    """
+
+    def _reference_package(self) -> Path:
+        root = Path(__file__).resolve().parents[1]
+        for candidate in sorted((root / ".profilepackage-cache").glob("profile-*.der")):
+            if candidate.stat().st_size > 1024:
+                return candidate
+        self.skipTest("no cached reference profile available")
+
+    def _identifications(self, sequence) -> list:
+        out = []
+        for pe in sequence.pe_list:
+            header = getattr(pe, "header", None)
+            if header and "identification" in header:
+                out.append(header["identification"])
+        return out
+
+    def test_no_op_round_trip_is_byte_identical(self) -> None:
+        from Tools.ProfilePackage.saip_json_codec import (
+            build_decoded_document_from_sequence,
+            ensure_workspace_pysim_on_path,
+        )
+
+        workspace = Path(__file__).resolve().parents[1]
+        ensure_workspace_pysim_on_path(workspace)
+        from pySim.esim.saip import ProfileElementSequence
+
+        raw = self._reference_package().read_bytes()
+        source = ProfileElementSequence.from_der(raw)
+        document = build_decoded_document_from_sequence(source, intro_lines=["fidelity"])
+        restored = dejsonify_document(json.loads(document_to_pretty_json(document)))
+        rebuilt = encode_der_from_document(restored, workspace)
+
+        self.assertEqual(rebuilt, raw, "opening and saving an unedited profile changed it")
+        self.assertEqual(
+            self._identifications(ProfileElementSequence.from_der(rebuilt)),
+            self._identifications(source),
+            "PE header identification numbering was not preserved",
+        )
+
+    def test_renumbering_still_repairs_what_authoring_breaks(self) -> None:
+        """Preserving valid numbering must not stop invalid numbering being fixed."""
+
+        from Tools.ProfilePackage.saip_json_codec import _identifications_are_usable
+
+        class _Pe:
+            def __init__(self, identification):
+                self.header = (
+                    {"identification": identification}
+                    if identification is not None
+                    else None
+                )
+
+        class _Seq:
+            def __init__(self, identifications):
+                self.pe_list = [_Pe(i) for i in identifications]
+
+        # Preserved: an imported package, gaps and non-monotonic order intact.
+        self.assertTrue(_identifications_are_usable(_Seq([2, 5, 6, 20, 19, 21])))
+        self.assertTrue(_identifications_are_usable(_Seq([])))
+        # Repaired: quick-add leaves a zero, and duplicates are never valid.
+        self.assertFalse(_identifications_are_usable(_Seq([1, 2, 0, 4])))
+        self.assertFalse(_identifications_are_usable(_Seq([1, 2, 2, 3])))
+        self.assertFalse(_identifications_are_usable(_Seq([1, -1])))
