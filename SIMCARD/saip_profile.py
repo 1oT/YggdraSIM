@@ -2291,35 +2291,40 @@ def _coerce_byte(value: Any) -> int:
 # Mirrors ``pySim.esim.saip.KeyType`` so the SD-key migration can map
 # pySim's resolved enum string back to the on-card byte without
 # importing the construct adapter at the use site.
+# GlobalPlatform Card Specification 2.3.1 table 11-16, which the SAIP
+# specification defers to for key types ("Only keyTypes defined in
+# [GP CS], Table 11-16, may be part of the list"). Keys are pySim's
+# KeyType enum spellings, which is what actually reaches the lookup;
+# _key_type_string_to_byte folds separators so a hyphenated spelling
+# resolves to the same byte.
 _GP_KEY_TYPE_STRING_TO_BYTE: dict[str, int] = {
-    "des-implicit": 0x80,
-    "reserved-1": 0x81,
-    "tls": 0x81,
-    "des-cbc": 0x82,
-    "des-ecb": 0x83,
-    "tdes-cbc": 0x84,
-    "tdes-cbc-2": 0x84,
+    "des": 0x80,
+    "des_implicit": 0x80,
+    "tls_psk": 0x85,
+    "tls": 0x85,
     "aes": 0x88,
-    "hmac-sha1": 0x90,
-    "hmac-sha-160": 0x91,
-    "rsa-public-e": 0xA0,
-    "rsa-public-n": 0xA1,
-    "rsa-private-n": 0xA2,
-    "rsa-private-d": 0xA3,
-    "rsa-crt-p": 0xA4,
-    "rsa-crt-q": 0xA5,
-    "rsa-crt-pq": 0xA6,
-    "rsa-crt-dp1": 0xA7,
-    "rsa-crt-dq1": 0xA8,
-    "ecc-public-key": 0xB0,
-    "ecc-private-key": 0xB1,
-    "ecc-field-parameter-a": 0xB2,
-    "ecc-field-parameter-b": 0xB3,
-    "ecc-field-parameter-g": 0xB4,
-    "ecc-field-parameter-n": 0xB5,
-    "ecc-field-parameter-k": 0xB6,
-    "ecc-key-parameter-reference": 0xF0,
-    "extended-format": 0xFF,
+    "hmac_sha1": 0x90,
+    "hmac_sha1_160": 0x91,
+    "rsa_public_exponent_e_cleartex": 0xA0,
+    "rsa_modulus_n_cleartext": 0xA1,
+    "rsa_modulus_n": 0xA2,
+    "rsa_private_exponent_d": 0xA3,
+    "rsa_chines_remainder_p": 0xA4,
+    "rsa_chines_remainder_q": 0xA5,
+    "rsa_chines_remainder_pq": 0xA6,
+    "rsa_chines_remainder_dpi": 0xA7,
+    "rsa_chines_remainder_dqi": 0xA8,
+    "ecc_public_key": 0xB0,
+    "ecc_private_key": 0xB1,
+    "ecc_field_parameter_p": 0xB2,
+    "ecc_field_parameter_a": 0xB3,
+    "ecc_field_parameter_b": 0xB4,
+    "ecc_field_parameter_g": 0xB5,
+    "ecc_field_parameter_n": 0xB6,
+    "ecc_field_parameter_k": 0xB7,
+    "ecc_key_parameters_reference": 0xF0,
+    "not_available": 0xFF,
+    "extended_format": 0xFF,
 }
 
 
@@ -2331,7 +2336,7 @@ def _key_type_string_to_byte(key_type: str) -> int:
     """
     if not key_type:
         return 0
-    key = str(key_type).strip().lower()
+    key = str(key_type).strip().lower().replace("-", "_")
     return _GP_KEY_TYPE_STRING_TO_BYTE.get(key, 0)
 
 
