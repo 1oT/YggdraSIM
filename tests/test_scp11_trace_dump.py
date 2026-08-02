@@ -153,7 +153,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
         self.assertIn("87 eimSupportedProtocol len=2 value=eimRetrieveHttps (0780)", decoded)
         self.assertIn("89 indirectProfileDownload len=0", decoded)
         self.assertIn("SEQUENCE len=111", decoded)
-        self.assertIn("5F37 signature len=64 value=64B ECDSA-rs", decoded)
+        self.assertIn("5F37 eimSignature / EuiccSign len=64 value=64B ECDSA-rs", decoded)
         self.assertNotIn("primitive", decoded)
         self.assertNotIn("constructed", decoded)
         self.assertNotIn("context [", decoded)
@@ -258,8 +258,8 @@ class Scp11TraceDumpTests(unittest.TestCase):
 
         decoded = "\n".join(format_tlv_decode(response))
 
-        self.assertIn("BF52 PackageData len=", decoded)
-        self.assertIn("A0 packageDataResponse len=", decoded)
+        self.assertIn("BF52 IpaEuiccDataResponse len=", decoded)
+        self.assertIn("A0 ipaEuiccData len=", decoded)
         self.assertIn("[+] RetrieveNotificationsList", decoded)
         self.assertIn("Notification Entries", decoded)
         self.assertIn("[+] EuiccConfiguredData", decoded)
