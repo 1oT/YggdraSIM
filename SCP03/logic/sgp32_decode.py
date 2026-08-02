@@ -10,11 +10,17 @@ from SCP03.logic.euicc_info2 import parse_tlv_simple
 from SCP03.logic.euicc_info2 import quote_text
 
 
+# SGP.22 NotificationEvent. The local operations are spelled with
+# "Local" in the ASN.1, and bits 4 to 7 carry the RPM operations.
 NOTIFICATION_EVENT_FLAGS: dict[int, str] = {
     0: "notificationInstall",
-    1: "notificationEnable",
-    2: "notificationDisable",
-    3: "notificationDelete",
+    1: "notificationLocalEnable",
+    2: "notificationLocalDisable",
+    3: "notificationLocalDelete",
+    4: "notificationRpmEnable",
+    5: "notificationRpmDisable",
+    6: "notificationRpmDelete",
+    7: "loadRpmPackageResult",
 }
 
 # SGP.22 PprIds defines three bits. Bit 3 is not allocated.
@@ -36,6 +42,8 @@ EIM_SUPPORTED_PROTOCOL_FLAGS: dict[int, str] = {
     4: "eimProprietary",
 }
 
+# SGP.32 GetCertsResponse. The ASN.1 spells 127 "undfinedError"; the
+# spelling here is corrected, the value is the one the spec assigns.
 GET_CERTS_ERROR_NAMES: dict[int, str] = {
     1: "invalidCiPKId",
     127: "undefinedError",

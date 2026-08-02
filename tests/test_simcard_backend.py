@@ -1817,7 +1817,7 @@ metadata_overrides = {{
 
             _, operation_value, _, _ = read_tlv(find_first_tlv(metadata_raw, "81"), 0)
             # NotificationEvent is an implicitly-tagged ASN.1 BIT STRING:
-            # four unused bits followed by notificationDelete(3).
+            # four unused bits followed by notificationLocalDelete(3).
             self.assertEqual(operation_value, b"\x04\x10")
 
             _, address_value, _, _ = read_tlv(find_first_tlv(metadata_raw, "0C"), 0)

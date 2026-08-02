@@ -85,9 +85,9 @@ class NotificationBitStringProducerTests(unittest.TestCase):
     def test_each_lifecycle_event_is_a_valid_named_bit_string(self) -> None:
         cases = (
             (SgpLogic.NOTIF_INSTALL, b"\x07\x80", "notificationInstall"),
-            (SgpLogic.NOTIF_ENABLE, b"\x06\x40", "notificationEnable"),
-            (SgpLogic.NOTIF_DISABLE, b"\x05\x20", "notificationDisable"),
-            (SgpLogic.NOTIF_DELETE, b"\x04\x10", "notificationDelete"),
+            (SgpLogic.NOTIF_ENABLE, b"\x06\x40", "notificationLocalEnable"),
+            (SgpLogic.NOTIF_DISABLE, b"\x05\x20", "notificationLocalDisable"),
+            (SgpLogic.NOTIF_DELETE, b"\x04\x10", "notificationLocalDelete"),
         )
         for operation, expected_value, expected_label in cases:
             with self.subTest(operation=operation):
@@ -130,7 +130,7 @@ class NotificationBitStringProducerTests(unittest.TestCase):
                 start=1,
             )
         ]
-        # NotificationEvent { notificationEnable(1), notificationDelete(3) }:
+        # NotificationEvent { notificationLocalEnable(1), notificationLocalDelete(3) }:
         # four significant bits, payload 0101xxxx.
         request = tlv("BF28", tlv("81", b"\x04\x50"))
 
@@ -143,8 +143,8 @@ class NotificationBitStringProducerTests(unittest.TestCase):
             decode_notification_entry(value)["operation"]
             for value in metadata_values
         ]
-        self.assertIn("notificationEnable", labels[0])
-        self.assertIn("notificationDelete", labels[1])
+        self.assertIn("notificationLocalEnable", labels[0])
+        self.assertIn("notificationLocalDelete", labels[1])
 
     def test_absent_filter_lists_all_but_empty_filter_lists_none(self) -> None:
         self.state.notifications = [
