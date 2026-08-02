@@ -265,57 +265,89 @@ def _card_access_denied() -> str:
 # Static data extracted from the repo
 # ---------------------------------------------------------------------------
 
+# ETSI TS 102 221 clause 10.2.1 and GlobalPlatform Card Specification
+# 2.3.1 table 11-10. '61XX', '6CXX', '63CX', '91XX' and '92XX' carry a
+# value in SW2 and are handled by status_word_lookup rather than listed.
 STATUS_WORDS: dict[int, str] = {
     0x9000: "Success",
-    0x6100: "More data available",
+    0x9300: "SIM Application Toolkit is busy; command cannot be executed at present",
+    0x6281: "Part of returned data may be corrupted",
+    0x6282: "End of file/record reached before reading Le bytes, or unsuccessful search",
     0x6283: "Selected file invalidated",
+    0x6285: "Selected file in termination state",
+    0x62F1: "More data available",
+    0x62F2: "More data available and proactive command pending",
+    0x62F3: "Response data available",
     0x6300: "Authentication failed",
-    0x6310: "More data available (GET STATUS continuation)",
-    0x6400: "State of non-volatile memory unchanged",
+    0x6310: "More data available (GlobalPlatform GET STATUS continuation)",
+    0x63F1: "More data expected",
+    0x63F2: "More data expected and proactive command pending",
+    0x6400: "State of non-volatile memory unchanged / no specific diagnosis",
+    0x6500: "State of non-volatile memory changed, no information given",
+    0x6581: "Memory problem",
     0x6700: "Wrong length",
-    0x6881: "Logical channel not supported",
+    0x6800: "Function in CLA not supported, no information given",
+    0x6881: "Logical channel not supported or not active",
     0x6882: "Secure messaging not supported",
+    0x6900: "Command not allowed, no information given",
+    0x6981: "Command incompatible with file structure",
     0x6982: "Security status not satisfied",
-    0x6983: "Authentication method blocked",
+    0x6983: "Authentication/PIN method blocked",
     0x6984: "Referenced data invalidated",
     0x6985: "Conditions of use not satisfied",
-    0x6A80: "Incorrect parameters in data field",
+    0x6986: "Command not allowed (no EF selected)",
+    0x6989: "Command not allowed: secure channel, security not satisfied",
+    0x6A80: "Incorrect parameters in the data field",
     0x6A81: "Function not supported",
     0x6A82: "File not found / Applet not found",
     0x6A83: "Record not found",
-    0x6A84: "Not enough memory space in file",
+    0x6A84: "Not enough memory space",
     0x6A86: "Incorrect parameters P1-P2",
+    0x6A87: "Lc inconsistent with P1-P2",
     0x6A88: "Referenced data not found",
+    0x6B00: "Wrong parameter(s) P1-P2",
     0x6D00: "Instruction code not supported or invalid",
     0x6E00: "Class not supported",
-    0x6F00: "Unknown error / No precise diagnosis",
+    0x6F00: "Technical problem, no precise diagnosis",
+    0x9850: "INCREASE cannot be performed, max value reached",
+    0x9862: "Authentication error, application specific",
+    0x9863: "Security session or association expired",
+    0x9864: "Minimum UICC suspension time is too long",
 }
 
+# Names are the ASN.1 type or field the tag carries. Clause numbers are
+# given only where the specification was checked; several ES10b functions
+# share a clause and a wrong number is worse than none.
 BER_TLV_TAGS: dict[int, str] = {
-    0xBF20: "EuiccInfo1 (SGP.22 §5.7.16)",
-    0xBF22: "EuiccInfo2 (SGP.22 §5.7.17)",
-    0xBF2B: "NotificationsList (SGP.22 §5.7.24)",
-    0xBF2D: "GetProfilesInfo (SGP.22 §5.7.20)",
-    0xBF31: "EnableProfile (SGP.22 §5.7.21)",
-    0xBF32: "DisableProfile (SGP.22 §5.7.22)",
-    0xBF33: "DeleteProfile (SGP.22 §5.7.23)",
-    0xBF3C: "EuiccConfiguredData (SGP.22 §5.7.18)",
-    0xBF3E: "ProfileInfo (SGP.22 §5.7.19)",
-    0xBF43: "RAT / Rules Authorisation Table (SGP.22 §5.7.16)",
-    0xBF55: "EimConfigurationData (SGP.32 §6.5)",
-    0xBF56: "GetCertsResponse (SGP.22 §5.7.32)",
-    0x80: "Result (profile operation result code)",
+    0xBF20: "EUICCInfo1 / GetEuiccInfo1Request (SGP.22 §5.7.8 GetEUICCInfo)",
+    0xBF22: "EUICCInfo2 / GetEuiccInfo2Request (SGP.22 §5.7.8 GetEUICCInfo)",
+    0xBF2B: "RetrieveNotificationsList (SGP.22 §5.7.10)",
+    0xBF2D: "ProfileInfoList (SGP.22 ES10c GetProfilesInfo)",
+    0xBF31: "EnableProfile (SGP.22 ES10c)",
+    0xBF32: "DisableProfile (SGP.22 ES10c)",
+    0xBF33: "DeleteProfile (SGP.22 ES10c)",
+    0xBF3C: "EuiccConfiguredData (SGP.22 ES10a)",
+    0xBF3E: "GetEuiccData (SGP.22 ES10c)",
+    0xBF43: "GetRat / Rules Authorisation Table (SGP.22 §5.7.22 GetRAT)",
+    0xBF55: "GetEimConfigurationData (SGP.32 §5.9.18)",
+    0xBF56: "GetCerts (SGP.32 §5.9.10)",
     0x4F: "AID (Application Identifier -- ISO 7816-5)",
-    0x5A: "ICCID (Integrated Circuit Card ID -- ETSI TS 102 221)",
-    0x9F70: "ProfileState (SGP.22 §5.7.19)",
-    0x90: "Nickname (profile nickname)",
-    0x91: "ServiceProviderName",
-    0x92: "ProfileName",
-    0x95: "ProfileClass",
-    0xA0: "Context-0 (SGP.22 first-level context tag)",
-    0xA1: "Context-1 (SGP.22 second-level context tag)",
-    0xA9: "Context-9 (EuiccInfo1 sub-structure)",
-    0xAA: "Context-10 (EuiccInfo1 sub-structure)",
+    0x5A: "ICCID (ETSI TS 102 221)",
+    0x90: "profileNickname (SGP.22 ProfileInfo)",
+    0x91: "serviceProviderName (SGP.22 ProfileInfo)",
+    0x92: "profileName (SGP.22 ProfileInfo)",
+    0x93: "iconType (SGP.22 ProfileInfo)",
+    0x94: "icon (SGP.22 ProfileInfo)",
+    0x95: "profileClass (SGP.22 ProfileInfo)",
+    0x9F70: "profileState (SGP.22 ProfileInfo)",
+    0xA9: "euiccCiPKIdListForVerification (SGP.22 EUICCInfo1 / EUICCInfo2)",
+    0xAA: "euiccCiPKIdListForSigning (SGP.22 EUICCInfo1 / EUICCInfo2)",
+    # Context-class tags whose meaning is fixed by the structure that
+    # encloses them, not by the tag: '80' is GP KeyType inside a key
+    # template and a result code elsewhere.
+    0x80: "context-0 primitive; meaning depends on the enclosing structure",
+    0xA0: "context-0 constructed; meaning depends on the enclosing structure",
+    0xA1: "context-1 constructed; meaning depends on the enclosing structure",
 }
 
 TEST_IDENTIFIER_RANGES: dict[str, dict[str, Any]] = {
@@ -527,8 +559,19 @@ def status_word_lookup(sw: str) -> str:
     elif sw1 == 0x6C:
         meaning = f"Wrong Le length. Correct length is {sw2}."
     elif sw1 == 0x63 and (sw2 & 0xF0) == 0xC0:
-        retries = sw2 & 0x0F
-        meaning = f"Verification failed. {retries} retries remaining."
+        # TS 102 221 table 10.10 note: after a PIN verification 'X' is the
+        # number of retries left; after any other command it is the number
+        # of internal retries the card performed. Without the command that
+        # produced it, both readings have to be given.
+        count = sw2 & 0x0F
+        meaning = (
+            f"After PIN verification: verification failed, {count} retries remaining. "
+            f"After any other command: successful, after {count} internal retries."
+        )
+    elif sw1 == 0x91:
+        meaning = f"Success, with a proactive command pending. {sw2} bytes of response data."
+    elif sw1 == 0x92:
+        meaning = f"Success, with extra information about an ongoing data transfer ('{sw2:02X}')."
     else:
         meaning = "Unknown status word."
 
@@ -538,8 +581,9 @@ def status_word_lookup(sw: str) -> str:
 @mcp.tool(annotations=READ_ONLY)
 def ber_tlv_lookup(tag: str) -> str:
     """Look up a BER-TLV tag by hex value and return its name and spec reference.
-    Covers SGP.22 context tags (0xBF20-0xBF56), ISO/GP tags (0x4F, 0x5A, 0x80),
-    and profile-level context tags (0xA0-0xA1, 0xA9-0xAA).
+    Covers SGP.22 / SGP.32 ES10 tags (0xBF20-0xBF56), ISO tags (0x4F, 0x5A),
+    the SGP.22 ProfileInfo fields (0x90-0x95, 0x9F70) and the eSIM CA key
+    identifier lists (0xA9-0xAA).
     """
     tag = tag.strip().replace(" ", "").replace("0x", "").upper()
     try:
