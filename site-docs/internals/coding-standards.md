@@ -90,6 +90,34 @@ path navigable and the wizard maintainable as the spec evolves.
 - Never commit keys, certificates, or credentials. Runtime material lives
   under the runtime root, not in the tree.
 
+## Decode boundaries
+
+Every subsystem decodes bytes it did not produce: a card response, an ES9+
+payload, a workbook, a profile package. Those bytes can be truncated,
+over-long, or hostile.
+
+- **Contain upstream exception types at the module boundary.** Code that
+  delegates to pySim, `asn1tools`, or `cryptography` can raise
+  `OutOfByteDataError`, `MissingDataError`, or a bare `IndexError`. A
+  caller catching `ValueError` never sees those, so a malformed remote
+  payload unwinds the whole flow instead of failing the one step.
+- **If the surrounding code already degrades gracefully for one malformed
+  field, a sibling field must take the same route.** Two fields of the
+  same response behaving differently is a defect, not a policy choice.
+- **Guard the call, not one field.** Validating a single field leaves its
+  siblings in the same call unguarded.
+- **A rejection should raise a type the module owns** -- `ValueError`, or
+  a domain error such as `Scp03ResponseProtectionError`. Those read as
+  rejections; an `IndexError` reads as a crash.
+- **A private helper may assume its caller's precondition.** Keep the
+  bounds check next to the caller that enforces it, and do not treat a
+  scanner calling the helper directly as a finding.
+
+When you change a decoder, call it with `b""`, a single byte, a truncated
+TLV header, a length that over-claims its body (`b"\x62\xc8"`), a
+long-form length with no body, and an odd-nibble BCD run. Anything other
+than a clean rejection is a defect.
+
 ## Git and commits
 
 - Do not update the git config in checked-in scripts or CI.
