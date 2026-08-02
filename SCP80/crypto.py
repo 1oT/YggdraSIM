@@ -180,14 +180,16 @@ class CryptoEngine :
         cipher_mode = CryptoEngine.get_algo_type(f"{kic_b:02X}")
         mac_mode = CryptoEngine.get_algo_type(f"{kid_b:02X}")
         block_size = 16 if cipher_mode == "AES" else 8
-        chi_byte = b"\x00"
+        # TS 102 225 table 2: CPI | CPL | CHI | CHL, with CHI a Null field
+        # on this transport. CHL spans SPI to the end of the RC/CC/DS.
+        cpi_byte = b"\x00"
         chl_byte = b"\x15"
         pcntr = CryptoEngine.compute_pcntr(len(body), block_size, 8)
         body_padded = body + b"\x00" * pcntr
         ct_len = 5 + 1 + 8 + len(body_padded)
         cpl_val = len(chl_byte) + len(param_data) + ct_len
         cpl_byte = bytes([cpl_val])
-        header_blob = chi_byte + cpl_byte + chl_byte
+        header_blob = cpi_byte + cpl_byte + chl_byte
         mac_input = header_blob + param_data + cntr_bytes + bytes([pcntr]) + body_padded
         cc = CryptoEngine.compute_cc(mac_mode, k_mac, mac_input)
         enc_input = cntr_bytes + bytes([pcntr]) + cc + body_padded

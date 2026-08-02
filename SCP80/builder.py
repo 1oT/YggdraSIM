@@ -144,11 +144,17 @@ class OtaPacketBuilder :
         payload_padded =payload +(b'\x00'*pcntr )
 
         ct_len =5 +1 +8 +len (payload_padded )
+        # TS 102 225 table 2 orders the packet CPI | CPL | CHI | CHL, but the
+        # Command Header Identifier is a Null field on this transport, so the
+        # three octets emitted here are CPI, CPL and CHL. CHL counts from the
+        # SPI to the end of the RC/CC/DS (2+1+1+3+5+1+8 = 0x15) and CPL counts
+        # from CHI to the end of the secured data. All three go into the CC,
+        # as clause 5.1.1 requires.
         chl_byte =b'\x15'
         cpl_val =len (chl_byte )+len (param_data )+ct_len 
         cpl_byte =bytes ([cpl_val ])
-        chi_byte =b'\x00'
-        header_blob =chi_byte +cpl_byte +chl_byte 
+        cpi_byte =b'\x00'
+        header_blob =cpi_byte +cpl_byte +chl_byte 
 
         mac_input =header_blob +param_data +cntr_bytes +pcntr_byte +payload_padded 
         cc =CryptoEngine .compute_cc (mac_mode ,kid_key ,mac_input )
@@ -161,7 +167,7 @@ class OtaPacketBuilder :
         cipher_mode ,
         mac_mode ,
         cntr_hex ,
-        chi_byte ,
+        cpi_byte ,
         cpl_byte ,
         chl_byte ,
         param_data ,
@@ -225,7 +231,7 @@ class OtaPacketBuilder :
         cipher_mode =block_data [1 ]
         mac_mode =block_data [2 ]
         cntr_hex =block_data [3 ]
-        chi_byte =block_data [4 ]
+        cpi_byte =block_data [4 ]
         cpl_byte =block_data [5 ]
         chl_byte =block_data [6 ]
         param_data =block_data [7 ]
@@ -302,7 +308,7 @@ class OtaPacketBuilder :
         if verbose :
             self ._print_verbose (
             plan ,
-            chi_byte ,
+            cpi_byte ,
             cpl_byte ,
             chl_byte ,
             param_data ,
