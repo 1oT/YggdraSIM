@@ -524,7 +524,10 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
                         "createFCP",
                         {
                             "fileDescriptor": {_TAG_BYTES: "4121"},
-                            "fileID": {_TAG_BYTES: "4F41"},
+                            # 4F42 per TS 31.102 §4.4.5.2. 4F41 in DF.WLAN
+                            # is EF.Pseudo, which holds a pseudonym rather
+                            # than the PLMN list filled in below.
+                            "fileID": {_TAG_BYTES: "4F42"},
                         },
                     ]},
                     {"@": ["fillFileContent", {_TAG_BYTES: "32F410FFFF"}]},

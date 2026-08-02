@@ -111,9 +111,9 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-hplmnwact": "6F62",
     "ef-fplmn": "6F7B",
     # DF.WLAN (5F40) — TS 31.102 §4.2.82 / §4.2.83 / §4.2.91.
-    "ef-uplmnwlan": "4F41",
-    "ef-oplmnwlan": "4F42",
-    "ef-wlrplmn": "4F47",
+    "ef-uplmnwlan": "4F42",
+    "ef-oplmnwlan": "4F43",
+    "ef-wlrplmn": "4F4A",
     "ef-pst": "4F10",
     "ef-gid1": "6F3E",
     "ef-gid2": "6F3F",
@@ -306,7 +306,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-emlpp": "6FB5",
     "ef-aaem": "6FB6",
     "ef-anl": "6F2E",
-    "ef-mexe-st": "6F3A",
+    "ef-mexe-st": "4F40",
     "ef-prose-pfsr": "4F30",
     "ef-vsuri": "6FE9",
     # 5x20 Pass B — CSIM (ADF.CSIM) EFs. Tokens namespaced as ``ef-csim-*``
@@ -9092,7 +9092,7 @@ _MEXE_ST_SERVICE_NAMES: dict[int, str] = {
 
 
 def _decode_ef_mexe_st(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MExE-ST (TS 31.102 §4.4.10.1) — MExE Service Table.
+    """Decode EF.MExE-ST (TS 31.102 §4.4.4.1) — MExE Service Table.
 
     Packed bit-map (service N at byte ``(N-1)//8`` bit ``(N-1)%8``).
     """
@@ -10429,23 +10429,23 @@ def _decode_known_ef_payload(
         return _decode_plmn_list(hex_clean, with_act=True)
     if token == "ef-fplmn" or fid_upper == "6F7B":
         return _decode_plmn_list(hex_clean, with_act=False)
-    # DF.WLAN (5F40) — I-WLAN configuration files. TS 31.102 §4.2.82
-    # (UPLMNWLAN @ 4F41), §4.2.83 (OPLMNWLAN @ 4F42), §4.2.91
-    # (WLRPLMN @ 4F47). Token wins over FID; the FIDs are kept for
+    # DF.WLAN (5F40) — I-WLAN configuration files. TS 31.102 §4.4.5.2
+    # (UPLMNWLAN @ 4F42), §4.4.5.3 (OPLMNWLAN @ 4F43), §4.4.5.10
+    # (WLRPLMN @ 4F4A). Token wins over FID; the FIDs are kept for
     # legacy callers that strip the token.
-    if token == "ef-oplmnwlan" or fid_upper == "4F42":
+    if token == "ef-oplmnwlan" or fid_upper == "4F43":
         return _decode_wlan_plmn_list(
             hex_clean,
             format_name="Operator-controlled I-WLAN PLMN selector",
-            spec_reference="TS 31.102 §4.2.83",
+            spec_reference="TS 31.102 §4.4.5.3",
         )
-    if token == "ef-uplmnwlan" or fid_upper == "4F41":
+    if token == "ef-uplmnwlan" or fid_upper == "4F42":
         return _decode_wlan_plmn_list(
             hex_clean,
             format_name="User-controlled I-WLAN PLMN selector",
-            spec_reference="TS 31.102 §4.2.82",
+            spec_reference="TS 31.102 §4.4.5.2",
         )
-    if token == "ef-wlrplmn" or fid_upper == "4F47":
+    if token == "ef-wlrplmn" or fid_upper == "4F4A":
         return _decode_ef_wlrplmn(hex_clean)
     if token == "ef-bst":
         return _decode_ef_bst(hex_clean)
