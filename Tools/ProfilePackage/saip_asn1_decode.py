@@ -7282,12 +7282,13 @@ def _decode_ef_a2xp_uu(hex_clean: str) -> dict[str, object] | None:
     )
 
 
-# Files in DFs that the SAIP ProfileElement ASN.1 has no member for, so
-# no profile package can carry them. TS 31.102 fixes their identifier,
-# structure and short identifier, but leaves the payload layout to a
-# companion spec -- TS 24.334 for the ProSe files, TS 23.003 for the WLAN
-# identifier lists, TS 33.102 for the MExE root keys. The payload is
-# surfaced with that citation rather than guessed at.
+# Files the SAIP ProfileElement ASN.1 has no member for, so no profile
+# package can carry them -- either because the whole DF is absent from
+# the ASN.1, or, for EF.TVCONFIG, because the file is. TS 31.102 fixes
+# each identifier, structure and short identifier, but leaves the payload
+# layout to a companion spec -- TS 24.334 for the ProSe files, TS 23.003
+# for the WLAN identifier lists, TS 33.102 for the MExE root keys. The
+# payload is surfaced with that citation rather than guessed at.
 _REFERENCE_ONLY_EF_FORMATS: dict[str, tuple[str, str]] = {
     "ef-sai": ("SoLSA Access Indicator", "TS 31.102 §4.4.1.1"),
     "ef-sll": ("SoLSA LSA List", "TS 31.102 §4.4.1.2"),
@@ -7334,6 +7335,7 @@ _REFERENCE_ONLY_EF_FORMATS: dict[str, tuple[str, str]] = {
         "ProSe Relay Discovery Parameters", "TS 31.102 §4.4.8.14"
     ),
     "ef-acdc-list": ("ACDC List", "TS 31.102 §4.4.9.2"),
+    "ef-tvconfig": ("TV Configuration", "TS 31.102 §4.2.108"),
 }
 
 
@@ -10397,7 +10399,7 @@ def _decode_known_ef_payload(
         return _decode_iccid(hex_clean)
     if token == "ef-dir" or fid_upper == "2F00":
         return _decode_ef_dir_record(hex_clean)
-    if token == "ef-arr" or fid_upper in {"2F06", "6F06"}:
+    if token in {"ef-arr", "ef-arr-telecom"} or fid_upper in {"2F06", "6F06"}:
         return _decode_ef_arr(hex_clean)
     if token == "ef-pl" or fid_upper == "2F05":
         return _decode_two_byte_language_records(hex_clean)
@@ -11120,6 +11122,7 @@ def _decode_known_ef_payload(
         "ef-prose-relay",
         "ef-prose-relay-discovery",
         "ef-acdc-list",
+        "ef-tvconfig",
     }:
         return _decode_reference_only_ef(token, hex_clean)
     if token == "ef-curid":

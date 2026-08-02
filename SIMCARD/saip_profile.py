@@ -216,7 +216,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-iccid": {"name": "EF.ICCID", "fid": "2FE2", "structure": "transparent", "sfi": 0x02},
     "ef-dir": {"name": "EF.DIR", "fid": "2F00", "structure": "linear-fixed", "sfi": 0x1E},
     "ef-pl": {"name": "EF.PL", "fid": "2F05", "structure": "transparent", "sfi": 0x05},
-    "ef-arr": {"name": "EF.ARR", "fid": "2F06", "structure": "linear-fixed", "sfi": 0x17},
+    "ef-arr": {"name": "EF.ARR", "fid": "2F06", "structure": "linear-fixed", "sfi": None},
     "ef-umpc": {"name": "EF.UMPC", "fid": "2F08", "structure": "transparent", "sfi": None},
     # ADF.USIM core (TS 31.102 §4.2).
     "ef-imsi": {"name": "EF.IMSI", "fid": "6F07", "structure": "transparent", "sfi": 0x07},
@@ -310,6 +310,10 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-spni": {"name": "EF.SPNI", "fid": "6FDE", "structure": "transparent", "sfi": None},
     "ef-pws": {"name": "EF.PWS", "fid": "6FEC", "structure": "transparent", "sfi": None},
     "ef-nasconfig": {"name": "EF.NASCONFIG", "fid": "6FE8", "structure": "transparent", "sfi": None},
+    # The SAIP USIM and ISIM templates both carry ef-uicciari, at 6FE7
+    # and linear fixed in each, so one entry serves both.
+    "ef-uicciari": {"name": "EF.UICCIARI", "fid": "6FE7", "structure": "linear-fixed", "sfi": None},
+    "ef-tvconfig": {"name": "EF.TVCONFIG", "fid": "6FFB", "structure": "linear-fixed", "sfi": None},
     "ef-fdnuri": {"name": "EF.FDNURI", "fid": "6FED", "structure": "linear-fixed", "sfi": None},
     "ef-bdnuri": {"name": "EF.BDNURI", "fid": "6FEE", "structure": "linear-fixed", "sfi": None},
     "ef-sdnuri": {"name": "EF.SDNURI", "fid": "6FEF", "structure": "linear-fixed", "sfi": None},
@@ -434,7 +438,6 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-impu": {"name": "EF.IMPU", "fid": "6F04", "structure": "linear-fixed", "sfi": None},
     "ef-ist": {"name": "EF.IST", "fid": "6F07", "structure": "transparent", "sfi": None},
     "ef-pcscf": {"name": "EF.PCSCF", "fid": "6F09", "structure": "linear-fixed", "sfi": None},
-    "ef-uicciari": {"name": "EF.UICCIARI", "fid": "6FE7", "structure": "linear-fixed", "sfi": None},
     # DF.EAP (TS 31.102 §4.4.x, DF 7F20).
     "ef-eapkeys": {"name": "EF.EAPKEYS", "fid": "4F01", "structure": "transparent", "sfi": None},
     "ef-eapstatus": {
@@ -706,14 +709,22 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     },
     "ef-ice-dn": {"name": "EF.ICE-DN", "fid": "6FE0", "structure": "linear-fixed", "sfi": None},
     "ef-ice-ff": {"name": "EF.ICE-FF", "fid": "6FE1", "structure": "linear-fixed", "sfi": None},
+    # BER-TLV in SAIP and §4.6.1.3; the id is unambiguous even though
+    # the structure has no representation here.
     "ef-ice-graphics": {
         "name": "EF.ICE-GRAPHICS",
-        "fid": "",
+        "fid": "4F21",
         "structure": "transparent",
         "sfi": None,
     },
     "ef-rma": {"name": "EF.RMA", "fid": "", "structure": "transparent", "sfi": None},
     "ef-sume": {"name": "EF.SUME", "fid": "6F54", "structure": "transparent", "sfi": None},
+    # EF.ARR is 6F06 at this level too (§4.5.5). SAIP names only the
+    # ADF.USIM one separately ("ef-arr-usim", Note 8); every other
+    # template reuses "ef-arr", so the DF.TELECOM one is disambiguated
+    # here and, like the reference-only DFs, never matches a decoded
+    # profile element.
+    "ef-arr-telecom": {"name": "EF.ARR", "fid": "6F06", "structure": "linear-fixed", "sfi": None},
     "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "linear-fixed", "sfi": None},
     # DF.PHONEBOOK (TS 31.102 §4.4.2).
     "ef-aas": {"name": "EF.AAS", "fid": "4F4A", "structure": "linear-fixed", "sfi": None},

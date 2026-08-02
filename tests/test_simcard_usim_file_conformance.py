@@ -97,6 +97,14 @@ class UsimFileStructureConformance(unittest.TestCase):
         ("DF.ProSe", "4F10"): ("transparent", "§4.4.8.11 EF_PST"),
         ("DF.ACDC", "4F01"): ("transparent", "§4.4.9.2 EF_ACDC_LIST"),
         ("DF.5MBS", "4F01"): ("transparent", "§4.4.14.2 EF_5MBSUECONFIG"),
+        # EF.ARR is 6F06 under both ADF.USIM and DF.TELECOM, and 2F06
+        # under MF, so it needs the DF to be checked at all.
+        ("ADF.USIM", "6F06"): ("linear-fixed", "§4.2.55 EF_ARR"),
+        ("DF.TELECOM", "6F06"): ("linear-fixed", "§4.5.5 EF_ARR"),
+        ("ADF.USIM", "6FFB"): ("linear-fixed", "§4.2.108 EF_TVCONFIG"),
+        ("DF.TELECOM", "4F21"): (
+            "transparent", "§4.6.1.3 EF_ICE_graphics, BER-TLV in spec"
+        ),
     }
 
     def _by_df_and_fid(self) -> dict[tuple[str, str], dict]:
