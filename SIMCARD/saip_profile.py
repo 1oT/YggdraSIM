@@ -337,8 +337,8 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-gas": {"name": "EF.GAS", "fid": "4F4C", "structure": "linear-fixed", "sfi": None},
     "ef-grp": {"name": "EF.GRP", "fid": "4F26", "structure": "linear-fixed", "sfi": None},
     "ef-psc": {"name": "EF.PSC", "fid": "4F22", "structure": "transparent", "sfi": None},
-    "ef-cc": {"name": "EF.CC", "fid": "4F23", "structure": "linear-fixed", "sfi": None},
-    "ef-puid": {"name": "EF.PUID", "fid": "4F24", "structure": "linear-fixed", "sfi": None},
+    "ef-cc": {"name": "EF.CC", "fid": "4F23", "structure": "transparent", "sfi": None},
+    "ef-puid": {"name": "EF.PUID", "fid": "4F24", "structure": "transparent", "sfi": None},
     "ef-pbc": {"name": "EF.PBC", "fid": "4F09", "structure": "linear-fixed", "sfi": None},
     # DF.GSM-ACCESS (TS 31.102 §4.4.4, DF 5F3B).
     "ef-kc": {"name": "EF.KC", "fid": "4F20", "structure": "transparent", "sfi": None},
