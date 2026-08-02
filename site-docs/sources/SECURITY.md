@@ -111,3 +111,8 @@ For context, the following hardening landed before `v1.0.0`:
 - `pyscard`, `pysim`, and operator-only state directories are
   excluded from the published wheel and Docker image (see
   `.gitignore`, `.dockerignore`, `MANIFEST.in`).
+- The GUI file picker is constrained to the directories it offers
+  when running `--web-server`, so an off-host session cannot
+  enumerate the whole filesystem (`YGGDRASIM_GUI_FS_ROOTS` to
+  override). `--gui` stays unrestricted because it is bound to
+  loopback on the operator's own machine.

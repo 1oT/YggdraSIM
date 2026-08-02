@@ -776,6 +776,26 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         sensitive=True,
     ),
     EnvFlag(
+        name="YGGDRASIM_GUI_FS_ROOTS",
+        category=CATEGORY_GUI,
+        summary="Directories the in-app file picker may list",
+        description=(
+            "os.pathsep-separated list of directories the /api/fs/browse\n"
+            "endpoint may enumerate. Overrides the per-mode default in\n"
+            "both directions: --gui browses the whole filesystem because\n"
+            "it is loopback-bound on the operator's own machine, while\n"
+            "--web-server is reachable off-host and is limited to the\n"
+            "picker's shortcut roots (home, working dir, workspace,\n"
+            "Documents, Downloads, Desktop). Set this to widen a lab\n"
+            "deployment that browses a mount, or to tighten a desktop\n"
+            "one. Paths are compared after resolution, so a symlink is\n"
+            "judged by its target."
+        ),
+        kind=KIND_PATH,
+        default_hint="unset -> whole filesystem for --gui, shortcut roots for --web-server",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
         name="YGGDRASIM_GUI_TLS_CERT",
         category=CATEGORY_GUI,
         summary="TLS certificate path for --web-server",

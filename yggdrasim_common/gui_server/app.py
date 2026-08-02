@@ -205,6 +205,16 @@ def create_app(config: GuiServerConfig) -> Any:
     app.include_router(actions_routes.router)
     app.include_router(apdu_event_routes.router)
     app.include_router(guides_routes.router)
+    # A desktop session is loopback-bound on the operator's own machine, so
+    # the picker may see the whole filesystem. A web-server session is
+    # reachable off-host and its token holder need not own that host, so
+    # constrain listing to the directories the picker actually offers.
+    # YGGDRASIM_GUI_FS_ROOTS overrides either default.
+    fs_browse_routes.configure_browse_roots(
+        None
+        if config.mode == MODE_DESKTOP
+        else fs_browse_routes.default_browse_roots()
+    )
     app.include_router(fs_browse_routes.router)
     app.include_router(remote_lab_routes.router)
     # Host shell is a free-form RCE-equivalent surface, registered

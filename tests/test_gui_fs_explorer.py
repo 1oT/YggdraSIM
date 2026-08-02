@@ -23,6 +23,8 @@ All tests are pure-Python — no card, no live HTTP server.
 
 from __future__ import annotations
 
+import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -266,3 +268,88 @@ class FrontendExplorerCss(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BrowseRootPolicyTests(unittest.TestCase):
+    """The picker lists directories; in web-server mode it must not list all of them.
+
+    A desktop session is loopback-bound on the operator's own machine, so
+    the whole filesystem is fair game. A web-server session is reachable
+    off-host and its token holder need not own that host, so enumeration
+    is a disclosure even though no endpoint returns file contents.
+    """
+
+    def setUp(self) -> None:
+        from yggdrasim_common.gui_server.routes import fs_browse as m
+        self.m = m
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        (self.root / "inside").mkdir()
+        self._saved = self.m.browse_roots()
+        os.environ.pop(self.m.FS_ROOTS_ENV, None)
+
+    def tearDown(self) -> None:
+        self.m.configure_browse_roots(self._saved)
+        os.environ.pop(self.m.FS_ROOTS_ENV, None)
+        self.tmp.cleanup()
+
+    def test_unconfigured_allows_the_whole_filesystem(self) -> None:
+        self.m.configure_browse_roots(None)
+        self.assertEqual(self.m.browse_roots(), None)
+        self.assertIsNone(self.m.browse(str(self.root)).error)
+
+    def test_a_root_permits_itself_and_its_children(self) -> None:
+        self.m.configure_browse_roots((self.root,))
+        self.assertIsNone(self.m.browse(str(self.root)).error)
+        self.assertIsNone(self.m.browse(str(self.root / "inside")).error)
+
+    def test_a_path_outside_every_root_is_refused(self) -> None:
+        self.m.configure_browse_roots((self.root / "inside",))
+        resp = self.m.browse(str(self.root))
+        self.assertIn("outside", resp.error or "")
+        self.assertEqual(resp.entries, [])
+
+    def test_traversal_cannot_climb_out_of_a_root(self) -> None:
+        self.m.configure_browse_roots((self.root / "inside",))
+        resp = self.m.browse(str(self.root / "inside" / ".." / ".."))
+        self.assertIn("outside", resp.error or "")
+
+    def test_a_symlink_is_judged_by_its_target(self) -> None:
+        """Resolving before the check is what makes the root a real boundary."""
+
+        outside = Path(tempfile.mkdtemp())
+        try:
+            link = self.root / "inside" / "escape"
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable on this host")
+            self.m.configure_browse_roots((self.root / "inside",))
+            self.assertIn("outside", self.m.browse(str(link)).error or "")
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_the_environment_override_wins_over_the_caller(self) -> None:
+        os.environ[self.m.FS_ROOTS_ENV] = str(self.root)
+        self.m.configure_browse_roots(None)
+        self.assertEqual(self.m.browse_roots(), (self.root,))
+        self.assertIsNone(self.m.browse(str(self.root)).error)
+
+    def test_default_roots_are_the_offered_shortcuts(self) -> None:
+        roots = self.m.default_browse_roots()
+        self.assertTrue(roots)
+        offered = {
+            s.path for s in self.m._build_shortcuts() if s.available and s.path
+        }
+        self.assertTrue({str(r) for r in roots} <= offered)
+
+    def test_app_constrains_web_server_mode_and_frees_desktop(self) -> None:
+        """A forgotten wiring would silently reopen the whole filesystem."""
+
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "yggdrasim_common" / "gui_server" / "app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("configure_browse_roots(", source)
+        self.assertIn("default_browse_roots()", source)
+        self.assertIn("config.mode == MODE_DESKTOP", source)

@@ -131,6 +131,14 @@ actions use `BatchMode=yes` and will not pause for an interactive password.
   `YGGDRASIM_GUI_HOST_SHELL=1`.
 - Remote-card bearer tokens are never echoed in GUI responses; only short
   fingerprints are shown.
+- The file picker lists only the directories it offers (home, working
+  dir, workspace, Documents, Downloads, Desktop) when running
+  `--web-server`, because that mode is reachable off-host and the token
+  holder need not own the machine. `--gui` is unrestricted: it is bound
+  to loopback on the operator's own machine. Override either default
+  with `YGGDRASIM_GUI_FS_ROOTS` (an `os.pathsep`-separated list). The
+  endpoint returns names, sizes, and timestamps only -- there is no
+  route that reads file contents by path.
 
 ## Common launch recipes
 
@@ -172,6 +180,7 @@ ssh -fN -L 8765:127.0.0.1:8765 lab-host
 | browser opens but actions return 401 | stale token in URL/local storage | reload from the printed URL or clear the browser tab state |
 | no APDUs appear | action did not use the shared card backend, or no card traffic happened yet | run a reader-backed action and check `/api/live/readers` |
 | Host shell is hidden | host shell intentionally disabled | set `YGGDRASIM_GUI_HOST_SHELL=1` and restart |
+| file picker says a path is "outside the directories this server may browse" | `--web-server` limits listing to the picker's roots | add the directory to `YGGDRASIM_GUI_FS_ROOTS` and restart |
 | remote rig action hangs at SSH | key login not configured | verify `ssh -o BatchMode=yes <target> true` outside the GUI |
 
 ## Related pages
