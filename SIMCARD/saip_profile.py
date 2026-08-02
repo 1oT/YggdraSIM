@@ -500,6 +500,142 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "sfi": None,
     },
     "ef-nid": {"name": "EF.NID", "fid": "4F02", "structure": "linear-fixed", "sfi": 0x02},
+    # The seven DFs below have no member in the SAIP ProfileElement
+    # ASN.1, so a profile package cannot carry their files: these entries
+    # serve the inspector and the simulated filesystem, and will never be
+    # matched by _consume_profile_element. Identifiers, structures and
+    # short identifiers are TS 31.102; DF identifiers are §4.3.
+    # DF.SoLSA (TS 31.102 §4.4.1, DF 5F70).
+    "ef-sai": {"name": "EF.SAI", "fid": "4F30", "structure": "transparent", "sfi": None},
+    "ef-sll": {"name": "EF.SLL", "fid": "4F31", "structure": "linear-fixed", "sfi": None},
+    # DF.MExE (TS 31.102 §4.4.4, DF 5F3C).
+    "ef-mexe-st": {"name": "EF.MEXE-ST", "fid": "4F40", "structure": "transparent", "sfi": None},
+    "ef-orpk": {"name": "EF.ORPK", "fid": "4F41", "structure": "linear-fixed", "sfi": None},
+    "ef-arpk": {"name": "EF.ARPK", "fid": "4F42", "structure": "linear-fixed", "sfi": None},
+    "ef-tprpk": {"name": "EF.TPRPK", "fid": "4F43", "structure": "linear-fixed", "sfi": None},
+    # DF.WLAN (TS 31.102 §4.4.5, DF 5F40).
+    "ef-pseudo": {"name": "EF.PSEUDO", "fid": "4F41", "structure": "transparent", "sfi": None},
+    "ef-uplmnwlan": {
+        "name": "EF.UPLMNWLAN",
+        "fid": "4F42",
+        "structure": "transparent",
+        "sfi": 0x02,
+    },
+    "ef-oplmnwlan": {
+        "name": "EF.OPLMNWLAN",
+        "fid": "4F43",
+        "structure": "transparent",
+        "sfi": 0x03,
+    },
+    "ef-uwsidl": {"name": "EF.UWSIDL", "fid": "4F44", "structure": "linear-fixed", "sfi": 0x04},
+    "ef-owsidl": {"name": "EF.OWSIDL", "fid": "4F45", "structure": "linear-fixed", "sfi": 0x05},
+    "ef-wri": {"name": "EF.WRI", "fid": "4F46", "structure": "transparent", "sfi": 0x06},
+    "ef-hwsidl": {"name": "EF.HWSIDL", "fid": "4F47", "structure": "linear-fixed", "sfi": 0x07},
+    "ef-wehplmnpi": {
+        "name": "EF.WEHPLMNPI",
+        "fid": "4F48",
+        "structure": "transparent",
+        "sfi": 0x08,
+    },
+    "ef-whpi": {"name": "EF.WHPI", "fid": "4F49", "structure": "transparent", "sfi": 0x09},
+    "ef-wlrplmn": {"name": "EF.WLRPLMN", "fid": "4F4A", "structure": "transparent", "sfi": 0x0A},
+    "ef-hplmndai": {"name": "EF.HPLMNDAI", "fid": "4F4B", "structure": "transparent", "sfi": 0x0B},
+    # DF.HNB (TS 31.102 §4.4.6, DF 5F50).
+    "ef-acsgl": {"name": "EF.ACSGL", "fid": "4F81", "structure": "linear-fixed", "sfi": 0x01},
+    "ef-csgt": {"name": "EF.CSGT", "fid": "4F82", "structure": "linear-fixed", "sfi": 0x02},
+    "ef-hnbn": {"name": "EF.HNBN", "fid": "4F83", "structure": "linear-fixed", "sfi": 0x03},
+    "ef-ocsgl": {"name": "EF.OCSGL", "fid": "4F84", "structure": "linear-fixed", "sfi": 0x04},
+    "ef-ocsgt": {"name": "EF.OCSGT", "fid": "4F85", "structure": "linear-fixed", "sfi": 0x05},
+    "ef-ohnbn": {"name": "EF.OHNBN", "fid": "4F86", "structure": "linear-fixed", "sfi": 0x06},
+    # DF.ProSe (TS 31.102 §4.4.8, DF 5F90).
+    "ef-prose-mon": {
+        "name": "EF.PROSE-MON",
+        "fid": "4F01",
+        "structure": "linear-fixed",
+        "sfi": 0x01,
+    },
+    "ef-prose-ann": {
+        "name": "EF.PROSE-ANN",
+        "fid": "4F02",
+        "structure": "linear-fixed",
+        "sfi": 0x02,
+    },
+    "ef-prosefunc": {
+        "name": "EF.PROSEFUNC",
+        "fid": "4F03",
+        "structure": "linear-fixed",
+        "sfi": 0x03,
+    },
+    "ef-prose-radio-com": {
+        "name": "EF.PROSE-RADIO-COM",
+        "fid": "4F04",
+        "structure": "transparent",
+        "sfi": 0x04,
+    },
+    "ef-prose-radio-mon": {
+        "name": "EF.PROSE-RADIO-MON",
+        "fid": "4F05",
+        "structure": "transparent",
+        "sfi": 0x05,
+    },
+    "ef-prose-radio-ann": {
+        "name": "EF.PROSE-RADIO-ANN",
+        "fid": "4F06",
+        "structure": "transparent",
+        "sfi": 0x06,
+    },
+    "ef-prose-policy": {
+        "name": "EF.PROSE-POLICY",
+        "fid": "4F07",
+        "structure": "linear-fixed",
+        "sfi": 0x07,
+    },
+    "ef-prose-plmn": {
+        "name": "EF.PROSE-PLMN",
+        "fid": "4F08",
+        "structure": "linear-fixed",
+        "sfi": 0x08,
+    },
+    "ef-prose-gc": {"name": "EF.PROSE-GC", "fid": "4F09", "structure": "transparent", "sfi": 0x09},
+    "ef-pst": {"name": "EF.PST", "fid": "4F10", "structure": "transparent", "sfi": 0x10},
+    "ef-prose-uirc": {
+        "name": "EF.PROSE-UIRC",
+        "fid": "4F11",
+        "structure": "transparent",
+        "sfi": 0x11,
+    },
+    "ef-prose-gm-discovery": {
+        "name": "EF.PROSE-GM-DISCOVERY",
+        "fid": "4F12",
+        "structure": "linear-fixed",
+        "sfi": 0x12,
+    },
+    "ef-prose-relay": {
+        "name": "EF.PROSE-RELAY",
+        "fid": "4F13",
+        "structure": "linear-fixed",
+        "sfi": 0x13,
+    },
+    "ef-prose-relay-discovery": {
+        "name": "EF.PROSE-RELAY-DISCOVERY",
+        "fid": "4F14",
+        "structure": "transparent",
+        "sfi": 0x14,
+    },
+    # DF.ACDC (TS 31.102 §4.4.9, DF 5FA0).
+    "ef-acdc-list": {
+        "name": "EF.ACDC-LIST",
+        "fid": "4F01",
+        "structure": "transparent",
+        "sfi": 0x01,
+    },
+    # DF.5MBS (TS 31.102 §4.4.14, DF 5FF1).
+    "ef-5mbsueconfig": {
+        "name": "EF.5MBSUECONFIG",
+        "fid": "4F01",
+        "structure": "transparent",
+        "sfi": None,
+    },
     # ADF.USIM / ADF.ISIM Rel-15/16 IMS configuration (TS 31.103 §4.2,
     # shared with TS 31.102 Annex B.x). MUD/MID and XCAP/IMS/PSDATAOFF
     # are TS 31.102 §4.2.94-§4.2.101.

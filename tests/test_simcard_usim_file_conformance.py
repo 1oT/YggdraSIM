@@ -85,6 +85,18 @@ class UsimFileStructureConformance(unittest.TestCase):
         # EF.PSISMSC is a §4.5 file, so it sits with the DF.TELECOM EFs
         # and not after the sub-DF blocks that follow them.
         ("DF.TELECOM", "6FE5"): ("linear-fixed", "§4.5.9 EF_PSISMSC"),
+        # The DFs SAIP has no template member for. '4F30' here is the pair
+        # that started this: transparent in DF.SoLSA, linear fixed in
+        # DF.PHONEBOOK above. '4F4A' and '4F01' repeat the pattern.
+        ("DF.SoLSA", "4F30"): ("transparent", "§4.4.1.1 EF_SAI"),
+        ("DF.MExE", "4F40"): ("transparent", "§4.4.4.1 EF_MExE-ST"),
+        ("DF.WLAN", "4F41"): ("transparent", "§4.4.5.1 EF_Pseudo"),
+        ("DF.WLAN", "4F4A"): ("transparent", "§4.4.5.10 EF_WLRPLMN"),
+        ("DF.HNB", "4F81"): ("linear-fixed", "§4.4.6.2 EF_ACSGL"),
+        ("DF.ProSe", "4F01"): ("linear-fixed", "§4.4.8.2 EF_PROSE_MON"),
+        ("DF.ProSe", "4F10"): ("transparent", "§4.4.8.11 EF_PST"),
+        ("DF.ACDC", "4F01"): ("transparent", "§4.4.9.2 EF_ACDC_LIST"),
+        ("DF.5MBS", "4F01"): ("transparent", "§4.4.14.2 EF_5MBSUECONFIG"),
     }
 
     def _by_df_and_fid(self) -> dict[tuple[str, str], dict]:

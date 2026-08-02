@@ -7282,6 +7282,76 @@ def _decode_ef_a2xp_uu(hex_clean: str) -> dict[str, object] | None:
     )
 
 
+# Files in DFs that the SAIP ProfileElement ASN.1 has no member for, so
+# no profile package can carry them. TS 31.102 fixes their identifier,
+# structure and short identifier, but leaves the payload layout to a
+# companion spec -- TS 24.334 for the ProSe files, TS 23.003 for the WLAN
+# identifier lists, TS 33.102 for the MExE root keys. The payload is
+# surfaced with that citation rather than guessed at.
+_REFERENCE_ONLY_EF_FORMATS: dict[str, tuple[str, str]] = {
+    "ef-sai": ("SoLSA Access Indicator", "TS 31.102 §4.4.1.1"),
+    "ef-sll": ("SoLSA LSA List", "TS 31.102 §4.4.1.2"),
+    "ef-orpk": ("MExE Operator Root Public Key", "TS 31.102 §4.4.4.2"),
+    "ef-arpk": ("MExE Administrator Root Public Key", "TS 31.102 §4.4.4.3"),
+    "ef-tprpk": ("MExE Third Party Root Public Key", "TS 31.102 §4.4.4.4"),
+    "ef-pseudo": ("I-WLAN Pseudonym", "TS 31.102 §4.4.5.1"),
+    "ef-uwsidl": (
+        "User-controlled WLAN Specific Identifier List", "TS 31.102 §4.4.5.4"
+    ),
+    "ef-owsidl": (
+        "Operator-controlled WLAN Specific Identifier List", "TS 31.102 §4.4.5.5"
+    ),
+    "ef-wri": ("I-WLAN Reauthentication Identity", "TS 31.102 §4.4.5.6"),
+    "ef-hwsidl": ("Home I-WLAN Specific Identifier List", "TS 31.102 §4.4.5.7"),
+    "ef-wehplmnpi": (
+        "I-WLAN Equivalent HPLMN Presentation Indication", "TS 31.102 §4.4.5.8"
+    ),
+    "ef-whpi": ("I-WLAN HPLMN Priority Indication", "TS 31.102 §4.4.5.9"),
+    "ef-hplmndai": ("HPLMN Direct Access Indicator", "TS 31.102 §4.4.5.11"),
+    "ef-prose-mon": ("ProSe Monitoring Parameters", "TS 31.102 §4.4.8.2"),
+    "ef-prose-ann": ("ProSe Announcing Parameters", "TS 31.102 §4.4.8.3"),
+    "ef-prosefunc": ("HPLMN ProSe Function", "TS 31.102 §4.4.8.4"),
+    "ef-prose-radio-com": (
+        "ProSe Direct Communication Radio Parameters", "TS 31.102 §4.4.8.5"
+    ),
+    "ef-prose-radio-mon": (
+        "ProSe Direct Discovery Monitoring Radio Parameters", "TS 31.102 §4.4.8.6"
+    ),
+    "ef-prose-radio-ann": (
+        "ProSe Direct Discovery Announcing Radio Parameters", "TS 31.102 §4.4.8.7"
+    ),
+    "ef-prose-policy": ("ProSe Policy Parameters", "TS 31.102 §4.4.8.8"),
+    "ef-prose-plmn": ("ProSe PLMN Parameters", "TS 31.102 §4.4.8.9"),
+    "ef-prose-gc": ("ProSe Group Counter", "TS 31.102 §4.4.8.10"),
+    "ef-prose-uirc": (
+        "ProSe Usage Information Reporting Configuration", "TS 31.102 §4.4.8.12"
+    ),
+    "ef-prose-gm-discovery": (
+        "ProSe Group Member Discovery Parameters", "TS 31.102 §4.4.8.12"
+    ),
+    "ef-prose-relay": ("ProSe Relay Parameters", "TS 31.102 §4.4.8.13"),
+    "ef-prose-relay-discovery": (
+        "ProSe Relay Discovery Parameters", "TS 31.102 §4.4.8.14"
+    ),
+    "ef-acdc-list": ("ACDC List", "TS 31.102 §4.4.9.2"),
+}
+
+
+def _decode_reference_only_ef(token: str, hex_clean: str) -> dict[str, object] | None:
+    """Surface a reference-only EF with its formal citation."""
+
+    entry = _REFERENCE_ONLY_EF_FORMATS.get(token)
+    if entry is None:
+        return None
+    format_name, spec_reference = entry
+    return _decode_spec_opaque_ef(
+        hex_clean,
+        format_name=format_name,
+        spec_reference=spec_reference,
+        summary_prefix=format_name,
+    )
+
+
 _EF_EAP_CURID_TAGS: dict[str, str] = {
     "80": "EAP Current ID (UTF-8)",
 }
@@ -11017,6 +11087,41 @@ def _decode_known_ef_payload(
         return _decode_ef_a2x_dc2p_pc5(hex_clean)
     if token == "ef-a2xp-uu":
         return _decode_ef_a2xp_uu(hex_clean)
+    # DF.HNB operator variants share the format of the subscriber files.
+    if token == "ef-ocsgt":
+        return _decode_ef_csgt(hex_clean)
+    if token == "ef-ohnbn":
+        return _decode_ef_hnbn(hex_clean)
+    if token in {
+        "ef-sai",
+        "ef-sll",
+        "ef-orpk",
+        "ef-arpk",
+        "ef-tprpk",
+        "ef-pseudo",
+        "ef-uwsidl",
+        "ef-owsidl",
+        "ef-wri",
+        "ef-hwsidl",
+        "ef-wehplmnpi",
+        "ef-whpi",
+        "ef-hplmndai",
+        "ef-prose-mon",
+        "ef-prose-ann",
+        "ef-prosefunc",
+        "ef-prose-radio-com",
+        "ef-prose-radio-mon",
+        "ef-prose-radio-ann",
+        "ef-prose-policy",
+        "ef-prose-plmn",
+        "ef-prose-gc",
+        "ef-prose-uirc",
+        "ef-prose-gm-discovery",
+        "ef-prose-relay",
+        "ef-prose-relay-discovery",
+        "ef-acdc-list",
+    }:
+        return _decode_reference_only_ef(token, hex_clean)
     if token == "ef-curid":
         return _decode_ef_eap_curid(hex_clean)
     if token == "ef-ps":
