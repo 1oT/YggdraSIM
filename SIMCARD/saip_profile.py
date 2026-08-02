@@ -563,34 +563,76 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-aas": {"name": "EF.AAS", "fid": "4F4A", "structure": "linear-fixed", "sfi": None},
     "ef-puri": {"name": "EF.PURI", "fid": "4F4D", "structure": "linear-fixed", "sfi": None},
     "ef-uid": {"name": "EF.UID", "fid": "4F10", "structure": "linear-fixed", "sfi": None},
-    # DF.MULTIMEDIA / DF.MMSS / DF.MCS / DF.V2X (SAIP-specific, FIDs are
-    # vendor-dependent outside TS 31.102 Annex H). Materialise with a
-    # blank FID so the node anchors at the correct hierarchical slot.
-    "ef-mml": {"name": "EF.MML", "fid": "", "structure": "linear-fixed", "sfi": None},
-    "ef-mmdf": {"name": "EF.MMDF", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mlpl": {"name": "EF.MLPL", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mspl": {"name": "EF.MSPL", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mmssmode": {"name": "EF.MMSSMODE", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mst": {"name": "EF.MST", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mcs-config": {"name": "EF.MCS-CONFIG", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-vst": {"name": "EF.VST", "fid": "", "structure": "transparent", "sfi": None},
+    # DF.MULTIMEDIA (TS 31.102 §4.6.3, DF 5F3B). Both files are BER-TLV,
+    # which the three structures here cannot express, so they keep the
+    # nearest representable value and are addressable by FID only.
+    "ef-mml": {"name": "EF.MML", "fid": "4F47", "structure": "linear-fixed", "sfi": None},
+    "ef-mmdf": {"name": "EF.MMDF", "fid": "4F48", "structure": "transparent", "sfi": None},
+    # DF.MMSS (SAIP §9, DF 5F3C). File contents are defined in C.S0074-A,
+    # not TS 31.102, so SAIP is the only source for these three.
+    "ef-mlpl": {"name": "EF.MLPL", "fid": "4F20", "structure": "transparent", "sfi": 0x01},
+    "ef-mspl": {"name": "EF.MSPL", "fid": "4F21", "structure": "transparent", "sfi": 0x02},
+    "ef-mmssmode": {"name": "EF.MMSSMODE", "fid": "4F22", "structure": "transparent", "sfi": 0x03},
+    # DF.MCS (TS 31.102 §4.6.4, DF 5F3D). EF.MCS-CONFIG is BER-TLV.
+    "ef-mst": {"name": "EF.MST", "fid": "4F01", "structure": "transparent", "sfi": 0x01},
+    "ef-mcs-config": {
+        "name": "EF.MCS-CONFIG",
+        "fid": "4F02",
+        "structure": "transparent",
+        "sfi": 0x02,
+    },
+    # DF.V2X (TS 31.102 §4.6.5, DF 5F3E). EF.V2X-CONFIG is BER-TLV. The
+    # two policy files declare "SFI: Optional", so they carry none.
+    "ef-vst": {"name": "EF.VST", "fid": "4F01", "structure": "transparent", "sfi": 0x01},
     "ef-v2x-config": {
         "name": "EF.V2X-CONFIG",
-        "fid": "",
+        "fid": "4F02",
         "structure": "transparent",
-        "sfi": None,
+        "sfi": 0x02,
     },
     "ef-v2xp-pc5": {
         "name": "EF.V2XP-PC5",
-        "fid": "",
+        "fid": "4F03",
         "structure": "transparent",
         "sfi": None,
     },
     "ef-v2xp-Uu": {
         "name": "EF.V2XP-UU",
-        "fid": "",
+        "fid": "4F04",
         "structure": "transparent",
         "sfi": None,
+    },
+    # DF.A2X (TS 31.102 §4.6.6, DF 5F3F).
+    "ef-ast": {"name": "EF.AST", "fid": "4F01", "structure": "transparent", "sfi": 0x01},
+    "ef-a2x-config": {
+        "name": "EF.A2X-CONFIG",
+        "fid": "4F02",
+        "structure": "transparent",
+        "sfi": 0x02,
+    },
+    "ef-a2xp-pc5": {
+        "name": "EF.A2XP-PC5",
+        "fid": "4F03",
+        "structure": "transparent",
+        "sfi": 0x03,
+    },
+    "ef-a2x-ddaap-pc5": {
+        "name": "EF.A2X-DDAAP-PC5",
+        "fid": "4F04",
+        "structure": "transparent",
+        "sfi": 0x04,
+    },
+    "ef-a2x-dc2p-pc5": {
+        "name": "EF.A2X-DC2P-PC5",
+        "fid": "4F05",
+        "structure": "transparent",
+        "sfi": 0x05,
+    },
+    "ef-a2xp-Uu": {
+        "name": "EF.A2XP-UU",
+        "fid": "4F06",
+        "structure": "transparent",
+        "sfi": 0x06,
     },
     "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "linear-fixed", "sfi": None},
     # ADF.USIM optional files: Rel-17/18 extras and misc EFs referenced by
@@ -767,10 +809,16 @@ apply_pysim_augmentations(_FILE_SPECS)
 
 
 def _install_pysim_aliases(specs: dict[str, dict[str, Any]]) -> None:
+    # An alias supplies a pySim spelling for a file the table does not
+    # already name. Where the spellings differ only in case, the SAIP key
+    # is the canonical one -- installing both would give a single file two
+    # entries that collapse to the same normalised GUI key.
+    folded = {key.casefold() for key in specs}
     for alias_pe_name, alias_spec in pysim_alias_specs_for(specs).items():
-        if alias_pe_name in specs:
+        if alias_pe_name in specs or alias_pe_name.casefold() in folded:
             continue
         specs[alias_pe_name] = alias_spec
+        folded.add(alias_pe_name.casefold())
 
 
 _install_pysim_aliases(_FILE_SPECS)

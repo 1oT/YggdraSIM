@@ -332,6 +332,23 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-csim-mlpl": "6F4F",
     "ef-csim-meruiid": "6F5D",
     "ef-csim-st": "6F32",
+    # DF.MULTIMEDIA / DF.MMSS / DF.MCS / DF.V2X / DF.A2X, named as the
+    # SAIP ASN.1 template members spell them (TS 31.102 §4.6.3-§4.6.6).
+    "ef-mml": "4F47",
+    "ef-mmdf": "4F48",
+    "ef-mlpl": "4F20",
+    "ef-mspl": "4F21",
+    "ef-mmssmode": "4F22",
+    "ef-mcs-config": "4F02",
+    "ef-v2x-config": "4F02",
+    "ef-v2xp-pc5": "4F03",
+    "ef-v2xp-Uu": "4F04",
+    "ef-ast": "4F01",
+    "ef-a2x-config": "4F02",
+    "ef-a2xp-pc5": "4F03",
+    "ef-a2x-ddaap-pc5": "4F04",
+    "ef-a2x-dc2p-pc5": "4F05",
+    "ef-a2xp-Uu": "4F06",
     # 5x20 Pass C — Specialized (ISIM + MCPTT + V2X + ProSe + MCS).
     "ef-mst": "4F01",
     "ef-vst": "4F01",
@@ -630,6 +647,22 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-csim-mlpl": "adf-csim",
     "ef-csim-meruiid": "adf-csim",
     "ef-csim-st": "adf-csim",
+    # DF.MULTIMEDIA / DF.MMSS / DF.MCS / DF.V2X / DF.A2X.
+    "ef-mml": "df-multimedia",
+    "ef-mmdf": "df-multimedia",
+    "ef-mlpl": "df-mmss",
+    "ef-mspl": "df-mmss",
+    "ef-mmssmode": "df-mmss",
+    "ef-mcs-config": "df-mcs",
+    "ef-v2x-config": "df-v2x",
+    "ef-v2xp-pc5": "df-v2x",
+    "ef-v2xp-Uu": "df-v2x",
+    "ef-ast": "df-a2x",
+    "ef-a2x-config": "df-a2x",
+    "ef-a2xp-pc5": "df-a2x",
+    "ef-a2x-ddaap-pc5": "df-a2x",
+    "ef-a2x-dc2p-pc5": "df-a2x",
+    "ef-a2xp-Uu": "df-a2x",
     # ProSe / V2X / MCS application-specific EFs.
     "ef-pst": "df-prose",
     "ef-prose-pfidg": "adf-prose-ue",
@@ -3368,12 +3401,18 @@ _OPAQUE_PASSTHROUGH_EF_CATALOG: dict[str, str] = {
     "ef-mlpl": "TELECOM MMS List Preferred",
     "ef-mspl": "TELECOM MMS Sender Preferred",
     "ef-mmssmode": "TELECOM MMS Storage Mode",
-    "ef-mst": "TELECOM Multimedia Service Table",
+    "ef-mst": "TELECOM MCS Service Table",
     "ef-mcs-config": "TELECOM MCS Configuration",
     "ef-vst": "TELECOM V2X Service Table",
     "ef-v2x-config": "TELECOM V2X Configuration",
     "ef-v2xp-pc5": "TELECOM V2X PC5 Parameters",
     "ef-v2xp-Uu": "TELECOM V2X Uu Parameters",
+    "ef-ast": "TELECOM A2X Service Table",
+    "ef-a2x-config": "TELECOM A2X Configuration",
+    "ef-a2xp-pc5": "TELECOM A2X PC5 Policy",
+    "ef-a2x-ddaap-pc5": "TELECOM A2X Detect-And-Avoid Policy over PC5",
+    "ef-a2x-dc2p-pc5": "TELECOM A2X Direct C2 Policy over PC5",
+    "ef-a2xp-Uu": "TELECOM A2X Uu Policy",
 }
 
 
@@ -7073,6 +7112,174 @@ def _decode_ef_vst(hex_clean: str) -> dict[str, object] | None:
         "activeServices": active_lines,
         "activeCount": len(active_lines),
     }
+
+
+# A2X service table (TS 31.102 §4.6.6.2). Unlike EF.VST there is no
+# leading coding-indicator byte: byte 0 already carries services 1..8,
+# "same as coding of USIM Service Table".
+_EF_AST_SERVICE_NAMES: dict[int, str] = {
+    1: "A2X configuration data",
+    2: "A2X policy data over PC5",
+    3: "A2X Direct Detect And Avoid policy data over PC5",
+    4: "A2X Direct C2 communication policy data over PC5",
+    5: "A2X policy data over Uu",
+}
+
+
+def _decode_ef_ast(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.AST (TS 31.102 §4.6.6.2 -- A2X Service Table)."""
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) < 1:
+        return None
+    active_services: list[dict[str, object]] = []
+    active_lines: list[str] = []
+    for byte_index, byte_value in enumerate(raw):
+        for bit_index in range(8):
+            if byte_value & (1 << bit_index):
+                service_number = (byte_index * 8) + bit_index + 1
+                name = _EF_AST_SERVICE_NAMES.get(
+                    service_number, f"Service {service_number}"
+                )
+                active_services.append({"number": service_number, "name": name})
+                active_lines.append(f"{service_number}: {name}")
+    return {
+        "format": "A2X Service Table",
+        "reference": "TS 31.102 §4.6.6.2",
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        "services": active_services,
+        "activeServices": active_lines,
+        "activeCount": len(active_lines),
+    }
+
+
+def _decode_a2x_policy_ef(
+    hex_clean: str,
+    *,
+    format_name: str,
+    spec_reference: str,
+    tag_names: dict[str, str],
+    summary_prefix: str,
+) -> dict[str, object] | None:
+    """Decode one of the DF.A2X policy files.
+
+    Each is a transparent EF holding constructed 'A0' data objects whose
+    contents TS 24.578 defines. The five files differ only in their tag
+    names, so they share this body rather than repeating it.
+    """
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) == 0:
+        return None
+    value_decoders: dict[str, ValueDecoder] = {"80": _tlv_value_decoder_text}
+    items = _decode_field_ber_tlv_stream(
+        raw,
+        tag_names=tag_names,
+        value_decoders=value_decoders,
+    )
+    if len(items) == 0:
+        return _decode_spec_opaque_ef(
+            hex_clean,
+            format_name=format_name,
+            spec_reference=spec_reference,
+            summary_prefix=summary_prefix,
+        )
+    return {
+        "format": format_name,
+        "reference": spec_reference,
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        "items": items,
+    }
+
+
+def _decode_ef_a2x_config(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2X_CONFIG (TS 31.102 §4.6.6.3)."""
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X Configuration",
+        spec_reference="TS 31.102 §4.6.6.3",
+        tag_names={
+            "A0": "A2X configuration data",
+            "80": "UE policy part contents",
+        },
+        summary_prefix="A2X-CONFIG",
+    )
+
+
+def _decode_ef_a2xp_pc5(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2XP_PC5 (TS 31.102 §4.6.6.4)."""
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X PC5 Policy",
+        spec_reference="TS 31.102 §4.6.6.4",
+        tag_names={
+            "A0": "A2X policy data over PC5",
+            "80": "Served by NG-RAN",
+            "81": "Not served by NG-RAN",
+            "83": "Privacy config",
+            "84": "A2X communication in E-UTRA-PC5",
+            "85": "A2X communication in NR-PC5",
+        },
+        summary_prefix="A2XP-PC5",
+    )
+
+
+def _decode_ef_a2x_ddaap_pc5(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2X_DDAAP_PC5 (TS 31.102 §4.6.6.5).
+
+    Only the constructed 'A0' tag is named: the inner deconfliction tags
+    are laid out across a wrapped column in the spec table and are not
+    quoted here rather than guessed at.
+    """
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X Detect-And-Avoid Policy over PC5",
+        spec_reference="TS 31.102 §4.6.6.5",
+        tag_names={"A0": "A2X Direct Detect And Avoid policy data over PC5"},
+        summary_prefix="A2X-DDAAP-PC5",
+    )
+
+
+def _decode_ef_a2x_dc2p_pc5(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2X_DC2P_PC5 (TS 31.102 §4.6.6.6)."""
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X Direct C2 Policy over PC5",
+        spec_reference="TS 31.102 §4.6.6.6",
+        tag_names={
+            "A0": "A2X Direct C2 communication policy data over PC5",
+            "80": "Served by NG-RAN for DC2",
+            "81": "Not served by NG-RAN for DC2",
+        },
+        summary_prefix="A2X-DC2P-PC5",
+    )
+
+
+def _decode_ef_a2xp_uu(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2XP_Uu (TS 31.102 §4.6.6.7)."""
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X Uu Policy",
+        spec_reference="TS 31.102 §4.6.6.7",
+        tag_names={
+            "A0": "A2X data policy over Uu",
+            "81": "PLMN infos",
+        },
+        summary_prefix="A2XP-Uu",
+    )
 
 
 _EF_EAP_CURID_TAGS: dict[str, str] = {
@@ -10798,6 +11005,18 @@ def _decode_known_ef_payload(
         return _decode_ef_v2xp_pc5(hex_clean)
     if token == "ef-vst":
         return _decode_ef_vst(hex_clean)
+    if token == "ef-ast":
+        return _decode_ef_ast(hex_clean)
+    if token == "ef-a2x-config":
+        return _decode_ef_a2x_config(hex_clean)
+    if token == "ef-a2xp-pc5":
+        return _decode_ef_a2xp_pc5(hex_clean)
+    if token == "ef-a2x-ddaap-pc5":
+        return _decode_ef_a2x_ddaap_pc5(hex_clean)
+    if token == "ef-a2x-dc2p-pc5":
+        return _decode_ef_a2x_dc2p_pc5(hex_clean)
+    if token == "ef-a2xp-uu":
+        return _decode_ef_a2xp_uu(hex_clean)
     if token == "ef-curid":
         return _decode_ef_eap_curid(hex_clean)
     if token == "ef-ps":

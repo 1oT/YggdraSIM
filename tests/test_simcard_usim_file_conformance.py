@@ -73,6 +73,12 @@ class UsimFileStructureConformance(unittest.TestCase):
         ("DF.5GS", "4F01"): ("transparent", "§4.4.11.2 EF_5GS3GPPLOCI"),
         ("DF.SNPN", "4F01"): ("transparent", "§4.4.12.2 EF_PWS_SNPN"),
         ("DF.TELECOM", "4F01"): ("transparent", "SAIP DF.GRAPHICS EF_LAUNCH-SCWS"),
+        ("DF.MCS", "4F01"): ("transparent", "§4.6.4.1 EF_MST"),
+        ("DF.V2X", "4F01"): ("transparent", "§4.6.5.2 EF_VST"),
+        ("DF.A2X", "4F01"): ("transparent", "§4.6.6.2 EF_AST"),
+        ("DF.A2X", "4F06"): ("transparent", "§4.6.6.7 EF_A2XP_Uu"),
+        ("DF.MMSS", "4F22"): ("transparent", "SAIP DF.MMSS EF_MMSSMODE"),
+        ("DF.MULTIMEDIA", "4F47"): ("linear-fixed", "§4.6.3.1 EF_MML, BER-TLV in spec"),
     }
 
     def _by_df_and_fid(self) -> dict[tuple[str, str], dict]:
