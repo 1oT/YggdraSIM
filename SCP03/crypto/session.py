@@ -267,9 +267,14 @@ class Scp03Session :
         self .ssc =0 
         self .last_encryption_counter =None
         context =self .host_challenge +self .card_challenge 
-        self .s_enc =self ._kdf (self .k_enc ,b'\x04',context ,128 )
-        self .s_mac =self ._kdf (self .k_mac ,b'\x06',context ,128 )
-        self .s_rmac =self ._kdf (self .k_mac ,b'\x07',context ,128 )
+        # Amd D §6.2.1: L reflects the session key length, '0080' for
+        # AES-128, '00C0' for AES-192 and '0100' for AES-256. A 24- or
+        # 32-byte static key that derived a 128-bit session key produced a
+        # session the card could not match, surfacing as a cryptogram
+        # mismatch rather than as an unsupported key length.
+        self .s_enc =self ._kdf (self .k_enc ,b'\x04',context ,len (self .k_enc )*8 )
+        self .s_mac =self ._kdf (self .k_mac ,b'\x06',context ,len (self .k_mac )*8 )
+        self .s_rmac =self ._kdf (self .k_mac ,b'\x07',context ,len (self .k_mac )*8 )
         expected =self ._gen_crypto (b'\x00')
         if not hmac .compare_digest (expected ,card_cryptogram ):
             self .reset_state ()
