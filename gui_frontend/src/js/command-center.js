@@ -10996,6 +10996,25 @@
           null,
           null
         );
+        // The session now lives in the workbench, so the form that made it
+        // has nothing left to show: hand the operator to the SAIP surface
+        // and drop the popout behind them.
+        //
+        // Only once the run actually produced something. A blocked intent
+        // returns a session id too, and its diagnostics render in this very
+        // panel, so closing it would hide the reason the run failed.
+        var blocked = !!(resp.data && resp.data.has_blocking_diagnostics);
+        if (!blocked) {
+          if (typeof openCommandSubsystem === "function") {
+            openCommandSubsystem("SAIP");
+          }
+          var originPopout = form && form.closest
+            ? form.closest(".cc-popout")
+            : null;
+          if (originPopout && typeof ccPopoutRemove === "function") {
+            ccPopoutRemove(originPopout, false);
+          }
+        }
       }
       logBus.emit({
         level: "info",

@@ -2132,11 +2132,17 @@
           listingEl.appendChild(empty);
           return;
         }
-        state.entries.forEach(function (entry) {
+        // Two costs bit here on a large directory such as /usr/bin (2700
+        // entries): indexOf() inside the loop made row ids O(n^2), and
+        // appending each row to the live list made the browser do layout
+        // work per row. forEach already hands us the index, and a fragment
+        // lets the list be touched once.
+        var frag = document.createDocumentFragment();
+        state.entries.forEach(function (entry, entryIndex) {
           var li = document.createElement("li");
           li.className = "cc-fs-explorer-row";
           li.classList.add("cc-fs-explorer-row--" + entry.kind);
-          li.id = explorerId + "-entry-" + String(state.entries.indexOf(entry));
+          li.id = explorerId + "-entry-" + String(entryIndex);
           li.setAttribute("role", "option");
           li.setAttribute("aria-selected", "false");
           li.tabIndex = -1;
@@ -2171,8 +2177,9 @@
           li.addEventListener("dblclick", function () {
             activateEntry(li);
           });
-          listingEl.appendChild(li);
+          frag.appendChild(li);
         });
+        listingEl.appendChild(frag);
       }
 
       async function loadPath(target) {
