@@ -3,6 +3,7 @@
 
 import datetime
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from asn1crypto import x509
@@ -287,3 +288,50 @@ class PayloadBuilderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProviderPayloadFaultTolerance(unittest.TestCase):
+    """A malformed provider payload must not unwind the download flow.
+
+    smdpSigned2 is re-encoded through the ASN.1 spec, so a truncated field
+    from the SM-DP+ surfaces as an asn1tools error rather than a decode
+    result. The orchestrator already falls back to local signing when the
+    provider's smdpCertificate is unusable; the signed2 field reaching the
+    same builder must take the same route.
+    """
+
+    #: Shapes an SM-DP+ could return that asn1tools cannot decode.
+    MALFORMED = (
+        ("empty", b""),
+        ("tag only", b"\x30"),
+        ("length promises 256 bytes, none follow", b"\x30\x82\x01\x00"),
+    )
+
+    def test_the_builder_itself_still_rejects_malformed_signed2(self) -> None:
+        """The guard belongs at the caller; the builder keeps failing loudly."""
+
+        for label, bad in self.MALFORMED:
+            with self.subTest(label):
+                with self.assertRaises(Exception):
+                    PayloadBuilder.build_prepare_download_remote(
+                        smdp_signed2_der=bad,
+                        smdp_signature2=b"\x5f\x37\x02\xaa\xbb",
+                        cert=b"\x30\x03\x02\x01\x00",
+                    )
+
+    def _orchestrator_call_site(self, module_path: str) -> str:
+        source = Path(module_path).read_text(encoding="utf-8")
+        start = source.index("self.state.provider_smdp_certificate = smdp_certificate_raw")
+        return source[start:start + 1400]
+
+    def test_both_orchestrators_guard_the_remote_build(self) -> None:
+        for module_path in ("SCP11/orchestrator.py", "SCP11/live/orchestrator.py"):
+            with self.subTest(module_path):
+                region = self._orchestrator_call_site(module_path)
+                self.assertIn("try:", region)
+                self.assertIn("build_prepare_download_remote(", region)
+                self.assertIn("_local_fallback_enabled()", region)
+                # Same two-branch shape as the smdpCertificate case: raise
+                # when local fallback is off, otherwise degrade to it.
+                self.assertIn("fallback to local signing", region)
+                self.assertIn("raise RuntimeError(", region)
