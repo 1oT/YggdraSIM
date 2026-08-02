@@ -9,9 +9,11 @@ is read with READ RECORD and reports a record length. Getting it backwards
 gives a card that answers the wrong command, so these are checked against
 the values in TS 31.102 clause 4.2 rather than left to drift.
 
-Nine EFs were corrected against the spec; the vectors below are the ones
-that were wrong, plus their neighbours, which were already right and would
-catch an over-broad edit.
+The vectors below are the EFs that were wrong, plus their neighbours,
+which were already right and would catch an over-broad edit. Where a run
+of ids was shifted, the whole run is pinned rather than the ends of it:
+a shift leaves each name sitting on the next file's structure, so a gap
+in the vectors lets half a rotation pass.
 """
 
 from __future__ import annotations
@@ -33,7 +35,18 @@ class UsimFileStructureConformance(unittest.TestCase):
         "6FB4": ("transparent", "§4.2.76 EF_VBSS"),
         "6FB6": ("transparent", "§4.2.40 EF_AaeM"),
         "6FD4": ("transparent", "§4.2.77 EF_VGCSCA"),
+        # 6FD2..6FD8 sat one or two positions off their spec ids, which put
+        # each name on its neighbour's structure. Pinned end to end.
+        "6FD2": ("transparent", "§4.2.69 EF_MMSUCP"),
+        "6FD5": ("transparent", "§4.2.78 EF_VBSCA"),
+        "6FD6": ("transparent", "§4.2.79 EF_GBABP"),
         "6FD7": ("linear-fixed", "§4.2.80 EF_MSK"),
+        "6FD8": ("linear-fixed", "§4.2.81 EF_MUK"),
+        "6FE1": ("linear-fixed", "§4.5.7 EF_ICE_FF"),
+        "6FE2": ("linear-fixed", "§4.2.90 EF_NCP-IP"),
+        "6FF0": ("linear-fixed", "§4.2.100 EF_IAL"),
+        "6FF1": ("cyclic", "§4.2.101 EF_IPS"),
+        "6FF2": ("linear-fixed", "§4.2.102 EF_IPD"),
         "6FE4": ("linear-fixed", "§4.2.92 EF_EPSNSC"),
         "6FE5": ("linear-fixed", "§4.5.9 EF_PSISMSC"),
         "6FE7": ("linear-fixed", "§4.2.95 EF_UICCIARI"),

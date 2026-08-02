@@ -292,10 +292,10 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-spdi": {"name": "EF.SPDI", "fid": "6FCD", "structure": "transparent", "sfi": None},
     "ef-nia": {"name": "EF.NIA", "fid": "6FD3", "structure": "linear-fixed", "sfi": None},
     "ef-vgcsca": {"name": "EF.VGCSCA", "fid": "6FD4", "structure": "transparent", "sfi": None},
-    "ef-vbsca": {"name": "EF.VBSCA", "fid": "6FD2", "structure": "linear-fixed", "sfi": None},
-    "ef-gbabp": {"name": "EF.GBABP", "fid": "6FD7", "structure": "linear-fixed", "sfi": None},
-    "ef-msk": {"name": "EF.MSK", "fid": "6FD5", "structure": "transparent", "sfi": None},
-    "ef-muk": {"name": "EF.MUK", "fid": "6FD6", "structure": "transparent", "sfi": None},
+    "ef-vbsca": {"name": "EF.VBSCA", "fid": "6FD5", "structure": "transparent", "sfi": None},
+    "ef-gbabp": {"name": "EF.GBABP", "fid": "6FD6", "structure": "transparent", "sfi": None},
+    "ef-msk": {"name": "EF.MSK", "fid": "6FD7", "structure": "linear-fixed", "sfi": None},
+    "ef-muk": {"name": "EF.MUK", "fid": "6FD8", "structure": "linear-fixed", "sfi": None},
     "ef-ehplmn": {"name": "EF.EHPLMN", "fid": "6FD9", "structure": "transparent", "sfi": None},
     "ef-gbanl": {"name": "EF.GBANL", "fid": "6FDA", "structure": "linear-fixed", "sfi": None},
     "ef-ehplmnpi": {"name": "EF.EHPLMNPI", "fid": "6FDB", "structure": "transparent", "sfi": None},
@@ -307,7 +307,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-fdnuri": {"name": "EF.FDNURI", "fid": "6FED", "structure": "linear-fixed", "sfi": None},
     "ef-bdnuri": {"name": "EF.BDNURI", "fid": "6FEE", "structure": "linear-fixed", "sfi": None},
     "ef-sdnuri": {"name": "EF.SDNURI", "fid": "6FEF", "structure": "linear-fixed", "sfi": None},
-    "ef-ips": {"name": "EF.IPS", "fid": "6FF1", "structure": "transparent", "sfi": None},
+    "ef-ips": {"name": "EF.IPS", "fid": "6FF1", "structure": "cyclic", "sfi": None},
     "ef-epdgid": {"name": "EF.EPDGID", "fid": "6FF3", "structure": "transparent", "sfi": None},
     "ef-epdgselection": {
         "name": "EF.EPDGSELECTION",
@@ -492,32 +492,36 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     },
     "ef-xcapconfigdata": {
         "name": "EF.XCAPCONFIGDATA",
-        "fid": "6FF9",
+        "fid": "6FFC",
         "structure": "transparent",
         "sfi": None,
     },
+    # 6FFA is the ISIM WebRTC URI, and also the USIM PS-data-off service
+    # list below. Both are correct: SAIP puts WebRTCURI in the ISIM
+    # template against ISIM service 20, and TS 31.102 §4.2.110 puts the
+    # service list in ADF.USIM.
     "ef-webrtcuri": {
         "name": "EF.WEBRTCURI",
         "fid": "6FFA",
-        "structure": "transparent",
+        "structure": "linear-fixed",
         "sfi": None,
     },
     "ef-mudmidconfigdata": {
         "name": "EF.MUDMIDCONFIGDATA",
-        "fid": "6FFB",
+        "fid": "6FFE",
         "structure": "transparent",
         "sfi": None,
     },
     "ef-3gpppsdataoff": {
         "name": "EF.3GPPPSDATAOFF",
-        "fid": "6FFC",
+        "fid": "6FF9",
         "structure": "transparent",
         "sfi": None,
     },
     "ef-3gpppsdataoffservicelist": {
         "name": "EF.3GPPPSDATAOFFSERVICELIST",
-        "fid": "6FFD",
-        "structure": "transparent",
+        "fid": "6FFA",
+        "structure": "linear-fixed",
         "sfi": None,
     },
     # ADF.USIM MMS family (TS 51.011 §10.3.51-§10.3.55, TS 31.102 Annex H).
@@ -525,10 +529,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-ext8": {"name": "EF.EXT8", "fid": "6FCF", "structure": "linear-fixed", "sfi": None},
     "ef-mmsicp": {"name": "EF.MMSICP", "fid": "6FD0", "structure": "transparent", "sfi": None},
     "ef-mmsup": {"name": "EF.MMSUP", "fid": "6FD1", "structure": "linear-fixed", "sfi": None},
-    # NOTE: EF.MMSUCP (6FD2) collides with EF.VBSCA per legacy SAIP
-    # tooling. Leave the canonical FID empty so the node materialises at
-    # the right hierarchical path without stomping VBSCA on the same FID.
-    "ef-mmsucp": {"name": "EF.MMSUCP", "fid": "", "structure": "transparent", "sfi": None},
+    "ef-mmsucp": {"name": "EF.MMSUCP", "fid": "6FD2", "structure": "transparent", "sfi": None},
     # DF.TELECOM / DF.GRAPHICS (TS 31.102 §4.6.1, SAIP §3.4.4).
     "ef-img": {"name": "EF.IMG", "fid": "4F20", "structure": "linear-fixed", "sfi": None},
     "ef-iidf": {"name": "EF.IIDF", "fid": "4F02", "structure": "transparent", "sfi": None},
@@ -546,7 +547,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "sfi": None,
     },
     "ef-ice-dn": {"name": "EF.ICE-DN", "fid": "6FE0", "structure": "linear-fixed", "sfi": None},
-    "ef-ice-ff": {"name": "EF.ICE-FF", "fid": "6FE2", "structure": "linear-fixed", "sfi": None},
+    "ef-ice-ff": {"name": "EF.ICE-FF", "fid": "6FE1", "structure": "linear-fixed", "sfi": None},
     "ef-ice-graphics": {
         "name": "EF.ICE-GRAPHICS",
         "fid": "",
@@ -589,15 +590,12 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "sfi": None,
     },
     "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "linear-fixed", "sfi": None},
-    # OPT-USIM Rel-17/18 extras and misc EFs referenced by SAIP. Some
-    # (pnni/ncp-ip/ial/ipd/ufc) do not have a single authoritative FID in
-    # TS 31.102 so they carry a blank FID; others align with TS 31.102
-    # Annex H assignments.
+    # OPT-USIM Rel-17/18 extras and misc EFs referenced by SAIP.
     "ef-pnni": {"name": "EF.PNNI", "fid": "6FDF", "structure": "linear-fixed", "sfi": None},
-    "ef-ncp-ip": {"name": "EF.NCP-IP", "fid": "", "structure": "linear-fixed", "sfi": None},
-    "ef-ufc": {"name": "EF.UFC", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-ial": {"name": "EF.IAL", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-ipd": {"name": "EF.IPD", "fid": "", "structure": "transparent", "sfi": None},
+    "ef-ncp-ip": {"name": "EF.NCP-IP", "fid": "6FE2", "structure": "linear-fixed", "sfi": None},
+    "ef-ufc": {"name": "EF.UFC", "fid": "6FE6", "structure": "transparent", "sfi": None},
+    "ef-ial": {"name": "EF.IAL", "fid": "6FF0", "structure": "linear-fixed", "sfi": None},
+    "ef-ipd": {"name": "EF.IPD", "fid": "6FF2", "structure": "linear-fixed", "sfi": None},
     "ef-epdgidem": {
         "name": "EF.EPDGIDEM",
         "fid": "6FF5",
