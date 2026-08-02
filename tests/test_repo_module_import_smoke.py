@@ -14,6 +14,11 @@ from scripts.release.source_boundary import reviewed_python_sources
 def _install_smartcard_stubs() -> None:
     if "smartcard" in sys.modules:
         return
+    if importlib.util.find_spec("smartcard") is not None:
+        # pyscard is installed. The stub carries only the four submodules
+        # this file needs, so leaving it in sys.modules would break every
+        # later test in the session that reaches smartcard.util.
+        return
 
     smartcard_module = types.ModuleType("smartcard")
     system_module = types.ModuleType("smartcard.System")

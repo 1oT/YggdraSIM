@@ -80,13 +80,31 @@ def test_sigkill_constant_is_defined_defensively() -> None:
 _SIGKILL_CALL_SITE_ALLOWLIST = {"yggdrasim_common/gui_server/terminal.py"}
 
 
+def _tracked_python_sources() -> list[str]:
+    """Paths git tracks, so generated trees cannot join the scan.
+
+    Walking the working tree instead picks up whatever happens to be on
+    disk: ``site/`` from a docs build, ``dist/`` from a packaging run. A
+    docs build racing the suite would then fail an unrelated test, and a
+    copy of an allowlisted file lands under a path the allowlist misses.
+    """
+    listing = subprocess.run(
+        ["git", "ls-files", "-z", "*.py"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return sorted(name for name in listing.stdout.split("\0") if name)
+
+
 def test_no_shipped_call_site_evaluates_signal_sigkill() -> None:
     """Passing ``signal.SIGKILL`` as an argument raises before any guard."""
 
     offenders: list[str] = []
-    for path in sorted(REPO_ROOT.rglob("*.py")):
-        rel = path.relative_to(REPO_ROOT).as_posix()
-        if rel.startswith(("tests/", ".venv/", "build/", "pysim/", "plugins/")):
+    for rel in _tracked_python_sources():
+        path = REPO_ROOT / rel
+        if rel.startswith(("tests/", "pysim/", "plugins/")):
             continue
         if rel in _SIGKILL_CALL_SITE_ALLOWLIST:
             continue
