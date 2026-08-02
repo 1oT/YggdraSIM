@@ -79,6 +79,12 @@ class UsimFileStructureConformance(unittest.TestCase):
         ("DF.A2X", "4F06"): ("transparent", "§4.6.6.7 EF_A2XP_Uu"),
         ("DF.MMSS", "4F22"): ("transparent", "SAIP DF.MMSS EF_MMSSMODE"),
         ("DF.MULTIMEDIA", "4F47"): ("linear-fixed", "§4.6.3.1 EF_MML, BER-TLV in spec"),
+        ("DF.SNPN", "4F02"): ("linear-fixed", "§4.4.12.3 EF_NID"),
+        ("DF.5G_PROSE", "4F07"): ("transparent", "§4.4.13.8 EF_5G_PROSE_U2URU"),
+        ("DF.5G_PROSE", "4F08"): ("transparent", "§4.4.13.9 EF_5G_PROSE_EU"),
+        # EF.PSISMSC is a §4.5 file, so it sits with the DF.TELECOM EFs
+        # and not after the sub-DF blocks that follow them.
+        ("DF.TELECOM", "6FE5"): ("linear-fixed", "§4.5.9 EF_PSISMSC"),
     }
 
     def _by_df_and_fid(self) -> dict[tuple[str, str], dict]:

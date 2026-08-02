@@ -226,6 +226,12 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-ust": {"name": "EF.UST", "fid": "6F38", "structure": "transparent", "sfi": None},
     "ef-spn": {"name": "EF.SPN", "fid": "6F46", "structure": "transparent", "sfi": None},
     "ef-est": {"name": "EF.EST", "fid": "6F56", "structure": "transparent", "sfi": None},
+    # EF.ARR exists at three levels with different ids: 2F06 under MF
+    # (TS 102 221), 6F06 under ADF.USIM (§4.2.55) and under DF.TELECOM
+    # (§4.5.5). SAIP names the ADF.USIM one separately; the other two
+    # share the "ef-arr" member and only the MF id can be carried here.
+    "ef-arr-usim": {"name": "EF.ARR", "fid": "6F06", "structure": "linear-fixed", "sfi": 0x17},
+    "ef-ocst": {"name": "EF.OCST", "fid": "6F02", "structure": "transparent", "sfi": None},
     "ef-start-hfn": {"name": "EF.START-HFN", "fid": "6F5B", "structure": "transparent", "sfi": None},
     "ef-threshold": {"name": "EF.THRESHOLD", "fid": "6F5C", "structure": "transparent", "sfi": None},
     "ef-psloci": {"name": "EF.PSLOCI", "fid": "6F73", "structure": "transparent", "sfi": None},
@@ -474,6 +480,18 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "structure": "transparent",
         "sfi": None,
     },
+    "ef-5g-prose-u2uru": {
+        "name": "EF.5G-PROSE-U2URU",
+        "fid": "4F07",
+        "structure": "transparent",
+        "sfi": 0x07,
+    },
+    "ef-5g-prose-eu": {
+        "name": "EF.5G-PROSE-EU",
+        "fid": "4F08",
+        "structure": "transparent",
+        "sfi": 0x08,
+    },
     # DF.SNPN (TS 31.102 §4.4.12, DF 5FE0).
     "ef-pws-snpn": {
         "name": "EF.PWS-SNPN",
@@ -481,6 +499,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "structure": "transparent",
         "sfi": None,
     },
+    "ef-nid": {"name": "EF.NID", "fid": "4F02", "structure": "linear-fixed", "sfi": 0x02},
     # ADF.USIM / ADF.ISIM Rel-15/16 IMS configuration (TS 31.103 §4.2,
     # shared with TS 31.102 Annex B.x). MUD/MID and XCAP/IMS/PSDATAOFF
     # are TS 31.102 §4.2.94-§4.2.101.
@@ -559,6 +578,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     },
     "ef-rma": {"name": "EF.RMA", "fid": "", "structure": "transparent", "sfi": None},
     "ef-sume": {"name": "EF.SUME", "fid": "6F54", "structure": "transparent", "sfi": None},
+    "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "linear-fixed", "sfi": None},
     # DF.PHONEBOOK (TS 31.102 §4.4.2).
     "ef-aas": {"name": "EF.AAS", "fid": "4F4A", "structure": "linear-fixed", "sfi": None},
     "ef-puri": {"name": "EF.PURI", "fid": "4F4D", "structure": "linear-fixed", "sfi": None},
@@ -634,7 +654,6 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "structure": "transparent",
         "sfi": 0x06,
     },
-    "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "linear-fixed", "sfi": None},
     # ADF.USIM optional files: Rel-17/18 extras and misc EFs referenced by
     # SAIP. These are USIM files despite following the DF blocks above, so
     # the marker is repeated here rather than left to the reader.
