@@ -593,7 +593,9 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "sfi": None,
     },
     "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "linear-fixed", "sfi": None},
-    # OPT-USIM Rel-17/18 extras and misc EFs referenced by SAIP.
+    # ADF.USIM optional files: Rel-17/18 extras and misc EFs referenced by
+    # SAIP. These are USIM files despite following the DF blocks above, so
+    # the marker is repeated here rather than left to the reader.
     "ef-pnni": {"name": "EF.PNNI", "fid": "6FDF", "structure": "linear-fixed", "sfi": None},
     "ef-ncp-ip": {"name": "EF.NCP-IP", "fid": "6FE2", "structure": "linear-fixed", "sfi": None},
     "ef-ufc": {"name": "EF.UFC", "fid": "6FE6", "structure": "transparent", "sfi": None},
