@@ -313,14 +313,26 @@ class Scp03CardLogic:
 
     def _derive_session_keys(self, host_challenge: bytes, card_challenge: bytes) -> tuple[bytes, bytes, bytes]:
         context = bytes(host_challenge) + bytes(card_challenge)
-        s_enc = self._kdf(self._static_keys["kenc"], 0x04, context, 128)
-        s_mac = self._kdf(self._static_keys["kmac"], 0x06, context, 128)
-        s_rmac = self._kdf(self._static_keys["kmac"], 0x07, context, 128)
+        k_enc = self._static_keys["kenc"]
+        k_mac = self._static_keys["kmac"]
+        # Amd D §6.2.1: L is the session key length, so it follows the
+        # static key rather than being fixed at AES-128.
+        s_enc = self._kdf(k_enc, 0x04, context, len(k_enc) * 8)
+        s_mac = self._kdf(k_mac, 0x06, context, len(k_mac) * 8)
+        s_rmac = self._kdf(k_mac, 0x07, context, len(k_mac) * 8)
         return s_enc, s_mac, s_rmac
 
     def _kdf(self, key: bytes, constant: int, context: bytes, bit_len: int) -> bytes:
-        payload = (b"\x00" * 11) + bytes([constant & 0xFF]) + b"\x00" + bit_len.to_bytes(2, "big") + b"\x01" + context
-        return self._cmac(bytes(key), payload)[: bit_len // 8]
+        # NIST SP 800-108 counter mode. The PRF gives 16 bytes a call, so
+        # anything above AES-128 needs a second round with the counter
+        # incremented; a single round silently returned a short key.
+        prefix = (b"\x00" * 11) + bytes([constant & 0xFF]) + b"\x00" + bit_len.to_bytes(2, "big")
+        out = b""
+        counter = 1
+        while len(out) < bit_len // 8:
+            out += self._cmac(bytes(key), prefix + bytes([counter]) + context)
+            counter += 1
+        return out[: bit_len // 8]
 
     def _gen_crypto(self, constant: int) -> bytes:
         session = self.state.scp03_session

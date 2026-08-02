@@ -96,5 +96,43 @@ class Scp03SessionKeyLength(unittest.TestCase):
                 self.assertEqual(len(session.calculate_host_cryptogram()), 8)
 
 
+class Scp03HostAndSimulatorAgree(unittest.TestCase):
+    """The simulated card derives its own session keys.
+
+    Both sides were fixed at 128 bits, so they agreed with each other and
+    with no real card. Correcting only one side would have made a session
+    against the simulator fail where it used to pass.
+    """
+
+    def test_derivations_match_at_every_key_length(self) -> None:
+        from SIMCARD.scp03 import Scp03CardLogic
+
+        # _kdf needs only _cmac, so the engine is built without its
+        # constructor rather than standing up a whole card.
+        card = object.__new__(Scp03CardLogic)
+        context = HOST_CHAL + CARD_CHAL
+        for key_len in (16, 24, 32):
+            key = bytes(range(0x40, 0x40 + key_len))
+            for constant in (0x04, 0x06, 0x07):
+                with self.subTest(bits=key_len * 8, constant=constant):
+                    self.assertEqual(
+                        card._kdf(key, constant, context, key_len * 8),
+                        _kdf(key, bytes([constant]), context, key_len * 8),
+                    )
+
+    def test_simulator_returns_a_full_length_key(self) -> None:
+        """The PRF gives 16 bytes a call; longer keys need a second round."""
+
+        from SIMCARD.scp03 import Scp03CardLogic
+
+        card = object.__new__(Scp03CardLogic)
+        for key_len in (16, 24, 32):
+            with self.subTest(bits=key_len * 8):
+                derived = card._kdf(
+                    bytes(key_len), 0x04, HOST_CHAL + CARD_CHAL, key_len * 8
+                )
+                self.assertEqual(len(derived), key_len)
+
+
 if __name__ == "__main__":
     unittest.main()
