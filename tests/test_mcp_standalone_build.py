@@ -50,6 +50,13 @@ def test_generation_produces_every_declared_file(generated: Path) -> None:
         "_vendor/sgp32_decode.py",
         "_vendor/euicc_info2.py",
         "_vendor/session_diff.py",
+        # The card transport chain, so the standalone can drive a card.
+        "_vendor/secure_files.py",
+        "_vendor/runtime_paths.py",
+        "_vendor/apdu_recorder.py",
+        "_vendor/card_backend.py",
+        "_vendor/card_bridge_auth.py",
+        "_vendor/remote_lab_security.py",
         "data/aid.txt",
     ):
         assert (generated / relative).is_file(), relative
@@ -102,9 +109,11 @@ def test_vendored_sources_match_the_repo_byte_for_byte(generated: Path) -> None:
         original = (REPO_ROOT / source).read_text(encoding="utf-8")
         vendored = (generated / relative).read_text(encoding="utf-8")
         if source.endswith("sgp32_decode.py"):
-            original = original.replace(
-                "from SCP03.logic.euicc_info2 import", "from .euicc_info2 import"
-            )
+            for old, new in builder.VENDOR_REWRITES:
+                original = original.replace(old, new)
+        for old, new in builder.PER_MODULE_REWRITES.get(source, ()):
+            assert old in original, f"{source}: rewrite no longer matches: {old[:50]!r}"
+            original = original.replace(old, new)
         assert vendored == original, source
 
 
@@ -133,3 +142,41 @@ def test_standalone_package_cannot_collide_with_yggdrasim() -> None:
         builder.generate(target)
         tops = {p.name for p in target.iterdir() if p.is_dir()}
     assert tops == {"yggdrasim_mcp"}, tops
+
+
+def test_the_card_transport_chain_is_fully_vendored(generated: Path) -> None:
+    """The standalone must reach a card without the rest of the tree.
+
+    Every module the transport needs is standard-library only apart from
+    its siblings, which is what makes this possible: a missed one would
+    surface as a runtime ImportError on a host that has no YggdraSIM.
+    """
+    transport = generated / "_vendor" / "card_backend.py"
+    tree = ast.parse(transport.read_text(encoding="utf-8"), filename=str(transport))
+
+    top_level = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            top_level.add(node.module.split(".")[0])
+        elif isinstance(node, ast.Import):
+            top_level.update(alias.name.split(".")[0] for alias in node.names)
+    assert not top_level & {"yggdrasim_common", "SIMCARD", "SCP03", "Tools"}, top_level
+
+    for sibling in ("secure_files", "runtime_paths", "apdu_recorder"):
+        assert (generated / "_vendor" / f"{sibling}.py").is_file(), sibling
+
+
+def test_the_simulator_backend_degrades_with_a_reason(generated: Path) -> None:
+    """SIMCARD is a whole subsystem and is deliberately not vendored."""
+
+    source = (generated / "_vendor" / "card_backend.py").read_text(encoding="utf-8")
+    assert "from SIMCARD.connection import SimulatedCardConnection" in source
+    assert "except ImportError as sim_error:" in source
+    assert "needs the full YggdraSIM" in source
+
+
+def test_the_server_resolves_card_backend_locally(generated: Path) -> None:
+    server = (generated / "server.py").read_text(encoding="utf-8")
+    assert "from yggdrasim_mcp._vendor import card_backend" in server
+    assert "from yggdrasim_common import card_backend" not in server
+    assert "from yggdrasim_common.card_backend import" not in server
