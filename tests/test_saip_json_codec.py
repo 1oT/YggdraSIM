@@ -515,3 +515,6 @@ class TranscodeRoundTripFidelity(unittest.TestCase):
         self.assertFalse(_identifications_are_usable(_Seq([1, 2, 0, 4])))
         self.assertFalse(_identifications_are_usable(_Seq([1, 2, 2, 3])))
         self.assertFalse(_identifications_are_usable(_Seq([1, -1])))
+        # PEHeader.identification is a UInt15, INTEGER (0..32767).
+        self.assertTrue(_identifications_are_usable(_Seq([32767])))
+        self.assertFalse(_identifications_are_usable(_Seq([32768])))

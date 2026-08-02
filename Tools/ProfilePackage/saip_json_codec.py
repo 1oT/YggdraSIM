@@ -1614,7 +1614,14 @@ def _identifications_are_usable(pes: Any) -> bool:
         if not header:
             continue
         identification = header.get("identification")
-        if not isinstance(identification, int) or identification <= 0:
+        # PEHeader.identification is a UInt15, INTEGER (0..32767), and the
+        # Profile Interoperability spec requires it to be unique because
+        # error reports back to the sender cite it. Zero is inside the
+        # range but is what quick-add leaves on a new PE, so it still
+        # counts as needing assignment.
+        if not isinstance(identification, int):
+            return False
+        if identification <= 0 or identification > 32767:
             return False
         if identification in seen:
             return False
