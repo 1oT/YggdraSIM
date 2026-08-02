@@ -178,6 +178,46 @@ def validate_frozen_artifact(artifact: Path) -> None:
             raise ReleaseValidationError(f"release canary found in {path.name}")
 
 
+def run_sanitizer(repo_root: Path) -> int:
+    """Gate a release commit on a clean identifier scan, when available.
+
+    The scan rules name the allocations this tree is scrubbed of, so they
+    live in an untracked plugin rather than here. A checkout without that
+    plugin reports the gap and passes: a public clone cannot run the check
+    and must not be blocked by its absence.
+    """
+    # Run as a script, sys.path[0] is this directory, so the plugin package
+    # is only importable once the repo root is on the path.
+    root = str(Path(__file__).resolve().parents[2])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        from plugins.release_sanitizer.scanner import scan_repository
+    except ImportError:
+        print("sanitizer: not installed in this checkout, skipping")
+        return 0
+
+    report = scan_repository(repo_root)
+    leaks = report["identifier_leaks"]
+    print(f"sanitizer: scanned {report['scanned']} tracked files")
+    for finding in leaks:
+        print(
+            f"  LEAK {finding['source']}:{finding['line']}: "
+            f"{finding['rule']} -> {finding['match']}",
+            file=sys.stderr,
+        )
+    phrases = report["banned_phrases"]
+    if phrases:
+        print(f"sanitizer: {len(phrases)} prose findings (advisory)")
+    if leaks:
+        print(
+            f"release validation failed: {len(leaks)} identifier leaks",
+            file=sys.stderr,
+        )
+        return 2
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -192,7 +232,15 @@ def main() -> int:
     )
     artifact_parser.add_argument("paths", type=Path, nargs="+")
 
+    sanitize_parser = subparsers.add_parser(
+        "sanitize",
+        help="scan tracked files for real-world identifier leaks",
+    )
+    sanitize_parser.add_argument("--repo-root", type=Path, default=Path.cwd())
+
     args = parser.parse_args()
+    if args.command == "sanitize":
+        return run_sanitizer(args.repo_root)
     try:
         if args.command == "tag":
             version = validate_tag(args.repo_root, args.tag)

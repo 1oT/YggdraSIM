@@ -44,7 +44,7 @@ flavor:
 | Extra          | Pulls in                                      | Used by                                        |
 |----------------|-----------------------------------------------|------------------------------------------------|
 | `[saip]`       | `openpyxl`, `defusedxml`                      | Hosting a spreadsheet import/export plugin (generator supplied separately) |
-| `[mcp]`        | `mcp`                                         | Serving decode/lint tools to an AI agent (`yggdrasim-mcp`)   |
+| `[mcp]`        | `mcp`                                         | Serving the tool surface to an AI agent (`yggdrasim-mcp`)    |
 | `[hil]`        | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
 | `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets`; pip Qt/WebEngine on Linux x86_64, `qtpy` plus system PyQt5 on Linux ARM | Desktop Universal GUI Command Center (`--gui`) |
 | `[gui-server]` | `fastapi`, `uvicorn[standard]`, `websockets`  | Headless web Command Center (`--web-server`)   |
@@ -354,3 +354,25 @@ Validate these before publication:
   SAIP ASN.1 compile path is needed)
 - state persistence writes land in runtime state, not inside the installed bundle
 - smart-card flows are validated on each target OS that will be supported
+
+## Pre-release sanitization
+
+Before a commit that goes to a public tree, scan for identifiers that must
+not ship:
+
+```bash
+python scripts/release/validate_release.py sanitize
+```
+
+It reports every tracked file carrying a real MCC/MNC, a non-test ICCID
+IIN, or a routable address outside RFC 5737, and exits non-zero so it can
+gate a release commit. Banned-prose findings are printed as advisory and do
+not fail the run; `python -m plugins.release_sanitizer --phrases-are-fatal`
+makes them fail too.
+
+The rules live in an untracked plugin rather than in this tree. They name
+the allocations the repo is scrubbed of, so publishing the detector would
+tell a reader which allocations were once here -- it would leak more than
+it prevents. A checkout without the plugin prints that it is skipping and
+exits zero, so a public clone is never blocked by the absence of a check it
+cannot run.

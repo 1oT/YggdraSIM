@@ -129,6 +129,17 @@ def register_plugins(manager):
     manager.register_capability("example.diagnostics", MyDiagnosticsCapability())
 ```
 
+## Not every plugin is a capability provider
+
+A plugin may exist purely as internal tooling and register nothing. The
+pre-release sanitizer is the worked example: it holds the identifier rules
+this tree is scrubbed against, which cannot ship for the reason the rules
+themselves describe, and it deliberately exposes no MCP tool. Deciding
+whether a tree is publishable is a maintainer's call, not an agent's.
+
+Such a plugin needs no `register_plugins`; the loader skips it without
+complaint.
+
 ## Design notes
 
 - Keep plugin code self-contained and runtime-root aware.
