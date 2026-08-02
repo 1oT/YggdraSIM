@@ -13,7 +13,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
 
-# EUM Diagnostics "God-Mode"
+# EUM Diagnostics
 
 `Tools/EumDiag/` is the *server-side* diagnostic toolbox for
 ES8+ / Bound Profile Package (BPP) work. Its purpose is to take

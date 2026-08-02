@@ -224,7 +224,7 @@ card).
 
 ---
 
-## 4. EUM Diagnostics "God-Mode"
+## 4. EUM Diagnostics
 
 ### 4.1 What it does
 
@@ -250,7 +250,7 @@ yggdrasim-eum-diag inject-keys \
     --shs-enc <32 hex chars> \
     --shs-mac <32 hex chars> \
     --dek     <32 hex chars> \
-    --pcap    /captures/provisioning-2026-04-19.pcapng
+    --pcap    /captures/provisioning-example.pcapng
 
 # Write keys only (useful when a separate tshark/wireshark session
 # already has the dissector loaded):

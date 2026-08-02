@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-EUM diagnostics "God-Mode" — Lua/tshark BPP dissector + key injection.
+EUM diagnostics: Lua/tshark BPP dissector + key injection.
 
 This package ships three cooperating pieces:
 

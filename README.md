@@ -80,7 +80,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `Tools/SuciTool/` | SUCI helper tooling | helper shell |
 | `Tools/Asn1TlvDecode/` | BER/DER ASN.1, BER-TLV, and APDU decode helper | `yggdrasim-asn1` or `python main/main.py --asn1` |
 | `Tools/ApduFuzz/` | Safety-gated eUICC APDU mutation fuzzer (`--i-mean-it` + ICCID/IMSI allow-list) | `yggdrasim-apdu-fuzzer` |
-| `Tools/EumDiag/` | EUM / SM-DP+ "God-Mode": session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
+| `Tools/EumDiag/` | EUM / SM-DP+ diagnostics: session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
+| `Tools/YggdraMCP/` | Model Context Protocol server: decode, lint, identifier, and card-transport tools plus batch access to the operator shells, behind read-only-by-default gates | `yggdrasim-mcp` (opt-in `[mcp]` extra) |
 | `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
 | `Tools/CardBridge/` *(post-v1 staging)* | Loopback HTTP APDU bridge for streaming a PC/SC reader to another host over SSH | `python -m Tools.CardBridge` |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center: FastAPI API + pywebview desktop window or headless lab server, live APDU dock, remote-rig controls | `--gui` / `--web-server` |
@@ -107,12 +108,18 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 - Opt-in, safety-gated eUICC APDU mutation fuzzer via
   `yggdrasim-apdu-fuzzer` (`--i-mean-it` + ICCID/IMSI allow-list
   required).
-- EUM / SM-DP+ diagnostics "God-Mode": session-key injection and
+- EUM / SM-DP+ diagnostics: session-key injection and
   Wireshark/tshark Lua dissector for BF36 Bound Profile Packages via
   `yggdrasim-eum-diag`.
 - Optional Universal GUI Command Center (`--gui` desktop / `--web-server`
   remote-lab) with reader selection, action forms, Card Bridge controls,
   and a live APDU dock fed by a process-wide recorder.
+- Model Context Protocol server (`Tools/YggdraMCP`, `[mcp]` extra) giving an
+  AI agent 26 tools: spec/status-word/AID lookup, ASN.1 and APDU decode, SAIP
+  and metadata linting, session diffing, card transport control, and batch
+  access to all eight operator shells. Read-only by default; changing state, reaching
+  a card, and running unverified scripts are three separate opt-ins. Also
+  buildable as a standalone `yggdrasim-mcp` wheel.
 - Centralized mutable state in SQLite, with optional `gpg`-based encryption for sensitive payloads.
 
 ## Quick start
@@ -560,6 +567,8 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `SCP11/eim_local/GUIDE.md` - detailed eIM operational guide
 - `SCP11/relay/README.md` - relay compatibility namespace note
 - `SCP11/shared/README.md` - shared SCP11 helper layer
+- `site-docs/how-to/run-the-mcp-server.md` - MCP server: tool inventory, the
+  access model, and the card-safety gates
 - `plugins/README.md` - runtime plugin contract and publication-ignore model
 - `scripts/install/README.md` - cross-platform one-liner installer flag reference
 
