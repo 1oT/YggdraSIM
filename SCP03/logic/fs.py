@@ -1337,6 +1337,22 @@ class FileSystemController :
                                     )
                                 self .current_fcp ['rules']=rules 
 
+                if not sec :
+                    # TS 102 221 allows three security-attribute tags: '8B'
+                    # referenced to expanded format (decoded above), '8C'
+                    # compact, and 'AB' expanded. The latter two are not
+                    # decoded here, but report their presence so a blank
+                    # access-rule panel is not read as "no rules apply".
+                    for alt_tag ,alt_format in ((0x8C ,"compact"),(0xAB ,"expanded")):
+                        alt_value =fcp_body .get (alt_tag )
+                        if not alt_value :
+                            continue
+                        self .current_fcp ['security']=alt_value .hex ().upper ()
+                        self .current_fcp ['security_format']=alt_format
+                        self .current_fcp ['rules']=(
+                        f"Present in {alt_format} format (tag {alt_tag:02X}); not decoded."
+                        )
+                        break
 
             elif 0x6F in parsed :
                 fci_body =parsed [0x6F ]
