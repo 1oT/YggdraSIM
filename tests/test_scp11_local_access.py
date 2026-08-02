@@ -1552,8 +1552,11 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(decoded["iccid"], bytes.fromhex("89880811111111111112"))
         self.assertEqual(decoded["serviceProviderName"], "Hampus Test")
         self.assertEqual(decoded["profileName"], "Hampus test profile")
-        self.assertEqual(decoded["iconType"], 0)
-        self.assertEqual(decoded["icon"], b"")
+        # The fixture carries icon type "NONE". IconType has no member for
+        # that, and 0 is jpg, so both optional fields are left out rather
+        # than declaring a format for an icon that is not there.
+        self.assertNotIn("iconType", decoded)
+        self.assertNotIn("icon", decoded)
         self.assertEqual(decoded["profileClass"], 2)
         self.assertEqual(decoded["profileOwner"]["mccMnc"], bytes.fromhex("99999F"))
         self.assertEqual(decoded["profileOwner"]["gid1"], bytes.fromhex("FFFFFFFFFFFFFFFF"))
