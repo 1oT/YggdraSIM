@@ -55,8 +55,23 @@ mcp = FastMCP("yggdrasim")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
+# Two orthogonal questions, one variable each.
+#
+#   ACCESS_ENV  what may be done: read (the default) or write
+#   CARD_ACCESS_ENV  whether hardware may be reached at all
+#
+# They are separate because "may this agent change anything" and "may it
+# touch my card" are different decisions. A profile author wants write
+# without a reader; someone reading a card wants the reader without writes.
+ACCESS_ENV = "YGGDRASIM_MCP_ACCESS"
 CARD_ACCESS_ENV = "YGGDRASIM_MCP_ALLOW_CARD"
-DESTRUCTIVE_ENV = "YGGDRASIM_MCP_ALLOW_DESTRUCTIVE"
+
+#: Permits verbs that execute a file of commands. Off by default because the
+#: verb classifier cannot see inside such a file, so nothing in it is checked.
+SCRIPT_FILES_ENV = "YGGDRASIM_MCP_ALLOW_SCRIPT_FILES"
+
+ACCESS_READ = "read"
+ACCESS_WRITE = "write"
 
 _TRUTHY = ("1", "true", "yes", "on")
 
@@ -65,21 +80,41 @@ def _env_on(name: str) -> bool:
     return str(os.environ.get(name, "")).strip().lower() in _TRUTHY
 
 
+def access_mode() -> str:
+    """The server's access level: ``read`` by default, ``write`` when set."""
+
+    raw = str(os.environ.get(ACCESS_ENV, "")).strip().lower()
+    if raw in (ACCESS_WRITE, "readwrite", "read-write", "rw"):
+        return ACCESS_WRITE
+    return ACCESS_READ
+
+
+def write_allowed() -> bool:
+    """Whether anything may be changed: files, cards, or configuration.
+
+    One switch rather than a ladder. Everything an operator can do from a
+    shell is reachable at this level, including operations that cannot be
+    undone, so the documentation warns rather than the code subdividing.
+    """
+
+    return access_mode() == ACCESS_WRITE
+
+
 def card_access_allowed() -> bool:
-    """Whether tools that transmit to a physical card are enabled."""
+    """Whether tools that reach a physical card are enabled."""
 
     return _env_on(CARD_ACCESS_ENV)
 
 
-def destructive_allowed() -> bool:
-    """Whether irreversible APDUs may be sent.
+def script_files_allowed() -> bool:
+    """Whether verbs that execute a file of commands may run.
 
-    Separate from :func:`card_access_allowed` on purpose. Reads are the bulk
-    of useful agent work and are safe; the operations below cannot be undone
-    on real hardware, so they need their own deliberate opt-in.
+    Deliberately its own switch. Such a file bypasses verb classification
+    entirely, so enabling it is a statement that the caller trusts whatever
+    the file contains.
     """
 
-    return card_access_allowed() and _env_on(DESTRUCTIVE_ENV)
+    return _env_on(SCRIPT_FILES_ENV)
 
 
 # INS -> (risk class, name). ``destructive`` means irreversible on a real
@@ -129,23 +164,47 @@ def classify_apdu(payload: bytes) -> dict[str, Any]:
     return {"risk": risk, "ins": f"{ins:02X}", "name": name}
 
 
-def _apdu_refusal(verdict: dict[str, Any]) -> str | None:
-    """Return a refusal payload when this APDU may not be sent, else None."""
+def _status_word_meaning(sw1: int, sw2: int) -> str:
+    """Resolve SW1/SW2, including the families that encode a value in SW2."""
 
-    if not card_access_allowed():
+    sw_int = (sw1 << 8) | sw2
+    if sw_int in STATUS_WORDS:
+        return STATUS_WORDS[sw_int]
+    if sw1 == 0x61:
+        return f"Success. {sw2} bytes available."
+    if sw1 == 0x6C:
+        return f"Wrong Le. Correct: {sw2}."
+    if sw1 == 0x63 and (sw2 & 0xF0) == 0xC0:
+        return f"Verification failed. {sw2 & 0x0F} retries left."
+    return "See SW1/SW2."
+
+
+def _apdu_refusal(verdict: dict[str, Any], *, simulated: bool = False) -> str | None:
+    """Return a refusal payload when this APDU may not be sent, else None.
+
+    ``simulated`` waives the card gate only: the simulator has no hardware
+    to protect, but it does carry state, so writes still need write access.
+    """
+    if not simulated and not card_access_allowed():
         return _card_access_denied()
-    if verdict["risk"] == "destructive" and not destructive_allowed():
+    if verdict["risk"] in ("write", "destructive") and not write_allowed():
+        irreversible = verdict["risk"] == "destructive"
         return json.dumps(
             {
                 "error": (
-                    f"Refused: {verdict['name']} is irreversible on a real card. "
-                    f"Set {DESTRUCTIVE_ENV}=1 as well to permit it."
+                    f"Refused: {verdict['name']} changes the card, and this "
+                    f"server is read-only. Set {ACCESS_ENV}={ACCESS_WRITE} to "
+                    "permit it."
                 ),
                 "ins": verdict["ins"],
                 "risk": verdict["risk"],
+                "access_mode": access_mode(),
                 "hint": (
-                    "Retry counters do not reset and a terminated card does not "
-                    "recover. Use a throwaway test card before enabling this."
+                    "Retry counters do not reset and a terminated card does "
+                    "not recover. Use a throwaway test card."
+                    if irreversible
+                    else "An unrecognised instruction is treated as a write, "
+                    "because not having seen it is not evidence it is safe."
                 ),
             }
         )
@@ -283,98 +342,6 @@ TEST_IDENTIFIER_RANGES: dict[str, dict[str, Any]] = {
 }
 
 # A dotted quad is only a leak when it is routable and is not a spec clause.
-# Spec section numbers are numerically valid IPv4 addresses, so matching on
-# shape alone reports thousands of spec citations as if they were hosts.
-#
-# The negative lookarounds stop a longer dotted chain yielding a false quad:
-# without them a five-part clause number yields a quad from its first four.
-_IPV4_CANDIDATE = re.compile(
-    r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
-    r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)(?![\d.])"
-)
-
-# Ranges that cannot identify a real-world host: loopback, RFC 1918 private,
-# link-local, CGNAT, multicast, unspecified, broadcast, and the RFC 5737
-# documentation ranges this rule exists to steer people towards.
-_NON_ROUTABLE_IPV4 = re.compile(
-    r"""^(?:
-          0\.
-        | 10\.
-        | 127\.
-        | 169\.254\.
-        | 172\.(?:1[6-9]|2\d|3[01])\.
-        | 192\.168\.
-        | 192\.0\.2\.
-        | 198\.51\.100\.
-        | 203\.0\.113\.
-        | 100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.
-        | (?:22[4-9]|23\d)\.
-        | 255\.255\.255\.255$
-    )""",
-    re.VERBOSE,
-)
-
-# A citation marker immediately before the match. Covers a section sign both
-# literally and as a "\\u00a7" escape, spec and table references, and version
-# strings such as "v2.3.1.49" or a "package_version" field.
-_SPEC_CITATION_BEFORE = re.compile(
-    "(?:\u00a7"
-    "|\\\\u00a"
-    "|\\bTS\\b|\\bGPCS?\\b|\\bSGP\\b|\\bETSI\\b|\\bISO\\b|\\b3GPP\\b"
-    "|\\bclause\\b|\\bsection\\b|\\bAnnex\\b|\\bTable\\b|\\bFigure\\b"
-    "|version|(?<![A-Za-z0-9])v"
-    # Digits and dots may sit between the marker and the match, so a section
-    # range written as two clause numbers joined by a dash is recognised. Any
-    # letter breaks the run, so an address after prose stays reportable.
-    ")[\\s.:\"'_\\-\\d]*$",
-    re.IGNORECASE,
-)
-
-# Object identifier arcs. An OID is a valid dotted quad numerically, and the
-# X.500 and ISO arcs below are the ones this tree actually carries, so a quad
-# inside them is a certificate OID rather than a host address.
-_OID_ARC = re.compile(r"^(?:0\.|1\.[023]\.|2\.(?:5|16|23)\.)")
-
-
-def _is_public_ipv4_leak(match: "re.Match[str]", content: str) -> bool:
-    """Whether a dotted quad is a routable address rather than a citation."""
-
-    value = match.group()
-    if _NON_ROUTABLE_IPV4.match(value) or _OID_ARC.match(value):
-        return False
-    preceding = content[max(0, match.start() - 24) : match.start()]
-    return _SPEC_CITATION_BEFORE.search(preceding) is None
-
-
-REAL_IDENTIFIER_PATTERNS: list[dict[str, Any]] = [
-    {"name": "Real SE MCC 240", "regex": re.compile(r"240\s*/\s*\d{2,3}"), "fix": "Use 001/01 (test PLMN per 3GPP TS 23.003 §2.2)"},
-    {"name": "Real NO MCC 242", "regex": re.compile(r"242\s*/\s*\d{2,3}"), "fix": "Use 001/01 (test PLMN per 3GPP TS 23.003 §2.2)"},
-    {"name": "Real EE MCC 248", "regex": re.compile(r"248\s*/\s*\d{2,3}"), "fix": "Use 001/01 (test PLMN per 3GPP TS 23.003 §2.2)"},
-    {"name": "Real SE IIN 8946", "regex": re.compile(r"8946\d{14,15}"), "fix": "Use 8988 prefix (ITU-T E.118 test range)"},
-    {"name": "Real NO IIN 8937", "regex": re.compile(r"8937\d{14,15}"), "fix": "Use 8988 prefix (ITU-T E.118 test range)"},
-    {
-        "name": "Real non-RFC 5737 IP",
-        "regex": _IPV4_CANDIDATE,
-        "filter": _is_public_ipv4_leak,
-        "fix": "Use 192.0.2.0/24, 198.51.100.0/24, or 203.0.113.0/24 (RFC 5737)",
-    },
-]
-
-BANNED_PHRASES: list[str] = [
-    "Phase 1", "Phase 2", "Phase 3", "Phase 4", "Phase 5", "Phase 6", "Phase 7",
-    "MVP", "next iteration", "future iteration", "next sprint",
-    "future-roadmap", "internal sprint", "handoff",
-    "Let me", "Let's", "We'll", "I'll", "I've",
-    "Feel free to", "As we mentioned", "Now we", "Here we", "Above we", "Below we",
-    "It is worth noting", "In a nutshell", "To sum up",
-    "Out of the box", "Under the hood", "Behind the scenes", "Deep dive", "First-class",
-    "Robust", "Seamless", "Comprehensive", "Powerful", "Cutting-edge",
-    "Production-ready", "Battle-tested", "Industry-leading", "Best-in-class", "Enterprise-grade",
-    "Carefully crafted", "Thoughtfully", "Elegantly", "The magic", "Secret sauce", "Rich set",
-    "Crucial", "Imperative", "Paramount", "Cornerstone", "Hallmark",
-    "Delve", "Leverage", "Harness",
-]
-
 SPEC_SECTIONS: dict[str, dict[str, str]] = {
     "SGP.22": {
         "url": "GSMA SGP.22 (Consumer RSP)",
@@ -600,43 +567,6 @@ def spec_section_lookup(spec_id: str) -> str:
     return json.dumps({"error": f"Spec '{spec_id}' not found. Known: {list(SPEC_SECTIONS)}."})
 
 
-@mcp.tool(annotations=READS_FILES)
-def scan_identifiers(file_path: str) -> str:
-    """Scan a source file for potential real-world identifier leaks.
-    Checks for: real MCC/MNC, non-test ICCID IINs, public IPs outside RFC 5737,
-    and internal phase labels or banned AI-prose phrases.
-
-    file_path: relative to the repo root (e.g. 'SCP03/logic/sgp22.py').
-    """
-    target = (REPO_ROOT / file_path).resolve()
-    if not target.is_file():
-        return json.dumps({"error": f"File not found: {target}"})
-
-    try:
-        content = target.read_text(encoding="utf-8")
-    except Exception as exc:
-        return json.dumps({"error": f"Cannot read file: {exc}"})
-
-    findings: list[dict[str, Any]] = []
-
-    for entry in REAL_IDENTIFIER_PATTERNS:
-        keep = entry.get("filter")
-        for match in entry["regex"].finditer(content):
-            if keep is not None and not keep(match, content):
-                continue
-            ctx_start = max(0, match.start() - 40)
-            ctx_end = min(len(content), match.end() + 40)
-            findings.append({"type": "identifier_leak", "rule": entry["name"], "match": match.group(), "fix": entry["fix"], "context": content[ctx_start:ctx_end]})
-
-    for phrase in BANNED_PHRASES:
-        for match in re.finditer(re.escape(phrase), content, re.IGNORECASE):
-            ctx_start = max(0, match.start() - 30)
-            ctx_end = min(len(content), match.end() + 30)
-            findings.append({"type": "banned_phrase", "phrase": phrase, "context": content[ctx_start:ctx_end]})
-
-    return json.dumps({"file": file_path, "findings_count": len(findings), "findings": findings[:50]}, indent=2)
-
-
 @mcp.tool(annotations=READ_ONLY)
 def aide_registry_lookup(query: str) -> str:
     """Look up an AID (Application Identifier) in the YggdraSIM AID registry.
@@ -732,8 +662,8 @@ async def pcsc_transmit(
     reader_name: case-insensitive substring match against reader names.
     timeout_ms: max wait for card response (default 5000).
     Requires pyscard (pip install pyscard) and a physical reader + card.
-    Requires YGGDRASIM_MCP_ALLOW_CARD. Irreversible instructions additionally
-    require YGGDRASIM_MCP_ALLOW_DESTRUCTIVE; call apdu_risk first if unsure.
+    Requires YGGDRASIM_MCP_ALLOW_CARD. Anything that changes the card also
+    requires YGGDRASIM_MCP_ACCESS=write; call apdu_risk first if unsure.
     """
     # Classify before touching hardware, so a refusal costs nothing.
     clean_early = hex_apdu.strip().replace(" ", "").replace(":", "").replace("0x", "")
@@ -834,18 +764,7 @@ async def pcsc_transmit(
         "SW2": f"0x{sw2:02X}",
     }
 
-    # Add status word meaning
-    sw_int = (sw1 << 8) | sw2
-    if sw_int in STATUS_WORDS:
-        result["status"] = STATUS_WORDS[sw_int]
-    elif sw1 == 0x61:
-        result["status"] = f"Success. {sw2} bytes available."
-    elif sw1 == 0x6C:
-        result["status"] = f"Wrong Le. Correct: {sw2}."
-    elif sw1 == 0x63 and (sw2 & 0xF0) == 0xC0:
-        result["status"] = f"Verification failed. {sw2 & 0x0F} retries left."
-    else:
-        result["status"] = "See SW1/SW2."
+    result["status"] = _status_word_meaning(sw1, sw2)
 
     return json.dumps(result, indent=2)
 
@@ -1119,6 +1038,13 @@ def session_diff(left_path: str, right_path: str) -> str:
         return json.dumps(diff_recordings(left_path, right_path).to_json(), indent=2)
     except SessionDiffError as exc:
         return json.dumps({"error": str(exc)})
+    except (OSError, ValueError) as exc:
+        # A recording is JSON text, so a binary or truncated file reaches
+        # here as UnicodeDecodeError or JSONDecodeError, both ValueError.
+        # Raising would surface as a protocol error instead of an answer.
+        return json.dumps({
+            "error": f"Could not read a recording: {type(exc).__name__}: {exc}",
+        })
 
 
 @mcp.tool(annotations=TOUCHES_CARD)
@@ -1180,14 +1106,24 @@ async def card_bridge_transmit(
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"error": f"Relay request failed: {exc}"})
 
+    # A bridge may report the status word as one hex string or as two
+    # integers. Resolve either, and always add the same normalised pair the
+    # other card tools return, so a caller does not branch on the shape.
     status = str(response.get("sw") or response.get("status") or "").upper()
+    if len(status) != 4 and "sw1" in response and "sw2" in response:
+        try:
+            status = f"{int(response['sw1']):02X}{int(response['sw2']):02X}"
+        except (TypeError, ValueError):
+            status = ""
     if len(status) == 4:
         try:
-            response["statusMeaning"] = STATUS_WORDS.get(
-                int(status, 16), "See SW1/SW2."
-            )
+            meaning = _status_word_meaning(int(status[:2], 16), int(status[2:], 16))
         except ValueError:
-            pass
+            meaning = ""
+        if meaning:
+            response["status_word"] = status
+            response["meaning"] = meaning
+            response.setdefault("statusMeaning", meaning)
     return json.dumps(response, indent=2, default=str)
 
 
@@ -1332,7 +1268,7 @@ def apdu_risk(hex_apdu: str) -> str:
             **verdict,
             "would_be_sent": _apdu_refusal(verdict) is None,
             "card_access_enabled": card_access_allowed(),
-            "destructive_enabled": destructive_allowed(),
+            "access_mode": access_mode(),
             "note": (
                 "Irreversible on a real card; a consumed retry counter does "
                 "not come back."
@@ -1537,11 +1473,14 @@ def _relative_path_arguments(batch: list[str]) -> list[str]:
     return flagged
 
 
-SHELL_WRITE_ENV = "YGGDRASIM_MCP_ALLOW_SHELL_WRITE"
+#: Verbs that reach a card even though their shell opens no reader at
+#: startup. SCP80 builds an envelope offline but SEND puts it on a card.
+_CARD_REACHING_VERBS = frozenset({"SEND", "SENDRAW", "OTA"})
 
-#: Refused in every shell: these execute a file of commands, so nothing
-#: inside them ever reaches the verb gate.
-_COMMAND_FILE_VERBS = frozenset({"RUN", "SCRIPT"})
+#: Gated on their own opt-in in every shell: these run commands this gate
+#: never sees. RUN and SCRIPT take a file; RAW passes its arguments through
+#: to the underlying tool as a subcommand.
+_COMMAND_FILE_VERBS = frozenset({"RUN", "SCRIPT", "RAW"})
 
 #: Refused in every shell: a tool argument reaches the model provider, so a
 #: verb taking key material would put a Ki in a transcript.
@@ -1560,6 +1499,9 @@ class _ShellSpec:
     write: frozenset
     destructive: frozenset
     interactive: frozenset = frozenset()
+    #: Verbs that reach a card from a shell that opens no reader itself.
+    #: Only meaningful when ``card`` is False; a card shell gates everything.
+    card_verbs: frozenset = frozenset()
 
 
 #: Only shells whose verbs were enumerated in full appear here. Guessing a
@@ -1571,23 +1513,23 @@ _SHELLS: dict[str, _ShellSpec] = {
         card=False,
         read=frozenset({
             "CHECK", "DIFF", "DIFF-PRESET", "DUMP", "HELP", "INFO", "INSPECT",
-            "LINT", "LIST", "LIST-AKA", "LIST-TOKENS", "PRESETS",
-            "PREVIEW-PRESET", "PROFILE-DIR", "PWD", "RELEASE-GATE", "STATUS",
-            "TOKENS", "TREE", "TYPE", "USE", "OPEN", "EXIT", "QUIT",
+            "LINT", "LIST-AKA", "LIST-TOKENS", "PRESETS", "PREVIEW-PRESET",
+            "PROFILE-DIR", "PWD", "Q", "STATUS", "TREE", "USE", "OPEN",
+            "EXIT", "QUIT",
         }),
         write=frozenset({
-            "ADD", "ADD-TOKEN", "APPLY", "APPLY-SIDECAR", "APPLY-TEMPLATE",
-            "APPLY-TOKENS", "ENCODE-JSON", "EXPORT", "EXPORT-CSV",
-            "EXPORT-SIDECAR", "EXPORT-TOKENS", "EXPORT-TOKENS-CSV",
-            "EXTRACT-APPS", "GENERATE-BATCH", "GENERATE-PROFILE",
-            "GENERATE-TEMPLATE", "IMPORT-CSV", "IMPORT-TOKENS-CSV",
-            "NEW-PROFILE", "NEW-TEMPLATE", "RENAME", "RENAME-TOKEN",
-            "RETOKENISE", "RETOKENISE-LENGTHS", "RETOKENIZE",
-            "RETOKENIZE-LENGTHS", "SET", "SET-TOKEN", "SPLIT", "TRANSCODE-DIR",
+            # TOKENS dispatches its own SET / ADD / REMOVE subcommands, which
+            # the leading-verb gate cannot see, so it sits at the write tier.
+            # LIST-TOKENS is the read-only way to see them.
+            "ADD-TOKEN", "APPLY-TEMPLATE", "APPLY-TOKENS", "ENCODE-JSON",
+            "EXPORT-TOKENS", "EXPORT-TOKENS-CSV", "EXTRACT-APPS",
+            "GENERATE-BATCH", "GENERATE-PROFILE", "GENERATE-TEMPLATE",
+            "IMPORT-TOKENS-CSV", "NEW-PROFILE", "NEW-TEMPLATE",
+            "RENAME-TOKEN", "RETOKENISE-LENGTHS", "RETOKENIZE-LENGTHS",
+            "SET-TOKEN", "SPLIT", "TOKENS", "TOOL", "TRANSCODE-DIR",
         }),
         destructive=frozenset({
-            "DELETE", "REMOVE", "REMOVE-NAA", "REMOVE-TOKEN",
-            "PROVISION-AKA", "RANDOMIZE-AKA",
+            "REMOVE-NAA", "REMOVE-TOKEN", "PROVISION-AKA", "RANDOMIZE-AKA",
         }),
         interactive=frozenset({
             "DIFF-TUI", "NEW-PROFILE-WIZARD", "TRANSCODE-TUI", "TUI",
@@ -1599,16 +1541,17 @@ _SHELLS: dict[str, _ShellSpec] = {
         summary="Card admin: filesystem, registry, GlobalPlatform (DRIVES A CARD)",
         card=True,
         read=frozenset({
-            "AIDS", "ARR", "ATR", "BINDS", "CERT-INFO", "GET-IOT", "GUIDE",
-            "HELP", "INFO", "KEYS", "LIST", "LIST-IOT", "OTA", "PROFILE-DIFF",
-            "READ", "RECORD", "SCAN", "SELECT", "SHOW", "VALIDATE", "EXIT",
-            "QA", "DEBUG", "VERBOSE",
+            "AIDS", "APPS", "ARR", "ATR", "BINDS", "CERT-INFO", "CLS",
+            "GET-IOT", "GUIDE", "HELP", "INFO", "KEYS", "LIST", "LIST-IOT",
+            "OTA", "PKGS", "PROFILE-DIFF", "Q", "READ", "RECORD", "SCAN",
+            "SD", "SELECT", "SHOW", "VALIDATE", "EXIT", "QA", "DEBUG",
+            "VERBOSE",
         }),
         write=frozenset({
             "AUTH-SD", "CLEAR-GOLD-PROFILE", "DUMP-FS", "EXPORT-EUICC",
-            "GOLD-PROFILE", "LOGOUT", "RESET", "SCP02-SD", "SCP03-SD",
-            "SET-AID-ALIAS", "SET-DEFAULT", "SET-GOLD-PROFILE", "STK",
-            "UPDATE",
+            "GOLD-PROFILE", "LOGOUT", "RESET", "RUN-AUTH-TEST", "SCP02-SD",
+            "SCP03-SD", "SET-AID-ALIAS", "SET-DEFAULT", "SET-GOLD-PROFILE",
+            "STK", "UPDATE",
         }),
         destructive=frozenset({
             # Applet lifecycle, raw card writes, and key-bag export.
@@ -1618,6 +1561,32 @@ _SHELLS: dict[str, _ShellSpec] = {
             "INSTALL-LOAD", "INSTALL-PERSONALIZE", "INSTALL-REGISTRY",
             "INSTALL-SELECTABLE", "LOAD", "LOAD-CAP", "MAKE-SELECTABLE",
             "PERSONALIZE", "REGISTRY-UPDATE", "STORE-DATA", "EXPORT-KEYBAG",
+            # GP delete and SET STATUS lock/unlock.
+            "DEL", "DELETE", "LOCK", "UNLOCK",
+        }),
+        interactive=frozenset({
+            # ShellInteractiveWizards.* prompt for input, so a batch would
+            # block on a terminal that is not there.
+            "CONFIG", "FS-ADMIN", "GET-DATA", "MANAGE-CHANNEL", "MANAGE-PIN",
+            "MANAGE-PROFILE", "PUT-KEY", "REPORT", "RUN-AUTH", "SET-STATUS",
+            "WIZARD",
+        }),
+    ),
+    "scp80": _ShellSpec(
+        module="SCP80",
+        summary="SCP80 OTA: build an envelope offline, or SEND it to a card",
+        # Opens no reader at startup, but SEND, SENDRAW and OTA put commands
+        # on a card, so those verbs carry their own card check.
+        card=False,
+        read=frozenset({"HELP", "HISTORY", "SHOW", "EXIT", "QUIT", "Q", "QA"}),
+        write=frozenset({
+            "BUILD", "ICCID", "SET", "RESET", "OTA", "SEND", "SENDRAW",
+        }),
+        destructive=frozenset(),
+        interactive=frozenset({
+            # Hands the reader to the SCP03 shell's own REPL, which then
+            # waits on a terminal this batch does not have.
+            "ADMIN",
         }),
     ),
     "scp11_local_access": _ShellSpec(
@@ -1625,17 +1594,17 @@ _SHELLS: dict[str, _ShellSpec] = {
         summary="Local eUICC profile management over ES10 (DRIVES A CARD)",
         card=True,
         read=frozenset({
-            "CERTS", "DISCOVER", "DISCOVER-VIA-LOCAL-SNAPSHOT",
-            "DISCOVER-VIA-SGP22-MANAGER", "EID", "EIM-DISCOVER", "ENABLED",
-            "EXPLAIN-LAST", "GET-METADATA", "HELP", "INFO", "LIST", "METADATA",
-            "METADATA-LINT", "PROFILE", "SCAN", "SMDP-CERTS", "STATUS",
+            "?", "CERTS", "DISCOVER", "EIM-DISCOVER", "EXPLAIN-LAST",
+            "GET-METADATA", "HELP", "INFO", "LIST", "METADATA",
+            "METADATA-LINT", "PROFILE", "Q", "SCAN", "SMDP-CERTS", "STATUS",
             "EXIT", "QUIT", "QA",
         }),
         write=frozenset({
-            "CANCEL", "DISABLE", "DISABLE-PROFILE", "ENABLE", "ENABLE-PROFILE",
-            "RECORD", "START", "STOP", "STORE-METADATA",
-            "STORE-METADATA-CUSTOM", "STORE-METADATA-CUSTOM-ALL",
-            "UPDATE-METADATA",
+            # RECORD dispatches START / STOP / CANCEL itself; all three are
+            # write-tier, so the leading verb carries the right class.
+            "DISABLE", "DISABLE-PROFILE", "ENABLE", "ENABLE-PROFILE",
+            "RECORD", "STORE-METADATA", "STORE-METADATA-CUSTOM",
+            "STORE-METADATA-CUSTOM-ALL", "UPDATE-METADATA",
         }),
         destructive=frozenset({
             "DELETE", "DELETE-PROFILE", "LOAD-PROFILE", "METADATA-CLEAR",
@@ -1643,16 +1612,124 @@ _SHELLS: dict[str, _ShellSpec] = {
             "EXPORT-KEYBAG",
         }),
     ),
+    "scp11_live": _ShellSpec(
+        module="SCP11.live.main",
+        summary="SGP.22/SGP.32 profile download and eUICC management (DRIVES A CARD)",
+        # Startup preflight enumerates PC/SC readers before any verb runs.
+        card=True,
+        read=frozenset({
+            "?", "AIDS", "DISCOVER", "EIM-DISCOVER", "ES9-CERT-INFO",
+            "GET-ALL-DATA", "GET-CERTS", "GET-EID", "GET-EIM-CONFIG",
+            "GET-ES9", "GET-EUICC-INFO1", "GET-EUICC-INFO2", "GET-METADATA",
+            "GET-NOTIFICATIONS", "GET-POL", "GET-RAT", "GET-SMDP", "H",
+            "HELP", "HELP-ALL", "INFO", "LIST", "METADATA", "Q", "QA",
+            "READ-METADATA", "SCAN", "STATUS", "EXIT", "QUIT",
+        }),
+        write=frozenset({
+            "CLEAR-NOTIFICATIONS", "DISABLE-PROFILE", "EIM-AUTHENTICATE",
+            "ENABLE-PROFILE", "REMOVE-NOTIFICATION", "SET-ES9", "SET-ES9-CA",
+            "SET-ES9-TLS", "SET-POL", "SET-SMDP", "STORE-METADATA",
+            "VERIFY-SCP11",
+        }),
+        destructive=frozenset({
+            # Each of these installs a profile, wipes session state, or runs
+            # a flow whose steps are chosen by the remote side.
+            "DELETE-PROFILE", "DOWNLOAD", "DOWNLOAD-AC", "DOWNLOAD-PROFILE",
+            "EIM-DOWNLOAD", "FLOW", "POLL", "RESET",
+        }),
+    ),
+    "scp11_eim": _ShellSpec(
+        module="SCP11.eim_local.main",
+        summary="SGP.32 local eIM: author, lint, and issue eIM packages",
+        # HELP and the package-authoring verbs run with no reader present.
+        # The card-facing subset carries its own check through card_verbs.
+        card=False,
+        read=frozenset({
+            "?", "COUNTERS", "DISCOVER", "EIM-CERTS", "EIM-DISCOVER",
+            "EIM-PACKAGE", "EIM-PACKAGE-EXPLAIN", "EIM-PACKAGE-LINT",
+            "ERROR-CODES", "GET-EIM-CONFIG", "GET-METADATA", "HANDOVER-STATUS",
+            "HELP", "HOTFOLDER", "HOTFOLDER-LIST", "HOTFOLDER-METADATA",
+            "INFO", "ISDR-GET-EIM-CONFIG", "LIST", "METADATA",
+            "METADATA-LINT", "PATHS", "PROFILE", "Q", "QA", "RESP-LOG",
+            "RESP-LOG-FILTER", "RESPONSE-LOG", "SCAN", "STATUS", "EXIT",
+            "QUIT",
+        }),
+        write=frozenset({
+            "ADD-EIM", "ADD-INITIAL-EIM", "COUNTER", "DISABLE",
+            "DISABLE-PROFILE", "EIM-ACK", "EIM-ACKNOWLEDGE", "ENABLE",
+            "ENABLE-PROFILE", "ERROR-CODE-SET", "HANDOVER-SET",
+            "HOTFOLDER-AGGREGATE", "HOTFOLDER-EXPORT", "IPAD-DISCOVER",
+            "ISDR-ADD-EIM", "ISDR-ADD-INITIAL-EIM", "NOTIF-HYGIENE",
+            "RECORD", "STORE-METADATA", "UPDATE-METADATA",
+        }),
+        destructive=frozenset({
+            # Issuing a package executes whatever that JSON carries, which
+            # may be a DeleteEim or a memory reset. The classifier cannot
+            # read the file, so every issue path sits at the top tier.
+            "DELETE", "DELETE-EIM", "DELETE-PROFILE", "EIM-PACKAGE-CLEAR",
+            "EIM-PACKAGE-ISSUE", "EIM-PACKAGE-ISSUE-ALL", "EUICC-MEMORY-RESET",
+            "HOTFOLDER-CAMPAIGN", "HOTFOLDER-CLEAR", "HOTFOLDER-FETCH",
+            "IPAD-LIVE", "IPAD-TEST", "ISDR-DELETE-EIM",
+            "ISDR-EUICC-MEMORY-RESET", "ISDR-LOAD-PACKAGE", "ISDR-PACKAGE",
+            "LOAD-EIM-PACKAGE", "LOAD-PROFILE", "METADATA-CLEAR",
+            "POLL-CAMPAIGN", "PROFILE-CLEAR", "RESP-LOG-CLEAR",
+        }),
+        card_verbs=frozenset({
+            "ADD-EIM", "ADD-INITIAL-EIM", "DELETE-EIM", "DELETE-PROFILE",
+            "DISABLE", "DISABLE-PROFILE", "DISCOVER", "EIM-ACK",
+            "EIM-ACKNOWLEDGE", "EIM-CERTS", "EIM-DISCOVER",
+            "EIM-PACKAGE-ISSUE", "EIM-PACKAGE-ISSUE-ALL", "ENABLE",
+            "ENABLE-PROFILE", "EUICC-MEMORY-RESET", "GET-EIM-CONFIG",
+            "HOTFOLDER-CAMPAIGN", "HOTFOLDER-FETCH", "INFO", "IPAD-DISCOVER",
+            "IPAD-LIVE", "IPAD-TEST", "ISDR-ADD-EIM", "ISDR-ADD-INITIAL-EIM",
+            "ISDR-DELETE-EIM", "ISDR-EUICC-MEMORY-RESET",
+            "ISDR-GET-EIM-CONFIG", "ISDR-LOAD-PACKAGE", "ISDR-PACKAGE",
+            "LOAD-EIM-PACKAGE", "LOAD-PROFILE", "NOTIF-HYGIENE",
+            "POLL-CAMPAIGN", "SCAN", "STORE-METADATA", "UPDATE-METADATA",
+        }),
+    ),
+    "scp11_relay": _ShellSpec(
+        module="SCP11.relay.main",
+        summary="SGP.22 relay compatibility shell: ES2+/ES9+ and profile lifecycle (DRIVES A CARD)",
+        # Same startup preflight as scp11_live: readers are enumerated before
+        # the first verb runs, so HELP alone would touch hardware.
+        card=True,
+        read=frozenset({
+            "?", "AIDS", "EIM-DISCOVER", "ES9-CERT-INFO", "GET-CERTS",
+            "GET-EID", "GET-EIM-CONFIG", "GET-ES9", "GET-EUICC-INFO1",
+            "GET-EUICC-INFO2", "GET-METADATA", "GET-NOTIFICATIONS",
+            "GET-POL", "GET-RAT", "GET-SMDP", "H", "HELP", "INFO", "LIST",
+            "Q", "QA", "READ-METADATA", "SCAN", "STATUS", "EXIT", "QUIT",
+        }),
+        write=frozenset({
+            "DISABLE-PROFILE", "EIM-AUTHENTICATE", "ENABLE-PROFILE",
+            "REMOVE-NOTIFICATION", "SET-ES9", "SET-ES9-CA", "SET-ES9-TLS",
+            "SET-POL", "SET-SMDP", "STORE-METADATA", "VERIFY-SCP11",
+        }),
+        destructive=frozenset({
+            # Each installs a profile or runs a flow the remote side steers.
+            "DELETE-PROFILE", "DOWNLOAD-AC", "EIM-DOWNLOAD", "FLOW",
+        }),
+    ),
+    "suci_tool": _ShellSpec(
+        module="Tools.SuciTool.main",
+        summary="SUCI key generation and public-key export for USIM / 5GS provisioning",
+        # Key material on disk, never a card.
+        card=False,
+        read=frozenset({
+            "DUMP", "HELP", "PWD", "Q", "QA", "QUIT", "STATUS", "USE", "EXIT",
+        }),
+        write=frozenset({
+            # GENERATE writes a key pair. TOOL redirects which binary the
+            # other verbs invoke, so it decides what actually runs.
+            "GENERATE", "TOOL",
+        }),
+        destructive=frozenset(),
+    ),
 }
 
 _SHELL_TIMEOUT_SECONDS = 120
 _SHELL_OUTPUT_LIMIT = 60_000
-
-
-def shell_write_allowed() -> bool:
-    """Whether verbs that write files may run."""
-
-    return _env_on(SHELL_WRITE_ENV)
 
 
 def classify_shell_command(command: str, shell: str = "profile_package") -> dict[str, Any]:
@@ -1700,57 +1777,61 @@ def _shell_batch_refusal(commands: list[str], shell: str = "profile_package") ->
         risk = verdict["risk"]
         if risk == "empty":
             continue
-        if risk == "command_file":
+        verb = verdict["verb"]
+        if risk == "command_file" and not script_files_allowed():
             return json.dumps({
                 "error": (
-                    f"Refused: {verdict['verb']} executes a file of commands, "
-                    "which would carry any verb past this gate unchecked."
+                    f"Refused: {verb} runs commands this gate cannot inspect, "
+                    "so nothing it carries is classified. Set "
+                    f"{SCRIPT_FILES_ENV}=1 to run them anyway."
                 ),
-                "verb": verdict["verb"],
-            })
-        if risk == "secret_argument":
-            return json.dumps({
-                "error": (
-                    f"Refused: {verdict['verb']} takes key material as an "
-                    "argument, and a tool argument reaches the model provider."
-                ),
-                "verb": verdict["verb"],
-            })
-        if risk == "destructive" and not destructive_allowed():
-            return json.dumps({
-                "error": (
-                    f"Refused: {verdict['verb']} is destructive and cannot be "
-                    f"undone. It needs {CARD_ACCESS_ENV}=1 and "
-                    f"{DESTRUCTIVE_ENV}=1."
-                ),
-                "verb": verdict["verb"],
-                "risk": "destructive",
+                "verb": verb,
+                "risk": "command_file",
             })
         if risk == "interactive":
             return json.dumps({
                 "error": (
-                    f"Refused: {verdict['verb']} opens an interactive view and "
-                    "would hang a non-interactive batch."
+                    f"Refused: {verb} opens an interactive view and would hang "
+                    "a non-interactive batch. This is not an access-level "
+                    "question; a batch has no terminal."
                 ),
-                "verb": verdict["verb"],
+                "verb": verb,
             })
         if risk == "unknown":
             return json.dumps({
                 "error": (
-                    f"Refused: {verdict['verb']} is not a recognised verb for "
-                    f"the {shell} shell. Unknown verbs are refused rather than "
-                    "assumed safe; run HELP to see what is available."
+                    f"Refused: {verb} is not a recognised verb for the {shell} "
+                    "shell. Unknown verbs are refused rather than assumed "
+                    "safe; run HELP to see what is available."
                 ),
-                "verb": verdict["verb"],
+                "verb": verb,
             })
-        if risk == "write" and not shell_write_allowed():
+        # A verb that reaches a card from a shell that opens no reader at
+        # startup, so the shell-level card check above did not cover it.
+        reaches_card = verb in _CARD_REACHING_VERBS or verb in spec.card_verbs
+        if reaches_card and not card_access_allowed():
             return json.dumps({
                 "error": (
-                    f"Refused: {verdict['verb']} writes files. Set "
-                    f"{SHELL_WRITE_ENV}=1 to permit it."
+                    f"Refused: {verb} puts commands on a card, so it needs "
+                    f"{CARD_ACCESS_ENV}=1."
                 ),
-                "verb": verdict["verb"],
-                "risk": "write",
+                "verb": verb,
+                "reaches_a_card": True,
+            })
+        if risk in ("write", "destructive", "secret_argument") and not write_allowed():
+            detail = {
+                "destructive": "cannot be undone",
+                "secret_argument": "takes key material as an argument, which "
+                                   "reaches the model provider",
+            }.get(risk, "changes state")
+            return json.dumps({
+                "error": (
+                    f"Refused: {verb} {detail}, and this server is read-only. "
+                    f"Set {ACCESS_ENV}={ACCESS_WRITE} to permit it."
+                ),
+                "verb": verb,
+                "risk": risk,
+                "access_mode": access_mode(),
             })
     return None
 
@@ -1765,26 +1846,33 @@ def shell_run(
 ) -> str:
     """Run a batch of operator-shell commands and return the output.
 
-    WARNING: two of these shells drive a real card. With the opt-ins set,
+    WARNING: some of these shells drive a real card. With the opt-ins set,
     verbs reachable here can install applets, write keys, disable or delete
-    a profile, and export a key bag. None of that can be undone. Use a
-    throwaway test card, never one carrying live credentials.
+    a profile, send an OTA envelope, and export a key bag. None of that can
+    be undone. Use a throwaway test card, never one carrying live
+    credentials.
 
-    shell: one of profile_package (files only), scp03 (DRIVES A CARD),
-        scp11_local_access (DRIVES A CARD). Run "HELP; EXIT" against a
-        shell to see its verbs.
+    shell: one of profile_package (SAIP authoring, files only), scp80
+        (builds OTA offline; SEND/SENDRAW/OTA reach a card), scp11_eim
+        (authors and lints SGP.32 eIM packages offline; the issue and
+        ISDR verbs reach a card), suci_tool (SUCI key generation, files
+        only), scp03 (DRIVES A CARD), scp11_live (DRIVES A CARD),
+        scp11_relay (DRIVES A CARD), scp11_local_access (DRIVES A CARD).
+        Run "HELP; EXIT" against a shell to see its verbs.
     commands: semicolon-separated batch, executed left to right in one
         non-interactive process. State does not survive between calls, so
         put a whole flow in one batch and pass absolute paths, for example
         "USE /abs/profile.der; INFO; TREE; LINT; EXIT".
     timeout_seconds: how long to allow the batch (default 120).
 
-    Gating, in order. A card-driving shell needs YGGDRASIM_MCP_ALLOW_CARD,
-    checked before the process starts because those shells connect to a
-    reader during startup. Verbs that write need
-    YGGDRASIM_MCP_ALLOW_SHELL_WRITE. Destructive verbs additionally need
-    YGGDRASIM_MCP_ALLOW_DESTRUCTIVE. Unknown verbs, interactive verbs, and
-    verbs that execute a command file are always refused.
+    Gating, in order. Reading is always allowed. A shell that opens a reader
+    at startup, or any verb that puts commands on a card, needs
+    YGGDRASIM_MCP_ALLOW_CARD. Any verb that changes state -- on disk or on a
+    card -- needs YGGDRASIM_MCP_ACCESS=write, as does a verb that takes key
+    material as an argument, because that argument reaches the model
+    provider. RUN, SCRIPT, and RAW need YGGDRASIM_MCP_ALLOW_SCRIPT_FILES,
+    separately, because what they carry is never classified. Unknown verbs
+    and interactive verbs are refused at every access level.
     """
     shell = str(shell or "").strip().lower()
     spec = _SHELLS.get(shell)
@@ -1802,7 +1890,22 @@ def shell_run(
     if refusal is not None:
         return refusal
 
+    import importlib.util
     import subprocess
+
+    # The standalone distribution ships no operator shells. Say so, rather
+    # than spawning a subprocess that exits 1 with an ImportError traceback.
+    # find_spec raises rather than returning None when the parent package is
+    # itself missing, which is exactly the standalone case.
+    try:
+        shell_present = importlib.util.find_spec(spec.module) is not None
+    except (ImportError, ValueError):
+        shell_present = False
+    if not shell_present:
+        return json.dumps({
+            "error": f"The {shell} shell is unavailable in this install: "
+                     f"no module {spec.module}. It needs the full YggdraSIM install.",
+        })
 
     argv = [sys.executable, "-W", "ignore::RuntimeWarning", "-m",
             spec.module, "--cmd", str(commands)]
@@ -1828,8 +1931,8 @@ def shell_run(
         "drives_a_card": spec.card,
         "exit_code": completed.returncode,
         "verbs": [classify_shell_command(c, shell)["verb"] for c in batch if c.strip()],
-        "write_enabled": shell_write_allowed(),
-        "destructive_enabled": destructive_allowed(),
+        "access_mode": access_mode(),
+        "card_access": card_access_allowed(),
         "output": stdout[:_SHELL_OUTPUT_LIMIT],
         "output_truncated": max(0, len(stdout) - _SHELL_OUTPUT_LIMIT),
     }
@@ -2092,6 +2195,365 @@ def ensure_plugin_extensions(server: Any = None) -> dict[str, Any]:
     _EXTENSION_STATE.clear()
     _EXTENSION_STATE.update(report)
     return dict(_EXTENSION_STATE)
+
+
+# ---------------------------------------------------------------------------
+# Card transport control
+# ---------------------------------------------------------------------------
+
+#: An open session pins a reader handle and keeps the card powered, so the
+#: registry stays small and self-expiring rather than growing per call.
+_MAX_CARD_SESSIONS = 4
+_CARD_SESSION_IDLE_SECONDS = 600
+_CARD_SESSIONS: dict[str, dict[str, Any]] = {}
+
+
+def _card_backend_module() -> Any:
+    from yggdrasim_common import card_backend
+
+    return card_backend
+
+
+def _expire_idle_sessions() -> list[str]:
+    """Close sessions nobody has touched, and report which ones went."""
+
+    import time
+
+    cutoff = time.monotonic() - _CARD_SESSION_IDLE_SECONDS
+    expired = [sid for sid, entry in _CARD_SESSIONS.items() if entry["touched"] < cutoff]
+    for sid in expired:
+        entry = _CARD_SESSIONS.pop(sid, None)
+        if entry is None:
+            continue
+        try:
+            entry["connection"].disconnect()
+        except Exception:  # noqa: BLE001 -- a dead handle is already closed
+            pass
+    return expired
+
+
+def _atr_hex(connection: Any) -> str:
+    try:
+        return bytes(connection.getATR()).hex().upper()
+    except Exception:  # noqa: BLE001 -- relay and sim backends may omit it
+        return ""
+
+
+@mcp.tool(annotations=PROBES_WORLD)
+def card_backend_status() -> str:
+    """Report which transport the card stack talks through, and what is open.
+
+    Covers the three paths a command can take to a card: a local PC/SC
+    reader, the simulator, or a relay. Reports the configured backend, where
+    that setting came from, whether a relay marker is present, and every
+    open session this server holds.
+
+    Read-only, and works with every gate shut. Relay details come back
+    redacted: whether a token is configured, never its value.
+    """
+    payload: dict[str, Any] = {
+        "access_mode": access_mode(),
+        "card_access_enabled": card_access_allowed(),
+    }
+    try:
+        backend = _card_backend_module()
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Card backend unavailable: {exc}"})
+
+    try:
+        payload["backend"] = backend.get_card_backend()
+        payload["backend_source"] = backend.get_card_backend_source()
+        payload["description"] = backend.describe_card_backend()
+        payload["simulated"] = backend.is_simulated_card_backend()
+    except Exception as exc:  # noqa: BLE001
+        payload["backend_error"] = str(exc)
+
+    try:
+        marker = backend.read_card_relay_marker() or {}
+        payload["relay"] = {
+            "configured": bool(marker.get("apdu_url")),
+            "apdu_url": str(marker.get("apdu_url", "")),
+            "token_configured": bool(marker.get("token") or marker.get("token_file")),
+        }
+    except Exception:  # noqa: BLE001 -- no marker is the normal case
+        payload["relay"] = {"configured": False}
+
+    _expire_idle_sessions()
+    payload["sessions"] = [
+        {
+            "session_id": sid,
+            "reader": entry["reader"],
+            "simulated": entry.get("simulated", False),
+            "protocol": entry["protocol"],
+            "atr": entry["atr"],
+            "transmits": entry["transmits"],
+        }
+        for sid, entry in _CARD_SESSIONS.items()
+    ]
+    payload["session_limit"] = _MAX_CARD_SESSIONS
+    return json.dumps(payload, indent=2)
+
+
+@mcp.tool(annotations=TOUCHES_CARD)
+def card_backend_select(backend: str, persist: bool = False) -> str:
+    """Point the card stack at a reader, the simulator, or a relay.
+
+    backend: "reader" for local PC/SC, "sim" for the built-in simulator.
+    persist: also write the choice to the runtime settings file, so every
+        other YggdraSIM process picks it up. Off by default, because that
+        reaches beyond this server's own session.
+
+    Selecting a backend needs YGGDRASIM_MCP_ACCESS=write. Selecting
+    "reader" additionally needs YGGDRASIM_MCP_ALLOW_CARD, since it points
+    the whole stack at physical hardware. Switching to "sim" is the way to
+    work through this without a card present.
+    """
+    if not write_allowed():
+        return json.dumps({
+            "error": (
+                "Refused: choosing a card backend changes state, and this "
+                f"server is read-only. Set {ACCESS_ENV}={ACCESS_WRITE}."
+            ),
+            "access_mode": access_mode(),
+        })
+    try:
+        module = _card_backend_module()
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Card backend unavailable: {exc}"})
+
+    # normalize_card_backend folds anything unrecognised to its default, so
+    # a typo would quietly select the reader. Check the raw value first.
+    wanted = str(backend or "").strip().lower()
+    if wanted not in (module.CARD_BACKEND_READER, module.CARD_BACKEND_SIM):
+        return json.dumps({
+            "error": f"Unknown backend {backend!r}.",
+            "known": [module.CARD_BACKEND_READER, module.CARD_BACKEND_SIM],
+        })
+    if wanted == module.CARD_BACKEND_READER and not card_access_allowed():
+        return json.dumps({
+            "error": (
+                "Refused: selecting the reader backend points the card stack "
+                f"at real hardware, so it needs {CARD_ACCESS_ENV}=1. The sim "
+                "backend needs no card."
+            ),
+            "requested": wanted,
+        })
+
+    previous = module.get_card_backend()
+    try:
+        selected = module.set_card_backend(wanted, persist=bool(persist))
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Could not select {wanted!r}: {exc}"})
+    return json.dumps({
+        "previous": previous,
+        "backend": selected,
+        "persisted": bool(persist),
+        "description": module.describe_card_backend(),
+        "access_mode": access_mode(),
+    }, indent=2)
+
+
+@mcp.tool(annotations=TOUCHES_CARD)
+def card_session_open(
+    reader_index: int = 0,
+    reader_name: str = "",
+    protocol: str = "",
+) -> str:
+    """Open a card session that survives across calls, and return its id.
+
+    pcsc_transmit connects and disconnects around a single APDU, so a
+    secure-channel flow cannot work through it: the second APDU arrives on a
+    card that has forgotten the first. This holds one connection open so
+    SCP03, SCP11, and any select-then-read sequence run as one session.
+
+    reader_index: which reader to use (default 0). Ignored if reader_name is set.
+    reader_name: case-insensitive substring match against reader names.
+    protocol: "T=0", "T=1", or "" to let the reader negotiate.
+
+    Needs YGGDRASIM_MCP_ALLOW_CARD, because opening a session powers the
+    card, unless the configured backend is the simulator. Opening is not
+    itself a write: what you then send through it is classified per APDU by
+    card_session_transmit.
+
+    Close it with card_session_close. Sessions expire after 10 minutes idle,
+    and at most 4 are held at once.
+    """
+    try:
+        module = _card_backend_module()
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Card backend unavailable: {exc}"})
+
+    simulated = False
+    try:
+        simulated = bool(module.is_simulated_card_backend())
+    except Exception:  # noqa: BLE001
+        pass
+    if not simulated and not card_access_allowed():
+        return _card_access_denied()
+
+    _expire_idle_sessions()
+    if len(_CARD_SESSIONS) >= _MAX_CARD_SESSIONS:
+        return json.dumps({
+            "error": (
+                f"Refused: {_MAX_CARD_SESSIONS} sessions are already open. "
+                "Close one with card_session_close first."
+            ),
+            "open": sorted(_CARD_SESSIONS),
+        })
+
+    index = int(reader_index)
+    resolved_name = ""
+    if not simulated:
+        try:
+            readers_fn, _share, _wrapper = _load_pcsc()
+        except RuntimeError as exc:
+            return json.dumps({"error": str(exc)})
+        try:
+            reader_list = list(readers_fn())
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"error": f"Could not enumerate readers: {exc}"})
+        if not reader_list:
+            return json.dumps({"error": "No smart card readers found."})
+        if reader_name.strip():
+            wanted = reader_name.strip().lower()
+            matches = [i for i, r in enumerate(reader_list) if wanted in str(r).lower()]
+            if not matches:
+                return json.dumps({
+                    "error": f"No reader matches {reader_name!r}.",
+                    "readers": [str(r) for r in reader_list],
+                })
+            index = matches[0]
+        if index < 0 or index >= len(reader_list):
+            return json.dumps({
+                "error": f"Reader index {index} is out of range.",
+                "readers": [str(r) for r in reader_list],
+            })
+        resolved_name = str(reader_list[index])
+
+    wanted_protocol = None
+    protocol_text = str(protocol or "").strip().upper().replace(" ", "")
+    if protocol_text in ("T=0", "T0"):
+        wanted_protocol = 1
+    elif protocol_text in ("T=1", "T1"):
+        wanted_protocol = 2
+    elif protocol_text:
+        return json.dumps({"error": f"Unknown protocol {protocol!r}. Use T=0, T=1, or ''."})
+
+    try:
+        connection = module.create_card_connection(
+            reader_index=index, protocol=wanted_protocol
+        )
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Could not open a card session: {exc}"})
+
+    import time
+    import uuid
+
+    session_id = f"card-{uuid.uuid4().hex[:12]}"
+    atr = _atr_hex(connection)
+    _CARD_SESSIONS[session_id] = {
+        "connection": connection,
+        "reader": resolved_name or ("simulator" if simulated else f"index {index}"),
+        "protocol": protocol_text or "negotiated",
+        "atr": atr,
+        "transmits": 0,
+        "simulated": simulated,
+        "touched": time.monotonic(),
+    }
+    return json.dumps({
+        "session_id": session_id,
+        "reader": _CARD_SESSIONS[session_id]["reader"],
+        "atr": atr,
+        "protocol": _CARD_SESSIONS[session_id]["protocol"],
+        "simulated": simulated,
+        "description": module.describe_card_backend(),
+        "note": "State survives across calls until card_session_close.",
+    }, indent=2)
+
+
+@mcp.tool(annotations=TOUCHES_CARD)
+async def card_session_transmit(
+    session_id: str,
+    hex_apdu: str,
+    ctx: Context | None = None,
+) -> str:
+    """Send one APDU through an open session, keeping the channel alive.
+
+    session_id: from card_session_open.
+    hex_apdu: hex-encoded APDU bytes (e.g. '00A4040000').
+
+    Each APDU is classified exactly as pcsc_transmit classifies it: reads
+    need YGGDRASIM_MCP_ALLOW_CARD, and anything that changes the card also
+    needs YGGDRASIM_MCP_ACCESS=write. Unlike pcsc_transmit, the secure
+    channel and selected file survive to the next call.
+    """
+    import time
+
+    _expire_idle_sessions()
+    entry = _CARD_SESSIONS.get(str(session_id or "").strip())
+    if entry is None:
+        return json.dumps({
+            "error": f"No open session {session_id!r}. Open one with card_session_open.",
+            "open": sorted(_CARD_SESSIONS),
+        })
+
+    clean = hex_apdu.strip().replace(" ", "").replace(":", "").replace("0x", "")
+    try:
+        apdu = bytes.fromhex(clean)
+    except ValueError:
+        return json.dumps({"error": "Invalid hex APDU."})
+    verdict = classify_apdu(apdu)
+    refusal = _apdu_refusal(verdict, simulated=bool(entry.get("simulated")))
+    if refusal is not None:
+        return refusal
+    declined = await _confirm_destructive(ctx, verdict, f"session {session_id}")
+    if declined is not None:
+        return declined
+
+    try:
+        data, sw1, sw2 = entry["connection"].transmit(list(apdu))
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Transmit failed: {exc}", "session_id": session_id})
+
+    entry["transmits"] += 1
+    entry["touched"] = time.monotonic()
+    status = f"{sw1:02X}{sw2:02X}"
+    return json.dumps({
+        "session_id": session_id,
+        "status_word": status,
+        "meaning": _status_word_meaning(sw1, sw2),
+        "data": bytes(data).hex().upper(),
+        "risk": verdict["risk"],
+        "transmits": entry["transmits"],
+    }, indent=2)
+
+
+@mcp.tool(annotations=TOUCHES_CARD)
+def card_session_close(session_id: str = "") -> str:
+    """Close one open card session, or every one when session_id is empty."""
+
+    wanted = str(session_id or "").strip()
+    targets = [wanted] if wanted else sorted(_CARD_SESSIONS)
+    if wanted and wanted not in _CARD_SESSIONS:
+        return json.dumps({
+            "error": f"No open session {wanted!r}.",
+            "open": sorted(_CARD_SESSIONS),
+        })
+    closed, failed = [], {}
+    for sid in targets:
+        entry = _CARD_SESSIONS.pop(sid, None)
+        if entry is None:
+            continue
+        try:
+            entry["connection"].disconnect()
+            closed.append(sid)
+        except Exception as exc:  # noqa: BLE001
+            failed[sid] = str(exc)
+    payload: dict[str, Any] = {"closed": closed, "still_open": sorted(_CARD_SESSIONS)}
+    if failed:
+        # The handle is gone from the registry either way; say so plainly.
+        payload["disconnect_errors"] = failed
+    return json.dumps(payload, indent=2)
 
 
 # ---------------------------------------------------------------------------

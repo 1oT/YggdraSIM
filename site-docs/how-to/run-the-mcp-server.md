@@ -15,56 +15,90 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 ## Goal
 
-Give an AI assistant the YggdraSIM decode and lint surfaces as callable
-tools, so it can parse an APDU, resolve a status word, look up a BER-TLV
-tag or spec section, scan a file for telecom identifiers, and lint a SAIP
-profile package without a human pasting hex back and forth.
+Give an AI assistant the YggdraSIM tool surface, so it can do the work an
+operator does rather than hand hex back and forth: decode an APDU or an
+ASN.1 structure, resolve a status word or spec section, lint a SAIP package
+or an eIM package, diff two session recordings, drive a card, and run batch
+commands in the operator shells.
+
+26 tools, 4 reference resources, and 3 canned workflows. Eight operator
+shells are reachable through `shell_run`, covering 360 classified verbs --
+every entry point in the project that has a batch mode.
 
 The server speaks the Model Context Protocol over stdio and works with any
 MCP client (Claude Code, Claude Desktop, and other MCP-capable tools).
 
+What it deliberately does not do is decide it is allowed to act. Every
+capability that changes something sits behind an opt-in an operator sets on
+the server entry, described under [Access model](#access-model).
+
+## Access model
+
+The intent is that an agent can do what an operator can do, given the same
+information -- build a SAIP profile, install an applet, test an OTA
+envelope. What it cannot do is decide on its own that it is allowed to.
+
+The server starts **read-only**, and three independent switches widen it.
+None implies another, and each is set on the server entry rather than per
+call, so the choice is persistent and visible.
+
+| Variable | Off (default) | On |
+| --- | --- | --- |
+| `YGGDRASIM_MCP_ACCESS` | reads only | `write` also permits anything that changes state |
+| `YGGDRASIM_MCP_ALLOW_CARD` | nothing reaches hardware | tools and verbs may reach a physical card |
+| `YGGDRASIM_MCP_ALLOW_SCRIPT_FILES` | `RUN` / `SCRIPT` refused | an unverified command file may be executed |
+
+`YGGDRASIM_MCP_ACCESS` is a mode, not a flag: it reads `write` (also
+`readwrite`, `read-write`, `rw`) and treats everything else, including
+`1` and `yes`, as read-only. A truthy-looking value is not a request for
+write access.
+
+The two axes are orthogonal on purpose. Write access without card access
+builds profiles and OTA envelopes on disk and never touches hardware. Card
+access without write access reads a card and cannot change it.
+
 ## Card safety
 
-Two tools drive a real card: `pcsc_transmit` locally and
-`card_bridge_transmit` through a relay. An MCP client is usually an agent
+Several tools reach a real card: `pcsc_transmit` locally,
+`card_bridge_transmit` through a relay, and the `card_session_*` tools
+through a connection they hold open. An MCP client is usually an agent
 acting without step-by-step review, and a wrong APDU is not always
 recoverable. PIN and PUK retry counters only decrement, an ADM key can
 block permanently, and a terminated card does not come back.
 
-There are three layers in front of that, in order.
-
-### 1. Card access is off by default
+### Card access is off by default
 
 Nothing reaches a card unless `YGGDRASIM_MCP_ALLOW_CARD` is set. With it
-unset both card tools refuse with an explanation, and the other 14 tools
+unset the card tools refuse with an explanation, and the rest of the 26
 work normally.
 
 Note what enabling it actually says: `card_bridge_transmit` reaches
 whatever relay URL it is given, so the flag covers the local reader **and**
 every rig this host can reach.
 
-### 2. Irreversible instructions need a second opt-in
+### Changing a card needs write access as well
 
-With card access on, APDUs are classified by instruction byte and the
-irreversible ones still refuse:
+With card access on, APDUs are classified by instruction byte, and the two
+classes that change the card need `YGGDRASIM_MCP_ACCESS=write`:
 
 | Class | Examples | Needs |
 | --- | --- | --- |
 | read | SELECT, READ BINARY, READ RECORD, GET STATUS | `ALLOW_CARD` |
-| write | UPDATE BINARY, UPDATE RECORD, INSTALL, STORE DATA | `ALLOW_CARD` |
-| destructive | VERIFY, CHANGE PIN, RESET RETRY COUNTER, PUT KEY, DELETE, SET STATUS, DEACTIVATE FILE, STORE DATA carrying an eUICC memory reset | `ALLOW_CARD` **and** `YGGDRASIM_MCP_ALLOW_DESTRUCTIVE` |
+| write | UPDATE BINARY, UPDATE RECORD, INSTALL, STORE DATA | `ALLOW_CARD` **and** `ACCESS=write` |
+| destructive | VERIFY, CHANGE PIN, RESET RETRY COUNTER, PUT KEY, DELETE, SET STATUS, DEACTIVATE FILE, STORE DATA carrying an eUICC memory reset | `ALLOW_CARD` **and** `ACCESS=write` |
 
 An instruction the table does not recognise is classified as **write**, not
 read: not having seen an instruction is not evidence that it is safe.
 
-Most useful agent work is reads, so the middle tier is the one to run in.
 Call `apdu_risk` to classify a command without sending it; it works with
-the gates shut.
+every gate shut, and reports the current access mode alongside the class.
 
-### 3. A confirmation prompt before anything irreversible
+### A confirmation prompt before anything irreversible
 
 When a destructive APDU is permitted, the server asks the client to confirm
-with a human first, naming the operation and the target.
+with a human first, naming the operation and the target. The distinction
+between write and destructive survives here even though both need the same
+opt-in: reflashing a file and terminating a card are not the same act.
 
 This is defence in depth, never the only guard. Elicitation is an optional
 MCP capability, and a client that is itself an agent may answer the prompt
@@ -74,11 +108,11 @@ actually hold.
 
 ### Credentials are never requested
 
-The server never asks for a PIN, PUK, ADM key, or any other secret, and no
-tool takes one as an argument. The MCP SDK scopes in-band elicitation to
-non-sensitive data for good reason, and there is a sharper problem here: an
-agent client may answer a prompt itself, so a fabricated PIN would be
-submitted to the card and consume a real retry counter.
+The server never asks for a PIN, PUK, ADM key, or any other secret. The MCP
+SDK scopes in-band elicitation to non-sensitive data for good reason, and
+there is a sharper problem here: an agent client may answer a prompt
+itself, so a fabricated PIN would be submitted to the card and consume a
+real retry counter.
 
 Secrets go in **by path**, configured out of band by a human:
 
@@ -92,12 +126,21 @@ handles a filename, never a value, so nothing secret enters a tool
 argument or a transcript. Authenticated flows such as SCP03 follow the same
 rule: stage the keys as files first, then reference them by path.
 
+A handful of shell verbs take key material as a positional argument --
+`DERIVE-OPC` is the clearest -- and those are gated at the write tier
+rather than refused outright. Refusing would be theatre: if the caller
+supplied the key, it is already in the transcript. Prefer the by-path form
+where the shell offers one, and treat any batch that carries a secret
+inline as a batch whose transcript is now sensitive.
+
 ### Tool annotations
 
 Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`,
 `idempotentHint`, `openWorldHint`), so a client can tell the difference
 between `status_word_lookup` and `pcsc_transmit` without reading this page
-and can prompt accordingly. 14 of the 16 tools are marked read-only.
+and can prompt accordingly. 19 of the 26 tools are marked read-only; the
+seven that are not are `pcsc_transmit`, `card_bridge_transmit`,
+`shell_run`, `card_backend_select`, and the three `card_session_*` tools.
 
 ### Session state
 
@@ -106,9 +149,10 @@ survives between calls, so it suits stateless probes and **cannot** carry a
 secure-channel flow: the second APDU of an SCP03 exchange would arrive on a
 card that has forgotten the first.
 
-For anything that needs session state, run a Card Bridge and use
-`card_bridge_transmit`. The bridge holds one connection to the reader and
-relays through it, so the channel survives across calls. See
+There are two ways to keep state. `card_session_open` holds a connection
+locally and hands back a session id to transmit through. Or run a Card
+Bridge and use `card_bridge_transmit`: the bridge holds the reader and
+relays through it, which is also what reaches a remote rig. See
 [Remote APDU Streaming](remote-apdu-streaming.md).
 
 Whatever the layers say: use a throwaway test card, not one carrying live
@@ -139,10 +183,21 @@ It declares only `mcp`, `pyyaml`, and `asn1crypto`, with `pyscard`
 optional because it needs a compiler and the PCSC headers. No Git
 dependencies, so a plain `pip` resolves it.
 
-Twelve of the sixteen tools work from that install alone, thirteen with
-`[card]`. `saip_lint` and `bpp_segment` report that they are unavailable,
-because they need the pySim profile stack and the SCP11 session code
-respectively.
+Fifteen of the twenty-six tools work from that install alone, nineteen
+with `[card]`. That includes driving a card: the transport chain is
+vendored, so `card_session_open`, `card_session_transmit`, and
+`card_bridge_transmit` all work without the rest of YggdraSIM. `[card]`
+adds the three that need a local PC/SC driver; the relay path needs no
+driver at all, so a standalone install with no pyscard can still drive a
+card through a Card Bridge or a Remote Lab rig.
+
+Seven tools need the full install and report that they are unavailable,
+naming what is missing rather than raising: `saip_lint` and `saip_diff`
+need the SAIP stack; `bpp_segment`, `metadata_lint`, and `eim_package_lint`
+need the SCP11 code; `runtime_status` and `shell_run` need the full
+runtime. The simulated backend is also full-install only -- `SIMCARD` is a
+whole subsystem, so selecting `sim` on a standalone reports that plainly
+and points at the reader backend.
 
 The distribution publishes a single `yggdrasim_mcp` package rather than
 re-providing `Tools` or `SCP03`, so it can be installed alongside the full
@@ -150,9 +205,8 @@ re-providing `Tools` or `SCP03`, so it can be installed alongside the full
 these sources and is never committed, so it cannot drift from the code it
 is cut from.
 
-`saip_lint` additionally needs the SAIP stack, which is part of the base
-install. If it is somehow unavailable the tool reports that rather than
-raising.
+Every degraded tool is still registered, so an agent discovers it and gets
+a reason instead of a missing capability it cannot ask about.
 
 ## Register it with a client
 
@@ -230,9 +284,8 @@ decodes too.
 | `eim_package_lint` | validate an SGP.32 eIM package against the ES2+ schema |
 | `plugin_status` | report which optional plugin-backed capabilities are available |
 | `runtime_status` | report the runtime root, build flavor, and live service state |
-| `shell_run` | run a batch of operator-shell commands; **two shells drive a real card** |
+| `shell_run` | run a batch of operator-shell commands; **some of these reach a real card** |
 | `session_diff` | diff the APDU traces of two session recordings |
-| `scan_identifiers` | sweep a file for telecom identifiers |
 
 `saip_lint` accepts the same inputs as `Package > Open`: binary DER, ASCII
 hex text, ASN.1 value notation, or transcode JSON. Excel workbooks are
@@ -257,6 +310,48 @@ when actually debugging a decode.
 | `pcsc_list_readers` | no | enumerate local PC/SC readers |
 | `pcsc_transmit` | **yes** | transmit a raw APDU to a local physical card (stateless) |
 | `card_bridge_transmit` | **yes** | transmit through a Card Bridge or Remote Lab relay (keeps session state) |
+| `card_backend_status` | no | report which transport the stack talks through, and what is open |
+| `card_backend_select` | for `reader` | point the stack at a local reader or the simulator |
+| `card_session_open` | for `reader` | open a session that survives across calls, and read its ATR |
+| `card_session_transmit` | for `reader` | send one APDU through an open session |
+| `card_session_close` | no | close one session, or all of them |
+
+### Choosing the transport
+
+Three paths reach a card: a local PC/SC reader, a relay, or the built-in
+simulator. `card_backend_status` reports which one is configured, where
+that setting came from, and every session this server holds. It reads with
+every gate shut, and reports whether a relay token exists rather than its
+value.
+
+`card_backend_select` switches between `reader` and `sim`. Both need write
+access, because the choice outlives the call; selecting `reader`
+additionally needs card access, since it points the whole stack at
+hardware. `persist` is off by default -- with it on, the choice is written
+to the runtime settings file and every other YggdraSIM process picks it up.
+
+Selecting `sim` is how an agent does card work with no reader present: the
+simulator answers real APDUs, so a SELECT/READ chain or a profile
+inspection runs end to end. The card gate does not apply to it, because
+there is no hardware to protect. Write access still does, because the
+simulator carries state.
+
+### Sessions
+
+`pcsc_transmit` connects and disconnects around each APDU, so a
+secure-channel flow cannot work through it: the second APDU of an SCP03
+exchange arrives on a card that has forgotten the first.
+
+`card_session_open` holds one connection open and returns a session id and
+the ATR. Every `card_session_transmit` on that id runs on the same channel,
+so the selected file, the logical channel, and the secure channel all
+survive between calls. Each APDU is still classified individually, so a
+read-only server can drive a whole inspection sequence and refuse the one
+command that would change something.
+
+Sessions expire after 10 minutes idle and at most 4 are held at once. The
+handle pins a reader and keeps the card powered, so an unbounded registry
+would leak both.
 
 `card_bridge_transmit` reaches whatever rig its URL points at, so it sits
 behind the same opt-in as `pcsc_transmit`. Enabling card access is
@@ -266,52 +361,93 @@ token file holds the session token, not the bridge's own token.
 
 ### Running shell commands
 
-!!! danger "Two of these shells drive a real card"
+!!! danger "These shells reach a real card"
 
     With every opt-in set, verbs reachable through `shell_run` can install
-    applets, write keys, export a key bag, and disable or delete a profile.
-    **None of that can be undone.** Use a throwaway test card, never one
-    carrying live credentials.
+    applets, write keys, send an OTA envelope, export a key bag, and
+    disable or delete a profile. **None of that can be undone.** Use a
+    throwaway test card, never one carrying live credentials.
 
-    Nothing reaches a card unless *you* set the environment variables
-    below. They are off by default and stay off until an operator turns
-    them on deliberately.
+    Nothing reaches a card, and nothing changes state, unless *you* set the
+    environment variables below. They are off by default and stay off until
+    an operator turns them on deliberately.
 
 `shell_run` executes a non-interactive batch in an operator shell, so an
 agent can drive a workflow rather than only inspect single files:
 
 ```text
 shell="profile_package"     USE /abs/profile.der; INFO; TREE; LINT; EXIT
+shell="scp80"               SET /abs/keys.json; BUILD; EXIT
+shell="scp11_eim"           EIM-PACKAGE /abs/pkg.json; EIM-PACKAGE-LINT; EXIT
+shell="suci_tool"           STATUS; GENERATE secp256r1; DUMP; EXIT
 shell="scp03"               SELECT 3F00; READ; INFO; EXIT
+shell="scp11_live"          GET-EID; GET-EUICC-INFO2; LIST; EXIT
+shell="scp11_relay"         GET-EID; GET-EUICC-INFO2; LIST; EXIT
 shell="scp11_local_access"  LIST; PROFILE; METADATA; EXIT
 ```
 
-| Shell | Drives a card | Purpose |
-| --- | --- | --- |
-| `profile_package` | no | SAIP package inspection and authoring |
-| `scp03` | **yes** | card admin: filesystem, registry, GlobalPlatform |
-| `scp11_local_access` | **yes** | local eUICC profile management over ES10 |
+All eight operator shells are exposed, covering 360 classified verbs:
 
-### The four gates
+| Shell | Opens a reader at startup | Verbs | Purpose |
+| --- | --- | --- | --- |
+| `profile_package` | no | 53 | SAIP package inspection and authoring |
+| `scp80` | no | 15 | OTA: build an envelope offline, or `SEND` it to a card |
+| `scp11_eim` | no | 74 | SGP.32 local eIM: author, lint, and issue eIM packages |
+| `suci_tool` | no | 11 | SUCI key generation and public-key export |
+| `scp03` | **yes** | 80 | card admin: filesystem, registry, GlobalPlatform |
+| `scp11_live` | **yes** | 50 | SGP.22/SGP.32 profile download and eUICC management |
+| `scp11_relay` | **yes** | 41 | SGP.22 relay compatibility console (ES2+/ES9+) |
+| `scp11_local_access` | **yes** | 36 | local eUICC profile management over ES10 |
 
-**A card-driving shell needs `YGGDRASIM_MCP_ALLOW_CARD`**, checked before
-the process starts. SCP03 connects to a reader during startup, so even
-`HELP` would touch hardware; refusing early means it never gets that far.
+`scp11_relay` is the older console kept for the compatibility namespace. It
+covers much of the same ES10 surface as `scp11_live`, and a test asserts
+the two never classify a shared verb differently.
 
-**Verbs are allow-listed, not deny-listed.** SCP03 alone carries 62 verbs.
-Read verbs run once the shell itself is permitted; verbs that write need
-`YGGDRASIM_MCP_ALLOW_SHELL_WRITE`; destructive verbs additionally need
-`YGGDRASIM_MCP_ALLOW_DESTRUCTIVE`. An unrecognised verb is refused rather
-than assumed harmless, and a refusal anywhere blocks the whole batch
+`scp80` and `scp11_eim` are the two that split the axes apart. Building an
+OTA envelope or authoring and linting an eIM package is offline work that
+needs write access and no card. The verbs that put those artefacts on a
+card -- `SEND`, `SENDRAW`, `OTA` in `scp80`, and the issue / ISDR / profile
+verbs in `scp11_eim` -- each carry their own card check even though the
+shell itself opened no reader.
+
+Each shell's verb set is read from that shell's own command table, and a
+test compares the two in both directions on every run. A verb the shell
+registers but the gate does not classify is refused as unknown, so the
+failure mode is a capability going missing rather than an unguarded one.
+
+### The gates
+
+**A shell that opens a reader at startup needs
+`YGGDRASIM_MCP_ALLOW_CARD`**, checked before the process starts. SCP03
+connects to a reader during startup, so even `HELP` would touch hardware;
+refusing early means it never gets that far. Individual verbs that reach a
+card from an otherwise offline shell are gated the same way.
+
+**Verbs are allow-listed, not deny-listed.** SCP03 alone carries 80
+classified verbs. Read verbs run at any access level; anything that changes
+state needs `YGGDRASIM_MCP_ACCESS=write`. An unrecognised verb is refused
+rather than assumed harmless, and a refusal anywhere blocks the whole batch
 before the process starts.
 
-**Verbs that execute a command file are always refused.** `RUN` and
-`SCRIPT` take a file of commands, and the classifier cannot see inside it.
-Allowing them would let a caller smuggle any verb past every other rule.
+**Classification follows the leading verb**, so a verb that dispatches its
+own subcommands is classified by the most dangerous thing it can reach:
+`TOKENS` sits at the write tier because `TOKENS SET` writes, even though a
+bare `TOKENS` only lists. Use the dedicated read verb where one exists --
+`LIST-TOKENS` rather than `TOKENS` -- to stay inside read-only access.
 
-**Verbs taking a secret as an argument are always refused.** A tool
-argument reaches the model provider, so `DERIVE-OPC` would put a Ki in a
-transcript.
+**Verbs whose payload is never classified need their own opt-in.** `RUN`
+and `SCRIPT` take a file of commands; `RAW` passes its arguments straight
+through to the underlying tool. In each case the gate cannot see what will
+actually run, so every other rule stops applying. Set
+`YGGDRASIM_MCP_ALLOW_SCRIPT_FILES` when you specifically want an agent to
+run something you have not had classified -- write access alone does not
+grant it.
+
+**Interactive verbs are refused at every level.** A batch has no terminal,
+so a verb that opens a menu or prompts for input would hang until the
+timeout rather than fail. This covers more than the obvious TUI entry
+points: SCP03's `PUT-KEY`, `SET-STATUS`, and `MANAGE-PIN` are wizards, and
+`scp80`'s `ADMIN` hands the reader to the SCP03 shell's own REPL.
 
 ### Enabling it
 
@@ -324,16 +460,19 @@ rather than made per call:
     "yggdrasim": {
       "command": "yggdrasim-mcp",
       "env": {
-        "YGGDRASIM_MCP_ALLOW_CARD": "1",
-        "YGGDRASIM_MCP_ALLOW_SHELL_WRITE": "1"
+        "YGGDRASIM_MCP_ACCESS": "write",
+        "YGGDRASIM_MCP_ALLOW_CARD": "1"
       }
     }
   }
 }
 ```
 
-Add `YGGDRASIM_MCP_ALLOW_DESTRUCTIVE` only when you specifically intend an
-agent to be able to delete a profile or install an applet unattended.
+Drop `YGGDRASIM_MCP_ALLOW_CARD` for a server that authors profiles and OTA
+payloads but cannot touch hardware -- that combination covers most of the
+build-side work with none of the irreversible risk. Add
+`YGGDRASIM_MCP_ALLOW_SCRIPT_FILES` only when you intend an agent to run
+unverified command files.
 
 ### Two things to know
 
@@ -346,10 +485,11 @@ path.
 **State does not survive between calls**, since each batch is a fresh
 process. Put a whole flow in one batch.
 
-Only shells whose verbs were enumerated in full are offered. SCP80,
-SCP11-live, and SCP11-eIM register their commands differently and are
-absent until their verbs can be classified from evidence: guessing a
-classification for a card shell is how an agent wipes one.
+**Ambiguity resolves upward.** Where a verb's own help text left its risk
+open -- a package-issuing verb whose JSON the gate never reads, a flow
+whose steps the remote side chooses -- it sits at the destructive tier
+rather than the write tier. Guessing downward for a card shell is how an
+agent wipes one.
 
 ### Service state is read-only
 
@@ -360,6 +500,24 @@ bad APDU, and the value does not justify handing that to an agent.
 
 Rig entries come back through the registry's redacted view: it reports
 whether a token file exists, never its path or contents.
+
+### What is not exposed
+
+The card, profile, and eUICC surfaces are covered end to end. Of the
+project's other entry points, these are reachable only from a terminal:
+
+| Entry point | Why |
+| --- | --- |
+| `yggdrasim-gui`, `yggdrasim-web-server` | long-running services with their own UI |
+| `yggdrasim-hil-bridge`, `yggdrasim-hil-supervisor` | rig services; lifecycle is an operator decision |
+| `yggdrasim-lab-agent`, `yggdrasim-card-bridge` | daemons; the MCP is a client of these, not their manager |
+| `yggdrasim-profile-autoload` | watches for card insertion, so it never returns |
+| `yggdrasim-apdu-fuzzer`, `yggdrasim-eum-diag` | no batch mode, and the fuzzer's own allow-list gate is the right place for that decision |
+
+Every entry point with a batch mode is exposed. The services are
+deliberate: starting and stopping a rig is a different class of risk from
+a bad APDU, and a watcher that never returns cannot answer a tool call.
+The last row has no `--cmd`, so there is nothing to classify.
 
 ## Resources
 
@@ -469,7 +627,7 @@ go through while a VERIFY is refused as irreversible.
 
 - Keep `YGGDRASIM_MCP_ALLOW_CARD` unset for unattended sessions. It gates
   both the local reader and every relay this host can reach.
-- `scan_identifiers` reads any path you give it. Point it at captures and
+- The file tools read any path you give them. Point them at captures and
   fixtures, not at a home directory.
 - Tool output flows back to a model provider. Treat an APDU trace the same
   way you would treat it in a bug report: it can carry PINs and operator

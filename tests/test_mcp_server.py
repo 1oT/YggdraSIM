@@ -102,7 +102,8 @@ def server(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fastmcp)
     monkeypatch.delitem(sys.modules, MODULE_NAME, raising=False)
     monkeypatch.delenv("YGGDRASIM_MCP_ALLOW_CARD", raising=False)
-    monkeypatch.delenv("YGGDRASIM_MCP_ALLOW_DESTRUCTIVE", raising=False)
+    monkeypatch.delenv("YGGDRASIM_MCP_ACCESS", raising=False)
+    monkeypatch.delenv("YGGDRASIM_MCP_ALLOW_SCRIPT_FILES", raising=False)
 
     module = importlib.import_module(MODULE_NAME)
     yield module
@@ -154,7 +155,6 @@ def test_registered_tools_cover_the_documented_surface(server) -> None:
         "status_word_lookup",
         "ber_tlv_lookup",
         "spec_section_lookup",
-        "scan_identifiers",
         "aide_registry_lookup",
         "pcsc_list_readers",
         "pcsc_transmit",
@@ -578,21 +578,25 @@ def test_a_short_apdu_classifies_without_raising(server) -> None:
     assert server.classify_apdu(b"\x00")["risk"] == "unknown"
 
 
-def test_destructive_needs_its_own_opt_in(server, monkeypatch) -> None:
+def test_card_writes_need_write_access(server, monkeypatch) -> None:
+    """Card access alone is read-only; changing the card is a second choice."""
+
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
     assert server.card_access_allowed() is True
-    assert server.destructive_allowed() is False
+    assert server.write_allowed() is False
 
     payload = json.loads(_call(server.pcsc_transmit("0020000108" + "AA" * 8)))
-    assert "irreversible" in payload["error"]
-    assert server.DESTRUCTIVE_ENV in payload["error"]
+    assert "read-only" in payload["error"]
+    assert server.ACCESS_ENV in payload["error"]
+    assert payload["risk"] == "destructive"
 
 
-def test_destructive_opt_in_alone_does_not_open_the_card(server, monkeypatch) -> None:
-    """The second flag must not be a way around the first."""
+def test_write_access_alone_does_not_open_the_card(server, monkeypatch) -> None:
+    """The two switches are orthogonal; neither implies the other."""
 
-    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
-    assert server.destructive_allowed() is False
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    assert server.write_allowed() is True
+    assert server.card_access_allowed() is False
     payload = json.loads(_call(server.pcsc_transmit("00A40004023F00")))
     assert "Card access is disabled" in payload["error"]
 
@@ -606,7 +610,7 @@ def test_reads_pass_the_destructive_gate(server, monkeypatch) -> None:
     assert "Card access is disabled" not in payload.get("error", "")
 
 
-def test_card_bridge_transmit_honours_the_destructive_tier(server, monkeypatch) -> None:
+def test_card_bridge_transmit_honours_write_access(server, monkeypatch) -> None:
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
     payload = json.loads(
         _call(
@@ -615,7 +619,7 @@ def test_card_bridge_transmit_honours_the_destructive_tier(server, monkeypatch) 
             )
         )
     )
-    assert "irreversible" in payload["error"]
+    assert "read-only" in payload["error"]
 
 
 def test_apdu_risk_reports_without_touching_a_card(server) -> None:
@@ -628,10 +632,10 @@ def test_apdu_risk_reports_without_touching_a_card(server) -> None:
 
 def test_apdu_risk_tracks_the_gates(server, monkeypatch) -> None:
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
-    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
     payload = json.loads(server.apdu_risk("80E400000A"))
     assert payload["would_be_sent"] is True
-    assert payload["destructive_enabled"] is True
+    assert payload["access_mode"] == server.ACCESS_WRITE
 
 
 # --------------------------------------------------------------------------
@@ -660,7 +664,7 @@ class _Ctx:
 
 def test_declining_the_prompt_sends_nothing(server, monkeypatch) -> None:
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
-    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
     ctx = _Ctx(_Elicited("decline"))
     payload = json.loads(
         _call(server.pcsc_transmit("80E400000A", ctx=ctx))
@@ -672,7 +676,7 @@ def test_declining_the_prompt_sends_nothing(server, monkeypatch) -> None:
 
 def test_cancelling_the_prompt_sends_nothing(server, monkeypatch) -> None:
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
-    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
     payload = json.loads(
         _call(server.pcsc_transmit("80E400000A", ctx=_Ctx(_Elicited("cancel"))))
     )
@@ -681,7 +685,7 @@ def test_cancelling_the_prompt_sends_nothing(server, monkeypatch) -> None:
 
 def test_accepting_the_prompt_proceeds_past_confirmation(server, monkeypatch) -> None:
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
-    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
     payload = json.loads(
         _call(
             server.pcsc_transmit("80E400000A", ctx=_Ctx(_Elicited("accept", True)))
@@ -704,7 +708,7 @@ def test_a_client_without_elicitation_falls_back_to_the_env_gates(
     """Elicitation is optional in MCP, so its absence must not break the tool."""
 
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
-    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
     ctx = _Ctx(raises=RuntimeError("client does not support elicitation"))
     payload = json.loads(_call(server.pcsc_transmit("80E400000A", ctx=ctx)))
     assert "Declined at confirmation prompt" not in payload.get("error", "")
@@ -723,93 +727,6 @@ def test_confirmation_never_asks_for_a_secret(server) -> None:
     for forbidden in ("pin", "puk", "adm", "password", "secret", "passphrase"):
         assert forbidden not in confirm.lower(), forbidden
     assert "proceed" in confirm
-
-
-# --------------------------------------------------------------------------
-# scan_identifiers: the IPv4 rule must not drown real leaks in citations
-# --------------------------------------------------------------------------
-
-
-def _ip_rule(server):
-    return next(e for e in server.REAL_IDENTIFIER_PATTERNS if "IP" in e["name"])
-
-
-def _reported(server, text: str) -> list[str]:
-    rule = _ip_rule(server)
-    keep = rule.get("filter")
-    return [
-        m.group()
-        for m in rule["regex"].finditer(text)
-        if keep is None or keep(m, text)
-    ]
-
-
-@pytest.mark.parametrize(
-    "text, value",
-    [
-        ('smsc = "93.184.216.34"', "93.184.216.34"),
-        ("relay host 8.8.8.8 configured", "8.8.8.8"),
-        # Prose between a spec marker and an address must not suppress it.
-        ("TS 102 221 and 8.8.8.8", "8.8.8.8"),
-    ],
-)
-def test_routable_addresses_are_reported(server, text: str, value: str) -> None:
-    assert value in _reported(server, text)
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "3GPP TS 31.102 §4.4.11.9 EF.OPL5G",       # section sign
-        "# TS 33.501 \\u00a76.1.1.4 canonical SN-name",  # escaped section sign
-        "INSTALL [for load] (GPCS 11.5.2.3.1)",          # five-part clause
-        "Per Table 4.2.20.1, each cyclic record",        # table reference
-        '"package_version": "2.1.2.1"',                  # version field
-        "GPC_CardSpecification_v2.3.1.49_PublicRvw.pdf",  # version in a filename
-        "ETSI TS 102 221 §§4.4.11.2-4.4.11.5", # clause range
-        '"2.5.4.3": "commonName"',                       # X.500 OID
-        '"2.5.29.35": "authorityKeyIdentifier"',         # X.509 extension OID
-    ],
-)
-def test_citations_and_oids_are_not_reported(server, text: str) -> None:
-    assert _reported(server, text) == []
-
-
-@pytest.mark.parametrize(
-    "address",
-    ["127.0.0.1", "10.5.4.7", "192.168.1.20", "172.16.0.9", "169.254.1.1",
-     "0.0.0.0", "255.255.255.255", "224.0.0.251", "100.64.0.1",
-     "192.0.2.10", "198.51.100.7", "203.0.113.9"],
-)
-def test_non_routable_and_documentation_ranges_are_not_reported(server, address: str) -> None:
-    """Loopback, private, link-local, multicast, CGNAT and RFC 5737 are not leaks."""
-
-    assert _reported(server, f"addr = {address}") == []
-
-
-def test_the_tracked_tree_reports_no_address_leaks(server) -> None:
-    """The rule is only useful if a clean tree is quiet."""
-
-    import subprocess
-
-    files = subprocess.run(
-        ["git", "ls-files"], capture_output=True, text=True, cwd=REPO_ROOT
-    ).stdout.split()
-    assert files, "expected a git checkout"
-    # This file deliberately carries routable addresses as true-positive
-    # fixtures, and the SGP.26 certificate corpus is upstream test material.
-    skip = {"uv.lock", "tests/test_mcp_server.py"}
-    noisy: list[str] = []
-    for name in files:
-        if name in skip or name.startswith("SCP11/SGP.26_test_Certs"):
-            continue
-        try:
-            text = (REPO_ROOT / name).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        for value in _reported(server, text):
-            noisy.append(f"{name}: {value}")
-    assert noisy == [], noisy[:10]
 
 
 # --------------------------------------------------------------------------
@@ -1050,7 +967,9 @@ def test_runtime_status_is_read_only(server) -> None:
     "command, risk",
     [
         ("INFO", "read"), ("LINT", "read"), ("TREE", "read"), ("USE p.der", "read"),
-        ("GENERATE-BATCH t.json r.csv out/", "write"), ("DELETE x", "destructive"),
+        ("GENERATE-BATCH t.json r.csv out/", "write"),
+        # DELETE is a TOKENS subcommand, not a verb this shell registers.
+        ("REMOVE-NAA x", "destructive"), ("DELETE x", "unknown"),
         ("SET-TOKEN a b", "write"), ("DIFF-TUI", "interactive"),
         ("NEW-PROFILE-WIZARD", "interactive"), ("WATCH-SIMCARD", "interactive"),
         ("RM -rf /", "unknown"), ("", "empty"),
@@ -1080,22 +999,22 @@ def test_no_write_verb_is_classified_as_read(server) -> None:
 
 
 def test_write_verbs_are_refused_without_the_opt_in(server, monkeypatch) -> None:
-    monkeypatch.delenv(server.SHELL_WRITE_ENV, raising=False)
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
     payload = json.loads(server.shell_run("profile_package", "GENERATE-BATCH a b c; EXIT"))
-    assert server.SHELL_WRITE_ENV in payload["error"]
+    assert server.ACCESS_ENV in payload["error"]
     assert payload["risk"] == "write"
 
 
 def test_interactive_verbs_are_always_refused(server, monkeypatch) -> None:
     """A TUI has no terminal in a batch and would hang until timeout."""
 
-    monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
     payload = json.loads(server.shell_run("profile_package", "DIFF-TUI; EXIT"))
     assert "interactive" in payload["error"]
 
 
 def test_unknown_verbs_are_refused_rather_than_passed_through(server, monkeypatch) -> None:
-    monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
     payload = json.loads(server.shell_run("profile_package", "RM -rf /; EXIT"))
     assert "not a recognised verb" in payload["error"]
 
@@ -1103,8 +1022,8 @@ def test_unknown_verbs_are_refused_rather_than_passed_through(server, monkeypatc
 def test_a_refused_verb_anywhere_blocks_the_whole_batch(server, monkeypatch) -> None:
     """Refusal must precede execution; a later write must not run either."""
 
-    monkeypatch.delenv(server.SHELL_WRITE_ENV, raising=False)
-    monkeypatch.delenv(server.DESTRUCTIVE_ENV, raising=False)
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
     payload = json.loads(server.shell_run("profile_package", "INFO; DELETE x; EXIT"))
     assert payload["verb"] == "DELETE"
     assert "output" not in payload
@@ -1151,7 +1070,7 @@ def test_card_driving_shells_are_not_exposed(server) -> None:
 
 
 def _all_env_off(monkeypatch, server) -> None:
-    for name in (server.CARD_ACCESS_ENV, server.DESTRUCTIVE_ENV, server.SHELL_WRITE_ENV):
+    for name in (server.CARD_ACCESS_ENV, server.ACCESS_ENV, server.SCRIPT_FILES_ENV):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -1166,25 +1085,32 @@ def test_card_shells_refuse_before_starting_the_process(server, monkeypatch, she
     assert "output" not in payload
 
 
-@pytest.mark.parametrize("verb", ["RUN evil.txt", "SCRIPT batch.txt"])
+@pytest.mark.parametrize("verb", ["RUN evil.txt", "SCRIPT batch.txt", "RAW export --all"])
 def test_command_file_verbs_are_always_refused(server, monkeypatch, verb) -> None:
     """These execute a file, so nothing inside ever reaches the verb gate."""
 
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
-    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
-    monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
     payload = json.loads(server.shell_run("scp03", f"{verb}; EXIT"))
-    assert "executes a file of commands" in payload["error"]
+    assert "cannot inspect" in payload["error"]
 
 
-def test_secret_bearing_verbs_are_always_refused(server, monkeypatch) -> None:
-    """A tool argument reaches the model provider; a Ki must not."""
+def test_secret_bearing_verbs_need_write_access(server, monkeypatch) -> None:
+    """The operator may hand over a Ki, but not from a read-only server.
 
+    Refusing outright would be theatre: if the caller supplied the key it is
+    already in the transcript. The refusal reason still names the exposure.
+    """
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
-    monkeypatch.setenv(server.DESTRUCTIVE_ENV, "1")
-    monkeypatch.setenv(server.SHELL_WRITE_ENV, "1")
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
     payload = json.loads(server.shell_run("scp03", "DERIVE-OPC AABB CCDD; EXIT"))
-    assert "key material as an argument" in payload["error"]
+    assert "reaches the model provider" in payload["error"]
+    assert payload["risk"] == "secret_argument"
+
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    allowed = json.loads(server.shell_run("scp03", "DERIVE-OPC AABB CCDD; EXIT"))
+    assert "error" not in allowed
 
 
 @pytest.mark.parametrize(
@@ -1201,10 +1127,10 @@ def test_destructive_card_verbs_need_their_own_opt_in(
     server, monkeypatch, shell: str, command: str
 ) -> None:
     monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
-    monkeypatch.delenv(server.DESTRUCTIVE_ENV, raising=False)
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
     payload = json.loads(server.shell_run(shell, f"{command}; EXIT"))
     assert payload["risk"] == "destructive"
-    assert server.DESTRUCTIVE_ENV in payload["error"]
+    assert server.ACCESS_ENV in payload["error"]
 
 
 def test_every_shell_classifies_its_verbs_consistently(server) -> None:
@@ -1242,3 +1168,571 @@ def test_unknown_shell_is_rejected_with_the_known_list(server) -> None:
     payload = json.loads(server.shell_run("scp99", "HELP; EXIT"))
     assert "Unknown shell" in payload["error"]
     assert set(payload["known"]) == set(server._SHELLS)
+
+
+# --------------------------------------------------------------------------
+# Access model: read by default, write by opt-in
+# --------------------------------------------------------------------------
+
+
+def test_default_access_is_read_only(server, monkeypatch) -> None:
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
+    assert server.access_mode() == server.ACCESS_READ
+    assert server.write_allowed() is False
+
+
+@pytest.mark.parametrize("value", ["write", "WRITE", "readwrite", "read-write", "rw"])
+def test_write_access_spellings(server, monkeypatch, value: str) -> None:
+    monkeypatch.setenv(server.ACCESS_ENV, value)
+    assert server.write_allowed() is True
+
+
+@pytest.mark.parametrize("value", ["", "read", "readonly", "ro", "yes", "1", "nonsense"])
+def test_anything_that_is_not_write_stays_read_only(server, monkeypatch, value: str) -> None:
+    """Including truthy-looking values: this is a mode, not a flag."""
+
+    monkeypatch.setenv(server.ACCESS_ENV, value)
+    assert server.write_allowed() is False
+
+
+def test_read_verbs_run_without_any_opt_in(server, monkeypatch) -> None:
+    for name in (server.ACCESS_ENV, server.CARD_ACCESS_ENV):
+        monkeypatch.delenv(name, raising=False)
+    payload = json.loads(server.shell_run("profile_package", "HELP; EXIT"))
+    assert "error" not in payload
+    assert payload["access_mode"] == server.ACCESS_READ
+
+
+def test_script_files_are_refused_until_opted_in(server, monkeypatch) -> None:
+    """The classifier cannot see inside the file, so this is its own switch."""
+
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    monkeypatch.delenv(server.SCRIPT_FILES_ENV, raising=False)
+    payload = json.loads(server.shell_run("scp03", "RUN batch.txt; EXIT"))
+    assert payload["risk"] == "command_file"
+    assert server.SCRIPT_FILES_ENV in payload["error"]
+
+    monkeypatch.setenv(server.SCRIPT_FILES_ENV, "1")
+    allowed = json.loads(server.shell_run("scp03", "RUN batch.txt; EXIT"))
+    assert "error" not in allowed
+
+
+def test_write_access_does_not_imply_script_files(server, monkeypatch) -> None:
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    monkeypatch.delenv(server.SCRIPT_FILES_ENV, raising=False)
+    payload = json.loads(server.shell_run("scp03", "SCRIPT b.txt; EXIT"))
+    assert "error" in payload
+
+
+def test_scp80_is_offered_for_ota_work(server) -> None:
+    spec = server._SHELLS["scp80"]
+    assert spec.card is False, "SCP80 opens no reader at startup"
+    for verb in ("SEND", "SENDRAW", "OTA"):
+        assert verb in spec.write
+        assert verb in server._CARD_REACHING_VERBS, verb
+
+
+def test_ota_send_needs_card_access_even_though_scp80_opens_no_reader(
+    server, monkeypatch
+) -> None:
+    """BUILD is offline; SEND puts the envelope on a card."""
+
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+    payload = json.loads(server.shell_run("scp80", "SEND; EXIT"))
+    assert payload["reaches_a_card"] is True
+    assert server.CARD_ACCESS_ENV in payload["error"]
+
+    offline = json.loads(server.shell_run("scp80", "BUILD; EXIT"))
+    assert "error" not in offline
+
+
+def test_interactive_verbs_are_refused_at_every_access_level(server, monkeypatch) -> None:
+    """Not an access question: a batch has no terminal."""
+
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.setenv(server.SCRIPT_FILES_ENV, "1")
+    payload = json.loads(server.shell_run("profile_package", "TUI; EXIT"))
+    assert "would hang" in payload["error"]
+
+
+def test_unknown_verbs_are_refused_at_every_access_level(server, monkeypatch) -> None:
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.setenv(server.SCRIPT_FILES_ENV, "1")
+    payload = json.loads(server.shell_run("scp03", "FROBNICATE; EXIT"))
+    assert "not a recognised verb" in payload["error"]
+
+
+def test_a_missing_shell_module_reports_rather_than_spawning(server, monkeypatch) -> None:
+    """The standalone wheel ships no operator shells.
+
+    find_spec raises rather than returning None when the parent package is
+    itself absent, which is exactly that case.
+    """
+    import importlib.util
+
+    def _absent(name: str):
+        raise ModuleNotFoundError(f"No module named {name.split('.')[0]!r}")
+
+    monkeypatch.setattr(importlib.util, "find_spec", _absent)
+    payload = json.loads(server.shell_run("profile_package", "HELP; EXIT"))
+    assert "unavailable in this install" in payload["error"]
+    assert "exit_code" not in payload, "must refuse before spawning a subprocess"
+
+
+# --------------------------------------------------------------------------
+# Every shell verb is classified
+# --------------------------------------------------------------------------
+
+
+class _Registry:
+    """Reads each shell's own command table out of its source.
+
+    Every shell registers differently, so there is one reader per style
+    rather than one clever reader that quietly matches nothing.
+    """
+
+    @staticmethod
+    def _tree(relative: str):
+        import ast
+
+        return ast.parse((REPO_ROOT / relative).read_text(encoding="utf-8"))
+
+    @classmethod
+    def _dicts_named(cls, relative: str, names: set) -> set:
+        import ast
+
+        found = set()
+        for node in ast.walk(cls._tree(relative)):
+            target = None
+            if isinstance(node, ast.AnnAssign):
+                target = ast.unparse(node.target)
+            elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = ast.unparse(node.targets[0])
+            if target in names and isinstance(node.value, ast.Dict):
+                found.update(ast.literal_eval(k) for k in node.value.keys)
+        return found
+
+    @classmethod
+    def _returned_dict(cls, relative: str, function: str) -> set:
+        import ast
+
+        found = set()
+        for node in ast.walk(cls._tree(relative)):
+            if isinstance(node, ast.FunctionDef) and node.name == function:
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Return) and isinstance(inner.value, ast.Dict):
+                        found.update(ast.literal_eval(k) for k in inner.value.keys)
+        return found
+
+    @classmethod
+    def _methods(cls, relative: str, prefix: str) -> set:
+        import ast
+
+        return {
+            node.name[len(prefix):].upper().replace("_", "-")
+            for node in ast.walk(cls._tree(relative))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith(prefix)
+        }
+
+    @classmethod
+    def _compared_to(cls, relative: str, variable: str) -> set:
+        import ast
+
+        found = set()
+        for node in ast.walk(cls._tree(relative)):
+            if isinstance(node, ast.Compare) and ast.unparse(node.left) == variable:
+                for other in node.comparators:
+                    if isinstance(other, ast.Constant) and isinstance(other.value, str):
+                        if other.value:
+                            found.add(other.value)
+        return found
+
+    @classmethod
+    def _add_command_calls(cls, relative: str) -> set:
+        import ast
+
+        found = set()
+        for node in ast.walk(cls._tree(relative)):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "attr", "") != "_add_command":
+                continue
+            fields = dict(zip(("name", "usage", "description"), node.args))
+            fields.update({kw.arg: kw.value for kw in node.keywords})
+            if "name" in fields:
+                found.add(ast.literal_eval(fields["name"]))
+            if fields.get("aliases") is not None:
+                try:
+                    found.update(ast.literal_eval(fields["aliases"]) or [])
+                except ValueError:
+                    pass
+        return found
+
+    @classmethod
+    def profile_package(cls) -> set:
+        return cls._dicts_named("Tools/ProfilePackage/shell.py", {"self._commands"})
+
+    @classmethod
+    def scp03(cls) -> set:
+        return cls._returned_dict("SCP03/interface/commands.py", "build")
+
+    @classmethod
+    def scp80(cls) -> set:
+        # _process_line handles these before falling through to do_<verb>.
+        return cls._methods("SCP80/cli.py", "do_") | {
+            "ADMIN", "QA", "QUIT", "EXIT", "Q",
+        }
+
+    @classmethod
+    def scp11_local_access(cls) -> set:
+        return cls._compared_to(
+            "SCP11/local_access/main.py", "canonical_command"
+        ) | cls._dicts_named("SCP11/local_access/main.py", {"_COMMAND_ALIASES"})
+
+    @classmethod
+    def scp11_live(cls) -> set:
+        return cls._add_command_calls("SCP11/live/console.py")
+
+    @classmethod
+    def scp11_eim(cls) -> set:
+        return cls._dicts_named(
+            "SCP11/eim_local/main.py", {"self._commands", "self._command_aliases"}
+        )
+
+    @classmethod
+    def scp11_relay(cls) -> set:
+        # SCP11/relay/console.py re-exports SCP11/console.py, which is a
+        # separate older console rather than an alias of the live one.
+        return cls._add_command_calls("SCP11/console.py")
+
+    @classmethod
+    def suci_tool(cls) -> set:
+        return cls._dicts_named("Tools/SuciTool/shell.py", {"self._commands"})
+
+
+@pytest.mark.parametrize("shell", [
+    "profile_package", "scp03", "scp80", "scp11_local_access",
+    "scp11_live", "scp11_eim", "scp11_relay", "suci_tool",
+])
+def test_every_registered_verb_is_classified(server, shell: str) -> None:
+    """The shell's own table is the source of truth for what it accepts.
+
+    An unclassified verb is refused as unknown, so the failure mode is a
+    capability silently missing rather than an unguarded one. A classified
+    verb the shell never registers is dead weight that reads as coverage.
+    """
+    registered = _Registry.__dict__[shell].__func__(_Registry)
+    assert len(registered) >= 10, f"{shell}: parsed {len(registered)} verbs; reader drifted"
+
+    spec = server._SHELLS[shell]
+    classified = set(spec.read | spec.write | spec.destructive | spec.interactive)
+    # Handled before the per-shell tables, so they need no entry there.
+    globally = server._COMMAND_FILE_VERBS | server._SECRET_ARGUMENT_VERBS
+
+    assert not registered - classified - globally, (
+        f"{shell}: registered but unclassified, so refused as unknown: "
+        f"{sorted(registered - classified - globally)}"
+    )
+    assert not classified - registered, (
+        f"{shell}: classified but not registered by the shell: "
+        f"{sorted(classified - registered)}"
+    )
+
+
+def test_eim_card_verbs_are_all_real_verbs(server) -> None:
+    spec = server._SHELLS["scp11_eim"]
+    classified = set(spec.read | spec.write | spec.destructive)
+    assert not spec.card_verbs - classified, sorted(spec.card_verbs - classified)
+
+
+def test_the_eim_shell_reads_packages_without_a_card(server, monkeypatch) -> None:
+    """Authoring and linting a package is the offline half of this shell."""
+
+    for name in (server.ACCESS_ENV, server.CARD_ACCESS_ENV):
+        monkeypatch.delenv(name, raising=False)
+    payload = json.loads(server.shell_run("scp11_eim", "EIM-PACKAGE-LINT; EXIT"))
+    assert "error" not in payload
+
+    reaches = json.loads(server.shell_run("scp11_eim", "SCAN; EXIT"))
+    assert reaches["reaches_a_card"] is True
+    assert server.CARD_ACCESS_ENV in reaches["error"]
+
+
+def test_the_live_shell_is_gated_before_startup(server, monkeypatch) -> None:
+    """Its preflight enumerates readers, so even HELP must not reach it."""
+
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+    payload = json.loads(server.shell_run("scp11_live", "HELP; EXIT"))
+    assert server.CARD_ACCESS_ENV in payload["error"]
+    assert "exit_code" not in payload
+
+
+def test_memory_reset_is_destructive_in_the_eim_shell(server, monkeypatch) -> None:
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
+    for verb in ("EUICC-MEMORY-RESET", "ISDR-EUICC-MEMORY-RESET"):
+        payload = json.loads(server.shell_run("scp11_eim", f"{verb}; EXIT"))
+        assert payload["risk"] == "destructive", verb
+        assert "cannot be undone" in payload["error"], verb
+
+
+# --------------------------------------------------------------------------
+# Card transport control
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def sim_backend(server, monkeypatch):
+    """Point the card stack at the simulator, and close what a test opens.
+
+    ``set_card_backend`` writes ``os.environ`` directly, so the variable is
+    registered with monkeypatch first to get it restored afterwards. The
+    session registry is module-global, so it is drained either way.
+    """
+    monkeypatch.setenv("YGGDRASIM_CARD_BACKEND", "sim")
+    yield server
+    _call(server.card_session_close(""))
+
+
+def test_card_backend_status_reads_with_every_gate_shut(server, monkeypatch) -> None:
+    for name in (server.ACCESS_ENV, server.CARD_ACCESS_ENV):
+        monkeypatch.delenv(name, raising=False)
+    payload = json.loads(server.card_backend_status())
+    assert payload["access_mode"] == server.ACCESS_READ
+    assert payload["card_access_enabled"] is False
+    assert payload["sessions"] == []
+    assert payload["session_limit"] == server._MAX_CARD_SESSIONS
+
+
+def test_card_backend_status_redacts_the_relay_token(server) -> None:
+    """It reports that a token exists, never the token."""
+
+    relay = json.loads(server.card_backend_status()).get("relay", {})
+    assert "token" not in relay
+    assert set(relay) <= {"configured", "apdu_url", "token_configured"}
+
+
+def test_card_backend_select_needs_write_access(server, monkeypatch) -> None:
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
+    payload = json.loads(server.card_backend_select("sim"))
+    assert "read-only" in payload["error"]
+    assert server.ACCESS_ENV in payload["error"]
+
+
+def test_selecting_the_simulator_needs_no_card_access(server, monkeypatch) -> None:
+    """The sim backend is how an agent works with no reader present."""
+
+    monkeypatch.setenv("YGGDRASIM_CARD_BACKEND", "reader")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+    payload = json.loads(server.card_backend_select("sim"))
+    assert payload["backend"] == "sim"
+    assert payload["persisted"] is False
+
+
+def test_selecting_the_reader_backend_needs_card_access(server, monkeypatch) -> None:
+    monkeypatch.setenv("YGGDRASIM_CARD_BACKEND", "sim")
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+    payload = json.loads(server.card_backend_select("reader"))
+    assert server.CARD_ACCESS_ENV in payload["error"]
+    assert payload["requested"] == "reader"
+
+
+def test_unknown_backend_is_named_not_guessed(server, monkeypatch) -> None:
+    """normalize_card_backend folds junk to "reader"; a typo must not select it."""
+
+    monkeypatch.setenv(server.ACCESS_ENV, server.ACCESS_WRITE)
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    payload = json.loads(server.card_backend_select("carrier-pigeon"))
+    assert "Unknown backend" in payload["error"]
+    assert set(payload["known"]) == {"reader", "sim"}
+
+
+def test_a_session_survives_across_calls(sim_backend, monkeypatch) -> None:
+    """The gap pcsc_transmit cannot close: SELECT then READ on one channel."""
+
+    server = sim_backend
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+
+    opened = json.loads(server.card_session_open())
+    assert opened["simulated"] is True
+    assert opened["atr"], "a session must report the ATR it negotiated"
+    session_id = opened["session_id"]
+
+    selected = json.loads(_call(server.card_session_transmit(session_id, "00A4000C023F00")))
+    assert selected["status_word"] == "9000"
+    assert selected["transmits"] == 1
+
+    # Only meaningful because the MF selection above survived this call.
+    json.loads(_call(server.card_session_transmit(session_id, "00A4000C022FE2")))
+    read = json.loads(_call(server.card_session_transmit(session_id, "00B0000000")))
+    assert read["status_word"] == "9000"
+    assert read["transmits"] == 3
+    # Content is deliberately not asserted: SimulatedSimCardEngine is a
+    # process-wide singleton, so what EF.ICCID holds depends on which tests
+    # ran first. What this test pins is that the read saw the file the
+    # previous call selected, which a stateless transmit could not do.
+    assert read["data"], "READ BINARY returned no data, so nothing was selected"
+
+
+def test_session_writes_still_need_write_access(sim_backend, monkeypatch) -> None:
+    """No hardware to protect, but the simulator still carries state."""
+
+    server = sim_backend
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
+    session_id = json.loads(server.card_session_open())["session_id"]
+
+    refused = json.loads(_call(server.card_session_transmit(session_id, "00D6000003AABBCC")))
+    assert "read-only" in refused["error"]
+
+    allowed = json.loads(_call(server.card_session_transmit(session_id, "00A4000C023F00")))
+    assert allowed["status_word"] == "9000"
+
+
+def test_opening_a_reader_session_needs_card_access(server, monkeypatch) -> None:
+    monkeypatch.setenv("YGGDRASIM_CARD_BACKEND", "reader")
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+    payload = json.loads(server.card_session_open())
+    assert "Card access is disabled" in payload["error"]
+
+
+def test_the_session_registry_is_bounded(sim_backend, monkeypatch) -> None:
+    """A pinned reader handle per call would leak the process-wide engine."""
+
+    server = sim_backend
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+    for _ in range(server._MAX_CARD_SESSIONS):
+        assert "session_id" in json.loads(server.card_session_open())
+    refused = json.loads(server.card_session_open())
+    assert str(server._MAX_CARD_SESSIONS) in refused["error"]
+    assert len(refused["open"]) == server._MAX_CARD_SESSIONS
+
+
+def test_idle_sessions_are_reaped(sim_backend, monkeypatch) -> None:
+    server = sim_backend
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+    session_id = json.loads(server.card_session_open())["session_id"]
+
+    server._CARD_SESSIONS[session_id]["touched"] -= server._CARD_SESSION_IDLE_SECONDS + 1
+    assert server._expire_idle_sessions() == [session_id]
+    assert session_id not in server._CARD_SESSIONS
+
+
+def test_transmitting_on_an_unknown_session_says_so(server) -> None:
+    payload = json.loads(_call(server.card_session_transmit("card-nope", "00A4000C023F00")))
+    assert "No open session" in payload["error"]
+    assert payload["open"] == []
+
+
+def test_closing_everything_leaves_nothing_open(sim_backend, monkeypatch) -> None:
+    server = sim_backend
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+    for _ in range(2):
+        server.card_session_open()
+    payload = json.loads(server.card_session_close(""))
+    assert len(payload["closed"]) == 2
+    assert payload["still_open"] == []
+
+
+def test_closing_an_unknown_session_is_an_error_not_a_silent_pass(server) -> None:
+    payload = json.loads(server.card_session_close("card-nope"))
+    assert "No open session" in payload["error"]
+
+
+def test_status_word_meaning_covers_the_value_bearing_families(server) -> None:
+    assert server._status_word_meaning(0x90, 0x00) == "Success"
+    assert "18 bytes available" in server._status_word_meaning(0x61, 0x12)
+    assert "Correct: 8" in server._status_word_meaning(0x6C, 0x08)
+    assert "2 retries left" in server._status_word_meaning(0x63, 0xC2)
+    assert server._status_word_meaning(0x6F, 0x42) == "See SW1/SW2."
+
+
+@pytest.mark.parametrize("payload", [b"\xa0\xff\x00\x01binary", b'{"truncated": '])
+def test_session_diff_answers_instead_of_raising(server, tmp_path, payload: bytes) -> None:
+    """A raised exception reaches the client as a protocol error, not an answer."""
+
+    recording = tmp_path / "recording.json"
+    recording.write_bytes(payload)
+    result = json.loads(server.session_diff(str(recording), str(recording)))
+    assert "error" in result
+
+
+def test_every_file_tool_answers_on_a_binary_input(server, tmp_path) -> None:
+    """The contract is one JSON answer per call, whatever the file holds."""
+
+    junk = tmp_path / "junk.bin"
+    junk.write_bytes(b"\xa0\xff\x00\x01not text")
+    path = str(junk)
+    for result in (
+        server.saip_lint(path),
+        server.saip_diff(path, path),
+        server.metadata_lint(path),
+        server.eim_package_lint(path),
+        server.session_diff(path, path),
+    ):
+        assert "error" in json.loads(result)
+
+
+def test_the_suci_tool_runs_offline(server, monkeypatch) -> None:
+    """Key generation touches files, never a card."""
+
+    spec = server._SHELLS["suci_tool"]
+    assert spec.card is False
+    assert spec.card_verbs == frozenset()
+    assert spec.destructive == frozenset()
+
+    for name in (server.ACCESS_ENV, server.CARD_ACCESS_ENV):
+        monkeypatch.delenv(name, raising=False)
+    assert "error" not in json.loads(server.shell_run("suci_tool", "STATUS; EXIT"))
+
+    refused = json.loads(server.shell_run("suci_tool", "GENERATE secp256r1; EXIT"))
+    assert "read-only" in refused["error"]
+
+
+def test_suci_tool_redirection_is_write_tier(server, monkeypatch) -> None:
+    """TOOL decides which binary GENERATE and DUMP invoke."""
+
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
+    payload = json.loads(server.shell_run("suci_tool", "TOOL /bin/sh; EXIT"))
+    assert payload["risk"] == "write"
+
+
+def test_the_relay_shell_is_gated_before_startup(server, monkeypatch) -> None:
+    """It enumerates readers in preflight, exactly as scp11_live does."""
+
+    assert server._SHELLS["scp11_relay"].card is True
+    monkeypatch.delenv(server.CARD_ACCESS_ENV, raising=False)
+    payload = json.loads(server.shell_run("scp11_relay", "HELP; EXIT"))
+    assert server.CARD_ACCESS_ENV in payload["error"]
+    assert "exit_code" not in payload
+
+
+def test_relay_download_and_flow_are_destructive(server, monkeypatch) -> None:
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
+    for verb in ("FLOW", "DOWNLOAD-AC", "EIM-DOWNLOAD", "DELETE-PROFILE"):
+        payload = json.loads(server.shell_run("scp11_relay", f"{verb}; EXIT"))
+        assert payload["risk"] == "destructive", verb
+
+
+def test_relay_and_live_agree_on_the_verbs_they_share(server) -> None:
+    """Two consoles for the same ES10 surface must not classify it differently."""
+
+    relay, live = server._SHELLS["scp11_relay"], server._SHELLS["scp11_live"]
+    tiers: dict[str, dict[str, str]] = {}
+    for spec, label in ((relay, "relay"), (live, "live")):
+        for tier in ("read", "write", "destructive"):
+            for verb in getattr(spec, tier):
+                tiers.setdefault(verb, {})[label] = tier
+    disagreements = {
+        verb: seen for verb, seen in tiers.items()
+        if len(seen) == 2 and len(set(seen.values())) > 1
+    }
+    assert not disagreements, disagreements
