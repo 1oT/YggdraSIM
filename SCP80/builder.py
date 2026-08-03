@@ -56,17 +56,22 @@ class OtaBuildPlan :
 
 
 class OtaPacketBuilder :
-    SMS_TPDU_PREFIX =bytes .fromhex ("4005811250F341F6222222222222222502")
-    SINGLE_SMS_TPDU_PREFIX =bytes .fromhex ("4005811250F341F62222222222222225027000")
+    # SMS-DELIVER through TP-SCTS (TS 23.040 §9.2.2.1). TP-UDL follows and
+    # is computed from the user data, so it is not part of the prefix.
+    SMS_TPDU_PREFIX =bytes .fromhex ("4005811250F341F622222222222222")
     TPDU_PID_OFFSET =6
     TPDU_DCS_OFFSET =7
-    ENVELOPE_PREFIX =bytes .fromhex ("0202828106028001")
+    # ENVELOPE (SMS-PP DOWNLOAD), 3GPP TS 31.111 §7.1.1.2: device
+    # identities tag '02', source Network '83', destination UICC '81'
+    # (TS 102 223 §8.7), then the Service Centre address object.
+    ENVELOPE_PREFIX =bytes .fromhex ("0202838106028001")
     # TS 23.048 table 7: the concatenated UDH carries both the concatenation
     # control element and the Command Packet Identifier, so UDHL is '07' --
     # IEIa '00' with its three octets, then IEIb CPI '70' with a null IED.
     CONCAT_UDH_PREFIX =bytes .fromhex ("070003")
     CONCAT_UDH_CPI =bytes .fromhex ("7000")
-    SINGLE_UDH =b"\x00"
+    # TS 23.048 table 6: UDHL '02', IEIa CPI '70', IEIDL '00'.
+    SINGLE_UDH =bytes .fromhex ("027000")
     DEFAULT_TP_UD_MAX =140 
 
     def __init__ (self ,config :ConfigManager ):
@@ -185,9 +190,9 @@ class OtaPacketBuilder :
         return bytes (prefix )
 
     def _build_single_sms_tpdu (self ,block_0348 :bytes )->tuple :
-        sms_tpdu =self ._tpdu_prefix (self .SINGLE_SMS_TPDU_PREFIX )+block_0348 
-        tp_ud_length =1 +len (block_0348 )
-        return sms_tpdu ,tp_ud_length 
+        tp_ud =self .SINGLE_UDH +block_0348 
+        sms_tpdu =self ._tpdu_prefix (self .SMS_TPDU_PREFIX )+bytes ([len (tp_ud )])+tp_ud 
+        return sms_tpdu ,len (tp_ud )
 
     def _build_concat_sms_tpdu (self ,fragment :bytes ,concat_ref :int ,total :int ,sequence :int )->tuple :
         tp_ud =(
@@ -246,7 +251,7 @@ class OtaPacketBuilder :
         ct =block_data [10 ]
 
         tp_ud_max =self ._get_tp_ud_max ()
-        single_tp_ud_len =1 +len (block_0348 )
+        single_tp_ud_len =len (self .SINGLE_UDH )+len (block_0348 )
         apdus :List [OtaEnvelopeApdu ]=[]
         reader_apdus :List [str ]=[]
 

@@ -121,7 +121,10 @@ class StkController:
 
     DEVICE_IDENTITIES_TERMINAL_TO_UICC = bytes.fromhex("02028281")
     DEVICE_IDENTITIES_UICC_TO_TERMINAL = bytes.fromhex("82028182")
-    SMS_PP_PREFIX = bytes.fromhex("0202828106028001")
+    # ENVELOPE (SMS-PP DOWNLOAD) carries a message that arrived from the
+    # network, so 3GPP TS 31.111 §7.1.1.2 sets the source to Network
+    # ('83'), unlike the terminal-sourced envelopes above.
+    SMS_PP_PREFIX = bytes.fromhex("0202838106028001")
 
     # Event List values per ETSI TS 102 223 §8.25 (table "Event list").
     # Keep the dict literal sparse so future additions are deliberate;

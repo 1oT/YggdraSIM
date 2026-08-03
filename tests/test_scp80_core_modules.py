@@ -323,7 +323,7 @@ class OtaPacketBuilderTests(unittest.TestCase):
         self.assertEqual(len(plan.apdus), 1)
         self.assertEqual(len(plan.reader_apdus), 1)
         self.assertEqual(plan.payload_hex, "AA" * 10)
-        self.assertIn("02028281060280018B", plan.apdus[0].apdu_hex)
+        self.assertIn("02028381060280018B", plan.apdus[0].apdu_hex)
         self.assertNotIn("820283818B", plan.apdus[0].apdu_hex)
         self.assertIn("4005811250F341F62222222222222225027000", plan.apdus[0].apdu_hex)
 

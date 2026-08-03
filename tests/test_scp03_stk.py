@@ -76,7 +76,7 @@ class StkControllerTests(unittest.TestCase):
 
         self.assertEqual(
             transport.connection.calls,
-            ["80C200000FD10D02028281060280018B03001122"],
+            ["80C200000FD10D02028381060280018B03001122"],
         )
 
     def test_send_data_available_event_uses_virtual_channel_length(self):
