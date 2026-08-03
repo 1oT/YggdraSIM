@@ -580,6 +580,21 @@ def encode_suci_mobile_identity(
         )
     if int(hn_public_key_id) < 0 or int(hn_public_key_id) > 0xFF:
         raise ValueError("HN public key identifier must fit in one byte.")
+    # TS 23.003 §2.2B: the Home Network Public Key Identifier "shall be set
+    # to the value 0 if and only if null protection scheme is used". Either
+    # half broken yields a SUCI a UDM is entitled to reject, so it is caught
+    # here rather than sent.
+    is_null_scheme = int(protection_scheme) == int(ProtectionScheme.NULL)
+    if is_null_scheme and int(hn_public_key_id) != 0:
+        raise ValueError(
+            "The null protection scheme requires HN public key identifier 0; "
+            f"got {int(hn_public_key_id)}."
+        )
+    if not is_null_scheme and int(hn_public_key_id) == 0:
+        raise ValueError(
+            "HN public key identifier 0 is reserved for the null protection "
+            f"scheme; got scheme {int(protection_scheme):#04x}."
+        )
     octet_1 = (int(supi_format) & 0x0F) << 4
     octet_1 |= TYPE_OF_IDENTITY_SUCI & 0x07
     out = bytearray()
