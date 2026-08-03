@@ -3406,16 +3406,17 @@ class EtsiFileSystem:
         Parses an FCP TLV (root tag ``62``) carried in the C-APDU
         body and creates a new EF as a child of the currently
         selected DF. The simulator implements the spec's most
-        common subset: transparent EFs (file descriptor byte
-        ``0x01``) and linear-fixed EFs (``0x02``); cyclic EFs are
-        also accepted (``0x06``). Recognised FCP children:
+        common subset: working and internal EFs whose structure bits
+        select transparent, linear fixed or cyclic. The shareable flag
+        and the file type bits are honoured, so both ``01`` and ``41``
+        describe a transparent EF. Recognised FCP children:
 
         - ``80`` File Size (transparent EF) or record length helper.
         - ``81`` Total File Size (optional).
-        - ``82`` File Descriptor: byte 0 is the file type / structure,
-          byte 1 + 2 are 0x21 (UICC), bytes 3..4 (record EFs only)
-          are the record length, byte 5 (record EFs only) is the
-          number of records.
+        - ``82`` File Descriptor: byte 0 is the file descriptor byte
+          (shareable flag, file type, EF structure), byte 1 is the data
+          coding byte, bytes 2..3 (record EFs only) are the record
+          length and byte 4 (record EFs only) the number of records.
         - ``83`` File ID (2 bytes, big-endian).
         - ``8A`` Lifecycle State (defaults to ``0x05`` operational).
 
@@ -3448,17 +3449,25 @@ class EtsiFileSystem:
         if len(descriptor) < 1:
             return b"", 0x6A, 0x80
         descriptor_byte = descriptor[0] & 0xFF
-        # TS 102 221 §11.1.1.4.3 Table 11.5 file-descriptor bytes:
-        # 0x01 working EF transparent, 0x02 working EF linear-fixed,
-        # 0x06 working EF cyclic.
-        structure = ""
-        if descriptor_byte == 0x01:
-            structure = "transparent"
-        elif descriptor_byte == 0x02:
-            structure = "linear-fixed"
-        elif descriptor_byte == 0x06:
-            structure = "cyclic"
-        else:
+        # TS 102 221 §11.1.1.4.3 table 11.5 packs three fields into the
+        # file descriptor byte: b7 shareable, b6 to b4 file type, b3 to b1
+        # EF structure. Only the structure bits pick the file layout, so a
+        # shareable transparent EF is '41' and a non-shareable one '01' --
+        # both describe the same structure, and build_fcp emits the
+        # shareable form.
+        if descriptor_byte & 0x80:
+            return b"", 0x6A, 0x80
+        file_type = (descriptor_byte >> 3) & 0x07
+        # 000 working EF, 001 internal EF. 111 is a DF, an ADF or a
+        # BER-TLV EF, none of which this creates.
+        if file_type not in (0b000, 0b001):
+            return b"", 0x6A, 0x80
+        structure = {
+            0b001: "transparent",
+            0b010: "linear-fixed",
+            0b110: "cyclic",
+        }.get(descriptor_byte & 0x07, "")
+        if structure == "":
             return b"", 0x6A, 0x80
         parent = self.current_node()
         if parent.kind not in ("df", "adf", "mf"):
@@ -3472,10 +3481,12 @@ class EtsiFileSystem:
         record_length = 0
         record_count = 0
         if structure in ("linear-fixed", "cyclic"):
-            if len(descriptor) < 5:
+            # Within the tag '82' value: [0] file descriptor byte, [1] data
+            # coding byte, [2:4] record length, [4] number of records.
+            if len(descriptor) < 4:
                 return b"", 0x6A, 0x80
-            record_length = int.from_bytes(descriptor[3:5], "big")
-            record_count = int(descriptor[5]) if len(descriptor) >= 6 else 0
+            record_length = int.from_bytes(descriptor[2:4], "big")
+            record_count = int(descriptor[4]) if len(descriptor) >= 5 else 0
             if record_count == 0 and size_bytes is not None and record_length > 0:
                 record_count = int.from_bytes(size_bytes, "big") // record_length
             if record_length == 0 or record_count == 0:
