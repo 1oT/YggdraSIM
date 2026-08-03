@@ -427,12 +427,20 @@ class Transport :
         "response_data":Utils .to_hex (response_data ),
         })
         if status_code ==0x00 and len (response_data )>0 :
+            # TS 102 226 table 5.1: one octet counting the commands the
+            # script executed, then the two status octets of the last one,
+            # then its response data. The status comes before the data, so
+            # reading it off the tail only agrees when there is no data --
+            # which is never the case after a READ BINARY, a READ RECORD or
+            # a GET RESPONSE, the commands that produce any.
             command_count =response_data [0 ]&0xFF
-            command_response =response_data [1 :]
+            body =response_data [1 :]
             decoded ["command_count"]=command_count
-            decoded ["command_response"]=Utils .to_hex (command_response )
-            if command_count ==1 and len (command_response )>=2 :
-                decoded ["command_sw"]=Utils .to_hex (command_response [-2 :])
+            if len (body )>=2 :
+                decoded ["command_sw"]=Utils .to_hex (body [0 :2 ])
+                decoded ["command_response"]=Utils .to_hex (body [2 :])
+            else :
+                decoded ["command_response"]=Utils .to_hex (body )
         return decoded
 
     @staticmethod

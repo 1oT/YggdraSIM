@@ -437,8 +437,10 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(decoded["cntr"], "000000FFFF")
         self.assertEqual(decoded["pcntr"], "00")
         self.assertEqual(decoded["command_count"], 1)
-        self.assertEqual(decoded["command_response"], "9000")
+        # Status bytes first, then response data; this script returned
+        # none, so command_response is empty.
         self.assertEqual(decoded["command_sw"], "9000")
+        self.assertEqual(decoded["command_response"], "")
         self.assertEqual(decoded["fetch_sw"], "9130")
 
     def test_decode_por_error_response_packet(self) -> None:
