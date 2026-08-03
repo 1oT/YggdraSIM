@@ -1001,7 +1001,7 @@ class ToolkitLogic:
         default_frame_identifier: int = 0,
         qualifier: int = 0x00,
     ) -> dict[str, str | int | list[str]]:
-        """ETSI TS 102 223 §6.4.36 SET FRAMES (proactive type 0x60).
+        """ETSI TS 102 223 §6.4.36 SET FRAMES (proactive type 0x50).
 
         Builds the proactive command body with:
 
@@ -1037,7 +1037,7 @@ class ToolkitLogic:
         *,
         qualifier: int = 0x00,
     ) -> dict[str, str | int | list[str]]:
-        """ETSI TS 102 223 §6.4.37 GET FRAMES STATUS (type 0x61).
+        """ETSI TS 102 223 §6.4.37 GET FRAMES STATUS (type 0x51).
 
         Empty body. The terminal returns a Frames Information TLV
         (``49`` / ``C9``) carrying the negotiated frames count and
