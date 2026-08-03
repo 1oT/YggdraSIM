@@ -126,7 +126,8 @@ class StkController:
     # ('83'), unlike the terminal-sourced envelopes above.
     SMS_PP_PREFIX = bytes.fromhex("0202838106028001")
 
-    # Event List values per ETSI TS 102 223 §8.25 (table "Event list").
+    # Event List values per ETSI TS 102 223 §8.25. '1A' is Void in every
+    # release of that clause, so nothing is named onto it.
     # Keep the dict literal sparse so future additions are deliberate;
     # missing event codes still fall through to "0xNN" via _stk_event_name.
     EVENT_NAME_MAP = {
@@ -156,14 +157,13 @@ class StkController:
         "IMS-REGISTRATION": 0x17,
         "IMS-INCOMING-DATA": 0x18,
         "PROFILE-CONTAINER": 0x19,
-        "USAT-APPLICATION": 0x1A,
-        "DATA-CONNECTION-STATUS-CHANGE": 0x1B,
+        "SECURED-PROFILE-CONTAINER": 0x1B,
+        "POLL-INTERVAL-NEGOTIATION": 0x1C,
     }
 
-    # Proactive command codes per ETSI TS 102 223 §6.6 (Type of Command).
-    # Includes the SET UP MENU (0x25) which the simulator emits during
-    # bootstrap, and the broader 0x10..0x16 / 0x20..0x28 / 0x45..0x73
-    # ranges so traces are no longer rendered as "UNKNOWN 0x..".
+    # Type of Command values, ETSI TS 102 223 table 9.4. '81' is not a
+    # command: it is the "end of the proactive UICC session" value that
+    # table allows for Next Action Indicator coding only.
     PROACTIVE_NAME_MAP = {
         0x01: "REFRESH",
         0x02: "MORE TIME",
@@ -200,13 +200,16 @@ class StkController:
         0x45: "SERVICE SEARCH",
         0x46: "GET SERVICE INFORMATION",
         0x47: "DECLARE SERVICE",
-        0x60: "SET FRAMES",
-        0x61: "GET FRAMES STATUS",
-        0x70: "RETRIEVE MULTIMEDIA MESSAGE",
-        0x71: "SUBMIT MULTIMEDIA MESSAGE",
-        0x72: "DISPLAY MULTIMEDIA MESSAGE",
-        0x73: "ACTIVATE",
-        0x81: "ESTABLISH NETWORK ACCESS",
+        0x50: "SET FRAMES",
+        0x51: "GET FRAMES STATUS",
+        0x60: "RETRIEVE MULTIMEDIA MESSAGE",
+        0x61: "SUBMIT MULTIMEDIA MESSAGE",
+        0x62: "DISPLAY MULTIMEDIA MESSAGE",
+        0x70: "ACTIVATE",
+        0x71: "CONTACTLESS STATE CHANGED",
+        0x72: "COMMAND CONTAINER",
+        0x73: "ENCAPSULATED SESSION CONTROL",
+        0x79: "LSI COMMAND",
     }
 
     def __init__(self, transport, debug: bool = False) -> None:
