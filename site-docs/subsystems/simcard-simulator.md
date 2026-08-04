@@ -443,11 +443,11 @@ bookkeeping for the events the simulator can react to:
 
 | Event code | Spec | Latch |
 | --- | --- | --- |
-| `0x03` | TS 102 223 §7.4.3 Location Status | `location_information` |
-| `0x07` | TS 102 223 §7.4.7 Idle Screen Available | `idle_screen_available` |
-| `0x09` | TS 102 223 §7.4.9 Browser Termination | `last_browser_termination_cause` |
-| `0x0B` | TS 102 223 §7.4.11 Channel Status | `open_channel_active` |
-| `0x0F` | 3GPP TS 31.111 §7.5.13 Network Rejection | `last_network_rejection_cause` |
+| `0x03` | TS 102 223 §7.5.4 Location status | `location_information` |
+| `0x05` | TS 102 223 §7.5.6 Idle screen available | `idle_screen_available` |
+| `0x08` | TS 102 223 §7.5.9 Browser termination | `last_browser_termination_cause` |
+| `0x0A` | TS 102 223 §7.5.11 Channel status | `open_channel_active` |
+| `0x12` | 3GPP TS 31.111 §7.5.2 Network Rejection | `last_network_rejection_cause` |
 
 Every received event also updates `last_event_code` and appends
 to `event_history` so the order and number of received events is
@@ -1456,15 +1456,13 @@ envelope, and `_handle_event_download` ships the values into
 
 | Event code | Spec | Latches |
 | --- | --- | --- |
-| `0x03` Location Status | TS 102 223 §7.4.4 | `last_location_status` (0=normal, 1=limited, 2=no service) + `location_status_changes` events-received counter. |
-| `0x06` Card Reader Status | TS 102 223 §7.4.7 | `last_card_reader_status` (raw byte: bits 7..6 present/powered, bits 0..3 reader id) + `last_card_reader_id` (decoded id) + `card_reader_status_events`. |
-| `0x09` Data Available (overlay) | TS 102 223 §7.4.10 | When the envelope carries TLV `37` Channel Length, `last_data_available_channel_length`, optional `last_data_available_channel_status` (TLV `38`), and `data_available_events` are latched. The existing browser-termination-cause path on the same code is unaffected. |
-| `0x10` Frames Information Change | TS 102 223 §7.4.16 | `last_frames_information` is overwritten with the new TLV `49` blob and `frames_information_changes` increments on every event (including empty payloads, mirroring `display_parameters_changes`). |
+| `0x03` Location status | TS 102 223 §7.5.4 | `last_location_status` (0=normal, 1=limited, 2=no service) + `location_status_changes` events-received counter. |
+| `0x06` Card reader status | TS 102 223 §7.5.7 | `last_card_reader_status` (raw byte: bits 7..6 present/powered, bits 0..3 reader id) + `last_card_reader_id` (decoded id) + `card_reader_status_events`. |
+| `0x09` Data available | TS 102 223 §7.5.10 | `last_data_available_channel_length` from TLV `37` Channel Length, optional `last_data_available_channel_status` (TLV `38`), and the `data_available_events` counter. |
+| `0x10` Frames Information changed | TS 102 223 §7.5.17 | `last_frames_information` is overwritten with the new TLV `49` blob and `frames_information_changes` increments on every event (including empty payloads, mirroring `display_parameters_changes`). |
 
-The `0x09` overlay accepts envelopes that carry both
-`browser_termination_cause` and `channel_length`, so a vendor that
-overloads the same opcode for both purposes does not lose either
-side of the dispatch.
+Browser termination is event `0x08` (§7.5.9) and carries its cause
+in TLV `34` / `B4`; it does not share a code with Data available.
 
 ### User-input proactive TR latches (round 16)
 
@@ -1656,8 +1654,8 @@ without scraping `event_history`.
 | Event code | Behaviour |
 | --- | --- |
 | `0x04` User Activity | `state.toolkit.user_activity_count` increments monotonically. The event carries no payload of interest. |
-| `0x0D` Access Technology Change | `state.toolkit.last_access_technology` caches the new RAT byte (TS 102 223 §8.61: `0x00` GSM, `0x03` UTRAN, `0x08` E-UTRAN, `0x0A` NG-RAN). `access_technology_changes` increments only when the value actually changed. The COMPREHENSION-TLV tag `3F` / `BF` is read by a dedicated single-byte / single-length scanner because the BER walker would otherwise mis-parse it as a multi-byte tag (TS 101 220 §7.1.1.1). |
-| `0x0E` Display Parameters Change | `state.toolkit.last_display_parameters` caches the raw TLV `46` / `C6` payload; `display_parameters_changes` increments on every event so polling can derive a delta. |
+| `0x0B` Access Technology Change | `state.toolkit.last_access_technology` caches the new RAT byte (TS 102 223 §8.61: `0x00` GSM, `0x03` UTRAN, `0x08` E-UTRAN, `0x0A` NG-RAN). `access_technology_changes` increments only when the value actually changed. The COMPREHENSION-TLV tag `3F` / `BF` is read by a dedicated single-byte / single-length scanner because the BER walker would otherwise mis-parse it as a multi-byte tag (TS 101 220 §7.1.1.1). |
+| `0x0C` Display parameters changed | `state.toolkit.last_display_parameters` caches the raw TLV `46` / `C6` payload; `display_parameters_changes` increments on every event so polling can derive a delta. |
 
 ### Proactive terminal-response latches (round 11)
 
@@ -1700,18 +1698,16 @@ proactives:
 
 ### Event Download additions
 
-Round-8 extends `_handle_event_download` with three event codes
-from TS 102 223 §7.4.10 / §7.4.12:
+`_handle_event_download` dispatches on the event codes of
+TS 102 223 §8.25, extended by the values TS 31.111 §8.25 adds:
 
 | Event code | Latched into |
 | --- | --- |
-| `0x0A` SS event   | `state.toolkit.last_ss_event_data` (TLV `89` payload) |
-| `0x0B` USSD event | `state.toolkit.last_ussd_event_data` + `last_ussd_event_dcs` (TLV `8A` byte 0 = DCS, bytes 1.. = text) |
-| `0x0C` Local Connection | `state.toolkit.local_connection_active` -- True when TLV `40` byte 0 high nibble = `0x80` (established), False on `0x00` (terminated) |
-| `0x13` HCI Connectivity (round-9) | `state.toolkit.hci_connectivity_active` -- shares TLV `40` decoding with Local Connection: high nibble `0x80` marks the HCI gate as connected, `0x00` as disconnected |
-| `0x16` Contactless State Request (round-10) | `state.toolkit.contactless_active` -- TLV `40` high nibble `0x80` activates the contactless front-end, `0x00` deactivates it |
-| `0x18` IMS Registration (round-10) | `state.toolkit.ims_registered` from TLV `B9` byte 0 (`0x01` registered, `0x00` deregistered) and `state.toolkit.last_ims_event_data` from the optional registered URI (TLV `BA`) |
-| `0x19` IMS Incoming Data (round-10) | `state.toolkit.last_ims_event_data` -- IMS / SIP payload from TLV `BA` |
+| `0x0D` Local Connection (§7.5.14) | `state.toolkit.local_connection_active` -- True when TLV `40` byte 0 high nibble = `0x80` (established), False on `0x00` (terminated) |
+| `0x13` HCI Connectivity (§7.5.18) | `state.toolkit.hci_connectivity_active` -- shares TLV `40` decoding with Local Connection: high nibble `0x80` marks the HCI gate as connected, `0x00` as disconnected |
+| `0x16` Contactless state request (§7.5.19) | `state.toolkit.contactless_active` -- TLV `40` high nibble `0x80` activates the contactless front-end, `0x00` deactivates it |
+| `0x17` IMS Registration (TS 31.111 §7.5.21) | `state.toolkit.ims_registered` from TLV `B9` byte 0 (`0x01` registered, `0x00` deregistered) and `state.toolkit.last_ims_event_data` from the optional registered URI (TLV `BA`) |
+| `0x18` Incoming IMS Data (TS 31.111 §7.5.20) | `state.toolkit.last_ims_event_data` -- IMS / SIP payload from TLV `BA` |
 
 `last_event_code` is still the most recently observed event so
 existing telemetry that polls a single field keeps working.

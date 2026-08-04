@@ -314,7 +314,7 @@ class EventDownloadGap10Tests(_ToolkitHarness):
     def test_ims_registration_event_sets_status_and_payload(self) -> None:
         uri = b"sip:user@example.com"
         envelope = self._envelope(
-            tlv("99", b"\x18"),
+            tlv("99", b"\x17"),
             tlv("B9", b"\x01"),
             tlv("BA", uri),
         )
@@ -325,7 +325,7 @@ class EventDownloadGap10Tests(_ToolkitHarness):
     def test_ims_registration_deregister_clears_flag(self) -> None:
         self.state.toolkit.ims_registered = True
         envelope = self._envelope(
-            tlv("99", b"\x18"),
+            tlv("99", b"\x17"),
             tlv("B9", b"\x00"),
         )
         self.toolkit.handle_envelope(envelope, self._fallback)
@@ -334,12 +334,12 @@ class EventDownloadGap10Tests(_ToolkitHarness):
     def test_ims_incoming_data_caches_payload(self) -> None:
         payload = bytes.fromhex("4D45535341474520626F6479")
         envelope = self._envelope(
-            tlv("99", b"\x19"),
+            tlv("99", b"\x18"),
             tlv("BA", payload),
         )
         self.toolkit.handle_envelope(envelope, self._fallback)
         self.assertEqual(self.state.toolkit.last_ims_event_data, payload)
-        self.assertEqual(self.state.toolkit.last_event_code, 0x19)
+        self.assertEqual(self.state.toolkit.last_event_code, 0x18)
 
 
 if __name__ == "__main__":

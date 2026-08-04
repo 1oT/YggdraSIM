@@ -458,6 +458,8 @@ class StkController:
             0x02: "TCP CLIENT REMOTE",
             0x03: "TCP SERVER",
             0x04: "UDP LOCAL",
+            0x05: "TCP CLIENT LOCAL",
+            0x06: "DIRECT CHANNEL",
         }.get(int(protocol_type) & 0xFF, f"0x{int(protocol_type) & 0xFF:02X}")
 
     @staticmethod

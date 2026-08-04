@@ -591,25 +591,17 @@ class SimToolkitState:
     last_channel_data_sent: int = 0
     last_received_channel_data: bytes = b""
     received_channel_history: list[bytes] = field(default_factory=list)
-    # ETSI TS 102 223 §7.4 Event Download bookkeeping. The simulator
+    # ETSI TS 102 223 §7.5 Event Download bookkeeping. The simulator
     # records the most recent event-code delivered by the terminal so
     # an STK applet can poll "did we just see an idle-screen / browser
-    # termination / network-rejection notification". The history list
+    # termination / network-rejection notification". Bounded by
     # is unbounded by design; tests trim it explicitly when needed.
     event_history: list[int] = field(default_factory=list)
     last_event_code: int = 0
     idle_screen_available: bool = False
     last_browser_termination_cause: int = 0
     last_network_rejection_cause: bytes = b""
-    # ETSI TS 102 223 §7.4.10 SS Event (0x0A) -- the SS-string the
-    # terminal observed, raw payload of the matching D6 envelope.
-    last_ss_event_data: bytes = b""
-    # ETSI TS 102 223 §7.4.10 USSD Event (0x0B) -- the USSD-string
-    # decoded from the envelope (DCS-aware, falls back to the raw
-    # bytes when the DCS is unknown).
-    last_ussd_event_data: bytes = b""
-    last_ussd_event_dcs: int = 0
-    # ETSI TS 102 223 §7.4.12 Local Connection event (0x0C). Tracks
+    # ETSI TS 102 223 §7.5.14 Local Connection event ('0D'). Tracks
     # whether the most recent local-bearer notification reported the
     # connection as established (True) or terminated (False).
     local_connection_active: bool = False

@@ -126,7 +126,7 @@ class CardReaderStatusEventTests(_ToolkitHarness):
 
 
 class DataAvailableEventTests(_ToolkitHarness):
-    """ETSI TS 102 223 §7.4.10 Data Available Event under 0x09."""
+    """ETSI TS 102 223 §7.5.10 Data available event under '09'."""
 
     def test_channel_length_latches_and_counter_bumps(self) -> None:
         envelope = _envelope(
@@ -141,20 +141,21 @@ class DataAvailableEventTests(_ToolkitHarness):
         self.assertEqual(toolkit.last_data_available_channel_status, b"\x81\x00")
         self.assertEqual(toolkit.data_available_events, 1)
 
-    def test_browser_termination_path_still_works(self) -> None:
+    def test_browser_termination_is_a_separate_event(self) -> None:
         envelope = _envelope(
-            tlv("99", b"\x09"),
+            tlv("99", b"\x08"),
             tlv("34", b"\x01"),
         )
         self.toolkit.handle_envelope(envelope, _fallback)
         toolkit = self.state.toolkit
+        self.assertEqual(toolkit.last_event_code, 0x08)
         self.assertEqual(toolkit.last_browser_termination_cause, 0x01)
         self.assertEqual(toolkit.data_available_events, 0)
 
-    def test_combined_envelope_latches_both_paths(self) -> None:
+    def test_data_available_ignores_a_browser_termination_cause(self) -> None:
         envelope = _envelope(
             tlv("99", b"\x09"),
-            tlv("34", b"\x00"),
+            tlv("34", b"\x01"),
             tlv("37", b"\x10"),
         )
         self.toolkit.handle_envelope(envelope, _fallback)
