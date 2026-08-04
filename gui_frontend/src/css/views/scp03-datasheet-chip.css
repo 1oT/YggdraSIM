@@ -49,9 +49,9 @@
 }
 
 .cc-datasheet-chip--warn {
-  background: color-mix(in oklab, var(--warn, #f0a030) 10%, var(--bg-hover));
-  border-color: color-mix(in oklab, var(--warn, #f0a030) 35%, var(--border));
-  color: var(--warn, #f0a030);
+  background: color-mix(in oklab, var(--warn) 10%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--warn) 35%, var(--border));
+  color: var(--warn);
 }
 
 .cc-action-datasheet-main--decoded > .cc-decoded {
@@ -128,7 +128,7 @@
 .cc-action-datasheet-raw.cc-details {
   margin-top: 2px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius-md);
   padding: 0 12px 10px;
   background: color-mix(in oklab, var(--bg-hover) 45%, transparent);
 }

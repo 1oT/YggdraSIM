@@ -42,7 +42,7 @@
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  border: 1px solid rgba(163, 190, 140, 0.42);
+  border: 1px solid color-mix(in oklab, var(--ok) 42%, transparent);
   border-radius: var(--radius-pill);
   background: var(--ok-soft);
   color: var(--ok);
@@ -72,12 +72,12 @@
 
 .overview-module-card[data-cb-state="running"],
 .overview-module-card[data-hil-trace-state="running"] {
-  border-color: rgba(163, 190, 140, 0.45);
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
 }
 
 .overview-module-card[data-cb-state="running"] .overview-module-card-badge,
 .overview-module-card[data-hil-trace-state="running"] .overview-module-card-badge {
-  border-color: rgba(163, 190, 140, 0.42);
+  border-color: color-mix(in oklab, var(--ok) 42%, transparent);
   background: var(--ok-soft);
   color: var(--ok);
 }

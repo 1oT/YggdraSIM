@@ -9,10 +9,10 @@
 .cc-destructive-banner {
   margin: 0 0 10px;
   padding: 10px 12px;
-  border-radius: var(--radius-sm, 6px);
-  background: color-mix(in srgb, var(--accent-danger, #ff6b6b) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent-danger, #ff6b6b) 55%, transparent);
-  color: var(--accent-danger, #ff6b6b);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-danger) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-danger) 55%, transparent);
+  color: var(--accent-danger);
   font-size: 12.5px;
   line-height: 1.4;
   display: grid;
@@ -25,7 +25,7 @@
 }
 
 .cc-destructive-banner-text {
-  color: var(--fg-muted, currentColor);
+  color: var(--fg-muted);
 }
 
 .cc-destructive-confirm {
@@ -42,11 +42,11 @@
   width: 18px;
   height: 18px;
   margin: 0;
-  accent-color: var(--accent-danger, var(--fail));
+  accent-color: var(--accent-danger);
 }
 
 .cc-empty {
-  color: var(--fg-subtle, var(--fg-muted));
+  color: var(--fg-subtle);
   font-size: 12.5px;
   margin: 6px 0;
   font-style: italic;
@@ -61,12 +61,12 @@
 }
 
 .cc-decode-input {
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 12px;
   background: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   padding: 7px 11px;
 }
 
@@ -79,7 +79,7 @@
 }
 
 .cc-warn {
-  color: var(--accent-warning, #f0c674);
+  color: var(--accent-warning);
   font-size: 12.5px;
   margin: 6px 0;
 }

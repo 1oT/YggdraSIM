@@ -76,7 +76,7 @@
 }
 
 .cc-fs-mirror {
-  color: var(--accent, #6aa9ff);
+  color: var(--accent);
   font-size: 11px;
   font-style: normal;
   margin-top: 2px;
@@ -143,7 +143,7 @@
 }
 
 .cc-fs-breakdown code {
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--fg);
   background: transparent;

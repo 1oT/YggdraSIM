@@ -16,7 +16,7 @@
 .saip-edit-card {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -28,13 +28,13 @@
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-edit-card-hint {
   margin: 0 0 4px 0;
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
@@ -48,7 +48,7 @@
 }
 
 .saip-edit-kv-label {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 11px;
   letter-spacing: 0.02em;
 }
@@ -59,18 +59,18 @@
 }
 
 .saip-edit-kv-value.is-mono {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
 }
 
 .saip-edit-kv-value.is-muted {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
 .saip-edit-card .saip-edit-card {
-  background: var(--surface, rgba(255, 255, 255, 0.02));
-  border-color: rgba(255, 255, 255, 0.06);
+  background: var(--surface);
+  border-color: var(--border);
 }
 
 .saip-decoded-edit-fold {
@@ -130,7 +130,7 @@
 .saip-sd-param-group-chip {
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 10px;
   line-height: 1;
   padding: 4px 7px;
@@ -138,7 +138,7 @@
 }
 
 .saip-sd-param-summary-chip {
-  color: var(--accent, #8bd3e6);
+  color: var(--accent);
 }
 
 .saip-sd-param-body {
@@ -167,7 +167,7 @@
 
 .saip-sd-param-tree {
   border-right: 1px solid var(--border);
-  background: var(--surface, rgba(255, 255, 255, 0.02));
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -202,7 +202,7 @@
 }
 
 .saip-sd-param-tree-row.is-active {
-  background: var(--accent-soft, rgba(116, 184, 205, 0.16));
+  background: var(--accent-soft);
 }
 
 .saip-sd-param-tree-label {
@@ -222,7 +222,7 @@
 }
 
 .saip-sd-param-tree-row.is-active .saip-sd-param-tree-label {
-  border-color: var(--accent, rgba(116, 184, 205, 0.75));
+  border-color: var(--accent);
 }
 
 .saip-sd-param-tree-name {
@@ -234,7 +234,7 @@
 
 .saip-sd-param-dot {
   border-radius: 999px;
-  background: var(--fg-muted, #888);
+  background: var(--fg-muted);
   flex: 0 0 auto;
   height: 7px;
   opacity: 0.5;
@@ -242,7 +242,7 @@
 }
 
 .saip-sd-param-dot.is-on {
-  background: var(--accent, #8bd3e6);
+  background: var(--accent);
   opacity: 1;
 }
 
@@ -253,7 +253,7 @@
 .saip-sd-param-pane-title,
 .saip-sd-param-subtitle {
   margin: 0;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -264,7 +264,7 @@
   flex-direction: column;
   gap: 5px;
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-sd-param-field textarea {
@@ -322,16 +322,16 @@
 }
 
 .saip-sd-param-status {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 11px;
 }
 
 .saip-sd-param-status[data-state="ok"] {
-  color: var(--ok, #8fd19e);
+  color: var(--ok);
 }
 
 .saip-sd-param-status[data-state="error"] {
-  color: var(--danger, #e07a7a);
+  color: var(--danger);
 }
 
 @media (max-width: 900px) {
@@ -376,7 +376,7 @@
 }
 
 .saip-add-file-row + .saip-add-file-row {
-  border-top: 1px solid var(--surface-border, rgba(255, 255, 255, 0.04));
+  border-top: 1px solid var(--surface-border);
 }
 
 .saip-add-file-row--df {
@@ -389,7 +389,7 @@
 
 .saip-add-file-glyph {
   flex: 0 0 auto;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 11px;
   width: 12px;
   text-align: center;
@@ -405,9 +405,9 @@
 
 .saip-add-file-pename {
   flex: 0 0 auto;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 11px;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
 }
 
 .saip-add-file-actions {
@@ -419,7 +419,7 @@
 .saip-add-file-present {
   font-size: 11px;
   font-style: italic;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 /* Editor-specific tables (Files / Key list) */
@@ -438,7 +438,7 @@
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   padding: 4px 8px;
   border-bottom: 1px solid var(--border);
 }
@@ -449,13 +449,13 @@
 }
 
 .saip-editor-files-row:hover {
-  background: var(--surface, rgba(255, 255, 255, 0.04));
+  background: var(--surface);
 }
 
 .saip-editor-files-row:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-  background: var(--surface, rgba(255, 255, 255, 0.04));
+  background: var(--surface);
 }
 
 .saip-editor-files td,
@@ -495,15 +495,15 @@ button.saip-chip:focus-visible {
 }
 
 .saip-chip-ok {
-  color: #9ddf9d;
-  border-color: rgba(157, 223, 157, 0.45);
-  background: rgba(73, 138, 73, 0.22);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
+  background: color-mix(in oklab, var(--ok) 22%, transparent);
 }
 
 .saip-chip-warn {
-  color: #f2c48a;
-  border-color: rgba(242, 196, 138, 0.45);
-  background: rgba(156, 104, 38, 0.22);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 45%, transparent);
+  background: color-mix(in oklab, var(--warn) 22%, transparent);
 }
 
 .saip-row-flash {
@@ -514,7 +514,7 @@ button.saip-chip:focus-visible {
 .saip-cell-sub {
   margin-top: 2px;
   font-size: 10px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
@@ -531,7 +531,7 @@ button.saip-chip:focus-visible {
 
 .saip-template-children {
   margin-left: 18px;
-  border-left: 1px dashed var(--border, rgba(255, 255, 255, 0.1));
+  border-left: 1px dashed var(--border);
   padding-left: 10px;
 }
 
@@ -550,7 +550,7 @@ button.saip-chip:focus-visible {
 }
 
 .saip-template-row:hover {
-  background: var(--surface, rgba(255, 255, 255, 0.04));
+  background: var(--surface);
 }
 
 .saip-template-row--present {
@@ -558,7 +558,7 @@ button.saip-chip:focus-visible {
 }
 
 .saip-template-row--required:not(.saip-template-row--present) {
-  color: var(--fg, #ECEFF4);
+  color: var(--fg);
 }
 
 .saip-template-row--volatile {
@@ -587,15 +587,15 @@ button.saip-chip:focus-visible {
 
 .saip-template-row-fid,
 .saip-template-row-sfi {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-template-row-type,
 .saip-template-row-dim {
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-template-row-badges {
@@ -611,9 +611,9 @@ button.saip-chip:focus-visible {
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 3px;
-  background: var(--surface, rgba(255, 255, 255, 0.06));
-  color: var(--fg-muted, #888);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: var(--surface);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
 }
 
 .saip-template-badge--req {
@@ -638,23 +638,23 @@ button.saip-chip:focus-visible {
   font-size: 9px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
-  background: var(--surface, rgba(255, 255, 255, 0.05));
+  color: var(--fg-muted);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 3px;
   vertical-align: middle;
 }
 
 .saip-editor-keylist-idx {
-  font-family: var(--mono, "JetBrains Mono", monospace);
-  color: var(--fg-muted, #888);
+  font-family: var(--mono);
+  color: var(--fg-muted);
   width: 28px;
 }
 
 .saip-editor-keylist-comps {
   white-space: pre-wrap;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 10px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   max-width: 240px;
 }

@@ -29,12 +29,12 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
-  background: var(--surface, rgba(255, 255, 255, 0.02));
+  background: var(--surface);
   transition: border-color 0.12s ease, background-color 0.12s ease;
 }
 
 .saip-pe-card:hover {
-  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  background: var(--surface-alt);
   border-color: var(--accent-soft);
 }
 
@@ -66,13 +66,13 @@
 }
 
 .saip-pe-card.is-dirty {
-  border-left: 3px solid var(--warning, #d08770);
+  border-left: 3px solid var(--warning);
   padding-left: 7px;
 }
 
 .saip-pe-card.is-active.is-dirty {
   border-left-width: 3px;
-  border-left-color: var(--warning, #d08770);
+  border-left-color: var(--warning);
 }
 
 .saip-pe-icon {
@@ -82,14 +82,14 @@
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: none;
   border: 1px solid var(--border);
-  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
-  color: var(--fg, #d8dee9);
+  background: var(--surface-alt);
+  color: var(--fg);
   flex-shrink: 0;
   user-select: none;
 }
@@ -148,9 +148,9 @@
 .saip-pe-icon--access,
 .saip-pe-icon--sparse,
 .saip-pe-icon--default {
-  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  background: var(--surface-alt);
   border-color: var(--border);
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-pe-card-body {
@@ -163,7 +163,7 @@
 .saip-pe-card-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--fg, #d8dee9);
+  color: var(--fg);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -171,8 +171,8 @@
 
 .saip-pe-card-sub {
   font-size: 11px;
-  color: var(--fg-muted, #888);
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  color: var(--fg-muted);
+  font-family: var(--mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -193,10 +193,10 @@
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.05));
+  background: var(--surface-alt);
   border: 1px solid var(--border);
-  color: var(--fg-muted, #888);
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  color: var(--fg-muted);
+  font-family: var(--mono);
 }
 
 .saip-pe-chip--fs {
@@ -216,28 +216,28 @@
 }
 
 .saip-pe-chip--lint-fail {
-  border-color: rgba(191, 97, 106, 0.55);
-  color: #d08090;
-  background: rgba(191, 97, 106, 0.10);
+  border-color: color-mix(in oklab, var(--fail) 55%, transparent);
+  color: var(--fail);
+  background: var(--fail-soft);
   font-weight: 600;
 }
 
 .saip-pe-chip--lint-warn {
-  border-color: rgba(235, 180, 50, 0.50);
-  color: #d4aa3a;
-  background: rgba(235, 180, 50, 0.08);
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 
 .saip-pe-chip--lint-info {
-  border-color: rgba(143, 188, 187, 0.40);
-  color: #8fbcbb;
+  border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+  color: var(--accent);
 }
 
 .saip-pe-card-id {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
-  color: var(--fg-muted, #888);
-  background: var(--surface-alt, rgba(255, 255, 255, 0.05));
+  color: var(--fg-muted);
+  background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 2px 8px;
@@ -247,6 +247,6 @@
 
 .saip-pe-card.is-active .saip-pe-card-id {
   background: var(--accent);
-  color: var(--accent-fg, #0b1015);
+  color: var(--accent-fg);
   border-color: var(--accent);
 }

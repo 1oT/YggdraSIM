@@ -36,13 +36,13 @@
 }
 
 .cc-decoded-tools-btn[data-mode="json"] {
-  background: var(--accent-soft, rgba(99, 169, 255, 0.10));
+  background: var(--accent-soft);
   color: var(--accent);
   border-color: var(--accent);
 }
 
 .cc-decoded-tools-btn.is-copied {
-  background: var(--ok, #22c55e);
+  background: var(--ok);
   color: var(--bg);
-  border-color: var(--ok, #22c55e);
+  border-color: var(--ok);
 }

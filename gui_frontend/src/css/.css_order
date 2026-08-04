@@ -60,7 +60,7 @@ views/workbench-legacy-card.css
 views/scp03-popout-kvl.css
 views/scp03-datasheet-decoded.css
 views/scp03-datasheet-chip.css
-views/floating-action-popouts.css
+views/inline-panels.css
 views/records-viewer.css
 views/remote-lab.css
 views/pretty-value-base.css

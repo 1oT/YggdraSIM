@@ -28,7 +28,7 @@
   width: 28px;
   height: 28px;
   padding: 0;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--fg-dim);
@@ -77,7 +77,7 @@
   background: var(--bg);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   font-size: 11px;
   padding: 5px 8px;
 }
@@ -106,7 +106,7 @@
   padding: 6px 8px;
   font-size: 12px;
   color: var(--fg);
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background-color var(--transition-fast),
     transform var(--transition-fast);
@@ -140,18 +140,18 @@
 }
 
 .reader-row-dot--card {
-  background: var(--ok, #4ade80);
-  box-shadow: 0 0 6px var(--ok, #4ade80);
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
 }
 
 .reader-row-dot--empty {
-  background: var(--warn, #facc15);
-  box-shadow: 0 0 5px var(--warn, #facc15);
+  background: var(--warn);
+  box-shadow: 0 0 5px var(--warn);
 }
 
 .reader-row-dot--error {
-  background: var(--fail, #f87171);
-  box-shadow: 0 0 5px var(--fail, #f87171);
+  background: var(--fail);
+  box-shadow: 0 0 5px var(--fail);
 }
 
 .reader-row-dot--unknown {

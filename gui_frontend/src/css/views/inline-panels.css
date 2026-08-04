@@ -1,0 +1,126 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+
+/* -- Inline result panels ---------------------------------------------- */
+
+/* Action forms and action results render in normal document flow, inside
+ * the surface that opened them. Nothing is ``position: fixed`` and
+ * nothing outlives its host: leaving the tab or the subsystem takes the
+ * panel with it. Panels stack newest-last and scroll with their host, so
+ * two results are compared by scrolling rather than by dragging windows
+ * around. */
+
+.cc-panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 12px;
+}
+
+.cc-panel-stack:empty {
+  display: none;
+  margin-top: 0;
+}
+
+.cc-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+/* The newest panel carries the accent edge so the eye lands on the
+ * result the operator just asked for, without a z-order or a focus
+ * ring that implies the panel is a window. */
+.cc-panel.is-latest {
+  border-color: var(--accent);
+}
+
+.cc-panel-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+}
+
+.cc-panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* The heading is focusable so a new panel is announced; it is not a
+ * control, so it gets the focus ring without any hover affordance. */
+.cc-panel-title:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.cc-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.cc-panel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.cc-panel-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.cc-panel-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.cc-panel-body {
+  min-width: 0;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+/* A panel body can hold a trace or a wide table. Cap the height so one
+ * result cannot push every later panel off the bottom of the surface;
+ * the body scrolls inside that cap. */
+.cc-panel-body {
+  max-height: min(60vh, 640px);
+  overflow-y: auto;
+}
+
+.cc-panel.is-collapsed .cc-panel-body {
+  display: none;
+}

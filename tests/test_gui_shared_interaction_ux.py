@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 
@@ -75,20 +77,25 @@ def test_secret_action_values_are_masked_redacted_and_cleared() -> None:
     assert 'inputs[field.name] = ""' in js
 
 
-def test_floating_action_windows_restore_focus_and_respect_log_dock() -> None:
+def test_inline_action_panels_restore_focus_and_stay_in_flow() -> None:
     js = _read(COMMAND_JS)
-    css = _read(CSS_ROOT / "floating-action-popouts.css")
+    css = _read(CSS_ROOT / "inline-panels.css")
 
-    assert "function ccPopoutRestoreFocus(" in js
-    assert "popout.__returnFocus = document.activeElement" in js
-    assert 'popout.setAttribute("role", "dialog")' in js
-    assert 'popout.setAttribute("aria-modal", "false")' in js
-    assert 'popout.setAttribute("aria-labelledby", titleEl.id)' in js
-    assert "function ccPopoutUsableBottom(" in js
-    assert 'document.getElementById("log-dock")' in js
-    assert 'typeof ResizeObserver === "function"' in js
-    assert "--cc-popout-usable-bottom" in css
-    assert "@media (prefers-reduced-motion: reduce)" in css
+    assert "function ccPanelRestoreFocus(" in js
+    assert "panel.__returnFocus = document.activeElement" in js
+    # A panel sits in normal flow, so it is a labelled region rather than
+    # a dialog: no focus trap, no aria-modal, no tabindex of its own.
+    assert 'panel.setAttribute("role", "region")' in js
+    assert 'panel.setAttribute("aria-labelledby", titleEl.id)' in js
+    assert 'panel.setAttribute("aria-modal"' not in js
+    assert 'panel.setAttribute("tabindex"' not in js
+    # Nothing about a panel depends on the log dock's height, because
+    # nothing is positioned against the viewport. Strip comments first so
+    # prose describing the old behaviour does not read as a declaration.
+    declarations = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    assert "position: fixed" not in declarations
+    assert "z-index" not in declarations
+    assert "--cc-popout-usable-bottom" not in js
 
 
 def test_reader_controls_use_sibling_buttons_and_restore_anchor_focus() -> None:
@@ -203,7 +210,7 @@ def test_shared_controls_have_theme_focus_target_and_motion_styles() -> None:
     reader = _read(CSS_ROOT / "misc-trailing.css")
 
     assert ".cc-form-row > textarea" in forms
-    assert "background: var(--bg-elev-2, var(--bg-elev))" in forms
+    assert "background: var(--bg-elev-2)" in forms
     assert "min-height: 36px" in forms
     assert ":focus" in forms
     assert '.cc-action-status[data-state="success"]' in status

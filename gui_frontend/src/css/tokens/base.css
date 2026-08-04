@@ -75,6 +75,7 @@
   --err-soft: var(--fail-soft);
   --success: var(--ok);
   --warning: var(--warn);
+  --danger: var(--fail);
   --accent-danger: var(--fail);
   --accent-warning: var(--warn);
   --accent-contrast: var(--accent-fg);

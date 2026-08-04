@@ -177,26 +177,22 @@ class LogDockClipboardCssContract(unittest.TestCase):
     def test_copy_button_uses_theme_tokens_not_hard_coded_colours(self) -> None:
         # Stay consistent with the rest of the GUI's dropdown / button
         # styling pass.
-        self.assertIn(
-            "background: var(--bg-elev, #2b303b);", self.css,
-        )
-        self.assertIn(
-            "color: var(--fg, #eceff4);", self.css,
-        )
+        self.assertIn("background: var(--bg-elev);", self.css)
+        self.assertIn("color: var(--fg);", self.css)
 
     def test_copied_flash_uses_ok_token(self) -> None:
         # Green flash on successful copy — picks up whatever success
         # colour the active theme defines.
         self.assertIn(".log-dock-row.is-copied", self.css)
         self.assertIn(".log-dock-action.is-copied", self.css)
-        self.assertIn("var(--ok, #22c55e)", self.css)
+        self.assertIn("var(--ok)", self.css)
 
     def test_focus_visible_outline_uses_accent_token(self) -> None:
         # Keyboard-focused rows get an inset accent outline so it's
         # obvious which row Ctrl+C will target if no selection exists.
         self.assertIn(".log-dock-row:focus-visible", self.css)
         self.assertIn(
-            "box-shadow: inset 0 0 0 1px var(--accent, #3b82f6);",
+            "box-shadow: inset 0 0 0 1px var(--accent);",
             self.css,
         )
 

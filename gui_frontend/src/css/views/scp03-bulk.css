@@ -11,8 +11,8 @@
  * BINARY) docked between them.
  * ------------------------------------------------------------------- */
 .cc-decoded-tools-btn--stage {
-  border-color: var(--accent, #88c0d0);
-  color: var(--accent, #88c0d0);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .cc-decoded-tools-btn--stage:hover {
@@ -26,7 +26,7 @@
   padding: 6px 8px;
   border-radius: 6px;
   background: var(--bg-elev);
-  border: 1px solid var(--border-soft, var(--border));
+  border: 1px solid var(--border-soft);
   margin: 6px 0 8px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -50,15 +50,15 @@
   color: var(--fg);
   word-break: break-all;
   white-space: pre-wrap;
-  background: var(--bg-deep, var(--bg));
-  border: 1px solid var(--border-soft, var(--border));
+  background: var(--bg-deep);
+  border: 1px solid var(--border-soft);
   border-radius: 4px;
   padding: 2px 6px;
 }
 
 .cc-svc-stage-hex-row--new .cc-svc-stage-hex-val {
-  border-color: var(--accent, #88c0d0);
-  color: var(--accent, #88c0d0);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .cc-svc-stage-meta {
@@ -79,13 +79,13 @@
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: var(--bg-deep, var(--bg));
-  border: 1px dashed var(--border-soft, var(--border));
+  background: var(--bg-deep);
+  border: 1px dashed var(--border-soft);
 }
 
 .cc-svc-stage-diff.is-changed {
-  color: var(--accent, #88c0d0);
-  border-color: var(--accent, #88c0d0);
+  color: var(--accent);
+  border-color: var(--accent);
   border-style: solid;
 }
 
@@ -93,18 +93,18 @@
   display: flex;
   gap: 6px;
   padding-top: 6px;
-  border-top: 1px dashed var(--border-soft, var(--border));
+  border-top: 1px dashed var(--border-soft);
   margin-top: 4px;
 }
 
 .cc-svc-stage-actions .btn.is-copied {
-  outline: 1px solid var(--accent, #88c0d0);
+  outline: 1px solid var(--accent);
 }
 
 /* Generic stage-edit popout (Task 3) — non-bitmap decoded EFs ---------- */
 .cc-stage-context {
   margin: 0 0 8px;
-  border: 1px solid var(--border-soft, var(--border));
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   background: var(--bg-elev);
 }
@@ -139,7 +139,7 @@
 .cc-stage-context-body {
   margin: 0;
   padding: 6px 10px 10px;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--fg);
   background: transparent;
@@ -151,7 +151,7 @@
 
 .cc-stage-decoded-preview {
   margin: 0 0 8px;
-  border: 1px solid var(--border-soft, var(--border));
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   background: color-mix(in oklab, var(--bg-elev), transparent 30%);
   padding: 8px 10px;
@@ -170,19 +170,19 @@
   min-height: 88px;
   padding: 8px 10px;
   margin: 4px 0 6px;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 12.5px;
   color: var(--fg);
-  background: var(--bg-deep, var(--bg));
-  border: 1px solid var(--border-soft, var(--border));
+  background: var(--bg-deep);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
   resize: vertical;
 }
 
 .cc-stage-editor:focus {
-  outline: 2px solid var(--accent, #88c0d0);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
-  border-color: var(--accent, #88c0d0);
+  border-color: var(--accent);
 }
 
 .cc-svc-stage-filter {
@@ -195,8 +195,8 @@
   flex: 1 1 auto;
   min-width: 0;
   padding: 4px 8px;
-  background: var(--bg-deep, var(--bg));
-  border: 1px solid var(--border-soft, var(--border));
+  background: var(--bg-deep);
+  border: 1px solid var(--border-soft);
   color: var(--fg);
   border-radius: 4px;
   font-family: inherit;
@@ -230,7 +230,7 @@
   max-height: 420px;
   overflow-y: auto;
   padding: 4px 6px;
-  border: 1px solid var(--border-soft, var(--border));
+  border: 1px solid var(--border-soft);
   border-radius: 4px;
   background: var(--bg);
 }
@@ -440,7 +440,7 @@
 .cc-decoded-json-full {
   margin: 0;
   padding: 8px 10px;
-  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: 11.5px;
@@ -480,7 +480,7 @@
 }
 
 .cc-max-hint {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
 }
 
 .cc-max-mounted {

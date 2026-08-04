@@ -6223,13 +6223,13 @@
     }
   }
 
-  // -- Action popout builder ------------------------------------------
-  // Opens a floating popout with the action's form + run button.
-  // Reuses _ccBuildCompactPopout (dedup + cascade) and buildField()
-  // so the form experience is identical to the old card-based layout.
+  // -- Action panel builder -------------------------------------------
+  // Renders the action's form + run button as an inline panel in the
+  // surface that owns the action, below the toolbar that launched it.
   function _ccBuildActionPopout(action, initialValues) {
     var title = action.title || action.id || "Action";
     var popBody = _ccBuildCompactPopout(title, action.id || title);
+    if (!popBody) return;
 
     // Description
     if (action.description) {
@@ -6286,7 +6286,6 @@
     ccInitializeSaipTokenConfigurationForm(action, form, runBtn, status, result);
 
     window.setTimeout(function () {
-      var popout = popBody && popBody.closest ? popBody.closest(".cc-popout") : null;
       var first = form.querySelector(
         "input:not([type='hidden']):not(:disabled), "
           + "select:not(:disabled), textarea:not(:disabled), "
@@ -6294,8 +6293,6 @@
       );
       if (first && first.focus) {
         try { first.focus({ preventScroll: true }); } catch (_e) { first.focus(); }
-      } else if (popout && popout.focus) {
-        popout.focus();
       }
     }, 0);
 
@@ -13976,7 +13973,7 @@
         );
         // The session now lives in the workbench, so the form that made it
         // has nothing left to show: hand the operator to the SAIP surface
-        // and drop the popout behind them.
+        // and drop the panel behind them.
         //
         // Only once the run actually produced something. A blocked intent
         // returns a session id too, and its diagnostics render in this very
@@ -13986,11 +13983,11 @@
           if (typeof openCommandSubsystem === "function") {
             openCommandSubsystem("SAIP");
           }
-          var originPopout = form && form.closest
-            ? form.closest(".cc-popout")
+          var originPanel = form && form.closest
+            ? form.closest(".cc-panel")
             : null;
-          if (originPopout && typeof ccPopoutRemove === "function") {
-            ccPopoutRemove(originPopout, false);
+          if (originPanel && typeof ccPanelRemove === "function") {
+            ccPanelRemove(originPanel, false);
           }
         }
       }
@@ -16655,14 +16652,6 @@
       // to ``scp03BuildExtrasCard`` — no signature churn required at the
       // 60+ call sites.
       popouts: {},
-      // Monotonically-increasing z-index counter for this tab's popouts.
-      // Initialised from the module-level ``SCP03_POPOUT_Z_BASE`` on first
-      // use; lives on the tab so a focus flip doesn't interfere with
-      // sibling tabs' stacking order.
-      popoutZCursor: 0,
-      // Cascade offset for staggered initial placement. Incremented on
-      // every new popout, reset when it would push the window off-screen.
-      popoutCascadeIdx: 0,
       // Per-tab secure-session auth cache.
       //
       // Populated by ``scp03.auth_scp03`` / ``scp03.auth_scp02`` responses
@@ -16762,10 +16751,8 @@
       return;
     }
     scp03RenderTabBody(active, tabBody, tabBar);
-    // Floating popouts live outside the tab body (``position: fixed``
-    // anchored to ``#cc-popout-host``) so a tab-body rerender doesn't
-    // touch them. The visibility sync is what scopes them per tab:
-    // windows owned by the active tab show, sibling-tab windows hide.
+    // Panels are owned by the tab object, so the rerender above detached
+    // them; re-mount the active tab's set into the fresh stack.
     scp03PopoutSyncVisibilityToActiveTab();
   }
 
@@ -18462,31 +18449,51 @@
   //   var card = scp03BuildExtrasCard("Title");
   //   card.appendChild(someSection);
   //
-  // ``card`` now refers to the popout **body** (the scrollable area
-  // beneath the titlebar) — same mental model as before, operators
-  // just see it floating instead of stacked inline.
+  // ``card`` refers to the panel **body** (the scrollable area beneath
+  // the titlebar); panels stack inline in the surface that opened them.
 
-  var SCP03_POPOUT_Z_BASE = 7500;
-  var _CC_COMPACT_POPOUT_Z = 8000;
-  var CC_POPOUT_SEQ = 0;
-  var _ccCompactPopoutMap = Object.create(null);
+  var CC_PANEL_SEQ = 0;
 
   // ------------------------------------------------------------------
-  // Generic result popout (compact workbench — eSIM Management / Tools / …)
+  // Inline result panels
   // ------------------------------------------------------------------
-  // Mirrors ``scp03BuildExtrasCard`` but does not depend on SCP03
-  // tabs. Each popout is a ``position: fixed`` card with titlebar,
-  // drag, maximize, and close — the same visual contract that SCP03
-  // Applications uses for action results.
+  // Action forms and action results render in normal document flow,
+  // inside the surface that opened them. ``ccInlinePanel`` returns the
+  // body element the caller fills, which is the same contract the
+  // floating popout builders had — so call sites are unaffected by the
+  // shell they get.
   //
-  // Deduplication: re-running the same action reuses the existing
-  // popout (brings it to front + clears the body), matching SCP03's
-  // ``scp03BuildExtrasCard`` dedup-by-title behaviour.
+  // Deduplication is by key within one stack: re-running an action
+  // clears and reuses its panel instead of opening a second one.
 
-  function ccPopoutRestoreFocus(popout) {
-    if (!popout) return;
-    var target = popout.__returnFocus;
-    popout.__returnFocus = null;
+  function ccPanelStack(host) {
+    if (!host || !host.querySelector) return null;
+    var existing = host.querySelector(":scope > .cc-panel-stack");
+    if (existing) return existing;
+    var stack = document.createElement("div");
+    stack.className = "cc-panel-stack";
+    host.appendChild(stack);
+    return stack;
+  }
+
+  // The newest panel carries the accent edge. This is the only ordering
+  // signal a panel gets — there is no z-order to maintain.
+  function ccPanelMarkLatest(stack) {
+    if (!stack || !stack.querySelectorAll) return;
+    var panels = stack.querySelectorAll(".cc-panel");
+    for (var index = 0; index < panels.length; index += 1) {
+      if (index === panels.length - 1) {
+        panels[index].classList.add("is-latest");
+      } else {
+        panels[index].classList.remove("is-latest");
+      }
+    }
+  }
+
+  function ccPanelRestoreFocus(panel) {
+    if (!panel) return;
+    var target = panel.__returnFocus;
+    panel.__returnFocus = null;
     if (!target || !target.isConnected || typeof target.focus !== "function") return;
     window.setTimeout(function () {
       if (!target.isConnected) return;
@@ -18494,275 +18501,205 @@
     }, 0);
   }
 
-  function ccPopoutMarkFocused(popout) {
-    if (!popout) return;
-    document.querySelectorAll(".cc-popout.is-focused").forEach(function (other) {
-      if (other !== popout) other.classList.remove("is-focused");
-    });
-    popout.classList.add("is-focused");
+  function ccPanelRemove(panel, restoreFocus) {
+    if (!panel) return;
+    var stack = panel.parentNode;
+    if (typeof panel.__onClose === "function") {
+      try { panel.__onClose(); } catch (_e) { /* caller bookkeeping only */ }
+    }
+    if (stack) stack.removeChild(panel);
+    if (stack && stack.classList && stack.classList.contains("cc-panel-stack")) {
+      ccPanelMarkLatest(stack);
+    }
+    if (restoreFocus !== false) ccPanelRestoreFocus(panel);
   }
 
-  function ccPopoutRemove(popout, restoreFocus) {
-    if (!popout) return;
-    if (popout.parentNode) popout.parentNode.removeChild(popout);
-    if (restoreFocus !== false) ccPopoutRestoreFocus(popout);
+  // Close the last panel in the surface the operator is looking at.
+  // A true modal owns Escape while it is open, so defer to one.
+  function ccPanelCloseLast() {
+    var panels = document.querySelectorAll(".cc-panel-stack > .cc-panel");
+    if (!panels.length) return false;
+    ccPanelRemove(panels[panels.length - 1]);
+    return true;
+  }
+
+  function ccPanelEscapeBootstrap() {
+    if (commandState._panelEscapeBound) return;
+    commandState._panelEscapeBound = true;
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape") return;
+      var modalOpen = Array.prototype.some.call(
+        document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
+        function (dialog) {
+          return dialog && dialog.isConnected && !dialog.hidden;
+        }
+      );
+      if (modalOpen) return;
+      if (ccPanelCloseLast()) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+    }, true);
+  }
+
+  // Build (or reuse) a panel in *host* and return its body element.
+  // ``options.onClose`` lets an owner drop its bookkeeping entry.
+  function ccInlinePanel(host, title, key, options) {
+    var stack = ccPanelStack(host);
+    if (!stack) return null;
+    var opts = options || {};
+    var safeTitle = String(title || "Result");
+    var panelKey = String(key || safeTitle);
+
+    var existing = stack.querySelector(
+      '[data-panel-key="' + ccCssEscape(panelKey) + '"]'
+    );
+    if (existing) {
+      var reuseBody = existing.querySelector(".cc-panel-body");
+      if (reuseBody) reuseBody.innerHTML = "";
+      existing.__returnFocus = document.activeElement;
+      existing.__onClose = opts.onClose || null;
+      stack.appendChild(existing);
+      ccPanelMarkLatest(stack);
+      ccPanelScrollIntoView(existing);
+      ccPanelFocusHeading(existing);
+      return reuseBody || existing;
+    }
+
+    CC_PANEL_SEQ += 1;
+    var panel = document.createElement("section");
+    panel.className = "cc-panel";
+    panel.setAttribute("data-panel-key", panelKey);
+    // A panel sits in normal flow and takes no focus trap, so it is a
+    // labelled region, not a dialog.
+    panel.setAttribute("role", "region");
+    panel.__returnFocus = document.activeElement;
+    panel.__onClose = opts.onClose || null;
+
+    var titlebar = document.createElement("div");
+    titlebar.className = "cc-panel-titlebar";
+    var titleEl = document.createElement("h3");
+    titleEl.className = "cc-panel-title";
+    titleEl.id = "cc-panel-title-" + String(CC_PANEL_SEQ);
+    titleEl.textContent = safeTitle;
+    // The heading takes focus when the panel opens so a screen reader
+    // announces the result the operator just asked for. Focusing a
+    // heading does not make the panel a dialog -- it stays a region in
+    // normal flow with no focus trap.
+    titleEl.setAttribute("tabindex", "-1");
+    panel.setAttribute("aria-labelledby", titleEl.id);
+    titlebar.appendChild(titleEl);
+
+    var actions = document.createElement("div");
+    actions.className = "cc-panel-actions";
+
+    var collapseBtn = document.createElement("button");
+    collapseBtn.type = "button";
+    collapseBtn.className = "cc-panel-btn cc-panel-collapse";
+    collapseBtn.title = "Collapse panel";
+    collapseBtn.setAttribute("aria-label", "Collapse panel");
+    collapseBtn.setAttribute("aria-expanded", "true");
+    collapseBtn.textContent = "\u2212"; // minus
+    collapseBtn.addEventListener("click", function () {
+      var collapsed = panel.classList.toggle("is-collapsed");
+      collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      collapseBtn.title = collapsed ? "Expand panel" : "Collapse panel";
+      collapseBtn.setAttribute("aria-label", collapseBtn.title);
+      collapseBtn.textContent = collapsed ? "+" : "\u2212";
+    });
+    actions.appendChild(collapseBtn);
+
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "cc-panel-btn cc-panel-close";
+    closeBtn.title = "Close panel";
+    closeBtn.setAttribute("aria-label", "Close panel");
+    closeBtn.textContent = "\u00D7"; // x
+    closeBtn.addEventListener("click", function () {
+      ccPanelRemove(panel);
+    });
+    actions.appendChild(closeBtn);
+
+    titlebar.appendChild(actions);
+    panel.appendChild(titlebar);
+
+    var body = document.createElement("div");
+    body.className = "cc-panel-body";
+    panel.appendChild(body);
+
+    stack.appendChild(panel);
+    ccPanelMarkLatest(stack);
+    ccPanelEscapeBootstrap();
+    ccPanelScrollIntoView(panel);
+    ccPanelFocusHeading(panel);
+    return body;
+  }
+
+  // An action form moves focus to its first field instead, so the
+  // heading only claims focus when the panel body is not interactive.
+  function ccPanelFocusHeading(panel) {
+    if (!panel) return;
+    var heading = panel.querySelector(".cc-panel-title");
+    if (!heading || typeof heading.focus !== "function") return;
+    window.setTimeout(function () {
+      if (!panel.isConnected) return;
+      if (panel.querySelector("form")) return;
+      try { heading.focus({ preventScroll: true }); } catch (_e) { heading.focus(); }
+    }, 0);
+  }
+
+  function ccPanelScrollIntoView(panel) {
+    if (!panel || typeof panel.scrollIntoView !== "function") return;
+    window.setTimeout(function () {
+      if (!panel.isConnected) return;
+      try {
+        panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      } catch (_e) {
+        panel.scrollIntoView(false);
+      }
+    }, 0);
+  }
+
+  // Attribute-selector escaping for panel keys, which are derived from
+  // free-text action titles.
+  function ccCssEscape(value) {
+    return String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  // ------------------------------------------------------------------
+  // Generic result panel (compact workbench — eSIM Management / Tools / …)
+  // ------------------------------------------------------------------
+  // Docks into the workbench the action was launched from, so the panel
+  // lives and dies with that surface. Falls back to the active view
+  // section when a workbench container cannot be resolved.
+
+  // Host for a generic action panel: the workbench body the operator is
+  // working in, else the active view section. Both are wiped when the
+  // operator leaves, which is what makes the panel non-persistent.
+  function ccCompactPanelHost() {
+    var candidates = [
+      ".cc-hil-body",
+      ".cc-workbench--compact",
+      ".cc-workbench",
+    ];
+    for (var index = 0; index < candidates.length; index += 1) {
+      var found = document.querySelector(candidates[index]);
+      if (found) return found;
+    }
+    return document.querySelector("section.view.view-active")
+      || document.querySelector(".main");
   }
 
   function _ccBuildCompactPopout(title, identity) {
     var safeTitle = String(title || "Result");
     var mapKey = String(identity || safeTitle);
-
-    // --- deduplication -----------------------------------------------
-    var existing = _ccCompactPopoutMap[mapKey];
-    if (existing && existing.parentNode) {
-      existing.__returnFocus = document.activeElement;
-      _CC_COMPACT_POPOUT_Z += 1;
-      existing.style.zIndex = String(_CC_COMPACT_POPOUT_Z);
-      ccPopoutMarkFocused(existing);
-      var reuseBody = existing.querySelector(".cc-popout-body");
-      if (reuseBody) reuseBody.innerHTML = "";
-      if (existing.focus) existing.focus();
-      return reuseBody || existing;
-    }
-
-    // --- sizing (matches scp03PopoutDefaultSize) --------------------
-    var popSz = scp03PopoutDefaultSize();
-    var vw = window.innerWidth;
-    var vh = ccPopoutUsableBottom();
-
-    var popout = document.createElement("div");
-    CC_POPOUT_SEQ += 1;
-    popout.className = "cc-popout card";
-    popout.setAttribute("role", "dialog");
-    popout.setAttribute("aria-modal", "false");
-    popout.setAttribute("tabindex", "-1");
-    popout.__returnFocus = document.activeElement;
-    popout.style.setProperty(
-      "--cc-popout-usable-bottom",
-      ccPopoutUsableBottom() + "px"
-    );
-    popout.style.position = "fixed";
-    popout.style.width = popSz.width + "px";
-    popout.style.height = popSz.height + "px";
-
-    // Cascade: offset each successive popout so overlapping windows
-    // stay discoverable.
-    _CC_COMPACT_POPOUT_Z += 1;
-    var cascade = (_CC_COMPACT_POPOUT_Z - 8000) * 26;
-    var left = Math.max(140, Math.round(vw * 0.18) + cascade);
-    var top = Math.max(100, Math.round(vh * 0.18) + cascade);
-    if (left + popSz.width > vw - 40 || top + popSz.height > vh - 40) {
-      left = Math.max(140, Math.round(vw * 0.18));
-      top = Math.max(100, Math.round(vh * 0.18));
-    }
-    popout.style.left = left + "px";
-    popout.style.top = top + "px";
-    popout.style.zIndex = String(_CC_COMPACT_POPOUT_Z);
-
-    // --- titlebar ----------------------------------------------------
-    var titlebar = document.createElement("div");
-    titlebar.className = "cc-popout-titlebar";
-    var titleEl = document.createElement("span");
-    titleEl.className = "cc-popout-title";
-    titleEl.id = "cc-popout-title-" + String(CC_POPOUT_SEQ);
-    titleEl.textContent = safeTitle;
-    popout.setAttribute("aria-labelledby", titleEl.id);
-    titlebar.appendChild(titleEl);
-
-    var actions = document.createElement("div");
-    actions.className = "cc-popout-actions";
-
-    var maxBtn = document.createElement("button");
-    maxBtn.type = "button";
-    maxBtn.className = "cc-popout-btn cc-popout-max";
-    maxBtn.title = "Toggle maximize";
-    maxBtn.setAttribute("aria-label", "Toggle maximize");
-    maxBtn.textContent = "⛶";
-    maxBtn.addEventListener("click", function (ev) {
-      ev.stopPropagation();
-      scp03PopoutToggleMaximize(popout);
-      var maximized = popout.classList.contains("is-maximized");
-      maxBtn.setAttribute("aria-pressed", maximized ? "true" : "false");
-      maxBtn.title = maximized ? "Restore window" : "Maximize window";
-      maxBtn.setAttribute("aria-label", maxBtn.title);
-    });
-    maxBtn.setAttribute("aria-pressed", "false");
-    actions.appendChild(maxBtn);
-
-    var closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "cc-popout-btn cc-popout-close";
-    closeBtn.title = "Close";
-    closeBtn.setAttribute("aria-label", "Close");
-    closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", function (ev) {
-      ev.stopPropagation();
-      delete _ccCompactPopoutMap[mapKey];
-      ccPopoutRemove(popout);
-    });
-    actions.appendChild(closeBtn);
-
-    titlebar.appendChild(actions);
-    popout.appendChild(titlebar);
-
-    // Double-click titlebar = maximize/restore
-    titlebar.addEventListener("dblclick", function (ev) {
-      if (ev.target && ev.target.closest && ev.target.closest(".cc-popout-btn")) return;
-      ev.preventDefault();
-      scp03PopoutToggleMaximize(popout);
-    });
-
-    // Pointerdown anywhere in popout → bring to front
-    popout.addEventListener("pointerdown", function () {
-      _CC_COMPACT_POPOUT_Z += 1;
-      popout.style.zIndex = String(_CC_COMPACT_POPOUT_Z);
-      ccPopoutMarkFocused(popout);
-    });
-    popout.addEventListener("focusin", function () {
-      _CC_COMPACT_POPOUT_Z += 1;
-      popout.style.zIndex = String(_CC_COMPACT_POPOUT_Z);
-      ccPopoutMarkFocused(popout);
-    });
-
-    scp03PopoutInstallDrag(popout, titlebar);
-
-    var body = document.createElement("div");
-    body.className = "cc-popout-body";
-    popout.appendChild(body);
-
-    scp03PopoutHost().appendChild(popout);
-    _ccCompactPopoutMap[mapKey] = popout;
-    return body;
+    return ccInlinePanel(ccCompactPanelHost(), safeTitle, mapKey);
   }
 
-  function scp03PopoutIsVisible(popout) {
-    if (!popout || !popout.parentNode || popout.hidden) return false;
-    var style = window.getComputedStyle
-      ? window.getComputedStyle(popout)
-      : null;
-    if (style && (style.display === "none" || style.visibility === "hidden")) {
-      return false;
-    }
-    return true;
-  }
-
-  function scp03PopoutTopmostVisible() {
-    var popouts = Array.prototype.slice.call(
-      document.querySelectorAll(".cc-popout")
-    );
-    var topmost = null;
-    var topZ = -Infinity;
-    popouts.forEach(function (popout, idx) {
-      if (!scp03PopoutIsVisible(popout)) return;
-      var z = parseInt(popout.style.zIndex || "", 10);
-      if (isNaN(z)) z = 0;
-      if (!topmost || z > topZ || (z === topZ && idx > topmost.idx)) {
-        topmost = { el: popout, idx: idx };
-        topZ = z;
-      }
-    });
-    return topmost ? topmost.el : null;
-  }
-
-  function scp03PopoutCloseElement(popout) {
-    if (!popout) return false;
-    var closeBtn = popout.querySelector(".cc-popout-close");
-    if (closeBtn) {
-      closeBtn.dispatchEvent(new MouseEvent("click", {
-        bubbles: true,
-        cancelable: true,
-      }));
-      return true;
-    }
-    if (popout.parentNode) {
-      ccPopoutRemove(popout);
-      return true;
-    }
-    return false;
-  }
-
-  function scp03PopoutCloseTopmostVisible() {
-    var popout = scp03PopoutTopmostVisible();
-    if (!popout) return false;
-    return scp03PopoutCloseElement(popout);
-  }
-
+  // Kept as the startup entry point ``trailing.js`` calls; the panel
+  // stack owns Escape now.
   function scp03PopoutEscapeBootstrap() {
-    if (commandState._popoutEscapeBound) return;
-    commandState._popoutEscapeBound = true;
-    document.addEventListener("keydown", function (ev) {
-      if (ev.key !== "Escape") return;
-      // A true modal (for example the fallback file explorer) owns Escape
-      // while it is open.  Do not close an unrelated floating action window
-      // behind it.
-      var modalOpen = Array.prototype.some.call(
-        document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
-        function (dialog) { return scp03PopoutIsVisible(dialog); }
-      );
-      if (modalOpen) return;
-      if (scp03PopoutCloseTopmostVisible()) {
-        ev.preventDefault();
-        ev.stopPropagation();
-      }
-    }, true);
-    window.addEventListener("resize", ccPopoutRefreshViewportBounds);
-    var dock = document.getElementById("log-dock");
-    if (dock && typeof ResizeObserver === "function") {
-      commandState._popoutDockObserver = new ResizeObserver(function () {
-        ccPopoutRefreshViewportBounds();
-      });
-      commandState._popoutDockObserver.observe(dock);
-    }
-  }
-
-  // Default popout size tracks the viewport so first open is large enough
-  // to read tables and traces without immediate maximize / resize.
-  var SCP03_POPOUT_CASCADE_STEP = 28;
-  var SCP03_POPOUT_MIN_WIDTH = 320;
-  var SCP03_POPOUT_MIN_HEIGHT = 200;
-
-  function ccPopoutUsableBottom() {
-    var bottom = window.innerHeight;
-    var dock = document.getElementById("log-dock");
-    if (dock && !dock.hidden && dock.getBoundingClientRect) {
-      var rect = dock.getBoundingClientRect();
-      if (rect.height > 0 && rect.top > 0) bottom = Math.min(bottom, rect.top);
-    }
-    return Math.max(240, bottom);
-  }
-
-  function ccPopoutRefreshViewportBounds() {
-    var usableBottom = ccPopoutUsableBottom();
-    document.querySelectorAll(".cc-popout").forEach(function (popout) {
-      popout.style.setProperty(
-        "--cc-popout-usable-bottom",
-        usableBottom + "px"
-      );
-      if (popout.classList.contains("is-maximized")) return;
-      var rect = popout.getBoundingClientRect();
-      var left = Math.min(
-        Math.max(-Math.max(0, rect.width - 80), rect.left),
-        Math.max(8, window.innerWidth - 80)
-      );
-      var top = Math.min(
-        Math.max(8, rect.top),
-        Math.max(8, usableBottom - 40)
-      );
-      popout.style.left = Math.round(left) + "px";
-      popout.style.top = Math.round(top) + "px";
-    });
-  }
-
-  function scp03PopoutDefaultSize() {
-    var vw = window.innerWidth;
-    var vh = ccPopoutUsableBottom();
-    var marginX = 44;
-    var marginY = 52;
-    var w = Math.round(vw * 0.56);
-    var h = Math.round(vh * 0.64);
-    w = Math.min(Math.max(w, 780), Math.max(SCP03_POPOUT_MIN_WIDTH, vw - marginX));
-    h = Math.min(Math.max(h, 580), Math.max(SCP03_POPOUT_MIN_HEIGHT, vh - marginY));
-    return { width: w, height: h };
+    ccPanelEscapeBootstrap();
   }
 
   function scp03GetExtrasSlot() {
@@ -18775,102 +18712,41 @@
     return scp03FindTab(wb.activeTabId);
   }
 
-  function scp03PopoutHost() {
-    var host = document.getElementById("cc-popout-host");
-    if (host) return host;
-    host = document.createElement("div");
-    host.id = "cc-popout-host";
-    host.className = "cc-popout-host";
-    // The host is a 0x0 absolutely-positioned anchor; each popout is
-    // itself ``position: fixed`` so the anchor is purely semantic
-    // (keeps DOM inspector tidy + gives us a single cleanup target).
-    document.body.appendChild(host);
-    return host;
-  }
-
-  function scp03PopoutNextZ(tab) {
-    if (!tab.popoutZCursor || tab.popoutZCursor < SCP03_POPOUT_Z_BASE) {
-      tab.popoutZCursor = SCP03_POPOUT_Z_BASE;
-    }
-    tab.popoutZCursor += 1;
-    return tab.popoutZCursor;
-  }
-
-  function scp03PopoutComputeOrigin(tab, size) {
-    // Viewport-relative cascade. ``position: fixed`` so we anchor off
-    // the visual viewport, not the document, which keeps windows
-    // visible regardless of scroll position.
-    var sz = size || scp03PopoutDefaultSize();
-    var usableBottom = ccPopoutUsableBottom();
-    var base = {
-      left: Math.max(160, Math.round(window.innerWidth * 0.18)),
-      top: Math.max(72, Math.round(usableBottom * 0.14)),
-    };
-    var cascade = tab.popoutCascadeIdx || 0;
-    var left = base.left + cascade * SCP03_POPOUT_CASCADE_STEP;
-    var top = base.top + cascade * SCP03_POPOUT_CASCADE_STEP;
-    // Reset the cascade once it would push a window off the visible
-    // area. Keeps a 40 px safety margin on the right/bottom edges.
-    if (left + sz.width > window.innerWidth - 40
-        || top + sz.height > usableBottom - 12) {
-      tab.popoutCascadeIdx = 0;
-      left = base.left;
-      top = base.top;
-    } else {
-      tab.popoutCascadeIdx = cascade + 1;
-    }
-    return { left: left, top: top };
-  }
-
   function scp03PopoutKey(title) {
     return String(title || "popout").trim().toLowerCase();
   }
 
-  function scp03PopoutBringToFront(tab, popout) {
-    if (!popout) return;
-    popout.style.zIndex = String(scp03PopoutNextZ(tab));
-    ccPopoutMarkFocused(popout);
-  }
-
   function scp03PopoutClose(tab, key) {
     if (!tab || !tab.popouts) return;
-    var popout = tab.popouts[key];
-    if (!popout) return;
+    var panel = tab.popouts[key];
+    if (!panel) return;
     delete tab.popouts[key];
-    ccPopoutRemove(popout);
+    ccPanelRemove(panel);
   }
 
   function scp03PopoutCloseAllForTab(tab) {
     if (!tab || !tab.popouts) return;
     Object.keys(tab.popouts).forEach(function (k) {
-      var popout = tab.popouts[k];
-      if (popout) ccPopoutRemove(popout, false);
+      var panel = tab.popouts[k];
+      if (panel) ccPanelRemove(panel, false);
     });
     tab.popouts = {};
   }
 
   function scp03PopoutSyncVisibilityToActiveTab() {
-    // Hide every popout whose owning tab isn't the active one. Called
-    // from ``renderScp03Tabs`` after the DOM swap so the operator sees
-    // only the popouts relevant to the tab they're looking at.
-    //
-    // We also respect the active subsystem: popouts are only relevant
-    // while the operator is on the SCP03 surface, so leaving to SAIP /
-    // eSIM Management / Tools hides the entire set (the state stays live in
-    // ``tab.popouts`` so windows reappear on return).
+    // Called from ``renderScp03Tabs`` after the DOM swap. The tab body is
+    // rebuilt from scratch on every render, so the active tab's panels
+    // are re-mounted into the fresh stack; a sibling tab's panels simply
+    // stay detached, which is what scopes them per tab.
     var wb = commandState && commandState.scp03Workbench;
     if (!wb || !Array.isArray(wb.tabs)) return;
     var onScp03 = commandState && commandState.activeSubsystem === "SCP03";
+    if (!onScp03) return;
+    var active = null;
     wb.tabs.forEach(function (tab) {
-      if (!tab || !tab.popouts) return;
-      var isActive = tab.id === wb.activeTabId;
-      var shouldShow = onScp03 && isActive;
-      Object.keys(tab.popouts).forEach(function (k) {
-        var popout = tab.popouts[k];
-        if (!popout) return;
-        popout.hidden = !shouldShow;
-      });
+      if (tab && tab.id === wb.activeTabId) active = tab;
     });
+    scp03RemountPanels(active);
   }
 
   function scp03PopoutSyncForSubsystem(subsystem) {
@@ -18888,236 +18764,50 @@
     }
   }
 
-  function scp03PopoutInstallDrag(popout, titlebar) {
-    // Pointer-based drag. We capture the pointer so drags survive
-    // the cursor momentarily leaving the titlebar (cursor speed > poll
-    // rate on long drags). ``touch-action: none`` on the titlebar CSS
-    // stops the browser from claiming the gesture for scroll.
-    var startX = 0, startY = 0, startLeft = 0, startTop = 0;
-    var dragging = false;
-    function onDown(ev) {
-      // Don't start a drag when the user clicks a button in the titlebar.
-      var target = ev.target;
-      if (target && target.closest && target.closest(".cc-popout-btn")) return;
-      if (ev.button !== undefined && ev.button !== 0) return;
-      dragging = true;
-      try { titlebar.setPointerCapture(ev.pointerId); } catch (_e) {}
-      var rect = popout.getBoundingClientRect();
-      startX = ev.clientX;
-      startY = ev.clientY;
-      startLeft = rect.left;
-      startTop = rect.top;
-      popout.classList.add("is-dragging");
-      ev.preventDefault();
-    }
-    function onMove(ev) {
-      if (!dragging) return;
-      var dx = ev.clientX - startX;
-      var dy = ev.clientY - startY;
-      var nextLeft = startLeft + dx;
-      var nextTop = startTop + dy;
-      // Clamp to viewport so the titlebar can't slip off-screen.
-      var maxLeft = window.innerWidth - 80;
-      var maxTop = ccPopoutUsableBottom() - 40;
-      if (nextLeft < -120) nextLeft = -120;
-      if (nextLeft > maxLeft) nextLeft = maxLeft;
-      if (nextTop < 0) nextTop = 0;
-      if (nextTop > maxTop) nextTop = maxTop;
-      popout.style.left = nextLeft + "px";
-      popout.style.top = nextTop + "px";
-      // Any explicit position cancels a previous maximize state.
-      popout.classList.remove("is-maximized");
-      scp03PopoutSyncMaxButton(popout);
-    }
-    function onUp(ev) {
-      if (!dragging) return;
-      dragging = false;
-      try { titlebar.releasePointerCapture(ev.pointerId); } catch (_e) {}
-      popout.classList.remove("is-dragging");
-    }
-    titlebar.addEventListener("pointerdown", onDown);
-    titlebar.addEventListener("pointermove", onMove);
-    titlebar.addEventListener("pointerup", onUp);
-    titlebar.addEventListener("pointercancel", onUp);
+  // Host for an SCP03 result panel. ``scp03RenderTabBody`` wipes the tab
+  // body on every rerender, so the panel elements are owned by the tab
+  // object and re-mounted by ``scp03RemountPanels`` after each render.
+  function scp03PanelHost() {
+    return document.querySelector(".scp03-session-main")
+      || document.querySelector(".scp03-shell")
+      || ccCompactPanelHost();
   }
 
-  function scp03PopoutSyncMaxButton(popout) {
-    if (!popout) return;
-    var button = popout.querySelector(".cc-popout-max");
-    if (!button) return;
-    var maximized = popout.classList.contains("is-maximized");
-    button.setAttribute("aria-pressed", maximized ? "true" : "false");
-    button.title = maximized ? "Restore window" : "Maximize window";
-    button.setAttribute("aria-label", button.title);
-  }
-
-  function scp03PopoutToggleMaximize(popout) {
-    popout.style.setProperty(
-      "--cc-popout-usable-bottom",
-      ccPopoutUsableBottom() + "px"
-    );
-    if (popout.classList.contains("is-maximized")) {
-      popout.classList.remove("is-maximized");
-      // Restore cached geometry.
-      if (popout.__prevGeom) {
-        popout.style.left = popout.__prevGeom.left;
-        popout.style.top = popout.__prevGeom.top;
-        popout.style.width = popout.__prevGeom.width;
-        popout.style.height = popout.__prevGeom.height;
-      }
-      scp03PopoutSyncMaxButton(popout);
+  function scp03RemountPanels(tab) {
+    var host = scp03PanelHost();
+    if (!host) return;
+    var stack = ccPanelStack(host);
+    if (!stack) return;
+    if (!tab || !tab.popouts) {
+      ccPanelMarkLatest(stack);
       return;
     }
-    popout.__prevGeom = {
-      left: popout.style.left,
-      top: popout.style.top,
-      width: popout.style.width,
-      height: popout.style.height,
-    };
-    popout.classList.add("is-maximized");
-    // is-maximized CSS owns the actual sizing — we clear inline to
-    // let the class win.
-    popout.style.left = "";
-    popout.style.top = "";
-    popout.style.width = "";
-    popout.style.height = "";
-    scp03PopoutSyncMaxButton(popout);
+    Object.keys(tab.popouts).forEach(function (key) {
+      var panel = tab.popouts[key];
+      if (panel) stack.appendChild(panel);
+    });
+    ccPanelMarkLatest(stack);
   }
 
   function scp03BuildExtrasCard(title) {
     // Back-compat signature: returns the scrollable body element that
-    // callers append their content to. The popout shell + titlebar are
-    // built around it and tracked on the active tab.
+    // callers append their content to. The panel shell is built around
+    // it and tracked on the active tab so a tab-body rerender can
+    // re-mount it.
     var tab = scp03GetActiveTab();
     var safeTitle = String(title || "Output");
     var key = scp03PopoutKey(safeTitle);
 
-    // Dedupe: clicking the same action twice brings the existing
-    // window forward + clears its body for the new payload (matches
-    // the pre-popout behaviour where the extras strip got replaced).
-    if (tab && tab.popouts && tab.popouts[key]) {
-      var existing = tab.popouts[key];
-      existing.__returnFocus = document.activeElement;
-      var body = existing.querySelector(".cc-popout-body");
-      if (body) body.innerHTML = "";
-      existing.hidden = false;
-      scp03PopoutBringToFront(tab, existing);
-      return body;
-    }
-
-    var popout = document.createElement("div");
-    CC_POPOUT_SEQ += 1;
-    popout.className = "cc-popout card";
-    popout.setAttribute("role", "dialog");
-    popout.setAttribute("aria-modal", "false");
-    popout.setAttribute("tabindex", "-1");
-    popout.setAttribute("data-popout-key", key);
-    popout.__returnFocus = document.activeElement;
-    popout.style.setProperty(
-      "--cc-popout-usable-bottom",
-      ccPopoutUsableBottom() + "px"
-    );
-    if (tab) popout.setAttribute("data-tab-id", tab.id);
-    popout.style.position = "fixed";
-    var popSz = scp03PopoutDefaultSize();
-    popout.style.width = popSz.width + "px";
-    popout.style.height = popSz.height + "px";
-
+    var body = ccInlinePanel(scp03PanelHost(), safeTitle, key, {
+      onClose: function () {
+        if (tab && tab.popouts) delete tab.popouts[key];
+      },
+    });
+    if (!body) return null;
     if (tab) {
-      var origin = scp03PopoutComputeOrigin(tab, popSz);
-      popout.style.left = origin.left + "px";
-      popout.style.top = origin.top + "px";
-      popout.style.zIndex = String(scp03PopoutNextZ(tab));
-    } else {
-      popout.style.left = "200px";
-      popout.style.top = "160px";
-      popout.style.zIndex = String(SCP03_POPOUT_Z_BASE);
+      if (!tab.popouts) tab.popouts = {};
+      tab.popouts[key] = body.closest(".cc-panel");
     }
-
-    var titlebar = document.createElement("div");
-    titlebar.className = "cc-popout-titlebar";
-    var titleEl = document.createElement("span");
-    titleEl.className = "cc-popout-title";
-    titleEl.id = "cc-scp03-popout-title-" + String(CC_POPOUT_SEQ);
-    titleEl.textContent = safeTitle;
-    popout.setAttribute("aria-labelledby", titleEl.id);
-    titlebar.appendChild(titleEl);
-
-    var actions = document.createElement("div");
-    actions.className = "cc-popout-actions";
-
-    var maxBtn = document.createElement("button");
-    maxBtn.type = "button";
-    maxBtn.className = "cc-popout-btn cc-popout-max";
-    maxBtn.title = "Toggle maximize";
-    maxBtn.setAttribute("aria-label", "Toggle maximize");
-    maxBtn.textContent = "\u26F6"; // ⛶
-    maxBtn.addEventListener("click", function (ev) {
-      ev.stopPropagation();
-      scp03PopoutToggleMaximize(popout);
-      var maximized = popout.classList.contains("is-maximized");
-      maxBtn.setAttribute("aria-pressed", maximized ? "true" : "false");
-      maxBtn.title = maximized ? "Restore window" : "Maximize window";
-      maxBtn.setAttribute("aria-label", maxBtn.title);
-    });
-    maxBtn.setAttribute("aria-pressed", "false");
-    actions.appendChild(maxBtn);
-
-    var closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "cc-popout-btn cc-popout-close";
-    closeBtn.title = "Close";
-    closeBtn.setAttribute("aria-label", "Close");
-    closeBtn.textContent = "\u00D7"; // ×
-    closeBtn.addEventListener("click", function (ev) {
-      ev.stopPropagation();
-      if (tab) {
-        scp03PopoutClose(tab, key);
-      } else if (popout.parentNode) {
-        ccPopoutRemove(popout);
-      }
-    });
-    actions.appendChild(closeBtn);
-
-    titlebar.appendChild(actions);
-    popout.appendChild(titlebar);
-
-    var body = document.createElement("div");
-    body.className = "cc-popout-body";
-    popout.appendChild(body);
-
-    // Double-click on titlebar = maximize/restore; mirrors the v1
-    // ``installMaximizable`` UX expectation on the action cards.
-    titlebar.addEventListener("dblclick", function (ev) {
-      var target = ev.target;
-      if (target && target.closest && target.closest(".cc-popout-btn")) return;
-      ev.preventDefault();
-      scp03PopoutToggleMaximize(popout);
-    });
-
-    // Any pointerdown inside the popout bumps its z-index so the
-    // window the operator is currently working with is always on top.
-    popout.addEventListener("pointerdown", function () {
-      if (tab) scp03PopoutBringToFront(tab, popout);
-    });
-    popout.addEventListener("focusin", function () {
-      if (tab) scp03PopoutBringToFront(tab, popout);
-    });
-
-    scp03PopoutInstallDrag(popout, titlebar);
-
-    scp03PopoutHost().appendChild(popout);
-
-    if (tab) {
-      tab.popouts[key] = popout;
-      scp03PopoutBringToFront(tab, popout);
-    }
-
-    window.setTimeout(function () {
-      if (!popout.isConnected) return;
-      try { popout.focus({ preventScroll: true }); } catch (_e) { popout.focus(); }
-    }, 0);
-
     return body;
   }
 
@@ -21365,7 +21055,7 @@
       // The operator may dismiss the popout before authenticating; we
       // can't hook "X button pressed" because the popout system keeps
       // the node alive for reuse, so we sample the auth state a few
-      // seconds later — if the popout closed without success, resolve
+      // seconds later — if the panel closed without success, resolve
       // false so the pending action handler sees the cancel.
       var resolved = false;
       var originalResolve = resolve;
@@ -21377,7 +21067,7 @@
       var key = scp03PopoutKey("Authenticate before " + (opts.actionTitle || "action"));
       var popout = tab.popouts && tab.popouts[key];
       if (popout) {
-        var closeBtn = popout.querySelector(".cc-popout-close");
+        var closeBtn = popout.querySelector(".cc-panel-close");
         if (closeBtn) {
           closeBtn.addEventListener("click", function () {
             if (!scp03HasLiveAuth(tab)) resolve(false);

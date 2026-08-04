@@ -18,7 +18,7 @@
   padding: 10px 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius-md);
 }
 
 .cc-sgp32-grid {
@@ -41,15 +41,15 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius-md);
 }
 
 .cc-sgp32-section.cc-sgp32-status-ok {
-  border-left-color: var(--ok, #3ec67a);
+  border-left-color: var(--ok);
 }
 
 .cc-sgp32-section.cc-sgp32-status-empty {
-  border-left-color: var(--warn, #d9a12c);
+  border-left-color: var(--warn);
 }
 
 .cc-sgp32-section.cc-sgp32-status-error {
@@ -99,10 +99,10 @@
 .cc-log-inline {
   margin: 8px 0 0;
   padding: 10px 12px;
-  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -122,8 +122,8 @@
 /* Status-coloured chip variants reused by the header + section chips. */
 .cc-chip.cc-chip-ok,
 .cc-sgp32-status-chip.cc-sgp32-status-chip-ok {
-  background: color-mix(in oklab, var(--ok, #3ec67a) 18%, var(--bg-hover));
-  border-color: color-mix(in oklab, var(--ok, #3ec67a) 38%, var(--border));
+  background: color-mix(in oklab, var(--ok) 18%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--ok) 38%, var(--border));
   color: var(--fg);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -133,8 +133,8 @@
 
 .cc-chip.cc-chip-warn,
 .cc-sgp32-status-chip.cc-sgp32-status-chip-empty {
-  background: color-mix(in oklab, var(--warn, #d9a12c) 18%, var(--bg-hover));
-  border-color: color-mix(in oklab, var(--warn, #d9a12c) 38%, var(--border));
+  background: color-mix(in oklab, var(--warn) 18%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--warn) 38%, var(--border));
   color: var(--fg);
   text-transform: uppercase;
   letter-spacing: 0.06em;

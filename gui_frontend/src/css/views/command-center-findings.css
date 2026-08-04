@@ -36,12 +36,12 @@
 }
 
 .cc-finding-error {
-  border-left-color: var(--danger, #e06c75);
+  border-left-color: var(--danger);
 }
 
 .cc-finding-warning,
 .cc-finding-warn {
-  border-left-color: var(--warning, #e5c07b);
+  border-left-color: var(--warning);
 }
 
 .cc-finding-info {
@@ -62,18 +62,18 @@
   letter-spacing: 0.05em;
   padding: 1px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-hover);
 }
 
 .cc-finding-error .cc-finding-sev {
-  background: rgba(224, 108, 117, 0.18);
-  color: var(--danger, #e06c75);
+  background: var(--fail-soft);
+  color: var(--danger);
 }
 
 .cc-finding-warning .cc-finding-sev,
 .cc-finding-warn .cc-finding-sev {
-  background: rgba(229, 192, 123, 0.18);
-  color: var(--warning, #e5c07b);
+  background: var(--warn-soft);
+  color: var(--warning);
 }
 
 .cc-finding-code {

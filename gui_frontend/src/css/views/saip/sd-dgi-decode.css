@@ -11,12 +11,12 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-dgi-empty {
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   margin: 2px 0 8px;
 }
 
@@ -32,7 +32,7 @@
   font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   padding: 3px 6px;
   border-bottom: 1px solid var(--border);
 }
@@ -46,8 +46,8 @@
 .saip-dgi-col-dgi,
 .saip-dgi-col-tag {
   white-space: nowrap;
-  font-family: var(--mono, "JetBrains Mono", monospace);
-  color: var(--fg-muted, #888);
+  font-family: var(--mono);
+  color: var(--fg-muted);
 }
 
 .saip-dgi-col-name {
@@ -55,7 +55,7 @@
 }
 
 .saip-dgi-col-val {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   word-break: break-all;
   max-width: 320px;
 }

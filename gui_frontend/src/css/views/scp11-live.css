@@ -126,10 +126,10 @@
 .scp03-apdu-input {
   width: 100%;
   padding: 10px 12px;
-  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.4;
   color: var(--fg);
@@ -139,7 +139,7 @@
 
 .scp03-apdu-input:focus {
   outline: none;
-  border-color: var(--accent, #4a90e2);
+  border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
@@ -157,7 +157,7 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
 }
 
 .scp03-apdu-breakdown-table th {
@@ -186,9 +186,9 @@
 }
 
 .scp03-apdu-ascii-mirror code {
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   color: var(--fg);
-  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  background: var(--code-bg);
   padding: 1px 6px;
   border-radius: 4px;
   margin-left: 4px;
@@ -223,11 +223,11 @@
 }
 
 .scp03-apdu-result--ok {
-  border-left-color: var(--ok, #3fb950);
+  border-left-color: var(--ok);
 }
 
 .scp03-apdu-result--warn {
-  border-left-color: var(--warn, #d29922);
+  border-left-color: var(--warn);
 }
 
 .scp03-apdu-result-head {
@@ -238,7 +238,7 @@
 }
 
 .scp03-apdu-sw-chip {
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 12.5px;
   font-weight: 600;
   padding: 3px 10px;
@@ -275,20 +275,20 @@
   margin-left: auto;
   font-size: 11.5px;
   color: var(--fg-muted);
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
 }
 
 .scp03-apdu-result-echo {
   margin: 0;
   font-size: 12px;
   color: var(--fg-muted);
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   word-break: break-all;
 }
 
 .scp03-apdu-result-echo code {
   color: var(--fg);
-  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  background: var(--code-bg);
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -312,7 +312,7 @@
   border: 1px solid var(--border);
   border-radius: 5px;
   font-size: 12px;
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
 }
 
 .scp03-apdu-chain-idx {
@@ -322,7 +322,7 @@
 
 .scp03-apdu-chain-reason {
   color: var(--fg-muted);
-  font-family: var(--font-sans, system-ui);
+  font-family: var(--font-sans);
   font-size: 11.5px;
 }
 
@@ -407,24 +407,24 @@
 }
 
 .scp03-apdu-history-item--ok {
-  border-left-color: var(--ok, #3fb950);
+  border-left-color: var(--ok);
 }
 
 .scp03-apdu-history-item--warn {
-  border-left-color: var(--warn, #d29922);
+  border-left-color: var(--warn);
 }
 
 .scp03-apdu-history-meta {
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   color: var(--fg-muted);
   min-width: 170px;
 }
 
 .scp03-apdu-history-apdu {
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--fg);
-  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  background: var(--code-bg);
   padding: 1px 6px;
   border-radius: 4px;
   word-break: break-all;

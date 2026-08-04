@@ -38,7 +38,7 @@
   font-size: 12px;
   cursor: pointer;
   text-align: left;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast),
     color var(--transition-fast);
 }
@@ -70,10 +70,10 @@
   flex: 0 0 22px;
   box-sizing: border-box;
   border: 1px solid color-mix(in oklab, var(--accent), transparent 52%);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   background: color-mix(in oklab, var(--accent-soft), transparent 16%);
   color: var(--accent);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 0;

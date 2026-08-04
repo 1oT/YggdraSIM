@@ -154,10 +154,10 @@ select {
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
-  background-color: var(--bg-elev, #2b303b);
-  color: var(--fg, #eceff4);
-  border: 1px solid var(--border-strong, rgba(216, 222, 233, 0.22));
-  border-radius: var(--radius-sm, 6px);
+  background-color: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   padding: 6px 32px 6px 10px;
   background-image: linear-gradient(
       45deg,
@@ -180,13 +180,13 @@ select {
 }
 
 select:hover:not(:disabled) {
-  border-color: var(--accent, #88c0d0);
+  border-color: var(--accent);
 }
 
 select:focus-visible {
   outline: none;
-  border-color: var(--accent, #88c0d0);
-  box-shadow: 0 0 0 3px var(--focus-ring-soft, rgba(136, 192, 208, 0.2));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring-soft);
 }
 
 select:disabled {
@@ -199,14 +199,14 @@ select:disabled {
    honour background-color / color here; Safari partially honours them. */
 select option,
 select optgroup {
-  background-color: var(--bg-elev, #2b303b);
-  color: var(--fg, #eceff4);
+  background-color: var(--bg-elev);
+  color: var(--fg);
 }
 
 select option:checked,
 select option:hover {
-  background-color: var(--accent-soft, rgba(136, 192, 208, 0.2));
-  color: var(--fg, #eceff4);
+  background-color: var(--accent-soft);
+  color: var(--fg);
 }
 
 @media (forced-colors: active) {

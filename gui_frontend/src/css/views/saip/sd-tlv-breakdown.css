@@ -10,14 +10,14 @@
   border: 1px dashed var(--border);
   border-radius: 4px;
   padding: 4px 8px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.025));
+  background: var(--surface-alt);
 }
 
 .saip-form-sd-tlv-summary {
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   cursor: pointer;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
 }
 
 .saip-form-sd-tlv[open] > .saip-form-sd-tlv-summary {
@@ -37,7 +37,7 @@
   display: grid;
   grid-template-columns: 56px 1fr 60px 2fr;
   gap: 8px;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   color: var(--fg);
   padding: 2px 0;
@@ -45,15 +45,15 @@
 
 .saip-form-sd-tlv-tag {
   font-weight: 600;
-  color: var(--accent, #5a8de0);
+  color: var(--accent);
 }
 
 .saip-form-sd-tlv-label {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-form-sd-tlv-len {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   text-align: right;
 }
 

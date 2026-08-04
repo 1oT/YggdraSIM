@@ -30,7 +30,7 @@
   padding: 4px 8px;
   border-radius: 6px;
   background: var(--bg-elev);
-  border: 1px solid var(--border-soft, var(--border));
+  border: 1px solid var(--border-soft);
 }
 
 .cc-svc-table-title {
@@ -55,8 +55,8 @@
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: var(--bg-deep, var(--bg));
-  border: 1px solid var(--border-soft, var(--border));
+  background: var(--bg-deep);
+  border: 1px solid var(--border-soft);
 }
 
 .cc-svc-table-grid {
@@ -78,7 +78,7 @@
   padding: 6px 8px;
   border-radius: 6px;
   background: var(--bg-elev);
-  border: 1px solid var(--border-soft, var(--border));
+  border: 1px solid var(--border-soft);
   min-width: 0;
 }
 
@@ -88,7 +88,7 @@
   text-transform: uppercase;
   color: var(--fg-muted);
   padding-bottom: 2px;
-  border-bottom: 1px dashed var(--border-soft, var(--border));
+  border-bottom: 1px dashed var(--border-soft);
   margin-bottom: 2px;
 }
 
@@ -126,7 +126,7 @@
 }
 
 .cc-svc-table-row--active .cc-svc-table-mark {
-  color: var(--accent, #88c0d0);
+  color: var(--accent);
 }
 
 .cc-svc-table-row--active .cc-svc-table-name {
@@ -151,12 +151,12 @@
 }
 
 .cc-svc-table-err {
-  color: var(--danger, #bf616a);
+  color: var(--danger);
   font-size: 11px;
   padding: 4px 8px;
   border-radius: 4px;
-  border: 1px solid var(--danger, #bf616a);
-  background: rgba(191, 97, 106, 0.08);
+  border: 1px solid var(--danger);
+  background: var(--fail-soft);
 }
 
 /* Yggdrasil-Nord palette accent on the active column — keeps the

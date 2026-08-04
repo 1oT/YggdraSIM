@@ -14,8 +14,8 @@
 .topbar-reader-popover {
   width: 320px;
   max-width: calc(100vw - 24px);
-  background: var(--bg-elev, var(--bg-card, #2a2f3a));
-  color: var(--fg, #e8e8ec);
+  background: var(--bg-elev);
+  color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
@@ -65,14 +65,14 @@
 }
 
 .topbar-reader-popover-close:hover {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  background: var(--bg-hover);
   color: var(--fg);
   border-color: var(--border);
 }
 
 .topbar-reader-popover-close:focus-visible,
 .topbar-reader-popover-actions .btn:focus-visible {
-  outline: 2px solid var(--focus-ring, var(--accent));
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -82,7 +82,7 @@
   gap: 8px;
   padding: 6px 8px;
   border-radius: 8px;
-  background: var(--bg-deep, rgba(0, 0, 0, 0.18));
+  background: var(--bg-deep);
   border: 1px solid var(--border);
 }
 
@@ -110,9 +110,9 @@
 
 .topbar-reader-popover-atr-val {
   flex: 1 1 auto;
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--mono);
   font-size: 11px;
-  background: var(--bg-deep, rgba(0, 0, 0, 0.22));
+  background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 2px 6px;
@@ -123,12 +123,12 @@
 }
 
 .topbar-reader-popover-atr-val:hover {
-  border-color: var(--accent, #5e81ac);
+  border-color: var(--accent);
 }
 
 .topbar-reader-popover-atr-val.is-copied {
-  background: var(--ok-bg, rgba(120, 200, 120, 0.18));
-  border-color: var(--ok, #8fbc8f);
+  background: var(--ok-bg);
+  border-color: var(--ok);
 }
 
 .topbar-reader-popover-hint {
@@ -157,9 +157,9 @@
 }
 
 .topbar-reader-popover-actions .btn-primary {
-  background: var(--accent, #5e81ac);
+  background: var(--accent);
   color: #fff;
-  border-color: var(--accent, #5e81ac);
+  border-color: var(--accent);
 }
 
 .topbar-reader-popover-actions .btn-primary:hover:not(:disabled) {
@@ -167,13 +167,13 @@
 }
 
 .topbar-reader-popover-actions .btn-secondary {
-  background: var(--bg-deep, rgba(0, 0, 0, 0.18));
+  background: var(--bg-deep);
   color: var(--fg);
 }
 
 .topbar-reader-popover-actions .btn-secondary:hover:not(:disabled) {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
-  border-color: var(--accent, #5e81ac);
+  background: var(--bg-hover);
+  border-color: var(--accent);
 }
 
 .topbar-reader-popover-actions .btn:disabled {

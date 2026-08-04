@@ -746,8 +746,8 @@ def test_local_smdp_path_inputs_are_themed() -> None:
     assert "color-scheme: dark;" in block
     assert "color: var(--fg);" in block
     assert "caret-color: var(--accent);" in block
-    assert "border: 1px solid var(--border-soft, var(--border));" in block
-    assert "border-radius: var(--radius-sm, 6px);" in block
+    assert "border: 1px solid var(--border-soft);" in block
+    assert "border-radius: var(--radius-sm);" in block
     assert "color: var(--fg-dim);" in placeholder
     assert "background:" in hover
     assert "border-color: var(--accent);" in focus

@@ -304,7 +304,7 @@ def test_active_session_prefill_is_hidden_and_never_activates_result() -> None:
         prefill = _between(
             body,
             "  function ccApplyActionFormInitialValues(",
-            "\n  // -- Action popout builder",
+            "\n  // -- Action panel builder",
         )
         assert '"saip-ribbon-active-session-form"' in prefill
         assert 'field.name === "session_id"' in prefill
@@ -386,7 +386,7 @@ def test_catalogue_refresh_and_safe_action_prefill_are_synced() -> None:
     command_source = _command_center_source()
     _saip_source, served = _source_and_served_bodies()
     prefill_start = "  function ccApplyActionFormInitialValues("
-    prefill_end = "\n  // -- Action popout builder"
+    prefill_end = "\n  // -- Action panel builder"
     assert _between(command_source, prefill_start, prefill_end) == _between(
         served,
         prefill_start,

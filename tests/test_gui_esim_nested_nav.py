@@ -350,7 +350,7 @@ def test_esim_action_runs_stay_in_flow_pane_not_popout() -> None:
     js = _read("app.js")
     assert "function ccActionShouldAutoRunInEsimFlowPane(action)" in js
     helper = js.split("function ccActionShouldAutoRunInEsimFlowPane(action)", 1)[1]
-    helper = helper.split("// -- Action popout builder", 1)[0]
+    helper = helper.split("// -- Action panel builder", 1)[0]
     assert "!ccActionNeedsManualInput(action)" in helper
     assert "action.streams" not in helper
 

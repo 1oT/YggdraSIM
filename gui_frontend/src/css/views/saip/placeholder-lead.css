@@ -15,7 +15,7 @@
   gap: 8px;
   font-size: 13px;
   line-height: 1.55;
-  color: var(--fg-dim, var(--fg-muted, #888));
+  color: var(--fg-dim);
   text-align: center;
   padding: 32px 24px;
   border: 1px dashed var(--border);
@@ -27,7 +27,7 @@
       color-mix(in srgb, var(--accent) 9%, transparent),
       transparent 54%
     ),
-    var(--surface, rgba(255, 255, 255, 0.02));
+    var(--surface);
   font-style: normal;
 }
 
@@ -65,8 +65,8 @@
   margin-top: 4px;
   padding: 6px 13px;
   border: 1px solid var(--accent);
-  border-radius: var(--radius-sm, 6px);
-  color: var(--accent-fg, var(--bg));
+  border-radius: var(--radius-sm);
+  color: var(--accent-fg);
   background: var(--accent);
   font: inherit;
   font-weight: 650;
@@ -84,17 +84,17 @@
 
 .saip-placeholder-shortcut {
   margin: 0;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 11px;
 }
 
 .saip-placeholder-shortcut kbd {
   padding: 1px 5px;
-  border: 1px solid var(--border-strong, var(--border));
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   color: var(--fg);
-  background: var(--bg-elev-2, var(--surface-alt));
+  background: var(--bg-elev-2);
   box-shadow: 0 1px 0 var(--border);
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 10px;
 }

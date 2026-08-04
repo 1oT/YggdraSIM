@@ -103,7 +103,7 @@
 
 .terminal-tab .tt-close:hover {
   color: var(--fail);
-  background: rgba(255, 120, 120, 0.12);
+  background: var(--fail-soft);
 }
 
 .terminal-host .xterm {

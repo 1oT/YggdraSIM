@@ -21,9 +21,9 @@
 }
 
 .saip-apps-meta {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   flex-grow: 1;
 }
 
@@ -41,7 +41,7 @@
 .saip-app-card {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -51,7 +51,7 @@
 }
 
 .saip-app-card:hover {
-  background: var(--surface, rgba(255, 255, 255, 0.05));
+  background: var(--surface);
   border-color: var(--accent-soft);
 }
 
@@ -79,8 +79,8 @@
 
 .saip-app-card-sub {
   font-size: 11px;
-  color: var(--fg-muted, #888);
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  color: var(--fg-muted);
+  font-family: var(--mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -94,8 +94,8 @@
   padding: 3px 8px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--surface, rgba(255, 255, 255, 0.04));
-  color: var(--fg-muted, #888);
+  background: var(--surface);
+  color: var(--fg-muted);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -123,7 +123,7 @@
 
 .saip-app-lifecycle.is-unknown {
   border-color: var(--border);
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-app-card-jump {
@@ -135,9 +135,9 @@
 }
 
 .saip-app-card-edit[aria-expanded="true"] {
-  background: var(--accent-soft, rgba(120, 160, 240, 0.18));
-  border-color: var(--accent, #6c8aff);
-  color: var(--accent, #6c8aff);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .saip-app-card-inline {
@@ -165,13 +165,13 @@
 
 .saip-app-aid-label {
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   letter-spacing: 0.02em;
   align-self: center;
 }
 
 .saip-app-aid-value {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   color: var(--fg);
   word-break: break-all;
@@ -180,7 +180,7 @@
 }
 
 .saip-app-aid-value.is-muted {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
@@ -195,7 +195,7 @@
 
 .saip-app-privs-label {
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -212,22 +212,22 @@
   padding: 2px 8px;
   border-radius: 4px;
   border: 1px solid var(--border);
-  background: var(--surface, rgba(255, 255, 255, 0.04));
+  background: var(--surface);
   color: var(--fg);
   white-space: nowrap;
 }
 
 .saip-app-priv--tar {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   background: rgba(94, 129, 172, 0.12);
   border-color: rgba(94, 129, 172, 0.45);
   color: #8fa6cc;
 }
 
 .saip-app-privs-hex {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 10px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   background: transparent;
 }
 
@@ -243,19 +243,19 @@
   font-size: 11px;
   padding: 3px 8px;
   border-radius: 4px;
-  background: var(--surface, rgba(255, 255, 255, 0.04));
-  color: var(--fg-muted, #888);
+  background: var(--surface);
+  color: var(--fg-muted);
   border: 1px solid var(--border);
 }
 
 .saip-app-foot-chip--mono {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.02em;
 }
 
 .saip-file-card {
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
@@ -270,7 +270,7 @@
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 /* Full-width stack used by the File Control Parameters tab. The
@@ -292,20 +292,20 @@
 
 .saip-template-default-card {
   background:
-    linear-gradient(90deg, rgba(180, 207, 153, 0.14), rgba(180, 207, 153, 0.04));
-  border-color: rgba(180, 207, 153, 0.38);
+    linear-gradient(90deg, var(--ok-soft), var(--ok-soft));
+  border-color: color-mix(in oklab, var(--ok) 38%, transparent);
 }
 
 .saip-template-default-card .saip-edit-card-title,
 .saip-template-default-card h5 {
-  color: #b4cf99;
+  color: var(--ok);
 }
 
 .saip-file-card-title {
   margin: 0 0 4px 0;
   font-size: 12px;
   font-weight: 600;
-  color: var(--fg, #eceff4);
+  color: var(--fg);
 }
 
 .saip-file-card--decoded-edit .saip-decoded-card {
@@ -328,7 +328,7 @@
 }
 
 .saip-backend-decoded-tree--root {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border);
   padding-top: 8px;
   margin-top: 4px;
 }
@@ -336,7 +336,7 @@
 .saip-backend-decoded-tree--nested {
   margin: 4px 0 6px 0;
   padding: 0 0 0 16px;
-  border-left: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-left: 1px solid var(--border);
 }
 
 .saip-backend-decoded-item {
@@ -345,7 +345,7 @@
 }
 
 .saip-backend-decoded-key {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 11px;
 }
 
@@ -354,17 +354,17 @@
 }
 
 .saip-backend-decoded-val {
-  color: var(--fg, #eceff4);
+  color: var(--fg);
   word-break: break-word;
 }
 
 .saip-backend-decoded-val.is-mono {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
 }
 
 .saip-backend-decoded-val.is-muted {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
@@ -380,7 +380,7 @@
   width: 100%;
   height: 1px;
   border: 0;
-  background: var(--border, #4c566a);
+  background: var(--border);
   margin: 12px 0 6px 0;
   opacity: 0.4;
 }
@@ -390,13 +390,13 @@
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-weight: 600;
 }
 
 .saip-file-data-summary {
   font-weight: 600;
-  color: var(--fg, #eceff4);
+  color: var(--fg);
 }
 
 .saip-file-card dl {
@@ -408,13 +408,13 @@
 }
 
 .saip-file-card dt {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 11px;
 }
 
 .saip-file-card dd {
   margin: 0;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   color: var(--fg);
   word-break: break-word;
@@ -440,18 +440,18 @@
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
 }
 
 .saip-file-data-op {
   font-size: 11px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-file-data-meta {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 12px;
   color: var(--fg);
 }
@@ -477,7 +477,7 @@
   border: 1px solid var(--border);
   border-left-width: 3px;
   border-radius: 3px;
-  background: var(--bg-2, var(--bg));
+  background: var(--bg);
   font-size: 0.82rem;
 }
 
@@ -490,8 +490,8 @@
 }
 
 .saip-gfm-parent-chip[data-state="mixed"] {
-  border-left-color: var(--warn, #d6a73a);
-  background: color-mix(in srgb, var(--warn, #d6a73a) 8%, var(--bg));
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, var(--bg));
 }
 
 .saip-gfm-parent-chip-label {
@@ -590,7 +590,7 @@
 }
 
 .saip-gfm-addbar-status[data-state="error"] {
-  color: var(--danger, #d44);
+  color: var(--danger);
 }
 
 .saip-gfm-panes {
@@ -612,12 +612,12 @@
   display: grid;
   grid-template-columns: 1fr 52px;
   padding: 6px 10px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   border-bottom: 1px solid var(--border);
 }
 
@@ -648,7 +648,7 @@
 }
 
 .saip-gfm-list-row:hover {
-  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+  background: var(--surface-hover);
 }
 
 .saip-gfm-list-row:focus-visible,
@@ -657,12 +657,12 @@
   z-index: 1;
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+  background: var(--surface-hover);
 }
 
 .saip-gfm-list-row.is-active {
-  background: var(--accent-muted, rgba(94, 129, 244, 0.22));
-  border-left: 3px solid var(--accent, #5e81f4);
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
 }
 
 .saip-gfm-row-name {
@@ -675,13 +675,13 @@
 }
 
 .saip-gfm-list-row.is-active .saip-gfm-row-name {
-  color: var(--accent, #5e81f4);
+  color: var(--accent);
 }
 
 .saip-gfm-row-fid {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 10px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   text-align: right;
 }
 
@@ -769,19 +769,19 @@
   margin-bottom: 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
 }
 
 .saip-record-toolbar-label {
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-record-select {
   min-width: 9rem;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 12px;
 }
 
@@ -792,8 +792,8 @@
 .saip-record-toolbar-meta {
   margin-left: auto;
   font-size: 11px;
-  color: var(--fg-muted, #888);
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  color: var(--fg-muted);
+  font-family: var(--mono);
 }
 
 .saip-rt-tabs {
@@ -819,19 +819,19 @@
 }
 
 .saip-form-section {
-  border: 1px solid var(--border, #2c313a);
+  border: 1px solid var(--border);
   border-radius: 5px;
-  background: var(--bg-elev1, rgba(255, 255, 255, 0.02));
+  background: var(--bg-elev1);
   margin: 1px 0;
 }
 
 .saip-form-section[data-depth="0"] > .saip-form-section-summary {
-  background: var(--bg-elev2, rgba(255, 255, 255, 0.04));
+  background: var(--bg-elev2);
   font-weight: 600;
 }
 
 .saip-form-section[data-depth="1"] > .saip-form-section-summary {
-  background: var(--bg-elev1, rgba(255, 255, 255, 0.025));
+  background: var(--bg-elev1);
 }
 
 .saip-form-section-summary {
@@ -853,7 +853,7 @@
   content: "▸";
   display: inline-block;
   font-size: 10px;
-  color: var(--fg-muted, #7a8290);
+  color: var(--fg-muted);
   width: 10px;
   transition: transform 0.12s ease;
 }
@@ -863,18 +863,18 @@
 }
 
 .saip-form-section-title {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.02em;
-  color: var(--fg, #d8dde6);
+  color: var(--fg);
 }
 
 .saip-form-section-chip {
   font-size: 9px;
   padding: 1px 6px;
   border-radius: 8px;
-  background: var(--bg-elev3, rgba(255, 255, 255, 0.06));
-  color: var(--fg-muted, #8a93a3);
+  background: var(--bg-elev3);
+  color: var(--fg-muted);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -884,8 +884,8 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  border-top: 1px solid var(--border, #2c313a);
-  background: var(--bg, transparent);
+  border-top: 1px solid var(--border);
+  background: var(--bg);
 }
 
 .saip-form-row {
@@ -897,9 +897,9 @@
 }
 
 .saip-form-row-label {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
-  color: var(--fg, #d8dde6);
+  color: var(--fg);
   padding-top: 3px;
 }
 
@@ -913,18 +913,18 @@
 .saip-form-row-hint {
   grid-column: 1 / -1;
   font-size: 10px;
-  color: var(--fg-muted, #7a8290);
+  color: var(--fg-muted);
   font-style: italic;
   padding-left: 2px;
 }
 
 .saip-form-input {
   font: inherit;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
-  background: var(--bg-input, #1c1f25);
-  color: var(--fg, #d8dde6);
-  border: 1px solid var(--border, #2c313a);
+  background: var(--bg-input);
+  color: var(--fg);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 3px 5px;
   flex: 1 1 auto;
@@ -933,8 +933,8 @@
 
 .saip-form-input:focus {
   outline: none;
-  border-color: var(--accent, #5e9bff);
-  box-shadow: 0 0 0 1px var(--accent, #5e9bff);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .saip-form-bool {
@@ -949,11 +949,11 @@
 }
 
 .saip-form-select {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 12px;
-  background: var(--bg-input, #1c1f25);
-  color: var(--fg, #d8dde6);
-  border: 1px solid var(--border, #2c313a);
+  background: var(--bg-input);
+  color: var(--fg);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 3px 6px;
   flex: 1 1 auto;
@@ -963,13 +963,13 @@
 
 .saip-form-select:focus {
   outline: none;
-  border-color: var(--accent, #5e9bff);
-  box-shadow: 0 0 0 1px var(--accent, #5e9bff);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .saip-form-null {
   font-size: 11px;
-  color: var(--fg-muted, #7a8290);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
@@ -989,18 +989,18 @@
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 8px;
-  background: var(--bg-elev3, rgba(255, 255, 255, 0.06));
-  color: var(--fg-muted, #8a93a3);
+  background: var(--bg-elev3);
+  color: var(--fg-muted);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
 .saip-form-hex-chip[data-tone="ok"] {
-  color: var(--accent, #5e9bff);
+  color: var(--accent);
 }
 
 .saip-form-hex-chip[data-tone="error"] {
-  color: var(--err, #ef6c6c);
+  color: var(--err);
 }
 
 .saip-form-list-csv {
@@ -1036,15 +1036,15 @@
   font-family: var(--font-mono);
   font-size: 12px;
   padding: 2px 6px;
-  border: 1px dashed var(--border, rgba(255, 255, 255, 0.12));
+  border: 1px dashed var(--border);
   border-radius: 3px;
-  background: var(--bg-elev2, rgba(255, 255, 255, 0.03));
-  color: var(--fg, #d8dee9);
+  background: var(--bg-elev2);
+  color: var(--fg);
   user-select: text;
 }
 
 .saip-form-readonly-value.is-empty {
-  color: var(--fg-muted, #8a93a3);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
@@ -1054,15 +1054,15 @@
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 8px;
-  background: var(--bg-elev3, rgba(255, 255, 255, 0.06));
-  color: var(--fg-muted, #8a93a3);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.10));
+  background: var(--bg-elev3);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
   cursor: help;
 }
 
 .saip-form-row[data-inferred] .saip-form-lock-chip {
-  color: var(--accent, #5e9bff);
-  border-color: color-mix(in srgb, var(--accent, #5e9bff) 30%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .saip-form-row-add {
@@ -1077,9 +1077,9 @@
   flex-wrap: wrap;
   padding: 5px 6px;
   margin: 0 0 6px 0;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg-elev2, rgba(255, 255, 255, 0.03));
+  background: var(--bg-elev2);
 }
 
 .saip-form-record-label {
@@ -1087,7 +1087,7 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #8a93a3);
+  color: var(--fg-muted);
 }
 
 .saip-form-record-select {
@@ -1108,9 +1108,9 @@
   letter-spacing: 0.04em;
   padding: 1px 6px;
   margin-left: 6px;
-  border: 1px dashed color-mix(in srgb, var(--accent, #5e9bff) 35%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
   background: transparent;
-  color: var(--accent, #5e9bff);
+  color: var(--accent);
   cursor: pointer;
   border-radius: 3px;
   align-self: center;
@@ -1118,7 +1118,7 @@
 }
 
 .saip-form-tokenize:hover {
-  background: color-mix(in srgb, var(--accent, #5e9bff) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   border-style: solid;
 }
 
@@ -1129,20 +1129,20 @@
    the token-defs map) get the warning tone. */
 .saip-form-row-token .saip-form-readonly-value {
   border-style: solid;
-  border-color: color-mix(in srgb, var(--accent, #5e9bff) 35%, transparent);
-  color: var(--accent, #5e9bff);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
 }
 
 .saip-form-row-token[data-token-state="unresolved"] .saip-form-readonly-value {
-  border-color: color-mix(in srgb, var(--warn, #ffcb6b) 50%, transparent);
-  color: var(--warn, #ffcb6b);
+  border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+  color: var(--warn);
   font-style: italic;
 }
 
 .saip-form-row-token .saip-form-lock-chip {
-  background: color-mix(in srgb, var(--accent, #5e9bff) 18%, transparent);
-  border-color: color-mix(in srgb, var(--accent, #5e9bff) 50%, transparent);
-  color: var(--accent, #5e9bff);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
   letter-spacing: 0.04em;
   text-transform: none;
 }
@@ -1170,8 +1170,8 @@
 
 .saip-val-score {
   font-size: 12px;
-  color: var(--fg-muted, #888);
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  color: var(--fg-muted);
+  font-family: var(--mono);
 }
 
 .saip-val-tools {
@@ -1186,7 +1186,7 @@
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   cursor: pointer;
@@ -1194,7 +1194,7 @@
 
 .saip-val-hint {
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
@@ -1220,15 +1220,15 @@
 }
 
 .saip-val-chip--fail {
-  background: rgba(255, 102, 128, 0.12);
-  color: #ff6680;
-  border-color: rgba(255, 102, 128, 0.4);
+  background: var(--fail-soft);
+  color: var(--fail);
+  border-color: color-mix(in oklab, var(--fail) 40%, transparent);
 }
 
 .saip-val-chip--warn {
-  background: rgba(255, 200, 80, 0.12);
-  color: #ffc850;
-  border-color: rgba(255, 200, 80, 0.4);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 40%, transparent);
 }
 
 .saip-val-chip--info {
@@ -1238,9 +1238,9 @@
 }
 
 .saip-val-chip--pass {
-  background: rgba(120, 220, 130, 0.12);
-  color: #78dc82;
-  border-color: rgba(120, 220, 130, 0.4);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 40%, transparent);
 }
 
 .saip-val-table {
@@ -1259,12 +1259,12 @@
 .saip-val-table thead th {
   position: sticky;
   top: 0;
-  background: var(--surface, #1e2128);
+  background: var(--surface);
   text-align: left;
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
@@ -1276,9 +1276,9 @@
 }
 
 .saip-val-row--fail {
-  background: rgba(255, 102, 128, 0.04);
+  background: var(--fail-soft);
 }
 
 .saip-val-row--warn {
-  background: rgba(255, 200, 80, 0.04);
+  background: var(--warn-soft);
 }

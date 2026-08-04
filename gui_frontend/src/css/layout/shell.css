@@ -97,9 +97,9 @@
   flex: 0 0 auto;
   margin-left: auto;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   cursor: pointer;
   transition: background-color var(--transition-fast),
     color var(--transition-fast),
@@ -112,14 +112,14 @@
 
 .topbar-collapse-toggle:hover,
 .app-close-button:hover {
-  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+  background: var(--surface-hover);
   color: var(--fg);
   border-color: var(--accent-soft);
 }
 
 .app-close-button:hover {
-  color: var(--error, #bf616a);
-  border-color: var(--error, #bf616a);
+  color: var(--error);
+  border-color: var(--error);
 }
 
 .topbar-collapse-toggle:focus-visible,
@@ -144,9 +144,9 @@
   flex: 0 0 auto;
   margin-right: 4px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   cursor: pointer;
   transition: background-color var(--transition-fast),
     color var(--transition-fast),
@@ -154,7 +154,7 @@
 }
 
 .sidebar-collapse-toggle:hover {
-  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+  background: var(--surface-hover);
   color: var(--fg);
   border-color: var(--accent-soft);
 }
@@ -366,7 +366,7 @@
 }
 
 .topbar-card-bridge[data-state="running"] {
-  border-color: rgba(163, 190, 140, 0.45);
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
   background: var(--ok-soft);
   color: var(--ok);
 }
@@ -377,7 +377,7 @@
 }
 
 .topbar-card-bridge[data-state="error"] {
-  border-color: rgba(191, 97, 106, 0.42);
+  border-color: color-mix(in oklab, var(--fail) 42%, transparent);
   background: var(--fail-soft);
   color: var(--fail);
 }

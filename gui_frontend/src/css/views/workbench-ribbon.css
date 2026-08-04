@@ -93,7 +93,7 @@
 }
 
 .ribbon-btn:hover:not(:disabled) .ribbon-btn-icon {
-  color: var(--accent-strong, var(--accent));
+  color: var(--accent-strong);
 }
 
 .ribbon-btn-label {

@@ -44,7 +44,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -58,7 +58,7 @@
 }
 
 .cc-wb-tab:hover {
-  border-color: var(--accent, #6fa8dc);
+  border-color: var(--accent);
 }
 
 .cc-wb-tab:focus-visible,
@@ -68,7 +68,7 @@
 }
 
 .cc-wb-tab.active {
-  background: var(--accent, #6fa8dc);
+  background: var(--accent);
   color: var(--accent-fg);
   border-color: transparent;
   font-weight: 600;
@@ -79,7 +79,7 @@
 }
 
 .cc-wb-tab-meta {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   opacity: 0.75;
   pointer-events: none;
@@ -109,7 +109,7 @@
 
 .cc-wb-tab-add:hover {
   color: var(--fg);
-  border-color: var(--accent, #6fa8dc);
+  border-color: var(--accent);
 }
 
 .cc-wb-body {

@@ -20,7 +20,7 @@
   background:
     linear-gradient(
       180deg,
-      var(--surface-alt, rgba(255, 255, 255, 0.04)) 0%,
+      var(--surface-alt) 0%,
       transparent 100%
     );
 }
@@ -38,9 +38,9 @@
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  background: var(--accent-soft, rgba(110, 160, 220, 0.18));
+  background: var(--accent-soft);
   color: var(--accent);
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -98,7 +98,7 @@
 .saip-token-list-lead {
   margin: 0;
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   line-height: 1.4;
 }
 
@@ -108,7 +108,7 @@
   border: 1px dashed var(--border);
   border-radius: 6px;
   font-size: 12px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   line-height: 1.5;
 }
 
@@ -120,7 +120,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.025));
+  background: var(--surface-alt);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -136,7 +136,7 @@
 .saip-token-bind-lead {
   margin: 0;
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   line-height: 1.5;
 }
 

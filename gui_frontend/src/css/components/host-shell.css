@@ -98,7 +98,7 @@
 }
 
 .host-shell-decoded-row.dir-rx .host-shell-decoded-glyph {
-  color: var(--success, #4caf50);
+  color: var(--success);
 }
 
 .host-shell-decoded-kind {

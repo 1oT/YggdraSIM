@@ -42,9 +42,9 @@
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-sans);
-  border: 1px solid var(--border-strong, var(--border));
-  border-radius: var(--radius-md, 10px);
-  box-shadow: var(--shadow-card, 0 24px 64px rgba(0, 0, 0, 0.45));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -77,7 +77,7 @@
   height: 36px;
   padding: 0;
   cursor: pointer;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 
@@ -110,10 +110,10 @@
   padding: 6px 10px;
   font-family: var(--font-mono);
   font-size: 12px;
-  background: var(--bg-elev-2, var(--bg-elev));
+  background: var(--bg-elev-2);
   border: 1px solid var(--border);
   color: var(--fg);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   outline: none;
   transition: border-color var(--transition-fast);
   min-height: 36px;
@@ -155,7 +155,7 @@
   border: 1px solid transparent;
   color: var(--fg);
   padding: 6px 10px;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 12px;
   font-family: inherit;
@@ -195,10 +195,10 @@
   flex: 1 1 auto;
   min-width: 0;
   padding: 6px 10px;
-  background: var(--bg-elev-2, var(--bg));
+  background: var(--bg-elev-2);
   border: 1px solid var(--border);
   color: var(--fg);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-family: inherit;
   outline: none;
@@ -319,7 +319,7 @@
 
 .cc-fs-explorer-status.is-error {
   color: var(--fail);
-  background: var(--fail-soft, var(--bg-elev));
+  background: var(--fail-soft);
 }
 
 .cc-fs-explorer-foot {
@@ -345,10 +345,10 @@
   flex: 1 1 auto;
   min-width: 0;
   padding: 6px 10px;
-  background: var(--bg-elev-2, var(--bg));
+  background: var(--bg-elev-2);
   border: 1px solid var(--border);
   color: var(--fg);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 12px;
   outline: none;
