@@ -9,7 +9,7 @@ import ipaddress
 import os
 from typing import Any
 
-from SIMCARD.state import SimCardState, SimToolkitMenuItem
+from SIMCARD.state import SimCardState, SimToolkitMenuItem, append_bounded
 from SIMCARD.utils import read_tlv, tlv
 from Tools.HilBridge.protocol import (
     REFRESH_MODE_EUICC_PROFILE_STATE_CHANGE,
@@ -360,7 +360,7 @@ class ToolkitLogic:
         plaintext OTA flows keep working.
         """
         normalized = bytes(payload or b"")
-        self.state.toolkit.envelope_history.append(normalized)
+        append_bounded(self.state.toolkit.envelope_history, normalized)
         envelope_tag = normalized[:1] if len(normalized) > 0 else b""
 
         if envelope_tag == b"\xD6":
@@ -2651,7 +2651,7 @@ class ToolkitLogic:
         channel_data = bytes(response_fields.get("channel_data", b"") or b"")
         toolkit.last_received_channel_data = channel_data
         if len(channel_data) > 0:
-            toolkit.received_channel_history.append(channel_data)
+            append_bounded(toolkit.received_channel_history, channel_data)
         if str(toolkit.bip_bootstrap_phase or "") == "dns_receive":
             resolved_address = self._extract_dns_a_record_address(channel_data)
             if len(resolved_address) > 0:
@@ -2681,7 +2681,7 @@ class ToolkitLogic:
         if event_code is not None:
             code_int = int(event_code) & 0xFF
             toolkit.last_event_code = code_int
-            toolkit.event_history.append(code_int)
+            append_bounded(toolkit.event_history, code_int)
             if code_int == 0x05:
                 # §7.5.6 Idle screen available -- the modem signals
                 # the home screen is idle, so SET UP IDLE MODE TEXT

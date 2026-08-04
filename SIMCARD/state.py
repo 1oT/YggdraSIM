@@ -5,11 +5,54 @@
 """Simulated SIM persistent state: profile FS nodes, auth config, PIN/PUK entries, and SD key records serialised to JSON."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 
 DEFAULT_SIM_ATR = bytes.fromhex("3B9F96801FC78031A073BE21136743200718000001A5")
+
+_DEFAULT_HISTORY_ENTRIES = 256
+
+
+def _resolve_history_cap() -> int:
+    raw = str(os.environ.get("YGGDRASIM_SIM_HISTORY_CAP", "")).strip()
+    if len(raw) == 0:
+        return _DEFAULT_HISTORY_ENTRIES
+    try:
+        parsed = int(raw, 10)
+    except ValueError:
+        return _DEFAULT_HISTORY_ENTRIES
+    if parsed < 1:
+        return _DEFAULT_HISTORY_ENTRIES
+    return parsed
+
+
+MAX_HISTORY_ENTRIES = _resolve_history_cap()
+
+_HistoryItem = TypeVar("_HistoryItem")
+
+
+def append_bounded(
+    target: list[_HistoryItem],
+    value: _HistoryItem,
+    maxlen: int = 0,
+) -> list[_HistoryItem]:
+    """Append *value* to *target*, dropping oldest entries past the cap.
+
+    The engine is a process-wide singleton, so a list that grows once per
+    APDU or per envelope grows for the life of the process. The list type
+    stays ``list`` -- callers that index ``[-1]``, compare against a
+    literal list, or take ``len(...)`` keep working; only entries older
+    than the cap disappear. ``maxlen`` of 0 means MAX_HISTORY_ENTRIES,
+    which ``YGGDRASIM_SIM_HISTORY_CAP`` overrides at import time.
+    """
+    cap = MAX_HISTORY_ENTRIES if maxlen <= 0 else maxlen
+    target.append(value)
+    excess = len(target) - cap
+    if excess > 0:
+        del target[:excess]
+    return target
 
 
 def _default_stk_imei_bcd() -> bytes:
@@ -595,7 +638,7 @@ class SimToolkitState:
     # records the most recent event-code delivered by the terminal so
     # an STK applet can poll "did we just see an idle-screen / browser
     # termination / network-rejection notification". Bounded by
-    # is unbounded by design; tests trim it explicitly when needed.
+    # ``append_bounded``; the oldest entries drop past the cap.
     event_history: list[int] = field(default_factory=list)
     last_event_code: int = 0
     idle_screen_available: bool = False
