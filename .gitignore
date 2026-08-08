@@ -160,6 +160,14 @@ V2_*.md
 *_review.md
 *_AUDIT.md
 *_audit.md
+*_REMEDIATION.md
+*_remediation.md
+
+# Charted card-behaviour profiles. Written by Tools/CardClone against a
+# real card; the writer excludes identity, but a profile still describes
+# a specific piece of hardware someone owns.
+card_behaviour_profile*.json
+*_behaviour_profile.json
 *_HANDOFF.md
 *_handoff_*.md
 *_hand_off.md
@@ -176,6 +184,7 @@ site-docs/sources/V1_*.md
 site-docs/sources/V2_*.md
 site-docs/sources/*_REVIEW.md
 site-docs/sources/*_AUDIT.md
+site-docs/sources/*_REMEDIATION.md
 site-docs/sources/*_HANDOFF.md
 site-docs/sources/NEW_FEATURE_IDEAS.md
 site-docs/sources/reports/
