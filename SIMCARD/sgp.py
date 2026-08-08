@@ -1502,7 +1502,7 @@ class SgpLogic:
     def _issue_card_challenge(self) -> bytes:
         challenge = hashlib.sha256(
             bytes.fromhex(self.state.eid)
-            + len(self.state.apdu_history).to_bytes(4, "big", signed=False)
+            + self.state.apdu_count.to_bytes(4, "big", signed=False)
         ).digest()[:16]
         self.state.sgp_session.card_challenge = challenge
         return challenge

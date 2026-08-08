@@ -100,3 +100,79 @@ class ParseApduExtendedCases(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApduLengthErrorTests(unittest.TestCase):
+    """Length faults carry a type the engine can map to a precise SW.
+
+    ``ApduLengthError`` subclasses ``ValueError``, so callers that only
+    catch ``ValueError`` are unaffected.
+    """
+
+    def test_length_error_is_a_value_error(self) -> None:
+        from SIMCARD.utils import ApduLengthError
+
+        self.assertTrue(issubclass(ApduLengthError, ValueError))
+
+    def test_every_length_fault_raises_the_dedicated_type(self) -> None:
+        from SIMCARD.utils import ApduLengthError
+
+        cases = {
+            "runt under four bytes": "00A400",
+            "short Lc over-claims its body": "00A40004F23F00",
+            "trailing bytes after short Lc": "00A4000403DEADBEEFCA",
+            "extended payload truncated": "00A400040000 05AABB",
+        }
+        for label, hex_text in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaises(ApduLengthError):
+                    parse_apdu(_apdu(hex_text))
+
+
+class EngineLengthStatusWordTests(unittest.TestCase):
+    """ISO/IEC 7816-4 §5.6: a length mismatch is 6700, not 6F00."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from SIMCARD.connection import get_shared_engine
+
+        cls.engine = get_shared_engine()
+
+    def _sw(self, hex_text: str) -> str:
+        _data, sw1, sw2 = self.engine.transmit(_apdu(hex_text))
+        return f"{sw1:02X}{sw2:02X}"
+
+    def test_over_claiming_lc_returns_6700(self) -> None:
+        # Found by the simulator-targeted fuzzer: Lc=0xF2 with two data
+        # bytes previously fell through to the 6F00 catch-all.
+        self.assertEqual(self._sw("00A40004F23F00"), "6700")
+
+    def test_runt_apdu_returns_6700(self) -> None:
+        self.assertEqual(self._sw("00A400"), "6700")
+
+    def test_trailing_bytes_after_lc_return_6700(self) -> None:
+        self.assertEqual(self._sw("00A4000403DEADBEEFCA"), "6700")
+
+    def test_truncated_extended_payload_returns_6700(self) -> None:
+        self.assertEqual(self._sw("00A400040000 05AABB"), "6700")
+
+    def test_valid_apdus_are_unaffected(self) -> None:
+        for label, hex_text in {
+            "case 3S SELECT MF": "00A40004023F00",
+            "case 2S with Le": "00A4000402",
+            "case 2E extended Le": "00A400040000 0A",
+        }.items():
+            with self.subTest(case=label):
+                self.assertEqual(self._sw(hex_text), "9000")
+
+    def test_internal_faults_still_return_6f00(self) -> None:
+        """6F00 stays reserved for a genuine no-precise-diagnosis fault.
+
+        TERMINATE CARD USAGE makes the card refuse everything but STATUS;
+        that is a deliberate 6F00 return, not a length fault.
+        """
+        self.engine.transmit(_apdu("00FE000000"))
+        try:
+            self.assertEqual(self._sw("00A40000023F00"), "6F00")
+        finally:
+            self.engine.state.terminated_card_usage = False

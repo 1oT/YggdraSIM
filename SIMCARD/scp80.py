@@ -38,7 +38,7 @@ class Scp80Logic:
 
     def handle_envelope(self, payload: bytes) -> ApduResult:
         """Handle an OTA ENVELOPE command (ETSI TS 102 225 §7.2) and return (data, SW1, SW2)."""
-        self.state.ota_history.append(payload.hex().upper())
+        self.state.ota_count += 1
         envelope = bytes(payload or b"")
         fetch_body: bytes
         try:

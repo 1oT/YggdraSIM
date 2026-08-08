@@ -1043,8 +1043,11 @@ class SimCardState:
     scp03_keys: SimScp03StaticKeys = field(default_factory=SimScp03StaticKeys)
     scp80_security: SimScp80SecurityConfig = field(default_factory=SimScp80SecurityConfig)
     current_node_id: str = "3F00"
-    ota_history: list[str] = field(default_factory=list)
-    apdu_history: list[str] = field(default_factory=list)
+    # Counters, not lists: the engine is a process-wide singleton and both
+    # of these grew once per APDU / per OTA payload for the life of the
+    # process. Only the count was ever read.
+    ota_count: int = 0
+    apdu_count: int = 0
     pending_fetch_queue: list[bytes] = field(default_factory=list)
     current_protocol: int | None = None
     # Monotonic per-engine reset generation used by read-only validation to

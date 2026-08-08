@@ -8,6 +8,16 @@ from __future__ import annotations
 from typing import Any
 
 
+class ApduLengthError(ValueError):
+    """An APDU's declared length does not agree with the bytes present.
+
+    Subclasses ``ValueError`` so existing callers that catch ``ValueError``
+    keep working. The engine distinguishes it so a length fault maps to
+    ISO/IEC 7816-4 ``6700`` "wrong length" rather than the ``6F00``
+    no-precise-diagnosis catch-all.
+    """
+
+
 def encode_length(length: int) -> bytes:
     """Encode a non-negative BER definite length using its minimal form."""
     if isinstance(length, bool) or not isinstance(length, int):
@@ -243,7 +253,7 @@ def parse_apdu(apdu: bytes) -> dict[str, Any]:
     """
     data = bytes(apdu or b"")
     if len(data) < 4:
-        raise ValueError("APDU must be at least 4 bytes.")
+        raise ApduLengthError("APDU must be at least 4 bytes.")
     cla = data[0]
     ins = data[1]
     p1 = data[2]
@@ -276,13 +286,13 @@ def parse_apdu(apdu: bytes) -> dict[str, Any]:
     if body[0] != 0x00:
         lc = body[0]
         if len(body) < 1 + lc:
-            raise ValueError("Short APDU body is truncated.")
+            raise ApduLengthError("Short APDU body is truncated.")
         command_data = body[1 : 1 + lc]
         trailing = body[1 + lc :]
         if len(trailing) == 1:
             le = 256 if trailing[0] == 0 else trailing[0]
         elif len(trailing) > 1:
-            raise ValueError(
+            raise ApduLengthError(
                 f"Short APDU has {len(trailing)} trailing bytes after Lc; "
                 "expected 0 (case 3S) or 1 (case 4S)."
             )
@@ -296,7 +306,7 @@ def parse_apdu(apdu: bytes) -> dict[str, Any]:
         }
 
     if len(body) < 3:
-        raise ValueError("Extended APDU body is truncated.")
+        raise ApduLengthError("Extended APDU body is truncated.")
 
     # ISO 7816-4 §5.1 Case 2E: ``CLA INS P1 P2 00 Le_hi Le_lo``. A
     # 3-byte body that starts with 0x00 is a command with no data and
@@ -320,11 +330,11 @@ def parse_apdu(apdu: bytes) -> dict[str, Any]:
 
     lc = int.from_bytes(body[1:3], "big", signed=False)
     if lc == 0:
-        raise ValueError(
+        raise ApduLengthError(
             "Extended Lc=0 is invalid outside the exact three-byte case 2E body."
         )
     if len(body) < 3 + lc:
-        raise ValueError("Extended APDU payload is truncated.")
+        raise ApduLengthError("Extended APDU payload is truncated.")
     command_data = body[3 : 3 + lc]
     trailing = body[3 + lc :]
     if len(trailing) == 2:
@@ -332,7 +342,7 @@ def parse_apdu(apdu: bytes) -> dict[str, Any]:
         if le == 0:
             le = 65536
     elif len(trailing) != 0:
-        raise ValueError(
+        raise ApduLengthError(
             f"Extended APDU has {len(trailing)} trailing bytes after "
             "data; expected 0 (case 3E) or 2 (case 4E)."
         )
