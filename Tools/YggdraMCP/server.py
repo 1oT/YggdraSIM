@@ -117,51 +117,9 @@ def script_files_allowed() -> bool:
     return _env_on(SCRIPT_FILES_ENV)
 
 
-# INS -> (risk class, name). ``destructive`` means irreversible on a real
-# card: a consumed retry counter never comes back, a terminated card never
-# wakes up. ``write`` mutates but is normally recoverable by writing again.
-_APDU_RISK: dict[int, tuple[str, str]] = {
-    0x20: ("destructive", "VERIFY (consumes a PIN retry)"),
-    0x24: ("destructive", "CHANGE REFERENCE DATA"),
-    0x26: ("destructive", "DISABLE VERIFICATION REQUIREMENT"),
-    0x28: ("destructive", "ENABLE VERIFICATION REQUIREMENT"),
-    0x2C: ("destructive", "RESET RETRY COUNTER (consumes a PUK retry)"),
-    0xD8: ("destructive", "PUT KEY"),
-    0xE4: ("destructive", "DELETE"),
-    0xF0: ("destructive", "SET STATUS (can lock or terminate the card)"),
-    0x04: ("destructive", "DEACTIVATE FILE"),
-    0xD6: ("write", "UPDATE BINARY"),
-    0xDC: ("write", "UPDATE RECORD"),
-    0xE0: ("write", "CREATE FILE"),
-    0xE2: ("write", "STORE DATA"),
-    0xE6: ("write", "INSTALL"),
-    0xE8: ("write", "LOAD"),
-    0x44: ("write", "ACTIVATE FILE"),
-    0xA4: ("read", "SELECT"),
-    0xB0: ("read", "READ BINARY"),
-    0xB2: ("read", "READ RECORD"),
-    0xC0: ("read", "GET RESPONSE"),
-    0xCA: ("read", "GET DATA"),
-    0xF2: ("read", "GET STATUS"),
-}
-
-
-def classify_apdu(payload: bytes) -> dict[str, Any]:
-    """Classify one command APDU as read, write, or destructive.
-
-    Unknown instructions are reported as ``write`` rather than ``read``: an
-    instruction this table has not seen is not evidence that it is safe.
-    """
-
-    if len(payload) < 2:
-        return {"risk": "unknown", "ins": "", "name": "APDU too short to classify"}
-    ins = payload[1]
-    risk, name = _APDU_RISK.get(ins, ("write", "unrecognised instruction"))
-    # STORE DATA carries ES10b profile operations, including memory reset and
-    # profile deletion, so its payload decides the real risk.
-    if ins == 0xE2 and b"\xBF\x34" in payload[:16]:
-        risk, name = "destructive", "STORE DATA (eUICC memory reset)"
-    return {"risk": risk, "ins": f"{ins:02X}", "name": name}
+# The risk table lives in yggdrasim_common.apdu_risk so the card-behaviour
+# prober and this server cannot disagree about what a command does.
+from yggdrasim_common.apdu_risk import classify_apdu  # noqa: E402
 
 
 def _status_word_meaning(sw1: int, sw2: int) -> str:
@@ -2601,12 +2559,256 @@ def card_session_close(session_id: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Simulated card, AKMA, and YggdraCore
+#
+# These mirror GUI action modules that had no MCP path. The simulator is
+# in-process with no hardware behind it, so reading its state is not
+# gated by CARD_ACCESS_ENV; changing it still needs write access.
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(annotations=READ_ONLY)
+def sim_card_status() -> str:
+    """Report the simulated eUICC identity and profile inventory.
+
+    Covers EID, ICCID, IMSI, the active ISD-P AID, and every profile with
+    its lifecycle state. Reads the in-process simulator, so no reader and
+    no YGGDRASIM_MCP_ALLOW_CARD is required.
+    """
+    try:
+        from SIMCARD.connection import get_shared_engine
+    except ImportError as error:
+        return json.dumps({"error": f"simulator unavailable: {error}"})
+    try:
+        state = get_shared_engine().state
+    except Exception as error:  # noqa: BLE001 - surface engine faults as data
+        return json.dumps({"error": f"simulator failed to start: {error}"})
+
+    profiles = [
+        {
+            "iccid": str(getattr(profile, "iccid", "") or ""),
+            "aid": str(getattr(profile, "aid", "") or ""),
+            "state": str(getattr(profile, "state", "") or ""),
+            "fallback_attribute": bool(getattr(profile, "fallback_attribute", False)),
+        }
+        for profile in getattr(state, "profiles", [])
+    ]
+    return json.dumps(
+        {
+            "eid": str(getattr(state, "eid", "") or ""),
+            "iccid": str(getattr(state, "iccid", "") or ""),
+            "imsi": str(getattr(state, "imsi", "") or ""),
+            "active_profile_aid": str(getattr(state, "active_profile_aid", "") or ""),
+            "apdu_count": int(getattr(state, "apdu_count", 0)),
+            "profile_count": len(profiles),
+            "profiles": profiles,
+            "eim_entries": [
+                str(getattr(entry, "eim_id", "") or "")
+                for entry in getattr(state, "eim_entries", [])
+            ],
+        },
+        indent=2,
+    )
+
+
+@mcp.tool(annotations=READ_ONLY)
+def sim_filesystem_select(path: str) -> str:
+    """SELECT a file on the simulated card and return the FCP response.
+
+    path: a hex file id or path, e.g. '3F00', '2FE2', or '3F007FFF6F07'.
+    Read-only: SELECT does not change stored data.
+    """
+    cleaned = str(path or "").strip().replace(" ", "").upper()
+    if len(cleaned) == 0 or len(cleaned) % 2 != 0:
+        return json.dumps({"error": "path must be non-empty even-length hex."})
+    try:
+        body = bytes.fromhex(cleaned)
+    except ValueError:
+        return json.dumps({"error": f"path {path!r} is not valid hex."})
+    try:
+        from SIMCARD.connection import get_shared_engine
+
+        engine = get_shared_engine()
+    except Exception as error:  # noqa: BLE001
+        return json.dumps({"error": f"simulator unavailable: {error}"})
+
+    apdu = bytes([0x00, 0xA4, 0x00, 0x04, len(body)]) + body
+    try:
+        data, sw1, sw2 = engine.transmit(apdu)
+    except Exception as error:  # noqa: BLE001
+        return json.dumps({"error": f"transmit failed: {error}"})
+    return json.dumps(
+        {
+            "apdu": apdu.hex().upper(),
+            "status_word": f"{sw1:02X}{sw2:02X}",
+            "ok": (sw1, sw2) in ((0x90, 0x00), (0x91, 0x00)),
+            "fcp_hex": bytes(data).hex().upper(),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool(annotations=READ_ONLY)
+def akma_derive_keys(
+    k_ausf_hex: str,
+    supi: str,
+    af_id: str = "",
+    routing_indicator: str = "",
+    mcc: str = "",
+    mnc: str = "",
+) -> str:
+    """Derive AKMA keys from KAUSF and SUPI per 3GPP TS 33.535.
+
+    Returns KAKMA and A-TID. Supplying af_id also derives the
+    application-function key KAF. Supplying routing_indicator, mcc, and
+    mnc together additionally formats the A-KID NAI, which needs the home
+    network identifier those three carry. Pure key derivation: nothing is
+    sent to a card or a network.
+    """
+    cleaned = str(k_ausf_hex or "").strip().replace(" ", "")
+    try:
+        k_ausf = bytes.fromhex(cleaned)
+    except ValueError:
+        return json.dumps({"error": "k_ausf_hex is not valid hex."})
+    if len(k_ausf) == 0:
+        return json.dumps({"error": "k_ausf_hex must be non-empty."})
+    supi_value = str(supi or "").strip()
+    if len(supi_value) == 0:
+        return json.dumps({"error": "supi must be non-empty."})
+
+    try:
+        from SIMCARD.akma import (
+            derive_a_tid,
+            derive_k_af,
+            derive_k_akma,
+            format_a_kid,
+        )
+    except ImportError as error:
+        return json.dumps({"error": f"AKMA helpers unavailable: {error}"})
+
+    try:
+        k_akma = derive_k_akma(k_ausf, supi_value)
+        a_tid = derive_a_tid(k_ausf, supi_value)
+        payload: dict[str, Any] = {
+            "supi": supi_value,
+            "kakma_hex": k_akma.hex().upper(),
+            "a_tid_hex": a_tid.hex().upper(),
+        }
+        # The A-KID NAI embeds the home network identifier, so it can only
+        # be formed when the caller supplies all three parts.
+        routing = str(routing_indicator or "").strip()
+        mcc_value = str(mcc or "").strip()
+        mnc_value = str(mnc or "").strip()
+        if len(routing) > 0 and len(mcc_value) > 0 and len(mnc_value) > 0:
+            payload["a_kid"] = format_a_kid(
+                a_tid,
+                routing_indicator=routing,
+                mcc=mcc_value,
+                mnc=mnc_value,
+            )
+        if len(str(af_id or "").strip()) > 0:
+            payload["af_id"] = str(af_id).strip()
+            payload["kaf_hex"] = derive_k_af(k_akma, str(af_id).strip()).hex().upper()
+    except (ValueError, TypeError) as error:
+        return json.dumps({"error": f"AKMA derivation rejected the input: {error}"})
+    return json.dumps(payload, indent=2)
+
+
+@mcp.tool(annotations=READ_ONLY)
+def yggdracore_status() -> str:
+    """Report YggdraCore stub state: mode, subscriptions, AAnF registrations.
+
+    Reads the in-process stubs. Returns mode 'off' when
+    YGGDRASIM_5GCORE_MODE is unset, which is the default.
+    """
+    try:
+        from Tools.YggdraCore.aanf_stub import get_default_aanf_stub
+        from Tools.YggdraCore.ausf_stub import get_default_ausf_stub, yggdra_core_mode
+        from Tools.YggdraCore.subscription_store import get_default_subscription_store
+    except ImportError as error:
+        return json.dumps({"error": f"YggdraCore unavailable: {error}"})
+
+    try:
+        payload = {
+            "mode": yggdra_core_mode(),
+            "subscriptions": len(get_default_subscription_store().list()),
+            "aanf_entries": len(get_default_aanf_stub().snapshot()),
+            "in_flight_auth_contexts": get_default_ausf_stub().in_flight_context_count(),
+        }
+    except Exception as error:  # noqa: BLE001
+        return json.dumps({"error": f"YggdraCore stub failed: {error}"})
+    return json.dumps(payload, indent=2)
+
+
+@mcp.tool(annotations=TOUCHES_CARD)
+def sim_execute_psmo(operation: str, iccid: str = "", aid: str = "", rollback: bool = False) -> str:
+    """Build a typed SGP.32 PSMO and execute it against the simulated card.
+
+    operation: enable, disable, delete, list_profile_info, get_rat,
+    configure_immediate_enable, set_fallback_attribute,
+    unset_fallback_attribute, set_default_dp_address.
+
+    Changes simulator state, so it requires YGGDRASIM_MCP_ACCESS=write.
+    Targets the in-process simulator only; no physical card is reachable
+    through this tool.
+    """
+    if not write_allowed():
+        return json.dumps({
+            "error": (
+                "Refused: a PSMO changes profile state, and this server is "
+                f"read-only. Set {ACCESS_ENV}={ACCESS_WRITE}."
+            ),
+            "access_mode": access_mode(),
+        })
+
+    try:
+        from SCP11.eim_local.psmo_builders import PsmoBuildError, build_psmo
+    except ImportError as error:
+        return json.dumps({"error": f"PSMO builders unavailable: {error}"})
+
+    spec: dict[str, Any] = {"operation": str(operation or "").strip().lower()}
+    if len(str(iccid or "").strip()) > 0:
+        spec["iccid"] = str(iccid).strip()
+    if len(str(aid or "").strip()) > 0:
+        spec["aid"] = str(aid).strip()
+    if bool(rollback) is True:
+        spec["rollback"] = True
+
+    try:
+        command = build_psmo(spec)
+    except PsmoBuildError as error:
+        return json.dumps({"error": str(error)})
+
+    try:
+        from SIMCARD.connection import get_shared_engine
+
+        handler = get_shared_engine().sgp
+        result = handler._execute_psmo(command)
+    except Exception as error:  # noqa: BLE001
+        return json.dumps({"error": f"simulator execution failed: {error}"})
+
+    return json.dumps(
+        {
+            "operation": spec["operation"],
+            "command_hex": command.hex().upper(),
+            "result_hex": bytes(result).hex().upper(),
+        },
+        indent=2,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 
 
 def run_cli() -> int:
-    """Console-script entry point: serve MCP over stdio."""
+    """Console-script entry point: serve MCP over stdio.
+
+    The simulator, AKMA, and YggdraCore tools above close the gap with the
+    GUI action modules, which could reach those surfaces when MCP could
+    not.
+    """
 
     if not card_access_allowed():
         _LOGGER.info(

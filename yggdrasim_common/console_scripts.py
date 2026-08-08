@@ -157,6 +157,22 @@ def session_diff() -> int:
     return _invoke("yggdrasim_common.session_diff", "run_cli")
 
 
+def card_clone() -> int:
+    return _invoke("Tools.CardClone.main", "run_cli")
+
+
+def yggdracore() -> int:
+    try:
+        return _invoke("Tools.YggdraCore.http_app", "main")
+    except ImportError as exc:
+        print(
+            "The YggdraCore stub AUSF needs FastAPI and uvicorn: "
+            f"pip install 'yggdrasim[test]' ({exc})",
+            file=sys.stderr,
+        )
+        return 3
+
+
 def mcp_server() -> int:
     try:
         return _invoke("Tools.YggdraMCP.server", "run_cli")

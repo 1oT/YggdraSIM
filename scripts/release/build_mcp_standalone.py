@@ -47,6 +47,8 @@ VENDORED = {
     "SCP03/logic/sgp32_decode.py": "_vendor/sgp32_decode.py",
     "SCP03/logic/euicc_info2.py": "_vendor/euicc_info2.py",
     "yggdrasim_common/session_diff.py": "_vendor/session_diff.py",
+    # The risk classifier the card gates read. Standard library only.
+    "yggdrasim_common/apdu_risk.py": "_vendor/apdu_risk.py",
     # The card transport chain. Each of these is standard-library only
     # apart from the others, which is what makes driving a card possible
     # without vendoring the rest of the runtime.
@@ -62,6 +64,10 @@ DATA_FILES = {"SCP03/seeds/aid.txt": "data/aid.txt"}
 # Imports the generated server resolves locally. Anything absent from this
 # map stays pointing at the full install and degrades with a clear message.
 SERVER_REWRITES = (
+    (
+        "from yggdrasim_common.apdu_risk import classify_apdu  # noqa: E402",
+        f"from {PACKAGE}._vendor.apdu_risk import classify_apdu",
+    ),
     (
         "from Tools.Asn1TlvDecode.main import DecodeError, decode_bytes",
         f"from {PACKAGE}._vendor.asn1tlv import DecodeError, decode_bytes",

@@ -221,6 +221,8 @@ yggdrasim-eum-diag = "yggdrasim_common.console_scripts:eum_diag"
 yggdrasim-asn1 = "yggdrasim_common.console_scripts:asn1_tlv_decode"
 yggdrasim-mcp = "yggdrasim_common.console_scripts:mcp_server"
 yggdrasim-session-diff = "yggdrasim_common.console_scripts:session_diff"
+yggdrasim-yggdracore = "yggdrasim_common.console_scripts:yggdracore"
+yggdrasim-card-clone = "yggdrasim_common.console_scripts:card_clone"
 
 [project.urls]
 Homepage = "https://github.com/1oT/YggdraSIM"

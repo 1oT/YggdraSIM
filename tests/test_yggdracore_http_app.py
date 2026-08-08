@@ -248,6 +248,92 @@ class LauncherSafetyTests(unittest.TestCase):
             del os.environ["YGGDRASIM_5GCORE_MODE"]
         self.assertEqual(rc, 2)
 
+    def test_main_refuses_unauthenticated_nonloopback_listener(self) -> None:
+        os.environ["YGGDRASIM_5GCORE_MODE"] = "stub"
+        try:
+            rc = main(
+                ["--host", "192.0.2.1", "--port", "0", "--allow-nonloopback", "--no-token"]
+            )
+        finally:
+            del os.environ["YGGDRASIM_5GCORE_MODE"]
+        # Reachable from the network AND no credential is the one
+        # combination the launcher must not serve.
+        self.assertEqual(rc, 2)
+
+
+@unittest.skipUnless(_HAS_FASTAPI, "FastAPI is required for endpoint tests")
+class BearerTokenTests(unittest.TestCase):
+    """Bearer auth reuses the Card Bridge token helpers."""
+
+    def _client(self, token: str):
+        from fastapi.testclient import TestClient
+
+        from Tools.YggdraCore.http_app import build_app
+
+        return TestClient(build_app(auth_token=token))
+
+    def test_no_token_leaves_every_route_open(self) -> None:
+        client = self._client("")
+        self.assertEqual(client.get("/yggdracore/diagnostics").status_code, 200)
+
+    def test_healthz_stays_open_so_probes_need_no_credential(self) -> None:
+        client = self._client("s3cret-token")
+        self.assertEqual(client.get("/yggdracore/healthz").status_code, 200)
+
+    def test_missing_header_is_401(self) -> None:
+        client = self._client("s3cret-token")
+        response = client.get("/yggdracore/diagnostics")
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("WWW-Authenticate", response.headers)
+
+    def test_wrong_token_is_403(self) -> None:
+        client = self._client("s3cret-token")
+        response = client.get(
+            "/yggdracore/diagnostics", headers={"Authorization": "Bearer wrong"}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_correct_token_is_accepted(self) -> None:
+        client = self._client("s3cret-token")
+        response = client.get(
+            "/yggdracore/diagnostics", headers={"Authorization": "Bearer s3cret-token"}
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_authentication_routes_are_guarded_too(self) -> None:
+        client = self._client("s3cret-token")
+        self.assertEqual(
+            client.post("/nausf-auth/v1/ue-authentications", json={}).status_code, 401
+        )
+        self.assertEqual(
+            client.put(
+                "/nausf-auth/v1/ue-authentications/abc/5g-aka-confirmation", json={}
+            ).status_code,
+            401,
+        )
+
+
+class TokenResolutionTests(unittest.TestCase):
+    def test_no_token_flag_yields_an_empty_token(self) -> None:
+        import argparse
+
+        from Tools.YggdraCore.http_app import resolve_auth_token
+
+        args = argparse.Namespace(no_token=True, token_file="", port=0)
+        self.assertEqual(resolve_auth_token(args), "")
+
+    def test_token_file_is_read_when_given(self) -> None:
+        import argparse
+        import tempfile
+        from pathlib import Path
+
+        from Tools.YggdraCore.http_app import resolve_auth_token
+
+        path = Path(tempfile.mkdtemp()) / "token"
+        path.write_text("file-sourced-token\n", encoding="utf-8")
+        args = argparse.Namespace(no_token=False, token_file=str(path), port=0)
+        self.assertEqual(resolve_auth_token(args), "file-sourced-token")
+
 
 if __name__ == "__main__":
     unittest.main()

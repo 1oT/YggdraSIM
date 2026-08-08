@@ -59,11 +59,18 @@ def build_app(
     *,
     ausf_stub: Optional[AusfStub] = None,
     subscription_store: Optional[SubscriptionStore] = None,
+    auth_token: str = "",
 ) -> Any:
     """Construct the FastAPI app. ``fastapi`` is imported lazily so
     importing this module never pulls FastAPI on systems that only
-    use the library API."""
-    from fastapi import Body, FastAPI, HTTPException, Path
+    use the library API.
+
+    ``auth_token`` turns on bearer-token authentication for every route
+    except ``/yggdracore/healthz``, which stays open so a liveness probe
+    needs no credential. An empty token leaves the app open, which is
+    only appropriate behind a loopback bind.
+    """
+    from fastapi import Body, Depends, FastAPI, Header, HTTPException, Path
 
     stub = ausf_stub or get_default_ausf_stub()
     subscriptions = subscription_store or get_default_subscription_store()
@@ -80,11 +87,36 @@ def build_app(
         version="0.1.0",
     )
 
+    expected_token = str(auth_token or "").strip()
+
+    def _require_token(authorization: str = Header(default="")) -> None:
+        """Bearer check shared with the Card Bridge relay.
+
+        Reuses ``card_bridge_auth`` so both HTTP surfaces parse the header
+        and compare the secret the same way, including the constant-time
+        comparison.
+        """
+        if len(expected_token) == 0:
+            return
+        from yggdrasim_common import card_bridge_auth
+
+        presented = card_bridge_auth.parse_bearer_header(authorization)
+        if len(presented) == 0:
+            raise HTTPException(
+                status_code=401,
+                detail="Authorization: Bearer <token> is required.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if not card_bridge_auth.compare(presented, expected_token):
+            raise HTTPException(status_code=403, detail="Bearer token rejected.")
+
+    guarded = [Depends(_require_token)]
+
     @app.get("/yggdracore/healthz")
     def _healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/yggdracore/diagnostics")
+    @app.get("/yggdracore/diagnostics", dependencies=guarded)
     def _diagnostics() -> dict[str, Any]:
         return {
             "mode": yggdra_core_mode(),
@@ -93,7 +125,7 @@ def build_app(
             "in_flight_auth_contexts": stub.in_flight_context_count(),
         }
 
-    @app.post("/nausf-auth/v1/ue-authentications", status_code=201)
+    @app.post("/nausf-auth/v1/ue-authentications", status_code=201, dependencies=guarded)
     def _start_auth(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
         supi = str(payload.get("supiOrSuci") or payload.get("supi") or "").strip()
         sn_name = str(payload.get("servingNetworkName") or "").strip()
@@ -121,7 +153,10 @@ def build_app(
             },
         }
 
-    @app.put("/nausf-auth/v1/ue-authentications/{ctx_id}/5g-aka-confirmation")
+    @app.put(
+        "/nausf-auth/v1/ue-authentications/{ctx_id}/5g-aka-confirmation",
+        dependencies=guarded,
+    )
     def _confirm(
         ctx_id: str = Path(..., min_length=1),
         payload: dict[str, Any] = Body(default_factory=dict),
@@ -194,7 +229,54 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "Allow non-loopback host bindings (sealed lab use only)."
         ),
     )
+    parser.add_argument(
+        "--token-file",
+        default=os.environ.get("YGGDRASIM_5GCORE_TOKEN_FILE", ""),
+        help=(
+            "Read the bearer token from this file. Without it a token is "
+            "generated and written under the default token directory."
+        ),
+    )
+    parser.add_argument(
+        "--no-token",
+        action="store_true",
+        default=os.environ.get("YGGDRASIM_5GCORE_NO_TOKEN", "0") == "1",
+        help=(
+            "Disable bearer-token authentication. Refused for a "
+            "non-loopback bind."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def resolve_auth_token(args: argparse.Namespace) -> str:
+    """Return the bearer token the launcher should enforce.
+
+    Mirrors the Card Bridge flow: an explicit file wins, otherwise a fresh
+    token is generated and written to the default token directory so the
+    operator can read it back for the client side.
+    """
+    from pathlib import Path as _Path
+
+    from yggdrasim_common import card_bridge_auth
+
+    if bool(getattr(args, "no_token", False)) is True:
+        return ""
+    token_file = str(getattr(args, "token_file", "") or "").strip()
+    if len(token_file) > 0:
+        return card_bridge_auth.read_token_file(_Path(token_file))
+    environment_token = card_bridge_auth.resolve_token_from_environment()
+    if len(environment_token) > 0:
+        return environment_token
+    token = card_bridge_auth.generate_token()
+    destination = card_bridge_auth.default_token_file_for_port(int(args.port))
+    card_bridge_auth.write_token_file(destination, token)
+    _LOG.info(
+        "YggdraCore bearer token written to %s (fingerprint %s)",
+        destination,
+        card_bridge_auth.fingerprint(token),
+    )
+    return token
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -219,14 +301,35 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         return 2
 
+    if not _is_loopback(args.host) and bool(args.no_token) is True:
+        print(
+            (
+                "Refusing to serve an unauthenticated listener on non-loopback "
+                f"host {args.host!r}. Drop --no-token."
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        auth_token = resolve_auth_token(args)
+    except (OSError, ValueError) as error:
+        print(f"cannot resolve the bearer token: {error}", file=sys.stderr)
+        return 3
+
     try:
         import uvicorn
     except ImportError as error:  # pragma: no cover -- exercised only without uvicorn
         print(f"uvicorn is required for the launcher: {error}", file=sys.stderr)
         return 3
 
-    app = build_app()
-    _LOG.info("YggdraCore stub AUSF listening on %s:%s (mode=stub)", args.host, args.port)
+    app = build_app(auth_token=auth_token)
+    _LOG.info(
+        "YggdraCore stub AUSF listening on %s:%s (mode=stub, auth=%s)",
+        args.host,
+        args.port,
+        "bearer" if len(auth_token) > 0 else "disabled",
+    )
     uvicorn.run(app, host=args.host, port=int(args.port), log_level="info")
     return 0
 

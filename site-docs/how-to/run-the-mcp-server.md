@@ -21,7 +21,7 @@ ASN.1 structure, resolve a status word or spec section, lint a SAIP package
 or an eIM package, diff two session recordings, drive a card, and run batch
 commands in the operator shells.
 
-26 tools, 4 reference resources, and 3 canned workflows. Eight operator
+31 tools, 4 reference resources, and 3 canned workflows. Eight operator
 shells are reachable through `shell_run`, covering 360 classified verbs --
 every entry point in the project that has a batch mode.
 
@@ -138,7 +138,7 @@ inline as a batch whose transcript is now sensitive.
 Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`,
 `idempotentHint`, `openWorldHint`), so a client can tell the difference
 between `status_word_lookup` and `pcsc_transmit` without reading this page
-and can prompt accordingly. 19 of the 26 tools are marked read-only; the
+and can prompt accordingly. 23 of the 31 tools are marked read-only; the
 seven that are not are `pcsc_transmit`, `card_bridge_transmit`,
 `shell_run`, `card_backend_select`, and the three `card_session_*` tools.
 

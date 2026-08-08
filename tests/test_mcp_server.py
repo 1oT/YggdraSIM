@@ -1736,3 +1736,113 @@ def test_relay_and_live_agree_on_the_verbs_they_share(server) -> None:
         if len(seen) == 2 and len(set(seen.values())) > 1
     }
     assert not disagreements, disagreements
+
+
+# ---------------------------------------------------------------------------
+# Simulator, AKMA, and YggdraCore tools
+#
+# These close the gap with the GUI action modules, which could reach the
+# simulator, AKMA, and the 5G-core stubs when MCP could not.
+# ---------------------------------------------------------------------------
+
+
+def test_sim_card_status_reports_identity_without_card_access(server) -> None:
+    # The simulator is in-process, so reading it must not need
+    # YGGDRASIM_MCP_ALLOW_CARD.
+    assert server.card_access_allowed() is False
+    payload = json.loads(_call(server.sim_card_status()))
+    assert "error" not in payload
+    assert len(payload["eid"]) > 0
+    assert isinstance(payload["profiles"], list)
+    assert payload["profile_count"] == len(payload["profiles"])
+
+
+def test_sim_filesystem_select_returns_an_fcp(server) -> None:
+    payload = json.loads(_call(server.sim_filesystem_select("3F00")))
+    assert payload["status_word"] == "9000"
+    assert payload["ok"] is True
+    assert len(payload["fcp_hex"]) > 0
+
+
+@pytest.mark.parametrize("bad", ["", "ODD", "ZZZZ"])
+def test_sim_filesystem_select_rejects_bad_paths(server, bad) -> None:
+    assert "error" in json.loads(_call(server.sim_filesystem_select(bad)))
+
+
+def test_akma_derive_keys_matches_the_simcard_helpers(server) -> None:
+    from SIMCARD.akma import derive_a_tid, derive_k_akma
+
+    k_ausf = "00" * 32
+    supi = "imsi-001010000000001"
+    payload = json.loads(_call(server.akma_derive_keys(k_ausf, supi)))
+    assert payload["kakma_hex"] == derive_k_akma(bytes.fromhex(k_ausf), supi).hex().upper()
+    assert payload["a_tid_hex"] == derive_a_tid(bytes.fromhex(k_ausf), supi).hex().upper()
+
+
+def test_akma_derive_keys_adds_kaf_when_af_id_given(server) -> None:
+    payload = json.loads(
+        _call(server.akma_derive_keys("00" * 32, "imsi-001010000000001", "af.example.test"))
+    )
+    assert len(payload["kaf_hex"]) > 0
+    assert payload["af_id"] == "af.example.test"
+
+
+@pytest.mark.parametrize("k_ausf,supi", [("ZZ", "imsi-1"), ("", "imsi-1"), ("00" * 32, "")])
+def test_akma_derive_keys_rejects_bad_input(server, k_ausf, supi) -> None:
+    assert "error" in json.loads(_call(server.akma_derive_keys(k_ausf, supi)))
+
+
+def test_yggdracore_status_reports_off_by_default(server, monkeypatch) -> None:
+    monkeypatch.delenv("YGGDRASIM_5GCORE_MODE", raising=False)
+    payload = json.loads(_call(server.yggdracore_status()))
+    assert "error" not in payload
+    assert "mode" in payload
+    assert isinstance(payload["subscriptions"], int)
+
+
+def test_sim_execute_psmo_is_refused_when_read_only(server) -> None:
+    payload = json.loads(_call(server.sim_execute_psmo("list_profile_info")))
+    assert "read-only" in payload["error"]
+    assert payload["access_mode"] == "read"
+
+
+def test_sim_execute_psmo_runs_with_write_access(server, monkeypatch) -> None:
+    monkeypatch.setenv("YGGDRASIM_MCP_ACCESS", "write")
+    payload = json.loads(_call(server.sim_execute_psmo("list_profile_info")))
+    assert payload["command_hex"] == "BF2D00"
+    assert len(payload["result_hex"]) > 0
+
+
+def test_sim_execute_psmo_reports_a_build_error(server, monkeypatch) -> None:
+    monkeypatch.setenv("YGGDRASIM_MCP_ACCESS", "write")
+    # enable needs a profile reference.
+    payload = json.loads(_call(server.sim_execute_psmo("enable")))
+    assert "iccid" in payload["error"]
+
+
+def test_sim_execute_psmo_rejects_an_unknown_operation(server, monkeypatch) -> None:
+    monkeypatch.setenv("YGGDRASIM_MCP_ACCESS", "write")
+    payload = json.loads(_call(server.sim_execute_psmo("not_a_psmo")))
+    assert "Unknown PSMO operation" in payload["error"]
+
+
+def test_akma_derive_keys_formats_a_kid_with_the_home_network_identifier(server) -> None:
+    payload = json.loads(
+        _call(
+            server.akma_derive_keys(
+                "00" * 32,
+                "imsi-001010000000001",
+                "",
+                "0",
+                "001",
+                "01",
+            )
+        )
+    )
+    assert "a_kid" in payload
+    assert "@" in payload["a_kid"]
+
+
+def test_akma_derive_keys_omits_a_kid_without_the_network_parts(server) -> None:
+    payload = json.loads(_call(server.akma_derive_keys("00" * 32, "imsi-001010000000001")))
+    assert "a_kid" not in payload
