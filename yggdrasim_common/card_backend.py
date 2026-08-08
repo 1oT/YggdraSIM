@@ -28,6 +28,7 @@ CARD_RELAY_URL_ENV = "YGGDRASIM_CARD_RELAY_URL"
 CARD_RELAY_TOKEN_ENV = "YGGDRASIM_CARD_RELAY_TOKEN"
 CARD_RELAY_TOKEN_FILE_ENV = "YGGDRASIM_CARD_RELAY_TOKEN_FILE"
 SIM_QUIRKS_ENV = "YGGDRASIM_SIM_QUIRKS"
+SIM_BEHAVIOUR_PROFILE_ENV = "YGGDRASIM_SIM_BEHAVIOUR_PROFILE"
 SIM_ISDR_CONFIG_ENV = "YGGDRASIM_SIM_ISDR_CONFIG"
 SIM_EIM_IDENTITY_ENV = "YGGDRASIM_SIM_EIM_IDENTITY"
 SIM_EUICC_STORE_ENV = "YGGDRASIM_SIM_EUICC_STORE"
@@ -46,6 +47,7 @@ SIM_QUIRKS_PATH_DISABLED_ALIASES = ("none", "off", "disabled", "disable")
 CARD_BACKEND_SETTINGS_FILENAME = "card_backend.json"
 _SETTINGS_KEY_CARD_BACKEND = "card_backend"
 _SETTINGS_KEY_SIM_QUIRKS_PATH = "sim_quirks_path"
+_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH = "sim_behaviour_profile_path"
 _SETTINGS_KEY_SIM_ISDR_CONFIG_PATH = "sim_isdr_config_path"
 _SETTINGS_KEY_SIM_EIM_IDENTITY_PATH = "sim_eim_identity_path"
 _SETTINGS_KEY_SIM_EUICC_STORE_ROOT = "sim_euicc_store_root"
@@ -440,6 +442,83 @@ def get_sim_quirks_path() -> str:
     if os.path.isfile(default_path):
         return default_path
     return ""
+
+
+def get_default_sim_behaviour_profile_path() -> str:
+    """Default location for a charted card-behaviour profile."""
+    return os.path.join(
+        ensure_workspace_dir("SIMCARD", "behaviour_profiles"),
+        "card_behaviour_profile.json",
+    )
+
+
+def get_sim_behaviour_profile_path() -> str:
+    """Return the configured card-behaviour profile path, or "".
+
+    Mirrors :func:`get_sim_quirks_path`: the environment wins over the
+    persisted setting, and the shipped default is only used when the file
+    actually exists, so a stock checkout boots on the built-in personality.
+    """
+    configured = str(os.environ.get(SIM_BEHAVIOUR_PROFILE_ENV, "") or "").strip()
+    if _is_sim_quirks_disabled_sentinel(configured):
+        return ""
+    if len(configured) > 0:
+        return os.path.abspath(os.path.expanduser(configured))
+    persisted = _get_persisted_setting(_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH)
+    if _is_sim_quirks_disabled_sentinel(persisted):
+        return ""
+    if len(persisted) > 0:
+        return os.path.abspath(os.path.expanduser(persisted))
+    default_path = get_default_sim_behaviour_profile_path()
+    if os.path.isfile(default_path):
+        return default_path
+    return ""
+
+
+def set_sim_behaviour_profile_path(path: str, *, persist: bool = True) -> str:
+    """Point the simulator at a behaviour profile, or clear the selection.
+
+    Mirrors :func:`set_sim_quirks_path`. An empty path clears the setting
+    so the resolver falls back to its default probe; a disable sentinel
+    (``none`` / ``off`` / ``disabled``) records the canonical sentinel so
+    the resolver returns "" and does not fall through to a profile left
+    at the default location.
+    """
+    normalized = str(path or "").strip()
+    if len(normalized) == 0:
+        os.environ.pop(SIM_BEHAVIOUR_PROFILE_ENV, None)
+        if persist:
+            _try_persist_setting(_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH, "")
+        return ""
+    if _is_sim_quirks_disabled_sentinel(normalized):
+        os.environ[SIM_BEHAVIOUR_PROFILE_ENV] = SIM_QUIRKS_PATH_NONE
+        if persist:
+            _try_persist_setting(
+                _SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH, SIM_QUIRKS_PATH_NONE
+            )
+        return SIM_QUIRKS_PATH_NONE
+    absolute_path = os.path.abspath(os.path.expanduser(normalized))
+    os.environ[SIM_BEHAVIOUR_PROFILE_ENV] = absolute_path
+    if persist:
+        _try_persist_setting(_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH, absolute_path)
+    return absolute_path
+
+
+def get_sim_behaviour_profile_source() -> str:
+    """Return the effective source label for the behaviour-profile path."""
+    raw_configured = str(os.environ.get(SIM_BEHAVIOUR_PROFILE_ENV, "") or "").strip()
+    raw_persisted = _get_persisted_setting(_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH)
+    if _is_sim_quirks_disabled_sentinel(raw_configured):
+        return SETTING_SOURCE_DISABLED
+    if _is_sim_quirks_disabled_sentinel(raw_persisted):
+        return SETTING_SOURCE_DISABLED
+    if len(_normalize_optional_path(raw_configured)) > 0:
+        return SETTING_SOURCE_SESSION_OVERRIDE
+    if len(_normalize_optional_path(raw_persisted)) > 0:
+        return SETTING_SOURCE_SAVED_OVERRIDE
+    if os.path.isfile(get_default_sim_behaviour_profile_path()):
+        return SETTING_SOURCE_WORKSPACE_DEFAULT
+    return SETTING_SOURCE_DISABLED
 
 
 def get_default_sim_profile_store_path() -> str:

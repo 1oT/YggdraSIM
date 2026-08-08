@@ -110,6 +110,11 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | `YGGDRASIM_CARD_BACKEND` | preselect `reader` / `sim` when no `--card-backend` is passed |
 | `YGGDRASIM_FLAVOR` | force `clean` / `full` / `source` when probing from a shared tree |
 | `YGGDRASIM_5GCORE_MODE` *(post-v1 staging)* | switch YggdraCore between in-process stub and BYO-Open5GS bridge |
+| `YGGDRASIM_SIM_BEHAVIOUR_PROFILE` | card-behaviour profile the simulator loads; `none` disables it |
+| `YGGDRASIM_5GCORE_HOST` / `YGGDRASIM_5GCORE_PORT` | bind address / port for the YggdraCore stub AUSF |
+| `YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK` | permit a non-loopback bind for the stub AUSF (sealed lab only) |
+| `YGGDRASIM_5GCORE_TOKEN_FILE` | read the stub-AUSF bearer token from this file |
+| `YGGDRASIM_5GCORE_NO_TOKEN` | disable stub-AUSF bearer auth; refused for a non-loopback bind |
 | `YGGDRASIM_EUM_SESSION_KEYS` | session-key staging for the EUM diagnostics dissector |
 | `GNUPGHOME` | pick the gpg home directory when inventory crypto is enabled |
 
@@ -130,6 +135,8 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | `yggdrasim-card-bridge` | `python -m Tools.CardBridge` | Loopback PC/SC-to-HTTP APDU bridge for SSH-forwarded remote-card workflows. |
 | `yggdrasim-eum-diag` | _(manual module)_ |  |
 | `yggdrasim-hil-bridge` | `python -m Tools.HilBridge.main` | SIMtrace2-backed HIL bridge (direct). |
+| `yggdrasim-yggdracore` | `python -m Tools.YggdraCore.http_app` | YggdraCore stub AUSF over loopback HTTP; bearer-authenticated. |
+| `yggdrasim-card-clone` | `python -m Tools.CardClone` | Chart a card's behaviour into a profile the simulator replays; read-only probe. |
 | `yggdrasim-hil-supervisor` | `python -m Tools.HilBridge.supervisor` | HIL supervisor that manages the bridge and remsim-client lifecycle. |
 | `yggdrasim-profile-autoload` | _(manual module)_ |  |
 | `yggdrasim-profile-package` | `python -m Tools.ProfilePackage` | SAIP / UPP shell, saip-tool bridge, lint engine, JSON↔DER transcode. |

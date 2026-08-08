@@ -80,6 +80,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `Tools/SuciTool/` | SUCI helper tooling | helper shell |
 | `Tools/Asn1TlvDecode/` | BER/DER ASN.1, BER-TLV, and APDU decode helper | `yggdrasim-asn1` or `python main/main.py --asn1` |
 | `Tools/ApduFuzz/` | Safety-gated eUICC APDU mutation fuzzer (`--i-mean-it` + ICCID/IMSI allow-list) | `yggdrasim-apdu-fuzzer` |
+| `Tools/CardClone/` | Read-only behaviour cloning: chart a real card's status-word dialect into a behaviour profile the simulator replays | `yggdrasim-card-clone` |
 | `Tools/EumDiag/` | EUM / SM-DP+ diagnostics: session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
 | `Tools/YggdraMCP/` | Model Context Protocol server: decode, lint, identifier, and card-transport tools plus batch access to the operator shells, behind read-only-by-default gates | `yggdrasim-mcp` (opt-in `[mcp]` extra) |
 | `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
@@ -105,6 +106,12 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
   `DIFF` / `DIFF-TUI` inside the profile-package shell.
 - Simulator-to-TUI auto-open pipeline via `yggdrasim-profile-autoload`
   and the `WATCH-SIMCARD` shell command.
+- Two-part simulated-card setup: a **behaviour profile** charted from a
+  real card with `yggdrasim-card-clone` (how the card answers) paired with
+  a **SAIP profile** (what data it holds). The probe is read-only and
+  refuses anything the risk classifier does not call read. Profiles are
+  JSON, switchable at runtime with `--activate` / `--deactivate`, and
+  `--deactivate-all` returns the simulator to its built-in personality.
 - Opt-in, safety-gated eUICC APDU mutation fuzzer via
   `yggdrasim-apdu-fuzzer` (`--i-mean-it` + ICCID/IMSI allow-list
   required).
@@ -115,7 +122,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
   remote-lab) with reader selection, action forms, Card Bridge controls,
   and a live APDU dock fed by a process-wide recorder.
 - Model Context Protocol server (`Tools/YggdraMCP`, `[mcp]` extra) giving an
-  AI agent 26 tools: spec/status-word/AID lookup, ASN.1 and APDU decode, SAIP
+  AI agent 31 tools: spec/status-word/AID lookup, ASN.1 and APDU decode, SAIP
   and metadata linting, session diffing, card transport control, and batch
   access to all eight operator shells. Read-only by default; changing state, reaching
   a card, and running unverified scripts are three separate opt-ins. Also
@@ -174,12 +181,17 @@ yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
 yggdrasim-hil-bridge
 yggdrasim-hil-supervisor
+yggdrasim-card-bridge
+yggdrasim-lab-agent
 yggdrasim-profile-package
 yggdrasim-profile-autoload
 yggdrasim-apdu-fuzzer
 yggdrasim-eum-diag
 yggdrasim-suci-tool
 yggdrasim-asn1
+yggdrasim-session-diff
+yggdrasim-yggdracore
+yggdrasim-card-clone
 ```
 
 ### Docker and bundle packaging
@@ -266,6 +278,9 @@ python -m SCP11.local_access
 python -m SCP11.eim_local
 python -m Tools.HilBridge.main
 python -m Tools.HilBridge.supervisor
+python -m Tools.CardBridge
+python -m Tools.YggdraCore.http_app
+python -m Tools.CardClone
 python -m Tools.ProfilePackage
 python -m Tools.SuciTool
 python -m Tools.Asn1TlvDecode
@@ -289,12 +304,17 @@ yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
 yggdrasim-hil-bridge
 yggdrasim-hil-supervisor
+yggdrasim-card-bridge
+yggdrasim-lab-agent
 yggdrasim-profile-package
 yggdrasim-profile-autoload
 yggdrasim-apdu-fuzzer
 yggdrasim-eum-diag
 yggdrasim-suci-tool
 yggdrasim-asn1
+yggdrasim-session-diff
+yggdrasim-yggdracore
+yggdrasim-card-clone
 ```
 
 For non-interactive automation, piping, and ready-to-run profile lifecycle
