@@ -370,18 +370,36 @@ def _encode_iccid(value: Any) -> bytes:
 
 
 def _encode_mcc_mnc(mcc: Any, mnc: Any) -> bytes:
+    """Encode MCC + MNC into the SGP.22 ``OperatorId.mccMnc`` octet string.
+
+    ``mccMnc`` follows 3GPP TS 24.008 10.5.1.3 (BCD, nibble-swapped, with a
+    0xF filler for a 2-digit MNC in the high nibble of the second octet):
+
+        octet 1: MCC digit 2 | MCC digit 1
+        octet 2: MNC digit 3 (0xF if 2-digit MNC) | MCC digit 3
+        octet 3: MNC digit 2 | MNC digit 1
+
+    A previous version concatenated the digits and F-padded the tail
+    (001/01 -> 00101F), which is not the TS 24.008 layout: a spec-compliant
+    eUICC or LPA would read the wrong PLMN back out.
+    """
     mcc_text = _normalize_compact_string(mcc)
     mnc_text = _normalize_compact_string(mnc)
     if len(mcc_text) == 0 and len(mnc_text) == 0:
         return b""
     if len(mcc_text) == 0 or len(mnc_text) == 0:
         raise ValueError("Metadata operator.mcc and operator.mnc must either both be set or both be empty.")
-    combined = mcc_text + mnc_text
-    if _is_hex_string(combined) is False:
-        raise ValueError("Metadata operator.mcc/operator.mnc must be hexadecimal-compatible digits.")
-    if len(combined) % 2 != 0:
-        combined = combined + "F"
-    return bytes.fromhex(combined)
+    if len(mcc_text) != 3 or mcc_text.isdigit() is False:
+        raise ValueError("Metadata operator.mcc must be exactly 3 decimal digits.")
+    if len(mnc_text) not in (2, 3) or mnc_text.isdigit() is False:
+        raise ValueError("Metadata operator.mnc must be 2 or 3 decimal digits.")
+    mcc_digits = [int(character) for character in mcc_text]
+    mnc_digits = [int(character) for character in mnc_text]
+    mnc_digit_3 = mnc_digits[2] if len(mnc_digits) == 3 else 0xF
+    octet_1 = (mcc_digits[1] << 4) | mcc_digits[0]
+    octet_2 = (mnc_digit_3 << 4) | mcc_digits[2]
+    octet_3 = (mnc_digits[1] << 4) | mnc_digits[0]
+    return bytes((octet_1, octet_2, octet_3))
 
 
 def _encode_octet_string(value: Any) -> bytes:

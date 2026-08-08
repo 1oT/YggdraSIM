@@ -1558,7 +1558,9 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertNotIn("iconType", decoded)
         self.assertNotIn("icon", decoded)
         self.assertEqual(decoded["profileClass"], 2)
-        self.assertEqual(decoded["profileOwner"]["mccMnc"], bytes.fromhex("99999F"))
+        # MCC=999 MNC=99 in 3GPP TS 24.008 10.5.1.3 BCD: the 0xF filler for
+        # the 2-digit MNC lands in the high nibble of octet 2, not at the tail.
+        self.assertEqual(decoded["profileOwner"]["mccMnc"], bytes.fromhex("99F999"))
         self.assertEqual(decoded["profileOwner"]["gid1"], bytes.fromhex("FFFFFFFFFFFFFFFF"))
         self.assertEqual(decoded["profileOwner"]["gid2"], bytes.fromhex("FFFFFFFFFFFFFFFF"))
         self.assertEqual(decoded["profilePolicyRules"], (b"\x00", 5))
