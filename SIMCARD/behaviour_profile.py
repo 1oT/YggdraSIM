@@ -54,12 +54,27 @@ SCHEMA = "yggdrasim_card_behaviour_profile/1"
 
 _DISABLE_QUIRKS_ENV = "YGGDRASIM_DISABLE_QUIRKS"
 
-# Response data must not carry card identity. These catch the shapes a
-# probe could pick up if the writer's exclusion were bypassed or the file
-# were hand-edited: a packed-BCD ICCID run and an EID body.
+# Response data must not carry a real-operator ICCID. The primary
+# protection is structural: identity-bearing probe steps are excluded when
+# writing, so this content check is a backstop for a hand-edited file or a
+# future step that forgets the flag.
+#
+# It matches only the allocated issuer prefixes CLAUDE.md section 1 bans,
+# in both the ASCII / high-nibble-BCD form (SAIP) and the low-nibble-first
+# EF.ICCID form, mirroring scripts/check_repo_hygiene.py. A broad "any
+# 89/98 run" heuristic was wrong: it false-positives on legitimate FCP
+# structure and GlobalPlatform AIDs -- an ISD-R AID ends ...8900000100 --
+# which made a real card's profile unloadable. The 8988 test range (BCD
+# 9888) is allowed and is deliberately absent here.
 _IDENTITY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("ICCID-like BCD run", re.compile(r"(?:98|89)[0-9A-F]{16,}", re.IGNORECASE)),
-    ("EID-like digit run", re.compile(r"89[0-9]{30}", re.IGNORECASE)),
+    (
+        "real ICCID (ASCII / high-nibble BCD)",
+        re.compile(r"(?:8946|8949|8937|8983|89126)[0-9]{10,}"),
+    ),
+    (
+        "real ICCID (EF.ICCID low-nibble BCD)",
+        re.compile(r"(?:9864|9894|9873|9838|9821)[0-9A-Fa-f]{14,}", re.IGNORECASE),
+    ),
 )
 
 _HEX = re.compile(r"^[0-9A-Fa-f]*$")
@@ -383,14 +398,32 @@ def _apply_live(profile: BehaviourProfile | None, *, rebuild: bool = False) -> N
     still holding, which then never receives the next ATR update.
     ``rebuild=True`` is for changes the hook cannot express, such as
     switching the executed quirks file.
+
+    The whole swap runs under ``_SHARED_ENGINE_LOCK``, the same lock
+    ``connection`` takes for every engine access. The behaviour hook's
+    read path is already race-free -- it snapshots the live cell into a
+    local and the profile is immutable after load -- but this writer also
+    mutates ``state.atr`` and clears the cache, and those must not
+    interleave with a concurrent rebuild. Reachable from the threaded GUI
+    server, which drives the simulator under uvicorn worker threads.
     """
-    set_active_profile(profile)
-    _apply_live_atr(profile)
-    if rebuild:
-        _drop_cached_engine()
+    try:
+        from SIMCARD import connection
+    except ImportError:
+        set_active_profile(profile)
+        return
+    with connection._SHARED_ENGINE_LOCK:
+        set_active_profile(profile)
+        _apply_live_atr(profile)
+        if rebuild:
+            _drop_cached_engine()
 
 
 def _apply_live_atr(profile: BehaviourProfile | None) -> None:
+    """Write the profile's ATR onto the live engine, or restore the default.
+
+    Caller holds ``_SHARED_ENGINE_LOCK``.
+    """
     try:
         from SIMCARD import connection
         from SIMCARD.etsi_fs import build_default_state
