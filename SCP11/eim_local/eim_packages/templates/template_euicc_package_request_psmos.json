@@ -1,7 +1,7 @@
 {
   "package_type": "euicc_package_request_psmos",
   "package_version": "2.0.0",
-  "spec_target": "SGP.32 eIM Package Request / EuiccPackageRequest Containing PSMOs",
+  "spec_target": "SGP.32 v1.2 \u00a72.11.1.1 EuiccPackageRequest Containing PSMOs",
   "sgp32": {
     "euicc_package_request": {
       "include": true,
@@ -11,7 +11,14 @@
         "psmos": [
           {
             "include": true,
-            "description": "Example PSMO payload container",
+            "description": "Typed PSMO: enable a profile by ICCID",
+            "operation": "enable",
+            "iccid": "8988201234567890123",
+            "rollback": false
+          },
+          {
+            "include": false,
+            "description": "Raw passthrough: pre-encoded PSMO command TLV",
             "value_hex": ""
           }
         ],

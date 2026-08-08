@@ -524,6 +524,8 @@ def _lint_euicc_package_request_ecos_spec(document: dict[str, Any]) -> list[str]
     rows = section.get("ecos")
     if isinstance(rows, list) is False or len(rows) == 0:
         errors.append("sgp32.euicc_package_request_containing_ecos.ecos must contain at least one entry.")
+    else:
+        errors.extend(_lint_operation_rows(rows, kind="eco", path="euicc_package_request_containing_ecos.ecos"))
     return errors
 
 
@@ -540,6 +542,47 @@ def _lint_euicc_package_request_psmos_spec(document: dict[str, Any]) -> list[str
     rows = section.get("psmos")
     if isinstance(rows, list) is False or len(rows) == 0:
         errors.append("sgp32.euicc_package_request_containing_psmos.psmos must contain at least one entry.")
+    else:
+        errors.extend(_lint_operation_rows(rows, kind="psmo", path="euicc_package_request_containing_psmos.psmos"))
+    return errors
+
+
+def _lint_operation_rows(rows: list[Any], *, kind: str, path: str) -> list[str]:
+    """Validate PSMO / eCO rows, typed by ``operation`` or raw ``value_hex``.
+
+    A row naming an operation is encoded here, so a bad field is caught at
+    lint time rather than as a card-side ``commandError``. A row carrying
+    only ``value_hex`` stays opaque and keeps the original hex-passthrough
+    behaviour.
+    """
+    from .psmo_builders import PsmoBuildError, build_eco, build_psmo
+
+    builder = build_psmo if kind == "psmo" else build_eco
+    errors: list[str] = []
+    for index, raw_row in enumerate(rows):
+        location = f"sgp32.{path}[{index}]"
+        if isinstance(raw_row, dict) is False:
+            errors.append(f"{location} must be a mapping.")
+            continue
+        if _bool_value(raw_row.get("include"), True) is False:
+            continue
+        operation = _compact_string(raw_row.get("operation"))
+        value_hex = _compact_hex_lenient(raw_row.get("value_hex"))
+        if len(operation) == 0:
+            if len(value_hex) == 0:
+                errors.append(
+                    f"{location} needs either 'operation' (typed) or non-empty 'value_hex' (raw)."
+                )
+            elif len(value_hex) % 2 != 0:
+                errors.append(f"{location}.value_hex must be even-length hex.")
+            continue
+        if len(value_hex) > 0:
+            errors.append(f"{location} sets both 'operation' and 'value_hex'; use one.")
+            continue
+        try:
+            builder(raw_row)
+        except PsmoBuildError as error:
+            errors.append(f"{location}: {error}")
     return errors
 
 
