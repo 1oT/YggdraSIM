@@ -373,8 +373,12 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
             return
 
         session_id = str(request_json.get("sessionId", "") or "").strip()
+        boundary = str(request_json.get("boundary", "") or "").strip()
         try:
-            payload = self.server.service.request_card_reset(session_id=session_id)
+            payload = self.server.service.request_card_reset(
+                session_id=session_id,
+                boundary=boundary,
+            )
         except Exception as exc:
             self._send_json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
             return
@@ -527,10 +531,18 @@ class HilBridgeApduRelayService:
     def exchange_apdu(self, apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
         return self._exchange_callback(apdu, session_id=session_id)
 
-    def request_card_reset(self, *, session_id: str = "") -> dict[str, Any]:
+    def request_card_reset(self, *, session_id: str = "", boundary: str = "") -> dict[str, Any]:
         if self._card_reset_callback is None:
             raise RuntimeError("Card reset control is not enabled.")
-        return self._card_reset_callback(session_id=session_id)
+        normalized_boundary = str(boundary or "").strip()
+        if len(normalized_boundary) == 0:
+            # Keep the historical call shape for plain reset requests so
+            # backends that only take a session id stay callable.
+            return self._card_reset_callback(session_id=session_id)
+        return self._card_reset_callback(
+            session_id=session_id,
+            boundary=normalized_boundary,
+        )
 
     def record_apdu_audit(
         self,

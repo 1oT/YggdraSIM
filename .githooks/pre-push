@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+#
+# Refuse to push key material to a public remote.
+#
+# Two failure modes this exists to stop, both of which are unrecoverable
+# once they land — the objects stay reachable in the remote's history
+# even after a branch is deleted:
+#
+#   1. pushing the `internal` branch to GitHub
+#   2. pushing any ref whose tip carries operator material to GitHub
+#
+# (2) is the one that matters: it catches an accidental merge of
+# `internal` into `main` before it reaches the public remote, which no
+# amount of branch-name checking would.
+#
+# Install with: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+REMOTE_NAME="${1:-}"
+REMOTE_URL="${2:-}"
+
+INTERNAL_BRANCH="${YGGDRASIM_INTERNAL_BRANCH:-internal}"
+
+# A tracked path that matches a .gitignore rule is the signature of
+# force-added material. The public branch legitimately has a few — the
+# SGP.26 test vectors and test keys that ship publicly — so those are
+# enumerated in a reviewed allowlist rather than pattern-guessed.
+# Anything matching an ignore rule and absent from the allowlist is
+# treated as operator material and blocked.
+ALLOWLIST="scripts/release/public-ignored-allowlist.txt"
+
+is_public_remote() {
+  case "$1" in
+    *github.com*|*github.io*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if ! is_public_remote "$REMOTE_URL"; then
+  exit 0
+fi
+
+fail() {
+  printf '\033[31m\n[pre-push] BLOCKED: %s\033[0m\n\n' "$1" >&2
+  printf '  remote: %s (%s)\n' "$REMOTE_NAME" "$REMOTE_URL" >&2
+  printf '  This remote is public. Key material pushed here cannot be\n' >&2
+  printf '  recalled — the objects stay reachable even after a branch\n' >&2
+  printf '  delete.\n\n' >&2
+  printf '  Internal material belongs on the GitLab remote, via\n' >&2
+  printf '  scripts/internal-sync.sh\n\n' >&2
+  exit 1
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Deletions carry the all-zero local sha and need no inspection.
+  case "$local_sha" in
+    *[!0]*) ;;
+    *) continue ;;
+  esac
+
+  short_ref="${local_ref#refs/heads/}"
+  if [ "$short_ref" = "$INTERNAL_BRANCH" ]; then
+    fail "refusing to push the '$INTERNAL_BRANCH' branch to a public remote"
+  fi
+
+  # Content check — catches a merge of internal into a public branch,
+  # which a name check alone would wave through.
+  allowed="$(git show "$local_sha:$ALLOWLIST" 2>/dev/null | grep -v '^#' | grep -v '^$' || true)"
+  offenders="$(
+    git ls-tree -r --name-only "$local_sha" \
+      | git check-ignore --no-index --stdin 2>/dev/null \
+      | { [ -n "$allowed" ] && grep -Fxv -f <(printf '%s\n' "$allowed") || cat; } \
+      || true
+  )"
+  if [ -n "$offenders" ]; then
+    count="$(printf '%s\n' "$offenders" | wc -l | tr -d ' ')"
+    first="$(printf '%s\n' "$offenders" | head -n 3 | sed 's/^/      /')"
+    fail "ref '$short_ref' carries $count force-added path(s) that .gitignore hides:
+$first"
+  fi
+done
+
+exit 0

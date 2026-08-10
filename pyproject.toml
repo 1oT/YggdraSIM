@@ -211,6 +211,7 @@ yggdrasim-scp11-local-access = "yggdrasim_common.console_scripts:scp11_local_acc
 yggdrasim-scp11-eim-local = "yggdrasim_common.console_scripts:scp11_eim_local"
 yggdrasim-hil-bridge = "yggdrasim_common.console_scripts:hil_bridge"
 yggdrasim-hil-supervisor = "yggdrasim_common.console_scripts:hil_bridge_supervisor"
+yggdrasim-hil-reset = "yggdrasim_common.console_scripts:hil_bridge_reset"
 yggdrasim-card-bridge = "yggdrasim_common.console_scripts:card_bridge"
 yggdrasim-lab-agent = "yggdrasim_common.console_scripts:lab_agent"
 yggdrasim-profile-package = "yggdrasim_common.console_scripts:profile_package"

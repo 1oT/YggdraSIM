@@ -435,8 +435,10 @@ class HilBridgeCardRelayTests(unittest.TestCase):
 
     @pytest.mark.usefixtures("require_loopback_socket")
     def test_create_card_connection_uses_bridge_marker_when_present(self) -> None:
+        seen_session_ids: list[str] = []
+
         def exchange_callback(apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
-            self.assertEqual(session_id, "")
+            seen_session_ids.append(session_id)
             self.assertEqual(apdu, bytes.fromhex("80CA005A00"))
             return bytes.fromhex("11223344"), 0x90, 0x00
 
@@ -479,12 +481,17 @@ class HilBridgeCardRelayTests(unittest.TestCase):
                     self.assertEqual(connection.__class__.__name__, "RelayCardConnection")
                     self.assertEqual(connection.getATR(), [0x3B, 0x8F, 0x80, 0x01])
                     data, sw1, sw2 = connection.transmit(list(bytes.fromhex("80CA005A00")))
+                    relay_session_id = connection.session_id
         finally:
             relay.stop()
 
         self.assertEqual(data, [0x11, 0x22, 0x33, 0x44])
         self.assertEqual(sw1, 0x90)
         self.assertEqual(sw2, 0x00)
+        # Every relay APDU carries the shell's session id so the bridge
+        # can power-cycle the card at the session boundaries.
+        self.assertEqual(seen_session_ids, [relay_session_id])
+        self.assertTrue(len(relay_session_id) > 0)
 
     @pytest.mark.usefixtures("require_loopback_socket")
     def test_apdu_relay_rejects_oversized_request_body(self) -> None:

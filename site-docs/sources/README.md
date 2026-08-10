@@ -181,6 +181,7 @@ yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
 yggdrasim-hil-bridge
 yggdrasim-hil-supervisor
+yggdrasim-hil-reset
 yggdrasim-card-bridge
 yggdrasim-lab-agent
 yggdrasim-profile-package
@@ -304,6 +305,7 @@ yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
 yggdrasim-hil-bridge
 yggdrasim-hil-supervisor
+yggdrasim-hil-reset
 yggdrasim-card-bridge
 yggdrasim-lab-agent
 yggdrasim-profile-package

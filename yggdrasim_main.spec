@@ -217,6 +217,7 @@ if INCLUDE_HIL is False:
     excludes.extend([
         "Tools.HilBridge.main",
         "Tools.HilBridge.supervisor",
+        "Tools.HilBridge.device_reset",
         "Tools.HilBridge.router",
         "Tools.HilBridge.protocol",
         "Tools.HilBridge.proactive",

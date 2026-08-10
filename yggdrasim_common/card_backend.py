@@ -12,6 +12,7 @@ import re
 import shutil
 import tempfile
 import time
+import uuid
 from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -673,16 +674,36 @@ def _normalize_card_relay_url(value: Any) -> str:
     return text.rstrip("/") + "/apdu"
 
 
-def _build_card_relay_status_url(apdu_url: str) -> str:
+def _mint_card_relay_session_id() -> str:
+    """Return a process-unique relay session id.
+
+    Only has to be unique among the sessions one bridge sees, so the
+    pid plus a random suffix is plenty and stays readable in the
+    bridge log lines that quote it.
+    """
+    return f"ygg-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def _build_card_relay_sibling_url(apdu_url: str, leaf: str) -> str:
+    """Return the relay URL for *leaf* alongside the ``/apdu`` endpoint."""
+    normalized_leaf = "/" + str(leaf or "").strip().strip("/")
     parsed = urlparse(apdu_url)
     normalized_path = parsed.path.rstrip("/")
     if normalized_path.endswith("/apdu"):
-        status_path = normalized_path[: -len("/apdu")] + "/status"
+        sibling_path = normalized_path[: -len("/apdu")] + normalized_leaf
     elif normalized_path == "":
-        status_path = "/status"
+        sibling_path = normalized_leaf
     else:
-        status_path = normalized_path + "/status"
-    return urlunparse((parsed.scheme, parsed.netloc, status_path, "", "", ""))
+        sibling_path = normalized_path + normalized_leaf
+    return urlunparse((parsed.scheme, parsed.netloc, sibling_path, "", "", ""))
+
+
+def _build_card_relay_status_url(apdu_url: str) -> str:
+    return _build_card_relay_sibling_url(apdu_url, "status")
+
+
+def _build_card_relay_card_reset_url(apdu_url: str) -> str:
+    return _build_card_relay_sibling_url(apdu_url, "card/reset")
 
 
 def read_card_relay_marker() -> dict[str, Any]:
@@ -876,16 +897,30 @@ class RelayCardConnection:
         timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS,
         *,
         auth_token: str = "",
+        session_id: str = "",
     ):
         normalized_endpoint = _normalize_card_relay_url(endpoint)
         if len(normalized_endpoint) == 0:
             raise RuntimeError("Invalid card relay endpoint.")
         self._endpoint = normalized_endpoint
         self._status_url = _build_card_relay_status_url(normalized_endpoint)
+        self._card_reset_url = _build_card_relay_card_reset_url(normalized_endpoint)
         self._timeout_seconds = max(1, int(timeout_seconds or DEFAULT_CARD_RELAY_TIMEOUT_SECONDS))
         self._auth_token = str(auth_token or "").strip()
         self._connected = False
         self._atr: list[int] = []
+        # Identifies this shell's work to the relay. The bridge
+        # power-cycles the card when the id first appears and again
+        # when :meth:`disconnect` reports the session closed, so
+        # secure-channel and logical-channel state cannot leak between
+        # a shell session and whatever touches the card next.
+        self._session_id = str(session_id or "").strip() or _mint_card_relay_session_id()
+        self._session_announced = False
+
+    @property
+    def session_id(self) -> str:
+        """Return the relay session id this connection transacts under."""
+        return self._session_id
 
     @property
     def auth_token(self) -> str:
@@ -904,7 +939,35 @@ class RelayCardConnection:
         self._connected = True
 
     def disconnect(self) -> None:
+        """Close the relay session and hand a clean card back.
+
+        Best-effort by design: this runs on shell teardown, so a relay
+        that has already gone away, a revoked token, or a slow link
+        must not turn "the shell exited" into a traceback. Failing to
+        notify only costs the next consumer a dirty card, which is the
+        pre-existing behaviour.
+        """
+        was_announced = self._session_announced
         self._connected = False
+        self._session_announced = False
+        if was_announced is False:
+            # Nothing ever reached the card under this session id, so
+            # there is no state to clear and no reason to bounce a
+            # modem that may be mid-session.
+            return
+        try:
+            self._request_json(
+                self._card_reset_url,
+                method="POST",
+                request_json={"sessionId": self._session_id, "boundary": "end"},
+            )
+        except Exception as relay_error:  # noqa: BLE001 - teardown must not raise
+            _LOGGER.debug(
+                "card_backend: relay session end for %s was not acknowledged (%s: %s).",
+                self._session_id,
+                relay_error.__class__.__name__,
+                relay_error,
+            )
 
     def getATR(self):
         if self._connected is False:
@@ -919,8 +982,15 @@ class RelayCardConnection:
         payload = self._request_json(
             self._endpoint,
             method="POST",
-            request_json={"apdu": apdu_bytes.hex().upper()},
+            request_json={
+                "apdu": apdu_bytes.hex().upper(),
+                "sessionId": self._session_id,
+            },
         )
+        # Marked only after the first APDU is accepted, so a session
+        # that never reached the card does not trigger an end-of-session
+        # power-cycle on teardown.
+        self._session_announced = True
         data_hex = str(payload.get("data", "") or "").strip()
         sw1_hex = str(payload.get("sw1", "") or "").strip()
         sw2_hex = str(payload.get("sw2", "") or "").strip()

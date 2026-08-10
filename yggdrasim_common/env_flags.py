@@ -577,6 +577,77 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_RUNTIME,
     ),
     EnvFlag(
+        name="YGGDRASIM_HIL_RELAY_SESSION_RESET",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Power-cycle the card at relay-session boundaries",
+        description=(
+            "The bridge cold-resets the physical card when an operator\n"
+            "shell's relay session starts, is replaced, or ends, so a\n"
+            "selected AID, an open logical channel, or an established\n"
+            "SCP03 / SCP11 secure channel cannot leak into the modem\n"
+            "session. Set to 0 only for workflows that deliberately\n"
+            "carry card state across sessions."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="enabled",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_SIMTRACE_RESET",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="How the supervisor clears the SIMtrace2 board before a session",
+        description=(
+            "Remote stand-in for the board's physical reset button. The\n"
+            "cardem firmware reboots its microcontroller whenever USB\n"
+            "drops below CONFIGURED, so the supervisor forces that before\n"
+            "every session start. Accepts 'usb-reset' (USBDEVFS_RESET on\n"
+            "the usbfs node), 'port-power' (uhubctl VBUS cycle, also\n"
+            "power-cycles the SIM), 'auto' (usb-reset then port-power),\n"
+            "or 'off'."
+        ),
+        kind=KIND_STRING,
+        default_hint="usb-reset",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_UHUBCTL_LOCATION",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Hub location for the port-power SIMtrace2 reset",
+        description=(
+            "Value passed to 'uhubctl -l', for example '1-1'. Required by\n"
+            "the 'port-power' reset mode and by 'auto' before it will fall\n"
+            "back to a VBUS cycle. Find it with 'uhubctl'."
+        ),
+        kind=KIND_STRING,
+        default_hint="unset (port-power reset disabled)",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_UHUBCTL_PORT",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Hub port for the port-power SIMtrace2 reset",
+        description=(
+            "Value passed to 'uhubctl -p'. Leave unset to cycle every port\n"
+            "on the selected hub, which also power-cycles anything else\n"
+            "plugged into it."
+        ),
+        kind=KIND_STRING,
+        default_hint="unset (all ports on the hub)",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_UHUBCTL_BINARY",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Path to the uhubctl binary",
+        description=(
+            "Explicit uhubctl executable used by the 'port-power' reset\n"
+            "mode. Only needed when uhubctl is not on PATH."
+        ),
+        kind=KIND_PATH,
+        default_hint="uhubctl (resolved from PATH)",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
         name="YGGDRASIM_RSPRO_ASN",
         category=CATEGORY_HIL_BRIDGE,
         summary="Override the RSPRO ASN.1 module path",

@@ -1194,6 +1194,12 @@ def _build_hil_bridge_service_options (
     if len (current_profile_store_override )>0 :
         environment_overrides .append ((SIM_PROFILE_STORE_ENV ,current_profile_store_override ))
     remote_card_url ,remote_card_token_file =_resolve_hil_remote_card_service_settings (supervisor_state )
+    (
+    simtrace_reset_mode ,
+    uhubctl_binary ,
+    uhubctl_location ,
+    uhubctl_port ,
+    )=hil_bridge_runtime .resolve_simtrace_reset_service_settings ()
     return hil_bridge_runtime .HilBridgeUserServiceOptions (
     python_executable =python_executable ,
     working_directory =PROJECT_ROOT ,
@@ -1209,6 +1215,10 @@ def _build_hil_bridge_service_options (
     remote_card_token_file =remote_card_token_file ,
     remsim_binary =str (os .environ .get (hil_bridge_runtime .REMSIM_BINARY_ENV ,"")or "").strip (),
     remsim_args =remsim_args ,
+    simtrace_reset_mode =simtrace_reset_mode ,
+    uhubctl_binary =uhubctl_binary ,
+    uhubctl_location =uhubctl_location ,
+    uhubctl_port =uhubctl_port ,
     documentation_path =documentation_path ,
     environment_overrides =tuple (environment_overrides ),
     )
