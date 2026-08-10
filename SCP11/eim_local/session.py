@@ -260,11 +260,7 @@ class EimLocalSession(LocalIsdrSession):
             return request
         return {}
 
-    def _euicc_memory_reset_options(self, package_document: dict[str, Any]) -> dict[str, bool]:
-        request = self._euicc_memory_reset_request(package_document)
-        option_source = request.get("options", {})
-        if isinstance(option_source, dict) is False or len(option_source) == 0:
-            option_source = request
+    def _normalize_memory_reset_option_source(self, option_source: Any) -> dict[str, bool]:
         normalized: dict[str, bool] = {}
         for snake_name, camel_name in self.EUICC_MEMORY_RESET_OPTION_FIELDS:
             value = False
@@ -275,6 +271,13 @@ class EimLocalSession(LocalIsdrSession):
                     value = self._boolish_flag(option_source.get(camel_name), False)
             normalized[snake_name] = value
         return normalized
+
+    def _euicc_memory_reset_options(self, package_document: dict[str, Any]) -> dict[str, bool]:
+        request = self._euicc_memory_reset_request(package_document)
+        option_source = request.get("options", {})
+        if isinstance(option_source, dict) is False or len(option_source) == 0:
+            option_source = request
+        return self._normalize_memory_reset_option_source(option_source)
 
     def _encode_euicc_memory_reset_options(self, options: dict[str, bool]) -> bytes:
         last_enabled_index = -1
@@ -302,6 +305,27 @@ class EimLocalSession(LocalIsdrSession):
         options = self._euicc_memory_reset_options(package_document)
         encoded_options = self._encode_euicc_memory_reset_options(options)
         return self._wrap_tlv(bytes.fromhex("BF64"), self._wrap_tlv(b"\x82", encoded_options))
+
+    def exchange_isdr_command(
+        self,
+        payload: bytes,
+        label: str,
+        *,
+        sync_notifications: bool = True,
+    ) -> bytes:
+        """Send one caller-built command TLV to the ISD-R and return the response.
+
+        Generic transport for callers that assemble their own ES10b/ES10c
+        payload outside this module. Runs the same reset/select/send/sync
+        sequence the named verbs (e.g. ``get_eim_configuration_data``) use, so a
+        caller never touches the private STORE DATA chaining.
+        """
+        self.reset_state()
+        self.select_isdr()
+        response = self._send_retrieve_store_data(payload, label)
+        if sync_notifications:
+            self._sync_pending_notifications(response)
+        return response
 
     def get_eim_configuration_data(self) -> bytes:
         """Return the eIM configuration data TLV for the current session."""
@@ -346,12 +370,31 @@ class EimLocalSession(LocalIsdrSession):
         )
         return response
 
-    def euicc_memory_reset(self, package_path: str = "") -> bytes:
-        """Send ES10c.EUICCMemoryReset to wipe all profiles and keys (SGP.22 §3.6)."""
-        resolved_path = self.resolve_eim_package_path(override_path=package_path)
-        package_document = self.load_eim_package_document(override_path=resolved_path)
-        command_payload = self._build_euicc_memory_reset_payload(package_document)
-        options = self._euicc_memory_reset_options(package_document)
+    def euicc_memory_reset(
+        self,
+        package_path: str = "",
+        *,
+        options: dict[str, bool] | None = None,
+    ) -> bytes:
+        """Send ES10c.EUICCMemoryReset to wipe all profiles and keys (SGP.22 §3.6).
+
+        With ``options`` set, the reset flags come from the caller and the eIM
+        package document is not consulted; the eUICC-config plugin uses this so
+        an operator states each flag explicitly. Otherwise the flags are read
+        from the resolved package document.
+        """
+        if options is not None:
+            normalized_options = self._normalize_memory_reset_option_source(options)
+            resolved_path = ""
+            command_payload = self._wrap_tlv(
+                bytes.fromhex("BF64"),
+                self._wrap_tlv(b"\x82", self._encode_euicc_memory_reset_options(normalized_options)),
+            )
+        else:
+            resolved_path = self.resolve_eim_package_path(override_path=package_path)
+            package_document = self.load_eim_package_document(override_path=resolved_path)
+            command_payload = self._build_euicc_memory_reset_payload(package_document)
+            normalized_options = self._euicc_memory_reset_options(package_document)
         self._remember_selected_eim_certificate("", "", [], "")
         self.reset_state()
         self.select_isdr()
@@ -372,7 +415,7 @@ class EimLocalSession(LocalIsdrSession):
             response_preview_hex=self._response_preview_hex(response),
             details={
                 "command_payload_hex": command_payload.hex().upper(),
-                "options": options,
+                "options": normalized_options,
             },
         )
         return response
