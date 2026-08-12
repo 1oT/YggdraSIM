@@ -30,7 +30,9 @@ from collections.abc import Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BASELINE_PATH = Path(__file__).with_name("repo_hygiene_baseline.json")
 
-TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".toml", ".yml", ".yaml", ".txt", ".cfg", ".ini"})
+TEXT_SUFFIXES = frozenset(
+    {".py", ".md", ".json", ".toml", ".yml", ".yaml", ".txt", ".cfg", ".ini", ".lua"}
+)
 
 # Section 6 mirrors these from their source, so a hit is reported once
 # against the source rather than twice.
