@@ -362,6 +362,17 @@ M.cat_port = ProtoField.uint16(PREFIX .. ".cat.port", "Port", base.DEC)
 M.cat_channel_data = ProtoField.bytes(
     PREFIX .. ".cat.channel_data", "Channel data"
 )
+M.cat_payload_protocol = ProtoField.string(
+    PREFIX .. ".cat.payload_protocol", "Channel payload"
+)
+M.tls_content_type = ProtoField.string(
+    PREFIX .. ".tls.content_type", "TLS record type"
+)
+M.tls_alert_level = ProtoField.string(PREFIX .. ".tls.alert_level", "TLS alert level")
+M.tls_alert = ProtoField.string(PREFIX .. ".tls.alert", "TLS alert")
+M.tls_incomplete = ProtoField.bool(
+    PREFIX .. ".tls.incomplete", "TLS record split across channel-data blocks"
+)
 
 -- ---------------------------------------------------------------- RSP tags
 M.rsp_function = ProtoField.string(PREFIX .. ".rsp.function", "ES10 function")
@@ -427,6 +438,8 @@ M.all = {
     M.cat_result, M.cat_result_name, M.cat_event, M.cat_event_name,
     M.cat_channel, M.cat_bearer, M.cat_apn, M.cat_address, M.cat_buffer_size,
     M.cat_transport, M.cat_port, M.cat_channel_data,
+    M.cat_payload_protocol, M.tls_content_type, M.tls_alert_level,
+    M.tls_alert, M.tls_incomplete,
     M.rsp_function, M.rsp_reassembled_in, M.rsp_reassembly_frame,
     M.rsp_reassembled_length, M.rsp_block_count, M.rsp_bpp_segment,
     M.rsp_bpp_section,

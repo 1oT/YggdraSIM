@@ -117,6 +117,12 @@ local experts = {
         expert.group.MALFORMED,
         expert.severity.WARN
     ),
+    tls_alert = ProtoExpert.new(
+        "yapdu.expert.tls_alert",
+        "Fatal TLS alert on a BIP channel",
+        expert.group.RESPONSE_CODE,
+        expert.severity.WARN
+    ),
     tlv_malformed = ProtoExpert.new(
         "yapdu.expert.tlv_malformed",
         "TLV structure is malformed",
@@ -141,6 +147,7 @@ yapdu.experts = {
     experts.ambiguous, experts.truncated, experts.destructive,
     experts.status_error, experts.atr_checksum, experts.tlv_malformed,
     experts.budget, experts.no_context, experts.sidecar_mismatch,
+    experts.tls_alert,
 }
 
 -- ----------------------------------------------------------- preferences
@@ -532,13 +539,87 @@ local function add_initialize_update_response(tree, payload, response)
     return true
 end
 
+--- Hand BIP channel data to the dissector that understands it.
+--
+-- This is where a failed profile download becomes readable. The bytes a
+-- terminal sends and receives over a BIP channel are ordinary DNS, TLS
+-- or HTTP, and Wireshark already dissects all three -- but nothing hands
+-- them over, so both the stock etsi_cat dissector and this one stop at
+-- "Channel data: 1503030002022a". Handed to the TLS dissector, the same
+-- bytes read as "Alert (Level: Fatal, Description: Bad Certificate)".
+local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
+    if tree == nil or values == nil or range == nil or #values == 0 then
+        return
+    end
+
+    local effective_port = port
+    if effective_port == nil then
+        effective_port = state.bip_port(machine, channel_id)
+    end
+
+    -- A TLS record split across several channel-data blocks gives the
+    -- stock dissector nothing complete to work with, so the header and
+    -- any alert are reported here before the handoff is attempted.
+    local record = cat.peek_tls_record(values)
+    if record ~= nil then
+        tree:add(fields.tls_content_type, range, record.content_type_name)
+            :set_generated()
+        if record.alert_description ~= nil then
+            tree:add(fields.tls_alert_level, range, record.alert_level_name)
+                :set_generated()
+            local alert = tree:add(
+                fields.tls_alert, range,
+                string.format(
+                    "%s (%d)",
+                    record.alert_description_name, record.alert_description
+                )
+            )
+            alert:set_generated()
+            if record.alert_level == 2 then
+                alert:add_proto_expert_info(
+                    experts.tls_alert,
+                    string.format(
+                        "fatal TLS alert %d (%s) on the BIP channel",
+                        record.alert_description, record.alert_description_name
+                    )
+                )
+            end
+        end
+        if record.complete == false then
+            tree:add(fields.tls_incomplete, range, true):set_generated()
+        end
+    end
+
+    local wanted = cat.channel_payload_dissector(values, effective_port)
+    if wanted == "" then
+        return
+    end
+    tree:add(fields.cat_payload_protocol, range, wanted):set_generated()
+
+    -- Only hand over a complete unit. A partial TLS record makes the
+    -- stock dissector report a malformed packet, which is worse than the
+    -- header this function already rendered.
+    if wanted == "tls" and record ~= nil and record.complete == false then
+        return
+    end
+
+    local handler = Dissector.get(wanted)
+    if handler == nil then
+        return
+    end
+    -- A sub-dissector that raises must not take our tree down with it.
+    pcall(function()
+        handler:call(range:tvb("BIP channel data"), pinfo, tree)
+    end)
+end
+
 --- Render a CAT proactive command or terminal response.
 --
 -- The outer 0xD0 Proactive Command tag is plain BER; only its contents
 -- are COMPREHENSION-TLV. Parsing the wrapper in comprehension mode would
 -- strip its high bit and rename it from "Proactive command" to whatever
 -- 0x50 happens to mean, so the wrapper is stepped over first.
-local function add_cat_subtree(tree, payload, offset, length, budget)
+local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
     local content_offset = offset
     local content_length = length
 
@@ -610,11 +691,23 @@ local function add_cat_subtree(tree, payload, offset, length, budget)
     local port = nil
     local channel_payload = nil
     local channel_payload_offset = nil
+    local channel_payload_range = nil
+    local channel_data_item = nil
+    local channel_id = nil
     for index = 1, #nodes do
         local node = nodes[index]
         local range = util.safe_range(payload, node.value_offset, node.value_length)
         if range ~= nil then
-            if node.base_tag == cat.TAG_BEARER_DESCRIPTION and node.value_length >= 1 then
+            if node.base_tag == cat.TAG_DEVICE_IDENTITIES and node.value_length >= 2 then
+                -- A BIP command addresses its channel through the
+                -- device identity: 0x21..0x27 are channels 1 to 7.
+                for byte_index = 0, node.value_length - 1 do
+                    local device = util.byte_at(payload, node.value_offset + byte_index)
+                    if device ~= nil and device >= 0x21 and device <= 0x27 then
+                        channel_id = device - 0x20
+                    end
+                end
+            elseif node.base_tag == cat.TAG_BEARER_DESCRIPTION and node.value_length >= 1 then
                 local bearer = util.byte_at(payload, node.value_offset)
                 tree:add(fields.cat_bearer, range, cat.bearer_name(bearer))
                     :set_generated()
@@ -659,7 +752,8 @@ local function add_cat_subtree(tree, payload, offset, length, budget)
                     payload, node.value_offset, node.value_length
                 )
                 channel_payload_offset = node.value_offset
-                tree:add(fields.cat_channel_data, range)
+                channel_payload_range = range
+                channel_data_item = tree:add(fields.cat_channel_data, range)
             elseif node.base_tag == cat.TAG_RESULT and node.value_length >= 1 then
                 local result = util.byte_at(payload, node.value_offset)
                 tree:add(fields.cat_result, range, result)
@@ -678,6 +772,18 @@ local function add_cat_subtree(tree, payload, offset, length, budget)
         end
     end
 
+    -- Remember what OPEN CHANNEL negotiated. SEND DATA and RECEIVE DATA
+    -- carry no transport information of their own, so without this the
+    -- channel payload has to be identified by content alone.
+    if details.command_type == 0x40 and channel_id ~= nil then
+        state.open_bip_channel(machine, channel_id, port, nil)
+    end
+
+    add_channel_payload(
+        channel_data_item, channel_payload, channel_payload_range,
+        channel_id, port, pinfo
+    )
+
     return {
         name = name,
         command_type = details.command_type,
@@ -688,7 +794,7 @@ local function add_cat_subtree(tree, payload, offset, length, budget)
 end
 
 local function add_command_subtree(
-    tree, payload, command, description, rsp_description, budget
+    tree, payload, command, description, rsp_description, budget, pinfo
 )
     local range = util.safe_range(payload, 0, command.length)
     local item
@@ -746,7 +852,7 @@ local function add_command_subtree(
             if cat.is_cat_instruction(command.cla, command.ins) then
                 add_cat_subtree(
                     data_item, payload, command.data_offset,
-                    command.data_length, budget
+                    command.data_length, budget, pinfo
                 )
             elseif rsp_description ~= nil then
                 data_item:set_text(
@@ -937,7 +1043,9 @@ local function add_ef_details(tree, payload, response, fid_hex)
     return false
 end
 
-local function add_response_subtree(tree, payload, response, context, command, budget)
+local function add_response_subtree(
+    tree, payload, response, context, command, budget, pinfo
+)
     local range = util.safe_range(payload, response.offset, response.length)
     local item
     if range ~= nil then
@@ -983,7 +1091,7 @@ local function add_response_subtree(tree, payload, response, context, command, b
                 and command.ins == 0x12 then
                 if add_cat_subtree(
                     data_item, payload, response.data_offset,
-                    response.data_length, budget
+                    response.data_length, budget, pinfo
                 ) ~= nil then
                     return item
                 end
@@ -1124,7 +1232,7 @@ end
 -- run again over it. That is the point of recovering it: a ciphered
 -- ES10b STORE DATA should read as an ES10b call, not as a blob with a
 -- note saying it was decrypted.
-local function add_plaintext_command(tree, hex, budget)
+local function add_plaintext_command(tree, hex, budget, pinfo)
     if hex == "" then
         return
     end
@@ -1172,7 +1280,7 @@ local function add_plaintext_command(tree, hex, budget)
         return
     end
     if cat.is_cat_instruction(cla, ins) then
-        add_cat_subtree(data_item, inner, 5, body_length, budget)
+        add_cat_subtree(data_item, inner, 5, body_length, budget, pinfo)
         return
     end
     add_tlv_subtree(data_item, inner, 5, body_length, {}, budget)
@@ -1246,7 +1354,9 @@ local function add_secure_messaging(tree, payload, pinfo, command, response, con
         ):set_generated()
     end
 
-    add_plaintext_command(item, sm.entry_hex(entry, "command_plaintext"), budget)
+    add_plaintext_command(
+        item, sm.entry_hex(entry, "command_plaintext"), budget, pinfo
+    )
 
     local response_hex = sm.entry_hex(entry, "response_plaintext")
     if response_hex ~= "" then
@@ -1364,9 +1474,11 @@ local function dissect_exchange(payload, pinfo, tree)
     local budget = tlv.new_budget()
     local rsp_description = rsp.describe(payload, command, context)
     add_command_subtree(
-        root, payload, command, description, rsp_description, budget
+        root, payload, command, description, rsp_description, budget, pinfo
     )
-    add_response_subtree(root, payload, response, context, command, budget)
+    add_response_subtree(
+        root, payload, response, context, command, budget, pinfo
+    )
     add_secure_messaging(root, payload, pinfo, command, response, context, budget)
 
     root:set_text(string.format(

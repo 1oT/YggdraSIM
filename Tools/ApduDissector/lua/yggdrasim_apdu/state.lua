@@ -64,6 +64,10 @@ function M.new()
     return {
         per_frame = {},
         channels = {},
+        -- BIP channels, keyed by the channel identifier in the device
+        -- identity. SEND DATA carries no transport information, so the
+        -- port has to come from the OPEN CHANNEL that preceded it.
+        bip = {},
         high_water = 0,
     }
 end
@@ -157,6 +161,36 @@ function M.advance(machine, frame_number, command, response, description)
     end
     -- Returned as a copy so no caller can reach back into the machine.
     return util.shallow_copy(snapshot)
+end
+
+--- Record what an OPEN CHANNEL negotiated.
+function M.open_bip_channel(machine, channel_id, port, transport)
+    if channel_id == nil then
+        return
+    end
+    machine.bip[channel_id] = { port = port, transport = transport }
+end
+
+--- The port a BIP channel was opened on, or nil.
+--
+-- Falls back to any single open channel: SEND DATA often addresses the
+-- channel through a device identity this decoder has not tied back to
+-- the OPEN CHANNEL, and one open channel is the overwhelmingly common
+-- case in a profile download.
+function M.bip_port(machine, channel_id)
+    if channel_id ~= nil and machine.bip[channel_id] ~= nil then
+        return machine.bip[channel_id].port
+    end
+    local found = nil
+    local count = 0
+    for _, entry in pairs(machine.bip) do
+        count = count + 1
+        found = entry
+    end
+    if count == 1 and found ~= nil then
+        return found.port
+    end
+    return nil
 end
 
 --- True when this frame may advance the machine.

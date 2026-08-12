@@ -275,30 +275,156 @@ function M.channel_number(value)
     return value % 8
 end
 
+-- ------------------------------------------------------ channel payloads
+--- TLS record content types (RFC 8446 clause 5.1, RFC 5246 appendix A.1).
+local TLS_CONTENT_TYPES = {
+    [20] = "change_cipher_spec",
+    [21] = "alert",
+    [22] = "handshake",
+    [23] = "application_data",
+    [24] = "heartbeat",
+}
+
+--- TLS alert levels (RFC 5246 clause 7.2).
+local TLS_ALERT_LEVELS = {
+    [1] = "warning",
+    [2] = "fatal",
+}
+
+--- TLS AlertDescription values.
+--
+-- These are DECIMAL. bad_certificate is 42, which is 0x2A -- reading it
+-- as hex 0x42 gives 66, which is unassigned, so an operator chasing a
+-- certificate failure would see nothing. The distinction matters enough
+-- to state: every number below is decimal.
+local TLS_ALERT_DESCRIPTIONS = {
+    [0] = "close_notify",
+    [10] = "unexpected_message",
+    [20] = "bad_record_mac",
+    [21] = "decryption_failed",
+    [22] = "record_overflow",
+    [30] = "decompression_failure",
+    [40] = "handshake_failure",
+    [41] = "no_certificate",
+    [42] = "bad_certificate",
+    [43] = "unsupported_certificate",
+    [44] = "certificate_revoked",
+    [45] = "certificate_expired",
+    [46] = "certificate_unknown",
+    [47] = "illegal_parameter",
+    [48] = "unknown_ca",
+    [49] = "access_denied",
+    [50] = "decode_error",
+    [51] = "decrypt_error",
+    [60] = "export_restriction",
+    [70] = "protocol_version",
+    [71] = "insufficient_security",
+    [80] = "internal_error",
+    [86] = "inappropriate_fallback",
+    [90] = "user_canceled",
+    [100] = "no_renegotiation",
+    [109] = "missing_extension",
+    [110] = "unsupported_extension",
+    [111] = "certificate_unobtainable",
+    [112] = "unrecognized_name",
+    [113] = "bad_certificate_status_response",
+    [114] = "bad_certificate_hash_value",
+    [115] = "unknown_psk_identity",
+    [116] = "certificate_required",
+    [120] = "no_application_protocol",
+}
+
+function M.tls_content_type_name(value)
+    return TLS_CONTENT_TYPES[value] or string.format("content type %d", value)
+end
+
+function M.tls_alert_level_name(value)
+    return TLS_ALERT_LEVELS[value] or string.format("level %d", value)
+end
+
+function M.tls_alert_description_name(value)
+    return TLS_ALERT_DESCRIPTIONS[value]
+        or string.format("unassigned alert %d", value)
+end
+
+--- Inspect a TLS record header without consuming it.
+--
+-- Returns nil when the bytes are not a plausible record. The stock TLS
+-- dissector handles a complete record far better than anything written
+-- here, so this exists for two narrow purposes: deciding whether to hand
+-- the bytes over at all, and reporting the alert when a record is split
+-- across several channel-data blocks and the stock dissector has nothing
+-- complete to work with.
+function M.peek_tls_record(values)
+    if values == nil or #values < 5 then
+        return nil
+    end
+    local content_type = values[1]
+    if TLS_CONTENT_TYPES[content_type] == nil then
+        return nil
+    end
+    -- Record-layer version: 0x0300 through 0x0304.
+    if values[2] ~= 0x03 or values[3] > 0x04 then
+        return nil
+    end
+    local length = (values[4] * 256) + values[5]
+    local record = {
+        content_type = content_type,
+        content_type_name = M.tls_content_type_name(content_type),
+        major = values[2],
+        minor = values[3],
+        length = length,
+        complete = (#values >= 5 + length),
+    }
+    if content_type == 21 and #values >= 7 then
+        record.alert_level = values[6]
+        record.alert_level_name = M.tls_alert_level_name(values[6])
+        record.alert_description = values[7]
+        record.alert_description_name = M.tls_alert_description_name(values[7])
+    end
+    return record
+end
+
 --- Which stock Wireshark dissector suits a BIP channel payload.
 --
--- Handing the bytes to the real dissector beats a hand-rolled peek:
+-- Handing the bytes to the real dissector beats a hand-rolled decode:
 -- Wireshark already knows how to read DNS, TLS and HTTP, and the tree it
--- produces is the one an engineer already knows how to navigate.
+-- produces is the one an engineer already knows how to navigate. A
+-- single TLS alert record handed to the stock dissector renders as
+-- "Alert (Level: Fatal, Description: Bad Certificate)", which is exactly
+-- what a failed profile download needs to show.
 function M.channel_payload_dissector(values, port)
     if values == nil or #values == 0 then
         return ""
     end
-    if port == 53 then
-        return "dns"
-    end
-    local first = values[1]
-    -- TLS record: content type 20-24, then a plausible version.
-    if first >= 0x14 and first <= 0x18 and #values >= 3 and values[2] == 0x03 then
+    -- Content evidence first, port second. A channel opened on port 53
+    -- can still carry something that is plainly not DNS, and the port
+    -- may have been inherited from another channel when the device
+    -- identity did not tie this command back to its OPEN CHANNEL. What
+    -- the bytes actually say beats what the channel was opened for.
+    if M.peek_tls_record(values) ~= nil then
         return "tls"
     end
+
     local prefix = ""
-    for index = 1, math.min(8, #values) do
-        prefix = prefix .. string.char(values[index])
+    for index = 1, math.min(16, #values) do
+        local character = values[index]
+        if character < 32 or character > 126 then
+            break
+        end
+        prefix = prefix .. string.char(character)
     end
     if prefix:match("^HTTP/1") or prefix:match("^GET ") or prefix:match("^POST ")
-        or prefix:match("^PUT ") or prefix:match("^HEAD ") then
+        or prefix:match("^PUT ") or prefix:match("^HEAD ")
+        or prefix:match("^DELETE ") or prefix:match("^OPTIONS ")
+        or prefix:match("^PATCH ") then
         return "http"
+    end
+
+    -- DNS over a BIP channel is UDP, so the payload starts at the DNS
+    -- header with no length prefix.
+    if port == 53 then
+        return "dns"
     end
     if port == 80 or port == 8080 then
         return "http"
