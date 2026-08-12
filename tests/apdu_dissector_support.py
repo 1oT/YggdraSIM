@@ -424,7 +424,77 @@ def standard_corpus() -> list[Exchange]:
             bytes.fromhex("9000"),
             "update-binary-extended",
         ),
+        # GlobalPlatform: opening a secure channel.
+        Exchange(
+            bytes.fromhex("8050000008") + bytes(range(8)) + b"\x00",
+            INITIALIZE_UPDATE_RESPONSE + b"\x90\x00",
+            "initialize-update",
+        ),
+        Exchange(
+            bytes.fromhex("8482330010") + bytes(range(16)),
+            bytes.fromhex("9000"),
+            "external-authenticate",
+        ),
+        # GlobalPlatform: a positional INSTALL body, not TLV.
+        Exchange(
+            bytes.fromhex("80E60200") + bytes([len(INSTALL_FOR_LOAD)])
+            + INSTALL_FOR_LOAD,
+            bytes.fromhex("9000"),
+            "install-for-load",
+        ),
+        # CAT: a FETCH answering with an OPEN CHANNEL proactive command.
+        Exchange(
+            bytes.fromhex("8012000000"),
+            PROACTIVE_OPEN_CHANNEL + b"\x90\x00",
+            "fetch-open-channel",
+        ),
     ]
+
+
+def _comprehension_tlv(tag: str, value: bytes) -> bytes:
+    return bytes.fromhex(tag) + bytes([len(value)]) + value
+
+
+#: An OPEN CHANNEL proactive command wrapped in its D0 envelope, per
+#: ETSI TS 102 223 clause 6.6.27. The D0 wrapper is plain BER; only its
+#: contents are COMPREHENSION-TLV.
+_OPEN_CHANNEL_BODY = b"".join(
+    [
+        _comprehension_tlv("81", bytes.fromhex("014001")),   # OPEN CHANNEL
+        _comprehension_tlv("82", bytes.fromhex("8121")),     # terminal -> UICC
+        _comprehension_tlv("35", bytes.fromhex("02030405060708")),
+        _comprehension_tlv("39", bytes.fromhex("0578")),     # buffer size 1400
+        _comprehension_tlv("47", b"\x03iot\x04test\x03com"),
+        _comprehension_tlv("3C", bytes.fromhex("020050")),   # TCP client, port 80
+        _comprehension_tlv("3E", bytes([0x21, 10, 0, 0, 1])),
+    ]
+)
+PROACTIVE_OPEN_CHANNEL = (
+    bytes.fromhex("D0") + bytes([len(_OPEN_CHANNEL_BODY)]) + _OPEN_CHANNEL_BODY
+)
+
+#: An INSTALL FOR LOAD data field: positional length-prefixed values, so
+#: the TLV walker is deliberately not applied to it.
+INSTALL_FOR_LOAD = (
+    bytes([5]) + bytes.fromhex("0102030405")      # load file AID
+    + bytes([5]) + bytes.fromhex("1112131415")    # Security Domain AID
+    + bytes([0])                                  # load file data block hash
+    + bytes([2]) + bytes.fromhex("C900")          # load parameters
+    + bytes([0])                                  # load token
+)
+
+#: An SCP03 INITIALIZE UPDATE response: 10 bytes of key diversification
+#: data, key version, SCP identifier 0x03, i-parameter, card challenge,
+#: card cryptogram, sequence counter.
+INITIALIZE_UPDATE_RESPONSE = (
+    bytes.fromhex("00112233445566778899")   # key diversification data
+    + bytes([0x30])                          # key version number
+    + bytes([0x03])                          # SCP03
+    + bytes([0x70])                          # i-parameter
+    + bytes.fromhex("A1A2A3A4A5A6A7A8")     # card challenge
+    + bytes.fromhex("B1B2B3B4B5B6B7B8")     # card cryptogram
+    + bytes.fromhex("000001")                # sequence counter
+)
 
 
 #: A File Control Parameters template for ADF.USIM, per ETSI TS 102 221

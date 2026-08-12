@@ -119,6 +119,32 @@ def _apdu_commands(assignments: dict[str, ast.expr], source: str) -> dict[Any, t
     return commands
 
 
+def _set_literal(assignments: dict[str, ast.expr], name: str, source: str) -> list[Any]:
+    """Read a ``frozenset({...})`` constant.
+
+    ``ast.literal_eval`` refuses the call node even though its single
+    argument is a literal set, so the wrapper is stepped over first.
+    """
+    node = assignments.get(name)
+    if node is None:
+        raise TableExtractionError(f"{source} no longer defines {name}")
+    if isinstance(node, ast.Call):
+        function = node.func
+        callee = getattr(function, "id", "")
+        if callee not in ("frozenset", "set") or len(node.args) != 1:
+            raise TableExtractionError(
+                f"{source}:{name} is not a frozenset(...) of literals"
+            )
+        node = node.args[0]
+    try:
+        value = ast.literal_eval(node)
+    except ValueError as error:
+        raise TableExtractionError(
+            f"{source}:{name} is not a literal the generator can read: {error}"
+        ) from error
+    return sorted(value, key=lambda entry: (isinstance(entry, tuple), entry))
+
+
 def _prefixed_constants(
     assignments: dict[str, ast.expr],
     prefix: str,
@@ -304,6 +330,28 @@ def _render_case_hints(hints: dict[Any, str]) -> str:
     return "\n\n".join(blocks)
 
 
+def _render_requires_data(entries) -> str:
+    """Render the instructions that always carry a command data field."""
+    qualified: list[int] = []
+    wildcard: list[int] = []
+    for entry in entries:
+        if isinstance(entry, tuple):
+            qualified.append((int(entry[0]) << 8) | int(entry[1]))
+        else:
+            wildcard.append(int(entry))
+    blocks = []
+    for table_name, values, width in (
+        ("INS_REQUIRES_DATA", wildcard, 2),
+        ("CLA_INS_REQUIRES_DATA", qualified, 4),
+    ):
+        lines = [f"M.{table_name} = {{"]
+        for key in sorted(values):
+            lines.append(f"    [0x{key:0{width}X}] = true,")
+        lines.append("}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 def _render_aids(constants: dict[str, str]) -> str:
     """Render the well-known AIDs as an AID-hex to friendly-name table."""
     labels = {
@@ -360,6 +408,9 @@ def collect_tables(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
         "case_hints": _literal(
             parsed["apdu_tables"], "APDU_CASE_HINTS", SOURCES["apdu_tables"]
         ),
+        "requires_data": _set_literal(
+            parsed["apdu_tables"], "APDU_REQUIRES_DATA", SOURCES["apdu_tables"]
+        ),
         "proactive": _literal(
             parsed["stk_tables"], "PROACTIVE_COMMANDS", SOURCES["stk_tables"]
         ),
@@ -410,6 +461,7 @@ def render_tables_lua(repo_root: Path = REPO_ROOT) -> str:
     sections: list[str] = [
         _render_commands(tables["commands"]),
         _render_case_hints(tables["case_hints"]),
+        _render_requires_data(tables["requires_data"]),
         _render_risk(tables["risk"]),
         _render_int_keyed("STATUS_WORDS", tables["status_words"], width=4),
         _render_string_keyed("BER_TAGS", ber_tags),

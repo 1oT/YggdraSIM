@@ -214,6 +214,31 @@ local function score_candidate(payload, candidate, cla, ins)
         end
     end
 
+    -- Some instructions are meaningless without a command body. That
+    -- breaks ties the structure alone cannot: an INSTALL with Lc=17 and
+    -- an INSTALL read as case 2S with Le=17 fit the same bytes, but
+    -- GlobalPlatform clause 11.5 says an INSTALL carries AIDs and
+    -- parameters, so the bodyless reading is not a real command.
+    local requires_data = tables.CLA_INS_REQUIRES_DATA[(cla * 256) + ins]
+    if requires_data == nil then
+        requires_data = tables.CLA_INS_REQUIRES_DATA[
+            (math.floor(cla / 4) * 4 * 256) + ins
+        ]
+    end
+    if requires_data == nil then
+        requires_data = tables.INS_REQUIRES_DATA[ins]
+    end
+    if requires_data == true then
+        if candidate.lc ~= nil and candidate.lc > 0 then
+            score = score + 20
+            if method == "structure" then
+                method = "requires-data"
+            end
+        else
+            score = score - 35
+        end
+    end
+
     -- An error status normally carries no response body, and a command
     -- with no Le should not have produced one either.
     if math.floor(sw1 / 16) == 0x06 and response_data_length == 0 then

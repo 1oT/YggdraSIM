@@ -22,7 +22,7 @@
 
 local M = {}
 
-M.SOURCE_DIGEST = "ccb0cdee0cc4b1d3839d4dd6a04ac5fe821cceffdc6c5ed1a38943a821182496"
+M.SOURCE_DIGEST = "288b72926c6ef9e90f99d15860c4c668091be90e9255daa8a4da6c19d9e5fccf"
 
 M.INS_NAMES = {
     [0x20] = "VERIFY",
@@ -182,6 +182,43 @@ M.CLA_INS_CASE_HINT = {
     [0x84E8] = "4S",
     [0x84F0] = "3S",
     [0x84F2] = "4S",
+}
+
+M.INS_REQUIRES_DATA = {
+    [0x20] = true,
+    [0x24] = true,
+    [0x2C] = true,
+    [0x32] = true,
+    [0xD6] = true,
+    [0xD7] = true,
+    [0xDA] = true,
+    [0xDC] = true,
+    [0xDD] = true,
+}
+
+M.CLA_INS_REQUIRES_DATA = {
+    [0x00E0] = true,
+    [0x00E4] = true,
+    [0x8010] = true,
+    [0x8014] = true,
+    [0x8050] = true,
+    [0x8082] = true,
+    [0x80AA] = true,
+    [0x80C2] = true,
+    [0x80D8] = true,
+    [0x80E2] = true,
+    [0x80E4] = true,
+    [0x80E6] = true,
+    [0x80E8] = true,
+    [0x80F0] = true,
+    [0x8450] = true,
+    [0x8482] = true,
+    [0x84D8] = true,
+    [0x84E2] = true,
+    [0x84E4] = true,
+    [0x84E6] = true,
+    [0x84E8] = true,
+    [0x84F0] = true,
 }
 
 M.RISK_CLASS = {

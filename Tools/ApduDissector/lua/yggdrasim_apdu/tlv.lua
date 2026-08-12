@@ -285,8 +285,17 @@ function M.parse(tvb, offset, length, options, budget, depth)
 
         local base_tag = tag.value
         local comprehension_required = nil
+        local constructed = tag.constructed
         if settings.mode == "comprehension" then
             base_tag, comprehension_required = M.comprehension_base(tag.value)
+            -- COMPREHENSION-TLV has no constructed bit. TS 101 220
+            -- clause 7.1.1 gives bit 8 to the comprehension-required
+            -- flag and the rest to the tag number; every data object is
+            -- primitive. Applying BER's bit-6 rule here recurses into
+            -- any tag that happens to have it set -- 0x35 Bearer
+            -- description, 0x39 Buffer size, 0x3C transport level --
+            -- and turns their values into invented sub-tags.
+            constructed = false
         end
 
         local name = ""
@@ -303,7 +312,7 @@ function M.parse(tvb, offset, length, options, budget, depth)
             tag_offset = cursor,
             tag_length = tag.length,
             class = tag.class,
-            constructed = tag.constructed,
+            constructed = constructed,
             length = value_length,
             length_offset = cursor + tag.length,
             length_length = length_info.length,
@@ -316,7 +325,7 @@ function M.parse(tvb, offset, length, options, budget, depth)
             depth = level,
         }
 
-        if tag.constructed and value_length > 0 then
+        if constructed and value_length > 0 then
             local children, child_errors = M.parse(
                 tvb, value_offset, value_length, settings, budget, level + 1
             )

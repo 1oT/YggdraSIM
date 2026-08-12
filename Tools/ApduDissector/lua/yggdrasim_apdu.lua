@@ -50,6 +50,9 @@ local tlv = require("yggdrasim_apdu.tlv")
 local commands = require("yggdrasim_apdu.commands")
 local responses = require("yggdrasim_apdu.responses")
 local state = require("yggdrasim_apdu.state")
+local gp = require("yggdrasim_apdu.gp")
+local cat = require("yggdrasim_apdu.cat")
+local rsp = require("yggdrasim_apdu.rsp")
 
 local yapdu = Proto("yapdu", "YggdraSIM APDU")
 yapdu.fields = fields.all
@@ -371,7 +374,307 @@ local function add_command_description(tree, payload, command, description)
     end
 end
 
-local function add_command_subtree(tree, payload, command, description, budget)
+--- Render a GlobalPlatform command's positional and bitmap fields.
+local function add_gp_description(tree, payload, command, gp_description)
+    tree:add(
+        fields.gp_variant, payload(1, 1), gp_description.variant
+            or gp_description.kind
+    ):set_generated()
+
+    if gp_description.kind == "install" and gp_description.install ~= nil then
+        local parsed = gp_description.install
+        for index = 1, #parsed.fields do
+            local entry = parsed.fields[index]
+            local range = util.safe_range(payload, entry.offset, entry.length)
+            if range ~= nil then
+                local field = fields.gp_field
+                if entry.name == "Privileges" then
+                    field = fields.gp_privileges
+                elseif entry.name:find("AID") ~= nil then
+                    field = fields.gp_aid
+                end
+                local item = tree:add(field, range)
+                item:set_text(string.format(
+                    "%s: %s", entry.name,
+                    util.hex(payload, entry.offset, entry.length)
+                ))
+                if field == fields.gp_aid and entry.length > 0 then
+                    local name = commands.aid_name(
+                        util.hex(payload, entry.offset, entry.length)
+                    )
+                    if name ~= "" then
+                        item:append_text(" (" .. name .. ")")
+                    end
+                end
+            end
+        end
+        if parsed.complete == false then
+            tree:add_proto_expert_info(
+                experts.tlv_malformed,
+                "the INSTALL data field did not consume exactly; the "
+                    .. "positional parse may have lost alignment"
+            )
+        end
+        return
+    end
+
+    if gp_description.kind == "load" or gp_description.kind == "store_data" then
+        tree:add(fields.gp_block_number, payload(3, 1), gp_description.block_number)
+            :set_generated()
+        tree:add(fields.gp_last_block, payload(2, 1), gp_description.last_block)
+            :set_generated()
+        if gp_description.structure ~= nil then
+            tree:add(fields.gp_structure, payload(2, 1), gp_description.structure)
+                :set_generated()
+            tree:add(fields.gp_encryption, payload(2, 1), gp_description.encryption)
+                :set_generated()
+        end
+        return
+    end
+
+    if gp_description.kind == "status" then
+        tree:add(fields.gp_scope, payload(2, 1), gp_description.scope):set_generated()
+        return
+    end
+
+    if gp_description.kind == "external_authenticate" then
+        tree:add(fields.gp_security_level, payload(2, 1), gp_description.level)
+            :set_generated()
+        if command.data_offset ~= nil and command.data_length >= 8 then
+            local range = util.safe_range(payload, command.data_offset, 8)
+            if range ~= nil then
+                tree:add(fields.gp_host_challenge, range)
+            end
+        end
+        return
+    end
+
+    if gp_description.kind == "initialize_update" then
+        tree:add(fields.gp_key_version, payload(2, 1), gp_description.key_version)
+            :set_generated()
+        if command.data_offset ~= nil and command.data_length >= 8 then
+            local range = util.safe_range(payload, command.data_offset, 8)
+            if range ~= nil then
+                tree:add(fields.gp_host_challenge, range)
+            end
+        end
+        return
+    end
+
+    if gp_description.kind == "put_key" then
+        tree:add(fields.gp_key_version, payload(2, 1), gp_description.key_version)
+            :set_generated()
+        tree:add(
+            fields.gp_key_identifier, payload(3, 1), gp_description.key_identifier
+        ):set_generated()
+        return
+    end
+end
+
+--- Render the INITIALIZE UPDATE response, which sets up the secure channel.
+local function add_initialize_update_response(tree, payload, response)
+    local parsed = gp.parse_initialize_update_response(
+        payload, response.data_offset, response.data_length
+    )
+    if parsed == nil then
+        return false
+    end
+    local diversification = util.safe_range(
+        payload, parsed.key_diversification_offset, 10
+    )
+    if diversification ~= nil then
+        tree:add(fields.gp_key_diversification, diversification)
+    end
+    tree:add(fields.gp_scp, payload(0, 1), parsed.scp_name):set_generated()
+    if parsed.key_version ~= nil then
+        tree:add(fields.gp_key_version, payload(0, 1), parsed.key_version)
+            :set_generated()
+    end
+    if parsed.card_challenge_offset ~= nil then
+        local range = util.safe_range(
+            payload, parsed.card_challenge_offset, parsed.card_challenge_length
+        )
+        if range ~= nil then
+            tree:add(fields.gp_card_challenge, range)
+        end
+    end
+    if parsed.card_cryptogram_offset ~= nil then
+        local range = util.safe_range(
+            payload, parsed.card_cryptogram_offset, parsed.card_cryptogram_length
+        )
+        if range ~= nil then
+            tree:add(fields.gp_card_cryptogram, range)
+        end
+    end
+    if parsed.sequence_counter_offset ~= nil then
+        local range = util.safe_range(
+            payload, parsed.sequence_counter_offset, parsed.sequence_counter_length
+        )
+        if range ~= nil then
+            tree:add(fields.gp_sequence_counter, range)
+        end
+    end
+    return true
+end
+
+--- Render a CAT proactive command or terminal response.
+--
+-- The outer 0xD0 Proactive Command tag is plain BER; only its contents
+-- are COMPREHENSION-TLV. Parsing the wrapper in comprehension mode would
+-- strip its high bit and rename it from "Proactive command" to whatever
+-- 0x50 happens to mean, so the wrapper is stepped over first.
+local function add_cat_subtree(tree, payload, offset, length, budget)
+    local content_offset = offset
+    local content_length = length
+
+    local wrapper = tlv.read_tag(payload, offset)
+    if wrapper ~= nil and wrapper.value == cat.PROACTIVE_COMMAND_TAG then
+        local wrapper_length = tlv.read_length(payload, offset + wrapper.length)
+        if wrapper_length ~= nil and wrapper_length.value ~= nil then
+            content_offset = offset + wrapper.length + wrapper_length.length
+            content_length = wrapper_length.value
+            local available = payload:captured_len() - content_offset
+            if content_length > available then
+                content_length = math.max(0, available)
+            end
+            local range = util.safe_range(payload, offset, length)
+            if range ~= nil then
+                tree = tree:add(fields.cat_command, range)
+                tree:set_text("Proactive command (D0)")
+            end
+        end
+    end
+
+    local nodes = add_tlv_subtree(
+        tree, payload, content_offset, content_length, cat.tlv_options(), budget
+    )
+    if nodes == nil then
+        return nil
+    end
+    offset = content_offset
+    -- Pull the command type out of the Command Details TLV so the info
+    -- column can name what the card asked the terminal to do.
+    local function find_details(node_list)
+        for index = 1, #node_list do
+            local node = node_list[index]
+            if node.base_tag == cat.TAG_COMMAND_DETAILS and node.value_length >= 3 then
+                return {
+                    number = util.byte_at(payload, node.value_offset),
+                    command_type = util.byte_at(payload, node.value_offset + 1),
+                    qualifier = util.byte_at(payload, node.value_offset + 2),
+                }
+            end
+            if node.children ~= nil then
+                local found = find_details(node.children)
+                if found ~= nil then
+                    return found
+                end
+            end
+        end
+        return nil
+    end
+    local details = find_details(nodes)
+    if details == nil or details.command_type == nil then
+        return nil
+    end
+    local name = cat.command_name(details.command_type)
+    tree:add(fields.cat_type, payload(offset, 1), details.command_type)
+        :set_generated()
+    tree:add(fields.cat_type_name, payload(offset, 1), name):set_generated()
+    tree:add(fields.cat_number, payload(offset, 1), details.number or 0)
+        :set_generated()
+    tree:add(
+        fields.cat_qualifier_name, payload(offset, 1),
+        cat.qualifier_name(details.command_type, details.qualifier or 0)
+    ):set_generated()
+
+    -- Bearer Independent Protocol parameters. These are what an eUICC
+    -- profile download actually runs over, so naming the bearer, the
+    -- access point and the peer address is most of what a BIP trace is
+    -- consulted for.
+    local port = nil
+    local channel_payload = nil
+    local channel_payload_offset = nil
+    for index = 1, #nodes do
+        local node = nodes[index]
+        local range = util.safe_range(payload, node.value_offset, node.value_length)
+        if range ~= nil then
+            if node.base_tag == cat.TAG_BEARER_DESCRIPTION and node.value_length >= 1 then
+                local bearer = util.byte_at(payload, node.value_offset)
+                tree:add(fields.cat_bearer, range, cat.bearer_name(bearer))
+                    :set_generated()
+            elseif node.base_tag == cat.TAG_BUFFER_SIZE and node.value_length == 2 then
+                local size = util.safe_uint(payload, node.value_offset, 2)
+                if size ~= nil then
+                    tree:add(fields.cat_buffer_size, range, size)
+                end
+            elseif node.base_tag == cat.TAG_NETWORK_ACCESS_NAME then
+                local values = util.byte_array(
+                    payload, node.value_offset, node.value_length
+                )
+                local apn = cat.decode_access_name(values)
+                if apn ~= "" then
+                    tree:add(fields.cat_apn, range, apn):set_generated()
+                end
+            elseif node.base_tag == cat.TAG_OTHER_ADDRESS then
+                local values = util.byte_array(
+                    payload, node.value_offset, node.value_length
+                )
+                local address = cat.decode_other_address(values)
+                if address ~= "" then
+                    tree:add(fields.cat_address, range, address):set_generated()
+                end
+            elseif node.base_tag == cat.TAG_TRANSPORT_LEVEL and node.value_length >= 1 then
+                local kind = util.byte_at(payload, node.value_offset)
+                tree:add(fields.cat_transport, range, cat.transport_name(kind))
+                    :set_generated()
+                if node.value_length >= 3 then
+                    port = util.safe_uint(payload, node.value_offset + 1, 2)
+                    if port ~= nil then
+                        tree:add(fields.cat_port, range, port)
+                    end
+                end
+            elseif node.base_tag == cat.TAG_CHANNEL_STATUS and node.value_length >= 1 then
+                local status = util.byte_at(payload, node.value_offset)
+                tree:add(
+                    fields.cat_channel, range, cat.channel_number(status)
+                ):set_generated()
+            elseif node.base_tag == cat.TAG_CHANNEL_DATA and node.value_length > 0 then
+                channel_payload = util.byte_array(
+                    payload, node.value_offset, node.value_length
+                )
+                channel_payload_offset = node.value_offset
+                tree:add(fields.cat_channel_data, range)
+            elseif node.base_tag == cat.TAG_RESULT and node.value_length >= 1 then
+                local result = util.byte_at(payload, node.value_offset)
+                tree:add(fields.cat_result, range, result)
+                tree:add(fields.cat_result_name, range, cat.result_name(result))
+                    :set_generated()
+            elseif node.base_tag == cat.TAG_EVENT_LIST then
+                for byte_index = 0, node.value_length - 1 do
+                    local event = util.byte_at(payload, node.value_offset + byte_index)
+                    if event ~= nil then
+                        tree:add(
+                            fields.cat_event_name, range, cat.event_name(event)
+                        ):set_generated()
+                    end
+                end
+            end
+        end
+    end
+
+    return {
+        name = name,
+        command_type = details.command_type,
+        channel_payload = channel_payload,
+        channel_payload_offset = channel_payload_offset,
+        port = port,
+    }
+end
+
+local function add_command_subtree(
+    tree, payload, command, description, rsp_description, budget
+)
     local range = util.safe_range(payload, 0, command.length)
     local item
     if range ~= nil then
@@ -408,6 +711,11 @@ local function add_command_subtree(tree, payload, command, description, budget)
         add_command_description(item, payload, command, description)
     end
 
+    local gp_description = gp.describe(payload, command)
+    if gp_description ~= nil then
+        add_gp_description(item, payload, command, gp_description)
+    end
+
     if command.data_offset ~= nil and command.data_length > 0 then
         local data_range = util.safe_range(
             payload, command.data_offset, command.data_length
@@ -415,9 +723,25 @@ local function add_command_subtree(tree, payload, command, description, budget)
         if data_range ~= nil then
             local data_item = item:add(fields.data, data_range)
             -- SELECT and the PIN commands carry positional data that the
-            -- description above already broke out, so a TLV attempt
-            -- there would only produce noise.
-            if command.ins ~= commands.INS_SELECT then
+            -- description above already broke out, and an INSTALL body is
+            -- positional too, so a TLV attempt on either produces noise.
+            local positional = command.ins == commands.INS_SELECT
+                or (gp_description ~= nil and gp_description.kind == "install")
+
+            if cat.is_cat_instruction(command.cla, command.ins) then
+                add_cat_subtree(
+                    data_item, payload, command.data_offset,
+                    command.data_length, budget
+                )
+            elseif rsp_description ~= nil then
+                data_item:set_text(
+                    "Command data: " .. rsp_description.name
+                )
+                add_tlv_subtree(
+                    data_item, payload, command.data_offset,
+                    command.data_length, rsp.tlv_options(), budget
+                )
+            elseif positional == false then
                 add_tlv_subtree(
                     data_item,
                     payload,
@@ -629,6 +953,25 @@ local function add_response_subtree(tree, payload, response, context, command, b
                 data_item:set_text(
                     "Response data: " .. responses.template_name(first_tag.value)
                 )
+            end
+
+            -- The INITIALIZE UPDATE response is positional, not TLV.
+            if gp.is_gp_class(command.cla)
+                and command.ins == gp.INS_INITIALIZE_UPDATE then
+                if add_initialize_update_response(data_item, payload, response) then
+                    return item
+                end
+            end
+
+            -- A FETCH answers with a proactive command.
+            if cat.is_cat_instruction(command.cla, command.ins)
+                and command.ins == 0x12 then
+                if add_cat_subtree(
+                    data_item, payload, response.data_offset,
+                    response.data_length, budget
+                ) ~= nil then
+                    return item
+                end
             end
 
             local nodes = add_tlv_subtree(
@@ -844,7 +1187,10 @@ local function dissect_exchange(payload, pinfo, tree)
     end
 
     local budget = tlv.new_budget()
-    add_command_subtree(root, payload, command, description, budget)
+    local rsp_description = rsp.describe(payload, command, context)
+    add_command_subtree(
+        root, payload, command, description, rsp_description, budget
+    )
     add_response_subtree(root, payload, response, context, command, budget)
 
     root:set_text(string.format(
@@ -853,6 +1199,17 @@ local function dissect_exchange(payload, pinfo, tree)
 
     if yapdu.prefs.set_info_column == true then
         local detail = commands.summary(description)
+        -- The most specific reading wins the column: naming the ES10
+        -- function or the GlobalPlatform variant is what an operator is
+        -- scanning the packet list for.
+        if rsp_description ~= nil then
+            detail = rsp_description.name
+        else
+            local gp_detail = gp.summary(gp.describe(payload, command))
+            if gp_detail ~= "" then
+                detail = gp_detail
+            end
+        end
         local summary
         if detail ~= "" then
             summary = string.format(

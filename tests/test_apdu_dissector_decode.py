@@ -234,6 +234,7 @@ class SplitReporting(DecodeTestBase):
                 "le-match",
                 "sw-table",
                 "sw-family",
+                "requires-data",
                 "structure",
             }
         ), methods)
