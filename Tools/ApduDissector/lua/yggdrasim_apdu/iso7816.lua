@@ -11,6 +11,19 @@
 --
 -- Side-effect free; see util.lua.
 
+-- Wireshark's plugin loader executes every .lua file in its plugin
+-- directory standalone, in alphabetical order, so this module can run
+-- before the entry point that is supposed to require it -- and before
+-- anything has put its own directory on package.path. Each module
+-- therefore bootstraps the path itself. Prepending is guarded so a
+-- normal require by the entry point does not grow package.path on
+-- every load.
+local _module_dir = debug.getinfo(1, "S").source:sub(2):match("^(.*)[/\\]") or "."
+local _package_root = _module_dir .. "/../?.lua"
+if package.path:find(_package_root, 1, true) == nil then
+    package.path = _package_root .. ";" .. package.path
+end
+
 local util = require("yggdrasim_apdu.util")
 local tables = require("yggdrasim_apdu.tables")
 local fields = require("yggdrasim_apdu.fields")

@@ -77,21 +77,50 @@ writer on TShark 4.2.2:
     tshark -X lua_script:$(yggdrasim-apdu-dissect path) -r capture.pcap -V
     ```
 
-## Wireshark GUI
+## When it loads
 
-tshark takes the script as a path; the GUI does not. `install` copies the Lua
-tree into the folder Wireshark reports for itself:
+The dissector is **not** loaded by every tshark or Wireshark invocation by
+default. It is loaded automatically on the YggdraSIM-driven paths, and
+becomes global for your account after a one-time `install`.
+
+| How you start | Loaded? |
+|---|---|
+| HIL-bridge terminal decode view, live or `--open-pcap` | Yes, automatically |
+| Wireshark launched from the HIL menu (`[B]` -> `[1]` -> start mode `[2]`) | Yes, automatically |
+| `yggdrasim-apdu-dissect decode` | Yes, automatically |
+| `yggdrasim-eum-diag` | Yes, automatically |
+| A bare `tshark -r capture.pcap` you type yourself | Only after `install` |
+| Wireshark started from the desktop or app menu | Only after `install` |
+
+`YGGDRASIM_APDU_DISSECTOR=0` opts the automatic paths out.
+
+## Making it global
+
+tshark takes the script as a path; the GUI has no equivalent. `install` copies
+the Lua tree into the personal plugin folder Wireshark reports for itself,
+which **both** Wireshark and tshark read at startup. After this, every
+invocation under your account loads it with no flags at all:
 
 ```bash
 yggdrasim-apdu-dissect install --dry-run   # show what would be copied
 yggdrasim-apdu-dissect install
+yggdrasim-apdu-dissect uninstall           # and back out again
 ```
 
 In a running Wireshark, pick up the change with **Analyze > Reload Lua
 Plugins** (++ctrl+shift+l++).
 
-Launching Wireshark through the HIL bridge menu (`[B]` -> `[1]` -> start mode
-`[2]`) adds the dissector automatically, so no install is needed for that path.
+Installing and passing `-X lua_script:` at the same time is harmless: the
+entry point carries a load guard, because `Proto()` raises on a duplicate
+name and Wireshark would otherwise refuse the whole plugin.
+
+!!! note "Why each module bootstraps its own package.path"
+    Wireshark's plugin loader executes every `.lua` file in the plugin
+    directory standalone, in alphabetical order, so `cat.lua` runs before the
+    entry point that is supposed to `require` it. Each module therefore puts
+    its own directory on `package.path` before its first `require`. Without
+    that the whole plugin is refused at startup with
+    `module 'yggdrasim_apdu.util' not found`.
 
 !!! warning "Wireshark refuses Lua scripts when running as root"
     It does so *silently*: no error, no warning, the script simply never loads

@@ -37,11 +37,14 @@ file) may change without notice between minor releases.
   with its payload untouched, and ATR frames were mis-parsed as APDUs
   down to an invented status word.
 
-  Available as `yggdrasim-apdu-dissect` (`decode`, `install`,
-  `uninstall`, `path`, `probe`), and loaded automatically by the
-  HIL-bridge terminal decode view, offline pcap review, and the
+  Available as `yggdrasim-apdu-dissect` (`decode`, `sidecar`,
+  `install`, `uninstall`, `path`, `probe`), and loaded automatically by
+  the HIL-bridge terminal decode view, offline pcap review, and the
   Wireshark launch under HIL start mode `[2]`. Set
-  `YGGDRASIM_APDU_DISSECTOR=0` to opt out.
+  `YGGDRASIM_APDU_DISSECTOR=0` to opt out. A bare `tshark` or a
+  desktop-launched Wireshark does not load it until
+  `yggdrasim-apdu-dissect install` copies the Lua tree into the personal
+  plugin folder, after which both read it at startup with no flags.
 
 - `scripts/generate_apdu_dissector_tables.py` generates the dissector's
   Lua lookup tables from the Python modules that already own them, so an

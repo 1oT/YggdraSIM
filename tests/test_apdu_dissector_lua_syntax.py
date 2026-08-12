@@ -147,6 +147,36 @@ class LuaModulesArePure(unittest.TestCase):
         self.assertIn("debug.getinfo", text)
         self.assertIn("package.path", text)
 
+    def test_every_module_that_requires_also_bootstraps_the_path(self) -> None:
+        """A module cannot assume the entry point ran first.
+
+        Wireshark's plugin loader executes each file standalone in
+        alphabetical order, so cat.lua runs before yggdrasim_apdu.lua.
+        Without its own path bootstrap its require fails and the whole
+        plugin is refused with "module 'yggdrasim_apdu.util' not found"
+        -- which is what happened the first time this was installed into
+        a real plugin directory.
+        """
+        for path in _module_files():
+            text = path.read_text(encoding="utf-8")
+            if 'require("yggdrasim_apdu.' not in text:
+                continue
+            with self.subTest(module=path.name):
+                self.assertIn(
+                    "debug.getinfo",
+                    text,
+                    f"{path.name} requires a sibling module but never puts "
+                    "its own directory on package.path",
+                )
+                bootstrap_at = text.index("package.path")
+                first_require = text.index('require("yggdrasim_apdu.')
+                self.assertLess(
+                    bootstrap_at,
+                    first_require,
+                    f"{path.name} bootstraps package.path after its first "
+                    "require, which is too late",
+                )
+
 
 class LuaSourcesAreAsciiClean(unittest.TestCase):
     def test_no_banned_typography(self) -> None:
