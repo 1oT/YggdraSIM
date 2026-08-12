@@ -8,7 +8,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 All notable changes to YggdraSIM are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 honours [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for
-the public API surface — the launcher, the documented CLI shells, the
+the public API surface -- the launcher, the documented CLI shells, the
 SCP03 / SCP11 / SCP80 / SIMCARD module entry points, and the
 `yggdrasim_common` helpers consumed by external integrators.
 
@@ -17,6 +17,53 @@ SAIP wrappers, and any path explicitly marked post-v1 staging in this
 file) may change without notice between minor releases.
 
 ## [Unreleased]
+
+### Added
+
+- `Tools/ApduDissector/` is a Wireshark and tshark dissector for the
+  GSMTAP SIM frames the HIL bridge mirrors on UDP `4729`. It decodes the
+  ISO/IEC 7816-4 header with its class-byte breakdown and case
+  classification, status words including the `61XX` / `6CXX` / `63CX`
+  families whose SW2 carries a count, BER-TLV and COMPREHENSION-TLV,
+  ETSI TS 102 221 clause 11.1.1.3 file-control templates, the contents
+  of EF.ICCID / EF.IMSI / EF.UST / EF.AD, and ISO/IEC 7816-3 ATR frames.
+  Each command also carries the risk class from
+  `yggdrasim_common/apdu_risk.py`, so `yapdu.risk == 3` lists every
+  irreversible command in a capture.
+
+  Measured against TShark 4.2.2, this fixes three defects in the stock
+  decode: a `GET RESPONSE` carrying an FCP template was reported as a
+  malformed packet, a `STORE DATA` to the ISD-R rendered as a bare `e2`
+  with its payload untouched, and ATR frames were mis-parsed as APDUs
+  down to an invented status word.
+
+  Available as `yggdrasim-apdu-dissect` (`decode`, `install`,
+  `uninstall`, `path`, `probe`), and loaded automatically by the
+  HIL-bridge terminal decode view, offline pcap review, and the
+  Wireshark launch under HIL start mode `[2]`. Set
+  `YGGDRASIM_APDU_DISSECTOR=0` to opt out.
+
+- `scripts/generate_apdu_dissector_tables.py` generates the dissector's
+  Lua lookup tables from the Python modules that already own them, so an
+  instruction name or status word cannot mean one thing in the toolkit
+  and another in a packet trace. `tests/test_apdu_dissector_tables.py`
+  fails when the committed Lua drifts.
+
+- `yggdrasim_common/stk_tables.py` holds the ETSI TS 102 223 Table 9.4
+  and clause 8.25 tables, which previously existed only as literals
+  inside `tests/test_stk_spec_tables.py`.
+
+- `yggdrasim_common/apdu_tables.py` records the ISO 7816-4 case each
+  instruction normally uses, used as a confidence signal when splitting
+  a concatenated command/response frame.
+
+### Changed
+
+- The HIL-bridge decode view names proactive command `0x04` `POLLING
+  OFF`, matching ETSI TS 102 223 Table 9.4. It previously read `POLL
+  OFF`. The TUI summary marker changed with it.
+
+- `scripts/check_repo_hygiene.py` now scans `.lua` files.
 
 ### Security
 
@@ -65,7 +112,7 @@ file) may change without notice between minor releases.
   every session, replacing the trip to the rig to press the physical
   reset button. The cardem firmware resets its own microcontroller when
   USB drops below `CONFIGURED`, so `Tools/HilBridge/device_reset.py`
-  forces that from the host — `USBDEVFS_RESET` on the usbfs node by
+  forces that from the host -- `USBDEVFS_RESET` on the usbfs node by
   default, or a `uhubctl` VBUS cycle that also power-cycles the SIM.
   Selected with `--simtrace-reset` / `YGGDRASIM_HIL_SIMTRACE_RESET`
   (`usb-reset`, `port-power`, `auto`, `off`); the USB snapshot is
@@ -77,7 +124,7 @@ file) may change without notice between minor releases.
   boundaries. Operator shells transact under a relay session id, and the
   bridge cold-resets the card (`SCARD_UNPOWER_CARD`) when that id first
   appears, when another shell replaces it, and when the shell
-  disconnects — so a selected AID, an open logical channel, or an
+  disconnects -- so a selected AID, an open logical channel, or an
   established SCP03 / SCP11 secure channel can no longer leak into the
   modem session. Because a power-cycle invalidates every view of the
   card, the bankd side is dropped too and `osmo-remsim-client-st2`
@@ -91,10 +138,10 @@ file) may change without notice between minor releases.
   stub, AAnF stub, FastAPI loopback, BYO Open5GS bridge);
   local-loopback `Tools/CardBridge/` HTTP card-relay daemon. The HTTP / CLI surface
   hardening, BYO-Open5GS resilience checks, and the public docs
-  pass for these modules are still pending — they are not part of
+  pass for these modules are still pending -- they are not part of
   the v1.0.0 promise.
 
-## [1.0.1] — 2026-06-05
+## [1.0.1] -- 2026-06-05
 
 ### Fixed
 
@@ -112,7 +159,7 @@ file) may change without notice between minor releases.
   logical-channel recovery, and STK-mode bootstrap for recoverable
   `6E00` / `6985` style failures after profile-state changes.
 
-## [1.0.0] — 2026-04-29
+## [1.0.0] -- 2026-04-29
 
 First SemVer-tagged release. Cut at git tag `v1.0.0`. Pinned commit
 exposes a frozen v1 footprint; the v2 staging continues on `main`.
@@ -123,8 +170,8 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
   `89049032123451234512345678901235`, with prefix `89049032` and a valid
   Luhn check digit.
 - SIMCARD 5G core: TS 33.501 Annex A AKA helpers (`SIMCARD/aka_5g.py`),
-  TS 33.535 AKMA (`SIMCARD/akma.py`), TS 33.501 §C.3 SUCI Profile A & B
-  with EF.SUCI_Calc_Info codec (`SIMCARD/suci.py`), TS 31.102 §7.1.2.4
+  TS 33.535 AKMA (`SIMCARD/akma.py`), TS 33.501 section C.3 SUCI Profile A & B
+  with EF.SUCI_Calc_Info codec (`SIMCARD/suci.py`), TS 31.102 section 7.1.2.4
   `GET IDENTITY` handler (`SIMCARD/identity.py`).
   transport (`SIMCARD/ipa_tls.py`); SAIP pySIM specs bridge
   (`SIMCARD/saip_pysim_specs.py`); SGP.32 package surfaces

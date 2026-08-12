@@ -219,6 +219,7 @@ yggdrasim-suci-tool = "yggdrasim_common.console_scripts:suci_tool"
 yggdrasim-profile-autoload = "yggdrasim_common.console_scripts:profile_autoload"
 yggdrasim-apdu-fuzzer = "yggdrasim_common.console_scripts:apdu_fuzzer"
 yggdrasim-eum-diag = "yggdrasim_common.console_scripts:eum_diag"
+yggdrasim-apdu-dissect = "yggdrasim_common.console_scripts:apdu_dissect"
 yggdrasim-asn1 = "yggdrasim_common.console_scripts:asn1_tlv_decode"
 yggdrasim-mcp = "yggdrasim_common.console_scripts:mcp_server"
 yggdrasim-session-diff = "yggdrasim_common.console_scripts:session_diff"
@@ -247,6 +248,11 @@ include-package-data = true
 # the wheel can resolve its location via ``importlib.resources`` even
 # when the source tree is not on disk.
 "Tools.EumDiag" = ["dissector.lua"]
+# The APDU dissector is a Lua tree loaded by tshark at runtime via
+# ``-X lua_script:...``, or copied into Wireshark's plugin folder by
+# ``python -m Tools.ApduDissector install``. Shipping it as package
+# data lets an installed wheel resolve it without the source tree.
+"Tools.ApduDissector" = ["lua/*.lua", "lua/yggdrasim_apdu/*.lua"]
 "Tools.ProfilePackage" = [
     "examples/saip_batch_data_template.yaml",
     "profile/reference_test_profile.txt",
@@ -385,6 +391,7 @@ include = [
     "SCP11.test",
     "SIMCARD",
     "Tools",
+    "Tools.ApduDissector",
     "Tools.ApduFuzz",
     "Tools.Asn1TlvDecode",
     "Tools.CardBridge",

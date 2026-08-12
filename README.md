@@ -10,7 +10,7 @@ YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/e
 > **Releases.** v1.0.1 was tagged on 2026-06-05 for SCP11 notification
 > recovery fixes on the v1 line. Check out the frozen v1.0.0 footprint
 > with `git checkout v1.0.0`. The `main` branch carries
-> in-flight v2 work — surfaces tagged `(post-v1 staging)`
+> in-flight v2 work -- surfaces tagged `(post-v1 staging)`
 > below are part of that v2 line and are not covered by the v1.0.x
 > compatibility promise. See [`CHANGELOG.md`](CHANGELOG.md) for release
 > notes and the active backlog.
@@ -75,6 +75,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `SCP11/local_access/` | Direct local `ISD-R` bring-up and one-shot `LOAD-PROFILE` | local SCP11 shell |
 | `SCP11/eim_local/` | eIM-local package generation, hotfolder queues, handover flows, and response tracking | eIM local shell |
 | `SIMCARD/` | In-process simulated UICC / eUICC: ETSI TS 102 221 file system, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit + BIP, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / GET IDENTITY | selected via `--card-backend sim` |
+| `Tools/ApduDissector/` | Wireshark / tshark dissector decoding GSMTAP SIM frames through the APDU header, BER-TLV, file-control templates and elementary-file contents | `yggdrasim-apdu-dissect` |
 | `Tools/HilBridge/` | SIMtrace2-based hardware-in-the-loop bridge: RSPRO relay, RemSIM lifecycle, GSMTAP mirror, remote-card input, offline pcap review, AT+CSIM/CRSM transcoding (`at_simlink`) | `yggdrasim-hil-bridge` (Linux) |
 | `Tools/ProfilePackage/` | SAIP shell, transcode UI, lint engine, JSON↔DER bridge | profile-package shell + TUI |
 | `Tools/SuciTool/` | SUCI helper tooling | helper shell |
@@ -99,8 +100,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 - eIM-centric local package work, hotfolder campaigns, handover validation, and response tracking through `SCP11/eim_local`.
 - Hardware-in-the-loop SIMtrace2 bridge with RemSIM lifecycle, GSMTAP mirroring, brokered APDU side-channel access, remote-card input, and AT+CSIM / AT+CRSM transcoding for modem cold-boot rigs through `Tools/HilBridge`.
 - In-process simulated UICC / eUICC backend (`--card-backend sim`) with full ETSI TS 102 221 file system, ISD-R + ISD-P personalities, persistent EID-scoped store, GP / SCP03 / SCP80 secure messaging, and an ETSI TS 102 223 toolkit + BIP runtime.
-- 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 §C.3) on the simulated card, including TS 31.102 §7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation). *(SIMCARD layer shipped in v1.0.0.)*
-- In-process 5G-core stubs for end-to-end AKA + AKMA loops (`Tools/YggdraCore`: AUSF, AAnF, subscription store, optional FastAPI loopback) plus a BYO-Open5GS provisioning bridge for hosts that already run a real 5GC. *(post-v1 staging on `main`; documentation, CLI surface, and HTTP-loopback hardening not part of this release — see `CHANGELOG.md`.)*
+- 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 section C.3) on the simulated card, including TS 31.102 section 7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation). *(SIMCARD layer shipped in v1.0.0.)*
+- In-process 5G-core stubs for end-to-end AKA + AKMA loops (`Tools/YggdraCore`: AUSF, AAnF, subscription store, optional FastAPI loopback) plus a BYO-Open5GS provisioning bridge for hosts that already run a real 5GC. *(post-v1 staging on `main`; documentation, CLI surface, and HTTP-loopback hardening not part of this release -- see `CHANGELOG.md`.)*
 - SAIP / UPP profile inspection, linting, JSON↔DER transcode, and shell automation through `Tools/ProfilePackage`.
 - Visual side-by-side SAIP profile diffing (shell + Textual TUI) via
   `DIFF` / `DIFF-TUI` inside the profile-package shell.
@@ -199,10 +200,10 @@ yggdrasim-card-clone
 
 Container, PyInstaller, `.deb`, and `.exe` notes now live in:
 
-- `guides/BUILD_AND_PACKAGING.md` — flavor-aware build commands
-- `guides/INSTALL_CLEAN.md` — operator install for the clean bundle
-- `guides/INSTALL_FULL.md` — operator install for the HIL-capable bundle
-- `guides/INSTALL_FROM_SOURCE.md` — editable install and test-suite usage
+- `guides/BUILD_AND_PACKAGING.md` -- flavor-aware build commands
+- `guides/INSTALL_CLEAN.md` -- operator install for the clean bundle
+- `guides/INSTALL_FULL.md` -- operator install for the HIL-capable bundle
+- `guides/INSTALL_FROM_SOURCE.md` -- editable install and test-suite usage
 
 Quick container smoke path:
 
@@ -449,7 +450,9 @@ Use `Tools/HilBridge` when you need a physical-card-to-modem bridge with:
 
 - `RSPRO` / `osmo-remsim-client-st2` connectivity on `127.0.0.1:9997`
 - optional remote-card input through `Tools.CardBridge` and SSH
-- GSMTAP mirroring to Wireshark on UDP `4729`
+- GSMTAP mirroring to Wireshark on UDP `4729`, decoded in depth by
+  `Tools/ApduDissector` (loaded automatically for both the terminal
+  decode view and the Wireshark launch)
 - exclusive reader ownership with relay-backed YggdraSIM side access
 - manual HIL capture sessions started and stopped on demand
 - offline review of saved `.pcap` / `.pcapng` captures via
@@ -463,7 +466,7 @@ Session-key keybag JSONs are produced by:
 - `EXPORT-KEYBAG` in `SCP11.local_access` (after any BSP-building verb)
 - `python -m SCP11.local_access --dump-keybag <path>` non-interactively
 
-`python -m SCP11.live --dump-keybag` is a documented no-op stub — live
+`python -m SCP11.live --dump-keybag` is a documented no-op stub -- live
 SCP11c BSP keys are derived inside the eUICC and never reach the host.
 
 The local SIMtrace2/RemSIM HIL bridge is **only shipped in the full
@@ -475,10 +478,10 @@ manually.
 
 See:
 
-- `guides/HIL_BRIDGE_GUIDE.md` — operator flow
-- `guides/CARD_BRIDGE_GUIDE.md` — remote reader and remote-rig APDU streaming
-- `guides/INSTALL_FULL.md` — HIL-capable executable install
-- `guides/SIMTRACE2_CARDEM_GUIDE.md` — flashing / updating SIMtrace2 and `osmo-remsim-client-st2`
+- `guides/HIL_BRIDGE_GUIDE.md` -- operator flow
+- `guides/CARD_BRIDGE_GUIDE.md` -- remote reader and remote-rig APDU streaming
+- `guides/INSTALL_FULL.md` -- HIL-capable executable install
+- `guides/SIMTRACE2_CARDEM_GUIDE.md` -- flashing / updating SIMtrace2 and `osmo-remsim-client-st2`
 - `guides/systemd/yggdrasim-hil-supervisor.service.example`
 
 ### Local SMDPP
@@ -538,17 +541,17 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 
 `akaParameter` tooling (3GPP TS 35.206 / TS 35.231):
 
-- `LIST-AKA` — read-only summary of every `akaParameter` PE in the active
+- `LIST-AKA` -- read-only summary of every `akaParameter` PE in the active
   profile, including algorithm, Ki/OPc byte length, Keccak count,
   `authCounterMax`, and whether a 32-slot `sqnInit` seed is present.
 - `PROVISION-AKA <out.der | IN-PLACE> [ALGORITHM=..] [KI=..] [OPC=..]
-  [NUMBER-OF-KECCAK=..] [AUTH-COUNTER-MAX=..] [SQN-INIT=..]` — tag-granular
+  [NUMBER-OF-KECCAK=..] [AUTH-COUNTER-MAX=..] [SQN-INIT=..]` -- tag-granular
   provisioning. With only an output path it walks the interactive wizard.
   Passing any `NAME=VALUE` override switches to non-interactive mode so the
   command is safe to paste into scripts or tests. `IN-PLACE` rewrites the
   currently-selected DER.
 - `RANDOMIZE-AKA <out.der | IN-PLACE> [ALGORITHM=..] [INCLUDE-AUTH-COUNTER-MAX]
-  [INCLUDE-SQN-INIT]` — development helper that generates Ki / OPc / TOPc
+  [INCLUDE-SQN-INIT]` -- development helper that generates Ki / OPc / TOPc
   (and the TUAK-specific `numberOfKeccak`) via `secrets.token_bytes` and
   applies them to the first `akaParameter` PE. `authCounterMax` and `sqnInit`
   are skipped by default so replay-protection envelopes stay predictable.
@@ -603,6 +606,7 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `SCP80/` - OTA CLI, builder, transport, decode helpers
 - `SCP11/` - relay, local, shared, and eIM-related flows
 - `SIMCARD/` - in-process simulated UICC / eUICC backend (file system, AKA, GP, SCP03 / SCP80, toolkit, 5G AKA / AKMA / SUCI, GET IDENTITY)
+- `Tools/ApduDissector/` - Wireshark / tshark APDU dissector, plugin installer, table codegen
 - `Tools/HilBridge/` - SIMtrace2 bridge, supervisor, RemSIM lifecycle, GSMTAP mirror, remote-card input, AT+CSIM/CRSM transcoder
 - `Tools/ProfilePackage/` - SAIP shell, linter, transcode UI
 - `Tools/SuciTool/` - SUCI helper shell

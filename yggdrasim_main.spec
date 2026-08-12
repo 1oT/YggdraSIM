@@ -175,6 +175,7 @@ package_candidates = [
     "yggdrasim_common",
 ]
 published_tool_packages = [
+    "Tools.ApduDissector",
     "Tools.ApduFuzz",
     "Tools.Asn1TlvDecode",
     "Tools.CardBridge",

@@ -115,6 +115,15 @@ Subsystem pages are the operator-facing guides. Each page covers:
 
     [Open APDU Fuzzer](apdu-fuzzer.md)
 
+-   :material-magnify-scan: __APDU Dissector__
+
+    ---
+
+    Wireshark/tshark dissector decoding GSMTAP SIM frames through BER-TLV,
+    file-control templates and elementary-file contents.
+
+    [Open APDU Dissector](apdu-dissector.md)
+
 -   :material-shield-key-outline: __EUM Diagnostics__
 
     ---
