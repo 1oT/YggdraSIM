@@ -143,6 +143,117 @@ M.atr_historical = ProtoField.bytes(
 M.atr_tck = ProtoField.uint8(PREFIX .. ".atr.tck", "TCK (check byte)", base.HEX)
 M.atr_tck_valid = ProtoField.bool(PREFIX .. ".atr.tck_valid", "TCK valid")
 
+-- ------------------------------------------------------------------- TLV
+local TAG_CLASS_NAMES = {
+    [0] = "Universal",
+    [1] = "Application",
+    [2] = "Context-specific",
+    [3] = "Private",
+}
+
+M.tlv = ProtoField.bytes(PREFIX .. ".tlv", "TLV")
+M.tlv_tag = ProtoField.uint32(PREFIX .. ".tlv.tag", "Tag", base.HEX)
+M.tlv_base_tag = ProtoField.uint32(
+    PREFIX .. ".tlv.base_tag", "Tag (comprehension bit cleared)", base.HEX
+)
+M.tlv_name = ProtoField.string(PREFIX .. ".tlv.name", "Tag name")
+M.tlv_class = ProtoField.uint8(
+    PREFIX .. ".tlv.class", "Tag class", base.DEC, TAG_CLASS_NAMES
+)
+M.tlv_constructed = ProtoField.bool(PREFIX .. ".tlv.constructed", "Constructed")
+M.tlv_length = ProtoField.uint32(PREFIX .. ".tlv.length", "Length", base.DEC)
+M.tlv_indefinite = ProtoField.bool(
+    PREFIX .. ".tlv.indefinite", "Indefinite length"
+)
+M.tlv_value = ProtoField.bytes(PREFIX .. ".tlv.value", "Value")
+M.tlv_comprehension = ProtoField.bool(
+    PREFIX .. ".tlv.comprehension_required", "Comprehension required"
+)
+M.tlv_text = ProtoField.string(PREFIX .. ".tlv.text", "Value (text)")
+-- uint32, not uint64: a Lua number cannot be handed to a 64-bit field
+-- (Wireshark wants a UInt64 userdata), and the renderer only offers an
+-- integer reading for values of four bytes or fewer anyway.
+M.tlv_uint = ProtoField.uint32(PREFIX .. ".tlv.uint", "Value (integer)", base.DEC)
+
+-- ------------------------------------------------------------- file access
+M.select_fid = ProtoField.uint16(PREFIX .. ".select.fid", "File identifier", base.HEX)
+M.select_aid = ProtoField.bytes(PREFIX .. ".select.aid", "Application identifier")
+M.select_name = ProtoField.string(PREFIX .. ".select.name", "Selected")
+M.select_control = ProtoField.uint8(
+    PREFIX .. ".select.control", "Selection control", base.HEX
+)
+M.select_return = ProtoField.uint8(
+    PREFIX .. ".select.return", "Return-data control", base.HEX
+)
+
+M.binary_offset = ProtoField.uint32(
+    PREFIX .. ".binary.offset", "Offset", base.DEC
+)
+M.binary_sfi = ProtoField.uint8(PREFIX .. ".binary.sfi", "Short file identifier", base.DEC)
+
+M.record_number = ProtoField.uint8(
+    PREFIX .. ".record.number", "Record number", base.DEC
+)
+M.record_sfi = ProtoField.uint8(PREFIX .. ".record.sfi", "Short file identifier", base.DEC)
+M.record_mode = ProtoField.uint8(PREFIX .. ".record.mode", "Record mode", base.DEC)
+
+M.pin_reference = ProtoField.uint8(
+    PREFIX .. ".pin.reference", "Key reference", base.HEX
+)
+M.pin_name = ProtoField.string(PREFIX .. ".pin.name", "Key")
+M.pin_value_len = ProtoField.uint32(
+    PREFIX .. ".pin.value_len", "PIN block length", base.DEC
+)
+M.pin_retries = ProtoField.uint8(PREFIX .. ".pin.retries", "Retries left", base.DEC)
+
+M.channel_number = ProtoField.uint8(
+    PREFIX .. ".channel.number", "Channel number", base.DEC
+)
+M.channel_operation = ProtoField.string(
+    PREFIX .. ".channel.operation", "Channel operation"
+)
+
+M.data_object_tag = ProtoField.uint16(
+    PREFIX .. ".data_object.tag", "Data object tag", base.HEX
+)
+M.data_object_name = ProtoField.string(
+    PREFIX .. ".data_object.name", "Data object"
+)
+
+-- --------------------------------------------------------------- FCP / EF
+M.fcp = ProtoField.bytes(PREFIX .. ".fcp", "File control parameters")
+M.fcp_file_size = ProtoField.uint32(PREFIX .. ".fcp.file_size", "File size", base.DEC)
+M.fcp_total_size = ProtoField.uint32(
+    PREFIX .. ".fcp.total_file_size", "Total file size", base.DEC
+)
+M.fcp_fid = ProtoField.uint16(PREFIX .. ".fcp.fid", "File identifier", base.HEX)
+M.fcp_df_name = ProtoField.bytes(PREFIX .. ".fcp.df_name", "DF name (AID)")
+M.fcp_sfi = ProtoField.uint8(PREFIX .. ".fcp.sfi", "Short file identifier", base.DEC)
+M.fcp_lcsi = ProtoField.uint8(PREFIX .. ".fcp.lcsi", "Life-cycle status", base.HEX)
+M.fcp_descriptor = ProtoField.bytes(
+    PREFIX .. ".fcp.file_descriptor", "File descriptor"
+)
+M.fcp_file_type = ProtoField.string(PREFIX .. ".fcp.file_type", "File type")
+M.fcp_structure = ProtoField.string(PREFIX .. ".fcp.structure", "EF structure")
+M.fcp_record_length = ProtoField.uint32(
+    PREFIX .. ".fcp.record_length", "Record length", base.DEC
+)
+M.fcp_record_count = ProtoField.uint32(
+    PREFIX .. ".fcp.record_count", "Record count", base.DEC
+)
+M.fcp_path = ProtoField.string(PREFIX .. ".fcp.path", "Resolved path")
+
+M.ef_name = ProtoField.string(PREFIX .. ".ef.name", "Elementary file")
+M.ef_iccid = ProtoField.string(PREFIX .. ".ef.iccid", "ICCID")
+M.ef_imsi = ProtoField.string(PREFIX .. ".ef.imsi", "IMSI")
+M.ef_service = ProtoField.string(PREFIX .. ".ef.service", "Service")
+M.ef_mnc_length = ProtoField.uint8(
+    PREFIX .. ".ef.mnc_length", "MNC length", base.DEC
+)
+M.ef_operation_mode = ProtoField.uint8(
+    PREFIX .. ".ef.operation_mode", "MS operation mode", base.HEX
+)
+
 --- Every field, in registration order.
 M.all = {
     M.frame_kind, M.raw, M.context_available,
@@ -156,6 +267,21 @@ M.all = {
     M.sw_success,
     M.atr, M.atr_ts, M.atr_t0, M.atr_historical_count, M.atr_interface,
     M.atr_protocol, M.atr_historical, M.atr_tck, M.atr_tck_valid,
+    M.tlv, M.tlv_tag, M.tlv_base_tag, M.tlv_name, M.tlv_class,
+    M.tlv_constructed, M.tlv_length, M.tlv_indefinite, M.tlv_value,
+    M.tlv_comprehension, M.tlv_text, M.tlv_uint,
+    M.select_fid, M.select_aid, M.select_name, M.select_control,
+    M.select_return,
+    M.binary_offset, M.binary_sfi,
+    M.record_number, M.record_sfi, M.record_mode,
+    M.pin_reference, M.pin_name, M.pin_value_len, M.pin_retries,
+    M.channel_number, M.channel_operation,
+    M.data_object_tag, M.data_object_name,
+    M.fcp, M.fcp_file_size, M.fcp_total_size, M.fcp_fid, M.fcp_df_name,
+    M.fcp_sfi, M.fcp_lcsi, M.fcp_descriptor, M.fcp_file_type,
+    M.fcp_structure, M.fcp_record_length, M.fcp_record_count, M.fcp_path,
+    M.ef_name, M.ef_iccid, M.ef_imsi, M.ef_service, M.ef_mnc_length,
+    M.ef_operation_mode,
 }
 
 return M

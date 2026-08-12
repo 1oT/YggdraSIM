@@ -369,10 +369,15 @@ def standard_corpus() -> list[Exchange]:
         # Case 2S: GET RESPONSE returning an FCP template. Le must equal
         # the body the card returns, or the split legitimately prefers a
         # different reading.
+        Exchange(bytes.fromhex("00C0000012"), FCP_ADF_USIM + b"\x90\x00",
+                 "get-response-fcp"),
+        # Selecting EF.ICCID before reading it is what gives the read
+        # below a file to be attributed to. Without the SELECT the
+        # response body is just ten bytes.
         Exchange(
-            bytes.fromhex("00C0000011"),
-            bytes.fromhex("621282027821830400003F00A503C00100") + b"\x90\x00",
-            "get-response-fcp",
+            bytes.fromhex("00A4000402") + bytes.fromhex("2FE2"),
+            bytes.fromhex("6113"),
+            "select-ef-iccid",
         ),
         # Case 2S: READ BINARY of EF.ICCID.
         Exchange(
@@ -421,6 +426,18 @@ def standard_corpus() -> list[Exchange]:
         ),
     ]
 
+
+#: A File Control Parameters template for ADF.USIM, per ETSI TS 102 221
+#: clause 11.1.1.3. Declared lengths and actual content must agree: the
+#: TLV walker refuses a template whose length over-claims its body, which
+#: is the correct reading of malformed bytes rather than a limitation.
+#:
+#:   62 10                  FCP template, 16 bytes of value
+#:      82 02 78 21         file descriptor: DF/ADF, shareable
+#:      83 02 7F F0         file identifier 7FF0
+#:      8A 01 05            life-cycle status: operational, deactivated
+#:      A5 03 C0 01 00      proprietary information
+FCP_ADF_USIM = bytes.fromhex("6210" "82027821" "83027FF0" "8A0105" "A503C00100")
 
 #: A well-formed ATR: T=0 and T=15, direct convention, 15 historical
 #: bytes, with a TCK that checks out. The check byte is the XOR of every

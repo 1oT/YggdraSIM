@@ -46,9 +46,16 @@ local tables = require("yggdrasim_apdu.tables")
 local fields = require("yggdrasim_apdu.fields")
 local split = require("yggdrasim_apdu.split")
 local iso7816 = require("yggdrasim_apdu.iso7816")
+local tlv = require("yggdrasim_apdu.tlv")
+local commands = require("yggdrasim_apdu.commands")
+local responses = require("yggdrasim_apdu.responses")
+local state = require("yggdrasim_apdu.state")
 
 local yapdu = Proto("yapdu", "YggdraSIM APDU")
 yapdu.fields = fields.all
+
+--- Cross-frame context. Rebuilt on every dissection run; see state.lua.
+local machine = state.new()
 
 -- --------------------------------------------------------------- experts
 local experts = {
@@ -100,11 +107,30 @@ local experts = {
         expert.group.CHECKSUM,
         expert.severity.WARN
     ),
+    tlv_malformed = ProtoExpert.new(
+        "yapdu.expert.tlv_malformed",
+        "TLV structure is malformed",
+        expert.group.MALFORMED,
+        expert.severity.WARN
+    ),
+    budget = ProtoExpert.new(
+        "yapdu.expert.budget_exhausted",
+        "Tree node budget exhausted; remainder shown as raw bytes",
+        expert.group.UNDECODED,
+        expert.severity.NOTE
+    ),
+    no_context = ProtoExpert.new(
+        "yapdu.expert.no_context",
+        "Decoded without cross-frame context",
+        expert.group.UNDECODED,
+        expert.severity.CHAT
+    ),
 }
 yapdu.experts = {
     experts.too_short, experts.split_failed, experts.low_confidence,
     experts.ambiguous, experts.truncated, experts.destructive,
-    experts.status_error, experts.atr_checksum,
+    experts.status_error, experts.atr_checksum, experts.tlv_malformed,
+    experts.budget, experts.no_context,
 }
 
 -- ----------------------------------------------------------- preferences
@@ -124,6 +150,126 @@ yapdu.prefs.show_candidates = Pref.bool(
     false,
     "Add a subtree listing every split that was considered and its score."
 )
+
+-- ------------------------------------------------------------ TLV render
+--- Render one parsed TLV node and its children.
+local function add_tlv_node(tree, payload, node, options)
+    local total = node.tag_length + node.length_length + node.value_length
+    local range = util.safe_range(payload, node.tag_offset, total)
+    if range == nil then
+        range = util.safe_range(payload, node.tag_offset, 1)
+    end
+    if range == nil then
+        return
+    end
+
+    local label
+    if node.name ~= "" then
+        label = string.format("%s (0x%X)", node.name, node.base_tag)
+    else
+        label = string.format("Tag 0x%X", node.base_tag)
+    end
+    if node.constructed then
+        label = label .. string.format(", %s", util.plural_bytes(node.value_length))
+    end
+
+    local item = tree:add(fields.tlv, range)
+    item:set_text(label)
+    item:add(fields.tlv_tag, util.safe_range(payload, node.tag_offset, node.tag_length))
+    if node.base_tag ~= node.tag then
+        item:add(fields.tlv_base_tag, range, node.base_tag):set_generated()
+    end
+    if node.name ~= "" then
+        item:add(fields.tlv_name, range, node.name):set_generated()
+    end
+    item:add(fields.tlv_class, range, node.class):set_generated()
+    item:add(fields.tlv_constructed, range, node.constructed):set_generated()
+    if node.comprehension_required ~= nil then
+        item:add(
+            fields.tlv_comprehension, range, node.comprehension_required
+        ):set_generated()
+    end
+    item:add(
+        fields.tlv_length,
+        util.safe_range(payload, node.length_offset, node.length_length),
+        node.length
+    )
+    if node.indefinite then
+        item:add(fields.tlv_indefinite, range, true):set_generated()
+    end
+    if node.clamped then
+        item:add_proto_expert_info(
+            experts.tlv_malformed,
+            string.format(
+                "declared length runs past the end of the value; showing %s",
+                util.plural_bytes(node.value_length)
+            )
+        )
+    end
+
+    -- Layer-specific detail hangs off the node it describes rather than
+    -- being appended as a parallel block, so the tree reads as one
+    -- structure instead of the same bytes twice.
+    if options ~= nil and options.enrich ~= nil then
+        options.enrich(item, node, payload)
+    end
+
+    if node.children ~= nil and #node.children > 0 then
+        for index = 1, #node.children do
+            add_tlv_node(item, payload, node.children[index], options)
+        end
+        return item
+    end
+
+    if node.value_length > 0 then
+        local value_range = util.safe_range(
+            payload, node.value_offset, node.value_length
+        )
+        if value_range ~= nil then
+            item:add(fields.tlv_value, value_range)
+            -- A short primitive value is very often a small integer, and
+            -- reading it as one saves an operator converting hex by eye.
+            if node.value_length <= 4 then
+                local numeric = util.safe_uint(
+                    payload, node.value_offset, node.value_length
+                )
+                if numeric ~= nil then
+                    item:add(fields.tlv_uint, value_range, numeric):set_generated()
+                end
+            end
+        end
+    end
+    return item
+end
+
+--- Parse and render a TLV run, returning the parsed nodes.
+local function add_tlv_subtree(tree, payload, offset, length, options, budget)
+    if length <= 0 then
+        return nil
+    end
+    if not tlv.looks_like_tlv(payload, offset, length) then
+        return nil
+    end
+    local nodes, errors = tlv.parse(payload, offset, length, options, budget, 0)
+    if nodes == nil or #nodes == 0 then
+        return nil
+    end
+    for index = 1, #nodes do
+        add_tlv_node(tree, payload, nodes[index], options)
+    end
+    for index = 1, #errors do
+        local error_entry = errors[index]
+        local range = util.safe_range(payload, error_entry.offset, 1)
+        if range ~= nil then
+            if error_entry.reason == "tree node budget exhausted" then
+                tree:add_proto_expert_info(experts.budget, error_entry.reason)
+            else
+                tree:add_proto_expert_info(experts.tlv_malformed, error_entry.reason)
+            end
+        end
+    end
+    return nodes
+end
 
 -- ----------------------------------------------------------------- render
 local function add_cla_subtree(tree, payload, command)
@@ -146,7 +292,86 @@ local function add_cla_subtree(tree, payload, command)
     end
 end
 
-local function add_command_subtree(tree, payload, command)
+--- Render the instruction-specific reading of P1, P2 and the body.
+local function add_command_description(tree, payload, command, description)
+    if description.kind == "select" then
+        tree:add(fields.select_control, payload(2, 1), command.p1)
+            :append_text(" (" .. description.control .. ")")
+        tree:add(fields.select_return, payload(3, 1), command.p2)
+            :append_text(" (" .. description.return_control .. ")")
+        if description.aid_hex ~= nil then
+            local range = util.safe_range(
+                payload, description.aid_offset, description.aid_length
+            )
+            if range ~= nil then
+                tree:add(fields.select_aid, range)
+            end
+        elseif description.fid ~= nil then
+            local range = util.safe_range(payload, command.data_offset, 2)
+            if range ~= nil then
+                tree:add(fields.select_fid, range)
+            end
+        end
+        if description.target ~= nil then
+            tree:add(fields.select_name, payload(2, 1), description.target)
+                :set_generated()
+        end
+        return
+    end
+
+    if description.kind == "binary" then
+        tree:add(fields.binary_offset, payload(2, 2), description.offset)
+            :set_generated()
+        if description.sfi_addressed then
+            tree:add(fields.binary_sfi, payload(2, 1), description.sfi)
+                :set_generated()
+        end
+        return
+    end
+
+    if description.kind == "record" then
+        tree:add(fields.record_number, payload(2, 1), description.record)
+        tree:add(fields.record_sfi, payload(3, 1), description.sfi):set_generated()
+        tree:add(fields.record_mode, payload(3, 1), description.mode)
+            :append_text(" (" .. description.mode_name .. ")")
+        return
+    end
+
+    if description.kind == "pin" then
+        tree:add(fields.pin_reference, payload(3, 1))
+            :append_text(" (" .. description.reference_name .. ")")
+        tree:add(fields.pin_name, payload(3, 1), description.reference_name)
+            :set_generated()
+        -- The PIN block itself is deliberately reported by length only.
+        -- A capture that contains plaintext PINs should not print them
+        -- to anyone who opens the file.
+        if description.value_length > 0 then
+            tree:add(
+                fields.pin_value_len, payload(3, 1), description.value_length
+            ):set_generated()
+        end
+        return
+    end
+
+    if description.kind == "channel" then
+        tree:add(fields.channel_operation, payload(2, 1), description.operation)
+            :set_generated()
+        tree:add(fields.channel_number, payload(3, 1), description.channel)
+        return
+    end
+
+    if description.kind == "data_object" then
+        tree:add(fields.data_object_tag, payload(2, 2), description.tag)
+            :set_generated()
+        if description.name ~= "" then
+            tree:add(fields.data_object_name, payload(2, 2), description.name)
+                :set_generated()
+        end
+        return
+    end
+end
+
+local function add_command_subtree(tree, payload, command, description, budget)
     local range = util.safe_range(payload, 0, command.length)
     local item
     if range ~= nil then
@@ -179,12 +404,29 @@ local function add_command_subtree(tree, payload, command)
             item:add(fields.lc, lc_range, command.lc)
         end
     end
+    if description ~= nil then
+        add_command_description(item, payload, command, description)
+    end
+
     if command.data_offset ~= nil and command.data_length > 0 then
         local data_range = util.safe_range(
             payload, command.data_offset, command.data_length
         )
         if data_range ~= nil then
-            item:add(fields.data, data_range)
+            local data_item = item:add(fields.data, data_range)
+            -- SELECT and the PIN commands carry positional data that the
+            -- description above already broke out, so a TLV attempt
+            -- there would only produce noise.
+            if command.ins ~= commands.INS_SELECT then
+                add_tlv_subtree(
+                    data_item,
+                    payload,
+                    command.data_offset,
+                    command.data_length,
+                    {},
+                    budget
+                )
+            end
         end
     end
     if command.le ~= nil then
@@ -207,7 +449,156 @@ local function add_command_subtree(tree, payload, command)
     return item
 end
 
-local function add_response_subtree(tree, payload, response)
+--- TLV options that decode an FCP/FCI/FMD template in place.
+--
+-- Wireshark 4.2 reports this whole structure as a malformed packet, and
+-- it is the answer to every SELECT, so it carries most of what a SIM
+-- trace has to say about the file system.
+local FCP_OPTIONS = {
+    resolver = function(tag)
+        return responses.fcp_tag_name(tag)
+    end,
+    enrich = function(item, node, payload)
+        if node.depth == 0 then
+            return
+        end
+        local range = util.safe_range(payload, node.value_offset, node.value_length)
+        if range == nil then
+            return
+        end
+
+        if node.base_tag == 0x82 then
+            local descriptor = responses.parse_file_descriptor(
+                payload, node.value_offset, node.value_length
+            )
+            if descriptor == nil then
+                return
+            end
+            item:add(fields.fcp_file_type, range, descriptor.file_type)
+                :set_generated()
+            item:add(fields.fcp_structure, range, descriptor.structure)
+                :set_generated()
+            if descriptor.record_length ~= nil then
+                item:add(
+                    fields.fcp_record_length, range, descriptor.record_length
+                ):set_generated()
+            end
+            if descriptor.record_count ~= nil then
+                item:add(
+                    fields.fcp_record_count, range, descriptor.record_count
+                ):set_generated()
+            end
+            return
+        end
+
+        if node.base_tag == 0x83 and node.value_length == 2 then
+            local fid = util.safe_uint(payload, node.value_offset, 2)
+            if fid == nil then
+                return
+            end
+            item:add(fields.fcp_fid, range, fid):set_generated()
+            local path = responses.ef_name(string.format("%04X", fid))
+            if path ~= "" then
+                item:add(fields.fcp_path, range, path):set_generated()
+                item:append_text(" (" .. path .. ")")
+            end
+            return
+        end
+
+        if node.base_tag == 0x84 then
+            item:add(fields.fcp_df_name, range):set_generated()
+            local name = commands.aid_name(
+                util.hex(payload, node.value_offset, node.value_length)
+            )
+            if name ~= "" then
+                item:append_text(" (" .. name .. ")")
+            end
+            return
+        end
+
+        if node.base_tag == 0x80 or node.base_tag == 0x81 then
+            local size = util.safe_uint(
+                payload, node.value_offset, node.value_length
+            )
+            if size == nil then
+                return
+            end
+            local field = fields.fcp_file_size
+            if node.base_tag == 0x81 then
+                field = fields.fcp_total_size
+            end
+            item:add(field, range, size):set_generated()
+            item:append_text(string.format(" (%s)", util.plural_bytes(size)))
+            return
+        end
+
+        if node.base_tag == 0x88 then
+            local sfi = util.byte_at(payload, node.value_offset)
+            if sfi ~= nil then
+                -- The short file identifier sits in the top five bits.
+                item:add(fields.fcp_sfi, range, math.floor(sfi / 8)):set_generated()
+            end
+            return
+        end
+
+        if node.base_tag == 0x8A then
+            local lcsi = util.byte_at(payload, node.value_offset)
+            if lcsi ~= nil then
+                item:add(fields.fcp_lcsi, range, lcsi):set_generated()
+                item:append_text(" (" .. responses.lifecycle_name(lcsi) .. ")")
+            end
+            return
+        end
+    end,
+}
+
+--- Decode a known elementary file's contents.
+local function add_ef_details(tree, payload, response, fid_hex)
+    if fid_hex == "" or response.data_length == 0 then
+        return false
+    end
+    local decoded = responses.decode_ef(
+        payload, response.data_offset, response.data_length, fid_hex
+    )
+    if decoded == nil then
+        return false
+    end
+    local range = util.safe_range(payload, response.data_offset, response.data_length)
+    if range == nil then
+        return false
+    end
+    local name = responses.ef_name(fid_hex)
+    if name ~= "" then
+        tree:add(fields.ef_name, range, name):set_generated()
+    end
+    if decoded.kind == "iccid" then
+        tree:add(fields.ef_iccid, range, decoded.value)
+        return true
+    end
+    if decoded.kind == "imsi" then
+        tree:add(fields.ef_imsi, range, decoded.value)
+        return true
+    end
+    if decoded.kind == "ust" then
+        for index = 1, #decoded.services do
+            tree:add(
+                fields.ef_service, range,
+                string.format("service %d available", decoded.services[index])
+            ):set_generated()
+        end
+        return true
+    end
+    if decoded.kind == "ad" then
+        tree:add(fields.ef_operation_mode, range, decoded.operation_mode)
+        if decoded.mnc_length ~= nil then
+            tree:add(fields.ef_mnc_length, range, decoded.mnc_length)
+        end
+        return true
+    end
+    return false
+end
+
+local function add_response_subtree(tree, payload, response, context, command, budget)
     local range = util.safe_range(payload, response.offset, response.length)
     local item
     if range ~= nil then
@@ -224,7 +615,30 @@ local function add_response_subtree(tree, payload, response)
             payload, response.data_offset, response.data_length
         )
         if data_range ~= nil then
-            item:add(fields.response_data, data_range)
+            local data_item = item:add(fields.response_data, data_range)
+
+            -- Peek at the outermost tag so a file-control template is
+            -- parsed with the sub-tag names ETSI TS 102 221 gives it
+            -- rather than the generic BER table.
+            local options = {}
+            local first_tag = tlv.read_tag(payload, response.data_offset)
+            local is_template = first_tag ~= nil
+                and responses.is_fcp_template(first_tag.value)
+            if is_template then
+                options = FCP_OPTIONS
+                data_item:set_text(
+                    "Response data: " .. responses.template_name(first_tag.value)
+                )
+            end
+
+            local nodes = add_tlv_subtree(
+                data_item, payload, response.data_offset,
+                response.data_length, options, budget
+            )
+            if nodes == nil then
+                local fid = state.response_file(context, command)
+                add_ef_details(data_item, payload, response, fid)
+            end
         end
     end
 
@@ -404,21 +818,63 @@ local function dissect_exchange(payload, pinfo, tree)
         return
     end
 
-    add_command_subtree(root, payload, command)
-    add_response_subtree(root, payload, response)
+    local description = commands.describe(payload, command)
+
+    -- Advance the machine only when this frame is genuinely the next one
+    -- in capture order; otherwise replay the stored snapshot. See
+    -- state.lua for why pinfo.visited alone is not sufficient.
+    local context
+    if state.may_advance(machine, pinfo.number, pinfo.visited) then
+        context = state.advance(
+            machine, pinfo.number, command, response, description
+        )
+    else
+        context = state.snapshot(machine, pinfo.number)
+    end
+
+    root:add(
+        fields.context_available, payload(0, 0), context.context_available
+    ):set_generated()
+    if context.context_available ~= true then
+        root:add_proto_expert_info(
+            experts.no_context,
+            "this frame was dissected without the frames before it, so the "
+                .. "currently selected file is unknown"
+        )
+    end
+
+    local budget = tlv.new_budget()
+    add_command_subtree(root, payload, command, description, budget)
+    add_response_subtree(root, payload, response, context, command, budget)
 
     root:set_text(string.format(
         "YggdraSIM APDU: %s -> %04X", command.name, response.status_word
     ))
 
     if yapdu.prefs.set_info_column == true then
-        local summary = string.format(
-            "%s %02X %02X -> %04X %s",
-            command.name, command.p1, command.p2,
-            response.status_word, response.meaning
-        )
-        pinfo.cols.info:set(util.clip(summary, 120))
+        local detail = commands.summary(description)
+        local summary
+        if detail ~= "" then
+            summary = string.format(
+                "%s %s -> %04X %s",
+                command.name, detail, response.status_word, response.meaning
+            )
+        else
+            summary = string.format(
+                "%s %02X %02X -> %04X %s",
+                command.name, command.p1, command.p2,
+                response.status_word, response.meaning
+            )
+        end
+        pinfo.cols.info:set(util.clip(summary, 140))
     end
+end
+
+--- Wireshark calls this at the start of every dissection run: file
+--- open, reload, filter change and preference change alike. It is the
+--- only reliable point at which to discard cross-frame state.
+function yapdu.init()
+    machine = state.new()
 end
 
 function yapdu.dissector(payload, pinfo, tree)
