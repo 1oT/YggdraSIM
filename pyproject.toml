@@ -243,11 +243,6 @@ include-package-data = true
 # lives in ``docs/RSPRO.asn``; ``Tools/HilBridge/RSPRO.asn`` is a mirror
 # that is ``cp``-refreshed from it as part of the release procedure.
 "Tools.HilBridge" = ["RSPRO.asn"]
-# The EUM diagnostics dissector is a Lua script that tshark loads at
-# runtime via ``-X lua_script:...``. Shipping it as package-data means
-# the wheel can resolve its location via ``importlib.resources`` even
-# when the source tree is not on disk.
-"Tools.EumDiag" = ["dissector.lua"]
 # The APDU dissector is a Lua tree loaded by tshark at runtime via
 # ``-X lua_script:...``, or copied into Wireshark's plugin folder by
 # ``python -m Tools.ApduDissector install``. Shipping it as package

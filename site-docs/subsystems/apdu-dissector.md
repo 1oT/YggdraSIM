@@ -143,6 +143,40 @@ This replaces the instruction allowlist in
 instruction it does not recognise -- so an unfamiliar command disappears from
 the trace entirely.
 
+## Secure messaging
+
+An SCP03 or SCP11c wrapped command is broken out with no keys at all: the
+C-MAC, the ciphertext, and whether the body is merely authenticated or also
+encrypted. `yapdu.cla.secure_messaging > 0` finds every wrapped exchange.
+
+Plaintext needs keys, and **Wireshark's Lua binding has no AES, no CMAC and
+no hash**, so no Lua dissector can decrypt anything regardless of what it is
+handed. The recovery therefore happens in Python, using the same engine the
+terminal decode view uses, and the result is written to a sidecar the
+dissector reads:
+
+```bash
+yggdrasim-apdu-dissect sidecar --pcap live.pcap --keybag live.keys.json
+yggdrasim-apdu-dissect decode  --pcap live.pcap \
+    --sidecar live.pcap.sidecar.json --verbose
+```
+
+The keybag is the one you already export with `EXPORT-KEYBAG` in the SCP03
+admin shell or `SCP11.local_access`; a sibling `<pcap>*.keys.json` is picked
+up automatically. In the Wireshark GUI, set the sidecar path in the
+dissector's preferences instead.
+
+Recovered plaintext is not merely displayed. The dissector re-runs its whole
+decode over it, so a ciphered ES10b `STORE DATA` renders as a complete ES10b
+tree rather than a blob with a note attached.
+
+**A sidecar is bound to its capture by content, not by frame number.** Each
+entry records the on-wire ciphered command, and an entry is applied only when
+those bytes match the frame in front of it. A sidecar built from a different
+capture therefore contributes nothing and sets
+`yapdu.sm.sidecar_mismatch`, instead of attributing plaintext to the wrong
+exchange. Corrupt or foreign-format sidecars collapse to one status line.
+
 ## Constant tables are generated
 
 `Tools/ApduDissector/lua/yggdrasim_apdu/tables.lua` is generated from the
@@ -192,6 +226,13 @@ suite noticing.
 ## See also
 
 - [HIL Bridge](hil-bridge.md)
-- [EUM Diagnostics](eum-diagnostics.md)
+- [EUM Diagnostics](eum-diagnostics.md) -- `yggdrasim-eum-diag` now hands its
+  captures to this dissector. Its own `dissector.lua` has been retired: it
+  byte-scanned for the `BF36` tag with no TLV awareness, rendered the value as
+  one opaque blob, loaded session keys it had no way to apply, and built a
+  TvbRange from half the digit count of an ICCID, which breaks on any real
+  19-digit one. `YGGDRASIM_EUM_SESSION_KEYS` is still honoured, and the key
+  bundles are shown for reference with an explicit note that they are not
+  being applied.
 - `Tools/ApduDissector/WIRESHARK_ENVIRONMENT.md` -- the measured capability
   matrix behind the design

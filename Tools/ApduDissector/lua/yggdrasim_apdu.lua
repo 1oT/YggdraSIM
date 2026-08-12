@@ -53,6 +53,7 @@ local state = require("yggdrasim_apdu.state")
 local gp = require("yggdrasim_apdu.gp")
 local cat = require("yggdrasim_apdu.cat")
 local rsp = require("yggdrasim_apdu.rsp")
+local sm = require("yggdrasim_apdu.sm")
 
 local yapdu = Proto("yapdu", "YggdraSIM APDU")
 yapdu.fields = fields.all
@@ -110,6 +111,12 @@ local experts = {
         expert.group.CHECKSUM,
         expert.severity.WARN
     ),
+    sidecar_mismatch = ProtoExpert.new(
+        "yapdu.expert.sidecar_mismatch",
+        "Sidecar entry does not match this frame",
+        expert.group.MALFORMED,
+        expert.severity.WARN
+    ),
     tlv_malformed = ProtoExpert.new(
         "yapdu.expert.tlv_malformed",
         "TLV structure is malformed",
@@ -133,7 +140,7 @@ yapdu.experts = {
     experts.too_short, experts.split_failed, experts.low_confidence,
     experts.ambiguous, experts.truncated, experts.destructive,
     experts.status_error, experts.atr_checksum, experts.tlv_malformed,
-    experts.budget, experts.no_context,
+    experts.budget, experts.no_context, experts.sidecar_mismatch,
 }
 
 -- ----------------------------------------------------------- preferences
@@ -147,6 +154,14 @@ yapdu.prefs.set_info_column = Pref.bool(
     "Rewrite the Info column",
     true,
     "Summarise the exchange in the packet list."
+)
+yapdu.prefs.sidecar_path = Pref.string(
+    "SCP plaintext sidecar",
+    "",
+    "Path to a yggdrasim-apdu-sidecar/v1 file produced by "
+        .. "`yggdrasim-apdu-dissect sidecar`. Wireshark's Lua has no AES, "
+        .. "so decryption happens in Python and the result is read here. "
+        .. "Falls back to the YGGDRASIM_APDU_SIDECAR environment variable."
 )
 yapdu.prefs.show_candidates = Pref.bool(
     "Show rejected command/response splits",
@@ -1102,6 +1117,147 @@ local function add_atr_subtree(tree, payload, atr)
     return item
 end
 
+--- Decode a recovered plaintext command APDU.
+--
+-- The plaintext is a complete command APDU, so the same header,
+-- command-body and payload decoding that ran on the ciphered frame is
+-- run again over it. That is the point of recovering it: a ciphered
+-- ES10b STORE DATA should read as an ES10b call, not as a blob with a
+-- note saying it was decrypted.
+local function add_plaintext_command(tree, hex, budget)
+    if hex == "" then
+        return
+    end
+    local ok, bytes = pcall(ByteArray.new, hex)
+    if ok == false or bytes == nil or bytes:len() < 4 then
+        return
+    end
+    local inner = bytes:tvb("Decrypted APDU")
+    local item = tree:add(fields.sm_plaintext, inner(0, inner:len()))
+
+    local cla = util.byte_at(inner, 0)
+    local ins = util.byte_at(inner, 1)
+    if cla == nil or ins == nil then
+        return
+    end
+    local name, source = iso7816.command_name(cla, ins)
+    item:set_text(string.format(
+        "Decrypted command APDU: %s (%s)", name, util.plural_bytes(inner:len())
+    ))
+    item:add(fields.command_name, inner(1, 1), name):set_generated()
+    if source ~= nil and source ~= "" then
+        item:add(fields.command_source, inner(1, 1), source):set_generated()
+    end
+
+    -- The plaintext carries no Le, so its body runs from offset 5 to the
+    -- end; _build_cleartext_apdu_from_header on the Python side builds
+    -- it that way.
+    if inner:len() <= 5 then
+        return
+    end
+    local body_length = inner:len() - 5
+    local declared = util.byte_at(inner, 4)
+    if declared ~= nil and declared < body_length then
+        body_length = declared
+    end
+    local body = inner(5, body_length)
+    local data_item = item:add(fields.data, body)
+
+    local inner_command = { ins = ins, cla = cla, data_offset = 5,
+                            data_length = body_length }
+    local inner_rsp = rsp.describe(inner, inner_command, nil)
+    if inner_rsp ~= nil then
+        data_item:set_text("Decrypted command data: " .. inner_rsp.name)
+        add_tlv_subtree(data_item, inner, 5, body_length, rsp.tlv_options(), budget)
+        return
+    end
+    if cat.is_cat_instruction(cla, ins) then
+        add_cat_subtree(data_item, inner, 5, body_length, budget)
+        return
+    end
+    add_tlv_subtree(data_item, inner, 5, body_length, {}, budget)
+end
+
+--- Break out secure-messaging structure and overlay any recovered plaintext.
+local function add_secure_messaging(tree, payload, pinfo, command, response, context, budget)
+    local wrapped = sm.describe(payload, command)
+    if wrapped == nil then
+        return
+    end
+
+    local range = util.safe_range(payload, 0, command.length)
+    if range == nil then
+        return
+    end
+    local item = tree:add(yapdu, range, "Secure messaging")
+    item:add(fields.sm_protocol, payload(0, 1), sm.protocol_name(context))
+        :set_generated()
+
+    if wrapped.mac_offset ~= nil then
+        local mac_range = util.safe_range(payload, wrapped.mac_offset, wrapped.mac_length)
+        if mac_range ~= nil then
+            item:add(fields.sm_cmac, mac_range)
+        end
+        if wrapped.ciphertext_length > 0 then
+            local cipher_range = util.safe_range(
+                payload, wrapped.ciphertext_offset, wrapped.ciphertext_length
+            )
+            if cipher_range ~= nil then
+                local cipher_item = item:add(fields.sm_ciphertext, cipher_range)
+                if wrapped.encrypted == false then
+                    cipher_item:set_text(string.format(
+                        "Authenticated body, not encrypted: %s",
+                        util.plural_bytes(wrapped.ciphertext_length)
+                    ))
+                end
+            end
+        end
+    end
+
+    local frames, status = sm.sidecar(yapdu.prefs.sidecar_path)
+    item:add(fields.sm_status, payload(0, 0), status):set_generated()
+    if frames == nil then
+        return
+    end
+
+    local observed = util.hex(payload, 0, command.length)
+    local entry, mismatch = sm.entry_for(frames, pinfo.number, observed)
+    if mismatch then
+        item:add(fields.sm_sidecar_mismatch, payload(0, 0), true):set_generated()
+        item:add_proto_expert_info(
+            experts.sidecar_mismatch,
+            "the sidecar has an entry for this frame number but its recorded "
+                .. "command does not match these bytes, so it was built from a "
+                .. "different capture and is being ignored"
+        )
+        return
+    end
+    if entry == nil then
+        return
+    end
+
+    local label = sm.entry_hex(entry, "session_label")
+    if label ~= "" then
+        item:add(fields.sm_session, payload(0, 0), label):set_generated()
+    end
+    if entry["mac_ok"] ~= nil then
+        item:add(
+            fields.sm_mac_verified, payload(0, 0), entry["mac_ok"] == true
+        ):set_generated()
+    end
+
+    add_plaintext_command(item, sm.entry_hex(entry, "command_plaintext"), budget)
+
+    local response_hex = sm.entry_hex(entry, "response_plaintext")
+    if response_hex ~= "" then
+        local ok, bytes = pcall(ByteArray.new, response_hex)
+        if ok and bytes ~= nil and bytes:len() > 0 then
+            local inner = bytes:tvb("Decrypted response")
+            item:add(fields.sm_response_plaintext, inner(0, inner:len()))
+        end
+    end
+end
+
 -- ------------------------------------------------------------- dissection
 local function dissect_atr(payload, pinfo, tree)
     local root = tree:add(yapdu, payload(0, payload:captured_len()), "YggdraSIM APDU")
@@ -1151,6 +1307,25 @@ local function dissect_exchange(payload, pinfo, tree)
     root:add(fields.frame_kind, payload(0, 0), "exchange"):set_generated()
     add_split_subtree(root, payload, result)
 
+    -- yggdrasim-eum-diag points YGGDRASIM_EUM_SESSION_KEYS at a session
+    -- key repository. It is reported, never applied; see sm.eum_keys.
+    local eum_entries, eum_status = sm.eum_keys()
+    if eum_status ~= "" then
+        local keys_item = root:add(yapdu, payload(0, 0), "EUM session keys")
+        keys_item:set_generated()
+        keys_item:add(fields.sm_status, payload(0, 0), eum_status):set_generated()
+        if eum_entries ~= nil then
+            for iccid, bundle in pairs(eum_entries) do
+                if type(bundle) == "table" then
+                    keys_item:add(
+                        fields.sm_session, payload(0, 0),
+                        "ICCID " .. tostring(iccid)
+                    ):set_generated()
+                end
+            end
+        end
+    end
+
     local command = iso7816.parse_command(payload, result)
     local response = iso7816.parse_response(payload, result)
     if command == nil or response == nil then
@@ -1192,6 +1367,7 @@ local function dissect_exchange(payload, pinfo, tree)
         root, payload, command, description, rsp_description, budget
     )
     add_response_subtree(root, payload, response, context, command, budget)
+    add_secure_messaging(root, payload, pinfo, command, response, context, budget)
 
     root:set_text(string.format(
         "YggdraSIM APDU: %s -> %04X", command.name, response.status_word
@@ -1232,6 +1408,8 @@ end
 --- only reliable point at which to discard cross-frame state.
 function yapdu.init()
     machine = state.new()
+    sm.reset()
+    sm.reset_eum_keys()
 end
 
 function yapdu.dissector(payload, pinfo, tree)

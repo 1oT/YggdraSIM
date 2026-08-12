@@ -116,6 +116,26 @@ def _build_parser() -> argparse.ArgumentParser:
         "--tshark", default=DEFAULT_TSHARK_BINARY, help="tshark binary to ask."
     )
 
+    sidecar_parser = subparsers.add_parser(
+        "sidecar",
+        help="Recover SCP03/SCP11c plaintext from a capture into a sidecar.",
+    )
+    sidecar_parser.add_argument("--pcap", required=True, help="Capture to read.")
+    sidecar_parser.add_argument(
+        "--keybag",
+        default="",
+        help="Keybag JSON with the session keys. Auto-discovered from a "
+             "sibling <pcap>*.keys.json when omitted.",
+    )
+    sidecar_parser.add_argument(
+        "--out",
+        default="",
+        help="Where to write the sidecar. Defaults to <pcap>.sidecar.json.",
+    )
+    sidecar_parser.add_argument(
+        "--tshark", default=DEFAULT_TSHARK_BINARY, help="tshark binary to use."
+    )
+
     subparsers.add_parser("path", help="Print the bundled dissector's path.")
 
     prober = subparsers.add_parser(
@@ -212,6 +232,57 @@ def _run_uninstall(args: argparse.Namespace, stdout, stderr) -> int:
     return 0
 
 
+def _run_sidecar(args: argparse.Namespace, stdout, stderr) -> int:
+    from .sidecar import SidecarError, autodiscover_keybag, build_sidecar
+
+    pcap_path = Path(args.pcap).expanduser()
+    if not pcap_path.is_file():
+        print(f"capture not found: {pcap_path}", file=stderr)
+        return 1
+
+    keybag_path = Path(args.keybag).expanduser() if args.keybag else None
+    if keybag_path is None:
+        keybag_path = autodiscover_keybag(pcap_path)
+        if keybag_path is None:
+            print(
+                "no keybag given and none found beside the capture. Export "
+                "one with EXPORT-KEYBAG in the SCP03 admin shell or "
+                "SCP11.local_access, then pass --keybag.",
+                file=stderr,
+            )
+            return 1
+        print(f"using keybag {keybag_path}", file=stdout)
+    if not keybag_path.is_file():
+        print(f"keybag not found: {keybag_path}", file=stderr)
+        return 1
+
+    output_path = (
+        Path(args.out).expanduser()
+        if args.out
+        else pcap_path.with_suffix(pcap_path.suffix + ".sidecar.json")
+    )
+    try:
+        summary = build_sidecar(
+            pcap_path=pcap_path,
+            keybag_path=keybag_path,
+            output_path=output_path,
+            tshark_binary=args.tshark,
+        )
+    except (SidecarError, TsharkMissingError) as error:
+        print(str(error), file=stderr)
+        return 1
+
+    print(summary.describe(), file=stdout)
+    if summary.frames_recovered == 0:
+        print(
+            "nothing was recovered. Check that the keybag matches this "
+            "capture and that the session it describes starts at or before "
+            "the first wrapped frame.",
+            file=stderr,
+        )
+    return 0
+
+
 def _run_probe(args: argparse.Namespace, stdout, stderr) -> int:
     probe_path = lua_directory() / PROBE_FILENAME
     if not probe_path.is_file():
@@ -268,6 +339,8 @@ def run_cli(
         return _run_install(args, out, err)
     if args.command == "uninstall":
         return _run_uninstall(args, out, err)
+    if args.command == "sidecar":
+        return _run_sidecar(args, out, err)
     if args.command == "path":
         print(str(locate_dissector()), file=out)
         return 0

@@ -57,7 +57,30 @@ file) may change without notice between minor releases.
   instruction normally uses, used as a confidence signal when splitting
   a concatenated command/response frame.
 
+- `yggdrasim-apdu-dissect sidecar` recovers SCP03 / SCP11c plaintext
+  from a capture into a sidecar file the dissector reads, using the
+  same replay engine the terminal decode view uses. Wireshark's Lua
+  binding has no AES, no CMAC and no hash, so a Lua dissector cannot
+  decrypt regardless of what keys it is given. Recovered plaintext is
+  re-decoded in full, so a ciphered ES10b STORE DATA renders as an
+  ES10b tree. Sidecars are bound to their capture by the on-wire
+  ciphered command rather than by frame number, so one built from a
+  different capture contributes nothing instead of misattributing.
+
+- `ScpReplayEngine.try_unwrap_bytes` returns the recovered plaintext
+  bytes alongside the lines `try_unwrap` already rendered.
+
 ### Changed
+
+- `Tools/EumDiag/dissector.lua` is retired. `yggdrasim-eum-diag` now
+  hands its captures to `Tools/ApduDissector`, which decodes the BF36
+  BoundProfilePackage as a tree rather than dumping it as one blob, and
+  still honours `YGGDRASIM_EUM_SESSION_KEYS`. The retired file
+  byte-scanned for the tag with no TLV awareness, so it matched inside
+  unrelated values; loaded the session keys and never applied them; set
+  the protocol column on every packet in the capture whether or not it
+  had touched it; and built a TvbRange from half the digit count of an
+  ICCID, which breaks on any real 19-digit one.
 
 - The HIL-bridge decode view names proactive command `0x04` `POLLING
   OFF`, matching ETSI TS 102 223 Table 9.4. It previously read `POLL
