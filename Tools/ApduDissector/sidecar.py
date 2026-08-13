@@ -129,27 +129,59 @@ def read_frames(
 def split_exchange(payload: bytes) -> tuple[bytes, bytes] | None:
     """Split a SIMtrace SIM-APDU record into command and response.
 
-    Only the secure-messaging case matters here, and it is the easy one:
-    a wrapped command is always case 3 from the transport's point of
-    view, because the MAC makes the body mandatory. That is the same
-    reasoning ``live_decode_state._parse_exchange_from_udp_payload_hex``
-    uses for its secure-messaging branch.
+    Only secure-messaging exchanges matter here, which narrows the
+    problem: the MAC makes the body mandatory, so the command is case 3
+    or case 4 and never case 1 or 2. It does *not* narrow it to case 3.
+    GlobalPlatform sends a wrapped ``INSTALL`` case 4, and assuming
+    ``5 + Lc`` there leaves the trailing Le byte on the response side --
+    one byte short of what the dissector sees.
+
+    That matters more than a cosmetic disagreement. The Lua binds a
+    sidecar entry to a frame by comparing ``command_hex`` against the
+    bytes in front of it, so a one-byte difference makes a perfectly
+    good sidecar report "built from a different capture" and contribute
+    nothing. The two splits have to agree, which is what
+    ``tests/test_apdu_dissector_runner.py`` pins.
+
+    The rule below is the decisive half of the Lua scorer
+    (``yggdrasim_apdu/split.lua``): a case 3 command carries no Le, so
+    ISO/IEC 7816-4 clause 5.1 gives its response no data field. If the
+    case 3 reading leaves bytes before SW1SW2 and the case 4 reading
+    accounts for them, case 4 is the right one.
     """
     if len(payload) < 7:
         return None
     if (payload[0] & SECURE_MESSAGING_CLA_BIT) == 0:
         return None
+
     lc = payload[4]
     if lc == 0:
-        if len(payload) < 7:
-            return None
         extended = int.from_bytes(payload[5:7], "big")
-        command_length = 7 + extended
+        if extended == 0:
+            return None
+        case_three_length = 7 + extended
+        case_four_length = case_three_length + 2
     else:
-        command_length = 5 + lc
-    if len(payload) < command_length + 2:
+        case_three_length = 5 + lc
+        case_four_length = case_three_length + 1
+
+    def usable(command_length: int) -> bool:
+        # A response APDU is at least SW1SW2.
+        return len(payload) >= command_length + 2
+
+    chosen = None
+    if usable(case_three_length):
+        chosen = case_three_length
+        # Response data with no Le to have asked for it means the Le is
+        # still sitting at the end of the command.
+        if len(payload) - case_three_length > 2 and usable(case_four_length):
+            chosen = case_four_length
+    elif usable(case_four_length):
+        chosen = case_four_length
+
+    if chosen is None:
         return None
-    return payload[:command_length], payload[command_length:]
+    return payload[:chosen], payload[chosen:]
 
 
 def _extract_gsmtap_payload(frame: bytes) -> bytes:
@@ -166,6 +198,39 @@ def _extract_gsmtap_payload(frame: bytes) -> bytes:
     if len(frame) < header_length:
         return b""
     return frame[header_length:]
+
+
+def _is_atr_frame(frame: bytes) -> bool:
+    """True for a GSMTAP SIM frame carrying an Answer To Reset."""
+    from Tools.HilBridge.protocol import GSMTAP_SIM_ATR, GSMTAP_TYPE_SIM
+
+    if len(frame) < 16:
+        return False
+    return frame[2] == GSMTAP_TYPE_SIM and frame[12] == GSMTAP_SIM_ATR
+
+
+def _selected_aid(payload: bytes) -> str | None:
+    """The AID a plaintext SELECT by DF name just selected, or None.
+
+    Only unwrapped SELECTs count: the body of a secure-messaged one is
+    ciphertext, and reading an AID out of it would hand the replay
+    engine a match value made of noise.
+    """
+    if len(payload) < 7:
+        return None
+    if (payload[0] & SECURE_MESSAGING_CLA_BIT) != 0:
+        return None
+    if payload[1] != 0xA4 or payload[2] != 0x04:
+        return None
+    lc = payload[4]
+    if lc == 0 or len(payload) < 5 + lc + 2:
+        return None
+    # Only a SELECT the card accepted moves the selection. A '6A82'
+    # leaves the previous application in place.
+    sw1 = payload[-2]
+    if sw1 not in (0x90, 0x61):
+        return None
+    return payload[5 : 5 + lc].hex().upper()
 
 
 def build_sidecar(
@@ -194,11 +259,32 @@ def build_sidecar(
     summary = SidecarSummary(path=Path(output_path))
     entries: dict[str, dict[str, object]] = {}
 
+    # Both of these were hardcoded, and both are filters the replay
+    # engine applies: a keybag session carrying ``match.aid`` or a
+    # ``match.card_session_index`` other than 1 could never be selected
+    # -- which is exactly the pair scp_replay recommends for a
+    # multi-session capture. Worse than unreachable: the engine then
+    # falls back to a less specific session and decrypts with the wrong
+    # keys, and the result is written out with mac_ok false rather than
+    # withheld. So both are tracked from the capture itself.
+    card_session_index = 1
+    current_aid_hex = ""
+
     for frame_number, frame in read_frames(pcap_path, tshark_binary=tshark_binary):
         summary.frames_examined += 1
+        if _is_atr_frame(frame):
+            # A new ATR is a card reset, which starts a new card session.
+            card_session_index += 1
+            current_aid_hex = ""
+            continue
         payload = _extract_gsmtap_payload(frame)
         if not payload:
             continue
+
+        selected = _selected_aid(payload)
+        if selected is not None:
+            current_aid_hex = selected
+
         split = split_exchange(payload)
         if split is None:
             continue
@@ -210,13 +296,21 @@ def build_sidecar(
         # exactly once.
         context = UnwrapContext(
             frame_number=frame_number,
-            card_session_index=1,
-            current_aid_hex="",
+            card_session_index=card_session_index,
+            current_aid_hex=current_aid_hex,
         )
         try:
             recovered = engine.try_unwrap_bytes(context, command, response)
         except (ValueError, RuntimeError) as error:
             summary.notes.append(f"frame {frame_number}: {error}")
+            # Skipping a wrapped frame desynchronises the SSC, so every
+            # later MAC in this session fails. Saying so here is the
+            # difference between one explained failure and a run of
+            # unexplained ones.
+            summary.notes.append(
+                f"frame {frame_number} was skipped; MACs after it in this "
+                "session will not verify"
+            )
             continue
         if recovered is None:
             continue

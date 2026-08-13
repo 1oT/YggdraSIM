@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 
 from Tools.ApduDissector import install as installer
+from Tools.ApduDissector import sidecar
 from Tools.ApduDissector import tshark_runner
 from Tools.ApduDissector.main import run_cli
 
@@ -253,6 +254,69 @@ class PackagingCoversEveryLuaFile(unittest.TestCase):
     def test_the_spec_publishes_the_package(self) -> None:
         spec = (REPO_ROOT / "yggdrasim_main.spec").read_text(encoding="utf-8")
         self.assertIn('"Tools.ApduDissector"', spec)
+
+
+class SidecarSplitMatchesTheDissector(unittest.TestCase):
+    """The sidecar and the Lua have to cut the frame in the same place.
+
+    An entry is bound to a frame by comparing its ``command_hex`` against
+    the bytes on the wire, so the two splits agreeing is not a tidiness
+    concern -- it is the whole binding. When they disagree by one byte
+    the operator is told the sidecar came from a different capture,
+    which is both false and the most misleading thing the tool can say.
+
+    No tshark needed: this exercises the Python side against the rule
+    the Lua scorer applies.
+    """
+
+    def split(self, hex_text: str) -> int | None:
+        result = sidecar.split_exchange(bytes.fromhex(hex_text))
+        if result is None:
+            return None
+        return len(result[0])
+
+    def test_a_wrapped_case_three_command_keeps_its_whole_body(self) -> None:
+        # 84 E2 91 00 with a 24-byte body, answered by 9000 alone.
+        payload = "84E2910018" + ("00" * 24) + "9000"
+        self.assertEqual(self.split(payload), 29)
+
+    def test_a_wrapped_case_four_command_keeps_its_trailing_le(self) -> None:
+        """A GlobalPlatform INSTALL is sent case 4.
+
+        Assuming case 3 leaves the Le byte on the response side, so the
+        recorded command is one byte short of the frame.
+        """
+        payload = "84E60C0020" + ("11" * 32) + "00" + "9000"
+        self.assertEqual(self.split(payload), 38)
+
+    def test_response_data_is_attributed_to_a_case_four_command(self) -> None:
+        # The response carries 4 bytes plus SW1SW2, which a case 3
+        # command could not have asked for.
+        payload = "84CA00A004" + ("22" * 4) + "04" + "AABBCCDD" + "9000"
+        self.assertEqual(self.split(payload), 10)
+
+    def test_an_unwrapped_command_is_not_a_sidecar_candidate(self) -> None:
+        self.assertIsNone(self.split("00A40004023F009000"))
+
+    def test_a_truncated_frame_is_refused_rather_than_guessed(self) -> None:
+        self.assertIsNone(self.split("84E2910018" + ("00" * 4)))
+
+
+class SidecarSessionContext(unittest.TestCase):
+    """The replay engine filters on facts the builder has to supply."""
+
+    def test_a_successful_plaintext_select_records_the_aid(self) -> None:
+        payload = bytes.fromhex("00A4040405A0000005599000")
+        self.assertEqual(sidecar._selected_aid(payload), "A000000559")
+
+    def test_a_refused_select_does_not_move_the_selection(self) -> None:
+        payload = bytes.fromhex("00A4040405A0000005596A82")
+        self.assertIsNone(sidecar._selected_aid(payload))
+
+    def test_a_secure_messaged_select_is_ignored(self) -> None:
+        """Its body is ciphertext, not an AID."""
+        payload = bytes.fromhex("0CA4040405A0000005599000")
+        self.assertIsNone(sidecar._selected_aid(payload))
 
 
 if __name__ == "__main__":
