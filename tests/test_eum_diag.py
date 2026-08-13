@@ -243,6 +243,46 @@ class TsharkRunnerTests(unittest.TestCase):
             self.assertIn("-Y", invocation.command)
             self.assertEqual(invocation.env[SESSION_KEYS_ENV_VAR], str(keys.resolve()))
 
+    def test_the_default_dissector_is_the_shipped_apdu_dissector(self) -> None:
+        """EumDiag no longer carries a dissector of its own.
+
+        Its ``dissector.lua`` byte-scanned for the ``BF36`` tag and
+        rendered the value as one opaque blob, loaded the session keys
+        without ever applying them, and built a TvbRange from half the
+        digit count of an ICCID -- which breaks on any real 19-digit
+        one. ``Tools/ApduDissector`` decodes the BoundProfilePackage as
+        a tree and reads the same environment variable, so this CLI is
+        pointed at it instead.
+        """
+        from Tools.EumDiag.tshark_runner import locate_dissector
+
+        resolved = locate_dissector()
+        self.assertTrue(resolved.is_file(), f"missing {resolved}")
+        self.assertEqual(resolved.name, "yggdrasim_apdu.lua")
+        self.assertIn("ApduDissector", str(resolved))
+
+    def test_the_retired_dissector_is_gone(self) -> None:
+        retired = Path(__file__).resolve().parent.parent / "Tools" / "EumDiag"
+        self.assertFalse((retired / "dissector.lua").exists())
+
+    def test_the_default_invocation_loads_a_real_script(self) -> None:
+        """Previously this asserted against a "-- stub --" placeholder."""
+        with tempfile.TemporaryDirectory() as td:
+            pcap = Path(td) / "capture.pcapng"
+            pcap.write_bytes(b"\x00" * 16)
+            keys = Path(td) / "session-keys.json"
+            keys.write_text("{}", "utf-8")
+            invocation = build_tshark_invocation(
+                pcap_path=pcap,
+                keys_path=keys,
+                existing_env={"PATH": "/usr/bin"},
+            )
+            script = invocation.command[2].removeprefix("lua_script:")
+            self.assertTrue(Path(script).is_file())
+            body = Path(script).read_text(encoding="utf-8")
+            self.assertNotIn("-- stub --", body)
+            self.assertIn('Proto("yapdu"', body)
+
     def test_ensure_tshark_raises_when_missing(self) -> None:
         with patch("shutil.which", return_value=None):
             with self.assertRaises(TsharkMissingError):

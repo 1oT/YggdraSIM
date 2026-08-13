@@ -171,6 +171,7 @@ nav:
       - SUCI Tool: subsystems/suci-tool.md
       - SIMCARD Simulator: subsystems/simcard-simulator.md
       - APDU Mutation Fuzzer: subsystems/apdu-fuzzer.md
+      - APDU Dissector: subsystems/apdu-dissector.md
       - EUM Diagnostics: subsystems/eum-diagnostics.md
   - How-To:
       - Overview: how-to/index.md

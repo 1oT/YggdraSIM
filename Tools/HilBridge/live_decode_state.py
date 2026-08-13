@@ -50,7 +50,7 @@ _PROACTIVE_COMMAND_NAMES = {
     TIMER_MANAGEMENT_COMMAND: "TIMER MANAGEMENT",
     0x05: "SET UP EVENT LIST",
     POLL_INTERVAL_COMMAND: "POLL INTERVAL",
-    POLL_OFF_COMMAND: "POLL OFF",
+    POLL_OFF_COMMAND: "POLLING OFF",
     0x01: "REFRESH",
     0x02: "MORE TIME",
     0x26: "PROVIDE LOCAL INFORMATION",
@@ -804,8 +804,8 @@ class LiveDecodeStateTracker:
             timer_state.observed_remaining_seconds = 0
             timer_state.observed_at_seconds = self._current_row_time_seconds()
             timer_state.stop_frame = frame_number
-            summary_parts.append("POLL OFF")
-            frame_lines.append("POLL OFF disabled the active terminal polling cadence.")
+            summary_parts.append("POLLING OFF")
+            frame_lines.append("POLLING OFF disabled the active terminal polling cadence.")
 
         self._pending_proactive = pending_state
 
@@ -976,11 +976,11 @@ class LiveDecodeStateTracker:
                     timer_state.observed_remaining_seconds = 0
                     timer_state.observed_at_seconds = self._current_row_time_seconds()
                     timer_state.stop_frame = frame_number
-                frame_lines.append("Terminal accepted POLL OFF.")
+                frame_lines.append("Terminal accepted POLLING OFF.")
             else:
-                summary_parts.append(f"POLL OFF FAIL 0x{result_code:02X}")
+                summary_parts.append(f"POLLING OFF FAIL 0x{result_code:02X}")
                 frame_lines.append(
-                    f"Terminal rejected POLL OFF with result 0x{result_code:02X}."
+                    f"Terminal rejected POLLING OFF with result 0x{result_code:02X}."
                 )
         elif pending_state.command_type == _REFRESH_PROACTIVE_COMMAND:
             # The terminal acknowledged (or rejected) a REFRESH request.

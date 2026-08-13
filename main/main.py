@@ -1266,6 +1266,22 @@ def _hil_bridge_log_line_is_apdu_related (line_text :str )->bool :
     return False
 
 
+def _hil_bridge_apdu_dissector_args ()->list :
+    """Return the ``-X lua_script:`` pair for the bundled APDU dissector.
+
+    Empty when the dissector is absent or switched off, so a partial
+    install can never stop Wireshark from launching.
+    """
+    try :
+        from Tools .ApduDissector .tshark_runner import dissector_arguments
+    except ImportError :
+        return []
+    try :
+        return dissector_arguments ()
+    except OSError :
+        return []
+
+
 def _launch_hil_bridge_wireshark ()->None :
     wireshark_binary =_hil_bridge_wireshark_binary_path ()
     if len (wireshark_binary )==0 :
@@ -1281,6 +1297,7 @@ def _launch_hil_bridge_wireshark ()->None :
     capture_interface ,
     "-f",
     _hil_bridge_gsmtap_capture_filter (),
+    *_hil_bridge_apdu_dissector_args (),
     "-style",
     "Adwaita-Dark",
     ]

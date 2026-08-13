@@ -53,7 +53,7 @@ include SCP11/local_access/profile/metadata/default_profile_metadata.json
 include SCP11/local_access/profile/test_profile.txt
 include SIMCARD/eim_identity_template.json
 include SIMCARD/isdr_config_template.json
-include Tools/EumDiag/dissector.lua
+recursive-include Tools/ApduDissector/lua *.lua
 include Tools/HilBridge/RSPRO.asn
 include Tools/ProfilePackage/examples/saip_batch_data_template.yaml
 include Tools/ProfilePackage/profile/reference_test_profile.txt

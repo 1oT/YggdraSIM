@@ -156,6 +156,10 @@ def eum_diag() -> int:
     return _invoke("Tools.EumDiag.main", "run_cli")
 
 
+def apdu_dissect() -> int:
+    return _invoke("Tools.ApduDissector.main", "run_cli")
+
+
 def asn1_tlv_decode() -> int:
     return _invoke("Tools.Asn1TlvDecode.main", "run_cli")
 

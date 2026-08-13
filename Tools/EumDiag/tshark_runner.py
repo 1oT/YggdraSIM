@@ -8,7 +8,7 @@ Subprocess wrapper around tshark + the EUM-BPP Lua dissector.
 The runner keeps the command construction + environment shaping out
 of the CLI layer so it can be unit-tested without actually invoking
 tshark. Each public function returns a plain argv list or a
-``subprocess.CompletedProcess`` — no global state.
+``subprocess.CompletedProcess`` -- no global state.
 """
 
 from __future__ import annotations
@@ -43,15 +43,22 @@ class TsharkInvocation:
 
 
 def locate_dissector(module_dir: Path | None = None) -> Path:
-    """Resolve the bundled ``dissector.lua`` path.
+    """Resolve the Lua dissector this tool hands to tshark.
 
-    The default location is next to this module. Tests override
-    ``module_dir`` to point at a tmpdir copy when they want to
-    assert against a known good checksum.
+    Formerly a ``dissector.lua`` sitting next to this module. That file
+    byte-scanned for the ``BF36`` tag and rendered its value as one
+    opaque blob, loaded the session keys without ever applying them, and
+    crashed on an odd-length ICCID. It has been retired in favour of
+    ``Tools/ApduDissector``, which decodes the BoundProfilePackage as a
+    tree and honours the same ``YGGDRASIM_EUM_SESSION_KEYS`` variable.
+
+    Tests override ``module_dir`` to point at a tmpdir copy.
     """
     if module_dir is not None:
         return (Path(module_dir) / DEFAULT_DISSECTOR_FILENAME).resolve()
-    return (Path(__file__).parent / DEFAULT_DISSECTOR_FILENAME).resolve()
+    from Tools.ApduDissector.tshark_runner import locate_dissector as locate_apdu
+
+    return locate_apdu()
 
 
 def build_tshark_invocation(
@@ -106,7 +113,7 @@ def run_tshark(
 ) -> subprocess.CompletedProcess[bytes]:
     """Execute the invocation and return the ``CompletedProcess``.
 
-    The call deliberately does NOT raise on non-zero exit — tshark
+    The call deliberately does NOT raise on non-zero exit -- tshark
     uses non-zero for benign cases (e.g. no matching packets) so the
     caller is responsible for interpreting the return code.
     """
