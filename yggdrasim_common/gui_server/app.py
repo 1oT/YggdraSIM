@@ -32,7 +32,7 @@ import threading
 import time
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from .auth import AuthMiddleware, FailureRateLimiter
 from .config import (
@@ -52,9 +52,6 @@ _LOGGER = logging.getLogger("yggdrasim.gui.app")
 _READY_TIMEOUT_SECONDS = 5.0
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _PYWEBVIEW_GUI_ENV = "PYWEBVIEW_GUI"
-_GUI_FILE_PICKER_ENV = "YGGDRASIM_GUI_FILE_PICKER"
-_GUI_FILE_PICKER_WEB_VALUES = frozenset(("web", "browser", "in-app", "in_app"))
-_GUI_FILE_PICKER_NATIVE_VALUES = frozenset(("native", "os", "qt", "system"))
 _QTWEBENGINE_CHROMIUM_FLAGS_ENV = "QTWEBENGINE_CHROMIUM_FLAGS"
 _QTWEBENGINE_DEFAULT_FLAGS = (
     "--disable-background-networking",
@@ -70,7 +67,6 @@ _QTWEBENGINE_DEFAULT_FLAGS = (
     "--num-raster-threads=1",
     "--renderer-process-limit=1",
 )
-_DESKTOP_FORCE_EXIT_DELAY_SECONDS = 1.0
 
 
 class _UvicornRunner:
@@ -503,28 +499,6 @@ def _cleanup_gui_runtime_on_shutdown(*, include_default_hil_service: bool) -> No
     _LOGGER.info("GUI shutdown cleanup: %s", summary)
 
 
-def _request_desktop_close_shutdown() -> None:
-    """Run desktop cleanup and ensure pywebview cannot leave the process alive."""
-    try:
-        _cleanup_gui_runtime_on_shutdown(include_default_hil_service=True)
-    finally:
-        _schedule_desktop_process_exit()
-
-
-def _schedule_desktop_process_exit(
-    *,
-    delay_seconds: float = _DESKTOP_FORCE_EXIT_DELAY_SECONDS,
-) -> None:
-    """Force-exit the desktop host if pywebview does not unwind cleanly."""
-
-    def _exit_process() -> None:
-        os._exit(0)
-
-    timer = threading.Timer(max(0.0, float(delay_seconds)), _exit_process)
-    timer.daemon = True
-    timer.start()
-
-
 def _ensure_self_signed_tls() -> tuple[str, str]:
     """Generate a one-time self-signed TLS pair under ``state/gui_tls/``.
 
@@ -596,130 +570,6 @@ def _emit_tls_fingerprint(cert_path: Path) -> None:
     fingerprint = hashlib.sha256(raw).hexdigest().upper()
     formatted = ":".join(fingerprint[i:i + 2] for i in range(0, len(fingerprint), 2))
     print(f"[*] Self-signed cert SHA-256: {formatted}")
-
-
-class _PywebviewJsBridge:
-    """Native-file-dialog bridge exposed to the SPA as ``pywebview.api``.
-
-    Each method returns a plain string (or ``""`` when the user cancels)
-    so the JS side never has to worry about tuples, arrays, or platform
-    quirks. ``save_file`` returns the chosen destination path as-is — the
-    SPA is responsible for appending a default filename if the user
-    picked an empty location.
-    """
-
-    def __init__(self, on_close_requested: Callable[[], None] | None = None) -> None:
-        self._webview = None  # set lazily via :meth:`attach`
-        self._on_close_requested = on_close_requested
-
-    def attach(self, webview_module: Any) -> None:
-        self._webview = webview_module
-
-    def file_picker_mode(self) -> str:
-        """Return the configured file-picker mode for the SPA."""
-        raw = os.environ.get(_GUI_FILE_PICKER_ENV, "").strip().lower()
-        if raw in _GUI_FILE_PICKER_NATIVE_VALUES:
-            return "native"
-        return "web"
-
-    def _active_window(self) -> Any:
-        if self._webview is None:
-            raise RuntimeError("pywebview bridge not attached yet")
-        windows = getattr(self._webview, "windows", None) or []
-        if len(windows) == 0:
-            raise RuntimeError("no active pywebview window")
-        return windows[0]
-
-    def pick_file(
-        self,
-        default_path: str = "",
-        file_types: Optional[list[str]] = None,
-        allow_multiple: bool = False,
-    ) -> str:
-        """Open a native *open-file* dialog. Returns ``""`` on cancel."""
-        try:
-            window = self._active_window()
-            types = tuple(file_types or ())
-            result = window.create_file_dialog(
-                self._webview.OPEN_DIALOG,  # type: ignore[union-attr]
-                directory=str(default_path or ""),
-                allow_multiple=bool(allow_multiple),
-                file_types=types,
-            )
-        except Exception:  # noqa: BLE001 — surface to JS
-            return ""
-        return _first_dialog_path(result)
-
-    def pick_folder(self, default_path: str = "") -> str:
-        """Open a native *select-folder* dialog. Returns ``""`` on cancel."""
-        try:
-            window = self._active_window()
-            result = window.create_file_dialog(
-                self._webview.FOLDER_DIALOG,  # type: ignore[union-attr]
-                directory=str(default_path or ""),
-            )
-        except Exception:  # noqa: BLE001
-            return ""
-        return _first_dialog_path(result)
-
-    def save_file(
-        self,
-        default_path: str = "",
-        save_filename: str = "",
-        file_types: Optional[list[str]] = None,
-    ) -> str:
-        """Open a native *save-as* dialog. Returns ``""`` on cancel."""
-        try:
-            window = self._active_window()
-            types = tuple(file_types or ())
-            result = window.create_file_dialog(
-                self._webview.SAVE_DIALOG,  # type: ignore[union-attr]
-                directory=str(default_path or ""),
-                save_filename=str(save_filename or ""),
-                file_types=types,
-            )
-        except Exception:  # noqa: BLE001
-            return ""
-        return _first_dialog_path(result)
-
-    def close_app(self) -> bool:
-        """Clean up GUI-owned processes and close the desktop WebView window."""
-        if self._on_close_requested is not None:
-            try:
-                self._on_close_requested()
-            except Exception as error:  # noqa: BLE001
-                _LOGGER.warning("desktop close cleanup failed: %s", error)
-        try:
-            window = self._active_window()
-            destroy = getattr(window, "destroy", None)
-            if callable(destroy):
-                destroy()
-                return True
-            close = getattr(window, "close", None)
-            if callable(close):
-                close()
-                return True
-        except Exception:  # noqa: BLE001
-            return False
-        return False
-
-
-def _first_dialog_path(result: Any) -> str:
-    """Normalise ``create_file_dialog`` return values to a single string.
-
-    Different pywebview backends return either ``None``, a ``str``, a
-    ``tuple[str]`` or a ``list[str]`` depending on the platform. We
-    collapse everything to the first path so the SPA sees a uniform
-    string.
-    """
-    if result is None:
-        return ""
-    if isinstance(result, (list, tuple)):
-        if len(result) == 0:
-            return ""
-        first = result[0]
-        return "" if first is None else str(first)
-    return str(result)
 
 
 def _qt_backend_available() -> bool:
@@ -813,9 +663,6 @@ def _launch_pywebview(config: GuiServerConfig) -> None:
     # is expected to strip it and promote it to sessionStorage.
     url = f"{config.base_url}/?t={config.token}"
 
-    bridge = _PywebviewJsBridge(on_close_requested=_request_desktop_close_shutdown)
-    bridge.attach(webview)
-
     window = webview.create_window(
         title="YggdraSIM",
         url=url,
@@ -823,7 +670,6 @@ def _launch_pywebview(config: GuiServerConfig) -> None:
         height=800,
         resizable=True,
         confirm_close=False,
-        js_api=bridge,
     )
     _ = window  # hold a reference; webview.start consumes it
     # ``private_mode=False`` so the embedded WebView keeps a persistent

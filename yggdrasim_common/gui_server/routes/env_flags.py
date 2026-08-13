@@ -69,6 +69,23 @@ class EnvFlagResetResponse(BaseModel):
     note: str
 
 
+class PluginView(BaseModel):
+    name: str
+    label: str
+    path: str
+
+
+class PluginStatusResponse(BaseModel):
+    allowed: bool
+    requires_restart: bool
+    block_reason: str
+    namespace_error: str
+    plugins: list[PluginView]
+    capabilities: list[str]
+    health_errors: dict[str, str]
+    errors: dict[str, str]
+
+
 def _view_for_flag(flag) -> EnvFlagView:
     raw = os.environ.get(flag.name)
     return EnvFlagView(
@@ -107,6 +124,29 @@ def list_flags() -> EnvFlagListResponse:
     return EnvFlagListResponse(
         categories=list(ef.CATEGORY_ORDER),
         flags=views,
+    )
+
+
+@router.get("/plugins", response_model=PluginStatusResponse)
+def list_plugins() -> PluginStatusResponse:
+    """Report which optional runtime plugins loaded — or why none did.
+
+    Plugin loading is gated by ``YGGDRASIM_ALLOW_PLUGINS`` (surfaced as a
+    flag in this same view) and evaluated once at startup, so
+    ``requires_restart`` flags a gate change that has not taken effect yet.
+    """
+    from yggdrasim_common.plugin_runtime import plugin_status_report
+
+    report = plugin_status_report()
+    return PluginStatusResponse(
+        allowed=bool(report["allowed"]),
+        requires_restart=bool(report["requires_restart"]),
+        block_reason=str(report["block_reason"]),
+        namespace_error=str(report["namespace_error"]),
+        plugins=[PluginView(**item) for item in report["plugins"]],
+        capabilities=list(report["capabilities"]),
+        health_errors=dict(report["health_errors"]),
+        errors=dict(report["errors"]),
     )
 
 

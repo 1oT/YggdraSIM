@@ -147,10 +147,12 @@ def _refuse(caller: str) -> None:
 def _refuse_introspection(caller: str) -> None:
     raise RuntimeError(
         "Refusing TLS chain introspection for "
-        f"{caller!r}. Pre-seed a reviewed trust anchor under "
-        "SCP11/<tree>/certs, or explicitly set "
+        f"{caller!r}. Point ES9_CA_BUNDLE_PATH (console: SET-ES9-CA) at a "
+        "reviewed trust anchor, or explicitly set "
         f"{ALLOW_TLS_INTROSPECTION_ENV}=1 for a read-only first-contact "
-        "chain fetch. The opt-in is ignored while "
+        "chain fetch. A PEM merely dropped under SCP11/<tree>/certs does "
+        "not help here: the ES9 candidate-bundle scan only runs after this "
+        "fetch succeeds. The opt-in is ignored while "
         f"{REQUIRE_PINNED_INTROSPECTION_TLS_ENV}=1."
     )
 

@@ -455,6 +455,25 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_RUNTIME,
     ),
     EnvFlag(
+        name="YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION",
+        category=CATEGORY_SCP11_TLS,
+        summary="Allow read-only TOFU chain reads on first contact",
+        description=(
+            "Opt-in to the read-only certificate-chain probe that\n"
+            "auto-learns a trust anchor for a freshly-seen SM-DP+ / eIM\n"
+            "FQDN. The probe sends no request body: it reads the\n"
+            "presented chain, verifies it against a local bundle, and\n"
+            "persists the result under SCP11/<tree>/dynamic_ca before any\n"
+            "ES9 call goes out. An active attacker controls first\n"
+            "contact, so prefer pointing ES9_CA_BUNDLE_PATH at a reviewed\n"
+            "anchor. Refused while REQUIRE_PINNED_TLS_INTROSPECTION=1."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset → first-contact chain reads are refused",
+        applies=APPLIES_RUNTIME,
+        sensitive=True,
+    ),
+    EnvFlag(
         name="YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION",
         category=CATEGORY_SCP11_TLS,
         summary="Hard-lock: refuse TOFU chain reads",
@@ -462,10 +481,10 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
             "Hard-lock for the read-only TOFU chain probe used to\n"
             "auto-learn trust anchors on first contact. Use when no new\n"
             "anchor may be learned at runtime (attestation / air-gapped)\n"
-            "and pre-seed anchors manually under SCP11/<tree>/certs."
+            "and point ES9_CA_BUNDLE_PATH at a pre-seeded anchor instead."
         ),
         kind=KIND_BOOL_TOGGLE,
-        default_hint="unset → auto-learn allowed",
+        default_hint="unset → ALLOW_TLS_INTROSPECTION=1 still required",
         applies=APPLIES_RUNTIME,
     ),
 

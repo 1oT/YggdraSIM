@@ -408,6 +408,112 @@
     }
   }
 
+  async function loadPlugins() {
+    var root = $("env-plugin-root");
+    if (!root) return;
+    var statusChip = $("env-plugin-status");
+    root.innerHTML = "<p class=\"loading\">loading…</p>";
+    try {
+      var data = await apiFetch("/api/env_flags/plugins");
+      renderPlugins(root, statusChip, data);
+    } catch (err) {
+      if (statusChip) statusChip.textContent = "plugins: failed";
+      root.innerHTML = "<p class=\"loading\">failed: "
+        + escapeHtml(err && err.message ? err.message : String(err)) + "</p>";
+    }
+  }
+
+  function makePluginRow(primary, chipText, detail) {
+    var row = document.createElement("div");
+    row.className = "env-flag";
+    var meta = document.createElement("div");
+    meta.className = "env-flag-meta";
+    var nameEl = document.createElement("div");
+    nameEl.className = "env-flag-name";
+    var nameText = document.createElement("code");
+    nameText.className = "env-flag-name-text";
+    nameText.textContent = primary;
+    nameEl.appendChild(nameText);
+    if (chipText) {
+      var chip = document.createElement("span");
+      chip.className = "env-flag-chip";
+      chip.textContent = chipText;
+      nameEl.appendChild(chip);
+    }
+    meta.appendChild(nameEl);
+    if (detail) {
+      var summary = document.createElement("div");
+      summary.className = "env-flag-summary";
+      summary.textContent = detail;
+      meta.appendChild(summary);
+    }
+    row.appendChild(meta);
+    return row;
+  }
+
+  function renderPlugins(root, statusChip, data) {
+    data = data || {};
+    var plugins = data.plugins || [];
+    var caps = data.capabilities || [];
+    var errors = data.errors || {};
+    var health = data.health_errors || {};
+    var allowed = !!data.allowed;
+
+    if (statusChip) {
+      statusChip.textContent = allowed
+        ? "plugins: " + plugins.length + " loaded"
+        : "plugins: disabled";
+    }
+
+    root.innerHTML = "";
+
+    if (data.requires_restart) {
+      var restart = document.createElement("p");
+      restart.className = "loading";
+      restart.textContent =
+        "Plugin gate changed — restart YggdraSIM to apply "
+        + "(loading is evaluated once at startup).";
+      root.appendChild(restart);
+    }
+    if (!allowed && data.block_reason) {
+      var reason = document.createElement("p");
+      reason.className = "loading";
+      reason.textContent = data.block_reason;
+      root.appendChild(reason);
+    }
+    if (data.namespace_error) {
+      root.appendChild(makePluginRow("namespace", "error", data.namespace_error));
+    }
+
+    if (plugins.length === 0) {
+      var empty = document.createElement("p");
+      empty.className = "loading";
+      empty.textContent = allowed ? "no plugins loaded" : "none loaded";
+      root.appendChild(empty);
+    } else {
+      plugins.forEach(function (p) {
+        root.appendChild(makePluginRow(p.label || p.name, p.path || "", ""));
+      });
+    }
+
+    if (caps.length > 0) {
+      var strip = document.createElement("div");
+      strip.className = "env-flag-status-strip";
+      var capChip = document.createElement("span");
+      capChip.className = "cc-chip";
+      capChip.textContent = "capabilities: " + caps.join(", ");
+      strip.appendChild(capChip);
+      root.appendChild(strip);
+    }
+
+    Object.keys(errors).forEach(function (key) {
+      root.appendChild(makePluginRow(key, "load error", String(errors[key])));
+    });
+    Object.keys(health).forEach(function (key) {
+      root.appendChild(makePluginRow(key, "health", String(health[key])));
+    });
+  }
+
   function renderEnvFlag(flag) {
     var row = document.createElement("div");
     row.className = "env-flag" + (flag.is_set ? " env-flag--set" : " env-flag--unset");
@@ -574,6 +680,7 @@
           loadBackend();
         } else if (view === "env_flags") {
           loadEnvFlags();
+          loadPlugins();
         } else if (view === "overview") {
           loadHealth();
           loadBackend();
@@ -609,6 +716,7 @@
       envRefreshBtn.addEventListener("click", function () {
         setEnvFlagToolbarStatus("");
         loadEnvFlags();
+        loadPlugins();
       });
     }
 

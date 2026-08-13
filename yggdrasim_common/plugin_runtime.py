@@ -104,6 +104,17 @@ def _ensure_plugins_namespace(plugins_dir: str) -> None:
         spec.submodule_search_locations = list(paths)
 
 
+def _plugin_label(source_path: str) -> str:
+    """Display name for a plugin path — ``pkg/`` for a directory plugin,
+    ``file.py`` for a single-file plugin. Kept in one place so the startup
+    banner and the operator-facing status report always agree.
+    """
+    base = os.path.basename(source_path)
+    if base == "__init__.py":
+        return os.path.basename(os.path.dirname(source_path)) + "/"
+    return base
+
+
 class PluginManager:
     def __init__(self) -> None:
         self._loaded = False
@@ -196,16 +207,7 @@ class PluginManager:
         # actually executing at startup. Matches the COMMON-P4-02
         # audit intent ("print a banner listing every loaded plugin
         # path").
-        label_parts: list[str] = []
-        for path in loaded_paths:
-            base = os.path.basename(path)
-            if base == "__init__.py":
-                # Directory-based plugin: surface the package name, not
-                # the boilerplate ``__init__.py`` filename.
-                label_parts.append(os.path.basename(os.path.dirname(path)) + "/")
-            else:
-                label_parts.append(base)
-        labels = ", ".join(label_parts)
+        labels = ", ".join(_plugin_label(path) for path in loaded_paths)
         sys.stderr.write(
             f"[plugins] loaded {len(loaded_paths)}: {labels} "
             f"({_ALLOW_PLUGINS_ENV}=1; set {_DISALLOW_PLUGINS_ENV}=1 "
@@ -317,6 +319,33 @@ class PluginManager:
         self.ensure_loaded()
         return dict(self._load_errors)
 
+    def loaded_plugins(self) -> list[dict[str, str]]:
+        """Return the plugin modules that imported successfully at load time.
+
+        Each entry carries the import ``name``, a display ``label`` (matching
+        the startup banner), and the source ``path`` (absolute; callers that
+        expose this over HTTP should relativise it first).
+        """
+        self.ensure_loaded()
+        with self._lock:
+            plugins: list[dict[str, str]] = []
+            for name, module in sorted(self._modules.items()):
+                source = str(getattr(module, "__file__", "") or "")
+                plugins.append(
+                    {
+                        "name": name,
+                        "label": _plugin_label(source) if source else name,
+                        "path": source,
+                    }
+                )
+            return plugins
+
+    def capabilities(self) -> list[str]:
+        """Return the sorted names of registered plugin capabilities."""
+        self.ensure_loaded()
+        with self._lock:
+            return sorted(self._capabilities)
+
     def extend_target(self, target: Any) -> Any:
         """Extend *target* with the callables registered for the named extension point."""
         self.ensure_loaded()
@@ -404,6 +433,61 @@ def has_capability(name: str) -> bool:
 
 def plugin_load_errors() -> dict[str, str]:
     return get_plugin_manager().load_errors()
+
+
+def plugin_status_report() -> dict[str, Any]:
+    """Summarise plugin-loading state for operator surfaces (GUI / CLI).
+
+    Reflects what the singleton manager actually did: plugin loading is
+    evaluated once at process start and latched, so the report also computes
+    ``requires_restart`` when the live ``YGGDRASIM_ALLOW_PLUGINS`` /
+    ``YGGDRASIM_DISALLOW_PLUGINS`` gate now disagrees with that latched
+    decision (e.g. the operator just toggled the flag from the UI).
+
+    Synthetic ``_load_errors`` keys are split out so callers can render them
+    distinctly: ``__gate__`` / ``__namespace__`` say why nothing loaded,
+    ``<capability>:health`` are health-check failures, and the remainder are
+    genuine per-plugin import errors.
+    """
+    manager = ensure_plugins_loaded()
+    errors = manager.load_errors()
+
+    block_reason = errors.pop("__gate__", "")
+    namespace_error = errors.pop("__namespace__", "")
+    health_errors = {
+        key: errors.pop(key) for key in list(errors) if key.endswith(":health")
+    }
+
+    loaded_at_startup = len(block_reason) == 0 and len(namespace_error) == 0
+    requires_restart = _plugin_loading_allowed() != loaded_at_startup
+
+    plugins_dir = ""
+    try:
+        plugins_dir = ensure_runtime_dir(_PLUGIN_DIR_NAME)
+    except Exception:  # noqa: BLE001 — never let reporting raise
+        plugins_dir = ""
+
+    plugins: list[dict[str, str]] = []
+    for entry in manager.loaded_plugins():
+        source = entry.get("path", "")
+        shown = source
+        if source:
+            try:
+                shown = os.path.relpath(source, plugins_dir) if plugins_dir else os.path.basename(source)
+            except ValueError:
+                shown = os.path.basename(source)
+        plugins.append({"name": entry["name"], "label": entry["label"], "path": shown})
+
+    return {
+        "allowed": loaded_at_startup,
+        "requires_restart": requires_restart,
+        "block_reason": block_reason,
+        "namespace_error": namespace_error,
+        "plugins": plugins,
+        "capabilities": manager.capabilities(),
+        "health_errors": health_errors,
+        "errors": errors,
+    }
 
 
 def extend_target_with_plugins(target: Any) -> Any:
