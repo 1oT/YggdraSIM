@@ -61,6 +61,14 @@ yapdu.fields = fields.all
 --- Cross-frame context. Rebuilt on every dissection run; see state.lua.
 local machine = state.new()
 
+--- Whether the frame being rendered is the one advancing the machine,
+--- and which frame that is. Set once per frame in dissect_exchange and
+--- read by the CAT renderer, which learns BIP channel state deep inside
+--- the tree walk and must obey the same rule the rest of the module
+--- does: a re-rendered frame observes, it does not mutate.
+local frame_advancing = false
+local frame_number = 0
+
 -- --------------------------------------------------------------- experts
 local experts = {
     too_short = ProtoExpert.new(
@@ -123,6 +131,24 @@ local experts = {
         expert.group.RESPONSE_CODE,
         expert.severity.WARN
     ),
+    bip_failure = ProtoExpert.new(
+        "yapdu.expert.bip_failure",
+        "Bearer Independent Protocol channel failure",
+        expert.group.RESPONSE_CODE,
+        expert.severity.WARN
+    ),
+    reserved_class = ProtoExpert.new(
+        "yapdu.expert.reserved_class",
+        "Class byte is reserved by ISO/IEC 7816-4",
+        expert.group.MALFORMED,
+        expert.severity.WARN
+    ),
+    status_warning = ProtoExpert.new(
+        "yapdu.expert.status_warning",
+        "Card returned a warning status word",
+        expert.group.RESPONSE_CODE,
+        expert.severity.NOTE
+    ),
     tlv_malformed = ProtoExpert.new(
         "yapdu.expert.tlv_malformed",
         "TLV structure is malformed",
@@ -147,7 +173,8 @@ yapdu.experts = {
     experts.ambiguous, experts.truncated, experts.destructive,
     experts.status_error, experts.atr_checksum, experts.tlv_malformed,
     experts.budget, experts.no_context, experts.sidecar_mismatch,
-    experts.tls_alert,
+    experts.tls_alert, experts.bip_failure, experts.reserved_class,
+    experts.status_warning,
 }
 
 -- ----------------------------------------------------------- preferences
@@ -207,8 +234,16 @@ local function add_tlv_node(tree, payload, node, options)
     if node.name ~= "" then
         item:add(fields.tlv_name, range, node.name):set_generated()
     end
-    item:add(fields.tlv_class, range, node.class):set_generated()
-    item:add(fields.tlv_constructed, range, node.constructed):set_generated()
+    -- COMPREHENSION-TLV has neither a class nor a constructed bit, so
+    -- both are nil there. Adding a nil to a uint8 ProtoField raises, and
+    -- the pcall around dissection would swallow the traceback and leave
+    -- the subtree silently truncated at the first tag.
+    if node.class ~= nil then
+        item:add(fields.tlv_class, range, node.class):set_generated()
+    end
+    if node.constructed ~= nil then
+        item:add(fields.tlv_constructed, range, node.constructed):set_generated()
+    end
     if node.comprehension_required ~= nil then
         item:add(
             fields.tlv_comprehension, range, node.comprehension_required
@@ -304,6 +339,23 @@ local function add_cla_subtree(tree, payload, command)
         fields.cla_type, payload(0, 1), decoded.proprietary and 1 or 0
     )
     subtree:set_generated()
+    if decoded.invalid then
+        item:append_text(" (invalid)")
+        item:add_proto_expert_info(
+            experts.reserved_class,
+            "CLA 'FF' is reserved by ISO/IEC 7816-4 and is not a valid class"
+        )
+        return
+    end
+    if decoded.channel == nil or decoded.secure_messaging == nil then
+        -- ISO/IEC 7816-4 clause 5.4.1 assigns no meaning to bits 6 to 1
+        -- of a proprietary or reserved class byte, so there is no
+        -- channel, no secure-messaging level and no chaining flag to
+        -- report. Rendering them anyway states three facts per command
+        -- that the specification does not.
+        item:append_text(decoded.reserved and " (reserved)" or " (proprietary)")
+        return
+    end
     item:add(fields.cla_channel, payload(0, 1), decoded.channel):set_generated()
     item:add(
         fields.cla_secure_messaging, payload(0, 1), decoded.secure_messaging
@@ -324,6 +376,35 @@ local function add_command_description(tree, payload, command, description)
             :append_text(" (" .. description.control .. ")")
         tree:add(fields.select_return, payload(3, 1), command.p2)
             :append_text(" (" .. description.return_control .. ")")
+        if description.occurrence_name ~= nil then
+            -- Enumerating the ISD-Ps that share an AID prefix is done
+            -- entirely with "next occurrence", so dropping this loses
+            -- the point of the exchange.
+            tree:add(
+                fields.select_occurrence, payload(3, 1),
+                description.occurrence_name
+            ):set_generated()
+        end
+        if description.reserved_bits_set then
+            tree:add_proto_expert_info(
+                experts.reserved_class,
+                "ETSI TS 102 221 Table 11.3 requires SELECT P2 bits 8 to 5 "
+                    .. "to be zero"
+            )
+        end
+        if description.secure_messaged then
+            tree:add_proto_expert_info(
+                experts.no_context,
+                "the command body is secure-messaged, so the selected file "
+                    .. "cannot be read from it"
+            )
+        end
+        if description.path_incomplete then
+            tree:add_proto_expert_info(
+                experts.tlv_malformed,
+                "the path body is not a whole number of file identifiers"
+            )
+        end
         if description.aid_hex ~= nil then
             local range = util.safe_range(
                 payload, description.aid_offset, description.aid_length
@@ -396,6 +477,59 @@ local function add_command_description(tree, payload, command, description)
     end
 end
 
+--- Render a DGI-format STORE DATA body.
+--
+-- GlobalPlatform Amendment A: a two-byte data grouping identifier, then
+-- a one-byte length, then the value; a length of 'FF' escapes to a
+-- two-byte length. Nothing about it is BER, so the generic walker turns
+-- each identifier into an invented tag and reads the length out of the
+-- wrong byte.
+local function add_dgi_subtree(tree, payload, offset, length)
+    local cursor = offset
+    local limit = offset + length
+    while cursor + 3 <= limit do
+        local identifier = util.safe_uint(payload, cursor, 2)
+        local first = util.byte_at(payload, cursor + 2)
+        if identifier == nil or first == nil then
+            return
+        end
+        local value_offset = cursor + 3
+        local value_length = first
+        if first == 0xFF then
+            value_length = util.safe_uint(payload, cursor + 3, 2)
+            if value_length == nil then
+                return
+            end
+            value_offset = cursor + 5
+        end
+        if value_offset + value_length > limit then
+            tree:add_proto_expert_info(
+                experts.tlv_malformed,
+                string.format(
+                    "DGI %04X declares %s, which runs past the command data",
+                    identifier, util.plural_bytes(value_length)
+                )
+            )
+            return
+        end
+        local range = util.safe_range(payload, cursor, value_offset + value_length - cursor)
+        if range == nil then
+            return
+        end
+        local item = tree:add(fields.gp_dgi, range)
+        item:set_text(string.format(
+            "DGI %04X, %s", identifier, util.plural_bytes(value_length)
+        ))
+        if value_length > 0 then
+            local value_range = util.safe_range(payload, value_offset, value_length)
+            if value_range ~= nil then
+                item:add(fields.gp_dgi_value, value_range)
+            end
+        end
+        cursor = value_offset + value_length
+    end
+end
+
 --- Render a GlobalPlatform command's positional and bitmap fields.
 local function add_gp_description(tree, payload, command, gp_description)
     tree:add(
@@ -430,7 +564,13 @@ local function add_gp_description(tree, payload, command, gp_description)
                 end
             end
         end
-        if parsed.complete == false then
+        if gp_description.more_blocks then
+            -- GlobalPlatform clause 11.5.2.1 bit 8: the parameters are
+            -- continued in the next INSTALL, so a short or unbalanced
+            -- positional parse here is expected rather than malformed.
+            tree:add(fields.gp_last_block, payload(2, 1), false):set_generated()
+        end
+        if parsed.complete == false and not gp_description.more_blocks then
             tree:add_proto_expert_info(
                 experts.tlv_malformed,
                 "the INSTALL data field did not consume exactly; the "
@@ -456,6 +596,13 @@ local function add_gp_description(tree, payload, command, gp_description)
 
     if gp_description.kind == "status" then
         tree:add(fields.gp_scope, payload(2, 1), gp_description.scope):set_generated()
+        return
+    end
+
+    if gp_description.kind == "set_status" then
+        tree:add(fields.gp_scope, payload(2, 1), gp_description.scope):set_generated()
+        tree:add(fields.gp_lifecycle, payload(3, 1), gp_description.new_state_name)
+            :set_generated()
         return
     end
 
@@ -553,8 +700,15 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
     end
 
     local effective_port = port
-    if effective_port == nil then
-        effective_port = state.bip_port(machine, channel_id)
+    local transport = nil
+    local opened = state.bip_channel(
+        machine, channel_id, frame_number, frame_advancing
+    )
+    if opened ~= nil then
+        if effective_port == nil then
+            effective_port = opened.port
+        end
+        transport = opened.transport
     end
 
     -- A TLS record split across several channel-data blocks gives the
@@ -585,12 +739,24 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
                 )
             end
         end
+        if record.handshake_type_name ~= nil then
+            tree:add(
+                fields.tls_handshake_type, range, record.handshake_type_name
+            ):set_generated()
+        end
+        if record.alert_encrypted then
+            -- Saying nothing here is the honest answer: the alert code
+            -- is inside the ciphertext. Under TLS 1.3 that is every
+            -- post-handshake alert, so an operator who does not see a
+            -- named alert should not conclude there was none.
+            tree:add(fields.tls_alert_encrypted, range, true):set_generated()
+        end
         if record.complete == false then
             tree:add(fields.tls_incomplete, range, true):set_generated()
         end
     end
 
-    local wanted = cat.channel_payload_dissector(values, effective_port)
+    local wanted = cat.channel_payload_dissector(values, effective_port, transport)
     if wanted == "" then
         return
     end
@@ -622,9 +788,18 @@ end
 local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
     local content_offset = offset
     local content_length = length
+    local envelope_name = nil
 
+    -- 'D0' wraps a proactive command; 'D1' to 'DE' wrap an ENVELOPE body
+    -- (ETSI TS 102 223 clause 7.5). Both are plain BER around a
+    -- COMPREHENSION-TLV run, so both have to be stepped over in BER
+    -- first. An ENVELOPE left unwrapped renders as one opaque node --
+    -- which hides Event download entirely, and Event download is how the
+    -- terminal reports that data arrived or that the link went away.
     local wrapper = tlv.read_tag(payload, offset)
-    if wrapper ~= nil and wrapper.value == cat.PROACTIVE_COMMAND_TAG then
+    if wrapper ~= nil
+        and (wrapper.value == cat.PROACTIVE_COMMAND_TAG
+            or cat.is_envelope_tag(wrapper.value)) then
         local wrapper_length = tlv.read_length(payload, offset + wrapper.length)
         if wrapper_length ~= nil and wrapper_length.value ~= nil then
             content_offset = offset + wrapper.length + wrapper_length.length
@@ -636,7 +811,17 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
             local range = util.safe_range(payload, offset, length)
             if range ~= nil then
                 tree = tree:add(fields.cat_command, range)
-                tree:set_text("Proactive command (D0)")
+                if wrapper.value == cat.PROACTIVE_COMMAND_TAG then
+                    tree:set_text("Proactive command (D0)")
+                else
+                    envelope_name = cat.envelope_name(wrapper.value)
+                    tree:set_text(string.format(
+                        "ENVELOPE: %s (%02X)", envelope_name, wrapper.value
+                    ))
+                    tree:add(
+                        fields.cat_envelope, range, envelope_name
+                    ):set_generated()
+                end
             end
         end
     end
@@ -670,41 +855,85 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
         return nil
     end
     local details = find_details(nodes)
-    if details == nil or details.command_type == nil then
+    if details == nil and envelope_name == nil then
         return nil
     end
-    local name = cat.command_name(details.command_type)
-    tree:add(fields.cat_type, payload(offset, 1), details.command_type)
-        :set_generated()
-    tree:add(fields.cat_type_name, payload(offset, 1), name):set_generated()
-    tree:add(fields.cat_number, payload(offset, 1), details.number or 0)
-        :set_generated()
-    tree:add(
-        fields.cat_qualifier_name, payload(offset, 1),
-        cat.qualifier_name(details.command_type, details.qualifier or 0)
-    ):set_generated()
+
+    -- An ENVELOPE carries no Command Details: the wrapper tag is what
+    -- names it. The command-type fields are simply absent there rather
+    -- than filled with a placeholder.
+    local name = envelope_name or ""
+    local command_type = nil
+    if details ~= nil and details.command_type ~= nil then
+        command_type = details.command_type
+        name = cat.command_name(command_type)
+        tree:add(fields.cat_type, payload(offset, 1), command_type)
+            :set_generated()
+        tree:add(fields.cat_type_name, payload(offset, 1), name):set_generated()
+        tree:add(fields.cat_number, payload(offset, 1), details.number or 0)
+            :set_generated()
+        tree:add(
+            fields.cat_qualifier_name, payload(offset, 1),
+            cat.qualifier_name(command_type, details.qualifier or 0)
+        ):set_generated()
+    end
 
     -- Bearer Independent Protocol parameters. These are what an eUICC
     -- profile download actually runs over, so naming the bearer, the
     -- access point and the peer address is most of what a BIP trace is
     -- consulted for.
     local port = nil
+    local transport_kind = nil
     local channel_payload = nil
     local channel_payload_offset = nil
     local channel_payload_range = nil
     local channel_data_item = nil
     local channel_id = nil
+    local status_channel = nil
+
+    -- OPEN CHANNEL may carry two Other address TLVs -- the local address
+    -- first, then the data destination -- or just the destination, since
+    -- the local one is optional and usually left to the terminal. The
+    -- count decides which reading applies, so it is taken before the
+    -- walk rather than guessed at during it.
+    local address_seen = 0
+    local address_total = 0
+    for index = 1, #nodes do
+        if nodes[index].base_tag == cat.TAG_OTHER_ADDRESS then
+            address_total = address_total + 1
+        end
+    end
+
     for index = 1, #nodes do
         local node = nodes[index]
         local range = util.safe_range(payload, node.value_offset, node.value_length)
         if range ~= nil then
             if node.base_tag == cat.TAG_DEVICE_IDENTITIES and node.value_length >= 2 then
+                -- Byte 1 is the source and byte 2 the destination. The
+                -- direction of a proactive command is not incidental
+                -- detail: it is how an operator tells a card asking the
+                -- terminal to do something from a terminal reporting
+                -- back, and until now it was parsed and dropped.
+                local source = util.byte_at(payload, node.value_offset)
+                local destination = util.byte_at(payload, node.value_offset + 1)
+                if source ~= nil then
+                    tree:add(fields.cat_source, range, cat.device_name(source))
+                        :set_generated()
+                end
+                if destination ~= nil then
+                    tree:add(
+                        fields.cat_destination, range,
+                        cat.device_name(destination)
+                    ):set_generated()
+                end
                 -- A BIP command addresses its channel through the
-                -- device identity: 0x21..0x27 are channels 1 to 7.
+                -- device identity: 0x21 to 0x27 are channels 1 to 7.
                 for byte_index = 0, node.value_length - 1 do
-                    local device = util.byte_at(payload, node.value_offset + byte_index)
-                    if device ~= nil and device >= 0x21 and device <= 0x27 then
-                        channel_id = device - 0x20
+                    local found = cat.device_channel(
+                        util.byte_at(payload, node.value_offset + byte_index)
+                    )
+                    if found ~= nil then
+                        channel_id = found
                     end
                 end
             elseif node.base_tag == cat.TAG_BEARER_DESCRIPTION and node.value_length >= 1 then
@@ -725,17 +954,35 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
                     tree:add(fields.cat_apn, range, apn):set_generated()
                 end
             elseif node.base_tag == cat.TAG_OTHER_ADDRESS then
+                -- OPEN CHANNEL carries two of these: the local address
+                -- first, then the data destination. Rendering both under
+                -- one field name leaves "0.0.0.0,8.8.8.8" with nothing
+                -- saying which end is which.
+                address_seen = address_seen + 1
                 local values = util.byte_array(
                     payload, node.value_offset, node.value_length
                 )
                 local address = cat.decode_other_address(values)
-                if address ~= "" then
-                    tree:add(fields.cat_address, range, address):set_generated()
+                if address == "" then
+                    address = "not specified (dynamic address requested)"
                 end
+                local role = "data destination address"
+                if address_total >= 2 and address_seen == 1 then
+                    role = "local address"
+                end
+                tree:add(
+                    fields.cat_address, range,
+                    string.format("%s: %s", role, address)
+                ):set_generated()
             elseif node.base_tag == cat.TAG_TRANSPORT_LEVEL and node.value_length >= 1 then
                 local kind = util.byte_at(payload, node.value_offset)
                 tree:add(fields.cat_transport, range, cat.transport_name(kind))
                     :set_generated()
+                if kind == 0x02 or kind == 0x03 or kind == 0x05 then
+                    transport_kind = "tcp"
+                elseif kind == 0x01 or kind == 0x04 then
+                    transport_kind = "udp"
+                end
                 if node.value_length >= 3 then
                     port = util.safe_uint(payload, node.value_offset + 1, 2)
                     if port ~= nil then
@@ -743,10 +990,46 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
                     end
                 end
             elseif node.base_tag == cat.TAG_CHANNEL_STATUS and node.value_length >= 1 then
-                local status = util.byte_at(payload, node.value_offset)
-                tree:add(
-                    fields.cat_channel, range, cat.channel_number(status)
-                ):set_generated()
+                local status = cat.parse_channel_status(
+                    util.byte_array(payload, node.value_offset, node.value_length)
+                )
+                if status ~= nil then
+                    status_channel = status.identifier
+                    tree:add(
+                        fields.cat_channel, range, status.identifier
+                    ):set_generated()
+                    tree:add(
+                        fields.cat_channel_established, range, status.established
+                    ):set_generated()
+                    if status.further_info_name ~= nil then
+                        tree:add(
+                            fields.cat_channel_info, range,
+                            status.further_info_name
+                        ):set_generated()
+                    end
+                    if status.link_dropped then
+                        tree:add_proto_expert_info(
+                            experts.bip_failure,
+                            string.format(
+                                "BIP channel %d reports the link dropped",
+                                status.identifier
+                            )
+                        )
+                    elseif status.no_channel then
+                        tree:add_proto_expert_info(
+                            experts.bip_failure, "no BIP channel available"
+                        )
+                    end
+                end
+            elseif node.base_tag == cat.TAG_CHANNEL_DATA_LENGTH
+                and node.value_length >= 1 then
+                local waiting = util.byte_at(payload, node.value_offset)
+                if waiting ~= nil then
+                    -- Clause 8.55 gives 'FF' the meaning "at least 255",
+                    -- not "exactly 255".
+                    tree:add(fields.cat_channel_data_length, range, waiting)
+                        :set_generated()
+                end
             elseif node.base_tag == cat.TAG_CHANNEL_DATA and node.value_length > 0 then
                 channel_payload = util.byte_array(
                     payload, node.value_offset, node.value_length
@@ -759,6 +1042,28 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
                 tree:add(fields.cat_result, range, result)
                 tree:add(fields.cat_result_name, range, cat.result_name(result))
                     :set_generated()
+                -- The second byte is where a BIP failure says what
+                -- actually went wrong. Without it every one of the
+                -- thirteen causes reads as "bearer independent protocol
+                -- error", which names the layer and nothing else.
+                local cause = nil
+                if node.value_length >= 2 then
+                    cause = util.byte_at(payload, node.value_offset + 1)
+                end
+                local cause_name = cat.result_additional_info(result, cause)
+                if cause_name ~= "" then
+                    tree:add(fields.cat_result_cause, range, cause_name)
+                        :set_generated()
+                end
+                if result == 0x3A then
+                    tree:add_proto_expert_info(
+                        experts.bip_failure,
+                        string.format(
+                            "BIP error: %s",
+                            cause_name ~= "" and cause_name or "no cause given"
+                        )
+                    )
+                end
             elseif node.base_tag == cat.TAG_EVENT_LIST then
                 for byte_index = 0, node.value_length - 1 do
                     local event = util.byte_at(payload, node.value_offset + byte_index)
@@ -774,19 +1079,49 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
 
     -- Remember what OPEN CHANNEL negotiated. SEND DATA and RECEIVE DATA
     -- carry no transport information of their own, so without this the
-    -- channel payload has to be identified by content alone.
-    if details.command_type == 0x40 and channel_id ~= nil then
-        state.open_bip_channel(machine, channel_id, port, nil)
+    -- channel payload has to be identified by content alone -- which is
+    -- enough for TLS and HTTP and not enough for DNS.
+    --
+    -- Only an advancing frame may write. Rule 1 in state.lua exists
+    -- because Wireshark re-dissects out of order, and a "-Y
+    -- frame.number==N" detail query would otherwise learn a port from a
+    -- frame it never saw.
+    if frame_advancing then
+        if status_channel ~= nil and status_channel ~= 0 then
+            state.bind_bip_channel(machine, status_channel)
+        end
+        -- The command asks; the terminal's response allocates. The
+        -- identifier arrives later, with the Channel status TLV, so the
+        -- port is latched here and bound then. The port guard matters:
+        -- the TERMINAL RESPONSE echoes command type '40' without a
+        -- transport-level TLV, and latching that would replace a real
+        -- port with nothing.
+        if command_type == 0x40 and port ~= nil then
+            state.open_bip_channel(machine, port, transport_kind)
+            if channel_id ~= nil then
+                -- Some cards name the channel in the OPEN CHANNEL's own
+                -- device identities rather than waiting for the
+                -- terminal to allocate one. Binding here as well means
+                -- the port is learned from whichever form the trace
+                -- actually uses.
+                state.bind_bip_channel(machine, channel_id)
+            end
+        end
+        if command_type == 0x41 and channel_id ~= nil then
+            state.close_bip_channel(machine, channel_id)
+        end
+        state.record_bip_frame(machine, frame_number)
     end
 
     add_channel_payload(
         channel_data_item, channel_payload, channel_payload_range,
-        channel_id, port, pinfo
+        channel_id or status_channel, port, pinfo
     )
 
     return {
         name = name,
-        command_type = details.command_type,
+        command_type = command_type,
+        envelope = envelope_name,
         channel_payload = channel_payload,
         channel_payload_offset = channel_payload_offset,
         port = port,
@@ -849,10 +1184,33 @@ local function add_command_subtree(
             local positional = command.ins == commands.INS_SELECT
                 or (gp_description ~= nil and gp_description.kind == "install")
 
-            if cat.is_cat_instruction(command.cla, command.ins) then
+            -- STORE DATA P1 bits 5 and 4 say what the body is. In DGI
+            -- format it is a run of two-byte data grouping identifiers
+            -- with a one-byte length, which is not BER-TLV and does not
+            -- survive being read as it: the DGI '00 70' becomes a
+            -- universal-class tag and the length is taken from the
+            -- second identifier byte.
+            local dgi = gp_description ~= nil
+                and gp_description.kind == "store_data"
+                and gp_description.structure == "DGI format"
+
+            if cat.is_terminal_profile(command.cla, command.ins) then
+                -- ETSI TS 102 223 clause 5.2: the body is a bit field of
+                -- terminal capabilities, not TLV. Running the
+                -- comprehension walker over it invents tags out of
+                -- capability bits, so the bytes are left as they are.
+                data_item:set_text(string.format(
+                    "Terminal profile: %s of capability bits",
+                    util.plural_bytes(command.data_length)
+                ))
+            elseif cat.is_cat_instruction(command.cla, command.ins) then
                 add_cat_subtree(
                     data_item, payload, command.data_offset,
                     command.data_length, budget, pinfo
+                )
+            elseif dgi then
+                add_dgi_subtree(
+                    data_item, payload, command.data_offset, command.data_length
                 )
             elseif rsp_description ~= nil then
                 data_item:set_text(
@@ -900,9 +1258,12 @@ end
 -- it is the answer to every SELECT, so it carries most of what a SIM
 -- trace has to say about the file system.
 local FCP_OPTIONS = {
-    resolver = function(tag)
-        return responses.fcp_tag_name(tag)
+    resolver = function(tag, _raw, _level, parent)
+        return responses.fcp_tag_name(tag, parent)
     end,
+    -- ETSI TS 102 221 clause 11.1.1.4.10 fills 'C6' with TLVs even
+    -- though BER calls it primitive, so the walker is told to descend.
+    constructed = { [0xC6] = true },
     enrich = function(item, node, payload)
         if node.depth == 0 then
             return
@@ -931,6 +1292,36 @@ local FCP_OPTIONS = {
             if descriptor.record_count ~= nil then
                 item:add(
                     fields.fcp_record_count, range, descriptor.record_count
+                ):set_generated()
+            end
+            if descriptor.data_coding ~= nil then
+                -- Parsed and then discarded is the same as not parsed.
+                local coding = item:add(
+                    fields.fcp_data_coding, range, descriptor.data_coding
+                )
+                coding:set_generated()
+                if descriptor.write_behaviour ~= nil then
+                    coding:add(
+                        fields.fcp_write_behaviour, range,
+                        descriptor.write_behaviour
+                    ):set_generated()
+                end
+                coding:add(
+                    fields.fcp_erased_value, range, descriptor.erased_value
+                ):set_generated()
+                coding:add(
+                    fields.fcp_data_unit, range, descriptor.data_unit_quartets
+                ):set_generated()
+            end
+            return
+        end
+
+        if node.base_tag == 0x83 and node.parent == 0xC6 then
+            local reference = util.byte_at(payload, node.value_offset)
+            if reference ~= nil then
+                item:add(fields.pin_reference, range, reference)
+                item:add(
+                    fields.pin_name, range, commands.key_reference_name(reference)
                 ):set_generated()
             end
             return
@@ -989,8 +1380,21 @@ local FCP_OPTIONS = {
         if node.base_tag == 0x8A then
             local lcsi = util.byte_at(payload, node.value_offset)
             if lcsi ~= nil then
+                -- The ISO coding, not the GlobalPlatform one: an FCP
+                -- '8A' is a life-cycle status integer, and consulting
+                -- the GP registry table first reported every ordinary
+                -- UICC file as "LOADED".
+                local named = responses.lifecycle_name(lcsi)
                 item:add(fields.fcp_lcsi, range, lcsi):set_generated()
-                item:append_text(" (" .. responses.lifecycle_name(lcsi) .. ")")
+                item:add(fields.fcp_lcsi_name, range, named):set_generated()
+                item:append_text(" (" .. named .. ")")
+                if named == "termination state" then
+                    item:add_proto_expert_info(
+                        experts.status_warning,
+                        "the selected file is in the termination state and "
+                            .. "cannot be reactivated"
+                    )
+                end
             end
             return
         end
@@ -998,12 +1402,25 @@ local FCP_OPTIONS = {
 }
 
 --- Decode a known elementary file's contents.
-local function add_ef_details(tree, payload, response, fid_hex)
+local function add_ef_details(tree, payload, response, fid_hex, context)
     if fid_hex == "" or response.data_length == 0 then
         return false
     end
+    -- '6F38' is EF.UST under ADF.USIM and EF.SST under DF.GSM, and the
+    -- two are encoded differently, so the selected application decides
+    -- which reader applies.
+    local ef_context = nil
+    if context ~= nil and context.context_available == true then
+        local aid = context.selected_aid or ""
+        local selected = context.selected_fid or ""
+        if aid ~= "" then
+            ef_context = { application = "usim" }
+        elseif selected:sub(1, 4) == "7F20" then
+            ef_context = { application = "gsm" }
+        end
+    end
     local decoded = responses.decode_ef(
-        payload, response.data_offset, response.data_length, fid_hex
+        payload, response.data_offset, response.data_length, fid_hex, ef_context
     )
     if decoded == nil then
         return false
@@ -1017,7 +1434,17 @@ local function add_ef_details(tree, payload, response, fid_hex)
         tree:add(fields.ef_name, range, name):set_generated()
     end
     if decoded.kind == "iccid" then
-        tree:add(fields.ef_iccid, range, decoded.value)
+        local item = tree:add(fields.ef_iccid, range, decoded.value)
+        if decoded.malformed then
+            item:add_proto_expert_info(
+                experts.tlv_malformed,
+                "these bytes contain a nibble that is not a decimal digit, "
+                    .. "so they are not an ICCID"
+            )
+        end
+        if decoded.over_read then
+            item:append_text(" (read ran past the 10-byte file)")
+        end
         return true
     end
     if decoded.kind == "imsi" then
@@ -1025,6 +1452,13 @@ local function add_ef_details(tree, payload, response, fid_hex)
         return true
     end
     if decoded.kind == "ust" then
+        if decoded.assumed then
+            tree:add_proto_expert_info(
+                experts.no_context,
+                "'6F38' is EF.UST under ADF.USIM and EF.SST under DF.GSM; "
+                    .. "with no selected application the USIM reading is assumed"
+            )
+        end
         for index = 1, #decoded.services do
             tree:add(
                 fields.ef_service, range,
@@ -1033,14 +1467,84 @@ local function add_ef_details(tree, payload, response, fid_hex)
         end
         return true
     end
+    if decoded.kind == "sst" then
+        for index = 1, #decoded.services do
+            local service = decoded.services[index]
+            tree:add(
+                fields.ef_service, range,
+                string.format(
+                    "service %d allocated%s", service.number,
+                    service.activated and " and activated" or ", not activated"
+                )
+            ):set_generated()
+        end
+        return true
+    end
     if decoded.kind == "ad" then
         tree:add(fields.ef_operation_mode, range, decoded.operation_mode)
+        tree:add(
+            fields.ef_operation_mode_name, range, decoded.operation_mode_name
+        ):set_generated()
+        if decoded.ciphering_indicator ~= nil then
+            tree:add(
+                fields.ef_ciphering_indicator, range, decoded.ciphering_indicator
+            ):set_generated()
+        end
         if decoded.mnc_length ~= nil then
             tree:add(fields.ef_mnc_length, range, decoded.mnc_length)
         end
         return true
     end
     return false
+end
+
+--- Render a completed chained STORE DATA, and the links to its blocks.
+--
+-- Nothing here reads a stored Tvb -- a Tvb's lifetime ends with the
+-- packet that produced it, so the assembled bytes are kept as hex and a
+-- fresh one is built on every visit. See rule 3 in state.lua.
+local function add_reassembly_subtree(tree, payload, context, budget)
+    if context == nil then
+        return
+    end
+    if context.reassembled_in ~= nil and context.reassembled_hex == nil then
+        -- A block in the middle of a chain: say where it ends up.
+        tree:add(fields.rsp_reassembled_in, payload(0, 0), context.reassembled_in)
+            :set_generated()
+        return
+    end
+    local hex = context.reassembled_hex
+    if hex == nil or #hex == 0 then
+        return
+    end
+    local frames = context.reassembly_frames or {}
+    if #frames < 2 then
+        -- A single-block "chain" is just the command, already rendered.
+        return
+    end
+
+    local item = tree:add(yapdu, payload(0, 0), "Reassembled STORE DATA")
+    item:set_generated()
+    item:add(fields.rsp_reassembled_length, payload(0, 0), #hex / 2)
+        :set_generated()
+    item:add(fields.rsp_block_count, payload(0, 0), #frames):set_generated()
+    for index = 1, #frames do
+        item:add(fields.rsp_reassembly_frame, payload(0, 0), frames[index])
+            :set_generated()
+    end
+
+    local assembled = ByteArray.new(hex):tvb("Reassembled STORE DATA")
+    local ok = pcall(function()
+        add_tlv_subtree(
+            item, assembled, 0, assembled:len(), rsp.tlv_options(), budget
+        )
+    end)
+    if not ok then
+        item:add_proto_expert_info(
+            experts.tlv_malformed,
+            "the reassembled blocks do not parse as a TLV structure"
+        )
+    end
 end
 
 local function add_response_subtree(
@@ -1097,13 +1601,24 @@ local function add_response_subtree(
                 end
             end
 
+            local fid = state.response_file(context, command)
+            if fid == responses.EF_DIR and not is_template then
+                -- EF.DIR records are application templates whose tags
+                -- are universal-class BER values; the generic table
+                -- names them "ASN1_..." which is true and useless.
+                options = {
+                    resolver = function(tag)
+                        return responses.dir_tag_name(tag)
+                    end,
+                }
+            end
+
             local nodes = add_tlv_subtree(
                 data_item, payload, response.data_offset,
                 response.data_length, options, budget
             )
             if nodes == nil then
-                local fid = state.response_file(context, command)
-                add_ef_details(data_item, payload, response, fid)
+                add_ef_details(data_item, payload, response, fid, context)
             end
         end
     end
@@ -1122,7 +1637,15 @@ local function add_response_subtree(
         sw_item:add(fields.sw2, sw_range(1, 1))
         sw_item:add(fields.sw_meaning, sw_range, response.meaning):set_generated()
         sw_item:add(fields.sw_success, sw_range, response.succeeded):set_generated()
-        if response.succeeded == false then
+        -- ISO/IEC 7816-4 clause 5.1.3 has four categories, not two, and
+        -- the boolean alone cannot say which. A failed PIN verification
+        -- and a wrong-length error are both "not success", but only one
+        -- of them consumed a retry.
+        sw_item:add(fields.sw_category, sw_range, response.category)
+            :set_generated()
+        if response.category == "warning" then
+            sw_item:add_proto_expert_info(experts.status_warning, response.meaning)
+        elseif response.succeeded == false then
             sw_item:add_proto_expert_info(experts.status_error, response.meaning)
         end
     end
@@ -1447,14 +1970,42 @@ local function dissect_exchange(payload, pinfo, tree)
     end
 
     local description = commands.describe(payload, command)
+    local gp_description = gp.describe(payload, command)
+
+    -- Facts the machine needs that only the payload can supply: the SCP
+    -- the card named in its INITIALIZE UPDATE response, the security
+    -- level EXTERNAL AUTHENTICATE asked for, and the blocks of a chained
+    -- STORE DATA. All three are gathered before the machine advances so
+    -- the render path never has to mutate it.
+    local extra = {}
+    if gp_description ~= nil then
+        if gp_description.kind == "initialize_update" and response.data_length > 0 then
+            local parsed = gp.parse_initialize_update_response(
+                payload, response.data_offset, response.data_length
+            )
+            if parsed ~= nil then
+                extra.scp_name = parsed.scp_name
+            end
+        elseif gp_description.kind == "external_authenticate" then
+            extra.security_level = gp_description.level
+        elseif gp_description.kind == "store_data"
+            and command.data_offset ~= nil and command.data_length > 0 then
+            extra.store_data_hex = util.hex(
+                payload, command.data_offset, command.data_length
+            )
+            extra.store_data_last = gp_description.last_block
+        end
+    end
 
     -- Advance the machine only when this frame is genuinely the next one
     -- in capture order; otherwise replay the stored snapshot. See
     -- state.lua for why pinfo.visited alone is not sufficient.
     local context
-    if state.may_advance(machine, pinfo.number, pinfo.visited) then
+    frame_number = pinfo.number
+    frame_advancing = state.may_advance(machine, pinfo.number, pinfo.visited)
+    if frame_advancing then
         context = state.advance(
-            machine, pinfo.number, command, response, description
+            machine, pinfo.number, command, response, description, extra
         )
     else
         context = state.snapshot(machine, pinfo.number)
@@ -1476,6 +2027,7 @@ local function dissect_exchange(payload, pinfo, tree)
     add_command_subtree(
         root, payload, command, description, rsp_description, budget, pinfo
     )
+    add_reassembly_subtree(root, payload, context, budget)
     add_response_subtree(
         root, payload, response, context, command, budget, pinfo
     )
@@ -1493,7 +2045,7 @@ local function dissect_exchange(payload, pinfo, tree)
         if rsp_description ~= nil then
             detail = rsp_description.name
         else
-            local gp_detail = gp.summary(gp.describe(payload, command))
+            local gp_detail = gp.summary(gp_description)
             if gp_detail ~= "" then
                 detail = gp_detail
             end

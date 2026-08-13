@@ -135,6 +135,7 @@ M.sw = ProtoField.uint16(PREFIX .. ".sw", "Status word", base.HEX, M.status_word
 M.sw1 = ProtoField.uint8(PREFIX .. ".sw1", "SW1", base.HEX)
 M.sw2 = ProtoField.uint8(PREFIX .. ".sw2", "SW2", base.HEX)
 M.sw_meaning = ProtoField.string(PREFIX .. ".sw_meaning", "Status")
+M.sw_category = ProtoField.string(PREFIX .. ".sw.category", "Status category")
 M.sw_success = ProtoField.bool(PREFIX .. ".sw_success", "Succeeded")
 
 -- ------------------------------------------------------------------- ATR
@@ -198,6 +199,9 @@ M.select_control = ProtoField.uint8(
 M.select_return = ProtoField.uint8(
     PREFIX .. ".select.return", "Return-data control", base.HEX
 )
+M.select_occurrence = ProtoField.string(
+    PREFIX .. ".select.occurrence", "Occurrence"
+)
 
 M.binary_offset = ProtoField.uint32(
     PREFIX .. ".binary.offset", "Offset", base.DEC
@@ -243,6 +247,21 @@ M.fcp_fid = ProtoField.uint16(PREFIX .. ".fcp.fid", "File identifier", base.HEX)
 M.fcp_df_name = ProtoField.bytes(PREFIX .. ".fcp.df_name", "DF name (AID)")
 M.fcp_sfi = ProtoField.uint8(PREFIX .. ".fcp.sfi", "Short file identifier", base.DEC)
 M.fcp_lcsi = ProtoField.uint8(PREFIX .. ".fcp.lcsi", "Life-cycle status", base.HEX)
+M.fcp_lcsi_name = ProtoField.string(
+    PREFIX .. ".fcp.lcsi_name", "Life-cycle state"
+)
+M.fcp_data_coding = ProtoField.uint8(
+    PREFIX .. ".fcp.data_coding", "Data coding byte", base.HEX
+)
+M.fcp_write_behaviour = ProtoField.string(
+    PREFIX .. ".fcp.write_behaviour", "Write behaviour"
+)
+M.fcp_erased_value = ProtoField.uint8(
+    PREFIX .. ".fcp.erased_value", "Value of an erased byte", base.HEX
+)
+M.fcp_data_unit = ProtoField.uint32(
+    PREFIX .. ".fcp.data_unit", "Data unit size in quartets", base.DEC
+)
 M.fcp_descriptor = ProtoField.bytes(
     PREFIX .. ".fcp.file_descriptor", "File descriptor"
 )
@@ -265,6 +284,12 @@ M.ef_mnc_length = ProtoField.uint8(
 )
 M.ef_operation_mode = ProtoField.uint8(
     PREFIX .. ".ef.operation_mode", "MS operation mode", base.HEX
+)
+M.ef_operation_mode_name = ProtoField.string(
+    PREFIX .. ".ef.operation_mode_name", "MS operation mode"
+)
+M.ef_ciphering_indicator = ProtoField.bool(
+    PREFIX .. ".ef.ciphering_indicator", "Ciphering indicator"
 )
 
 -- ---------------------------------------------------------- GlobalPlatform
@@ -303,8 +328,10 @@ M.gp_sequence_counter = ProtoField.bytes(
 M.gp_key_diversification = ProtoField.bytes(
     PREFIX .. ".gp.key_diversification", "Key diversification data"
 )
-M.gp_lifecycle = ProtoField.uint8(
-    PREFIX .. ".gp.lifecycle", "Life-cycle state", base.HEX
+M.gp_dgi = ProtoField.bytes(PREFIX .. ".gp.dgi", "Data grouping identifier")
+M.gp_dgi_value = ProtoField.bytes(PREFIX .. ".gp.dgi_value", "DGI value")
+M.gp_lifecycle = ProtoField.string(
+    PREFIX .. ".gp.lifecycle", "Life-cycle state"
 )
 M.gp_aid = ProtoField.bytes(PREFIX .. ".gp.aid", "AID")
 
@@ -339,17 +366,29 @@ M.cat_qualifier = ProtoField.uint8(
 M.cat_qualifier_name = ProtoField.string(
     PREFIX .. ".cat.qualifier_name", "Qualifier"
 )
-M.cat_source = ProtoField.uint8(PREFIX .. ".cat.source", "Source device", base.HEX)
-M.cat_destination = ProtoField.uint8(
-    PREFIX .. ".cat.destination", "Destination device", base.HEX
+M.cat_envelope = ProtoField.string(PREFIX .. ".cat.envelope", "ENVELOPE")
+M.cat_source = ProtoField.string(PREFIX .. ".cat.source", "Source device")
+M.cat_destination = ProtoField.string(
+    PREFIX .. ".cat.destination", "Destination device"
 )
-M.cat_device_name = ProtoField.string(PREFIX .. ".cat.device", "Devices")
 M.cat_result = ProtoField.uint8(PREFIX .. ".cat.result", "Result", base.HEX)
 M.cat_result_name = ProtoField.string(PREFIX .. ".cat.result_name", "Result")
+M.cat_result_cause = ProtoField.string(
+    PREFIX .. ".cat.result_cause", "Result cause"
+)
 M.cat_event = ProtoField.uint8(PREFIX .. ".cat.event", "Event", base.HEX)
 M.cat_event_name = ProtoField.string(PREFIX .. ".cat.event_name", "Event")
 M.cat_channel = ProtoField.uint8(
     PREFIX .. ".cat.channel", "BIP channel", base.DEC
+)
+M.cat_channel_established = ProtoField.bool(
+    PREFIX .. ".cat.channel_established", "Link established"
+)
+M.cat_channel_info = ProtoField.string(
+    PREFIX .. ".cat.channel_info", "Channel further information"
+)
+M.cat_channel_data_length = ProtoField.uint8(
+    PREFIX .. ".cat.channel_data_length", "Channel data waiting", base.DEC
 )
 M.cat_bearer = ProtoField.string(PREFIX .. ".cat.bearer", "Bearer")
 M.cat_apn = ProtoField.string(PREFIX .. ".cat.apn", "Network access name")
@@ -372,6 +411,12 @@ M.tls_alert_level = ProtoField.string(PREFIX .. ".tls.alert_level", "TLS alert l
 M.tls_alert = ProtoField.string(PREFIX .. ".tls.alert", "TLS alert")
 M.tls_incomplete = ProtoField.bool(
     PREFIX .. ".tls.incomplete", "TLS record split across channel-data blocks"
+)
+M.tls_handshake_type = ProtoField.string(
+    PREFIX .. ".tls.handshake_type", "TLS handshake type"
+)
+M.tls_alert_encrypted = ProtoField.bool(
+    PREFIX .. ".tls.alert_encrypted", "TLS alert body is encrypted"
 )
 
 -- ---------------------------------------------------------------- RSP tags
@@ -407,39 +452,46 @@ M.all = {
     M.p1, M.p2, M.lc, M.le, M.le_effective, M.data, M.case,
     M.extended_length, M.risk, M.risk_name,
     M.response, M.response_data, M.sw, M.sw1, M.sw2, M.sw_meaning,
-    M.sw_success,
+    M.sw_success, M.sw_category,
     M.atr, M.atr_ts, M.atr_t0, M.atr_historical_count, M.atr_interface,
     M.atr_protocol, M.atr_historical, M.atr_tck, M.atr_tck_valid,
     M.tlv, M.tlv_tag, M.tlv_base_tag, M.tlv_name, M.tlv_class,
     M.tlv_constructed, M.tlv_length, M.tlv_indefinite, M.tlv_value,
     M.tlv_comprehension, M.tlv_text, M.tlv_uint,
     M.select_fid, M.select_aid, M.select_name, M.select_control,
-    M.select_return,
+    M.select_return, M.select_occurrence,
     M.binary_offset, M.binary_sfi,
     M.record_number, M.record_sfi, M.record_mode,
     M.pin_reference, M.pin_name, M.pin_value_len, M.pin_retries,
     M.channel_number, M.channel_operation,
     M.data_object_tag, M.data_object_name,
     M.fcp, M.fcp_file_size, M.fcp_total_size, M.fcp_fid, M.fcp_df_name,
-    M.fcp_sfi, M.fcp_lcsi, M.fcp_descriptor, M.fcp_file_type,
+    M.fcp_sfi, M.fcp_lcsi, M.fcp_lcsi_name, M.fcp_descriptor, M.fcp_file_type,
+    M.fcp_data_coding, M.fcp_write_behaviour, M.fcp_erased_value,
+    M.fcp_data_unit,
     M.fcp_structure, M.fcp_record_length, M.fcp_record_count, M.fcp_path,
     M.ef_name, M.ef_iccid, M.ef_imsi, M.ef_service, M.ef_mnc_length,
-    M.ef_operation_mode,
+    M.ef_operation_mode, M.ef_operation_mode_name, M.ef_ciphering_indicator,
     M.gp_variant, M.gp_field, M.gp_privileges, M.gp_block_number,
     M.gp_last_block, M.gp_structure, M.gp_encryption, M.gp_scope,
     M.gp_security_level, M.gp_key_version, M.gp_key_identifier, M.gp_scp,
     M.gp_card_challenge, M.gp_card_cryptogram, M.gp_host_challenge,
     M.gp_sequence_counter, M.gp_key_diversification, M.gp_lifecycle, M.gp_aid,
+    M.gp_dgi, M.gp_dgi_value,
     M.sm_protocol, M.sm_ciphertext, M.sm_cmac, M.sm_rmac, M.sm_status,
     M.sm_plaintext, M.sm_response_plaintext, M.sm_session, M.sm_mac_verified,
     M.sm_sidecar_mismatch,
-    M.cat_command, M.cat_number, M.cat_type, M.cat_type_name, M.cat_qualifier,
-    M.cat_qualifier_name, M.cat_source, M.cat_destination, M.cat_device_name,
-    M.cat_result, M.cat_result_name, M.cat_event, M.cat_event_name,
-    M.cat_channel, M.cat_bearer, M.cat_apn, M.cat_address, M.cat_buffer_size,
+    M.cat_command, M.cat_envelope, M.cat_number, M.cat_type, M.cat_type_name,
+    M.cat_qualifier, M.cat_qualifier_name, M.cat_source, M.cat_destination,
+    M.cat_result, M.cat_result_name, M.cat_result_cause,
+    M.cat_event, M.cat_event_name,
+    M.cat_channel, M.cat_channel_established, M.cat_channel_info,
+    M.cat_channel_data_length,
+    M.cat_bearer, M.cat_apn, M.cat_address, M.cat_buffer_size,
     M.cat_transport, M.cat_port, M.cat_channel_data,
     M.cat_payload_protocol, M.tls_content_type, M.tls_alert_level,
-    M.tls_alert, M.tls_incomplete,
+    M.tls_alert, M.tls_incomplete, M.tls_handshake_type,
+    M.tls_alert_encrypted,
     M.rsp_function, M.rsp_reassembled_in, M.rsp_reassembly_frame,
     M.rsp_reassembled_length, M.rsp_block_count, M.rsp_bpp_segment,
     M.rsp_bpp_section,

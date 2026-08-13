@@ -68,6 +68,12 @@ function M.new()
         -- identity. SEND DATA carries no transport information, so the
         -- port has to come from the OPEN CHANNEL that preceded it.
         bip = {},
+        -- What an OPEN CHANNEL asked for, held until the terminal says
+        -- which channel it got. See open_bip_channel.
+        bip_pending = nil,
+        -- Rule 2 applies here as much as anywhere: a re-rendered frame
+        -- reads the BIP map as it stood then, not as it stands now.
+        bip_per_frame = {},
         high_water = 0,
     }
 end
@@ -83,6 +89,10 @@ local function channel_state(machine, channel)
         selected_aid = "",
         aid_name = "",
         pending_get_response = nil,
+        -- Chained STORE DATA, keyed by channel because GlobalPlatform
+        -- numbers the blocks per channel.
+        blocks = nil,
+        sm_protocol = "",
     }
     machine.channels[channel] = created
     return created
@@ -92,17 +102,24 @@ end
 --
 -- *description* is the command-specific table from commands.describe,
 -- or nil.
-function M.advance(machine, frame_number, command, response, description)
+function M.advance(machine, frame_number, command, response, description, extra)
     local channel = 0
     if command ~= nil and command.cla_decoded ~= nil then
-        channel = command.cla_decoded.channel
+        channel = command.cla_decoded.channel or 0
     end
     local channels = channel_state(machine, channel)
+    local details = extra or {}
 
-    if description ~= nil and description.kind == "select" then
+    if description ~= nil and description.kind == "select"
+        and description.secure_messaged ~= true then
         -- Only a successful SELECT changes what is selected. A 6A82
         -- leaves the previous selection in place, and treating it as a
         -- move would mis-attribute every following read.
+        --
+        -- A secure-messaged SELECT is excluded for the same reason: its
+        -- body is ciphertext, so whatever "file identifier" was read out
+        -- of it is not one. Committing that poisons every following read
+        -- in the channel while still reporting context as available.
         if response ~= nil and response.succeeded then
             if description.aid_hex ~= nil then
                 channels.selected_aid = description.aid_hex
@@ -142,6 +159,49 @@ function M.advance(machine, frame_number, command, response, description)
         channels.pending_get_response = nil
     end
 
+    -- The SCP in use is only ever stated once, in the INITIALIZE UPDATE
+    -- response. Every wrapped command after it is just a class byte with
+    -- bit 3 set, so without carrying this forward the tree reports
+    -- "SCP03 or SCP11c" on a channel whose protocol the capture already
+    -- named unambiguously.
+    if details.scp_name ~= nil and details.scp_name ~= "" then
+        channels.sm_protocol = details.scp_name
+    end
+    if details.security_level ~= nil then
+        channels.sm_level = details.security_level
+    end
+
+    -- Chained STORE DATA. GlobalPlatform clause 11.11 splits a payload
+    -- larger than one APDU across numbered blocks with a last-block flag
+    -- in P1, and a BoundProfilePackage routinely runs to dozens of them.
+    -- None of the blocks means anything on its own, which is why an
+    -- unassembled ES8+ chain renders as N unrelated byte strings.
+    local reassembled_hex = nil
+    local reassembly_frames = nil
+    if details.store_data_hex ~= nil then
+        if channels.blocks == nil then
+            channels.blocks = { parts = {}, frames = {} }
+        end
+        local blocks = channels.blocks
+        blocks.parts[#blocks.parts + 1] = details.store_data_hex
+        blocks.frames[#blocks.frames + 1] = frame_number
+        if details.store_data_last then
+            reassembled_hex = table.concat(blocks.parts)
+            reassembly_frames = blocks.frames
+            channels.blocks = nil
+            -- Point every contributing frame at the one that completes
+            -- the chain. Wireshark renders a frame more than once, so an
+            -- earlier frame picks the link up on its next visit -- the
+            -- same way the built-in reassembly machinery behaves.
+            for index = 1, #reassembly_frames do
+                local member = machine.per_frame[reassembly_frames[index]]
+                if member ~= nil then
+                    member.reassembled_in = frame_number
+                end
+            end
+        end
+    end
+
     local snapshot = {
         context_available = true,
         channel = channel,
@@ -149,7 +209,14 @@ function M.advance(machine, frame_number, command, response, description)
         selected_name = channels.selected_name,
         selected_aid = channels.selected_aid,
         aid_name = channels.aid_name,
+        sm_protocol = channels.sm_protocol,
+        sm_level = channels.sm_level,
+        reassembled_hex = reassembled_hex,
+        reassembly_frames = reassembly_frames,
     }
+    if reassembled_hex ~= nil then
+        snapshot.reassembled_in = frame_number
+    end
     if channels.pending_get_response ~= nil then
         snapshot.pending_get_response_frame = channels.pending_get_response.frame
         snapshot.pending_get_response_fid = channels.pending_get_response.fid
@@ -163,32 +230,75 @@ function M.advance(machine, frame_number, command, response, description)
     return util.shallow_copy(snapshot)
 end
 
---- Record what an OPEN CHANNEL negotiated.
-function M.open_bip_channel(machine, channel_id, port, transport)
-    if channel_id == nil then
-        return
-    end
-    machine.bip[channel_id] = { port = port, transport = transport }
+--- Record what an OPEN CHANNEL asked for.
+--
+-- The channel does not exist yet at this point. ETSI TS 102 223 clause
+-- 6.4.27 has OPEN CHANNEL addressed UICC to terminal ('81' to '82'), and
+-- it is the terminal that allocates the identifier and reports it back
+-- in the Channel status TLV of its TERMINAL RESPONSE. Trying to read a
+-- channel number out of the command's own device identities therefore
+-- always fails, and nothing is ever recorded -- which is why DNS and
+-- plaintext HTTP inside a BIP channel stayed invisible.
+function M.open_bip_channel(machine, port, transport)
+    machine.bip_pending = { port = port, transport = transport }
 end
 
---- The port a BIP channel was opened on, or nil.
+--- Bind the pending OPEN CHANNEL to the identifier the terminal chose.
+function M.bind_bip_channel(machine, channel_id)
+    if channel_id == nil or channel_id == 0 then
+        return
+    end
+    local pending = machine.bip_pending
+    if pending == nil then
+        return
+    end
+    machine.bip[channel_id] = { port = pending.port, transport = pending.transport }
+    machine.bip_pending = nil
+end
+
+--- Forget a channel the terminal closed.
+function M.close_bip_channel(machine, channel_id)
+    if channel_id ~= nil then
+        machine.bip[channel_id] = nil
+    end
+end
+
+--- Freeze the BIP map for *frame_number*.
+function M.record_bip_frame(machine, frame_number)
+    machine.bip_per_frame[frame_number] = util.deep_copy(machine.bip)
+end
+
+--- The BIP map as it stood at *frame_number*.
+--
+-- An advancing frame reads the live map; any other frame reads its own
+-- snapshot, so clicking back through a capture in the GUI cannot show a
+-- port learned from a later OPEN CHANNEL.
+local function bip_view(machine, frame_number, advancing)
+    if advancing then
+        return machine.bip
+    end
+    return machine.bip_per_frame[frame_number] or {}
+end
+
+--- What a BIP channel was opened with: ``port`` and ``transport``, or nil.
 --
 -- Falls back to any single open channel: SEND DATA often addresses the
 -- channel through a device identity this decoder has not tied back to
 -- the OPEN CHANNEL, and one open channel is the overwhelmingly common
 -- case in a profile download.
-function M.bip_port(machine, channel_id)
-    if channel_id ~= nil and machine.bip[channel_id] ~= nil then
-        return machine.bip[channel_id].port
+function M.bip_channel(machine, channel_id, frame_number, advancing)
+    local view = bip_view(machine, frame_number, advancing)
+    if channel_id ~= nil and view[channel_id] ~= nil then
+        return view[channel_id]
     end
     local found = nil
     local count = 0
-    for _, entry in pairs(machine.bip) do
+    for _, entry in pairs(view) do
         count = count + 1
         found = entry
     end
-    if count == 1 and found ~= nil then
-        return found.port
+    if count == 1 then
+        return found
     end
     return nil
 end
@@ -204,12 +314,17 @@ function M.may_advance(machine, frame_number, visited)
 end
 
 --- The snapshot for a frame, or the stateless placeholder.
+--
+-- Copied on the way out, like the one M.advance returns. Handing back
+-- the stored table -- or the module-global STATELESS -- would let one
+-- caller's edit change what every later frame sees, which is the
+-- invariant rule 2 depends on.
 function M.snapshot(machine, frame_number)
     local found = machine.per_frame[frame_number]
     if found == nil then
-        return M.STATELESS
+        return util.shallow_copy(M.STATELESS)
     end
-    return found
+    return util.shallow_copy(found)
 end
 
 --- The file identifier whose contents a response body belongs to.

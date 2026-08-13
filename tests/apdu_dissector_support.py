@@ -461,7 +461,7 @@ def _comprehension_tlv(tag: str, value: bytes) -> bytes:
 _OPEN_CHANNEL_BODY = b"".join(
     [
         _comprehension_tlv("81", bytes.fromhex("014001")),   # OPEN CHANNEL
-        _comprehension_tlv("82", bytes.fromhex("8121")),     # terminal -> UICC
+        _comprehension_tlv("82", bytes.fromhex("8121")),     # UICC -> channel 1
         _comprehension_tlv("35", bytes.fromhex("02030405060708")),
         _comprehension_tlv("39", bytes.fromhex("0578")),     # buffer size 1400
         _comprehension_tlv("47", b"\x03iot\x04test\x03com"),

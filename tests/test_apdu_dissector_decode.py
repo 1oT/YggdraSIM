@@ -160,6 +160,26 @@ class StatusWordDecoding(DecodeTestBase):
         self.assertEqual(by_sw.get("0x6a82"), "False")
         self.assertEqual(by_sw.get("0x612b"), "True")
 
+    def test_a_failed_verification_is_not_reported_as_success(self) -> None:
+        """'63 CX' is a warning, and the command did not do what was asked.
+
+        ISO/IEC 7816-4 clause 5.1.3 has four categories, and lumping the
+        warnings in with normal processing made a failed PIN
+        verification report "Succeeded: True" beside the text
+        "Verification failed" -- and made a filter for failures miss
+        every consumed retry and every blocked PIN on the card.
+        """
+        rows = self.rows(["yapdu.sw", "yapdu.sw_success"])
+        by_sw = {row[0]: row[1] for row in rows if len(row) > 1 and row[0]}
+        self.assertEqual(by_sw.get("0x63c2"), "False")
+
+    def test_the_four_iso_categories_are_reported(self) -> None:
+        rows = self.rows(["yapdu.sw", "yapdu.sw.category"])
+        by_sw = {row[0]: row[1] for row in rows if len(row) > 1 and row[0]}
+        self.assertEqual(by_sw.get("0x9000"), "normal")
+        self.assertEqual(by_sw.get("0x63c2"), "warning")
+        self.assertEqual(by_sw.get("0x6a82"), "checking error")
+
 
 class RiskClassification(DecodeTestBase):
     """The risk field turns apdu_risk.py into a display filter."""
@@ -329,6 +349,114 @@ class BadAtrChecksum(unittest.TestCase):
     def test_the_frame_is_still_decoded_as_an_atr(self) -> None:
         rows = decode_fields(self.capture, ["yapdu.frame_kind"])
         self.assertEqual(rows[0][0], "ATR")
+
+
+class StatusWordEdgeCases(unittest.TestCase):
+    """Status words whose SW2 changes what SW1 means.
+
+    Each of these was reported as its family's happy path: '61 00' as
+    zero bytes waiting, '6C 00' as an instruction to send Le=0, '92 40'
+    as a normal ending after 64 retries, and '9E XX' as nothing at all.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._directory = tempfile.TemporaryDirectory()
+        cls.capture = write_capture(
+            Path(cls._directory.name) / "status.pcap",
+            [
+                # 61 00: 256 bytes waiting, not zero.
+                Exchange(bytes.fromhex("00A40004023F00"), bytes.fromhex("6100")),
+                # 6C 00: retry with Le = 256.
+                Exchange(bytes.fromhex("00B0000005"), bytes.fromhex("6C00")),
+                # 92 40: a memory problem, not a retry count.
+                Exchange(bytes.fromhex("00D6000002AABB"), bytes.fromhex("9240")),
+                # 9E 1A: a SIM data download error carrying a length.
+                Exchange(bytes.fromhex("80C2000005AABBCCDDEE"), bytes.fromhex("9E1A")),
+                # 63 C0: no retries left, which is a blocked key.
+                Exchange(bytes.fromhex("0020000108" + "00" * 8),
+                         bytes.fromhex("63C0")),
+            ],
+        )
+        require_working_tshark(cls.capture)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._directory.cleanup()
+
+    def meanings(self) -> dict[str, str]:
+        rows = decode_fields(self.capture, ["yapdu.sw", "yapdu.sw_meaning"])
+        return {row[0]: row[1] for row in rows if len(row) > 1 and row[0]}
+
+    def test_sw2_zero_means_256_in_the_61xx_family(self) -> None:
+        self.assertIn("256 bytes", self.meanings().get("0x6100", ""))
+
+    def test_sw2_zero_means_256_in_the_6cxx_family(self) -> None:
+        self.assertIn("Le = 256", self.meanings().get("0x6c00", ""))
+
+    def test_9240_is_a_memory_problem_not_a_retry_count(self) -> None:
+        """GSM 11.11 clause 9.4 splits '92': '0X' counts, '40' does not."""
+        self.assertIn("Memory problem", self.meanings().get("0x9240", ""))
+
+    def test_9240_is_classified_as_an_error(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.sw", "yapdu.sw_success"])
+        by_sw = {row[0]: row[1] for row in rows if len(row) > 1 and row[0]}
+        self.assertEqual(by_sw.get("0x9240"), "False")
+
+    def test_9exx_is_described_as_a_download_error(self) -> None:
+        self.assertIn("data download error", self.meanings().get("0x9e1a", ""))
+
+    def test_63c0_says_the_key_is_blocked(self) -> None:
+        self.assertIn("blocked", self.meanings().get("0x63c0", ""))
+
+
+class CaseFourCommandsKeepTheirLe(unittest.TestCase):
+    """A trailing Le is part of the command, not the response.
+
+    Scoring the case hint as one string comparison made a hint of "3S"
+    beat the true 4S reading by 20 points -- at confidence 100, with no
+    ambiguity flag -- so an ES10b STORE DATA came out one byte short and
+    its Le rendered as a one-byte response body.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._directory = tempfile.TemporaryDirectory()
+        cls.capture = write_capture(
+            Path(cls._directory.name) / "case4.pcap",
+            [
+                Exchange(
+                    bytes.fromhex("80E2910A0A") + bytes(range(10)) + b"\x00",
+                    bytes.fromhex("9000"),
+                ),
+                Exchange(
+                    bytes.fromhex("00D600000441424344") + b"\x00",
+                    bytes.fromhex("9000"),
+                ),
+            ],
+        )
+        require_working_tshark(cls.capture)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._directory.cleanup()
+
+    def test_the_split_is_case_four(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.case"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["4S", "4S"])
+
+    def test_the_le_is_present_rather_than_read_as_response_data(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.le", "yapdu.split.response_len"])
+        for row in rows:
+            with self.subTest(row=row):
+                self.assertEqual(row[0], "0")
+                self.assertEqual(row[1], "2")
+
+    def test_the_command_body_is_not_a_byte_short(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.split.command_len"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["16", "10"])
 
 
 class IccidRoundTrip(unittest.TestCase):

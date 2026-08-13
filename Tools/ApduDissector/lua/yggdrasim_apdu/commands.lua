@@ -56,7 +56,10 @@ local SELECT_CONTROL = {
     [0x09] = "by path from the current DF",
 }
 
--- SELECT P2, bits 3-1 of the return-data control.
+-- SELECT P2 bits 4-3, the return-data control. ETSI TS 102 221
+-- Table 11.3 gives bits 2-1 to the occurrence, so the control has to be
+-- masked out of the low nibble rather than read from it: P2 '06' is
+-- "FCP, next occurrence", not a reserved value.
 local SELECT_RETURN = {
     [0x00] = "FCI template",
     [0x04] = "FCP template",
@@ -64,20 +67,49 @@ local SELECT_RETURN = {
     [0x0C] = "no data returned",
 }
 
--- ETSI TS 102 221 clause 11.1.5: READ RECORD P2, low three bits.
+-- SELECT P2 bits 2-1, the occurrence. Enumerating ISD-Ps that share an
+-- AID prefix is done entirely with "next occurrence", so losing it loses
+-- the whole point of the exchange.
+local SELECT_OCCURRENCE = {
+    [0x00] = "first or only occurrence",
+    [0x01] = "last occurrence",
+    [0x02] = "next occurrence",
+    [0x03] = "previous occurrence",
+}
+
+-- READ RECORD P2, bits 3-1. ETSI TS 102 221 clause 11.1.5 defines
+-- '010', '011' and '100'; ISO/IEC 7816-4 clause 7.3.3 adds '000', '001'
+-- and '101'. '110' and '111' are reserved everywhere -- SFI addressing
+-- is signalled by bits 8-4 being non-zero, not by a mode value, which is
+-- why there is no "SFI-addressed" entry here.
 local RECORD_MODE = {
+    [0x00] = "first occurrence",
+    [0x01] = "last occurrence",
     [0x02] = "next record",
     [0x03] = "previous record",
     [0x04] = "absolute or current record",
-    [0x06] = "absolute, SFI-addressed",
+    [0x05] = "all records from P1 to the last",
 }
 
---- ETSI TS 102 221 clause 9.4.1 key references.
+--- ETSI TS 102 221 clause 9.4.1 Table 9.3 key references.
+--
+-- b8 is the global/specific flag, b7 to b5 are reserved, and b4 to b1
+-- are the reference number -- except for the universal PIN, which is the
+-- whole byte '11'. Masking with 0x1F instead of 0x0F keeps a reserved
+-- bit in the number, which made '21' report as "global PIN 1" and every
+-- '31'/'51'/'71' report as the universal PIN.
 local function key_reference_name(reference)
-    local number = reference % 0x20
-    local global = reference < 0x80
-    if number == 0 then
+    if reference == 0x00 then
         return "no key reference given"
+    end
+    if reference == 0x11 then
+        return "universal PIN"
+    end
+    local number = reference % 0x10
+    local global = reference < 0x80
+    local reserved = math.floor(reference / 16) % 8
+    if reserved ~= 0 then
+        return string.format("reserved key reference 0x%02X", reference)
     end
     if number >= 0x01 and number <= 0x08 then
         if global then
@@ -86,13 +118,19 @@ local function key_reference_name(reference)
         return string.format("application PIN %d", number)
     end
     if number >= 0x0A and number <= 0x0E then
-        return string.format("ADM%d", number - 0x09)
-    end
-    if number == 0x11 then
-        return "universal PIN"
+        -- TS 102 221 draws the same global/specific distinction over the
+        -- administrative keys as it does over the PINs.
+        if global then
+            return string.format("global ADM%d", number - 0x09)
+        end
+        return string.format("application ADM%d", number - 0x09)
     end
     return string.format("key reference 0x%02X", reference)
 end
+
+--- Name a key reference byte. Exported because the PIN status template
+--- inside an FCP carries the same encoding.
+M.key_reference_name = key_reference_name
 
 --- Resolve a file identifier to a friendly path when we know it.
 function M.file_name(fid_hex)
@@ -124,16 +162,38 @@ end
 local function describe_select(payload, command)
     local control = SELECT_CONTROL[command.p1]
         or string.format("reserved selection control 0x%02X", command.p1)
-    local return_control = SELECT_RETURN[command.p2 % 0x10]
-        or string.format("reserved return control 0x%02X", command.p2 % 0x10)
+    local control_bits = math.floor(command.p2 / 4) % 4 * 4
+    local return_control = SELECT_RETURN[control_bits]
+        or string.format("reserved return control 0x%02X", control_bits)
+    local occurrence = command.p2 % 4
 
     local description = {
         kind = "select",
         control = control,
         return_control = return_control,
+        occurrence = occurrence,
+        occurrence_name = SELECT_OCCURRENCE[occurrence],
     }
+    if command.p2 >= 0x10 then
+        -- ETSI TS 102 221 Table 11.3 requires bits 8-5 to be zero.
+        description.reserved_bits_set = true
+    end
 
     if command.data_length == 0 then
+        return description
+    end
+
+    -- A secure-messaged SELECT carries a ciphered body wrapped in
+    -- SM data objects, not a bare AID, file identifier or path. Reading
+    -- it as one produces a target invented from ciphertext -- and,
+    -- because state.advance folds a successful SELECT into the channel's
+    -- selected file, every following read in that channel is then
+    -- attributed to a file identifier that does not exist.
+    local secure = command.cla_decoded ~= nil
+        and command.cla_decoded.secure_messaging ~= nil
+        and command.cla_decoded.secure_messaging ~= 0
+    if secure then
+        description.secure_messaged = true
         return description
     end
 
@@ -171,6 +231,11 @@ local function describe_select(payload, command)
         end
         parts[#parts + 1] = string.format("%04X", element)
         index = index + 2
+    end
+    if index ~= command.data_length then
+        -- A path is a whole number of two-byte identifiers; a trailing
+        -- odd byte means this is not one.
+        description.path_incomplete = true
     end
     if #parts > 0 then
         description.path = table.concat(parts, "/")

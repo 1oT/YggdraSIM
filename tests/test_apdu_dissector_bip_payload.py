@@ -61,6 +61,24 @@ def open_channel(port: int) -> bytes:
     )
 
 
+def open_channel_to_terminal(port: int) -> bytes:
+    """OPEN CHANNEL as a card really sends it: UICC to terminal.
+
+    The channel identifier is absent, because the terminal has not
+    allocated one yet.
+    """
+    return b"".join(
+        [
+            comprehension_tlv("81", bytes.fromhex("014001")),
+            comprehension_tlv("82", bytes.fromhex("8182")),
+            comprehension_tlv("35", bytes.fromhex("0303040506")),
+            comprehension_tlv("39", bytes.fromhex("0578")),
+            comprehension_tlv("3C", bytes([0x01]) + port.to_bytes(2, "big")),
+            comprehension_tlv("3E", bytes([0x21, 8, 8, 8, 8])),
+        ]
+    )
+
+
 def send_data(payload: bytes, *, channel: int = 1) -> bytes:
     return b"".join(
         [
@@ -268,6 +286,88 @@ class NonProtocolPayloadIsLeftAlone(BipPayloadBase):
     def test_the_bytes_are_still_shown(self) -> None:
         text = decode_text(self.capture)
         self.assertIn("deadbeefcafebabe", text.lower())
+
+
+def terminal_response(body: bytes) -> Exchange:
+    return Exchange(
+        bytes.fromhex("80140000") + bytes([len(body)]) + body,
+        bytes.fromhex("9000"),
+    )
+
+
+def channel_status(channel: int, *, established: bool = True) -> bytes:
+    first = channel + (0x80 if established else 0x00)
+    return b"".join(
+        [
+            comprehension_tlv("81", bytes.fromhex("014001")),
+            comprehension_tlv("82", bytes.fromhex("8281")),
+            comprehension_tlv("83", bytes.fromhex("00")),
+            comprehension_tlv("38", bytes([first, 0x00])),
+        ]
+    )
+
+
+class DnsResolvesThroughTheAllocatedChannel(BipPayloadBase):
+    """The realistic OPEN CHANNEL flow, which used to learn nothing.
+
+    ETSI TS 102 223 clause 6.4.27 addresses OPEN CHANNEL UICC to
+    terminal ('81' to '82'): the channel does not exist yet, and the
+    terminal allocates it in the Channel status TLV of its TERMINAL
+    RESPONSE. Reading a channel number out of the command's own device
+    identities therefore always failed, nothing was ever recorded, and a
+    profile download that failed on name resolution stayed exactly as
+    invisible as it had been before the dissector existed.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.build(
+            [
+                fetch(open_channel_to_terminal(53)),
+                terminal_response(channel_status(1)),
+                fetch(send_data(DNS_QUERY)),
+            ],
+            "dns-allocated.pcap",
+        )
+
+    def test_the_port_survives_from_open_channel_to_send_data(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.payload_protocol"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["dns"])
+
+    def test_the_queried_name_is_visible(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==3")
+        self.assertIn("smdp.example.com", text)
+
+
+class EncryptedAlertsAreNotGuessedAt(BipPayloadBase):
+    """A plaintext alert is exactly two bytes; anything longer is not one.
+
+    Reading bytes 6 and 7 out of ciphertext produces a random alert
+    name, and roughly one record in 128 produces a fatal-looking one --
+    a "fatal TLS alert" expert item raised over nothing at all.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        encrypted = bytes.fromhex("1503030014") + bytes(range(0x14))
+        cls.build(
+            [fetch(open_channel(443)), fetch(send_data(encrypted))],
+            "encrypted-alert.pcap",
+        )
+
+    def test_no_alert_name_is_invented(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.tls.alert"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], [])
+
+    def test_no_fatal_alert_expert_item_is_raised(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertNotIn("fatal TLS alert", text)
+
+    def test_the_record_is_marked_as_encrypted(self) -> None:
+        """Saying nothing at all would read as "there was no alert"."""
+        rows = decode_fields(self.capture, ["yapdu.tls.alert_encrypted"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], ["True"])
 
 
 class AlertTableConformance(unittest.TestCase):

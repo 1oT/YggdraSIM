@@ -122,6 +122,40 @@ class StructureWithoutKeys(unittest.TestCase):
         self.assertTrue(by_frame["1"])
         self.assertEqual(by_frame["2"], "")
 
+    def test_secure_messaging_is_read_the_way_the_class_byte_defines_it(
+        self,
+    ) -> None:
+        """The pair a test for bit 3 alone gets wrong in both directions.
+
+        ISO/IEC 7816-4 Table 3 gives the first interindustry form four
+        secure-messaging values in bits 4 and 3, so CLA '08' -- header
+        not authenticated -- is secure messaging and a bit-3 test misses
+        it. The further interindustry form uses a single bit instead, so
+        CLA '44' is logical channel 8 with no secure messaging at all,
+        and a bit-3 test carves a phantom eight-byte C-MAC off ordinary
+        command data.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            capture = write_capture(
+                Path(directory) / "cla.pcap",
+                [
+                    Exchange(
+                        bytes.fromhex("08E2910018") + bytes(range(0x18)),
+                        bytes.fromhex("9000"),
+                    ),
+                    Exchange(
+                        bytes.fromhex("44E2910018") + bytes(range(0x18)),
+                        bytes.fromhex("9000"),
+                    ),
+                ],
+            )
+            rows = decode_fields(capture, ["frame.number", "yapdu.sm.protocol"])
+            by_frame = {row[0]: row[1] for row in rows if len(row) > 1}
+        self.assertTrue(by_frame["1"], "CLA '08' is secure messaging type '10'")
+        self.assertEqual(
+            by_frame["2"], "", "CLA '44' is channel 8, not secure messaging"
+        )
+
     def test_the_sidecar_status_says_none_is_configured(self) -> None:
         rows = decode_fields(self.capture, ["yapdu.sm.sidecar_status"])
         values = [row[0] for row in rows if row and row[0]]
@@ -224,6 +258,44 @@ class PlaintextFromSidecar(unittest.TestCase):
         text = self._decode_with_sidecar(foreign)
         self.assertIn("does not match", text)
         self.assertNotIn("Decrypted command APDU", text)
+
+    def test_an_entry_with_no_command_hex_is_refused(self) -> None:
+        """An unverifiable entry is the case the check exists for.
+
+        The comparison was skipped when ``command_hex`` was absent or
+        blank, which made the whole anti-cross-capture guarantee opt-in:
+        a sidecar could reinstate the exact risk it was built to rule
+        out simply by omitting the field.
+        """
+        document = json.loads(self.sidecar_path.read_text(encoding="utf-8"))
+        for entry in document["frames"].values():
+            entry.pop("command_hex", None)
+        unverifiable = Path(self._directory.name) / "unverifiable.sidecar.json"
+        unverifiable.write_text(json.dumps(document), encoding="utf-8")
+        unverifiable.chmod(0o644)
+
+        text = self._decode_with_sidecar(unverifiable)
+        self.assertNotIn("Decrypted command APDU", text)
+
+    def test_a_frames_array_is_refused_rather_than_reported_as_loaded(
+        self,
+    ) -> None:
+        """It parses as a table and then matches nothing.
+
+        Entries are keyed by frame number as a string, so an array is a
+        silent no-op -- and the status line used to call it a successful
+        load, which is the least helpful thing it could say.
+        """
+        array_form = Path(self._directory.name) / "array.sidecar.json"
+        array_form.write_text(
+            json.dumps(
+                {"format": "yggdrasim-apdu-sidecar/v1", "frames": [{"a": 1}]}
+            ),
+            encoding="utf-8",
+        )
+        array_form.chmod(0o644)
+        text = self._decode_with_sidecar(array_form)
+        self.assertIn("JSON array", text)
 
     def test_a_corrupt_sidecar_degrades_to_a_status_line(self) -> None:
         broken = Path(self._directory.name) / "broken.sidecar.json"

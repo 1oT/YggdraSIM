@@ -51,8 +51,14 @@ local PLAUSIBLE_SW1 = {
     [0x65] = true, [0x66] = true, [0x67] = true, [0x68] = true,
     [0x69] = true, [0x6A] = true, [0x6B] = true, [0x6C] = true,
     [0x6D] = true, [0x6E] = true, [0x6F] = true,
+    -- Every '9X' is a legal SW1. Listing only the ones this repo happens
+    -- to have met costs a correctly split frame a 100-point swing --
+    -- +40 becomes -60 -- purely for using a status word we had not
+    -- written down, which can drag it below the confidence floor.
     [0x90] = true, [0x91] = true, [0x92] = true, [0x93] = true,
-    [0x94] = true, [0x98] = true, [0x9E] = true, [0x9F] = true,
+    [0x94] = true, [0x95] = true, [0x96] = true, [0x97] = true,
+    [0x98] = true, [0x99] = true, [0x9A] = true, [0x9B] = true,
+    [0x9C] = true, [0x9D] = true, [0x9E] = true, [0x9F] = true,
 }
 
 --- Status words whose SW2 is a count rather than a fixed code.
@@ -63,10 +69,27 @@ local function is_counted_family(sw1, sw2)
     if sw1 == 0x63 and math.floor(sw2 / 16) == 0x0C then
         return true
     end
-    if sw1 == 0x91 or sw1 == 0x92 or sw1 == 0x9F then
+    if sw1 == 0x91 or sw1 == 0x9E or sw1 == 0x9F then
+        return true
+    end
+    -- GSM 11.11 clause 9.4 splits '92': '92' '0X' counts internal
+    -- retries, but '92' '40' is a memory problem and not a count at all.
+    if sw1 == 0x92 and sw2 < 0x10 then
         return true
     end
     return false
+end
+
+--- The two properties an ISO 7816-4 case actually asserts.
+--
+-- Cases 3 and 4 carry a command body; cases 2 and 4 ask for a response.
+-- Comparing the whole case name instead treats "3S" and "4S" as
+-- unrelated, which is how an UPDATE BINARY sent with a trailing Le byte
+-- -- perfectly ordinary, and what ES10b STORE DATA does -- came out
+-- split one byte short with its Le rendered as a one-byte response.
+local function case_properties(case_name)
+    local digit = case_name:sub(1, 1)
+    return (digit == "3" or digit == "4"), (digit == "2" or digit == "4")
 end
 
 --- Effective Le: a coded zero means the maximum, not "none".
@@ -161,6 +184,45 @@ function M.candidates(payload)
     return found
 end
 
+--- Look *table* up by class byte, trying the maskings the Python does.
+--
+-- yggdrasim_common.apdu_tables tries the class byte, then the class with
+-- the logical-channel bits cleared, then the class with the whole low
+-- nibble cleared. Only the third finds an entry for a secure-messaged
+-- command, because in the first interindustry form the secure-messaging
+-- field is bits 4 and 3 and masking 0xFC cannot reach it. Omitting it
+-- here left every ISO-SM administrative command with no name, no case
+-- hint and no risk class -- and, through the missing hint, mis-split.
+local function lookup_by_class(qualified, bare, cla, ins)
+    local found = qualified[(cla * 256) + ins]
+    if found ~= nil then
+        return found
+    end
+    found = qualified[((cla - (cla % 4)) * 256) + ins]
+    if found ~= nil then
+        return found
+    end
+    found = qualified[((cla - (cla % 16)) * 256) + ins]
+    if found ~= nil then
+        return found
+    end
+    return bare[ins]
+end
+
+--- The usual ISO 7816-4 case for an instruction, or nil.
+function M.case_hint(cla, ins)
+    return lookup_by_class(
+        tables.CLA_INS_CASE_HINT, tables.INS_CASE_HINT, cla, ins
+    )
+end
+
+--- True when an instruction is meaningless without a command body.
+function M.requires_data(cla, ins)
+    return lookup_by_class(
+        tables.CLA_INS_REQUIRES_DATA, tables.INS_REQUIRES_DATA, cla, ins
+    )
+end
+
 --- Score one candidate against the bytes.
 local function score_candidate(payload, candidate, cla, ins)
     local total = payload:captured_len()
@@ -193,26 +255,32 @@ local function score_candidate(payload, candidate, cla, ins)
     end
 
     -- The instruction's usual case is the strongest single signal.
-    local hint = tables.CLA_INS_CASE_HINT[(cla * 256) + ins]
-    if hint == nil then
-        hint = tables.CLA_INS_CASE_HINT[(math.floor(cla / 4) * 4 * 256) + ins]
-    end
-    if hint == nil then
-        hint = tables.INS_CASE_HINT[ins]
-    end
+    local hint = M.case_hint(cla, ins)
     if hint ~= nil then
         if hint == candidate.case then
             score = score + 25
             method = "case-hint"
-        elseif hint:sub(1, 1) == candidate.case:sub(1, 1) then
-            -- Same case number, different length form. The hint table
-            -- records the short form because that is what cards use in
-            -- practice, but an UPDATE BINARY carrying 256 bytes is still
-            -- a case 3 command -- it just had to reach for extended
-            -- length to say so. Without this the 2E reading of an
-            -- extended case 3 command wins on a coincidental Le match.
-            score = score + 15
-            method = "case-family"
+        else
+            -- The hint records the form cards use in practice, and the
+            -- two halves of it are worth very different amounts. Whether
+            -- the command carries a body is close to fixed for an
+            -- instruction; whether it also asks for a response varies
+            -- freely, because appending Le to a case 3 command is
+            -- routine. So a body mismatch is punished and an Le mismatch
+            -- barely registers. Scoring them together, as one string
+            -- comparison, is what made the hint pick the wrong candidate
+            -- with 100 confidence and no ambiguity flag.
+            local hint_data, hint_le = case_properties(hint)
+            local candidate_data, candidate_le = case_properties(candidate.case)
+            if hint_data == candidate_data then
+                score = score + 15
+                method = "case-family"
+            else
+                score = score - 20
+            end
+            if hint_le ~= candidate_le then
+                score = score - 5
+            end
         end
     end
 
@@ -225,6 +293,12 @@ local function score_candidate(payload, candidate, cla, ins)
             -- A card never returns more than was asked for.
             score = score - 30
         end
+    elseif response_data_length > 0 then
+        -- A case 1 or case 3 command has no Le, so ISO/IEC 7816-4
+        -- clause 5.1 gives its response no data field. Bytes attributed
+        -- to one are therefore bytes the split got wrong -- almost
+        -- always a trailing Le read as the first byte of the body.
+        score = score - 35
     end
 
     -- Some instructions are meaningless without a command body. That
@@ -232,15 +306,7 @@ local function score_candidate(payload, candidate, cla, ins)
     -- an INSTALL read as case 2S with Le=17 fit the same bytes, but
     -- GlobalPlatform clause 11.5 says an INSTALL carries AIDs and
     -- parameters, so the bodyless reading is not a real command.
-    local requires_data = tables.CLA_INS_REQUIRES_DATA[(cla * 256) + ins]
-    if requires_data == nil then
-        requires_data = tables.CLA_INS_REQUIRES_DATA[
-            (math.floor(cla / 4) * 4 * 256) + ins
-        ]
-    end
-    if requires_data == nil then
-        requires_data = tables.INS_REQUIRES_DATA[ins]
-    end
+    local requires_data = M.requires_data(cla, ins)
     if requires_data == true then
         if candidate.lc ~= nil and candidate.lc > 0 then
             score = score + 20
@@ -345,18 +411,26 @@ function M.split(payload)
     table.sort(scored, better)
     local best = scored[1]
 
-    local confidence = best.score
-    if confidence < 0 then
-        confidence = 0
+    -- Confidence has to describe the split, not the frame. Most of a
+    -- candidate's score comes from evidence every candidate shares --
+    -- the status word is the same two bytes whichever way the frame is
+    -- cut -- so a raw score of 95 was reported for what was in truth a
+    -- coin toss between two readings ten points apart. The margin over
+    -- the runner-up is the part that actually decided anything, and the
+    -- absolute score still caps it so a frame that looks nothing like an
+    -- exchange cannot report certainty for winning by default.
+    local absolute = math.max(0, math.min(100, best.score))
+    local margin = nil
+    local relative = 100
+    if #scored > 1 then
+        margin = best.score - scored[2].score
+        relative = math.max(0, math.min(100, margin * 5))
     end
-    if confidence > 100 then
-        confidence = 100
-    end
-    -- A close runner-up means the evidence did not really decide.
+    local confidence = math.min(absolute, relative)
+
     local ambiguous = false
-    if #scored > 1 and (best.score - scored[2].score) <= 10 then
+    if margin ~= nil and margin <= 10 then
         ambiguous = true
-        confidence = math.max(0, confidence - 20)
     end
 
     return {
@@ -370,6 +444,7 @@ function M.split(payload)
         extended = best.extended,
         method = best.method,
         confidence = confidence,
+        margin = margin,
         ambiguous = ambiguous,
         low_confidence = confidence < M.CONFIDENCE_FLOOR,
         alternatives = scored,

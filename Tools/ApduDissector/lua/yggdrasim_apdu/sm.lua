@@ -33,6 +33,7 @@ end
 
 local util = require("yggdrasim_apdu.util")
 local json = require("yggdrasim_apdu.json")
+local iso7816 = require("yggdrasim_apdu.iso7816")
 
 local M = {}
 
@@ -100,6 +101,15 @@ function M.sidecar(preference_path)
         cache.status = "sidecar carries no frames"
         return nil, cache.status
     end
+    if #frames > 0 then
+        -- Frames are keyed by frame number as a string. A JSON array
+        -- parses into a table just as happily and then matches nothing,
+        -- so without this check the status line reports a successful
+        -- load of a sidecar that can never contribute anything.
+        cache.status = "sidecar frames is a JSON array, not an object keyed "
+            .. "by frame number"
+        return nil, cache.status
+    end
 
     local count = 0
     for _ in pairs(frames) do
@@ -127,8 +137,12 @@ function M.entry_for(frames, frame_number, observed_command_hex)
     if type(entry) ~= "table" then
         return nil, false
     end
+    -- Fail closed. An entry with no command_hex cannot be checked, and
+    -- an unverifiable entry is exactly the case this test exists for:
+    -- accepting it reinstates the "plaintext from another capture" risk
+    -- the whole mechanism was built to rule out.
     local expected = tostring(entry["command_hex"] or ""):upper()
-    if expected ~= "" and expected ~= tostring(observed_command_hex):upper() then
+    if expected == "" or expected ~= tostring(observed_command_hex):upper() then
         return nil, true
     end
     return entry, false
@@ -138,12 +152,21 @@ end
 --
 -- Returns nil when the class byte says the command is not wrapped.
 function M.describe(payload, command)
-    local secure = math.floor(command.cla / M.CLA_SECURE_MESSAGING_BIT) % 2
-    if secure ~= 1 then
+    -- The class byte is decoded once, by iso7816. Testing bit 3 here
+    -- instead disagreed with it in both directions: it missed secure
+    -- messaging type '10' (CLA '08' and '88', header not authenticated)
+    -- and it invented secure messaging for the further interindustry
+    -- classes '44' and '4C', where that bit is part of the channel
+    -- number -- carving a phantom eight-byte C-MAC off ordinary data.
+    local decoded = command.cla_decoded or iso7816.decode_cla(command.cla)
+    if decoded.secure_messaging == nil or decoded.secure_messaging == 0 then
         return nil
     end
     local described = {
-        encrypted = (math.floor(command.cla / M.CLA_CIPHER_BIT) % 2) == 1,
+        secure_messaging = decoded.secure_messaging,
+        -- ISO/IEC 7816-4 Table 3 value '11' is the authenticated-header
+        -- form; the payload is enciphered in both '10' and '11'.
+        encrypted = decoded.secure_messaging >= 2,
         mac_offset = nil,
         mac_length = 0,
         ciphertext_offset = nil,

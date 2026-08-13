@@ -116,10 +116,18 @@ class InstallCommand(LayerTestBase):
         self.assertEqual(values[0], "INSTALL FOR LOAD")
 
     def test_combined_variants_are_named_in_full(self) -> None:
+        """The GlobalPlatform spelling, in the specification's bit order.
+
+        GlobalPlatform writes it "INSTALL [for install and make
+        selectable]", so the qualifiers are joined under one FOR and
+        appear lowest bit first. Walking the P1 bitmap from bit 8 down
+        produced "INSTALL FOR MAKE SELECTABLE AND FOR INSTALL", and
+        folded bit 8 -- which means more blocks follow, not a variant --
+        into the name as though it were one.
+        """
         rows = decode_fields(self.capture, ["yapdu.gp.variant"])
         values = [row[0] for row in rows if row and row[0]]
-        self.assertIn("FOR INSTALL", values[1])
-        self.assertIn("FOR MAKE SELECTABLE", values[1])
+        self.assertEqual(values[1], "INSTALL FOR INSTALL AND MAKE SELECTABLE")
 
     def test_positional_fields_are_named(self) -> None:
         text = decode_text(self.capture, display_filter="frame.number==1")
@@ -207,12 +215,18 @@ class ProactiveCommands(LayerTestBase):
         )
         self.assertTrue(rows)
         row = rows[0]
-        self.assertIn("bearer", row[0].lower())
+        # Bearer type '02' is the packet-switched bearer. The table
+        # starts at '01'; numbering it from zero shifted every entry, so
+        # '03' -- the default packet bearer this repo's own toolkit
+        # emits -- came out as "local link technology independent".
+        self.assertIn("GPRS", row[0])
         self.assertEqual(row[1], "1400")
         self.assertEqual(row[2], "iot.test.com")
         self.assertIn("TCP", row[3])
         self.assertEqual(row[4], "80")
-        self.assertEqual(row[5], "10.0.0.1")
+        # A lone Other address is the data destination; the local
+        # address is optional and, when both appear, comes first.
+        self.assertEqual(row[5], "data destination address: 10.0.0.1")
 
     def test_the_info_column_names_the_command(self) -> None:
         rows = decode_fields(self.capture, ["_ws.col.Info"])
@@ -257,19 +271,207 @@ class Es10Functions(LayerTestBase):
         self.assertIn("ICCID", text)
 
 
+def _ctlv(tag: str, value: bytes) -> bytes:
+    return bytes.fromhex(tag) + bytes([len(value)]) + value
+
+
+class DeviceIdentitiesGiveTheDirection(LayerTestBase):
+    """'81' is the UICC and '82' is the terminal, not the reverse.
+
+    Swapping the pair reverses the reported direction of every proactive
+    command and every terminal response in the capture, which is the
+    single fact an operator uses to tell "the card asked for this" from
+    "the terminal reported this".
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        body = _ctlv("81", bytes.fromhex("012101")) + _ctlv("82", bytes.fromhex("8182"))
+        proactive = bytes.fromhex("D0") + bytes([len(body)]) + body
+        cls.build(
+            [Exchange(bytes.fromhex("8012000000"), proactive + b"\x90\x00")],
+            "devices.pcap",
+        )
+
+    def test_the_source_is_the_uicc(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.source"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], ["UICC"])
+
+    def test_the_destination_is_the_terminal(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.destination"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], ["terminal"])
+
+
+class BipFailureCauseIsReported(LayerTestBase):
+    """General result '3A' names the layer; the second byte names the fault.
+
+    Without it all thirteen causes read as "bearer independent protocol
+    error", so "the modem rejected the channel identifier" is
+    indistinguishable from "the SM-DP+ is unreachable".
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        body = b"".join(
+            [
+                _ctlv("81", bytes.fromhex("014001")),
+                _ctlv("82", bytes.fromhex("8281")),
+                _ctlv("83", bytes.fromhex("3A03")),
+            ]
+        )
+        cls.build(
+            [Exchange(bytes.fromhex("80140000") + bytes([len(body)]) + body,
+                      bytes.fromhex("9000"))],
+            "bip_failure.pcap",
+        )
+
+    def test_the_general_result_is_named(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.result_name"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertIn("bearer independent protocol error", values)
+
+    def test_the_additional_information_byte_is_decoded(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.result_cause"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["channel identifier not valid"])
+
+    def test_it_raises_an_expert_item(self) -> None:
+        text = decode_text(self.capture)
+        self.assertIn("BIP error", text)
+
+
+class GeneralResultTableIsNotShifted(LayerTestBase):
+    """'04' is the icon result, '06' is limited service.
+
+    The block from '04' up is easy to shift by two, and the consequence
+    is that a REFRESH which simply could not draw an icon is reported as
+    an inactive NAA -- a phantom for an operator to chase.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        def response(result: str) -> bytes:
+            body = _ctlv("81", bytes.fromhex("012101")) + _ctlv("82", bytes.fromhex("8281")) \
+                + _ctlv("83", bytes.fromhex(result))
+            return bytes.fromhex("80140000") + bytes([len(body)]) + body
+
+        cls.build(
+            [
+                Exchange(response("04"), bytes.fromhex("9000")),
+                Exchange(response("06"), bytes.fromhex("9000")),
+                Exchange(response("08"), bytes.fromhex("9000")),
+            ],
+            "results.pcap",
+        )
+
+    def test_each_result_carries_its_own_meaning(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.result_name"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(
+            values,
+            [
+                "command performed, but requested icon could not be displayed",
+                "command performed successfully, limited service",
+                "REFRESH performed but indicated NAA was not active",
+            ],
+        )
+
+
+class EnvelopeIsDissected(LayerTestBase):
+    """ENVELOPE bodies are wrapped in BER, like a proactive command.
+
+    Left unwrapped, an Event download renders as one opaque node -- and
+    Event download is how the terminal reports that data arrived on a
+    BIP channel or that the link went away.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        body = b"".join(
+            [
+                _ctlv("99", bytes.fromhex("09")),          # event: data available
+                _ctlv("38", bytes.fromhex("8100")),        # channel 1, established
+                _ctlv("37", bytes.fromhex("20")),          # 32 bytes waiting
+            ]
+        )
+        envelope = bytes.fromhex("D6") + bytes([len(body)]) + body
+        cls.build(
+            [Exchange(bytes.fromhex("80C20000" + format(len(envelope), "02X"))
+                      + envelope, bytes.fromhex("9000"))],
+            "envelope.pcap",
+        )
+
+    def test_the_envelope_is_named(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.envelope"])
+        self.assertEqual(
+            [row[0] for row in rows if row and row[0]], ["Event download"]
+        )
+
+    def test_the_event_is_visible(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.event_name"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertTrue(values, "the event list should be decoded")
+
+    def test_the_channel_status_is_broken_out(self) -> None:
+        rows = decode_fields(
+            self.capture, ["yapdu.cat.channel", "yapdu.cat.channel_established"]
+        )
+        values = [row for row in rows if row and row[0]]
+        self.assertEqual(values[0], ["1", "True"])
+
+    def test_the_waiting_byte_count_is_reported(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.channel_data_length"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], ["32"])
+
+
+class DroppedLinkIsDistinguishableFromAHealthyOne(LayerTestBase):
+    """Channel status byte 2 is where a mid-download failure says so."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        body = _ctlv("99", bytes.fromhex("0A")) + _ctlv("38", bytes.fromhex("0105"))
+        envelope = bytes.fromhex("D6") + bytes([len(body)]) + body
+        cls.build(
+            [Exchange(bytes.fromhex("80C20000" + format(len(envelope), "02X"))
+                      + envelope, bytes.fromhex("9000"))],
+            "dropped.pcap",
+        )
+
+    def test_the_link_is_reported_as_not_established(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.channel_established"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], ["False"])
+
+    def test_the_further_information_names_the_drop(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.channel_info"])
+        self.assertEqual(
+            [row[0] for row in rows if row and row[0]], ["link dropped"]
+        )
+
+    def test_it_raises_an_expert_item(self) -> None:
+        text = decode_text(self.capture)
+        self.assertIn("link dropped", text)
+
+
 class BoundProfilePackage(LayerTestBase):
     """BF36 is the structure the retired EumDiag dissector dumped raw."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        # A miniature BoundProfilePackage: the four sections SGP.22
-        # clause 2.5.2 defines, with short placeholder segments.
+        # A miniature BoundProfilePackage, with short placeholder
+        # segments. GSMA SGP.22 clause 2.5.2 gives it five members, not
+        # four: 'BF23' initialiseSecureChannelRequest, then 'A0'
+        # firstSequenceOf87, 'A1' sequenceOf88, 'A2' sequenceOf86 and
+        # 'A3' secondSequenceOf87. Starting the implicit tags at the
+        # request shifts every name by one and loses the fifth, so a
+        # profile that fails installing the second run of '87' segments
+        # is reported as failing in the first.
         inner = b"".join(
             [
-                bytes.fromhex("A004") + bytes.fromhex("80020102"),
-                bytes.fromhex("A104") + bytes.fromhex("87020304"),
-                bytes.fromhex("A204") + bytes.fromhex("88020506"),
-                bytes.fromhex("A304") + bytes.fromhex("86020708"),
+                bytes.fromhex("BF2304") + bytes.fromhex("80020102"),
+                bytes.fromhex("A004") + bytes.fromhex("87020304"),
+                bytes.fromhex("A104") + bytes.fromhex("88020506"),
+                bytes.fromhex("A204") + bytes.fromhex("86020708"),
+                bytes.fromhex("A304") + bytes.fromhex("87020910"),
             ]
         )
         bpp = bytes.fromhex("BF36") + bytes([len(inner)]) + inner
@@ -287,16 +489,28 @@ class BoundProfilePackage(LayerTestBase):
         text = decode_text(self.capture, display_filter="frame.number==2")
         self.assertIn("BOUND_PROFILE_PACKAGE", text)
 
-    def test_the_four_sections_are_named(self) -> None:
+    def test_the_five_sections_are_named(self) -> None:
         text = decode_text(self.capture, display_filter="frame.number==2")
         for section in (
             "initialiseSecureChannelRequest",
             "firstSequenceOf87",
             "sequenceOf88",
             "sequenceOf86",
+            "secondSequenceOf87",
         ):
             with self.subTest(section=section):
                 self.assertIn(section, text)
+
+    def test_the_section_names_only_apply_inside_a_BF36(self) -> None:
+        """'A0' to 'A3' are ordinary constructed context tags.
+
+        They carry the BoundProfilePackage names only as direct children
+        of a 'BF36'. Naming them wherever they appear labels the 'A0' of
+        an unrelated structure "firstSequenceOf87".
+        """
+        rows = decode_fields(self.capture, ["frame.number", "yapdu.tlv.name"])
+        first_frame = [row[1] for row in rows if row and row[0] == "1"]
+        self.assertNotIn("firstSequenceOf87", "\n".join(first_frame))
 
     def test_it_is_not_rendered_as_one_blob(self) -> None:
         rows = decode_fields(self.capture, ["yapdu.tlv.name"])

@@ -122,8 +122,21 @@ class FileControlParameters(PayloadTestBase):
         self.assertIn("ADF.USIM", values[0][1])
 
     def test_the_life_cycle_status_is_named(self) -> None:
+        """LCSI '05' is activated.
+
+        ISO/IEC 7816-4 Table 13 makes bit 1 the activated flag, so '04'
+        and '06' are deactivated while '05' and '07' are not -- and
+        '0C' to '0F' are the termination state, not an operational one.
+        Reading the ranges the other way round reports a terminated ADF
+        as healthy.
+        """
         text = decode_text(self.capture, display_filter="frame.number==2")
-        self.assertIn("operational, deactivated", text)
+        self.assertIn("operational, activated", text)
+
+    def test_a_terminated_file_is_not_reported_as_operational(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.fcp.lcsi_name"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["operational, activated"])
 
     def test_no_malformed_packet_is_reported(self) -> None:
         """The exact regression: tshark 4.2.2 reports this as malformed."""
@@ -300,6 +313,82 @@ class FailedSelectDoesNotMoveTheSelection(PayloadTestBase):
             [TEST_ICCID],
             "a 6A82 SELECT must not change what is selected",
         )
+
+
+class TerminatedFileIsNotReportedAsOperational(PayloadTestBase):
+    """The direction of the life-cycle inversion that mattered.
+
+    ISO/IEC 7816-4 Table 13 gives '0C' to '0F' to the termination state.
+    Reading that range as "operational, activated" reports a
+    permanently dead file or ADF as healthy, which is the one way round
+    this defect could cost someone a debugging session.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        terminated = bytes.fromhex("6210" "82027821" "83027FF0" "8A010F" "A503C00100")
+        cls.build(
+            [
+                Exchange(bytes.fromhex("00A4040402") + bytes.fromhex("7FF0"),
+                         bytes.fromhex("6112")),
+                Exchange(bytes.fromhex("00C0000012"), terminated + b"\x90\x00"),
+            ],
+            "terminated.pcap",
+        )
+
+    def test_the_state_is_named_as_termination(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.fcp.lcsi_name"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["termination state"])
+
+    def test_it_raises_an_expert_item(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertIn("cannot be reactivated", text)
+
+
+class PinStatusTemplateKeyReferences(PayloadTestBase):
+    """'83' means different things at different depths.
+
+    At FCP level it is a file identifier; inside the 'C6' PIN status
+    template (ETSI TS 102 221 clause 11.1.1.4.10) it is a key
+    reference. Resolving it without regard to the enclosing tag labelled
+    every PIN in the template "File identifier".
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # C6: PS_DO, then a global PIN 1 and an application PIN 1.
+        template = bytes.fromhex("620F" "83022F00" "C609" "900100" "830101" "830181")
+        cls.build(
+            [
+                Exchange(bytes.fromhex("00A4000402") + bytes.fromhex("2F00"),
+                         bytes.fromhex("6111")),
+                Exchange(bytes.fromhex("00C0000011"), template + b"\x90\x00"),
+            ],
+            "pin_status.pcap",
+        )
+
+    def test_the_nested_tag_is_a_key_reference(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertIn("Key reference", text)
+
+    def test_the_keys_are_named(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertIn("[Key: global PIN 1]", text)
+        self.assertIn("[Key: application PIN 1]", text)
+
+    def test_the_template_is_walked_although_ber_calls_it_primitive(self) -> None:
+        """'C6' has bit 6 clear, so a conforming BER walker stops at it.
+
+        ETSI TS 102 221 fills it with TLVs regardless, and stopping
+        renders nine bytes of PIN state as one opaque value.
+        """
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertIn("PS_DO (PIN status)", text)
+
+    def test_the_top_level_tag_is_still_a_file_identifier(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertIn("File identifier", text)
 
 
 if __name__ == "__main__":

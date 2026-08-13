@@ -26,7 +26,6 @@ end
 
 local util = require("yggdrasim_apdu.util")
 local tables = require("yggdrasim_apdu.tables")
-local fields = require("yggdrasim_apdu.fields")
 
 local M = {}
 
@@ -46,17 +45,41 @@ function M.decode_cla(cla)
         extended_channel = false,
     }
 
-    if cla == 0xFF then
-        -- Reserved by ISO/IEC 7816-4 as an invalid class byte.
-        decoded.invalid = true
+    -- An opaque class byte reports nil rather than zero for the three
+    -- interindustry fields, so a caller can tell "the specification says
+    -- nothing about these bits" from "channel 0, no secure messaging".
+    local function opaque()
+        decoded.channel = nil
+        decoded.secure_messaging = nil
+        decoded.chaining = nil
         return decoded
     end
 
-    local high = math.floor(cla / 16)
-    if high >= 0x0A and high ~= 0x0F then
+    if cla == 0xFF then
+        -- Reserved by ISO/IEC 7816-4 as an invalid class byte.
+        decoded.invalid = true
         decoded.proprietary = true
-    elseif high >= 0x08 then
+        return opaque()
+    end
+
+    if cla >= 0x80 then
         decoded.proprietary = true
+        -- ISO/IEC 7816-4 clause 5.4.1 gives '80' to 'FE' to proprietary
+        -- use and assigns no meaning to bits 6 to 1 there. One
+        -- proprietary layout matters enough to decode anyway:
+        -- GlobalPlatform card specification Table 11-1 claims the '8X'
+        -- block and gives it the same shape as the first interindustry
+        -- form -- bit 3 secure messaging, bits 2 and 1 the logical
+        -- channel -- which is what every GP and ES10 command in a UICC
+        -- trace uses.
+        --
+        -- Everything above '8F' really is opaque, and decoding it
+        -- invents three facts per command: CLA 'F0' is not "command
+        -- chaining", CLA 'AC' is not "secure messaging 3", and CLA 'A3'
+        -- is not channel 3.
+        if cla > 0x8F then
+            return opaque()
+        end
     end
 
     if math.floor(cla / 64) % 4 == 1 then
@@ -68,25 +91,51 @@ function M.decode_cla(cla)
         return decoded
     end
 
+    if cla >= 0x20 and cla <= 0x3F then
+        -- '20' to '3F' is reserved by clause 5.4.1. Its bits carry no
+        -- defined meaning either.
+        decoded.reserved = true
+        return opaque()
+    end
+
     decoded.channel = cla % 4
     decoded.secure_messaging = math.floor(cla / 4) % 4
     decoded.chaining = (math.floor(cla / 16) % 2) == 1
     return decoded
 end
 
+--- True when the class byte says the command is secure-messaged.
+--
+-- ISO/IEC 7816-4 Table 3 gives the first interindustry form four secure
+-- messaging values in bits 4 and 3: '00' none, '01' proprietary, '10'
+-- header not authenticated, '11' header authenticated. Anything other
+-- than '00' is secure messaging, including '10' -- the value a test for
+-- bit 3 alone misses, and CLA '08' and '88' are exactly that. The
+-- further interindustry form uses a single bit instead, which is why
+-- reading bit 3 there turns CLA '44' -- logical channel 8, no secure
+-- messaging at all -- into a command with an invented C-MAC.
+function M.uses_secure_messaging(cla)
+    local decoded = M.decode_cla(cla)
+    return decoded.secure_messaging ~= nil and decoded.secure_messaging ~= 0
+end
+
 --- Resolve the command name, mirroring _lookup_apdu_command in
 --- Tools/Asn1TlvDecode/main.py: class-qualified first, then the class
---- with its channel and secure-messaging bits masked off, then the bare
---- instruction.
+--- with its channel bits cleared, then with the whole low nibble
+--- cleared, then the bare instruction.
+--
+-- The third step is the one that names a secure-messaged command. In the
+-- first interindustry form the secure-messaging field is bits 4 and 3,
+-- which a 0xFC mask cannot reach, so an ISO-SM CREATE FILE ('0C E0') was
+-- reported as "INS_E0" with the default risk class.
 function M.command_name(cla, ins)
-    local qualified = tables.CLA_INS_NAMES[(cla * 256) + ins]
-    if qualified ~= nil then
-        return qualified, tables.CLA_INS_SOURCE[(cla * 256) + ins]
-    end
-    local masked = (math.floor(cla / 4) * 4)
-    qualified = tables.CLA_INS_NAMES[(masked * 256) + ins]
-    if qualified ~= nil then
-        return qualified, tables.CLA_INS_SOURCE[(masked * 256) + ins]
+    local candidates = { cla, cla - (cla % 4), cla - (cla % 16) }
+    for index = 1, #candidates do
+        local key = (candidates[index] * 256) + ins
+        local qualified = tables.CLA_INS_NAMES[key]
+        if qualified ~= nil then
+            return qualified, tables.CLA_INS_SOURCE[key]
+        end
     end
     local bare = tables.INS_NAMES[ins]
     if bare ~= nil then
@@ -121,13 +170,25 @@ function M.describe_status_word(sw1, sw2)
     if named ~= nil then
         return named
     end
+    -- SW2 of zero means 256 in both counted families, per the Le
+    -- convention of ISO/IEC 7816-4 clause 5.1. "Retry with Le = 0" reads
+    -- as an instruction to send Le=0, which asks for 256 bytes only by
+    -- accident and is the opposite of what the card said.
     if sw1 == 0x61 then
-        return string.format("Success. %d bytes available via GET RESPONSE.", sw2)
+        return string.format(
+            "Success. %d bytes available via GET RESPONSE.",
+            sw2 == 0 and 256 or sw2
+        )
     end
     if sw1 == 0x6C then
-        return string.format("Wrong Le. Retry with Le = %d.", sw2)
+        return string.format(
+            "Wrong Le. Retry with Le = %d.", sw2 == 0 and 256 or sw2
+        )
     end
     if sw1 == 0x63 and math.floor(sw2 / 16) == 0x0C then
+        if sw2 % 16 == 0 then
+            return "Verification failed. No retries left: the key is blocked."
+        end
         return string.format("Verification failed. %d retries left.", sw2 % 16)
     end
     if sw1 == 0x62 then
@@ -140,18 +201,79 @@ function M.describe_status_word(sw1, sw2)
         return string.format("Normal ending. %d bytes of proactive data.", sw2)
     end
     if sw1 == 0x92 then
-        return string.format("Normal ending after %d internal retries.", sw2)
+        -- GSM 11.11 clause 9.4: '92' '0X' counts internal retries, but
+        -- '92' '40' is a memory problem -- a failed write against bad
+        -- memory, reported until now as a normal ending after 64 tries.
+        if sw2 == 0x40 then
+            return "Memory problem: the update did not complete."
+        end
+        if sw2 < 0x10 then
+            return string.format(
+                "Update successful after %d internal retries.", sw2
+            )
+        end
+        return string.format("Memory management status 0x%02X.", sw2)
+    end
+    if sw1 == 0x9E then
+        -- TS 51.011 clause 9.4: the response data is available, and the
+        -- reason it exists is that the data download failed.
+        return string.format(
+            "SIM data download error. %d bytes of response data available.", sw2
+        )
     end
     if sw1 == 0x9F then
-        return string.format("Success. %d bytes available (GSM 11.11).", sw2)
+        return string.format(
+            "Success. %d bytes available (GSM 11.11).", sw2 == 0 and 256 or sw2
+        )
     end
     return string.format("Unknown status word 0x%04X.", status_word)
 end
 
---- True when the status word reports success or a warning, not an error.
-function M.status_is_success(sw1)
-    return sw1 == 0x90 or sw1 == 0x61 or sw1 == 0x62 or sw1 == 0x63
-        or sw1 == 0x91 or sw1 == 0x92 or sw1 == 0x9E or sw1 == 0x9F
+--- Classify a status word per ISO/IEC 7816-4 clause 5.1.3.
+--
+-- Four categories, not two. Lumping warnings in with success is what
+-- made a failed PIN verification report "Succeeded: True" beside the
+-- text "Verification failed" -- and made a filter for failures miss
+-- every blocked PIN on the card.
+function M.status_category(sw1, sw2)
+    if sw1 == 0x92 then
+        -- GSM 11.11 splits this one: a retry count is a normal ending,
+        -- a memory problem is not.
+        if sw2 ~= nil and sw2 >= 0x10 then
+            return "execution error"
+        end
+        return "normal"
+    end
+    if sw1 == 0x9E then
+        -- The response data is there, but it is there because the data
+        -- download failed. Calling that success hides every failed
+        -- SMS-PP download in the capture.
+        return "warning"
+    end
+    if sw1 == 0x90 or sw1 == 0x61 or sw1 == 0x91 or sw1 == 0x9F then
+        return "normal"
+    end
+    if sw1 == 0x62 or sw1 == 0x63 then
+        return "warning"
+    end
+    if sw1 == 0x64 or sw1 == 0x65 or sw1 == 0x66 then
+        return "execution error"
+    end
+    if sw1 >= 0x67 and sw1 <= 0x6F then
+        return "checking error"
+    end
+    return "unknown"
+end
+
+--- True only when the card did what was asked.
+--
+-- Warnings are excluded deliberately. 0x63 Cx is a failed verification
+-- with a retry count, 0x62 83 is a selected file in an invalidated
+-- state: in neither case did the command achieve what the terminal
+-- asked for, so reporting them as success is worse than useless to
+-- someone filtering a capture for what went wrong.
+function M.status_is_success(sw1, sw2)
+    return M.status_category(sw1, sw2) == "normal"
 end
 
 -- ---------------------------------------------------------------- command
@@ -221,7 +343,8 @@ function M.parse_response(payload, split_result)
         sw2 = sw2,
         status_word = (sw1 * 256) + sw2,
         meaning = M.describe_status_word(sw1, sw2),
-        succeeded = M.status_is_success(sw1),
+        category = M.status_category(sw1, sw2),
+        succeeded = M.status_is_success(sw1, sw2),
     }
 end
 

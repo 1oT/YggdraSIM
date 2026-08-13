@@ -45,25 +45,33 @@ M.INS_STORE_DATA = 0xE2
 
 --- True when the class byte marks a GlobalPlatform command.
 --
--- GP uses 0x80 and 0x84 (the latter with secure messaging), plus the
--- logical-channel variants of both.
+-- GlobalPlatform card specification Table 11-1: a GP command carries
+-- class '8X' on logical channels 0 to 3 and '6X' on channels 4 to 19,
+-- with the low nibble holding the channel and the secure-messaging bit
+-- in both forms. Recognising only '80' and '84' rejected every GP
+-- command on a channel above 3, which on a populated eUICC is where an
+-- ISD-P is opened.
 function M.is_gp_class(cla)
-    local base = cla - (cla % 4)
-    return base == 0x80 or base == 0x84
+    local high = cla - (cla % 16)
+    return high == 0x80 or high == 0x60
 end
 
--- Table 11-47: INSTALL P1 reference control.
+-- Table 11-47: INSTALL P1 reference control, in ascending bit order so
+-- the composed name reads the way GlobalPlatform writes it: INSTALL FOR
+-- INSTALL AND MAKE SELECTABLE, not the reverse.
 local INSTALL_P1_BITS = {
-    { mask = 0x80, name = "more blocks follow" },
-    { mask = 0x40, name = "FOR REGISTRY UPDATE" },
-    { mask = 0x20, name = "FOR PERSONALIZATION" },
-    { mask = 0x10, name = "FOR EXTRADITION" },
-    { mask = 0x08, name = "FOR MAKE SELECTABLE" },
-    { mask = 0x04, name = "FOR INSTALL" },
-    { mask = 0x02, name = "FOR LOAD" },
+    { mask = 0x02, name = "LOAD" },
+    { mask = 0x04, name = "INSTALL" },
+    { mask = 0x08, name = "MAKE SELECTABLE" },
+    { mask = 0x10, name = "EXTRADITION" },
+    { mask = 0x20, name = "PERSONALIZATION" },
+    { mask = 0x40, name = "REGISTRY UPDATE" },
 }
 
 --- Name the INSTALL variant, e.g. "INSTALL FOR INSTALL AND MAKE SELECTABLE".
+--
+-- Bit 8 is not a variant: it says more blocks follow. Folding it into
+-- the name produced "INSTALL more blocks follow AND FOR LOAD".
 function M.install_variant(p1)
     local parts = {}
     for index = 1, #INSTALL_P1_BITS do
@@ -75,10 +83,15 @@ function M.install_variant(p1)
     if #parts == 0 then
         return "INSTALL", parts
     end
-    return "INSTALL " .. table.concat(parts, " AND "), parts
+    return "INSTALL FOR " .. table.concat(parts, " AND "), parts
 end
 
--- Table 11-36: GET STATUS P1 scope.
+--- True when INSTALL P1 bit 8 says further blocks follow.
+function M.install_more_blocks(p1)
+    return math.floor(p1 / 0x80) % 2 == 1
+end
+
+-- Table 11-36: GET STATUS P1 scope, bits 8 to 5.
 local GET_STATUS_SCOPE = {
     [0x80] = "Issuer Security Domain",
     [0x40] = "applications and Supplementary Security Domains",
@@ -86,10 +99,28 @@ local GET_STATUS_SCOPE = {
     [0x10] = "executable load files and their modules",
 }
 
+--- Name the GET STATUS scope.
+--
+-- The scope lives in the high nibble, so it has to be masked out with a
+-- clear, not a modulo: ``p1 % 0xF0`` leaves '80' as 128 and '90' as 0,
+-- which is not what either byte means.
 function M.get_status_scope(p1)
-    return GET_STATUS_SCOPE[p1 % 0xF0]
-        or GET_STATUS_SCOPE[p1]
+    return GET_STATUS_SCOPE[p1 - (p1 % 16)]
         or string.format("scope 0x%02X", p1)
+end
+
+-- Table 11-79: SET STATUS P1. It is a state-transition selector, not the
+-- GET STATUS scope, and giving it GET STATUS semantics named '60' -- a
+-- Security Domain and its applications -- "scope 0x60".
+local SET_STATUS_SCOPE = {
+    [0x40] = "application or Supplementary Security Domain",
+    [0x60] = "Security Domain and its associated applications",
+    [0x80] = "Issuer Security Domain",
+}
+
+--- Name the SET STATUS target and the state it is moving to.
+function M.set_status_scope(p1)
+    return SET_STATUS_SCOPE[p1] or string.format("target 0x%02X", p1)
 end
 
 --- Table 11-58: EXTERNAL AUTHENTICATE P1 security level.
@@ -168,16 +199,52 @@ function M.parse_install(tvb, offset, length, p1)
     local variant, parts = M.install_variant(p1)
     local parsed = { variant = variant, parts = parts, fields = {} }
 
-    -- Field order per GlobalPlatform clause 11.5.2.3.
+    -- Field order per GlobalPlatform clause 11.5.2.3. Every variant
+    -- uses the same six positional slots, but they mean different
+    -- things and several are sent empty -- so labelling an extradition
+    -- or a registry update with the for-install names reports a
+    -- Security Domain AID as an "Executable load file AID" and an empty
+    -- slot as a zero-length module.
     local names
-    if math.floor(p1 / 0x02) % 2 == 1 and math.floor(p1 / 0x04) % 2 == 0 then
-        -- FOR LOAD only.
+    local for_load = math.floor(p1 / 0x02) % 2 == 1
+    local for_install = math.floor(p1 / 0x04) % 2 == 1
+    local for_extradition = math.floor(p1 / 0x10) % 2 == 1
+    local for_personalization = math.floor(p1 / 0x20) % 2 == 1
+    local for_registry = math.floor(p1 / 0x40) % 2 == 1
+    if for_load and not for_install then
         names = {
             "Load file AID",
             "Security Domain AID",
             "Load file data block hash",
             "Load parameters",
             "Load token",
+        }
+    elseif for_extradition and not for_install then
+        names = {
+            "Security Domain AID",
+            "(empty)",
+            "Application AID",
+            "(empty)",
+            "Extradition parameters",
+            "Extradition token",
+        }
+    elseif for_registry and not for_install then
+        names = {
+            "Security Domain AID",
+            "(empty)",
+            "Application AID",
+            "Privileges",
+            "Registry update parameters",
+            "Registry update token",
+        }
+    elseif for_personalization and not for_install then
+        names = {
+            "(empty)",
+            "(empty)",
+            "Application AID",
+            "(empty)",
+            "(empty)",
+            "Token",
         }
     else
         names = {
@@ -210,14 +277,32 @@ end
 
 --- Parse the INITIALIZE UPDATE response, GlobalPlatform clause 11.5.
 --
--- 28 bytes for SCP02, 32 for SCP03 with the pseudo-random challenge
--- variant. The key information block says which.
+-- Every variant opens with 10 bytes of key diversification data, then
+-- the key version and the SCP identifier. What follows depends on which
+-- protocol that identifier names, and the three layouts share almost
+-- nothing:
+--
+--   SCP01/SCP02 (clause E.5.1): 2-byte sequence counter, 6-byte card
+--   challenge, 8-byte card cryptogram -- 28 bytes total. The counter is
+--   the first two bytes of what SCP01 calls a plain 8-byte challenge, so
+--   for SCP01 the whole 8 bytes are reported as the challenge instead.
+--
+--   SCP03 (clause D.4.3): i-parameter, 8-byte card challenge, 8-byte
+--   card cryptogram, and a 3-byte sequence counter present only when the
+--   i-parameter says the pseudo-random challenge variant is in use --
+--   bit 5 of 'i'. Keying that on the response length instead reads three
+--   bytes of whatever follows as a counter on any longer response.
+--
+--   SCP11 (amendment F): the response is a GlobalPlatform TLV structure,
+--   not a positional record, so nothing beyond the identifier is
+--   asserted here rather than inventing offsets for it.
 function M.parse_initialize_update_response(tvb, offset, length)
     if length < 28 then
         return nil
     end
     local parsed = {
         key_diversification_offset = offset,
+        key_diversification_length = 10,
         key_version = util.byte_at(tvb, offset + 10),
         scp_identifier = util.byte_at(tvb, offset + 11),
     }
@@ -228,7 +313,8 @@ function M.parse_initialize_update_response(tvb, offset, length)
         parsed.card_challenge_length = 8
         parsed.card_cryptogram_offset = offset + 21
         parsed.card_cryptogram_length = 8
-        if length >= 32 then
+        local i_parameter = parsed.i_parameter or 0
+        if math.floor(i_parameter / 0x10) % 2 == 1 and length >= 32 then
             parsed.sequence_counter_offset = offset + 29
             parsed.sequence_counter_length = 3
         end
@@ -236,14 +322,19 @@ function M.parse_initialize_update_response(tvb, offset, length)
         parsed.scp_name = "SCP02"
         parsed.sequence_counter_offset = offset + 12
         parsed.sequence_counter_length = 2
-        parsed.card_challenge_offset = offset + 14
-        parsed.card_challenge_length = 6
+        parsed.card_challenge_offset = offset + 12
+        parsed.card_challenge_length = 8
+        parsed.card_cryptogram_offset = offset + 20
+        parsed.card_cryptogram_length = 8
+    elseif parsed.scp_identifier == 0x01 then
+        parsed.scp_name = "SCP01"
+        parsed.card_challenge_offset = offset + 12
+        parsed.card_challenge_length = 8
         parsed.card_cryptogram_offset = offset + 20
         parsed.card_cryptogram_length = 8
     elseif parsed.scp_identifier == 0x11 then
         parsed.scp_name = "SCP11"
-        parsed.card_challenge_offset = offset + 12
-        parsed.card_challenge_length = 8
+        parsed.tlv_response = true
     else
         parsed.scp_name = string.format("SCP 0x%02X", parsed.scp_identifier or 0)
     end
@@ -279,6 +370,7 @@ function M.describe(payload, command)
             kind = "install",
             variant = variant,
             parts = parts,
+            more_blocks = M.install_more_blocks(command.p1),
             install = parsed,
         }
     end
@@ -298,11 +390,25 @@ function M.describe(payload, command)
         return control
     end
 
-    if ins == M.INS_GET_STATUS or ins == M.INS_SET_STATUS then
+    if ins == M.INS_GET_STATUS then
         return {
             kind = "status",
             scope = M.get_status_scope(command.p1),
-            next_occurrence = (command.p2 % 4) == 2,
+            -- P2 bit 2 asks for the next occurrence; bit 1 selects the
+            -- TLV response format. Testing the pair for equality with 2
+            -- misses '03', which is both at once and by far the more
+            -- common spelling on an eUICC.
+            next_occurrence = math.floor(command.p2 / 2) % 2 == 1,
+            tlv_response = command.p2 % 2 == 1,
+        }
+    end
+
+    if ins == M.INS_SET_STATUS then
+        return {
+            kind = "set_status",
+            scope = M.set_status_scope(command.p1),
+            new_state = command.p2,
+            new_state_name = M.lifecycle_name(command.p2),
         }
     end
 
@@ -342,7 +448,7 @@ function M.summary(description)
         -- LOAD". Only the qualifying half belongs here.
         local parts = description.parts or {}
         if #parts > 0 then
-            return table.concat(parts, " AND ")
+            return "FOR " .. table.concat(parts, " AND ")
         end
         return ""
     end
@@ -362,6 +468,11 @@ function M.summary(description)
     end
     if description.kind == "status" then
         return description.scope
+    end
+    if description.kind == "set_status" then
+        return string.format(
+            "%s -> %s", description.scope, description.new_state_name
+        )
     end
     if description.kind == "external_authenticate" then
         return description.level

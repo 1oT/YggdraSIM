@@ -114,23 +114,34 @@ end
 -- a 19-digit ICCID leaves a trailing 0xF -- and must not be treated as
 -- an error, which is precisely where Tools/EumDiag/dissector.lua went
 -- wrong by dividing the digit count by two.
+-- Returns ``digits, clean``. ``clean`` is false when a nibble other than
+-- the 0xF padding was not a decimal digit, which for an ICCID or an IMSI
+-- means the bytes are not the identifier they were taken for. Emitting
+-- 'A' to 'F' as though they were digits -- as an earlier version did --
+-- turns a corrupt or misattributed read into a plausible-looking
+-- identifier, which is the worst of the three possible outcomes.
 function M.decode_swapped_bcd(values)
     if values == nil then
-        return ""
+        return "", false
     end
     local digits = {}
+    local clean = true
+    local function push(nibble)
+        if nibble == 0x0F then
+            return
+        end
+        if nibble > 9 then
+            clean = false
+            return
+        end
+        digits[#digits + 1] = string.format("%d", nibble)
+    end
     for index = 1, #values do
         local byte_value = values[index]
-        local low = byte_value % 16
-        local high = math.floor(byte_value / 16)
-        if low ~= 0x0F then
-            digits[#digits + 1] = string.format("%X", low)
-        end
-        if high ~= 0x0F then
-            digits[#digits + 1] = string.format("%X", high)
-        end
+        push(byte_value % 16)
+        push(math.floor(byte_value / 16))
     end
-    return table.concat(digits)
+    return table.concat(digits), clean
 end
 
 --- Render a byte count with the right plural, for tree item text.

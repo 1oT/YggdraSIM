@@ -46,15 +46,38 @@ function M.isdr_aid()
     return ""
 end
 
---- SGP.22 clause 2.5.2: the BoundProfilePackage's four sections.
+--- GSMA SGP.22 clause 2.5.2, the BoundProfilePackage.
+--
+-- Five members, not four. The first is 'BF23'
+-- initialiseSecureChannelRequest -- a tagged type, not one of the
+-- implicit context tags -- and the sequences that follow are 'A0'
+-- firstSequenceOf87, 'A1' sequenceOf88, 'A2' sequenceOf86 and 'A3'
+-- secondSequenceOf87. Numbering them from 'A0' as the request shifts
+-- every name by one and loses the fifth entirely, so a profile whose
+-- installation fails in the second sequence of '87' segments is reported
+-- as failing in the first.
 local BPP_SECTIONS = {
-    [0xA0] = "initialiseSecureChannelRequest",
-    [0xA1] = "firstSequenceOf87",
-    [0xA2] = "sequenceOf88",
-    [0xA3] = "sequenceOf86",
+    [0xBF23] = "initialiseSecureChannelRequest",
+    [0xA0] = "firstSequenceOf87",
+    [0xA1] = "sequenceOf88",
+    [0xA2] = "sequenceOf86",
+    [0xA3] = "secondSequenceOf87",
 }
 
-function M.bpp_section_name(tag)
+--- Name a BoundProfilePackage member.
+--
+-- *parent* gates the implicit context tags: 'A0' to 'A3' are ordinary
+-- constructed context tags that appear all over the SGP.22 surface, and
+-- they only carry these names directly inside a 'BF36'. Naming them
+-- unconditionally labelled the 'A0' of an unrelated structure
+-- "firstSequenceOf87".
+function M.bpp_section_name(tag, parent)
+    if tag == 0xBF23 then
+        return BPP_SECTIONS[tag]
+    end
+    if parent ~= M.TAG_BOUND_PROFILE_PACKAGE then
+        return ""
+    end
     return BPP_SECTIONS[tag] or ""
 end
 
@@ -76,8 +99,8 @@ end
 --- TLV walker options that name RSP structures.
 function M.tlv_options()
     return {
-        resolver = function(tag)
-            local section = M.bpp_section_name(tag)
+        resolver = function(tag, _raw, _level, parent)
+            local section = M.bpp_section_name(tag, parent)
             if section ~= "" then
                 return section
             end

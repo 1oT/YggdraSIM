@@ -85,11 +85,43 @@ end
 --
 -- Returns ``nil`` when the tag runs past the captured data or never
 -- terminates within MAX_TAG_BYTES.
-function M.read_tag(tvb, offset)
+function M.read_tag(tvb, offset, mode)
     local first = util.byte_at(tvb, offset)
     if first == nil then
         return nil
     end
+
+    -- COMPREHENSION-TLV is not BER and does not share its tag rules.
+    -- TS 101 220 clause 7.1.1 defines exactly two forms: a single byte
+    -- in 0x01-0x7E (or 0x81-0xFE with the comprehension bit), and a
+    -- three-byte form introduced by 0x7F. There is no 0x1F escape and
+    -- no class or constructed field.
+    --
+    -- Applying BER's rules here corrupts every tag whose low five bits
+    -- are all ones -- 0x1F Item icon identifier list, 0x3F Access
+    -- technology, and their comprehension-set spellings 0x9F and 0xBF
+    -- are all real, deployed TS 102 223 tags. The next byte would be
+    -- swallowed as part of the tag and the length read from the value.
+    if mode == "comprehension" then
+        if first == 0x00 or first == 0xFF then
+            return nil
+        end
+        if first == 0x7F then
+            local second = util.byte_at(tvb, offset + 1)
+            local third = util.byte_at(tvb, offset + 2)
+            if second == nil or third == nil then
+                return nil
+            end
+            return {
+                value = (0x7F * 65536) + (second * 256) + third,
+                length = 3,
+                class = nil,
+                constructed = false,
+            }
+        end
+        return { value = first, length = 1, class = nil, constructed = false }
+    end
+
     local class = math.floor(first / 64)
     local constructed = (math.floor(first / 32) % 2) == 1
     local length = 1
@@ -98,7 +130,7 @@ function M.read_tag(tvb, offset)
     if (first % 32) == 0x1F then
         -- Multi-byte tag: continue while bit 8 is set.
         local index = offset + 1
-        while length <= M.MAX_TAG_BYTES do
+        while length < M.MAX_TAG_BYTES do
             local continuation = util.byte_at(tvb, index)
             if continuation == nil then
                 return nil
@@ -129,7 +161,7 @@ end
 --- Read a BER length at *offset*.
 --
 -- Returns a table with ``value``, ``length`` and ``indefinite``, or nil.
-function M.read_length(tvb, offset)
+function M.read_length(tvb, offset, mode)
     local first = util.byte_at(tvb, offset)
     if first == nil then
         return nil
@@ -137,9 +169,19 @@ function M.read_length(tvb, offset)
     if first < 0x80 then
         return { value = first, length = 1, indefinite = false }
     end
+    -- TS 101 220 clause 7.1.2 defines only 00-7F, 81 xx, 82 xx xx and
+    -- 83 xx xx xx. 0x80 is not an indefinite marker here, it is invalid.
+    if mode == "comprehension" and (first == 0x80 or first > 0x83) then
+        return nil
+    end
     if first == 0x80 then
-        -- Indefinite: the value runs to an end-of-contents 00 00.
-        return { value = nil, length = 1, indefinite = true }
+        -- Indefinite length. Legal in BER, but prohibited by DER (X.690
+        -- clause 10.1), which SGP.22 and SGP.32 mandate, and unused by
+        -- TS 102 221 BER-TLV files. Nothing conforming emits it, so it
+        -- is reported rather than guessed at: resolving it means finding
+        -- an end-of-contents marker, and a byte scan cannot tell a real
+        -- terminator from 00 00 inside a value or a nested construct.
+        return { value = nil, length = 1, indefinite = true, rejected = true }
     end
     if first == 0xFF then
         -- Reserved by ISO/IEC 8825-1.
@@ -160,19 +202,6 @@ function M.read_length(tvb, offset)
     return { value = value, length = count + 1, indefinite = false }
 end
 
---- Locate the end-of-contents marker for an indefinite-length value.
-local function find_end_of_contents(tvb, offset)
-    local index = offset
-    local limit = tvb:captured_len() - 1
-    while index < limit do
-        if util.byte_at(tvb, index) == 0 and util.byte_at(tvb, index + 1) == 0 then
-            return index
-        end
-        index = index + 1
-    end
-    return nil
-end
-
 --- Normalise a COMPREHENSION-TLV tag to its base value.
 --
 -- Bit 8 is the comprehension-required flag. For a multi-byte tag the
@@ -182,9 +211,12 @@ function M.comprehension_base(tag_value)
         return tag_value % 128, tag_value >= 128
     end
     -- 0x7F xx yy form: the CR bit is bit 8 of the first tag-number byte.
+    -- The 0x7F marker stays in the base value. Dropping it collapses
+    -- '7F 21 81' and '7F A1 81' onto the two-byte value 0x2181, which
+    -- can then collide with an unrelated BER tag in the name table.
     local high = math.floor(tag_value / 256) % 256
     local low = tag_value % 256
-    local base = ((high % 128) * 256) + low
+    local base = (0x7F * 65536) + ((high % 128) * 256) + low
     return base, high >= 128
 end
 
@@ -223,7 +255,7 @@ end
 -- The return value is ``{nodes, errors}``. Parsing stops at the first
 -- structural problem and records it rather than raising, so a caller can
 -- render what was understood and flag the rest.
-function M.parse(tvb, offset, length, options, budget, depth)
+function M.parse(tvb, offset, length, options, budget, depth, parent)
     local settings = options or {}
     local level = depth or 0
     local nodes = {}
@@ -252,19 +284,22 @@ function M.parse(tvb, offset, length, options, budget, depth)
             return nodes, errors
         end
 
-        local tag = M.read_tag(tvb, cursor)
+        local tag = M.read_tag(tvb, cursor, settings.mode)
         if tag == nil then
             errors[#errors + 1] = { offset = cursor, reason = "unreadable tag" }
             return nodes, errors
         end
 
-        -- A zero tag byte is padding in several UICC files, and the
-        -- end-of-contents marker in an indefinite-length value.
-        if tag.value == 0 then
+        -- ISO/IEC 7816-4 clause 5.2.2 allows 0x00 and 0xFF filler
+        -- before, between and after BER-TLV data objects, and 0xFF is
+        -- the erased-byte value in a UICC file. Neither is an error, and
+        -- 0xFF in particular must not reach the long-form tag reader,
+        -- which would chase it to the end of the frame.
+        if tag.value == 0 or tag.value == 0xFF then
             return nodes, errors
         end
 
-        local length_info = M.read_length(tvb, cursor + tag.length)
+        local length_info = M.read_length(tvb, cursor + tag.length, settings.mode)
         if length_info == nil then
             errors[#errors + 1] = {
                 offset = cursor + tag.length,
@@ -278,15 +313,13 @@ function M.parse(tvb, offset, length, options, budget, depth)
         local clamped = false
 
         if length_info.indefinite then
-            local terminator = find_end_of_contents(tvb, value_offset)
-            if terminator == nil then
-                errors[#errors + 1] = {
-                    offset = cursor,
-                    reason = "indefinite length with no end-of-contents marker",
-                }
-                return nodes, errors
-            end
-            value_length = terminator - value_offset
+            errors[#errors + 1] = {
+                offset = cursor + tag.length,
+                reason = "indefinite length, which DER prohibits and no "
+                    .. "conforming card emits here; the remainder is not "
+                    .. "framed",
+            }
+            return nodes, errors
         end
 
         if value_offset + value_length > limit then
@@ -308,14 +341,27 @@ function M.parse(tvb, offset, length, options, budget, depth)
             -- any tag that happens to have it set -- 0x35 Bearer
             -- description, 0x39 Buffer size, 0x3C transport level --
             -- and turns their values into invented sub-tags.
-            constructed = false
+            constructed = nil
+        end
+
+        -- A few ETSI tags hold a TLV run while being primitive by BER's
+        -- own rule: the PIN Status Template DO is 'C6', whose bit 6 is
+        -- clear, so a conforming BER walker stops at it and renders
+        -- nine bytes of PIN state as an opaque value. The caller names
+        -- the exceptions rather than the walker guessing at them.
+        if settings.constructed ~= nil and settings.constructed[base_tag] then
+            constructed = true
         end
 
         local name = ""
         if settings.resolver ~= nil then
-            name = settings.resolver(base_tag, tag, level) or ""
+            name = settings.resolver(base_tag, tag, level, parent) or ""
         end
-        if name == "" then
+        if name == "" and settings.mode ~= "comprehension" then
+            -- The BER table is meaningless for a COMPREHENSION-TLV tag:
+            -- the two encodings share no numbering, so falling back to
+            -- it renames tag '10' Item identifier to "ASN1_SEQUENCE".
+            -- An unnamed tag is better than a confidently wrong one.
             name = M.name_ber_tag(base_tag)
         end
 
@@ -336,11 +382,17 @@ function M.parse(tvb, offset, length, options, budget, depth)
             comprehension_required = comprehension_required,
             name = name,
             depth = level,
+            -- The enclosing constructed tag. Several tags mean one thing
+            -- at the top of a template and another inside a nested one:
+            -- '83' is a file identifier in an FCP and a key reference
+            -- inside the 'C6' PIN status template.
+            parent = parent,
         }
 
         if constructed and value_length > 0 then
             local children, child_errors = M.parse(
-                tvb, value_offset, value_length, settings, budget, level + 1
+                tvb, value_offset, value_length, settings, budget, level + 1,
+                base_tag
             )
             node.children = children
             for index = 1, #child_errors do
@@ -351,9 +403,6 @@ function M.parse(tvb, offset, length, options, budget, depth)
         nodes[#nodes + 1] = node
 
         local consumed = tag.length + length_info.length + value_length
-        if length_info.indefinite then
-            consumed = consumed + 2
-        end
         if consumed <= 0 then
             -- Defensive: a zero-width node would loop forever.
             errors[#errors + 1] = {
@@ -385,11 +434,8 @@ function M.looks_like_tlv(tvb, offset, length)
         return false
     end
     local length_info = M.read_length(tvb, offset + tag.length)
-    if length_info == nil then
+    if length_info == nil or length_info.value == nil then
         return false
-    end
-    if length_info.indefinite then
-        return true
     end
     local total = tag.length + length_info.length + length_info.value
     return total <= length
