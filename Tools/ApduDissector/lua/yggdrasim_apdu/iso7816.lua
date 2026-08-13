@@ -65,17 +65,32 @@ function M.decode_cla(cla)
     if cla >= 0x80 then
         decoded.proprietary = true
         -- ISO/IEC 7816-4 clause 5.4.1 gives '80' to 'FE' to proprietary
-        -- use and assigns no meaning to bits 6 to 1 there. One
-        -- proprietary layout matters enough to decode anyway:
-        -- GlobalPlatform card specification Table 11-1 claims the '8X'
-        -- block and gives it the same shape as the first interindustry
-        -- form -- bit 3 secure messaging, bits 2 and 1 the logical
-        -- channel -- which is what every GP and ES10 command in a UICC
-        -- trace uses.
+        -- use and assigns no meaning to bits 6 to 1 there. Two
+        -- proprietary layouts matter enough to decode anyway, and
+        -- GlobalPlatform defines both.
         --
-        -- Everything above '8F' really is opaque, and decoding it
-        -- invents three facts per command: CLA 'F0' is not "command
-        -- chaining", CLA 'AC' is not "secure messaging 3", and CLA 'A3'
+        -- The first is the '8X' block (GlobalPlatform Table 11-1),
+        -- shaped like the first interindustry form -- bit 3 secure
+        -- messaging, bits 2 and 1 the logical channel -- which is what
+        -- every GP and ES10 command on channels 0 to 3 uses.
+        --
+        -- The second is 'C0' to 'FE': the further interindustry shape
+        -- with bit 8 set, which is how GlobalPlatform reaches logical
+        -- channels 4 to 19. SCP03/crypto/session.py builds exactly this
+        -- on the wire -- (cla & 0x80) | 0x60 | (cla & 0x0F) -- so a
+        -- secure-messaged GP command on channel 4 arrives as 'E4', not
+        -- '84'. Treating it as opaque loses the channel, the
+        -- secure-messaging level and the whole GP body decode on the
+        -- channel where a populated eUICC opens its ISD-P.
+        if cla >= 0xC0 then
+            decoded.extended_channel = true
+            decoded.channel = 4 + (cla % 16)
+            decoded.secure_messaging = (math.floor(cla / 32) % 2) == 1 and 3 or 0
+            decoded.chaining = (math.floor(cla / 16) % 2) == 1
+            return decoded
+        end
+        -- '90' to 'BF' really is opaque, and decoding it invents facts
+        -- per command: CLA 'AC' is not "secure messaging 3" and CLA 'A3'
         -- is not channel 3.
         if cla > 0x8F then
             return opaque()
@@ -119,17 +134,47 @@ function M.uses_secure_messaging(cla)
     return decoded.secure_messaging ~= nil and decoded.secure_messaging ~= 0
 end
 
+--- The channel-independent class byte a lookup table is keyed on, or nil.
+--
+-- Every table in tables.lua is keyed on the channel-0 spelling of a
+-- class: '00' for the interindustry commands and '80' for the
+-- GlobalPlatform ones. A command issued on logical channel 4 or above
+-- carries neither, because both encodings move the channel into the low
+-- nibble and mark themselves in bits 8 and 7 -- '4X' to '7X' for the ISO
+-- further interindustry form, 'CX' to 'FX' for the GlobalPlatform one.
+-- Masking the low nibble leaves 'E0', which is in no table, so a
+-- high-channel STORE DATA lost its name, its risk class and -- through
+-- the missing case hint -- its command/response split as well.
+function M.base_class(cla)
+    if cla >= 0xC0 and cla <= 0xFE then
+        -- GlobalPlatform on channels 4 to 19 is the '8X' block reached
+        -- through the further interindustry shape.
+        return 0x80
+    end
+    if math.floor(cla / 64) % 4 == 1 then
+        -- ISO further interindustry, channels 4 to 19.
+        return 0x00
+    end
+    return nil
+end
+
 --- Resolve the command name, mirroring _lookup_apdu_command in
 --- Tools/Asn1TlvDecode/main.py: class-qualified first, then the class
 --- with its channel bits cleared, then with the whole low nibble
---- cleared, then the bare instruction.
+--- cleared, then the channel-independent base, then the bare
+--- instruction.
 --
 -- The third step is the one that names a secure-messaged command. In the
 -- first interindustry form the secure-messaging field is bits 4 and 3,
 -- which a 0xFC mask cannot reach, so an ISO-SM CREATE FILE ('0C E0') was
--- reported as "INS_E0" with the default risk class.
+-- reported as "INS_E0" with the default risk class. The fourth is what
+-- names the same command on a logical channel above 3; see base_class.
 function M.command_name(cla, ins)
     local candidates = { cla, cla - (cla % 4), cla - (cla % 16) }
+    local base = M.base_class(cla)
+    if base ~= nil then
+        candidates[#candidates + 1] = base
+    end
     for index = 1, #candidates do
         local key = (candidates[index] * 256) + ins
         local qualified = tables.CLA_INS_NAMES[key]

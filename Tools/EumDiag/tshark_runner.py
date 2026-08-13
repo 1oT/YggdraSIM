@@ -24,7 +24,9 @@ from .session_keys import SESSION_KEYS_ENV_VAR
 
 
 DEFAULT_TSHARK_BINARY: str = "tshark"
-DEFAULT_DISSECTOR_FILENAME: str = "dissector.lua"
+#: Kept as the name of the file this tool now loads, not the retired
+#: ``dissector.lua``; see locate_dissector.
+DEFAULT_DISSECTOR_FILENAME: str = "yggdrasim_apdu.lua"
 
 
 @dataclass(frozen=True)
@@ -52,13 +54,14 @@ def locate_dissector(module_dir: Path | None = None) -> Path:
     ``Tools/ApduDissector``, which decodes the BoundProfilePackage as a
     tree and honours the same ``YGGDRASIM_EUM_SESSION_KEYS`` variable.
 
-    Tests override ``module_dir`` to point at a tmpdir copy.
+    ``module_dir`` is forwarded rather than resolved here. Resolving it
+    against this module's own name would return a ``dissector.lua`` that
+    no longer exists anywhere, so the two branches would disagree on
+    which file they mean.
     """
-    if module_dir is not None:
-        return (Path(module_dir) / DEFAULT_DISSECTOR_FILENAME).resolve()
     from Tools.ApduDissector.tshark_runner import locate_dissector as locate_apdu
 
-    return locate_apdu()
+    return locate_apdu(module_dir)
 
 
 def build_tshark_invocation(

@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 from tests.apdu_dissector_support import (
+    DISSECTOR_PATH,
     INITIALIZE_UPDATE_RESPONSE,
     INSTALL_FOR_LOAD,
     PROACTIVE_OPEN_CHANNEL,
@@ -23,6 +24,7 @@ from tests.apdu_dissector_support import (
     decode_fields,
     decode_text,
     require_working_tshark,
+    run_tshark,
     write_capture,
 )
 
@@ -221,12 +223,12 @@ class ProactiveCommands(LayerTestBase):
         # emits -- came out as "local link technology independent".
         self.assertIn("GPRS", row[0])
         self.assertEqual(row[1], "1400")
-        self.assertEqual(row[2], "iot.test.com")
+        self.assertEqual(row[2], "iot.example.test")
         self.assertIn("TCP", row[3])
         self.assertEqual(row[4], "80")
         # A lone Other address is the data destination; the local
         # address is optional and, when both appear, comes first.
-        self.assertEqual(row[5], "data destination address: 10.0.0.1")
+        self.assertEqual(row[5], "data destination address: 192.0.2.1")
 
     def test_the_info_column_names_the_command(self) -> None:
         rows = decode_fields(self.capture, ["_ws.col.Info"])
@@ -377,6 +379,74 @@ class GeneralResultTableIsNotShifted(LayerTestBase):
         )
 
 
+class GlobalPlatformOnAHighLogicalChannel(LayerTestBase):
+    """A GP command on channel 4 or above does not carry class '8X'.
+
+    Channels 0 to 3 put the channel in the low two bits of '8X'. Channels
+    4 to 19 use the further interindustry shape instead, so the same
+    command arrives as 'CX' unwrapped and 'EX' secure-messaged --
+    SCP03/crypto/session.py builds exactly that on the wire. Every table
+    here is keyed on the channel-0 spelling, so without folding the
+    channel back out the command loses its name, its GlobalPlatform body
+    decode and its case hint. The missing hint is the expensive one: it
+    feeds the splitter, so the frame is cut in the wrong place too.
+
+    An ISD-P on a populated eUICC is opened on exactly these channels.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        es10c = bytes.fromhex("BF2D07A0055A03010203")
+        cls.build(
+            [
+                # 'C0': channel 4, no secure messaging.
+                Exchange(
+                    bytes.fromhex("C0E29100") + bytes([len(es10c)]) + es10c,
+                    bytes.fromhex("9000"),
+                    "store-data-channel-4",
+                ),
+                # 'E0': channel 4, secure-messaged.
+                Exchange(
+                    bytes.fromhex("E0E29100") + bytes([0x18]) + bytes(range(0x18)),
+                    bytes.fromhex("9000"),
+                    "store-data-channel-4-wrapped",
+                ),
+            ],
+            "gp-high-channel.pcap",
+        )
+
+    def test_the_command_is_still_named(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.command_name"])
+        self.assertEqual(
+            [row[0] for row in rows if row and row[0]],
+            ["STORE_DATA", "STORE_DATA"],
+        )
+
+    def test_the_logical_channel_is_reported(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cla.channel"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], ["4", "4"])
+
+    def test_the_globalplatform_body_is_decoded(self) -> None:
+        """Without is_gp_class accepting 'CX'/'EX' there is no variant."""
+        rows = decode_fields(self.capture, ["yapdu.gp.variant"])
+        self.assertEqual(len([row[0] for row in rows if row and row[0]]), 2)
+
+    def test_the_case_hint_still_splits_the_frame(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.case", "yapdu.lc"])
+        values = [row for row in rows if row and row[0]]
+        self.assertEqual([row[0] for row in values], ["3S", "3S"])
+        self.assertEqual([row[1] for row in values], ["10", "24"])
+
+    def test_the_wrapped_command_reports_secure_messaging(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cla.secure_messaging"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values[1], "3")
+
+    def test_the_es10c_function_is_named_through_the_wrapper(self) -> None:
+        text = decode_text(self.capture, display_filter="yapdu.cla.channel == 4")
+        self.assertIn("ProfileInfoList", text)
+
+
 class EnvelopeIsDissected(LayerTestBase):
     """ENVELOPE bodies are wrapped in BER, like a proactive command.
 
@@ -422,6 +492,109 @@ class EnvelopeIsDissected(LayerTestBase):
     def test_the_waiting_byte_count_is_reported(self) -> None:
         rows = decode_fields(self.capture, ["yapdu.cat.channel_data_length"])
         self.assertEqual([row[0] for row in rows if row and row[0]], ["32"])
+
+
+class QualifiersAreReadPerCommand(LayerTestBase):
+    """A qualifier means something different for every command type.
+
+    Three readings here are ones a plausible implementation gets
+    backwards, and each is asserted against the clause that fixes it.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        def proactive(command_type: int, qualifier: int) -> Exchange:
+            body = (
+                _ctlv("81", bytes([0x01, command_type, qualifier]))
+                + _ctlv("82", bytes.fromhex("8102"))
+            )
+            envelope = bytes.fromhex("D0") + bytes([len(body)]) + body
+            return Exchange(
+                bytes.fromhex("8012000000"), envelope + bytes.fromhex("9000")
+            )
+
+        cls.build(
+            [
+                # GET INPUT with bit 3 set: TS 102 223 clause 8.6 makes
+                # that "shall not be revealed", not "shall echo".
+                proactive(0x23, 0x04),
+                # SELECT ITEM qualifier '01': presentation type specified,
+                # data values. SET UP MENU's map would call bit 1 a soft
+                # key preference.
+                proactive(0x24, 0x01),
+                # LAUNCH BROWSER '04' is explicitly "not used"; a two-bit
+                # mask folded it onto '00'.
+                proactive(0x15, 0x04),
+            ],
+            "qualifiers.pcap",
+        )
+
+    def test_get_input_bit_3_hides_the_input(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.qualifier_name"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertIn("not be revealed", values[0])
+        self.assertNotIn("echo", values[0])
+
+    def test_select_item_does_not_borrow_the_menu_bit_map(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.qualifier_name"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertIn("choice of data values", values[1])
+        self.assertNotIn("soft key", values[1])
+
+    def test_launch_browser_is_an_enumeration_not_a_bit_field(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.qualifier_name"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertNotIn("launch if not already launched", values[2])
+
+
+class EnvelopeTagsFollowTheStandardNumbering(LayerTestBase):
+    """The BER-TLV envelope tags are not a gapless run from 'D1'.
+
+    'D8' is reserved for intra-UICC communication, so 3GPP TS 31.111
+    clause 9.1 puts USSD download at 'D9', Geographical Location
+    Reporting at 'DD' and ProSe Report at 'DF'. Numbering the table
+    straight through the gap shifts every tag from 'D9' up by one and
+    drops 'DF' off the end entirely -- so a USSD download reports as an
+    MMS transfer status, and a ProSe report is not recognised as an
+    ENVELOPE at all.
+    """
+
+    #: Tag to the name TS 31.111 clause 9.1 and TS 101 220 clause 7.2
+    #: give it. The three 3GPP-assigned ones are the citable anchors.
+    EXPECTED = {
+        0xD1: "SMS-PP download",
+        0xD6: "Event download",
+        0xD9: "USSD download",
+        0xDA: "MMS transfer status",
+        0xDD: "Geographical location reporting",
+        0xDE: "Envelope container",
+        0xDF: "ProSe report",
+    }
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        body = _ctlv("82", bytes.fromhex("8281"))
+        exchanges = []
+        for tag in sorted(cls.EXPECTED):
+            envelope = bytes([tag]) + bytes([len(body)]) + body
+            exchanges.append(
+                Exchange(
+                    bytes.fromhex("80C20000" + format(len(envelope), "02X"))
+                    + envelope,
+                    bytes.fromhex("9000"),
+                )
+            )
+        cls.build(exchanges, "envelope-tags.pcap")
+
+    def test_each_envelope_tag_carries_its_standard_name(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.envelope"])
+        seen = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(seen, [self.EXPECTED[tag] for tag in sorted(self.EXPECTED)])
+
+    def test_a_prose_report_is_recognised_as_an_envelope(self) -> None:
+        """'DF' is the tag a straight run through the 'D8' gap loses."""
+        text = decode_text(self.capture, display_filter="yapdu.cat.envelope")
+        self.assertIn("ProSe report", text)
 
 
 class DroppedLinkIsDistinguishableFromAHealthyOne(LayerTestBase):
@@ -516,6 +689,80 @@ class BoundProfilePackage(LayerTestBase):
         rows = decode_fields(self.capture, ["yapdu.tlv.name"])
         names = "\n".join(row[0] for row in rows if row and row[0])
         self.assertIn("BOUND_PROFILE_PACKAGE", names)
+
+
+class ChainedStoreDataSurvivesSnapshotDedup(LayerTestBase):
+    """A chained STORE DATA links its blocks even when snapshots are shared.
+
+    The state machine stores one snapshot table for a run of frames whose
+    context is identical, which a chain of STORE DATA blocks to the same
+    ISD-R is. Reassembly then backpatches each contributing frame with the
+    frame that completes the chain -- a mutation of the stored table. If a
+    block frame's table were shared with a neighbour, that backpatch would
+    bleed a 'Reassembled in' link onto a frame that is not part of the
+    chain. Block frames are therefore excluded from sharing; this pins it.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        def block(p1: int, p2: int, body: bytes) -> Exchange:
+            command = bytes([0x80, 0xE2, p1, p2, len(body)]) + body
+            return Exchange(command, bytes.fromhex("9000"))
+
+        cls.build(
+            [
+                # Select the ISD-R, then three STORE DATA blocks on the
+                # same selection: two "more blocks" then the last. P1 bit
+                # 8 set marks the final block.
+                Exchange(bytes.fromhex("00A4040410") + ISDR_AID,
+                         bytes.fromhex("6120")),
+                block(0x00, 0x00, bytes.fromhex("BF360A")),
+                block(0x00, 0x01, bytes.fromhex("A004870203")),
+                block(0x80, 0x02, bytes.fromhex("04A2028601")),
+            ],
+            "chained-store-data.pcap",
+        )
+
+    def _reassembled_in(self) -> dict[str, str]:
+        # Two-pass, because the backpatch only shows on a frame's second
+        # visit -- the same reason it shows in the GUI, which re-renders,
+        # and the pre-existing behaviour of Wireshark's own reassembly.
+        result = run_tshark(
+            [
+                "-X", f"lua_script:{DISSECTOR_PATH}",
+                "-r", str(self.capture),
+                "-2",
+                "-T", "fields",
+                "-e", "frame.number", "-e", "yapdu.rsp.reassembled_in",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[:800])
+        links = {}
+        for line in result.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) > 1 and parts[1]:
+                links[parts[0]] = parts[1]
+        return links
+
+    def test_each_earlier_block_points_at_the_completing_frame(self) -> None:
+        # Frames 2 and 3 are mid-chain blocks; frame 4 completes it.
+        links = self._reassembled_in()
+        self.assertEqual(links.get("2"), "4")
+        self.assertEqual(links.get("3"), "4")
+
+    def test_the_select_frame_is_not_dragged_into_the_chain(self) -> None:
+        """The load-bearing dedup-safety check. Frame 1 selects the ISD-R
+        and so shares the blocks' context, but is not part of the chain.
+        Had it shared a snapshot table with block frame 2, the backpatch
+        would have bled a 'Reassembled in' link onto it. It does not."""
+        self.assertNotIn("1", self._reassembled_in())
+
+    def test_the_completing_frame_counts_every_block(self) -> None:
+        rows = decode_fields(
+            self.capture, ["frame.number", "yapdu.rsp.block_count"]
+        )
+        counts = {row[0]: row[1] for row in rows if len(row) > 1 and row[1]}
+        self.assertEqual(counts.get("4"), "3")
 
 
 if __name__ == "__main__":

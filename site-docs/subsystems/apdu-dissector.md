@@ -252,7 +252,7 @@ implementation gets backwards:
 | Status word categories | ISO/IEC 7816-4 clause 5.1.3 | Four categories, not two. `'62'` and `'63'` are warnings: `63 CX` is a *failed* verification, so `yapdu.sw_success` is false for it. |
 | `61 00`, `6C 00` | ISO/IEC 7816-4 clause 5.1 | SW2 of zero means 256, following the Le convention. |
 | `92 40` | GSM 11.11 clause 9.4 | `'92' '0X'` counts internal retries; `'92' '40'` is a memory problem. |
-| Class byte | ISO/IEC 7816-4 clause 5.4.1 | `'80'`--`'FE'` is proprietary and bits 6--1 mean nothing there. The `'8X'` block is decoded anyway because GlobalPlatform Table 11-1 claims it; above `'8F'` no channel, secure-messaging level or chaining flag is reported. |
+| Class byte | ISO/IEC 7816-4 clause 5.4.1 | `'80'`--`'FE'` is proprietary and bits 6--1 mean nothing there. Two blocks are decoded anyway because GlobalPlatform claims them: `'8X'` (Table 11-1) for logical channels 0--3, and `'C0'`--`'FE'` for channels 4--19, which is the further interindustry shape with bit 8 set. `'90'`--`'BF'` reports no channel, secure-messaging level or chaining flag. |
 | Secure messaging | ISO/IEC 7816-4 Table 3 | Bits 4 **and** 3 in the first interindustry form, so CLA `'08'` is secure messaging; a single bit in the further form, so CLA `'44'` is channel 8 and is not. |
 | Device identities | ETSI TS 102 223 clause 8.7 | `'81'` UICC, `'82'` terminal, `'21'`--`'27'` channels 1--7, `'10'`--`'17'` card readers. |
 | General result | ETSI TS 102 223 clause 8.12 | `'04'` is the icon result and `'06'` is limited service. The second byte carries the cause for `'3A'`, `'20'` and `'26'`. |
@@ -260,6 +260,8 @@ implementation gets backwards:
 | Channel status | ETSI TS 102 223 clause 8.56 | Bit 8 of byte 1 is link-established; byte 2 `'05'` is "link dropped". |
 | Transport level | ETSI TS 102 223 clause 8.59 | `'01'`/`'02'` are remote, `'04'`/`'05'` are local. |
 | COMPREHENSION-TLV | ETSI TS 101 220 clause 7.1 | Not BER. Two tag forms only, no `'1F'` escape, no class and no constructed bit. |
+| ENVELOPE tags | 3GPP TS 31.111 clause 9.1 | The run is not gapless: `'D8'` is reserved for intra-UICC communication, so USSD download is `'D9'`, Geographical Location Reporting `'DD'` and ProSe Report `'DF'`. Numbering straight through the gap shifts every tag from `'D9'` up and loses `'DF'`. |
+| `'DF'` ProSe Report | ETSI TS 101 220 clause 7.2 | A single-byte tag whose low five bits are all set, which is BER's multi-byte introducer. Read as BER it swallows the length byte and the envelope vanishes, so the wrapper byte is matched directly. |
 | BoundProfilePackage | GSMA SGP.22 clause 2.5.2 | Five members: `BF23`, then `A0`--`A3` ending in `secondSequenceOf87`. |
 
 ### Deliberate divergences
@@ -272,12 +274,20 @@ implementation gets backwards:
   rejects the object outright. A dissector has to show what is on the wire.
 - **`'C6'` is walked as constructed** although BER calls it primitive, because
   ETSI TS 102 221 clause 11.1.1.4.10 fills it with TLVs.
-- **A TLS 1.3 post-handshake alert cannot be named.** Every alert after the
-  handshake is wrapped in an `application_data` record, so the code is inside
-  the ciphertext. `yapdu.tls.alert_encrypted` says so rather than letting the
-  absence of an alert read as "there was none".
-- **A proprietary or reserved class byte reports no channel.** Saying nothing
-  is the honest answer where the specification assigns no meaning.
+- **Naming an alert is a TLS 1.2-and-earlier capability.** From the server's
+  first flight onward, TLS 1.3 encrypts every alert and RFC 8446 clause 5.2
+  sets the *outer* `opaque_type` of a protected record to `23`
+  (`application_data`), so the alert code is inside the ciphertext and the
+  record does not even announce itself as an alert. `yapdu.tls.alert_encrypted`
+  therefore covers the TLS 1.2 shape -- an `alert` record whose body is
+  ciphered -- and not the TLS 1.3 one, which is indistinguishable from any
+  other application data without the keys. Under TLS 1.3, read
+  `yapdu.tls.content_type == "application_data"` as "an alert may be in here",
+  rather than reading the absence of a named alert as "there was none".
+- **A reserved class byte, and proprietary `'90'`--`'BF'`, report no channel.**
+  Saying nothing is the honest answer where the specification assigns no
+  meaning. `'8X'` and `'C0'`--`'FE'` are the exceptions, because
+  GlobalPlatform does assign meaning to both.
 
 ## Known limits
 
@@ -296,7 +306,10 @@ implementation gets backwards:
   but is not handed to the stock dissector, because half a record produces a
   malformed-packet complaint rather than a tree. In practice this means a
   `bad_certificate` alert is visible while the certificate that caused it is
-  not: an SM-DP+ chain runs to several kilobytes across ~236-byte blocks.
+  not: an SM-DP+ chain runs to several kilobytes across ~236-byte blocks. A DNS
+  message over TCP is de-framed and handed over only when one block carries the
+  whole message; one split across blocks is left as raw channel data for the
+  same reason.
 - The TERMINAL PROFILE body is left as raw bytes. It is a bit field per
   ETSI TS 102 223 clause 5.2, not TLV.
 

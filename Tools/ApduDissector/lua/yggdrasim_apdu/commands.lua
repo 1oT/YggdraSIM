@@ -112,18 +112,25 @@ local function key_reference_name(reference)
         return string.format("reserved key reference 0x%02X", reference)
     end
     if number >= 0x01 and number <= 0x08 then
+        -- TS 102 221 Table 9.3 names '01' to '08' PIN Appl 1 to 8 and
+        -- '81' to '88' Second PIN Appl 1 to 8, which clause 9.5.1 maps
+        -- onto PIN and PIN2. The labels were the wrong way round, so
+        -- "application PIN" landed on PIN2 -- the local one.
         if global then
-            return string.format("global PIN %d", number)
+            return string.format("application PIN %d (PIN1)", number)
         end
-        return string.format("application PIN %d", number)
+        return string.format("second/local PIN %d (PIN2)", number)
     end
     if number >= 0x0A and number <= 0x0E then
-        -- TS 102 221 draws the same global/specific distinction over the
-        -- administrative keys as it does over the PINs.
+        -- Table 9.3 numbers the administrative keys straight through
+        -- both halves: '0A' to '0E' are ADM1 to ADM5 and '8A' to '8E'
+        -- are ADM6 to ADM10. They are not two scopes of the same five,
+        -- so subtracting one constant from both made '8A' report as
+        -- "application ADM1" -- a name that already belongs to '0A'.
         if global then
-            return string.format("global ADM%d", number - 0x09)
+            return string.format("ADM%d", number - 0x09)
         end
-        return string.format("application ADM%d", number - 0x09)
+        return string.format("ADM%d", number - 0x04)
     end
     return string.format("key reference 0x%02X", reference)
 end
@@ -174,8 +181,22 @@ local function describe_select(payload, command)
         occurrence = occurrence,
         occurrence_name = SELECT_OCCURRENCE[occurrence],
     }
-    if command.p2 >= 0x10 then
-        -- ETSI TS 102 221 Table 11.3 requires bits 8-5 to be zero.
+    -- ETSI TS 102 221 Table 11.2 gives bits 7 and 6 to the application
+    -- session control -- '00' activation/reset, '10' termination -- and
+    -- requires only bits 8 and 5 to be zero. Treating everything above
+    -- '0F' as reserved reported a legal "terminate application session"
+    -- SELECT as malformed, and never decoded the field at all.
+    local session_control = math.floor(command.p2 / 32) % 4
+    if session_control == 0 then
+        description.session_control = "activation or reset"
+    elseif session_control == 2 then
+        description.session_control = "termination"
+    else
+        description.session_control =
+            string.format("reserved session control 0x%02X", session_control)
+    end
+    if math.floor(command.p2 / 128) % 2 == 1
+        or math.floor(command.p2 / 16) % 2 == 1 then
         description.reserved_bits_set = true
     end
 

@@ -46,17 +46,25 @@ M.INS_STORE_DATA = 0xE2
 --- True when the class byte marks a GlobalPlatform command.
 --
 -- GlobalPlatform card specification Table 11-1: a GP command carries
--- class '8X' on logical channels 0 to 3 and '6X' on channels 4 to 19,
--- with the low nibble holding the channel and the secure-messaging bit
--- in both forms. Recognising only '80' and '84' rejected every GP
--- command on a channel above 3, which on a populated eUICC is where an
--- ISD-P is opened.
+-- class '8X' on logical channels 0 to 3, with the low nibble holding the
+-- channel and the secure-messaging bit. Channels 4 to 19 use the further
+-- interindustry shape instead, which moves the channel into the low
+-- nibble and marks itself in bits 8 and 7 -- so the same command becomes
+-- 'CX' unwrapped and 'EX' secure-messaged.
+--
+-- SCP03/crypto/session.py is the reference for what actually reaches the
+-- wire: (cla & 0x80) | 0x60 | (cla & 0x0F). With bit 8 set that yields
+-- 'E0' to 'EF'; with it clear -- an ISO-class command secure-messaged on
+-- a high channel -- it yields '60' to '6F', which is why '60' belongs
+-- here too and must not be dropped. Recognising only '80' and '84'
+-- rejected every GP command on a channel above 3, which on a populated
+-- eUICC is where an ISD-P is opened.
 function M.is_gp_class(cla)
     local high = cla - (cla % 16)
-    return high == 0x80 or high == 0x60
+    return high == 0x80 or high == 0x60 or high == 0xC0 or high == 0xE0
 end
 
--- Table 11-47: INSTALL P1 reference control, in ascending bit order so
+-- Table 11-41: INSTALL P1 reference control, in ascending bit order so
 -- the composed name reads the way GlobalPlatform writes it: INSTALL FOR
 -- INSTALL AND MAKE SELECTABLE, not the reverse.
 local INSTALL_P1_BITS = {
@@ -91,12 +99,14 @@ function M.install_more_blocks(p1)
     return math.floor(p1 / 0x80) % 2 == 1
 end
 
--- Table 11-36: GET STATUS P1 scope, bits 8 to 5.
+-- Table 11-33: GET STATUS P1 scope, bits 8 to 5.
 local GET_STATUS_SCOPE = {
     [0x80] = "Issuer Security Domain",
     [0x40] = "applications and Supplementary Security Domains",
     [0x20] = "executable load files",
     [0x10] = "executable load files and their modules",
+    [0x08] = "executable load files marked logically deleted with references",
+    [0x04] = "OPEN only",
 }
 
 --- Name the GET STATUS scope.
@@ -109,7 +119,7 @@ function M.get_status_scope(p1)
         or string.format("scope 0x%02X", p1)
 end
 
--- Table 11-79: SET STATUS P1. It is a state-transition selector, not the
+-- Table 11-86: SET STATUS P1. It is a state-transition selector, not the
 -- GET STATUS scope, and giving it GET STATUS semantics named '60' -- a
 -- Security Domain and its applications -- "scope 0x60".
 local SET_STATUS_SCOPE = {
@@ -123,7 +133,7 @@ function M.set_status_scope(p1)
     return SET_STATUS_SCOPE[p1] or string.format("target 0x%02X", p1)
 end
 
---- Table 11-58: EXTERNAL AUTHENTICATE P1 security level.
+--- Table 10-1: EXTERNAL AUTHENTICATE P1 security level.
 function M.security_level(p1)
     if p1 == 0 then
         return "no secure messaging", {}
@@ -147,7 +157,7 @@ function M.security_level(p1)
     return table.concat(parts, " + "), parts
 end
 
---- STORE DATA P1, GlobalPlatform table 11-86.
+--- STORE DATA P1, GlobalPlatform Table 11-89.
 function M.store_data_control(p1)
     local structure = math.floor(p1 / 8) % 4
     local structure_name = "no general encoding"
@@ -297,7 +307,11 @@ end
 --   not a positional record, so nothing beyond the identifier is
 --   asserted here rather than inventing offsets for it.
 function M.parse_initialize_update_response(tvb, offset, length)
-    if length < 28 then
+    -- 10 key diversification + 3 key information + 8 card challenge +
+    -- 8 card cryptogram = 29 mandatory bytes (Amendment D Table 7-3).
+    -- A guard of 28 let a body one byte short through and then read the
+    -- cryptogram past its end.
+    if length < 29 then
         return nil
     end
     local parsed = {
@@ -320,10 +334,14 @@ function M.parse_initialize_update_response(tvb, offset, length)
         end
     elseif parsed.scp_identifier == 0x02 then
         parsed.scp_name = "SCP02"
+        -- The 2-byte sequence counter and the 6-byte card challenge are
+        -- consecutive, not overlaid: reporting an 8-byte challenge at
+        -- the counter's own offset rendered the same two bytes twice
+        -- and ran the challenge two bytes past its end.
         parsed.sequence_counter_offset = offset + 12
         parsed.sequence_counter_length = 2
-        parsed.card_challenge_offset = offset + 12
-        parsed.card_challenge_length = 8
+        parsed.card_challenge_offset = offset + 14
+        parsed.card_challenge_length = 6
         parsed.card_cryptogram_offset = offset + 20
         parsed.card_cryptogram_length = 8
     elseif parsed.scp_identifier == 0x01 then
@@ -394,12 +412,14 @@ function M.describe(payload, command)
         return {
             kind = "status",
             scope = M.get_status_scope(command.p1),
-            -- P2 bit 2 asks for the next occurrence; bit 1 selects the
-            -- TLV response format. Testing the pair for equality with 2
-            -- misses '03', which is both at once and by far the more
-            -- common spelling on an eUICC.
-            next_occurrence = math.floor(command.p2 / 2) % 2 == 1,
-            tlv_response = command.p2 % 2 == 1,
+            -- GlobalPlatform Table 11-34: b1 asks for the next
+            -- occurrence, b2 selects the TLV response format, and
+            -- b2 = 0 is the format deprecated since 2.2. The two were
+            -- the other way round here, so the standard eUICC opening
+            -- call P2 = '02' -- TLV, first occurrence -- reported as
+            -- "next occurrence, no TLV": both halves wrong at once.
+            next_occurrence = command.p2 % 2 == 1,
+            tlv_response = math.floor(command.p2 / 2) % 2 == 1,
         }
     end
 

@@ -385,10 +385,15 @@ local function add_command_description(tree, payload, command, description)
                 description.occurrence_name
             ):set_generated()
         end
+        if description.session_control ~= nil then
+            tree:add(
+                fields.select_session, payload(3, 1), description.session_control
+            ):set_generated()
+        end
         if description.reserved_bits_set then
             tree:add_proto_expert_info(
                 experts.reserved_class,
-                "ETSI TS 102 221 Table 11.3 requires SELECT P2 bits 8 to 5 "
+                "ETSI TS 102 221 Table 11.2 requires SELECT P2 bits 8 and 5 "
                     .. "to be zero"
             )
         end
@@ -756,7 +761,7 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
         end
     end
 
-    local wanted = cat.channel_payload_dissector(values, effective_port, transport)
+    local wanted, skip = cat.channel_payload_dissector(values, effective_port, transport)
     if wanted == "" then
         return
     end
@@ -769,13 +774,27 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
         return
     end
 
-    local handler = Dissector.get(wanted)
-    if handler == nil then
-        return
+    -- A DNS-over-TCP payload is handed over past its two-byte length
+    -- prefix; skip is 0 for everything else.
+    local handoff = range
+    if skip ~= nil and skip > 0 then
+        if range:len() <= skip then
+            return
+        end
+        handoff = range:range(skip)
     end
-    -- A sub-dissector that raises must not take our tree down with it.
+
+    -- Dissector.get is inside the pcall, not before it. Wireshark 4.0
+    -- returns nil for an unknown name, but 3.4 -- the stated floor
+    -- version -- raises instead, and a raise here would abort the frame
+    -- rather than fall back to the raw bytes. A sub-dissector that
+    -- raises must not take our tree down with it either.
     pcall(function()
-        handler:call(range:tvb("BIP channel data"), pinfo, tree)
+        local handler = Dissector.get(wanted)
+        if handler == nil then
+            return
+        end
+        handler:call(handoff:tvb("BIP channel data"), pinfo, tree)
     end)
 end
 
@@ -790,19 +809,28 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
     local content_length = length
     local envelope_name = nil
 
-    -- 'D0' wraps a proactive command; 'D1' to 'DE' wrap an ENVELOPE body
+    -- 'D0' wraps a proactive command; 'D1' to 'DF' wrap an ENVELOPE body
     -- (ETSI TS 102 223 clause 7.5). Both are plain BER around a
-    -- COMPREHENSION-TLV run, so both have to be stepped over in BER
-    -- first. An ENVELOPE left unwrapped renders as one opaque node --
-    -- which hides Event download entirely, and Event download is how the
-    -- terminal reports that data arrived or that the link went away.
-    local wrapper = tlv.read_tag(payload, offset)
-    if wrapper ~= nil
-        and (wrapper.value == cat.PROACTIVE_COMMAND_TAG
-            or cat.is_envelope_tag(wrapper.value)) then
-        local wrapper_length = tlv.read_length(payload, offset + wrapper.length)
+    -- COMPREHENSION-TLV run, so both have to be stepped over first. An
+    -- ENVELOPE left unwrapped renders as one opaque node -- which hides
+    -- Event download entirely, and Event download is how the terminal
+    -- reports that data arrived or that the link went away.
+    --
+    -- The wrapper byte is matched directly rather than through
+    -- tlv.read_tag. ETSI TS 101 220 clause 7.2 allocates these as
+    -- single-byte tags, but 'DF' -- ProSe report -- has its low five
+    -- bits all set, which is exactly BER's multi-byte tag introducer. A
+    -- conforming BER read therefore swallows the length byte into the
+    -- tag, the wrapper is never recognised, and the whole envelope
+    -- disappears from the tree. 'DF' is the only CAT wrapper that
+    -- collides this way, which is what makes it easy to miss.
+    local wrapper_value = util.byte_at(payload, offset)
+    if wrapper_value ~= nil
+        and (wrapper_value == cat.PROACTIVE_COMMAND_TAG
+            or cat.is_envelope_tag(wrapper_value)) then
+        local wrapper_length = tlv.read_length(payload, offset + 1)
         if wrapper_length ~= nil and wrapper_length.value ~= nil then
-            content_offset = offset + wrapper.length + wrapper_length.length
+            content_offset = offset + 1 + wrapper_length.length
             content_length = wrapper_length.value
             local available = payload:captured_len() - content_offset
             if content_length > available then
@@ -811,12 +839,12 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
             local range = util.safe_range(payload, offset, length)
             if range ~= nil then
                 tree = tree:add(fields.cat_command, range)
-                if wrapper.value == cat.PROACTIVE_COMMAND_TAG then
+                if wrapper_value == cat.PROACTIVE_COMMAND_TAG then
                     tree:set_text("Proactive command (D0)")
                 else
-                    envelope_name = cat.envelope_name(wrapper.value)
+                    envelope_name = cat.envelope_name(wrapper_value)
                     tree:set_text(string.format(
-                        "ENVELOPE: %s (%02X)", envelope_name, wrapper.value
+                        "ENVELOPE: %s (%02X)", envelope_name, wrapper_value
                     ))
                     tree:add(
                         fields.cat_envelope, range, envelope_name
@@ -956,7 +984,7 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
             elseif node.base_tag == cat.TAG_OTHER_ADDRESS then
                 -- OPEN CHANNEL carries two of these: the local address
                 -- first, then the data destination. Rendering both under
-                -- one field name leaves "0.0.0.0,8.8.8.8" with nothing
+                -- one field name leaves "0.0.0.0,192.0.2.53" with nothing
                 -- saying which end is which.
                 address_seen = address_seen + 1
                 local values = util.byte_array(
@@ -974,6 +1002,21 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
                     fields.cat_address, range,
                     string.format("%s: %s", role, address)
                 ):set_generated()
+                -- The typed peer carries the raw bytes, one past the
+                -- type octet, so Wireshark reads and filters it as a
+                -- real address. Clause 8.58: '21' is a 4-byte IPv4,
+                -- '57' a 16-byte IPv6.
+                if values ~= nil and values[1] == 0x21 and #values >= 5 then
+                    local ipv4 = util.safe_range(payload, node.value_offset + 1, 4)
+                    if ipv4 ~= nil then
+                        tree:add(fields.cat_address_ipv4, ipv4)
+                    end
+                elseif values ~= nil and values[1] == 0x57 and #values >= 17 then
+                    local ipv6 = util.safe_range(payload, node.value_offset + 1, 16)
+                    if ipv6 ~= nil then
+                        tree:add(fields.cat_address_ipv6, ipv6)
+                    end
+                end
             elseif node.base_tag == cat.TAG_TRANSPORT_LEVEL and node.value_length >= 1 then
                 local kind = util.byte_at(payload, node.value_offset)
                 tree:add(fields.cat_transport, range, cat.transport_name(kind))
@@ -994,7 +1037,15 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
                     util.byte_array(payload, node.value_offset, node.value_length)
                 )
                 if status ~= nil then
-                    status_channel = status.identifier
+                    -- A GET CHANNEL STATUS response carries one Channel
+                    -- status object per open channel (ETSI TS 102 223
+                    -- clause 6.6.31), so this branch runs several times
+                    -- in one frame. Keeping the first means a later
+                    -- entry cannot overwrite the identifier the pending
+                    -- OPEN CHANNEL is about to be bound to.
+                    if status_channel == nil then
+                        status_channel = status.identifier
+                    end
                     tree:add(
                         fields.cat_channel, range, status.identifier
                     ):set_generated()
@@ -1087,7 +1138,15 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
     -- frame.number==N" detail query would otherwise learn a port from a
     -- frame it never saw.
     if frame_advancing then
-        if status_channel ~= nil and status_channel ~= 0 then
+        -- Only the TERMINAL RESPONSE to an OPEN CHANNEL allocates the
+        -- channel the pending port belongs to. A Channel status TLV also
+        -- rides in a GET CHANNEL STATUS response and in an Event
+        -- download envelope, and binding on those consumed the pending
+        -- OPEN CHANNEL against an unrelated channel -- silently moving
+        -- one channel's port onto another, and leaving the real one
+        -- with no port at all.
+        if command_type == 0x40
+            and status_channel ~= nil and status_channel ~= 0 then
             state.bind_bip_channel(machine, status_channel)
         end
         -- The command asks; the terminal's response allocates. The
@@ -1507,6 +1566,19 @@ local function add_reassembly_subtree(tree, payload, context, budget)
     if context == nil then
         return
     end
+    if context.reassembly_dropped then
+        -- Degrades the way the TLV node budget already does: say what
+        -- was given up on rather than render a short tree in silence.
+        tree:add_proto_expert_info(
+            experts.budget,
+            string.format(
+                "the chained STORE DATA passed %s with no last-block "
+                    .. "flag, so the blocks held for it were released",
+                util.plural_bytes(state.MAX_REASSEMBLY_BYTES)
+            )
+        )
+        return
+    end
     if context.reassembled_in ~= nil and context.reassembled_hex == nil then
         -- A block in the middle of a chain: say where it ends up.
         tree:add(fields.rsp_reassembled_in, payload(0, 0), context.reassembled_in)
@@ -1525,7 +1597,11 @@ local function add_reassembly_subtree(tree, payload, context, budget)
 
     local item = tree:add(yapdu, payload(0, 0), "Reassembled STORE DATA")
     item:set_generated()
-    item:add(fields.rsp_reassembled_length, payload(0, 0), #hex / 2)
+    -- math.floor, not bare '/': Lua 5.3 and later make '/' a float
+    -- divide, and a non-integral float handed to a uint32 field
+    -- raises rather than rounds -- aborting the frame. The hex is
+    -- even-length today only because util.hex produces it.
+    item:add(fields.rsp_reassembled_length, payload(0, 0), math.floor(#hex / 2))
         :set_generated()
     item:add(fields.rsp_block_count, payload(0, 0), #frames):set_generated()
     for index = 1, #frames do
@@ -2098,12 +2174,12 @@ function yapdu.dissector(payload, pinfo, tree)
     -- decoder reports today. Chaining it there would carry that defect
     -- forward into our tree.
     if yapdu.prefs.chain_gsm_sim == true and is_atr == false then
-        local gsm_sim = Dissector.get("gsm_sim")
-        if gsm_sim ~= nil then
-            pcall(function()
+        pcall(function()
+            local gsm_sim = Dissector.get("gsm_sim")
+            if gsm_sim ~= nil then
                 gsm_sim:call(payload, pinfo, tree)
-            end)
-        end
+            end
+        end)
     end
 
     pinfo.cols.protocol:set("APDU")
@@ -2130,10 +2206,19 @@ if table_ok and gsmtap_types ~= nil then
 end
 
 if registered == false then
-    -- Older builds without a gsmtap.type table: claim UDP 4729 and let
-    -- the stock GSMTAP dissector run first so its header fields survive.
-    local udp_port = DissectorTable.get("udp.port")
-    if udp_port ~= nil then
-        udp_port:add(4729, yapdu)
-    end
+    -- No fallback to udp.port. Registering a Lua proto on UDP 4729 does
+    -- not layer on top of GSMTAP, it *displaces* it: the dissector is
+    -- then handed the raw UDP payload with the 16-byte GSMTAP header
+    -- still attached, and the splitter reads GSMTAP's version and type
+    -- bytes as CLA and INS. Every frame in the capture would decode as
+    -- something, with a confident-looking split score and no sign that
+    -- the header was never stripped -- which is worse than not loading.
+    --
+    -- packet-gsmtap.c has registered the gsmtap.type table since well
+    -- before the 3.4 floor this dissector claims, so reaching here means
+    -- the build genuinely cannot support the binding.
+    print(
+        "yggdrasim_apdu: no gsmtap.type dissector table in this Wireshark "
+            .. "build; the APDU dissector will not load."
+    )
 end
