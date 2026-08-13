@@ -171,6 +171,96 @@ file) may change without notice between minor releases.
 
 ### Fixed
 
+- A conformance sweep of `Tools/ApduDissector/` against the governing
+  specifications corrected a set of defects that produced confidently
+  wrong output rather than missing output. These change what an operator
+  reads off a capture they have already collected, so they are listed
+  individually:
+
+  - The life-cycle status integer was inverted against ISO/IEC 7816-4
+    Table 13. `'05'` and `'07'` were reported as deactivated when they
+    are activated, and `'0C'` to `'0F'` -- the **termination state** --
+    were reported as operational, so a permanently dead file or ADF
+    rendered as healthy. The GlobalPlatform registry codings were also
+    consulted ahead of the ISO table for an FCP `'8A'`, which made every
+    ordinary UICC file report "LOADED" or "INSTALLED".
+  - Warning status words were counted as success. `63 CX` is a *failed*
+    verification, so `yapdu.sw_success` reported "Succeeded: True"
+    beside the text "Verification failed", and a filter for failures
+    missed every consumed retry and every blocked PIN. Status words are
+    now classified into the four categories of ISO/IEC 7816-4
+    clause 5.1.3 and published as `yapdu.sw.category`.
+  - ETSI TS 102 223 clause 8.7 device identities had the UICC and the
+    terminal swapped, reversing the reported direction of every
+    proactive command and every terminal response; the channel block was
+    read from `'10'` rather than `'21'`, so channels 1--7 were named as
+    card readers. Source and destination are now rendered, which they
+    previously were not at all.
+  - The clause 8.52 bearer table was numbered from `'00'` instead of
+    `'01'`, shifting every entry -- including `'03'`, the default packet
+    bearer this repository's own toolkit emits, which read as "local
+    link technology independent".
+  - The clause 8.12 general result table was shifted by two from `'04'`
+    up, so a REFRESH that merely could not draw an icon was reported as
+    an inactive NAA.
+  - Clause 8.59 transport levels had local and remote swapped, reporting
+    a channel terminating on the handset as one to the network.
+  - Case-4 commands were split one byte short. The case hint was scored
+    as a single string comparison, so an instruction hinted `3S` beat
+    its true `4S` reading by 20 points -- at confidence 100 and with no
+    ambiguity flag -- and the trailing Le rendered as a one-byte
+    response body. Every ES10b `STORE DATA` is case 4. Scoring now
+    models the two properties a case actually asserts, and confidence
+    derives from the margin over the runner-up rather than from evidence
+    every candidate shares.
+  - Secure messaging was detected from bit 3 alone, which missed
+    ISO/IEC 7816-4 Table 3 type `'10'` (CLA `'08'` and `'88'`) and
+    invented an eight-byte C-MAC on the further interindustry classes
+    `'44'` and `'4C'`, where that bit is part of the channel number.
+  - `61 00` and `6C 00` reported zero bytes rather than 256; `92 40`, a
+    memory problem, was reported as a normal ending after 64 retries;
+    and `9E XX`, a SIM data download error, had no description at all.
+  - A proprietary or reserved class byte had a logical channel, a
+    secure-messaging level and a chaining flag decoded out of bits
+    ISO/IEC 7816-4 clause 5.4.1 assigns no meaning to, stating three
+    facts per command that the specification does not.
+  - COMPREHENSION-TLV tags `'1C'`, `'1D'` and `'1E'` were each named as
+    their neighbour and `'32'` was named as `'3F'`; the tag table now
+    covers the full ETSI TS 101 220 clause 7.2 allocation.
+  - The BoundProfilePackage sections were numbered from `'A0'` as the
+    initialiseSecureChannelRequest. GSMA SGP.22 clause 2.5.2 puts the
+    request in `BF23` and gives `'A0'` to `'A3'` to the four sequences,
+    so every name was shifted by one and `secondSequenceOf87` was
+    missing entirely.
+  - A secure-messaged SELECT had its ciphertext read as an AID, a file
+    identifier or a path, and the result was committed to the
+    cross-frame state -- so every following read in that channel was
+    attributed to a file identifier made of ciphertext, while still
+    reporting its context as available.
+  - `Tools/ApduDissector/sidecar.py` split a wrapped exchange as case 3
+    unconditionally. A GlobalPlatform `INSTALL` is sent case 4, so the
+    recorded command was one byte short of the frame and a valid sidecar
+    was refused with "does not match", which is both false and the most
+    misleading thing the tool can report. It also hardcoded the card
+    session index and the selected AID, making every keybag session that
+    matches on either unreachable; both are now tracked from the
+    capture.
+  - A sidecar entry with no `command_hex` bypassed the check that binds
+    a sidecar to its capture, making the guarantee opt-in. It now fails
+    closed.
+
+- The dissector also closes gaps the sweep found where the decode simply
+  stopped early: ENVELOPE bodies (`D1`--`DE`) are unwrapped, so Event
+  download exposes its event code, channel status and pending byte
+  count; the Result cause byte names which of the thirteen BIP failures
+  occurred; Channel status reports whether the link came up and whether
+  it dropped; the OPEN CHANNEL port is bound to the channel the terminal
+  allocates, so DNS inside a BIP session resolves; chained `STORE DATA`
+  is reassembled; and DGI-format `STORE DATA`, the INSTALL extradition,
+  registry-update and personalisation layouts, and SCP01/02/03/11
+  INITIALIZE UPDATE responses are decoded per their own structures
+  rather than a shared guess.
+
 - SCP11 live and relay notification sync now encode
   `seqNumber >= 0x80` as positive ASN.1 INTEGER values before
   `RetrieveNotification`, `RemoveNotificationFromList`, and local-access

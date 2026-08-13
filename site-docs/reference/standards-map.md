@@ -30,6 +30,8 @@ package data so that the HIL bridge works from a plain `pip install`.
 | ETSI TS 102 222 | `docs/ts_102222v130000p.md` | SCP80 RFM payloads, [SCP80 OTA Shell](../subsystems/scp80.md) |
 | ETSI TS 102 225 | `docs/ts_102225v180000p.md` | [SCP80 OTA](../concepts/ota-scp80.md), [SCP80 OTA Shell](../subsystems/scp80.md) |
 | ETSI TS 102 226 | `docs/ts_102226v120000p.md` | [SCP80 OTA Shell](../subsystems/scp80.md) |
+| ETSI TS 102 223 (Card Application Toolkit, BIP) | -- | [APDU Dissector](../subsystems/apdu-dissector.md) -- clauses 8.7 device identities, 8.12 general result and its cause byte, 8.52 bearer, 8.56 channel status, 8.59 transport level |
+| ETSI TS 101 220 (COMPREHENSION-TLV tag allocation) | -- | [APDU Dissector](../subsystems/apdu-dissector.md) -- clause 7.1 tag and length forms, clause 7.2 tag values |
 
 ## 3GPP
 
@@ -69,8 +71,9 @@ package data so that the HIL bridge works from a plain `pip install`.
 
 | Spec | Implemented at |
 | --- | --- |
-| ISO/IEC 7816-3 (electrical, transport) | every card-facing subsystem |
-| ISO/IEC 7816-4 (APDU, logical) | [Secure Element Primer](../concepts/secure-element-primer.md), every card-facing subsystem |
+| ISO/IEC 7816-3 (electrical, transport) | every card-facing subsystem; [APDU Dissector](../subsystems/apdu-dissector.md) decodes the ATR per clause 8.2 |
+| ISO/IEC 7816-4 (APDU, logical) | [Secure Element Primer](../concepts/secure-element-primer.md), every card-facing subsystem; [APDU Dissector](../subsystems/apdu-dissector.md) -- clause 5.1.3 status categories, clause 5.4.1 class byte, Table 3 secure messaging, Table 12 file descriptor, Table 13 life-cycle status |
+| ISO/IEC 8825-1 (BER-TLV) | [APDU Dissector](../subsystems/apdu-dissector.md); indefinite lengths are reported and refused, since DER prohibits them |
 
 ## Related pages
 

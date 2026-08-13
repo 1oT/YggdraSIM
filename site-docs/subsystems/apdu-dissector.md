@@ -239,6 +239,46 @@ tshark is missing -- or when the suite runs as root and Wireshark refuses to
 load the Lua. Set it in at least one CI job, or the dissector rots without the
 suite noticing.
 
+## Conformance
+
+Every table and bit-field below is read from the clause named, and
+`tests/test_apdu_dissector_*.py` pins the readings that are easy to get subtly
+wrong. The ones worth knowing about, because they are the ones a plausible
+implementation gets backwards:
+
+| Reading | Clause | The trap |
+| --- | --- | --- |
+| Life-cycle status integer | ISO/IEC 7816-4 Table 13 | Bit 1 is the activated flag, so `'05'`/`'07'` are activated and `'04'`/`'06'` are not. `'0C'`--`'0F'` is the **termination state**, not an operational one. |
+| Status word categories | ISO/IEC 7816-4 clause 5.1.3 | Four categories, not two. `'62'` and `'63'` are warnings: `63 CX` is a *failed* verification, so `yapdu.sw_success` is false for it. |
+| `61 00`, `6C 00` | ISO/IEC 7816-4 clause 5.1 | SW2 of zero means 256, following the Le convention. |
+| `92 40` | GSM 11.11 clause 9.4 | `'92' '0X'` counts internal retries; `'92' '40'` is a memory problem. |
+| Class byte | ISO/IEC 7816-4 clause 5.4.1 | `'80'`--`'FE'` is proprietary and bits 6--1 mean nothing there. The `'8X'` block is decoded anyway because GlobalPlatform Table 11-1 claims it; above `'8F'` no channel, secure-messaging level or chaining flag is reported. |
+| Secure messaging | ISO/IEC 7816-4 Table 3 | Bits 4 **and** 3 in the first interindustry form, so CLA `'08'` is secure messaging; a single bit in the further form, so CLA `'44'` is channel 8 and is not. |
+| Device identities | ETSI TS 102 223 clause 8.7 | `'81'` UICC, `'82'` terminal, `'21'`--`'27'` channels 1--7, `'10'`--`'17'` card readers. |
+| General result | ETSI TS 102 223 clause 8.12 | `'04'` is the icon result and `'06'` is limited service. The second byte carries the cause for `'3A'`, `'20'` and `'26'`. |
+| Bearer type | ETSI TS 102 223 clause 8.52 | The list starts at `'01'`; `'03'` is the default packet bearer. |
+| Channel status | ETSI TS 102 223 clause 8.56 | Bit 8 of byte 1 is link-established; byte 2 `'05'` is "link dropped". |
+| Transport level | ETSI TS 102 223 clause 8.59 | `'01'`/`'02'` are remote, `'04'`/`'05'` are local. |
+| COMPREHENSION-TLV | ETSI TS 101 220 clause 7.1 | Not BER. Two tag forms only, no `'1F'` escape, no class and no constructed bit. |
+| BoundProfilePackage | GSMA SGP.22 clause 2.5.2 | Five members: `BF23`, then `A0`--`A3` ending in `secondSequenceOf87`. |
+
+### Deliberate divergences
+
+- **Indefinite BER lengths are rejected**, not resolved. DER prohibits them,
+  SGP.22 and SGP.32 mandate DER, and no conforming card emits one here.
+  Resolving one means scanning for an end-of-contents marker, and a byte scan
+  cannot tell a real terminator from `00 00` inside a value.
+- **A malformed length is clamped and flagged**, where `SIMCARD.utils.read_tlv`
+  rejects the object outright. A dissector has to show what is on the wire.
+- **`'C6'` is walked as constructed** although BER calls it primitive, because
+  ETSI TS 102 221 clause 11.1.1.4.10 fills it with TLVs.
+- **A TLS 1.3 post-handshake alert cannot be named.** Every alert after the
+  handshake is wrapped in an `application_data` record, so the code is inside
+  the ciphertext. `yapdu.tls.alert_encrypted` says so rather than letting the
+  absence of an alert read as "there was none".
+- **A proprietary or reserved class byte reports no channel.** Saying nothing
+  is the honest answer where the specification assigns no meaning.
+
 ## Known limits
 
 - Requires **Wireshark 3.4 or newer**; measured against 4.2.2. Re-run
@@ -251,6 +291,14 @@ suite noticing.
 - An exchange whose instruction has no case hint and whose bytes fit two
   readings is decoded and flagged, not resolved. There is no information in
   the frame that would resolve it.
+- **BIP channel data is not reassembled across APDUs.** A TLS record split over
+  several SEND DATA blocks has its header and any plaintext alert reported here,
+  but is not handed to the stock dissector, because half a record produces a
+  malformed-packet complaint rather than a tree. In practice this means a
+  `bad_certificate` alert is visible while the certificate that caused it is
+  not: an SM-DP+ chain runs to several kilobytes across ~236-byte blocks.
+- The TERMINAL PROFILE body is left as raw bytes. It is a bit field per
+  ETSI TS 102 223 clause 5.2, not TLV.
 
 ## See also
 
