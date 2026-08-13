@@ -464,9 +464,12 @@ _OPEN_CHANNEL_BODY = b"".join(
         _comprehension_tlv("82", bytes.fromhex("8121")),     # UICC -> channel 1
         _comprehension_tlv("35", bytes.fromhex("02030405060708")),
         _comprehension_tlv("39", bytes.fromhex("0578")),     # buffer size 1400
-        _comprehension_tlv("47", b"\x03iot\x04test\x03com"),
+        _comprehension_tlv("47", b"\x03iot\x07example\x04test"),
         _comprehension_tlv("3C", bytes.fromhex("020050")),   # TCP client, port 80
-        _comprehension_tlv("3E", bytes([0x21, 10, 0, 0, 1])),
+        # RFC 5737 documentation range; see the identifier rules in
+        # CONTRIBUTING.md. A routable address in a fixture is a leak
+        # whether or not anything ever connects to it.
+        _comprehension_tlv("3E", bytes([0x21, 192, 0, 2, 1])),
     ]
 )
 PROACTIVE_OPEN_CHANNEL = (
@@ -505,7 +508,7 @@ INITIALIZE_UPDATE_RESPONSE = (
 #:   62 10                  FCP template, 16 bytes of value
 #:      82 02 78 21         file descriptor: DF/ADF, shareable
 #:      83 02 7F F0         file identifier 7FF0
-#:      8A 01 05            life-cycle status: operational, deactivated
+#:      8A 01 05            life-cycle status: operational, activated
 #:      A5 03 C0 01 00      proprietary information
 FCP_ADF_USIM = bytes.fromhex("6210" "82027821" "83027FF0" "8A0105" "A503C00100")
 

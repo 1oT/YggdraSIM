@@ -43,6 +43,7 @@ package data so that the HIL bridge works from a plain `pip install`.
 | 3GPP TS 33.535 (AKMA) | `docs/ts_133535.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md), YggdraCore AAnF stub *(post-v1 staging)* |
 | 3GPP TS 35.205 / 35.206 (Milenage) | `docs/ts_135205.md` / `docs/ts_135206.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
 | 3GPP TS 35.231 (TUAK) | `docs/ts_135231.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
+| 3GPP TS 31.111 (USIM Application Toolkit) | `docs/ts_131111v170600p.md` | [APDU Dissector](../subsystems/apdu-dissector.md) -- clause 9.1 BER-TLV envelope tags in the ME-to-UICC direction |
 
 ## GlobalPlatform
 

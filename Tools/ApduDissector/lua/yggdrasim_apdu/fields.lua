@@ -202,6 +202,9 @@ M.select_return = ProtoField.uint8(
 M.select_occurrence = ProtoField.string(
     PREFIX .. ".select.occurrence", "Occurrence"
 )
+M.select_session = ProtoField.string(
+    PREFIX .. ".select.session_control", "Application session control"
+)
 
 M.binary_offset = ProtoField.uint32(
     PREFIX .. ".binary.offset", "Offset", base.DEC
@@ -393,6 +396,18 @@ M.cat_channel_data_length = ProtoField.uint8(
 M.cat_bearer = ProtoField.string(PREFIX .. ".cat.bearer", "Bearer")
 M.cat_apn = ProtoField.string(PREFIX .. ".cat.apn", "Network access name")
 M.cat_address = ProtoField.string(PREFIX .. ".cat.address", "Address")
+-- Typed peers of cat.address, carrying the raw address bytes so
+-- Wireshark filters them the way it filters ip.addr -- subnet match,
+-- comparison against an address literal -- and formats IPv6 in its
+-- RFC 5952 canonical form. The string field above keeps the role label
+-- ("data destination address: ...") and stays the display anchor; these
+-- add the machine-readable value beside it without changing it.
+M.cat_address_ipv4 = ProtoField.ipv4(
+    PREFIX .. ".cat.address.ipv4", "Address (IPv4)"
+)
+M.cat_address_ipv6 = ProtoField.ipv6(
+    PREFIX .. ".cat.address.ipv6", "Address (IPv6)"
+)
 M.cat_buffer_size = ProtoField.uint32(
     PREFIX .. ".cat.buffer_size", "Buffer size", base.DEC
 )
@@ -459,7 +474,7 @@ M.all = {
     M.tlv_constructed, M.tlv_length, M.tlv_indefinite, M.tlv_value,
     M.tlv_comprehension, M.tlv_text, M.tlv_uint,
     M.select_fid, M.select_aid, M.select_name, M.select_control,
-    M.select_return, M.select_occurrence,
+    M.select_return, M.select_occurrence, M.select_session,
     M.binary_offset, M.binary_sfi,
     M.record_number, M.record_sfi, M.record_mode,
     M.pin_reference, M.pin_name, M.pin_value_len, M.pin_retries,
@@ -487,7 +502,8 @@ M.all = {
     M.cat_event, M.cat_event_name,
     M.cat_channel, M.cat_channel_established, M.cat_channel_info,
     M.cat_channel_data_length,
-    M.cat_bearer, M.cat_apn, M.cat_address, M.cat_buffer_size,
+    M.cat_bearer, M.cat_apn, M.cat_address,
+    M.cat_address_ipv4, M.cat_address_ipv6, M.cat_buffer_size,
     M.cat_transport, M.cat_port, M.cat_channel_data,
     M.cat_payload_protocol, M.tls_content_type, M.tls_alert_level,
     M.tls_alert, M.tls_incomplete, M.tls_handshake_type,

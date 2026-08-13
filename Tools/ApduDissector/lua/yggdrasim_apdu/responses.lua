@@ -31,6 +31,11 @@ end
 local util = require("yggdrasim_apdu.util")
 local tables = require("yggdrasim_apdu.tables")
 
+-- Lua 5.1 spells this bare 'unpack'; 5.2 moved it onto table. A
+-- packager building Wireshark against 5.1 would otherwise abort
+-- exactly the frames that decode EF.IMSI and an over-read EF.ICCID.
+local table_unpack = table.unpack or unpack
+
 local M = {}
 
 M.TAG_FCP = 0x62
@@ -38,7 +43,7 @@ M.TAG_FCI = 0x6F
 M.TAG_FMD = 0x64
 M.TAG_PROPRIETARY = 0xA5
 
--- ETSI TS 102 221 clause 11.1.1.3 Table 11.5, FCP sub-tags.
+-- ETSI TS 102 221 clause 11.1.1.3 Tables 11.3 and 11.4, FCP sub-tags.
 local FCP_TAGS = {
     [0x80] = "File size",
     [0x81] = "Total file size",
@@ -68,7 +73,7 @@ local PIN_STATUS_TAGS = {
     [0x83] = "Key reference",
 }
 
---- ISO/IEC 7816-4 Table 13, adopted by ETSI TS 102 221 clause 11.1.1.4.9.
+--- ISO/IEC 7816-4 Table 13, adopted by ETSI TS 102 221 Table 11.7b.
 --
 -- Bit 1 of the operational coding is the activated flag, so '05' and
 -- '07' are activated while '04' and '06' are not, and '0C' to '0F' are
@@ -149,10 +154,15 @@ local EF_STRUCTURE = {
     [7] = "cyclic, SIMPLE-TLV",
 }
 
--- ETSI TS 102 221 clause 11.1.1.4.3 gives the whole descriptor byte
--- '39' to a BER-TLV structure EF, which does not decompose into the ISO
--- shareable/category/structure fields.
-local DESCRIPTOR_BER_TLV = 0x39
+-- ETSI TS 102 221 clause 11.1.1.4.3 gives the descriptor byte '39' to a
+-- BER-TLV structure EF, which does not decompose into the ISO
+-- shareable/category/structure fields. Bit 7 is the shareable flag and
+-- is don't-care there, so '79' is equally a BER-TLV EF -- matching only
+-- '39' let a shareable one fall through and render as "DF or ADF,
+-- transparent".
+local function is_ber_tlv_descriptor(descriptor)
+    return descriptor == 0x39 or descriptor == 0x79
+end
 
 -- ISO/IEC 7816-4 Table 12, data-coding byte.
 local WRITE_BEHAVIOUR = {
@@ -190,7 +200,7 @@ function M.parse_file_descriptor(tvb, offset, length)
         parsed.file_type = string.format("0x%02X", category)
     end
 
-    if descriptor == DESCRIPTOR_BER_TLV then
+    if is_ber_tlv_descriptor(descriptor) then
         parsed.file_type = "working EF"
         parsed.structure = "BER-TLV"
     end
@@ -281,7 +291,7 @@ local function decode_imsi(values)
     if declared >= 1 and declared < last then
         last = declared + 1
     end
-    local digits = util.decode_swapped_bcd({table.unpack(values, 2, last)})
+    local digits = util.decode_swapped_bcd({table_unpack(values, 2, last)})
     -- The first nibble of the packed run is the parity indicator.
     if #digits < 2 then
         return ""
@@ -324,7 +334,7 @@ function M.decode_ef(tvb, offset, length, fid_hex, context)
         local iccid_bytes = values
         local over_read = false
         if #values > 10 then
-            iccid_bytes = { table.unpack(values, 1, 10) }
+            iccid_bytes = { table_unpack(values, 1, 10) }
             over_read = true
         end
         local digits, clean = util.decode_swapped_bcd(iccid_bytes)

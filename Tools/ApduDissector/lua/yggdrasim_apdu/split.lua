@@ -36,6 +36,7 @@ end
 
 local util = require("yggdrasim_apdu.util")
 local tables = require("yggdrasim_apdu.tables")
+local iso7816 = require("yggdrasim_apdu.iso7816")
 
 local M = {}
 
@@ -193,6 +194,12 @@ end
 -- field is bits 4 and 3 and masking 0xFC cannot reach it. Omitting it
 -- here left every ISO-SM administrative command with no name, no case
 -- hint and no risk class -- and, through the missing hint, mis-split.
+--
+-- The fourth candidate is iso7816.base_class, which folds a logical
+-- channel of 4 or above back onto the class the tables are keyed on. A
+-- case hint missing for that reason is the expensive one: the hint feeds
+-- the scorer below, so losing it mis-splits the frame rather than merely
+-- leaving it unnamed.
 local function lookup_by_class(qualified, bare, cla, ins)
     local found = qualified[(cla * 256) + ins]
     if found ~= nil then
@@ -205,6 +212,13 @@ local function lookup_by_class(qualified, bare, cla, ins)
     found = qualified[((cla - (cla % 16)) * 256) + ins]
     if found ~= nil then
         return found
+    end
+    local base = iso7816.base_class(cla)
+    if base ~= nil then
+        found = qualified[(base * 256) + ins]
+        if found ~= nil then
+            return found
+        end
     end
     return bare[ins]
 end

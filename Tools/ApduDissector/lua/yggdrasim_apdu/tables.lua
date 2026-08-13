@@ -22,7 +22,7 @@
 
 local M = {}
 
-M.SOURCE_DIGEST = "67b2ba755d4a01c426dfd2e7eb474368f4fa868fade73460c3b078a264d95a54"
+M.SOURCE_DIGEST = "b1d89bb3d06b429778c76ba8296fd371772fb4f7b7c8738d13be737b97d4e21a"
 
 M.INS_NAMES = {
     [0x20] = "VERIFY",
@@ -425,21 +425,21 @@ M.BER_TAGS = {
     ["BF4E"] = "TRANSFER_EIM_PACKAGE (SGP.32)",
     ["BF4F"] = "GET_EIM_PACKAGE (SGP.32)",
     ["BF50"] = "PROVIDE_EIM_PACKAGE_RESULT (SGP.32)",
-    ["BF51"] = "EIM_PACKAGE (SGP.32 section 6.3.2.6/section 6.3.2.7)",
-    ["BF52"] = "PACKAGE_DATA (SGP.32)",
+    ["BF51"] = "EuiccPackageRequest or EuiccPackageResult (SGP.32 Annex D)",
+    ["BF52"] = "IpaEuiccDataRequest or IpaEuiccDataResponse (SGP.32 Annex D) / PACKAGE_DATA",
     ["BF53"] = "EIM_ACKNOWLEDGEMENTS (SGP.32)",
     ["BF54"] = "PROFILE_DOWNLOAD_TRIGGER (SGP.32)",
     ["BF55"] = "GetEimConfigurationData (SGP.32 section 5.9.18)",
     ["BF56"] = "GetCerts (SGP.32 section 5.9.10)",
     ["BF57"] = "ADD_INITIAL_EIM (SGP.32)",
-    ["BF58"] = "PROFILE_ROLLBACK_OR_ADD_EIM (SGP.32)",
+    ["BF58"] = "ProfileRollbackRequest or ProfileRollbackResponse (SGP.32 Annex D) / PROFILE_ROLLBACK_OR_ADD_EIM",
     ["BF59"] = "CONFIGURE_IMMEDIATE_PROFILE_ENABLING (SGP.32)",
     ["BF5A"] = "IMMEDIATE_ENABLE (SGP.32)",
     ["BF5B"] = "ENABLE_EMERGENCY_PROFILE (SGP.32)",
     ["BF5C"] = "DISABLE_EMERGENCY_PROFILE (SGP.32)",
     ["BF5D"] = "EXECUTE_FALLBACK_MECHANISM (SGP.32)",
     ["BF5E"] = "RETURN_FROM_FALLBACK (SGP.32)",
-    ["BF5F"] = "GET_CONNECTIVITY_PARAMETERS_OR_MEMORY_RESET (SGP.32)",
+    ["BF5F"] = "GetConnectivityParameters (SGP.32 Annex D) / GET_CONNECTIVITY_PARAMETERS_OR_MEMORY_RESET",
     ["BF60"] = "VERIFY_SMDP_RESPONSE (SGP.22 / reserved in SGP.32)",
     ["BF61"] = "CHECK_PROGRESS (SGP.22 / reserved in SGP.32)",
     ["BF62"] = "VERIFY_PROFILE_RECOVERY (SGP.22 / reserved in SGP.32)",
@@ -559,6 +559,7 @@ M.EVENT_NAMES = {
     [0x19] = "PROFILE-CONTAINER",
     [0x1B] = "SECURED-PROFILE-CONTAINER",
     [0x1C] = "POLL-INTERVAL-NEGOTIATION",
+    [0x1D] = "DATA-CONNECTION-STATUS-CHANGE",
 }
 
 M.REFRESH_QUALIFIERS = {
@@ -570,6 +571,9 @@ M.REFRESH_QUALIFIERS = {
     [0x05] = "NAA Application Reset",
     [0x06] = "NAA Session Reset",
     [0x07] = "Steering of Roaming",
+    [0x08] = "Steering of Roaming for I-WLAN",
+    [0x09] = "eUICC Profile State Change",
+    [0x0A] = "Application Update",
 }
 
 M.FILE_PATHS = {

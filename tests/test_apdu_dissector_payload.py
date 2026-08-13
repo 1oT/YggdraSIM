@@ -243,7 +243,10 @@ class CommandBodies(PayloadTestBase):
 
     def test_verify_names_the_key_reference(self) -> None:
         text = decode_text(self.capture, display_filter="frame.number==4")
-        self.assertIn("global PIN 1", text)
+        # TS 102 221 Table 9.3 names '01' PIN Appl 1, which clause
+        # 9.5.1 maps onto PIN1. It is the application PIN, not a
+        # global one -- '81' is the second (local) PIN.
+        self.assertIn("application PIN 1 (PIN1)", text)
 
     def test_the_pin_block_is_reported_by_length_only(self) -> None:
         """A capture containing plaintext PINs should not print them."""
@@ -357,7 +360,7 @@ class PinStatusTemplateKeyReferences(PayloadTestBase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        # C6: PS_DO, then a global PIN 1 and an application PIN 1.
+        # C6: PS_DO, then PIN1 ('01') and PIN2 ('81').
         template = bytes.fromhex("620F" "83022F00" "C609" "900100" "830101" "830181")
         cls.build(
             [
@@ -374,8 +377,8 @@ class PinStatusTemplateKeyReferences(PayloadTestBase):
 
     def test_the_keys_are_named(self) -> None:
         text = decode_text(self.capture, display_filter="frame.number==2")
-        self.assertIn("[Key: global PIN 1]", text)
-        self.assertIn("[Key: application PIN 1]", text)
+        self.assertIn("[Key: application PIN 1 (PIN1)]", text)
+        self.assertIn("[Key: second/local PIN 1 (PIN2)]", text)
 
     def test_the_template_is_walked_although_ber_calls_it_primitive(self) -> None:
         """'C6' has bit 6 clear, so a conforming BER walker stops at it.

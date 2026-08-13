@@ -242,6 +242,9 @@ _REFRESH_QUALIFIER_NAMES: dict[int, str] = {
     0x05: "NAA Application Reset",
     0x06: "NAA Session Reset",
     0x07: "Steering of Roaming",
+    0x08: "Steering of Roaming for I-WLAN",
+    0x09: "eUICC Profile State Change",
+    0x0A: "Application Update",
 }
 # An idle gap in the capture (no APDU exchanges) longer than this many
 # seconds is treated as evidence of a card power-cycle / re-read, and the

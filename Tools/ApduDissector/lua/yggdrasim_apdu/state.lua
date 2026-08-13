@@ -48,6 +48,17 @@ local util = require("yggdrasim_apdu.util")
 
 local M = {}
 
+--- Largest chained STORE DATA this will hold before giving up, in bytes.
+--
+-- GlobalPlatform clause 11.11 ends a chain with the last-block flag in
+-- P1, and until it arrives every block is retained. A truncated capture,
+-- a dropped final frame, or a card that simply never sets the flag then
+-- accumulates without limit -- roughly 1.7 kB per block measured, so a
+-- 100 000-block run costs ~166 MB and nothing stops it. A
+-- BoundProfilePackage runs to dozens of blocks, not thousands, so a
+-- megabyte is far past anything legitimate and well short of harmful.
+M.MAX_REASSEMBLY_BYTES = 1024 * 1024
+
 --- A snapshot with nothing in it, for frames the machine never reached.
 M.STATELESS = {
     context_available = false,
@@ -74,8 +85,51 @@ function M.new()
         -- Rule 2 applies here as much as anywhere: a re-rendered frame
         -- reads the BIP map as it stood then, not as it stands now.
         bip_per_frame = {},
+        -- The last snapshot that is safe to share, so a run of frames
+        -- with identical context stores one table rather than one per
+        -- frame; see the dedup in advance. Only a snapshot that no later
+        -- backpatch will mutate is ever eligible.
+        last_snapshot = nil,
         high_water = 0,
     }
+end
+
+--- True when two snapshots carry the same context and neither is one
+--- the backpatch may later touch.
+--
+-- The reassembly fields are checked first: a frame carrying any of them
+-- is never shared, because the backpatch in advance mutates its stored
+-- table in place. Passing that guard means both snapshots have those
+-- keys absent (reassembly_dropped false), so the field-by-field pass
+-- below never compares the one table-valued field, reassembly_frames,
+-- by identity.
+--
+-- The comparison iterates the snapshots' own keys rather than a fixed
+-- list. A field added to the snapshot later therefore cannot silently
+-- fall out of the check and let two frames that differ only in it share
+-- a table -- which would render one frame's value on the other, the
+-- exact failure rules 1 and 2 above exist to prevent.
+local function snapshots_equal(a, b)
+    if a == nil or b == nil then
+        return false
+    end
+    if a.reassembled_hex ~= nil or b.reassembled_hex ~= nil
+        or a.reassembled_in ~= nil or b.reassembled_in ~= nil
+        or a.reassembly_frames ~= nil or b.reassembly_frames ~= nil
+        or a.reassembly_dropped or b.reassembly_dropped then
+        return false
+    end
+    for key, value in pairs(a) do
+        if b[key] ~= value then
+            return false
+        end
+    end
+    for key, value in pairs(b) do
+        if a[key] ~= value then
+            return false
+        end
+    end
+    return true
 end
 
 local function channel_state(machine, channel)
@@ -178,14 +232,23 @@ function M.advance(machine, frame_number, command, response, description, extra)
     -- unassembled ES8+ chain renders as N unrelated byte strings.
     local reassembled_hex = nil
     local reassembly_frames = nil
+    local reassembly_dropped = false
     if details.store_data_hex ~= nil then
         if channels.blocks == nil then
-            channels.blocks = { parts = {}, frames = {} }
+            channels.blocks = { parts = {}, frames = {}, bytes = 0 }
         end
         local blocks = channels.blocks
         blocks.parts[#blocks.parts + 1] = details.store_data_hex
         blocks.frames[#blocks.frames + 1] = frame_number
-        if details.store_data_last then
+        blocks.bytes = blocks.bytes + math.floor(#details.store_data_hex / 2)
+        if blocks.bytes > M.MAX_REASSEMBLY_BYTES and not details.store_data_last then
+            -- Drop the chain rather than carry it, and say so. The
+            -- alternative is holding every block of a chain whose end
+            -- never arrives, which is unbounded by construction.
+            channels.blocks = nil
+            reassembly_dropped = true
+        end
+        if details.store_data_last and channels.blocks ~= nil then
             reassembled_hex = table.concat(blocks.parts)
             reassembly_frames = blocks.frames
             channels.blocks = nil
@@ -213,6 +276,7 @@ function M.advance(machine, frame_number, command, response, description, extra)
         sm_level = channels.sm_level,
         reassembled_hex = reassembled_hex,
         reassembly_frames = reassembly_frames,
+        reassembly_dropped = reassembly_dropped,
     }
     if reassembled_hex ~= nil then
         snapshot.reassembled_in = frame_number
@@ -222,7 +286,25 @@ function M.advance(machine, frame_number, command, response, description, extra)
         snapshot.pending_get_response_fid = channels.pending_get_response.fid
     end
 
-    machine.per_frame[frame_number] = snapshot
+    -- Store one table for a run of frames whose context is identical.
+    -- selected_fid, selected_aid and sm_protocol change rarely, so on a
+    -- long read-heavy or block-heavy capture the overwhelming majority
+    -- of frames repeat their predecessor -- roughly 1.7 kB each if every
+    -- one is kept. A frame that contributed a STORE DATA block, or whose
+    -- snapshot carries a reassembly field, is never shared: the
+    -- backpatch above mutates such a frame's stored table in place, and
+    -- a shared table would carry that mutation into its neighbours.
+    local can_share = details.store_data_hex == nil and reassembled_hex == nil
+    local stored = snapshot
+    if can_share and snapshots_equal(snapshot, machine.last_snapshot) then
+        stored = machine.last_snapshot
+    end
+    machine.per_frame[frame_number] = stored
+    if can_share then
+        -- Only a shareable snapshot becomes the anchor, so the backpatch
+        -- can never reach one through a later dedup.
+        machine.last_snapshot = stored
+    end
     if frame_number > machine.high_water then
         machine.high_water = frame_number
     end
@@ -264,7 +346,16 @@ function M.close_bip_channel(machine, channel_id)
 end
 
 --- Freeze the BIP map for *frame_number*.
+--
+-- An empty map is not stored: bip_view falls back to an empty table for
+-- a frame with no entry, so the reading is the same either way. Before a
+-- channel opens and after the last one closes -- which on most captures
+-- is most frames -- this skips a deep_copy of an empty table per frame.
 function M.record_bip_frame(machine, frame_number)
+    if next(machine.bip) == nil then
+        machine.bip_per_frame[frame_number] = nil
+        return
+    end
     machine.bip_per_frame[frame_number] = util.deep_copy(machine.bip)
 end
 
@@ -282,13 +373,19 @@ end
 
 --- What a BIP channel was opened with: ``port`` and ``transport``, or nil.
 --
--- Falls back to any single open channel: SEND DATA often addresses the
--- channel through a device identity this decoder has not tied back to
--- the OPEN CHANNEL, and one open channel is the overwhelmingly common
--- case in a profile download.
+-- Falls back to any single open channel only when the frame did not name
+-- one: SEND DATA often addresses the channel through a device identity
+-- this decoder has not tied back to the OPEN CHANNEL, and one open
+-- channel is the overwhelmingly common case in a profile download.
+--
+-- The fallback must not fire when the identifier *is* known and simply
+-- has no entry. Letting it through hands a SEND DATA on channel 2 the
+-- port channel 1 was opened with, and the port is what decides which
+-- dissector the payload goes to -- so the frame is then handed to the
+-- wrong one on evidence it never had.
 function M.bip_channel(machine, channel_id, frame_number, advancing)
     local view = bip_view(machine, frame_number, advancing)
-    if channel_id ~= nil and view[channel_id] ~= nil then
+    if channel_id ~= nil then
         return view[channel_id]
     end
     local found = nil

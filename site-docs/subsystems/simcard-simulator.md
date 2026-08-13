@@ -187,7 +187,7 @@ through the wrapper menu.
 - an ETSI TS 102 223 Toolkit / BIP runtime that routes envelopes by
   root tag (D1 SMS-PP, D2 Cell Broadcast, D3 Menu Selection, D4 Call
   Control, D5 MO-SMS Control, D6 Event Download, D7 Timer Expiration,
-  D8 USSD Download)
+  D9 USSD Download; D8 is reserved for intra-UICC communication)
 - a Milenage / TUAK 3GPP TS 35.205 / 35.231 AKA core
 - a 5G authentication stack:
     - 3GPP TS 33.501 5G AKA (`AUTHENTICATE`, `RES*`)
@@ -394,7 +394,7 @@ relevant section of TS 102 223 / TS 31.111:
 | `D5` | MO Short Message Control | `80 01 00` per TS 31.111 §7.3.2. |
 | `D6` | Event Download | Existing local handler that updates `state.toolkit` and queues follow-up proactive commands. |
 | `D7` | Timer Expiration | `90 00`, no body. |
-| `D8` | USSD Download | `80 01 00` per TS 31.111 §7.3.3. |
+| `D9` | USSD Download | `80 01 00` per TS 31.111 §7.3.3 (tag `D9` per §9.1; `D8` reserved). |
 | other | Legacy passthrough | Falls through to the SCP80 handler so plaintext OTA traffic keeps working. |
 
 When a proactive command queues into `state.pending_fetch_queue` while
@@ -1389,7 +1389,7 @@ intercept without parsing `envelope_history` by hand:
 | --- | --- | --- | --- |
 | `D4` Call Control by USIM | TS 31.111 §7.3.1.1 | `last_cc_address` (BCD digits), `last_cc_address_ton_npi`, `last_cc_capability_params` (TLV `07`/`87`), `last_cc_subaddress` (`08`/`88`), `last_cc_location_information` (`13`/`93`) | `cc_envelopes_received` |
 | `D5` MO Short Message Control | TS 31.111 §7.3.2.1 / §7.3.2.2 | `last_mo_sms_destination_address` + TON/NPI (first Address TLV = RP-DA), `last_mo_sms_sc_address` + TON/NPI (second Address TLV = RP-OA), `last_mo_sms_location_information` | `mo_sms_envelopes_received` |
-| `D8` USSD Download | TS 31.111 §7.3.3 | `last_ussd_download_dcs`, `last_ussd_download_raw`, `last_ussd_download_text` (best-effort decoded via `_decode_text_string`) | `ussd_downloads_received` |
+| `D9` USSD Download | TS 31.111 §7.3.3 | `last_ussd_download_dcs`, `last_ussd_download_raw`, `last_ussd_download_text` (best-effort decoded via `_decode_text_string`) | `ussd_downloads_received` |
 
 The reply path is unchanged -- each envelope continues to return
 the canned `80 01 00` Result TLV ("Allowed, no modification")
@@ -1878,5 +1878,5 @@ python main/main.py \
 - 3GPP TS 31.111 §7.3.1 Call Control by USIM (envelope `D4`)
 - 3GPP TS 31.111 §7.3.2 MO Short Message Control (envelope `D5`)
 - 3GPP TS 102 223 §7.1.7 Timer Expiration (envelope `D7`)
-- 3GPP TS 31.111 §7.3.3 USSD Download (envelope `D8`)
+- 3GPP TS 31.111 §7.3.3 USSD Download (envelope `D9`; `D8` reserved for intra-UICC communication)
 - TCA Profile Interoperability §3.4.2 profileHeader.connectivityParameters

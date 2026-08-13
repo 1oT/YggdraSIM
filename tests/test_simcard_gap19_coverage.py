@@ -16,9 +16,10 @@ decoding any of the body fields:
   The two Address TLVs in the envelope (RP-DA destination first,
   RP-OA SC second per §7.3.2.2) plus Location Information are
   decoded into ``state.toolkit``.
-* 3GPP TS 31.111 §7.3.3 ``USSD Download`` (``D8``). The USSD
+* 3GPP TS 31.111 §7.3.3 ``USSD Download`` (``D9``). The USSD
   String TLV (``8A`` / ``0A``) is split into DCS + raw bytes +
-  best-effort decoded text.
+  best-effort decoded text. The tag is ``D9`` per clause 9.1;
+  ``D8`` is reserved for intra-UICC communication.
 
 Round-19 also seeds ``EF.LND`` (``6F44``) -- a cyclic EF that
 real cards always carry. The simulator now ships one all-FF
@@ -167,13 +168,18 @@ class MoSmsControlEnvelopeTests(_ToolkitHarness):
 
 
 class UssdDownloadEnvelopeTests(_ToolkitHarness):
-    """3GPP TS 31.111 §7.3.3 USSD Download (D8)."""
+    """3GPP TS 31.111 §7.3.3 USSD Download (D9).
+
+    Clause 9.1 assigns USSD download to 'D9'; 'D8' is reserved for
+    intra-UICC communication, and a 'D8' envelope must not be answered
+    as USSD -- see test_the_reserved_d8_tag_is_not_answered_as_ussd.
+    """
 
     def test_8bit_text_decoded(self) -> None:
         # DCS 0x04 = 8-bit ASCII; payload = "*100#" reply text.
         ussd_body = b"\x04" + b"Welcome"
         envelope = _envelope(
-            b"\xD8",
+            b"\xD9",
             tlv("82", bytes((0x82, 0x81))),
             tlv("8A", ussd_body),
         )
@@ -191,7 +197,7 @@ class UssdDownloadEnvelopeTests(_ToolkitHarness):
         text = "Héllo"
         ussd_body = b"\x08" + text.encode("utf-16-be")
         envelope = _envelope(
-            b"\xD8",
+            b"\xD9",
             tlv("82", bytes((0x82, 0x81))),
             tlv("8A", ussd_body),
         )
@@ -200,6 +206,22 @@ class UssdDownloadEnvelopeTests(_ToolkitHarness):
         self.assertEqual(toolkit.last_ussd_download_dcs, 0x08)
         self.assertEqual(toolkit.last_ussd_download_text, text)
         self.assertEqual(toolkit.last_ussd_download_raw, text.encode("utf-16-be"))
+
+    def test_the_reserved_d8_tag_is_not_answered_as_ussd(self) -> None:
+        """'D8' is reserved for intra-UICC communication (TS 101 220
+        §7.2). It must fall through to the OTA handler, not be decoded
+        as a USSD download -- a conformance card must not accept a tag
+        no conformant terminal sends."""
+        envelope = _envelope(
+            b"\xD8",
+            tlv("82", bytes((0x82, 0x81))),
+            tlv("8A", b"\x04" + b"Welcome"),
+        )
+        data, sw1, sw2 = self.toolkit.handle_envelope(envelope, _fallback)
+        # The fallback returns 9000 with an empty body, not the
+        # "Allowed, no modification" 800100 a real USSD reply carries.
+        self.assertEqual((data, sw1, sw2), (b"", 0x90, 0x00))
+        self.assertEqual(self.state.toolkit.ussd_downloads_received, 0)
 
 
 class _EngineHarness(unittest.TestCase):

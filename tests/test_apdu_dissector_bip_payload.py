@@ -56,7 +56,21 @@ def open_channel(port: int) -> bytes:
             comprehension_tlv(
                 "3C", bytes([0x01]) + port.to_bytes(2, "big")
             ),
-            comprehension_tlv("3E", bytes([0x21, 8, 8, 8, 8])),
+            comprehension_tlv("3E", bytes([0x21, 192, 0, 2, 53])),
+        ]
+    )
+
+
+def open_channel_tcp(port: int) -> bytes:
+    """OPEN CHANNEL with transport level '02' -- TCP, UICC client."""
+    return b"".join(
+        [
+            comprehension_tlv("81", bytes.fromhex("014001")),
+            comprehension_tlv("82", bytes.fromhex("8121")),
+            comprehension_tlv("35", bytes.fromhex("0203040506")),
+            comprehension_tlv("39", bytes.fromhex("0578")),
+            comprehension_tlv("3C", bytes([0x02]) + port.to_bytes(2, "big")),
+            comprehension_tlv("3E", bytes([0x21, 192, 0, 2, 53])),
         ]
     )
 
@@ -74,7 +88,7 @@ def open_channel_to_terminal(port: int) -> bytes:
             comprehension_tlv("35", bytes.fromhex("0303040506")),
             comprehension_tlv("39", bytes.fromhex("0578")),
             comprehension_tlv("3C", bytes([0x01]) + port.to_bytes(2, "big")),
-            comprehension_tlv("3E", bytes([0x21, 8, 8, 8, 8])),
+            comprehension_tlv("3E", bytes([0x21, 192, 0, 2, 53])),
         ]
     )
 
@@ -118,6 +132,64 @@ class BipPayloadBase(unittest.TestCase):
     def protocols(self) -> list[str]:
         rows = decode_fields(self.capture, ["frame.protocols"])
         return [row[0] for row in rows if row]
+
+
+def open_channel_ipv6(port: int, address: bytes) -> bytes:
+    """OPEN CHANNEL whose Other address is a 16-byte IPv6 literal."""
+    return b"".join(
+        [
+            comprehension_tlv("81", bytes.fromhex("014001")),
+            comprehension_tlv("82", bytes.fromhex("8121")),
+            comprehension_tlv("35", bytes.fromhex("0203040506")),
+            comprehension_tlv("39", bytes.fromhex("0578")),
+            comprehension_tlv("3C", bytes([0x01]) + port.to_bytes(2, "big")),
+            comprehension_tlv("3E", bytes([0x57]) + address),
+        ]
+    )
+
+
+class TheAddressIsFilterableByValue(BipPayloadBase):
+    """The Other address is carried as a typed field, not only a string.
+
+    The string field keeps the role label, so it can only be matched with
+    `contains`. The typed peers carry the raw bytes, so Wireshark filters
+    them like `ip.addr` -- subnet match and address-literal comparison --
+    and formats IPv6 in its RFC 5952 canonical form.
+    """
+
+    #: RFC 3849 documentation range; renders canonically as 2001:db8::1.
+    IPV6 = bytes.fromhex("20010db8000000000000000000000001")
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.build(
+            [
+                # open_channel() carries 192.0.2.53 in its Other address.
+                fetch(open_channel(443)),
+                fetch(open_channel_ipv6(443, cls.IPV6)),
+            ],
+            "typed-address.pcap",
+        )
+
+    def test_the_ipv4_address_populates_a_typed_field(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.address.ipv4"])
+        self.assertIn("192.0.2.53", [row[0] for row in rows if row and row[0]])
+
+    def test_the_ipv4_address_matches_a_subnet_filter(self) -> None:
+        text = decode_text(
+            self.capture, display_filter="yapdu.cat.address.ipv4 == 192.0.2.0/24"
+        )
+        self.assertIn("192.0.2.53", text)
+
+    def test_the_ipv6_address_renders_canonically(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.address.ipv6"])
+        # RFC 5952: leading zeros suppressed, longest zero run compressed.
+        self.assertIn("2001:db8::1", [row[0] for row in rows if row and row[0]])
+
+    def test_the_string_field_still_carries_the_role_label(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.address"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertTrue(any("data destination address:" in v for v in values))
 
 
 class TlsAlertsAreVisible(BipPayloadBase):
@@ -192,6 +264,63 @@ class DnsInsideBip(BipPayloadBase):
         rows = decode_fields(self.capture, ["yapdu.cat.payload_protocol"])
         values = [row[0] for row in rows if row and row[0]]
         self.assertEqual(values, ["dns"])
+
+
+class DnsOverTcpIsDeFramed(BipPayloadBase):
+    """DNS over a TCP BIP channel is prefixed with a 2-byte length.
+
+    RFC 1035 clause 4.2.2 puts a two-byte message length ahead of the DNS
+    header on TCP. The stock dns dissector expects a bare message on a
+    channel tvb, so the prefix is stripped before handoff -- but only
+    when it agrees with the payload and what follows is really DNS.
+    """
+
+    #: DNS_QUERY carried over TCP: its 2-byte length, then the message.
+    TCP_DNS = len(DNS_QUERY).to_bytes(2, "big") + DNS_QUERY
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.build(
+            [fetch(open_channel_tcp(53)), fetch(send_data(cls.TCP_DNS))],
+            "dns-tcp.pcap",
+        )
+
+    def test_the_dns_dissector_is_reached(self) -> None:
+        self.assertIn("dns", self.protocols()[1])
+
+    def test_the_payload_protocol_is_reported(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.payload_protocol"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], ["dns"])
+
+    def test_the_queried_name_is_visible(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertIn("smdp.example.com", text)
+
+    def test_no_malformed_packet_from_the_length_prefix(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        section = "YggdraSIM APDU" + text.split("YggdraSIM APDU")[-1]
+        self.assertNotIn("Malformed", section)
+
+
+class NonDnsBytesOnTcpPort53AreNotHandedOver(BipPayloadBase):
+    """The length prefix and DNS shape must both hold, or the bytes stay
+    raw -- a profile-package fragment on a TCP/53 channel is not DNS."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # A plausible 2-byte length ahead of non-DNS bytes.
+        payload = bytes.fromhex("0005") + bytes.fromhex("BF360A1122")
+        cls.build(
+            [fetch(open_channel_tcp(53)), fetch(send_data(payload))],
+            "not-dns-tcp.pcap",
+        )
+
+    def test_nothing_is_handed_to_the_dns_dissector(self) -> None:
+        self.assertNotIn(":dns", self.protocols()[1])
+
+    def test_no_payload_protocol_is_claimed(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.payload_protocol"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], [])
 
 
 class HttpInsideBip(BipPayloadBase):

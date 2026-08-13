@@ -105,6 +105,7 @@ EVENT_LIST: dict[int, str] = {
     0x19: "PROFILE-CONTAINER",
     0x1B: "SECURED-PROFILE-CONTAINER",
     0x1C: "POLL-INTERVAL-NEGOTIATION",
+    0x1D: "DATA-CONNECTION-STATUS-CHANGE",
 }
 
 #: Clause 8.25 reserves this code with no assigned event.

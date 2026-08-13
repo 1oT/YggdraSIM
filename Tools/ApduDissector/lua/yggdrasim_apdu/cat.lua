@@ -141,28 +141,33 @@ local TAG_NAMES = {
     [0x55] = "CSG cell selection status",
     [0x56] = "CSG identifier",
     [0x57] = "HNB name",
-    [0x60] = "IMEISV",
-    [0x61] = "Battery state",
-    [0x62] = "Browsing status",
-    [0x63] = "Network search mode",
-    [0x64] = "Frame layout",
-    [0x65] = "Frames information",
-    [0x66] = "Frame identifier",
-    [0x67] = "UTRAN/E-UTRAN measurement qualifier",
-    [0x68] = "Multimedia message reference",
-    [0x69] = "Multimedia message identifier",
-    [0x6A] = "Multimedia message transfer status",
-    [0x6B] = "MEID",
-    [0x6C] = "Multimedia message content identifier",
-    [0x6D] = "Multimedia message notification",
-    [0x6E] = "Last envelope",
-    [0x6F] = "Registry application data",
-    [0x70] = "PLMN with access technology list",
-    [0x71] = "Broadcast network information",
-    [0x72] = "ACTIVATE descriptor",
-    [0x73] = "EPS PDN connection activation parameters",
-    [0x74] = "Tracking area identification",
-    [0x75] = "CSG identifier list",
+    -- The '60' block is not a dense run. TS 101 220 clause 7.2 leaves
+    -- reserved slots inside it, so packing the assigned names together
+    -- from '60' shifts all 22 of them: IMEISV is '62', not '60', and
+    -- the last five sit at '7A' to '7E' rather than '71' to '75'.
+    [0x60] = "MAC",
+    [0x62] = "IMEISV",
+    [0x63] = "Battery state",
+    [0x64] = "Browsing status",
+    [0x65] = "Network search mode",
+    [0x66] = "Frame layout",
+    [0x67] = "Frames information",
+    [0x68] = "Frame identifier",
+    [0x69] = "UTRAN/E-UTRAN measurement qualifier",
+    [0x6A] = "Multimedia message reference",
+    [0x6B] = "Multimedia message identifier",
+    [0x6C] = "Multimedia message transfer status",
+    [0x6D] = "MEID",
+    [0x6E] = "Multimedia message content identifier",
+    [0x6F] = "Multimedia message notification",
+    [0x70] = "Last envelope",
+    [0x71] = "Registry application data",
+    [0x72] = "PLMN with access technology list",
+    [0x7A] = "Broadcast network information",
+    [0x7B] = "ACTIVATE descriptor",
+    [0x7C] = "EPS PDN connection activation parameters",
+    [0x7D] = "Tracking area identification",
+    [0x7E] = "CSG identifier list",
 }
 
 -- ETSI TS 102 223 clause 8.7 device identities.
@@ -195,6 +200,12 @@ local DEVICE_NAMES = {
     [0x82] = "terminal",
     [0x83] = "network",
 }
+
+-- Clause 8.7 also allocates '31' to '3F' to eCAT clients 1 to 15,
+-- which is how an eCAT client addresses the UICC.
+for _ecat = 0x31, 0x3F do
+    DEVICE_NAMES[_ecat] = string.format("eCAT client %d", _ecat - 0x30)
+end
 
 -- ETSI TS 102 223 clause 8.12 general result.
 --
@@ -241,8 +252,8 @@ local RESULT_NAMES = {
     [0x3D] = "MMS error",
 }
 
--- ETSI TS 102 223 clause 8.12.3, the second Result byte when the general
--- result is '3A'. This is the byte that says *why* a BIP channel failed,
+-- ETSI TS 102 223 clause 8.12.11, the second Result byte when the
+-- general result is '3A'. This is the byte that says *why* a BIP channel failed,
 -- and without it "bearer independent protocol error" covers everything
 -- from "the modem rejected the channel identifier" to "the SM-DP+ is
 -- unreachable".
@@ -262,8 +273,8 @@ local BIP_ADDITIONAL_INFO = {
     [0x12] = "application launch failed",
 }
 
--- ETSI TS 102 223 clause 8.12.2, the second Result byte when the general
--- result is '20'.
+-- ETSI TS 102 223 clause 8.12.2, the second Result byte when the
+-- general result is '20'.
 local TERMINAL_ADDITIONAL_INFO = {
     [0x00] = "no specific cause given",
     [0x01] = "screen is busy",
@@ -278,13 +289,59 @@ local TERMINAL_ADDITIONAL_INFO = {
     [0x0A] = "no NAA active",
 }
 
--- ETSI TS 102 223 clause 8.12.4, general result '26'.
+-- ETSI TS 102 223 clause 8.12.10, general result '26'.
 local BROWSER_ADDITIONAL_INFO = {
     [0x00] = "no specific cause given",
     [0x01] = "bearer unavailable",
     [0x02] = "browser unavailable",
     [0x03] = "terminal unable to read the provisioning data",
     [0x04] = "default URL unavailable",
+}
+
+-- Clause 8.12.0 makes a cause byte mandatory for '20', '21', '26',
+-- '38', '39', '3A', '3C' and '3D'. Only three of the eight were decoded,
+-- so the other five reported the layer and nothing else -- the same
+-- defect the BIP table above exists to fix, on five more results.
+
+-- Clause 8.12.3, general result '21' (network unable to process).
+local NETWORK_ADDITIONAL_INFO = {
+    [0x00] = "no specific cause given",
+    [0x01] = "no service",
+    [0x02] = "access control class bar",
+    [0x03] = "radio resource not granted",
+    [0x04] = "not in speech call",
+}
+
+-- Clause 8.12.9, general result '38' (MultipleCard commands error).
+local MULTIPLE_CARD_ADDITIONAL_INFO = {
+    [0x00] = "no specific cause given",
+    [0x01] = "card reader removed or not present",
+    [0x02] = "card removed or not present",
+    [0x03] = "card reader busy",
+    [0x04] = "card powered off",
+    [0x05] = "C-APDU format error",
+    [0x06] = "mute card",
+    [0x07] = "transmission error",
+    [0x08] = "protocol not supported",
+    [0x09] = "specified reader not valid",
+}
+
+-- Clause 8.12.8, general result '39' (interaction with call control or
+-- SMS control by the NAA, permanent problem).
+local CONTROL_ADDITIONAL_INFO = {
+    [0x00] = "no specific cause given",
+    [0x01] = "action not allowed",
+    [0x02] = "the type of request has changed",
+}
+
+-- Clause 8.12.12, general result '3C' (frames error).
+local FRAMES_ADDITIONAL_INFO = {
+    [0x00] = "no specific cause given",
+    [0x01] = "frame identifier is not valid",
+    [0x02] = "number of frames beyond the terminal's capabilities",
+    [0x03] = "no frame defined",
+    [0x04] = "requested size not supported",
+    [0x05] = "default active frame is not valid",
 }
 
 -- ETSI TS 102 223 clause 8.59, UICC/terminal interface transport level.
@@ -366,6 +423,27 @@ function M.result_additional_info(result, value)
         return BROWSER_ADDITIONAL_INFO[value]
             or string.format("browser cause 0x%02X", value)
     end
+    if result == 0x21 then
+        return NETWORK_ADDITIONAL_INFO[value]
+            or string.format("network cause 0x%02X", value)
+    end
+    if result == 0x38 then
+        return MULTIPLE_CARD_ADDITIONAL_INFO[value]
+            or string.format("card command cause 0x%02X", value)
+    end
+    if result == 0x39 then
+        return CONTROL_ADDITIONAL_INFO[value]
+            or string.format("control cause 0x%02X", value)
+    end
+    if result == 0x3C then
+        return FRAMES_ADDITIONAL_INFO[value]
+            or string.format("frames cause 0x%02X", value)
+    end
+    if result == 0x3D then
+        -- Clause 8.12.13 defers the MMS cause to the MMS layer, so the
+        -- byte is reported rather than named.
+        return string.format("MMS error cause 0x%02X", value)
+    end
     if result == 0x34 or result == 0x35 or result == 0x37 then
         -- The additional byte is the raw protocol error cause.
         return string.format("protocol error cause 0x%02X", value)
@@ -389,8 +467,8 @@ function M.bearer_name(value)
     return BEARER_NAMES[value] or string.format("bearer 0x%02X", value)
 end
 
--- PROVIDE LOCAL INFORMATION, ETSI TS 102 223 clause 6.4.15 with the
--- 3GPP TS 31.111 additions.
+-- PROVIDE LOCAL INFORMATION qualifiers, ETSI TS 102 223 clause 8.6
+-- with the 3GPP TS 31.111 additions.
 local LOCAL_INFORMATION = {
     [0x00] = "location information",
     [0x01] = "IMEI",
@@ -405,26 +483,37 @@ local LOCAL_INFORMATION = {
     [0x0A] = "charge state of the battery",
     [0x0B] = "MEID",
     [0x0D] = "broadcast network information",
-    [0x0F] = "H(e)NB IP address",
-    [0x10] = "H(e)NB surrounding macrocells",
+    -- '0F' and '10' are the multiple-access-technology pair, not the
+    -- H(e)NB values -- those sit two slots further on. Placing the
+    -- H(e)NB names here reported a terminal asked for its serving-cell
+    -- location as one asked for a femtocell's IP address.
+    [0x0E] = "multiple access technologies",
+    [0x0F] = "location information for multiple access technologies",
+    [0x10] = "network measurement results for multiple access technologies",
     [0x11] = "CSG ID list and corresponding HNB name",
+    [0x12] = "H(e)NB IP address",
+    [0x13] = "H(e)NB surrounding macrocells",
+    [0x1A] = "supported radio access technologies",
 }
 
--- TIMER MANAGEMENT, clause 6.4.21.
+-- TIMER MANAGEMENT, clause 6.4.21. Bits 1 to 2 carry the operation and
+-- bits 3 to 8 are RFU, so the mask is two bits wide, not three.
 local TIMER_OPERATION = {
     [0x00] = "start",
     [0x01] = "deactivate",
     [0x02] = "get current value",
 }
 
--- LAUNCH BROWSER, clause 6.4.20.
+-- LAUNCH BROWSER, clause 6.4.26. A whole-byte enumeration, not a bit
+-- field: '01' and '04' are explicitly "not used" and '05' upward is RFU.
 local BROWSER_OPERATION = {
     [0x00] = "launch if not already launched",
     [0x02] = "use the existing browser",
     [0x03] = "close the existing session and launch a new browser",
 }
 
--- SET UP CALL, clause 6.4.13.
+-- SET UP CALL, clause 6.4.13. Also a whole-byte enumeration: '06' to
+-- 'FF' are reserved.
 local CALL_HANDLING = {
     [0x00] = "only if not currently busy on another call",
     [0x01] = "only if not currently busy on another call, with redial",
@@ -510,15 +599,20 @@ function M.qualifier_name(command_type, qualifier)
         return "packing not required"
     end
     if command_type == 0x27 then
-        return TIMER_OPERATION[qualifier % 8]
+        -- Bits 1 to 2 only; bits 3 to 8 are RFU.
+        return TIMER_OPERATION[qualifier % 4]
             or string.format("0x%02X", qualifier)
     end
     if command_type == 0x15 then
-        return BROWSER_OPERATION[qualifier % 4]
+        -- A whole-byte enumeration. Masking it folded the "not used"
+        -- value '04' onto '00' and reported it as a real operation.
+        return BROWSER_OPERATION[qualifier]
             or string.format("0x%02X", qualifier)
     end
     if command_type == 0x10 then
-        return CALL_HANDLING[qualifier % 8]
+        -- Likewise a whole-byte enumeration: '08' is reserved, not
+        -- "only if not currently busy on another call".
+        return CALL_HANDLING[qualifier]
             or string.format("0x%02X", qualifier)
     end
     if command_type == 0x22 then
@@ -537,15 +631,21 @@ function M.qualifier_name(command_type, qualifier)
     end
     if command_type == 0x23 then
         -- GET INPUT, clause 6.4.3.
+        -- Bit 3 reads the other way round from the rest: TS 102 223
+        -- clause 8.6 gives 0 = "terminal may echo user input" and
+        -- 1 = "user input shall not be revealed". Reporting the set bit
+        -- as echo turns a PIN prompt into an echoing one, and an
+        -- echoing prompt into a hidden one -- backwards in both
+        -- directions, on the command that collects PINs.
         local named = bit_flags(qualifier, {
             [1] = "alphabet set",
             [2] = "UCS2 alphabet",
-            [4] = "terminal shall echo the input",
+            [4] = "input shall not be revealed",
             [8] = "SMS-packed input",
             [128] = "help information available",
         })
         if named == "" then
-            return "digits only, hidden input"
+            return "digits only, terminal may echo"
         end
         return named
     end
@@ -556,12 +656,36 @@ function M.qualifier_name(command_type, qualifier)
         end
         return "no vibrate alert"
     end
-    if command_type == 0x25 or command_type == 0x24 then
-        -- SET UP MENU and SELECT ITEM, clauses 6.4.9 and 6.4.8.
+    if command_type == 0x25 then
+        -- SET UP MENU, clause 6.4.8. Bit 1 really is the soft-key
+        -- preference here.
         return bit_flags(qualifier, {
             [1] = "soft key preferred",
             [128] = "help information available",
         })
+    end
+    if command_type == 0x24 then
+        -- SELECT ITEM, clause 6.4.9, which does not share SET UP MENU's
+        -- bit map: bits 1 and 2 are the presentation type and the soft
+        -- key preference is bit 3. Reusing the menu map read a choice of
+        -- data values as a soft-key request.
+        local parts = {}
+        if qualifier % 2 == 1 then
+            if math.floor(qualifier / 2) % 2 == 1 then
+                parts[#parts + 1] = "presented as a choice of navigation options"
+            else
+                parts[#parts + 1] = "presented as a choice of data values"
+            end
+        else
+            parts[#parts + 1] = "presentation type not specified"
+        end
+        if math.floor(qualifier / 4) % 2 == 1 then
+            parts[#parts + 1] = "soft key preferred"
+        end
+        if math.floor(qualifier / 128) % 2 == 1 then
+            parts[#parts + 1] = "help information available"
+        end
+        return table.concat(parts, ", ")
     end
     if command_type == 0x35 then
         -- LANGUAGE NOTIFICATION, clause 6.4.25.
@@ -585,9 +709,21 @@ function M.decode_access_name(values)
         if length == 0 or index + length > #values then
             break
         end
+        -- 3GPP TS 23.003 clause 9.1 limits a label to the alphabetic
+        -- characters, digits and the hyphen, and RFC 1035 clause 2.3.4
+        -- caps it at 63 octets. Pushing an unvalidated label into an
+        -- FT_STRING lets a NUL truncate the field: '04 69 00 6F ...'
+        -- rendered as "i" and silently dropped everything after it.
+        if length > 63 then
+            return ""
+        end
         local characters = {}
         for offset = 1, length do
-            characters[offset] = string.char(values[index + offset])
+            local character = values[index + offset]
+            if character < 45 or character > 122 then
+                return ""
+            end
+            characters[offset] = string.char(character)
         end
         parts[#parts + 1] = table.concat(characters)
         index = index + length + 1
@@ -596,9 +732,17 @@ function M.decode_access_name(values)
 end
 
 --- Decode an Other Address: a type byte then an IPv4 or IPv6 literal.
+-- Clause 8.58 gives "request a dynamic address" to Length = '00' with no
+-- value part, and nothing else. Returning "" for a truncated IPv4, a
+-- truncated IPv6 and an unknown type byte alike made the caller render
+-- all three as a dynamic-address request -- a specific claim about what
+-- the card asked for, made out of bytes it could not read.
 function M.decode_other_address(values)
-    if values == nil or #values < 2 then
+    if values == nil or #values == 0 then
         return ""
+    end
+    if #values < 2 then
+        return string.format("malformed Other address (%d bytes)", #values)
     end
     local kind = values[1]
     if kind == 0x21 and #values >= 5 then
@@ -613,7 +757,9 @@ function M.decode_other_address(values)
         end
         return table.concat(groups, ":")
     end
-    return ""
+    return string.format(
+        "malformed Other address (type 0x%02X, %d bytes)", kind, #values
+    )
 end
 
 --- The channel number a Channel status TLV refers to.
@@ -655,10 +801,18 @@ function M.parse_channel_status(values)
     return parsed
 end
 
--- ETSI TS 102 223 clause 7.5 / TS 31.111: the BER tag that wraps an
--- ENVELOPE body. The contents are COMPREHENSION-TLV, but the wrapper
--- itself is not, so it has to be stepped over in BER before the
+-- ETSI TS 102 223 clause 7.5 / TS 101 220 clause 7.2: the BER tag that
+-- wraps an ENVELOPE body. The contents are COMPREHENSION-TLV, but the
+-- wrapper itself is not, so it has to be stepped over in BER before the
 -- comprehension walker runs -- exactly as the 'D0' proactive wrapper is.
+--
+-- 'D8' is reserved for intra-UICC communication and carries no ENVELOPE
+-- of its own, which is the gap that makes this run easy to number one
+-- slot short: 3GPP TS 31.111 clause 9.1 puts USSD download at 'D9',
+-- Geographical Location Reporting at 'DD' and ProSe Report at 'DF'.
+-- Closing the gap shifts every tag from 'D9' up and drops 'DF' off the
+-- end, so a USSD download reports as an MMS transfer status and a ProSe
+-- report is not recognised as an ENVELOPE at all.
 local ENVELOPE_TAGS = {
     [0xD1] = "SMS-PP download",
     [0xD2] = "Cell broadcast download",
@@ -667,13 +821,14 @@ local ENVELOPE_TAGS = {
     [0xD5] = "MO short message control",
     [0xD6] = "Event download",
     [0xD7] = "Timer expiration",
-    [0xD8] = "USSD download",
-    [0xD9] = "MMS transfer status",
-    [0xDA] = "MMS notification download",
-    [0xDB] = "Terminal application",
-    [0xDC] = "Geographical location reporting",
-    [0xDD] = "Envelope container",
-    [0xDE] = "ProSe report",
+    [0xD8] = "reserved for intra-UICC communication",
+    [0xD9] = "USSD download",
+    [0xDA] = "MMS transfer status",
+    [0xDB] = "MMS notification download",
+    [0xDC] = "Terminal application",
+    [0xDD] = "Geographical location reporting",
+    [0xDE] = "Envelope container",
+    [0xDF] = "ProSe report",
 }
 
 --- Name an ENVELOPE wrapper tag, or "" when the tag is not one.
@@ -727,6 +882,7 @@ local TLS_ALERT_DESCRIPTIONS = {
     [49] = "access_denied",
     [50] = "decode_error",
     [51] = "decrypt_error",
+    [52] = "too_many_cids_requested",
     [60] = "export_restriction",
     [70] = "protocol_version",
     [71] = "insufficient_security",
@@ -742,7 +898,9 @@ local TLS_ALERT_DESCRIPTIONS = {
     [114] = "bad_certificate_hash_value",
     [115] = "unknown_psk_identity",
     [116] = "certificate_required",
+    [117] = "general_error",
     [120] = "no_application_protocol",
+    [121] = "ech_required",
 }
 
 function M.tls_content_type_name(value)
@@ -781,6 +939,11 @@ local TLS_HANDSHAKE_TYPES = {
     [21] = "certificate_url",
     [22] = "certificate_status",
     [24] = "key_update",
+    -- RFC 8879 certificate compression. Worth naming here in particular:
+    -- an SM-DP+ chain runs to kilobytes across ~236-byte channel-data
+    -- blocks, which is exactly the pressure that gets compression turned
+    -- on, so this is a likely handshake type on this transport.
+    [25] = "compressed_certificate",
     [254] = "message_hash",
 }
 
@@ -805,11 +968,20 @@ function M.peek_tls_record(values)
     if TLS_CONTENT_TYPES[content_type] == nil then
         return nil
     end
-    -- Record-layer version: 0x0300 through 0x0304.
-    if values[2] ~= 0x03 or values[3] > 0x04 then
+    -- Record-layer version. RFC 8446 clause 5.1 pins legacy_record_version
+    -- to 0x0303 for TLS 1.3 (0x0301 on an initial ClientHello), so the
+    -- set that ever reaches the wire is 0x0300 to 0x0303. 0x0304 is a
+    -- protocol version, never a record version, and accepting it only
+    -- widens the false-positive surface of a five-byte sniff.
+    if values[2] ~= 0x03 or values[3] > 0x03 then
         return nil
     end
     local length = (values[4] * 256) + values[5]
+    -- RFC 8446 clause 5.1 caps a plaintext record at 2^14 and clause 5.2
+    -- a ciphertext one at 2^14 + 256. A larger claim is not a record.
+    if length > 16640 then
+        return nil
+    end
     local record = {
         content_type = content_type,
         content_type_name = M.tls_content_type_name(content_type),
@@ -830,7 +1002,15 @@ function M.peek_tls_record(values)
         record.alert_level_name = M.tls_alert_level_name(values[6])
         record.alert_description = values[7]
         record.alert_description_name = M.tls_alert_description_name(values[7])
-    elseif content_type == 21 then
+    elseif content_type == 21 and length ~= 2 then
+        -- A declared length of 2 is the plaintext single-alert shape --
+        -- RFC 8446 clause 5.1 forbids fragmenting or coalescing alerts,
+        -- so under TLS 1.3 it can be nothing else. Reaching here with
+        -- length 2 therefore means the block was cut short, not that the
+        -- body is ciphered, and reporting "encrypted" for a record the
+        -- decoder merely has not finished reading contradicts the
+        -- tls_incomplete flag set alongside it. That case is routine
+        -- here: a record split across ~236-byte channel-data blocks.
         record.alert_encrypted = true
     end
     if content_type == 22 and #values >= 6 then
@@ -840,6 +1020,80 @@ function M.peek_tls_record(values)
     return record
 end
 
+--- True when the bytes plausibly begin a DNS message.
+--
+-- RFC 1035 clause 4.1.1 fixes a 12-byte header: a 16-bit identifier,
+-- then flags whose Z field (bits 4 to 6 of the second flag byte) is
+-- reserved and must be zero and whose OPCODE is 0 to 2, then four
+-- 16-bit counts. Clause 4.1.2 follows it with a QNAME, a chain of
+-- length-prefixed labels ending in a zero byte, each at most 63 bytes
+-- (clause 2.3.4).
+--
+-- Checking the label chain terminates inside the buffer is what
+-- separates a real query from a payload that merely starts with
+-- plausible counts.
+--
+-- *base* is the number of leading bytes to skip -- 0 for a UDP message,
+-- 2 for a TCP one, whose RFC 1035 clause 4.2.2 length prefix sits ahead
+-- of the header.
+function M.looks_like_dns(values, base)
+    base = base or 0
+    if values == nil or #values < base + 12 then
+        return false
+    end
+    local opcode = math.floor(values[base + 3] / 8) % 16
+    if opcode > 2 then
+        return false
+    end
+    if math.floor(values[base + 4] / 16) % 8 ~= 0 then
+        return false
+    end
+    local questions = (values[base + 5] * 256) + values[base + 6]
+    if questions < 1 or questions > 16 then
+        return false
+    end
+    -- Walk the first QNAME. A compression pointer (top two bits set) is
+    -- legal in a response but never opens a question, so it is not
+    -- followed here.
+    local index = base + 13
+    while index <= #values do
+        local label = values[index]
+        if label == 0 then
+            -- QTYPE and QCLASS follow the terminator.
+            return (index + 4) <= #values
+        end
+        if label > 63 then
+            return false
+        end
+        index = index + label + 1
+    end
+    return false
+end
+
+--- True when the bytes look like a DTLS record.
+--
+-- DTLS shares the content types and the 0x03 major version but not the
+-- header: RFC 6347 clause 4.1 inserts a two-byte epoch and a six-byte
+-- sequence number ahead of the length, so the record is 13 bytes and
+-- peek_tls_record above reads the length out of the sequence number.
+-- The version is the one-s-complement pair 'FE FD' for DTLS 1.2 and
+-- 'FE FF' for DTLS 1.0, which is what identifies it.
+--
+-- Recognising it matters because the port fallback below otherwise
+-- hands DTLS to the TLS dissector on a UDP channel opened to 443. That
+-- produces a bare Transport Layer Security node with no record layer
+-- and no malformed complaint -- a protocol claim that is wrong and
+-- silent about being wrong, which is worse than the raw bytes.
+function M.is_dtls_record(values)
+    if values == nil or #values < 13 then
+        return false
+    end
+    if TLS_CONTENT_TYPES[values[1]] == nil then
+        return false
+    end
+    return values[2] == 0xFE and (values[3] == 0xFD or values[3] == 0xFF)
+end
+
 --- Which stock Wireshark dissector suits a BIP channel payload.
 --
 -- Handing the bytes to the real dissector beats a hand-rolled decode:
@@ -847,7 +1101,10 @@ end
 -- produces is the one an engineer already knows how to navigate. A
 -- single TLS alert record handed to the stock dissector renders as
 -- "Alert (Level: Fatal, Description: Bad Certificate)", which is exactly
--- what a failed profile download needs to show.
+-- what a failed profile download needs to show. That reading is a
+-- TLS 1.2-and-earlier one: from the server's first flight onward a
+-- TLS 1.3 alert is encrypted and carries outer type 23, so it arrives
+-- indistinguishable from application data.
 function M.channel_payload_dissector(values, port, transport)
     if values == nil or #values == 0 then
         return ""
@@ -860,19 +1117,33 @@ function M.channel_payload_dissector(values, port, transport)
     if M.peek_tls_record(values) ~= nil then
         return "tls"
     end
+    if M.is_dtls_record(values) then
+        return "dtls"
+    end
 
+    -- RFC 9112 clause 2.2 tells a server to ignore at least one empty
+    -- line before the request-line, and a card that sends one would
+    -- otherwise break the prefix on its first byte and match nothing.
+    local start = 1
+    while start <= #values and start <= 3
+        and (values[start] == 13 or values[start] == 10) do
+        start = start + 1
+    end
     local prefix = ""
-    for index = 1, math.min(16, #values) do
+    for index = start, math.min(start + 15, #values) do
         local character = values[index]
         if character < 32 or character > 126 then
             break
         end
         prefix = prefix .. string.char(character)
     end
+    -- RFC 9110 clause 9.3 defines eight methods; PATCH is RFC 5789.
+    -- Matching is case-sensitive, which clause 9.1 requires.
     if prefix:match("^HTTP/1") or prefix:match("^GET ") or prefix:match("^POST ")
         or prefix:match("^PUT ") or prefix:match("^HEAD ")
         or prefix:match("^DELETE ") or prefix:match("^OPTIONS ")
-        or prefix:match("^PATCH ") then
+        or prefix:match("^PATCH ") or prefix:match("^CONNECT ")
+        or prefix:match("^TRACE ") then
         return "http"
     end
 
@@ -882,6 +1153,31 @@ function M.channel_payload_dissector(values, port, transport)
     -- malformed-packet complaint would be worse than the raw bytes.
     if port == 53 then
         if transport == "tcp" then
+            -- DNS over TCP prefixes the message with a two-byte length
+            -- (RFC 1035 clause 4.2.2). The stock dns dissector expects a
+            -- bare message on a channel tvb, so the prefix is stripped
+            -- before handoff -- but only when it agrees with the payload
+            -- and what follows is actually DNS. A second return value
+            -- tells the caller how many bytes to skip; the alternative,
+            -- handing the length bytes over as though they were the
+            -- header, is the malformed decode this whole gate exists to
+            -- avoid.
+            if #values >= 2 then
+                local declared = (values[1] * 256) + values[2]
+                if declared == #values - 2 and M.looks_like_dns(values, 2) then
+                    return "dns", 2
+                end
+            end
+            return ""
+        end
+        -- The port alone is not evidence. A channel opened on 53 still
+        -- carries whatever the card sends, and handing a profile-package
+        -- fragment to the DNS dissector renders a header invented out of
+        -- its length fields -- "Questions: 28576" -- followed by a
+        -- malformed-packet complaint. That is the confidently-wrong
+        -- output this dissector exists to remove, so the bytes have to
+        -- look like a DNS message before they are handed over.
+        if not M.looks_like_dns(values) then
             return ""
         end
         return "dns"
@@ -905,14 +1201,29 @@ function M.tlv_options()
     }
 end
 
+--- The class byte with its logical channel folded out.
+--
+-- Channels 0 to 3 sit in the low nibble of '8X', so clearing the nibble
+-- is enough. Channels 4 to 19 use the further interindustry shape, which
+-- moves the class itself to 'C0'--'FE'; see iso7816.base_class, which
+-- this mirrors so cat.lua stays free of that dependency.
+local function class_base(cla)
+    if cla >= 0xC0 and cla <= 0xFE then
+        return 0x80
+    end
+    return cla - (cla % 16)
+end
+
 --- True when this instruction carries CAT content.
 --
 -- CAT rides on class '8X' (ETSI TS 102 221) and on the classic GSM class
 -- 'A0' (TS 51.011). Logical channels vary the low two bits and secure
 -- messaging bits 4 and 3, so masking only the channel bits rejected
--- '8C' -- a secure-messaged FETCH -- as though it were another command.
+-- '8C' -- a secure-messaged FETCH -- as though it were another command,
+-- and masking the nibble alone still rejects a FETCH issued on a channel
+-- above 3.
 function M.is_cat_instruction(cla, ins)
-    local base = cla - (cla % 16)
+    local base = class_base(cla)
     if base ~= 0x80 and base ~= 0xA0 then
         return false
     end
@@ -924,7 +1235,7 @@ end
 
 --- True for TERMINAL PROFILE, whose body is a bit field rather than TLV.
 function M.is_terminal_profile(cla, ins)
-    local base = cla - (cla % 16)
+    local base = class_base(cla)
     return (base == 0x80 or base == 0xA0) and ins == 0x10
 end
 

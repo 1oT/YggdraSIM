@@ -354,7 +354,7 @@ class ToolkitLogic:
         ``D5`` MO Short Message Control     → spec-shaped Allowed reply.
         ``D6`` Event Download               → handled locally (existing).
         ``D7`` Timer Expiration             → recorded; SW=9000.
-        ``D8`` USSD Download                → spec-shaped Allowed reply.
+        ``D9`` USSD Download                → spec-shaped Allowed reply.
 
         Anything else falls through to the legacy SCP80 handler so
         plaintext OTA flows keep working.
@@ -436,11 +436,16 @@ class ToolkitLogic:
                 return self._pending_status()
             return response, 0x90, 0x00
 
-        if envelope_tag == b"\xD8":
-            # 3GPP TS 31.111 §7.3.3 USSD Download. Body carries
-            # the network-side USSD String (TLV 8A = DCS + text);
-            # round 19 decodes both halves into ``state.toolkit``.
-            # The reply remains "Allowed, no modification".
+        if envelope_tag == b"\xD9":
+            # 3GPP TS 31.111 §7.3.3 USSD Download. The tag is 'D9', not
+            # 'D8': clause 9.1 assigns USSD download to 'D9' and 'D8' is
+            # reserved for intra-UICC communication (ETSI TS 101 220
+            # §7.2). A 'D8' envelope therefore falls through to the OTA
+            # handler below rather than being answered as USSD -- a
+            # conformance simulator must not accept a tag no conformant
+            # terminal sends. Body carries the network-side USSD String
+            # (TLV 8A = DCS + text), decoded into ``state.toolkit``; the
+            # reply remains "Allowed, no modification".
             self._apply_ussd_download_envelope(normalized)
             response = bytes.fromhex("80 01 00".replace(" ", ""))
             if len(self.state.pending_fetch_queue) > 0:
@@ -3164,7 +3169,7 @@ class ToolkitLogic:
     def _apply_ussd_download_envelope(self, payload: bytes) -> None:
         """3GPP TS 31.111 §7.3.3 USSD Download envelope decoder.
 
-        Walks the ``D8`` envelope and extracts the USSD String
+        Walks the ``D9`` envelope and extracts the USSD String
         TLV (``8A`` / ``0A``). Byte 0 is the GSM-7 / UCS-2 DCS
         per TS 23.038; bytes 1.. carry the encoded text. The
         simulator latches the DCS, the raw bytes, and a
@@ -3177,7 +3182,7 @@ class ToolkitLogic:
             )
         except ValueError:
             return
-        if outer_tag != b"\xD8":
+        if outer_tag != b"\xD9":
             return
         toolkit = self.state.toolkit
         toolkit.ussd_downloads_received += 1
