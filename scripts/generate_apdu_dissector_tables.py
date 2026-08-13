@@ -145,6 +145,36 @@ def _set_literal(assignments: dict[str, ast.expr], name: str, source: str) -> li
     return sorted(value, key=lambda entry: (isinstance(entry, tuple), entry))
 
 
+#: The SIMCARD.etsi_fs constants the AID table is built from. Kept as an
+#: explicit list so the generated output and the source digest both
+#: depend on these and nothing else.
+AID_CONSTANTS = (
+    "USIM_AID",
+    "ISIM_AID",
+    "ISDR_AID",
+    "ECASD_AID",
+    "MNO_SD_AID",
+    "PROFILE_AID_PREFIX",
+)
+
+
+def _named_constants(
+    assignments: dict[str, ast.expr],
+    names: tuple[str, ...],
+) -> dict[str, Any]:
+    """Collect exactly the named literal module constants."""
+    collected: dict[str, Any] = {}
+    for name in names:
+        node = assignments.get(name)
+        if node is None:
+            continue
+        try:
+            collected[name] = ast.literal_eval(node)
+        except ValueError:
+            continue
+    return collected
+
+
 def _prefixed_constants(
     assignments: dict[str, ast.expr],
     prefix: str,
@@ -432,16 +462,61 @@ def collect_tables(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
         "aid_paths": _literal(
             parsed["decode_state"], "_KNOWN_AID_PATHS", SOURCES["decode_state"]
         ),
-        "aids": _prefixed_constants(parsed["etsi_fs"], ""),
+        # Named explicitly, not swept up by prefix. An empty prefix
+        # collects every literal constant in the module -- thirteen of
+        # them, of which six are rendered -- and the other seven still
+        # feed the source digest, so adding an unrelated constant to
+        # SIMCARD/etsi_fs.py failed the drift test for a change that
+        # altered no table.
+        "aids": _named_constants(parsed["etsi_fs"], AID_CONSTANTS),
         "gp_lifecycle": _prefixed_constants(parsed["gp"], "GP_LCS_"),
     }
     return collected
 
 
+def _canonical(value: Any) -> Any:
+    """Reduce a collected value to something order-independent."""
+    if isinstance(value, dict):
+        return sorted((repr(key), _canonical(item)) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return [_canonical(item) for item in value]
+    return repr(value)
+
+
 def _source_digest(tables: dict[str, Any]) -> str:
-    """Digest the collected tables so drift is attributable."""
-    canonical = repr(sorted((key, repr(value)) for key, value in tables.items()))
+    """Digest the collected tables so drift is attributable.
+
+    The digest has to describe table *content*, not the order the source
+    file happens to declare it in. Hashing ``repr()`` of a dict hashes
+    its insertion order, so reordering STATUS_WORDS in
+    ``Tools/YggdraMCP/server.py`` without changing a single entry failed
+    the drift test -- while every rendered table stayed byte-identical,
+    because the renderers all sort. A drift guard that fires on
+    non-drift teaches people to regenerate without reading the diff,
+    which is the one habit it exists to prevent.
+    """
+    canonical = repr(sorted((key, _canonical(value)) for key, value in tables.items()))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _tag_meaning_key(name: str) -> str:
+    """Normalise a tag name for comparison across the two sources.
+
+    The two tables spell the same concept differently -- ``ICCID`` and
+    ``iccid``, ``EUICC_INFO2`` and ``EUICCInfo2`` -- so a plain string
+    comparison would report almost every shared tag as a conflict.
+    """
+    return "".join(character for character in name.lower() if character.isalnum())
+
+
+def _same_tag_meaning(left: str, right: str) -> bool:
+    """True when two tag names plainly describe the same thing."""
+    first = _tag_meaning_key(left)
+    second = _tag_meaning_key(right)
+    if first == second:
+        return True
+    # One naming the other plus a qualifier is agreement, not conflict.
+    return first in second or second in first
 
 
 # -------------------------------------------------------------------- render
@@ -449,14 +524,30 @@ def render_tables_lua(repo_root: Path = REPO_ROOT) -> str:
     """Return the complete generated Lua module as text."""
     tables = collect_tables(repo_root)
 
-    # Merge the two BER-TLV tag tables. The MCP copy carries spec clause
-    # citations, so it wins where both name the same tag.
+    # Merge the two BER-TLV tag tables.
+    #
+    # Twenty-one tags appear in both, and letting one silently overwrite
+    # the other makes the dissector contradict the tool the losing name
+    # came from. '5A' is the one that bites: Tools/Asn1TlvDecode calls it
+    # EID_OR_ICCID because the reading depends on context, while
+    # Tools/YggdraMCP calls it ICCID -- so taking the MCP name outright
+    # labels the EID inside a BF3E GetEuiccData response "ICCID", which
+    # is exactly the confusion the SGP-context qualifier exists to
+    # prevent. Where the two disagree, both names are kept.
     ber_tags: dict[str, str] = {}
+    fallback_names: dict[str, str] = {}
     for tag_hex, (tag_name, tag_source) in sorted(tables["fallback_tags"].items()):
-        ber_tags[str(tag_hex).upper()] = f"{tag_name} ({tag_source})"
+        key = str(tag_hex).upper()
+        fallback_names[key] = str(tag_name)
+        ber_tags[key] = f"{tag_name} ({tag_source})"
     for tag_value, tag_name in sorted(tables["ber_tags"].items()):
         width = 2 if tag_value <= 0xFF else 4
-        ber_tags[f"{tag_value:0{width}X}"] = tag_name
+        key = f"{tag_value:0{width}X}"
+        other = fallback_names.get(key)
+        if other is not None and _same_tag_meaning(other, str(tag_name)) is False:
+            ber_tags[key] = f"{tag_name} / {other}"
+        else:
+            ber_tags[key] = str(tag_name)
 
     sections: list[str] = [
         _render_commands(tables["commands"]),

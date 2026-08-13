@@ -22,7 +22,7 @@
 
 local M = {}
 
-M.SOURCE_DIGEST = "288b72926c6ef9e90f99d15860c4c668091be90e9255daa8a4da6c19d9e5fccf"
+M.SOURCE_DIGEST = "67b2ba755d4a01c426dfd2e7eb474368f4fa868fade73460c3b078a264d95a54"
 
 M.INS_NAMES = {
     [0x20] = "VERIFY",
@@ -353,7 +353,7 @@ M.BER_TAGS = {
     ["42"] = "IIN (SGP.02 / SGP.22 ECASD)",
     ["45"] = "CIN (SGP.02 / SGP.22 ECASD)",
     ["4F"] = "AID (Application Identifier -- ISO 7816-5)",
-    ["5A"] = "ICCID (ETSI TS 102 221)",
+    ["5A"] = "ICCID (ETSI TS 102 221) / EID_OR_ICCID",
     ["5C"] = "TAG_LIST (GlobalPlatform / GSMA)",
     ["5F20"] = "APPLICATION_PROVIDER_IDENTIFIER (GlobalPlatform)",
     ["5F37"] = "SIGNATURE (GSMA / GlobalPlatform)",
@@ -391,7 +391,7 @@ M.BER_TAGS = {
     ["BF28"] = "LIST_NOTIFICATION (SGP.22)",
     ["BF29"] = "SET_NICKNAME (SGP.22)",
     ["BF2A"] = "UPDATE_METADATA (SGP.22)",
-    ["BF2B"] = "RetrieveNotificationsList (SGP.22 section 5.7.10)",
+    ["BF2B"] = "RetrieveNotificationsList (SGP.22 section 5.7.10) / PENDING_NOTIFICATIONS_LIST",
     ["BF2D"] = "ProfileInfoList (SGP.22 ES10c GetProfilesInfo)",
     ["BF2E"] = "GET_EUICC_CHALLENGE (SGP.22)",
     ["BF2F"] = "NOTIFICATION_METADATA (SGP.22)",
@@ -407,7 +407,7 @@ M.BER_TAGS = {
     ["BF39"] = "INITIATE_AUTHENTICATION (SGP.22)",
     ["BF3A"] = "GET_BOUND_PROFILE_PACKAGE (SGP.22)",
     ["BF3B"] = "AUTHENTICATE_CLIENT (SGP.22)",
-    ["BF3C"] = "EuiccConfiguredData (SGP.22 ES10a)",
+    ["BF3C"] = "EuiccConfiguredData (SGP.22 ES10a) / EUICC_CONFIGURED_ADDRESSES",
     ["BF3D"] = "HANDLE_NOTIFICATION (SGP.22)",
     ["BF3E"] = "GetEuiccData (SGP.22 ES10c)",
     ["BF3F"] = "SET_DEFAULT_DP_ADDRESS (SGP.22)",
