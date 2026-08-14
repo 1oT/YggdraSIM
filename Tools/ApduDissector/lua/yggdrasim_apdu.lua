@@ -2168,19 +2168,34 @@ local function dissect_exchange(payload, pinfo, tree)
     -- Anchor file operations to the selected file. READ/UPDATE BINARY,
     -- READ/UPDATE RECORD and the GET RESPONSE that follows a SELECT act on
     -- whatever is currently selected and stay about that file until the
-    -- next SELECT; state.response_file already resolves which file that is
-    -- (including the pending file a GET RESPONSE is fetching). SELECT names
-    -- its own target, so it is left as it is.
+    -- next SELECT; state.response_file resolves which file that is (the
+    -- pending file a GET RESPONSE is fetching, otherwise the selection).
+    -- Two exceptions: an SFI-addressed access names its own file by short
+    -- identifier, not the selection, so it is left alone; and a selected
+    -- file with no known path still shows its raw identifier rather than
+    -- nothing. SELECT names its own target and is left as it is.
     local ins = command.ins
-    if ins == commands.INS_READ_BINARY or ins == commands.INS_UPDATE_BINARY
-        or ins == commands.INS_READ_RECORD or ins == commands.INS_UPDATE_RECORD
-        or ins == commands.INS_GET_RESPONSE then
-        local fid = state.response_file(context, command)
-        local file = ""
-        if fid ~= nil and fid ~= "" then
-            file = commands.file_name(fid)
+    local sfi_addressed = false
+    if description ~= nil then
+        if description.sfi_addressed == true then
+            sfi_addressed = true
+        elseif description.kind == "record"
+            and description.sfi ~= nil and description.sfi ~= 0 then
+            sfi_addressed = true
         end
-        if file ~= "" then
+    end
+    local is_file_op = ins == commands.INS_READ_BINARY
+        or ins == commands.INS_UPDATE_BINARY
+        or ins == commands.INS_READ_RECORD
+        or ins == commands.INS_UPDATE_RECORD
+        or ins == commands.INS_GET_RESPONSE
+    if is_file_op and not sfi_addressed then
+        local fid = state.response_file(context, command)
+        if fid ~= nil and fid ~= "" then
+            local file = commands.file_name(fid)
+            if file == "" then
+                file = "FID " .. fid
+            end
             if detail ~= "" then
                 detail = file .. " (" .. detail .. ")"
             else
