@@ -11,15 +11,15 @@
 # untouched.
 #
 # If a column does not appear, add it by hand instead (this always works):
-#   Edit > Preferences > Columns > +, Type "Custom", Field "yapdu.operation".
+#   Edit > Preferences > Columns > +, Type "Custom", Field "yapdu.command_name".
 
 # Packet list column format.
 gui.column.format:
 	"No.", "%m",
 	"Time", "%t",
 	"Kind", "%Cus:yapdu.frame_kind:0:R",
-	"Command", "%Cus:yapdu.command_name:0:R",
-	"Operation", "%Cus:yapdu.operation:0:R",
+	"Operation", "%Cus:yapdu.command_name:0:R",
+	"Detail", "%Cus:yapdu.detail:0:R",
 	"SW", "%Cus:yapdu.sw:0:R",
 	"Status", "%Cus:yapdu.sw_meaning:0:R",
 	"Info", "%i"

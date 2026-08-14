@@ -2165,7 +2165,7 @@ local function dissect_exchange(payload, pinfo, tree)
         end
     end
     if detail ~= "" then
-        root:add(fields.operation, payload(0, 0), detail):set_generated()
+        root:add(fields.detail, payload(0, 0), detail):set_generated()
     end
 
     if yapdu.prefs.set_info_column == true then

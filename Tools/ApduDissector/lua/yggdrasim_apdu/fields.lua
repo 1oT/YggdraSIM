@@ -71,7 +71,7 @@ M.case_names = CASE_NAMES
 
 -- ------------------------------------------------------------ frame level
 M.frame_kind = ProtoField.string(PREFIX .. ".frame_kind", "Frame kind")
-M.operation = ProtoField.string(PREFIX .. ".operation", "Operation")
+M.detail = ProtoField.string(PREFIX .. ".detail", "Operation detail")
 M.raw = ProtoField.bytes(PREFIX .. ".raw", "Undecoded bytes")
 M.context_available = ProtoField.bool(
     PREFIX .. ".context_available",
@@ -466,7 +466,7 @@ M.rsp_bpp_section = ProtoField.string(
 
 --- Every field, in registration order.
 M.all = {
-    M.frame_kind, M.operation, M.raw, M.context_available,
+    M.frame_kind, M.detail, M.raw, M.context_available,
     M.split_command_len, M.split_response_len, M.split_confidence,
     M.split_method, M.split_ambiguous, M.split_candidate,
     M.command, M.cla, M.cla_type, M.cla_channel, M.cla_secure_messaging,

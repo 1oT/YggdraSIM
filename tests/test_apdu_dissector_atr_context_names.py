@@ -146,7 +146,7 @@ class PathSelectResolvesTheFileName(unittest.TestCase):
         cls._directory.cleanup()
 
     def test_the_selected_target_is_named(self) -> None:
-        rows = decode_fields(self.capture, ["yapdu.operation"])
+        rows = decode_fields(self.capture, ["yapdu.detail"])
         values = [row[0] for row in rows if row and row[0]]
         self.assertTrue(values, "the operation field should be populated")
         self.assertIn("DF.PHONEBOOK", values[0])
