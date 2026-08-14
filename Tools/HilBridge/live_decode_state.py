@@ -41,6 +41,13 @@ POLL_OFF_COMMAND = 0x04
 
 _POLL_INTERVAL_TIMER_ID = 0
 
+# Plausibility bounds for the RFC 1035 clause 4.1.1 header. A BIP channel
+# resolves one name at a time, so counts far above these mark bytes that are
+# not a DNS message at all. Kept in step with ``looks_like_dns`` in
+# Tools/ApduDissector/lua/yggdrasim_apdu/cat.lua.
+_MAX_DNS_QUESTION_COUNT = 16
+_MAX_DNS_RECORD_COUNT = 64
+
 _PROACTIVE_COMMAND_NAMES = {
     OPEN_CHANNEL_COMMAND: "OPEN CHANNEL",
     CLOSE_CHANNEL_COMMAND: "CLOSE CHANNEL",
@@ -2297,6 +2304,21 @@ def _parse_dns_resource_record(value_bytes: bytes, offset: int) -> tuple[dict[st
     }, record_data_end
 
 
+def _dns_header_is_plausible(flags: int, question_count: int) -> bool:
+    """True when a 12-byte DNS header (RFC 1035 clause 4.1.1) is self-consistent.
+
+    A BIP channel carrying TLS hands this decoder record fragments that have
+    no framing of their own, so the header fields have to carry the
+    discrimination: OPCODE is 0 to 2, the Z field is reserved and must be
+    zero, and a message always asks at least one question.
+    """
+    if ((flags >> 11) & 0x0F) > 2:
+        return False
+    if ((flags >> 4) & 0x07) != 0:
+        return False
+    return 1 <= question_count <= _MAX_DNS_QUESTION_COUNT
+
+
 def _try_decode_dns_query(value_bytes: bytes) -> str:
     if len(value_bytes) < 17:
         return ""
@@ -2307,6 +2329,8 @@ def _try_decode_dns_query(value_bytes: bytes) -> str:
     answer_count = int.from_bytes(value_bytes[6:8], "big", signed=False)
     authority_count = int.from_bytes(value_bytes[8:10], "big", signed=False)
     if question_count != 1 or answer_count != 0 or authority_count != 0:
+        return ""
+    if not _dns_header_is_plausible(flags, question_count):
         return ""
     try:
         question, _ = _parse_dns_question(value_bytes, 12)
@@ -2341,16 +2365,28 @@ def _try_decode_dns_response(value_bytes: bytes) -> str:
     answer_count = int.from_bytes(value_bytes[6:8], "big", signed=False)
     authority_count = int.from_bytes(value_bytes[8:10], "big", signed=False)
     additional_count = int.from_bytes(value_bytes[10:12], "big", signed=False)
+    if not _dns_header_is_plausible(flags, question_count):
+        return ""
+    if max(answer_count, authority_count, additional_count) > _MAX_DNS_RECORD_COUNT:
+        return ""
     query_id = int.from_bytes(value_bytes[0:2], "big", signed=False)
     response_code = flags & 0x000F
     question_name = ""
     answer_summaries: list[str] = []
+    # A question that does not parse means these bytes were never a DNS
+    # message; reporting the header anyway invents a response out of
+    # whatever the channel happened to carry.
     try:
         offset = 12
         for question_index in range(question_count):
             question, offset = _parse_dns_question(value_bytes, offset)
             if question_index == 0:
                 question_name = str(question.get("qname", "")).strip()
+    except Exception:
+        return ""
+    if len(question_name) == 0:
+        return ""
+    try:
         for _ in range(min(answer_count, 6)):
             answer_record, offset = _parse_dns_resource_record(value_bytes, offset)
             record_type_name = _dns_record_type_name(int(answer_record.get("record_type", 0) or 0))
@@ -2359,7 +2395,6 @@ def _try_decode_dns_response(value_bytes: bytes) -> str:
                 continue
             answer_summaries.append(f"{record_type_name}:{record_value}")
     except Exception:
-        question_name = ""
         answer_summaries = []
     summary_text = f"DNS Response: id=0x{query_id:04X}"
     if len(question_name) > 0:
@@ -2393,7 +2428,11 @@ def _try_decode_tls_records(value_bytes: bytes) -> list[str]:
                 summaries.append(f"TLS Record: {record_name} ({record_length} byte(s))")
             else:
                 summaries.extend(handshake_summaries)
-        elif record_type == 0x15 and len(record_payload) >= 2:
+        elif record_type == 0x15 and record_length == 2:
+            # RFC 5246 clause 7.2 gives a plaintext alert exactly two bytes.
+            # Anything longer is protected, and its leading bytes are the
+            # explicit nonce -- decoding those yields an invented level and
+            # description, so a close_notify reads as a fatal failure.
             alert_level = record_payload[0]
             alert_description = record_payload[1]
             summaries.append(
@@ -2401,6 +2440,8 @@ def _try_decode_tls_records(value_bytes: bytes) -> list[str]:
                 f"{_tls_alert_level_name(alert_level)} "
                 f"{_tls_alert_description_name(alert_description)}"
             )
+        elif record_type == 0x15:
+            summaries.append(f"TLS Alert: encrypted ({record_length} byte(s))")
         else:
             summaries.append(f"TLS Record: {record_name} ({record_length} byte(s))")
         offset = record_end
