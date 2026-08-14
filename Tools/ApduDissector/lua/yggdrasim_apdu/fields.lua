@@ -71,6 +71,7 @@ M.case_names = CASE_NAMES
 
 -- ------------------------------------------------------------ frame level
 M.frame_kind = ProtoField.string(PREFIX .. ".frame_kind", "Frame kind")
+M.operation = ProtoField.string(PREFIX .. ".operation", "Operation")
 M.raw = ProtoField.bytes(PREFIX .. ".raw", "Undecoded bytes")
 M.context_available = ProtoField.bool(
     PREFIX .. ".context_available",
@@ -153,6 +154,12 @@ M.atr_protocol = ProtoField.uint8(
 )
 M.atr_historical = ProtoField.bytes(
     PREFIX .. ".atr.historical", "Historical bytes"
+)
+M.atr_historical_category = ProtoField.uint8(
+    PREFIX .. ".atr.historical.category", "Category indicator", base.HEX
+)
+M.atr_historical_object = ProtoField.bytes(
+    PREFIX .. ".atr.historical.object", "Historical DO"
 )
 M.atr_tck = ProtoField.uint8(PREFIX .. ".atr.tck", "TCK (check byte)", base.HEX)
 M.atr_tck_valid = ProtoField.bool(PREFIX .. ".atr.tck_valid", "TCK valid")
@@ -459,7 +466,7 @@ M.rsp_bpp_section = ProtoField.string(
 
 --- Every field, in registration order.
 M.all = {
-    M.frame_kind, M.raw, M.context_available,
+    M.frame_kind, M.operation, M.raw, M.context_available,
     M.split_command_len, M.split_response_len, M.split_confidence,
     M.split_method, M.split_ambiguous, M.split_candidate,
     M.command, M.cla, M.cla_type, M.cla_channel, M.cla_secure_messaging,
@@ -469,7 +476,8 @@ M.all = {
     M.response, M.response_data, M.sw, M.sw1, M.sw2, M.sw_meaning,
     M.sw_success, M.sw_category,
     M.atr, M.atr_ts, M.atr_t0, M.atr_historical_count, M.atr_interface,
-    M.atr_protocol, M.atr_historical, M.atr_tck, M.atr_tck_valid,
+    M.atr_protocol, M.atr_historical, M.atr_historical_category,
+    M.atr_historical_object, M.atr_tck, M.atr_tck_valid,
     M.tlv, M.tlv_tag, M.tlv_base_tag, M.tlv_name, M.tlv_class,
     M.tlv_constructed, M.tlv_length, M.tlv_indefinite, M.tlv_value,
     M.tlv_comprehension, M.tlv_text, M.tlv_uint,

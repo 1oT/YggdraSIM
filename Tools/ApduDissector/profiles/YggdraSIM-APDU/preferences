@@ -1,0 +1,25 @@
+# Wireshark configuration profile: YggdraSIM APDU
+#
+# A packet-list column layout that separates what the yapdu dissector
+# decodes, instead of leaving it all in the Info column.
+#
+# Install: copy this directory to your personal Wireshark profiles folder
+#   <Personal configuration>/profiles/YggdraSIM-APDU
+# (find <Personal configuration> under Help > About Wireshark > Folders),
+# then pick "YggdraSIM-APDU" from the profile selector at the bottom-right of the
+# status bar. It is additive: your Default profile and its columns are
+# untouched.
+#
+# If a column does not appear, add it by hand instead (this always works):
+#   Edit > Preferences > Columns > +, Type "Custom", Field "yapdu.operation".
+
+# Packet list column format.
+gui.column.format:
+	"No.", "%m",
+	"Time", "%t",
+	"Kind", "%Cus:yapdu.frame_kind:0:R",
+	"Command", "%Cus:yapdu.command_name:0:R",
+	"Operation", "%Cus:yapdu.operation:0:R",
+	"SW", "%Cus:yapdu.sw:0:R",
+	"Status", "%Cus:yapdu.sw_meaning:0:R",
+	"Info", "%i"

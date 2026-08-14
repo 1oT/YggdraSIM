@@ -549,6 +549,19 @@ def render_tables_lua(repo_root: Path = REPO_ROOT) -> str:
         else:
             ber_tags[key] = str(tag_name)
 
+    # 'A9'/'AA' are euiccCiPKId lists only inside an EUICCInfo1/2 (BF20/BF22).
+    # Elsewhere -- the Type-2/3 file tags of an EF.PBR record, say -- they are
+    # ordinary constructed context tags, so the flat dissector table names
+    # them generically and rsp.lua applies the EUICCInfo meaning by parent.
+    # The MCP source keeps its own names; only the generated table is toned
+    # down, so a filesystem read is not labelled euiccCiPKIdListForVerification.
+    for _context_tag, _generic_name in (
+        ("A9", "context-9 constructed; meaning depends on the enclosing structure"),
+        ("AA", "context-10 constructed; meaning depends on the enclosing structure"),
+    ):
+        if _context_tag in ber_tags:
+            ber_tags[_context_tag] = _generic_name
+
     sections: list[str] = [
         _render_commands(tables["commands"]),
         _render_case_hints(tables["case_hints"]),

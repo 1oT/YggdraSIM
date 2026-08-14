@@ -96,6 +96,23 @@ function M.is_rsp_function(tag)
     return M.function_name(tag) ~= ""
 end
 
+--- SGP.22 EUICCInfo1/EUICCInfo2 carry the euiccCiPKId lists at 'A9'/'AA'.
+-- Those are ordinary constructed context tags elsewhere -- the Type-2/3
+-- file tags of an EF.PBR record are 'A9'/'AA' too -- so they are named only
+-- when nested directly in a 'BF20'/'BF22'.
+local EUICC_INFO_TAGS = {
+    [0xA9] = "euiccCiPKIdListForVerification (SGP.22 EUICCInfo1 / EUICCInfo2)",
+    [0xAA] = "euiccCiPKIdListForSigning (SGP.22 EUICCInfo1 / EUICCInfo2)",
+}
+
+--- Name an EUICCInfo1/2 sub-tag, gated on its parent being 'BF20'/'BF22'.
+function M.euicc_info_tag_name(tag, parent)
+    if parent ~= 0xBF20 and parent ~= 0xBF22 then
+        return ""
+    end
+    return EUICC_INFO_TAGS[tag] or ""
+end
+
 --- TLV walker options that name RSP structures.
 function M.tlv_options()
     return {
@@ -103,6 +120,10 @@ function M.tlv_options()
             local section = M.bpp_section_name(tag, parent)
             if section ~= "" then
                 return section
+            end
+            local euicc = M.euicc_info_tag_name(tag, parent)
+            if euicc ~= "" then
+                return euicc
             end
             return M.function_name(tag)
         end,

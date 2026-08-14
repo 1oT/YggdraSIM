@@ -394,6 +394,193 @@ function M.parse_response(payload, split_result)
 end
 
 -- -------------------------------------------------------------------- ATR
+-- ISO/IEC 7816-3:2006 Table 7: clock-rate conversion integer Fi and the
+-- maximum frequency, indexed by the high nibble of TA1.
+local ATR_FI = {
+    [0] = { fi = 372, f = "4 MHz" },
+    [1] = { fi = 372, f = "5 MHz" },
+    [2] = { fi = 558, f = "6 MHz" },
+    [3] = { fi = 744, f = "8 MHz" },
+    [4] = { fi = 1116, f = "12 MHz" },
+    [5] = { fi = 1488, f = "16 MHz" },
+    [6] = { fi = 1860, f = "20 MHz" },
+    [9] = { fi = 512, f = "5 MHz" },
+    [10] = { fi = 768, f = "7.5 MHz" },
+    [11] = { fi = 1024, f = "10 MHz" },
+    [12] = { fi = 1536, f = "15 MHz" },
+    [13] = { fi = 2048, f = "20 MHz" },
+}
+
+-- ISO/IEC 7816-3:2006 Table 8: baud-rate adjustment integer Di, indexed by
+-- the low nibble of TA1.
+local ATR_DI = {
+    [1] = 1, [2] = 2, [3] = 4, [4] = 8, [5] = 16, [6] = 32,
+    [7] = 64, [8] = 12, [9] = 20,
+}
+
+-- ISO/IEC 7816-3:2006 clause 8.3: clock-stop indicator (bits 8-7) of the TA
+-- byte that follows a T=15 indication.
+local ATR_CLOCK_STOP = {
+    [0] = "clock stop not supported",
+    [1] = "clock stop allowed, state L",
+    [2] = "clock stop allowed, state H",
+    [3] = "clock stop allowed, no preferred state",
+}
+
+-- ISO/IEC 7816-4 compact-TLV historical data objects, keyed by tag number
+-- (the high nibble of the object's first byte).
+local ATR_COMPACT_TLV = {
+    [1] = "Country/issuer indicator",
+    [2] = "Issuer identification number",
+    [3] = "Card service data",
+    [4] = "Initial access data",
+    [5] = "Card issuer's data",
+    [6] = "Pre-issuing data",
+    [7] = "Card capabilities",
+    [8] = "Status indicator",
+    [15] = "Application identifier",
+}
+
+-- ISO/IEC 7816-4 category indicator (the first historical byte).
+local ATR_CATEGORY = {
+    [0x00] = "compact-TLV, mandatory 3-byte status indicator at end",
+    [0x10] = "DIR data reference",
+    [0x80] = "compact-TLV data objects",
+}
+
+local function atr_describe_ta1(value)
+    local fi = ATR_FI[math.floor(value / 16)]
+    local di = ATR_DI[value % 16]
+    local fi_text = fi ~= nil
+        and string.format("Fi=%d (f max %s)", fi.fi, fi.f)
+        or "Fi=RFU"
+    local di_text = di ~= nil and string.format("Di=%d", di) or "Di=RFU"
+    return fi_text .. ", " .. di_text
+end
+
+local function atr_describe_t15_ta(value)
+    local stop = ATR_CLOCK_STOP[math.floor(value / 64)] or "clock stop RFU"
+    local class_bits = value % 64
+    local classes = {}
+    if class_bits % 2 == 1 then
+        classes[#classes + 1] = "A (5V)"
+    end
+    if math.floor(class_bits / 2) % 2 == 1 then
+        classes[#classes + 1] = "B (3V)"
+    end
+    if math.floor(class_bits / 4) % 2 == 1 then
+        classes[#classes + 1] = "C (1.8V)"
+    end
+    local class_text = (#classes > 0) and table.concat(classes, ", ") or "none"
+    return string.format("%s; supported classes %s", stop, class_text)
+end
+
+local function atr_describe_t15_tb(value)
+    if value >= 128 then
+        return string.format("SPU proprietary use 0x%02X", value % 128)
+    end
+    if value == 0 then
+        return "contact C6 (SPU) not used"
+    end
+    return string.format("SPU standard use 0x%02X", value)
+end
+
+-- Interpret one A/B/C interface byte from its letter, 1-based group, and the
+-- protocol T governing the group (-1 for the global group 1). Returns a
+-- human-readable string, or nil when the byte has no standard meaning here.
+local function atr_interface_detail(letter, group, protocol, value)
+    if letter == "A" then
+        if group == 1 then
+            return atr_describe_ta1(value)
+        end
+        if group == 2 then
+            return "specific-mode / negotiable-mode byte"
+        end
+        if protocol == 1 then
+            return string.format("IFSC=%d (T=1 information field size)", value)
+        end
+        if protocol == 15 then
+            return atr_describe_t15_ta(value)
+        end
+    elseif letter == "B" then
+        if group == 1 then
+            return "deprecated global byte (Vpp / programming current)"
+        end
+        if protocol == 1 then
+            return string.format(
+                "BWI=%d, CWI=%d (T=1 block/character waiting integers)",
+                math.floor(value / 16), value % 16
+            )
+        end
+        if protocol == 15 then
+            return atr_describe_t15_tb(value)
+        end
+    elseif letter == "C" then
+        if group == 1 then
+            if value == 255 then
+                return "extra guard time N=255 (minimum inter-byte delay)"
+            end
+            return string.format("extra guard time N=%d etu", value)
+        end
+        if protocol == 0 then
+            return string.format(
+                "WI=%d (T=0 waiting-time integer; WT = 960 x WI x Fi/f)", value
+            )
+        end
+        if protocol == 1 then
+            local crc = (value % 2 == 1)
+            return crc and "error detection: CRC" or "error detection: LRC"
+        end
+    end
+    return nil
+end
+
+--- Decompose the historical bytes into a category indicator and, for the
+--- compact-TLV category (0x80), the ISO/IEC 7816-4 data objects it carries.
+function M.parse_historical(payload, start, count)
+    if count <= 0 then
+        return nil
+    end
+    local category = util.byte_at(payload, start)
+    if category == nil then
+        return nil
+    end
+    local result = {
+        category = category,
+        category_name = ATR_CATEGORY[category] or "proprietary",
+        objects = {},
+    }
+    -- Only 0x80 is a bare compact-TLV list. 0x00 appends a 3-byte status
+    -- indicator; the others are reference/proprietary layouts left as raw
+    -- bytes.
+    if category ~= 0x80 then
+        return result
+    end
+    local pos = start + 1
+    local finish = start + count
+    while pos < finish do
+        local head = util.byte_at(payload, pos)
+        if head == nil then
+            break
+        end
+        local tag = math.floor(head / 16)
+        local length = head % 16
+        if pos + 1 + length > finish then
+            break
+        end
+        result.objects[#result.objects + 1] = {
+            tag = tag,
+            name = ATR_COMPACT_TLV[tag]
+                or string.format("compact-TLV tag %d", tag),
+            offset = pos,
+            value_offset = pos + 1,
+            value_length = length,
+        }
+        pos = pos + 1 + length
+    end
+    return result
+end
+
 --- Parse an ISO/IEC 7816-3 Answer To Reset into a structure table.
 --
 -- Returns nil when the bytes do not form a well-formed ATR, so the
@@ -420,32 +607,52 @@ function M.parse_atr(payload)
     local offset = 2
     local indicator = math.floor(t0 / 16)
     local group = 1
+    -- The A/B/C bytes of group 1 are global; in later groups they are
+    -- governed by the protocol T indicated in the preceding TD byte.
+    local group_protocol = -1
     local uses_checksum = false
     while group <= 8 do
         local next_indicator = nil
+        local next_protocol = nil
         for bit = 0, 3 do
             if math.floor(indicator / (2 ^ bit)) % 2 == 1 then
                 local value = util.byte_at(payload, offset)
                 if value == nil then
                     return nil
                 end
-                local label = string.char(string.byte("A") + bit)
-                parsed.interface_bytes[#parsed.interface_bytes + 1] = {
-                    name = string.format("T%s%d", label, group),
+                local letter = string.char(string.byte("A") + bit)
+                local entry = {
+                    name = string.format("T%s%d", letter, group),
                     offset = offset,
                     value = value,
                 }
                 if bit == 3 then
                     next_indicator = math.floor(value / 16)
                     local protocol = value % 16
+                    next_protocol = protocol
+                    entry.detail = string.format(
+                        "protocol T=%d for the next interface-byte group",
+                        protocol
+                    )
                     parsed.protocols[#parsed.protocols + 1] = {
                         offset = offset,
                         value = protocol,
+                        -- T=15 only flags that global interface bytes follow;
+                        -- it is not a selectable transmission protocol.
+                        is_global = (protocol == 15),
                     }
+                    -- TCK presence keys off any non-T=0 indication (T=15
+                    -- included); this stays independent of the "offered
+                    -- protocols" view, which excludes T=15.
                     if protocol ~= 0 then
                         uses_checksum = true
                     end
+                else
+                    entry.detail = atr_interface_detail(
+                        letter, group, group_protocol, value
+                    )
                 end
+                parsed.interface_bytes[#parsed.interface_bytes + 1] = entry
                 offset = offset + 1
             end
         end
@@ -453,6 +660,7 @@ function M.parse_atr(payload)
             break
         end
         indicator = next_indicator
+        group_protocol = next_protocol
         group = group + 1
     end
 
@@ -460,6 +668,9 @@ function M.parse_atr(payload)
     if offset + parsed.historical_count > payload:captured_len() then
         return nil
     end
+    parsed.historical = M.parse_historical(
+        payload, offset, parsed.historical_count
+    )
     offset = offset + parsed.historical_count
 
     -- TCK is present whenever any protocol other than T=0 is offered.

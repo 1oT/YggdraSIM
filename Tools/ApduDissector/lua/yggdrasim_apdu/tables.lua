@@ -22,7 +22,7 @@
 
 local M = {}
 
-M.SOURCE_DIGEST = "b1d89bb3d06b429778c76ba8296fd371772fb4f7b7c8738d13be737b97d4e21a"
+M.SOURCE_DIGEST = "e82ce74aebdbf1e7471f15d29026197870c87cdecb7301ca5665720edcd4c499"
 
 M.INS_NAMES = {
     [0x20] = "VERIFY",
@@ -377,8 +377,8 @@ M.BER_TAGS = {
     ["9F7F"] = "CPLC (GlobalPlatform / ETSI TS 102 226)",
     ["A0"] = "context-0 constructed; meaning depends on the enclosing structure",
     ["A1"] = "context-1 constructed; meaning depends on the enclosing structure",
-    ["A9"] = "euiccCiPKIdListForVerification (SGP.22 EUICCInfo1 / EUICCInfo2)",
-    ["AA"] = "euiccCiPKIdListForSigning (SGP.22 EUICCInfo1 / EUICCInfo2)",
+    ["A9"] = "context-9 constructed; meaning depends on the enclosing structure",
+    ["AA"] = "context-10 constructed; meaning depends on the enclosing structure",
     ["AC"] = "CERTIFICATION_DATA_OBJECT (GSMA)",
     ["BF20"] = "EUICCInfo1 / GetEuiccInfo1Request (SGP.22 section 5.7.8 GetEUICCInfo)",
     ["BF21"] = "PREPARE_DOWNLOAD_RESPONSE (SGP.22)",
@@ -578,15 +578,48 @@ M.REFRESH_QUALIFIERS = {
 
 M.FILE_PATHS = {
     ["2F00"] = "MF / EF.DIR",
+    ["2F05"] = "MF / EF.PL",
+    ["2F06"] = "MF / EF.ARR",
+    ["2F08"] = "MF / EF.UMPC",
     ["2FE2"] = "MF / EF.ICCID",
     ["3F00"] = "MF",
+    ["4F30"] = "MF / DF.TELECOM / DF.PHONEBOOK / EF.PBR",
+    ["5F3A"] = "MF / DF.TELECOM / DF.PHONEBOOK",
+    ["5F3B"] = "MF / DF.TELECOM / DF.MULTIMEDIA",
+    ["5F50"] = "MF / DF.TELECOM / DF.GRAPHICS",
     ["6F02"] = "MF / ADF.ISIM / EF.IMPI",
+    ["6F05"] = "MF / ADF.USIM / EF.LI",
+    ["6F06"] = "MF / ADF.USIM / EF.ARR",
     ["6F07"] = "MF / ADF.USIM / EF.IMSI",
+    ["6F08"] = "MF / ADF.USIM / EF.KEYS",
+    ["6F09"] = "MF / ADF.USIM / EF.KEYSPS",
+    ["6F31"] = "MF / ADF.USIM / EF.HPPLMN",
+    ["6F37"] = "MF / ADF.USIM / EF.ACMMAX",
+    ["6F38"] = "MF / ADF.USIM / EF.UST",
+    ["6F39"] = "MF / ADF.USIM / EF.ACM",
+    ["6F3B"] = "MF / ADF.USIM / EF.FDN",
+    ["6F3C"] = "MF / ADF.USIM / EF.SMS",
+    ["6F3E"] = "MF / ADF.USIM / EF.GID1",
+    ["6F3F"] = "MF / ADF.USIM / EF.GID2",
+    ["6F40"] = "MF / ADF.USIM / EF.MSISDN",
+    ["6F42"] = "MF / ADF.USIM / EF.SMSP",
+    ["6F43"] = "MF / ADF.USIM / EF.SMSS",
+    ["6F46"] = "MF / ADF.USIM / EF.SPN",
+    ["6F56"] = "MF / ADF.USIM / EF.EST",
+    ["6F73"] = "MF / ADF.USIM / EF.PSLOCI",
+    ["6F78"] = "MF / ADF.USIM / EF.ACC",
+    ["6F7B"] = "MF / ADF.USIM / EF.FPLMN",
+    ["6F7E"] = "MF / ADF.USIM / EF.LOCI",
     ["6FAD"] = "MF / ADF.USIM / EF.AD",
+    ["6FB7"] = "MF / ADF.USIM / EF.ECC",
+    ["6FC4"] = "MF / ADF.USIM / EF.NETPAR",
+    ["6FE3"] = "MF / ADF.USIM / EF.EPSLOCI",
+    ["6FE4"] = "MF / ADF.USIM / EF.EPSNSC",
     ["7F10"] = "MF / DF.TELECOM",
     ["7F20"] = "MF / DF.GSM",
     ["7FF0"] = "MF / ADF.USIM",
     ["7FF2"] = "MF / ADF.ISIM",
+    ["7FF3"] = "MF / ADF.CSIM",
 }
 
 M.AID_PATHS = {

@@ -1656,6 +1656,11 @@ local function add_response_subtree(
                 data_item:set_text(
                     "Response data: " .. responses.template_name(first_tag.value)
                 )
+            elseif first_tag ~= nil and rsp.is_rsp_function(first_tag.value) then
+                -- An EUICCInfo2 (BF22) or other RSP structure returned in a
+                -- response: name its BFxx / euiccCiPKId / BPP members rather
+                -- than leaving A9/AA to the generic context-tag fallback.
+                options = rsp.tlv_options()
             end
 
             -- The INITIALIZE UPDATE response is positional, not TLV.
@@ -1788,16 +1793,28 @@ local function add_atr_subtree(tree, payload, atr)
         local interface_byte = atr.interface_bytes[index]
         local range = util.safe_range(payload, interface_byte.offset, 1)
         if range ~= nil then
+            local label = interface_byte.name
+            if interface_byte.detail ~= nil then
+                label = label .. " — " .. interface_byte.detail
+            end
             item:add(fields.atr_interface, range)
-                :append_text(string.format(" (%s)", interface_byte.name))
+                :append_text(string.format(" (%s)", label))
         end
     end
     for index = 1, #atr.protocols do
         local protocol = atr.protocols[index]
         local range = util.safe_range(payload, protocol.offset, 1)
         if range ~= nil then
-            item:add(fields.atr_protocol, range, protocol.value)
-                :append_text(string.format(" (T=%d)", protocol.value))
+            local proto_item = item:add(fields.atr_protocol, range, protocol.value)
+            if protocol.is_global == true then
+                proto_item:append_text(
+                    " (T=15: global interface bytes indicator, not an offered protocol)"
+                )
+            else
+                proto_item:append_text(
+                    string.format(" (offered protocol T=%d)", protocol.value)
+                )
+            end
         end
     end
     if atr.historical_count > 0 then
@@ -1805,7 +1822,29 @@ local function add_atr_subtree(tree, payload, atr)
             payload, atr.historical_offset, atr.historical_count
         )
         if range ~= nil then
-            item:add(fields.atr_historical, range)
+            local hist_item = item:add(fields.atr_historical, range)
+            local hist = atr.historical
+            if hist ~= nil then
+                local cat_range = util.safe_range(payload, atr.historical_offset, 1)
+                if cat_range ~= nil then
+                    hist_item:add(
+                        fields.atr_historical_category, cat_range, hist.category
+                    ):append_text(string.format(" (%s)", hist.category_name))
+                end
+                for oi = 1, #hist.objects do
+                    local obj = hist.objects[oi]
+                    local span = util.safe_range(
+                        payload, obj.offset, obj.value_length + 1
+                    )
+                    if span ~= nil then
+                        hist_item:add(fields.atr_historical_object, span)
+                            :append_text(string.format(
+                                " (%s, %s)", obj.name,
+                                util.plural_bytes(obj.value_length)
+                            ))
+                    end
+                end
+            end
         end
     end
     if atr.tck ~= nil then
@@ -2113,19 +2152,23 @@ local function dissect_exchange(payload, pinfo, tree)
         "YggdraSIM APDU: %s -> %04X", command.name, response.status_word
     ))
 
-    if yapdu.prefs.set_info_column == true then
-        local detail = commands.summary(description)
-        -- The most specific reading wins the column: naming the ES10
-        -- function or the GlobalPlatform variant is what an operator is
-        -- scanning the packet list for.
-        if rsp_description ~= nil then
-            detail = rsp_description.name
-        else
-            local gp_detail = gp.summary(gp_description)
-            if gp_detail ~= "" then
-                detail = gp_detail
-            end
+    -- The most specific reading is what an operator scans for: the ES10
+    -- function or GlobalPlatform variant beats the bare command detail.
+    -- Surfaced as its own field (so it can be a column) and in Info.
+    local detail = commands.summary(description)
+    if rsp_description ~= nil then
+        detail = rsp_description.name
+    else
+        local gp_detail = gp.summary(gp_description)
+        if gp_detail ~= "" then
+            detail = gp_detail
         end
+    end
+    if detail ~= "" then
+        root:add(fields.operation, payload(0, 0), detail):set_generated()
+    end
+
+    if yapdu.prefs.set_info_column == true then
         local summary
         if detail ~= "" then
             summary = string.format(

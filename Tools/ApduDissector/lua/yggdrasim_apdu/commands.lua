@@ -260,7 +260,15 @@ local function describe_select(payload, command)
     end
     if #parts > 0 then
         description.path = table.concat(parts, "/")
-        description.target = "path " .. description.path
+        -- Resolve the selected file (the last identifier) to its named
+        -- path when known, matching the single-identifier SELECT; fall
+        -- back to the raw path otherwise.
+        local named = M.file_name(parts[#parts])
+        if named ~= "" then
+            description.target = named
+        else
+            description.target = "path " .. description.path
+        end
     end
     return description
 end
