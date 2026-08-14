@@ -2164,6 +2164,31 @@ local function dissect_exchange(payload, pinfo, tree)
             detail = gp_detail
         end
     end
+
+    -- Anchor file operations to the selected file. READ/UPDATE BINARY,
+    -- READ/UPDATE RECORD and the GET RESPONSE that follows a SELECT act on
+    -- whatever is currently selected and stay about that file until the
+    -- next SELECT; state.response_file already resolves which file that is
+    -- (including the pending file a GET RESPONSE is fetching). SELECT names
+    -- its own target, so it is left as it is.
+    local ins = command.ins
+    if ins == commands.INS_READ_BINARY or ins == commands.INS_UPDATE_BINARY
+        or ins == commands.INS_READ_RECORD or ins == commands.INS_UPDATE_RECORD
+        or ins == commands.INS_GET_RESPONSE then
+        local fid = state.response_file(context, command)
+        local file = ""
+        if fid ~= nil and fid ~= "" then
+            file = commands.file_name(fid)
+        end
+        if file ~= "" then
+            if detail ~= "" then
+                detail = file .. " (" .. detail .. ")"
+            else
+                detail = file
+            end
+        end
+    end
+
     if detail ~= "" then
         root:add(fields.detail, payload(0, 0), detail):set_generated()
     end
