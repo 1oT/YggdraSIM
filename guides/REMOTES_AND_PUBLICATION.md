@@ -71,16 +71,31 @@ A snapshot commit carries key material. Merging one into `main` puts that
 material in the public history, and the objects stay reachable on any
 remote that has seen them even after a branch delete.
 
-### Never force-push `gitlab/main`
+### Prove a force-push loses nothing before you make it
 
-`gitlab/main` predates the current split and holds paths that exist in no
-other history, including `Tools/Sunrise6G/` and the IPA polling stack.
-`scripts/internal-sync.sh` only ever writes the `internal` branch and does
-not touch it. Verify before any manual push:
+A force-push is safe exactly when nothing is reachable only from the ref
+being overwritten. That is a question about the whole ref graph, not about
+two branches, so compare against every ref rather than against your
+current branch:
 
 ```bash
-git diff --name-status refs/heads/main..gitlab/main | awk '$1=="A"'
+# Commits reachable from the target and from nowhere else. Zero means the
+# force-push discards no history that is not preserved somewhere.
+git rev-list <target-ref> --not --all --remotes | wc -l
 ```
+
+Comparing two refs with `git diff` answers a different and much narrower
+question, and reading its output as a safety check overstates the risk:
+paths absent from your branch are routinely still held by a release
+branch, another remote, or a tag. Check the file set the same way, across
+all refs, if you want a per-path answer.
+
+Preserve the tip first regardless -- `git update-ref refs/backup/<name>
+<sha>` costs nothing and keeps the old line recoverable without putting it
+back in `refs/heads/*`.
+
+`scripts/internal-sync.sh` writes only the `internal` branch and never
+touches `gitlab/main`, so routine snapshot publishing raises none of this.
 
 ## Authorship
 
