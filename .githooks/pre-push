@@ -2,18 +2,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 #
-# Refuse to push key material to a public remote.
+# Refuse to push key material or assistant attribution to a public remote.
 #
-# Two failure modes this exists to stop, both of which are unrecoverable
-# once they land — the objects stay reachable in the remote's history
-# even after a branch is deleted:
+# Three failure modes this exists to stop, all unrecoverable once they
+# land — the objects stay reachable in the remote's history even after a
+# branch is deleted:
 #
 #   1. pushing the `internal` branch to GitHub
 #   2. pushing any ref whose tip carries operator material to GitHub
+#   3. pushing commits whose author or trailers name an assistant tool
 #
-# (2) is the one that matters: it catches an accidental merge of
+# (2) is the one that matters most: it catches an accidental merge of
 # `internal` into `main` before it reaches the public remote, which no
-# amount of branch-name checking would.
+# amount of branch-name checking would. (3) enforces the authorship rule
+# in guides/REMOTES_AND_PUBLICATION.md at the only boundary where it still matters.
 #
 # Install with: git config core.hooksPath .githooks
 
@@ -31,6 +33,11 @@ INTERNAL_BRANCH="${YGGDRASIM_INTERNAL_BRANCH:-internal}"
 # Anything matching an ignore rule and absent from the allowlist is
 # treated as operator material and blocked.
 ALLOWLIST="scripts/release/public-ignored-allowlist.txt"
+
+# Authorship shapes that name an assistant tool. Deliberately narrow:
+# these match attribution, not prose, so a how-to that names an MCP
+# client as a supported integration is not caught.
+ATTRIBUTION_RE='@anthropic\.com|claude\.ai/code|Claude-Session:|Co-[Aa]uthored-[Bb]y:.*(Claude|Copilot|Codex|ChatGPT|Gemini|anthropic|openai)|Generated with \[?(Claude|Copilot|Codex|Cursor)|^(Claude|Copilot|Codex|Cursor|ChatGPT|Gemini)( |$)'
 
 is_public_remote() {
   case "$1" in
@@ -77,9 +84,40 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   )"
   if [ -n "$offenders" ]; then
     count="$(printf '%s\n' "$offenders" | wc -l | tr -d ' ')"
-    first="$(printf '%s\n' "$offenders" | head -n 3 | sed 's/^/      /')"
+    # awk rather than head: head exits after three lines, and a large
+    # offender list then SIGPIPEs the printf, which under `set -o pipefail`
+    # kills the hook with 141 before it can report anything. The push still
+    # aborts, but the operator never learns why.
+    first="$(printf '%s\n' "$offenders" | awk 'NR<=3' | sed 's/^/      /')"
     fail "ref '$short_ref' carries $count force-added path(s) that .gitignore hides:
 $first"
+  fi
+
+  # Authorship check. The range is what this push would actually add to
+  # the remote: remote_sha is all-zeros for a new branch and stale if the
+  # remote moved, so derive it from the remote's tracking refs instead.
+  if [ -n "$REMOTE_NAME" ]; then
+    range_args="$local_sha --not --remotes=$REMOTE_NAME"
+  elif [ -n "${remote_sha//0/}" ]; then
+    range_args="$remote_sha..$local_sha"
+  else
+    range_args="$local_sha"
+  fi
+
+  tainted=""
+  for sha in $(git rev-list $range_args); do
+    if git log -1 --format='%an%n%ae%n%cn%n%ce%n%B' "$sha" \
+         | grep -qE "$ATTRIBUTION_RE"; then
+      tainted="$tainted$(git log -1 --format='%h %an <%ae> %s' "$sha")
+"
+    fi
+  done
+  if [ -n "$tainted" ]; then
+    count="$(printf '%s' "$tainted" | grep -c . || true)"
+    first="$(printf '%s' "$tainted" | awk 'NR<=3' | sed 's/^/      /')"
+    fail "ref '$short_ref' carries $count commit(s) attributing authorship to an assistant tool:
+$first
+  Rewrite the range before publishing. See guides/REMOTES_AND_PUBLICATION.md."
   fi
 done
 
