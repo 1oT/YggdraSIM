@@ -188,3 +188,7 @@ site-docs/sources/*_REMEDIATION.md
 site-docs/sources/*_HANDOFF.md
 site-docs/sources/NEW_FEATURE_IDEAS.md
 site-docs/sources/reports/
+
+# Assistant-facing working notes. Kept on disk, never tracked.
+guides/AGENT_SECURE_ELEMENT.md
+site-docs/sources/guides/AGENT_SECURE_ELEMENT.md

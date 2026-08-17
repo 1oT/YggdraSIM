@@ -1310,6 +1310,11 @@ class LocalAccessSessionTests(unittest.TestCase):
     def test_real_sgp26_bundle_resolves_variant_o_nist_auth_and_pb(self):
         project_root = Path(__file__).resolve().parent.parent
         valid_root = project_root / "SCP11" / "SGP.26_test_Certs" / "Valid Test Cases"
+        # The SGP.26 bundle is GSMA reference material and is not tracked.
+        # A checkout that has not been populated with it skips rather than
+        # reporting a resolution failure that is really a missing fixture.
+        if not valid_root.is_dir():
+            self.skipTest("SGP.26 reference certificates absent from this checkout")
         store = LocalSgp26CertStore(str(valid_root), prefer_curve="NIST")
 
         auth_record = store.resolve_auth_record(["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"])

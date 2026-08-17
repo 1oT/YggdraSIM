@@ -30,6 +30,10 @@ EXCLUDED_SOURCE_PARTS = {
 
 EXCLUDED_SOURCE_FILES = {
     "tests/eim-sh/" + "EIM_" + "POLL" + "_SEQUENCE.md",
+    # Assistant-facing working notes. Kept on disk for local use, never
+    # tracked and never published, so the generated index stays identical
+    # between a working checkout and a fresh clone.
+    "guides/AGENT_SECURE_ELEMENT.md",
 }
 
 # Top-level Markdown files that should be mirrored alongside the README so
