@@ -227,7 +227,7 @@ class PluginManager:
             # already in sys.modules because an earlier ``import
             # plugins.<name>`` beat the runtime to the punch, reuse
             # that object. This prevents sys.modules from forking into
-            # two distinct copies of the same plugin — a condition
+            # two distinct copies of the same plugin -- a condition
             # that silently breaks ``mock.patch`` targets in tests.
             existing = sys.modules.get(module_name)
             if existing is not None:
@@ -464,7 +464,7 @@ def plugin_status_report() -> dict[str, Any]:
     plugins_dir = ""
     try:
         plugins_dir = ensure_runtime_dir(_PLUGIN_DIR_NAME)
-    except Exception:  # noqa: BLE001 — never let reporting raise
+    except Exception:  # noqa: BLE001 -- never let reporting raise
         plugins_dir = ""
 
     plugins: list[dict[str, str]] = []

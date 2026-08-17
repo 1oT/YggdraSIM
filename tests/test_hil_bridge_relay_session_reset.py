@@ -6,8 +6,8 @@
 Operator shells drive the card through the APDU relay while a modem
 session may be live, and they leave selected AIDs, open logical
 channels, and established SCP03 / SCP11 secure channels behind. The
-SIMtrace2 board reset cannot clear any of that — the card sits in the
-PC/SC reader, not on the board — so the bridge resets the card when a
+SIMtrace2 board reset cannot clear any of that -- the card sits in the
+PC/SC reader, not on the board -- so the bridge resets the card when a
 relay session starts, is replaced, or ends.
 
 No reader, no sockets, and no HTTP server: the bridge is assembled from

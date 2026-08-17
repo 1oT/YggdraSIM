@@ -246,7 +246,7 @@ class PcscCardChannel:
         ``SCARD_UNPOWER_CARD``, but :meth:`reset_card` deliberately
         rewrites that attribute mid-flight, and a caller that reaches
         us with ``SCARD_LEAVE_CARD`` still set would leave the card
-        powered and holding its session state — exactly the leak a
+        powered and holding its session state -- exactly the leak a
         disconnect is supposed to close.
         """
         if self._connection is None:

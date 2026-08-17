@@ -30,15 +30,18 @@ class RepoHygieneTests(unittest.TestCase):
         )
 
     def test_identifier_and_report_rules_stay_clean(self) -> None:
-        """Section 1 identifiers and section 3 report filenames carry no baseline.
+        """Identifiers, report filenames and attribution carry no baseline.
 
-        These two never had accepted violations, so any hit is new work
-        regardless of the baseline file.
+        These never had accepted violations, so any hit is new work
+        regardless of the baseline file. Attribution joins them because a
+        tracked file may never credit an assistant as an author; see
+        guides/REMOTES_AND_PUBLICATION.md.
         """
         offenders = [
             violation
             for violation in collect()
-            if violation.check in {"iccid-ascii", "iccid-bcd", "report-filename"}
+            if violation.check
+            in {"iccid-ascii", "iccid-bcd", "report-filename", "ai-attribution"}
         ]
         formatted = "\n".join(
             f"  [{item.check}] {item.path}:{item.line} {item.detail}" for item in offenders

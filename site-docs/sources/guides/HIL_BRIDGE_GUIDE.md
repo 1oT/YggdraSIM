@@ -510,23 +510,23 @@ Modes, selected with `--simtrace-reset` or `YGGDRASIM_HIL_SIMTRACE_RESET`:
 
 | Mode | What it does | Needs |
 |------|--------------|-------|
-| `usb-reset` *(default)* | `USBDEVFS_RESET` on `/dev/bus/usb/BBB/DDD` — the kernel drives a port reset, the firmware reboots | write access to the device node |
+| `usb-reset` *(default)* | `USBDEVFS_RESET` on `/dev/bus/usb/BBB/DDD` -- the kernel drives a port reset, the firmware reboots | write access to the device node |
 | `port-power` | VBUS cycle through `uhubctl`; a true unplug/replug of the board | `uhubctl` plus a hub with per-port power switching |
 | `auto` | `usb-reset`, falling back to `port-power` when it fails | as above |
-| `off` | no automatic reset | — |
+| `off` | no automatic reset | -- |
 
 > **This resets the board, not the card.** In this topology the SIM
 > lives in the PC/SC reader; the SIMtrace2 only emulates a card toward
 > the modem. Neither mode touches the card unless the reader happens to
 > hang off the same switched hub port. Card state is cleared separately
-> — see [5.2](#52-card-session-hygiene).
+> -- see [5.2](#52-card-session-hygiene).
 
 Ordering inside the supervisor is deliberate:
 
 1. the remsim client is stopped, so the bus is never reset underneath an
    open libusb handle
 2. the board is reset and the supervisor waits for it to re-enumerate
-3. the USB snapshot is re-read — **a reset changes the device's USB
+3. the USB snapshot is re-read -- **a reset changes the device's USB
    address**, and the generated remsim command pins it with `-A`, so the
    bridge and client are always started from the post-reset snapshot
 
@@ -559,7 +559,7 @@ export YGGDRASIM_HIL_UHUBCTL_PORT=2
 The launcher and the GUI copy these into the generated `systemd --user`
 unit, so the setting survives service restarts.
 
-To reset the board by hand — the remote equivalent of walking over and
+To reset the board by hand -- the remote equivalent of walking over and
 pressing the button:
 
 ```bash
@@ -577,7 +577,7 @@ jq .simtraceReset ~/.local/state/yggdrasim/state/hil_bridge_supervisor.json
 
 > **Do not use `dfu-util --detach` for this.** The DFU runtime interface
 > in the application firmware latches `USB_DFU_MAGIC` before resetting,
-> and the SIMtrace2 bootloader has no auto-boot timeout — the board
+> and the SIMtrace2 bootloader has no auto-boot timeout -- the board
 > parks in DFU mode (`1d50:4004`) until somebody physically power-cycles
 > it. That is precisely the situation a remote rig cannot recover from.
 
@@ -591,8 +591,8 @@ an established SCP03 / SCP11 secure channel, PIN verification status.
 Two mechanisms clear it, both power-cycling the card with
 `SCardReconnect(..., SCARD_UNPOWER_CARD)` and re-reading the ATR:
 
-**Modem sessions.** When `osmo-remsim-client-st2` attaches — or
-re-attaches after the board reset — the bridge power-cycles the card
+**Modem sessions.** When `osmo-remsim-client-st2` attaches -- or
+re-attaches after the board reset -- the bridge power-cycles the card
 and pushes the fresh ATR to the modem with `setAtrReq`. So every modem
 session starts from a card that just came up.
 
@@ -607,7 +607,7 @@ modem next read the SIM.
 A card power-cycle invalidates everyone's view of the card, so it also
 drops the bankd side: `osmo-remsim-client-st2` re-handshakes and re-reads
 the ATR rather than transacting against state that no longer exists.
-Expect a modem re-attach whenever you start or finish shell work — that
+Expect a modem re-attach whenever you start or finish shell work -- that
 is the mechanism working, not a fault.
 
 Watch it in the bridge log:
@@ -619,7 +619,7 @@ Reset card for modem session; reader … ATR 3B9F… reset={'mode': 'pcsc-reconn
 
 Set `YGGDRASIM_HIL_RELAY_SESSION_RESET=0` (or pass
 `--no-relay-session-reset`) only for workflows that deliberately carry
-card state across sessions — for example driving a secure channel from
+card state across sessions -- for example driving a secure channel from
 a shell and then inspecting it from another tool.
 
 ## 6. Attach Wireshark
@@ -751,7 +751,7 @@ are auto-discovered in this order:
 2. `<stem>.keys.json` (capture path with extension stripped + `.keys.json`)
 
 Both locations are checked before the TUI launches. A missing or
-unreadable keybag is non-fatal — ciphered APDUs simply stay wrapped
+unreadable keybag is non-fatal -- ciphered APDUs simply stay wrapped
 in the TUI.
 
 ### 11.3 Producing a keybag
@@ -874,11 +874,11 @@ is for. Check whether it is actually running:
 jq .simtraceReset ~/.local/state/yggdrasim/state/hil_bridge_supervisor.json
 ```
 
-- `"enabled": false` — the mode is `off`; set `YGGDRASIM_HIL_SIMTRACE_RESET=usb-reset`
+- `"enabled": false` -- the mode is `off`; set `YGGDRASIM_HIL_SIMTRACE_RESET=usb-reset`
   and restart the supervisor.
-- `last.error` mentioning *Permission denied* — the supervisor cannot
+- `last.error` mentioning *Permission denied* -- the supervisor cannot
   open `/dev/bus/usb/BBB/DDD`. Install the udev rule from 5.1.
-- `last.reenumerated: false` — the reset was issued but the board did
+- `last.reenumerated: false` -- the reset was issued but the board did
   not come back within the settle window. Raise
   `--simtrace-reset-settle-timeout`, and if the board is genuinely dead
   on the bus after a USB reset, switch to `port-power` so VBUS is cut
@@ -892,7 +892,7 @@ its session across a board reset, so look at
 session that failed. If neither appears, the card was never cleared.
 
 Note that `port-power` does not help here either unless the PC/SC
-reader shares the switched hub port with the board — the card is behind
+reader shares the switched hub port with the board -- the card is behind
 the reader, not the SIMtrace2.
 
 ### YggdraSIM falls back to direct PC/SC

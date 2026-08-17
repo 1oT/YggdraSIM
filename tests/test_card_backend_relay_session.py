@@ -98,7 +98,7 @@ class RelaySessionLifecycleTests(unittest.TestCase):
         )
 
     def test_disconnect_without_any_apdu_stays_silent(self) -> None:
-        # Nothing reached the card, so there is no state to clear — and
+        # Nothing reached the card, so there is no state to clear -- and
         # no reason to bounce a modem that may be mid-session.
         captured: list[dict[str, Any]] = []
         with patch.object(card_backend, "_request_card_relay_json", side_effect=_fake_relay(captured)):

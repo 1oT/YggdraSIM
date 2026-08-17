@@ -129,7 +129,7 @@ def list_flags() -> EnvFlagListResponse:
 
 @router.get("/plugins", response_model=PluginStatusResponse)
 def list_plugins() -> PluginStatusResponse:
-    """Report which optional runtime plugins loaded — or why none did.
+    """Report which optional runtime plugins loaded -- or why none did.
 
     Plugin loading is gated by ``YGGDRASIM_ALLOW_PLUGINS`` (surfaced as a
     flag in this same view) and evaluated once at startup, so

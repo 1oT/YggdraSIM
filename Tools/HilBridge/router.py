@@ -1250,7 +1250,7 @@ class HilBridgeServer:
         real state behind: a selected AID, open logical channels, an
         established SCP03 / SCP11 secure channel, PIN verification
         status. None of that is cleared by the SIMtrace2 board reset —
-        the card lives in the PC/SC reader, not on the board — so
+        the card lives in the PC/SC reader, not on the board -- so
         without this a shell session leaks its state into whatever
         touches the card next.
 
@@ -1283,7 +1283,7 @@ class HilBridgeServer:
         """Power-cycle the card and make every consumer re-read it.
 
         A cold reset drops the card's session state, so any modem
-        already attached is holding a stale view — stale ATR, stale
+        already attached is holding a stale view -- stale ATR, stale
         channel state. Dropping the bankd side makes
         ``osmo-remsim-client-st2`` re-handshake, which routes through
         :meth:`_reset_card_for_modem_session` and re-sends the ATR the
@@ -1291,8 +1291,8 @@ class HilBridgeServer:
         resync is what leaves a modem talking to a card it no longer
         understands.
 
-        Runs on the relay HTTP thread. The card half is safe there —
-        ``CardWorker`` serialises it — but the socket half is not: the
+        Runs on the relay HTTP thread. The card half is safe there --
+        ``CardWorker`` serialises it -- but the socket half is not: the
         selector belongs to the event loop, so the bankd close is
         queued for :meth:`_process_completed_exchanges` instead of
         being done here.
@@ -1319,7 +1319,7 @@ class HilBridgeServer:
     def _drain_pending_card_resync(self) -> None:
         """Close the bankd side for card power-cycles queued off-thread.
 
-        Must run on the event-loop thread — it touches the selector.
+        Must run on the event-loop thread -- it touches the selector.
         """
         reasons: list[str] = []
         while True:
@@ -1486,7 +1486,7 @@ class HilBridgeServer:
 
     def _refresh_card(self, *, reconnect: bool) -> None:
         # Drain the worker before touching the card connection so
-        # the event loop never blocks on _card_lock — the worker
+        # the event loop never blocks on _card_lock -- the worker
         # is guaranteed idle by the time we acquire it.
         if reconnect:
             self._card_worker.drain(timeout=5.0)

@@ -655,8 +655,8 @@ def _compose_bridge_ready_failure(
 
     The supervisor publishes a ``status`` field (``running``,
     ``restart-pending``, ``start-failed``, ``usb-detect-error`` …) and
-    a free-form ``reason``. Surfacing the raw ``reason`` on timeout —
-    as the previous implementation did — was misleading because a
+    a free-form ``reason``. Surfacing the raw ``reason`` on timeout --
+    as the previous implementation did -- was misleading because a
     transient ``restart-pending`` reason like
     ``Waiting 1.0s before bridge restart (simulated card backend).``
     looks like a non-fatal hint but is actually the symptom of a

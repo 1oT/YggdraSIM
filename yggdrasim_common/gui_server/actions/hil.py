@@ -2439,7 +2439,7 @@ def _dispatch_supervisor_launch(
     confirm: Any = None,
 ) -> dict[str, Any]:
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — launching the supervisor starts a long-running subprocess.")
+        raise ValueError("confirm must be true -- launching the supervisor starts a long-running subprocess.")
 
     import subprocess
     import shlex

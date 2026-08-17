@@ -452,8 +452,8 @@ def run_card_bridge(
 
     def card_reset_callback(*, session_id: str = "", boundary: str = "") -> dict[str, Any]:
         # The Card Bridge serves a bare reader with no modem session to
-        # resynchronise, so every relay-session boundary — start, switch,
-        # or end — means the same thing here: power-cycle the card.
+        # resynchronise, so every relay-session boundary -- start, switch,
+        # or end -- means the same thing here: power-cycle the card.
         del session_id, boundary
         reset_method = getattr(channel, "reset_card", None)
         reset_payload: dict[str, Any] = {}

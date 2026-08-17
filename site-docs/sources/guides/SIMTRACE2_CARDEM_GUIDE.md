@@ -285,7 +285,7 @@ runtime handler stores `USB_DFU_MAGIC` before resetting
 `firmware/atmel_softpack_libraries/usb/device/dfu/dfu_runtime.c`), the
 bootloader honours that magic on the next boot, and it has no auto-boot
 timeout. The board stays at `1d50:4004` until it is physically
-power-cycled or re-flashed — the worst possible outcome for a board in
+power-cycled or re-flashed -- the worst possible outcome for a board in
 another building. Keep `dfu-util` for firmware updates only.
 
 ## 10. Troubleshooting checklist
@@ -306,9 +306,9 @@ another building. Keep `dfu-util` for firmware updates only.
 
 ## Related guides
 
-- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) — operator flow.
-- [`INSTALL_FULL.md`](INSTALL_FULL.md) — HIL-capable executable install.
-- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) — Pi-specific HIL notes.
+- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) -- operator flow.
+- [`INSTALL_FULL.md`](INSTALL_FULL.md) -- HIL-capable executable install.
+- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) -- Pi-specific HIL notes.
 - Osmocom upstream documentation:
   - <https://osmocom.org/projects/sim-card/wiki/SIMtrace2>
   - <https://osmocom.org/projects/osmo-remsim/wiki>

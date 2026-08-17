@@ -2,8 +2,8 @@
 """Check tracked content against the release-hygiene rules in CLAUDE.md.
 
 Covers the mechanically checkable parts of sections 1 to 4: reserved-range
-identifiers, banned typography, AI-style prose, internal-report filenames,
-and personal TODO markers.
+identifiers, banned typography, AI-style prose, assistant attribution,
+internal-report filenames, and personal markers.
 
 The tree carries pre-existing typography violations, so a strict gate
 would fail on adoption. Runs therefore compare against a recorded
@@ -38,8 +38,10 @@ TEXT_SUFFIXES = frozenset(
 # against the source rather than twice.
 MIRROR_PREFIX = "site-docs/sources/"
 
-# This file necessarily contains the patterns it searches for.
+# These files necessarily contain the patterns they define or search for.
 SELF_PATH = "scripts/check_repo_hygiene.py"
+RULE_DOC_PATH = "guides/REMOTES_AND_PUBLICATION.md"
+EXEMPT_PATHS = frozenset({SELF_PATH, RULE_DOC_PATH})
 
 
 class Violation(NamedTuple):
@@ -122,6 +124,34 @@ BANNED_PHRASES = (
 )
 
 
+# --- Section 2: assistant attribution ------------------------------------
+
+# Authorship shapes, not product names. Naming an assistant product as a
+# supported integration -- an MCP client in a how-to, say -- is
+# documentation; claiming it as an author is the thing being banned. The
+# patterns therefore match trailers and identities only.
+ATTRIBUTION_CHECKS = (
+    (re.compile(r"@anthropic\.com"), "assistant identity in an authorship field"),
+    (re.compile(r"claude\.ai/code"), "assistant session link"),
+    (re.compile(r"Claude-Session:"), "assistant session trailer"),
+    (
+        re.compile(
+            r"Co-authored-by:\s*\S.*(?:Claude|Copilot|Codex|ChatGPT|Gemini|anthropic|openai)",
+            re.IGNORECASE,
+        ),
+        "assistant named in a Co-authored-by trailer",
+    ),
+    (
+        re.compile(r"Generated with \[?(?:Claude|Copilot|Codex|Cursor)"),
+        "assistant named in a generation credit",
+    ),
+    (
+        re.compile(r"@author\s+(?:Claude|Copilot|Codex|Cursor|ChatGPT|Gemini)", re.IGNORECASE),
+        "assistant named in an @author tag",
+    ),
+)
+
+
 # --- Section 3 and 4: filenames and markers ------------------------------
 
 # Internal-report document shapes that belong in .git/info/exclude.
@@ -182,20 +212,71 @@ def scan_filenames(paths: Iterable[str]) -> list[Violation]:
     return found
 
 
+def quoted_lines(path: str, text: str) -> frozenset[int]:
+    """Line numbers holding cited source rather than prose written here.
+
+    The typography, prose and marker rules police what this repository
+    writes. Editing a quotation to satisfy them would misreport what the
+    upstream actually says, so citations are skipped. Two shapes carry
+    them: a fenced block in Markdown, and an reStructuredText literal
+    block introduced by a trailing ``::`` in a Python docstring.
+    """
+    lines = text.splitlines()
+    quoted: set[int] = set()
+
+    if path.endswith(".md"):
+        in_fence = False
+        for number, line in enumerate(lines, start=1):
+            if line.lstrip().startswith(("```", "~~~")):
+                in_fence = not in_fence
+                quoted.add(number)
+                continue
+            if in_fence:
+                quoted.add(number)
+        return frozenset(quoted)
+
+    if path.endswith(".py"):
+        indent_of = lambda text_line: len(text_line) - len(text_line.lstrip())  # noqa: E731
+        block_indent: int | None = None
+        for number, line in enumerate(lines, start=1):
+            if block_indent is not None:
+                if not line.strip():
+                    quoted.add(number)
+                    continue
+                if indent_of(line) > block_indent:
+                    quoted.add(number)
+                    continue
+                block_indent = None
+            if line.rstrip().endswith("::"):
+                block_indent = indent_of(line)
+        return frozenset(quoted)
+
+    return frozenset()
+
+
 def scan_contents(paths: Iterable[str]) -> list[Violation]:
     found: list[Violation] = []
     for path in paths:
-        if path.startswith(MIRROR_PREFIX) or path == SELF_PATH:
+        if path.startswith(MIRROR_PREFIX) or path in EXEMPT_PATHS:
             continue
         text = read_text(path)
         if text is None:
             continue
         is_source = path.endswith((".py", ".md"))
+        cited = quoted_lines(path, text)
         for line_number, line in enumerate(text.splitlines(), start=1):
             for check, pattern, detail in IDENTIFIER_CHECKS:
                 if pattern.search(line):
                     found.append(Violation(check, path, line_number, detail))
-            if not is_source:
+            found.extend(
+                Violation("ai-attribution", path, line_number, detail)
+                for pattern, detail in ATTRIBUTION_CHECKS
+                if pattern.search(line)
+            )
+            # Attribution and reserved identifiers are checked even inside a
+            # citation: quoting is no reason to carry a real ICCID or credit
+            # an assistant as author.
+            if not is_source or line_number in cited:
                 continue
             for character, detail in BANNED_CODEPOINTS:
                 if character in line:

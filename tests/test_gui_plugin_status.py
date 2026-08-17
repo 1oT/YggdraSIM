@@ -4,7 +4,7 @@
 """Plugin-status report + the ``/api/env_flags/plugins`` GUI route.
 
 The GUI "Configuration" (env_flags) view surfaces which optional runtime
-plugins loaded — or why none did. Loading is gated by
+plugins loaded -- or why none did. Loading is gated by
 ``YGGDRASIM_ALLOW_PLUGINS`` and evaluated once at startup, so the report is
 latch-aware: a live flag flip must advertise ``requires_restart`` rather than
 silently contradicting the toggle sitting next to it in the same panel.
@@ -31,7 +31,7 @@ except ImportError:
 
 _needs_gui_stack = pytest.mark.skipif(
     not _FASTAPI_AVAILABLE,
-    reason="FastAPI not installed — gui extra missing.",
+    reason="FastAPI not installed -- gui extra missing.",
 )
 
 

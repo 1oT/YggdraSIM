@@ -4,7 +4,7 @@
 """Remote equivalent of the SIMtrace2 reset button.
 
 Osmocom's cardem firmware reboots the SAM3 microcontroller on its own
-whenever the USB device leaves the ``CONFIGURED`` state — see
+whenever the USB device leaves the ``CONFIGURED`` state -- see
 ``firmware/apps/cardem/main.c`` in ``osmocom/simtrace2``::
 
     if (USBD_GetState() < USBD_STATE_CONFIGURED) {
@@ -39,7 +39,7 @@ This module drives that from the host, in two flavours:
 Deliberately **not** implemented: ``dfu-util --detach``. The DFU
 runtime interface in the application firmware latches
 ``USB_DFU_MAGIC`` before resetting (``DFURT_SwitchToDFU``), and the
-bootloader has no auto-boot timeout — the board would sit in DFU mode
+bootloader has no auto-boot timeout -- the board would sit in DFU mode
 (``1d50:4004``) until somebody physically power-cycles it. That is the
 exact failure this module exists to avoid.
 """
@@ -547,7 +547,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         description=(
-            "Reboot an attached SIMtrace2 board over USB — the remote "
+            "Reboot an attached SIMtrace2 board over USB -- the remote "
             "equivalent of pressing its reset button."
         )
     )
