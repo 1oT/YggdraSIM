@@ -131,12 +131,15 @@ BANNED_PHRASES = (
 # documentation; claiming it as an author is the thing being banned. The
 # patterns therefore match trailers and identities only.
 ATTRIBUTION_CHECKS = (
-    (re.compile(r"@anthropic\.com"), "assistant identity in an authorship field"),
+    (
+        re.compile(r"@(?:anthropic|cursor|openai)\.com"),
+        "assistant identity in an authorship field",
+    ),
     (re.compile(r"claude\.ai/code"), "assistant session link"),
     (re.compile(r"Claude-Session:"), "assistant session trailer"),
     (
         re.compile(
-            r"Co-authored-by:\s*\S.*(?:Claude|Copilot|Codex|ChatGPT|Gemini|anthropic|openai)",
+            r"Co-authored-by:\s*\S.*(?:Claude|Copilot|Codex|Cursor|ChatGPT|Gemini|anthropic|openai)",
             re.IGNORECASE,
         ),
         "assistant named in a Co-authored-by trailer",

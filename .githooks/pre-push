@@ -37,7 +37,7 @@ ALLOWLIST="scripts/release/public-ignored-allowlist.txt"
 # Authorship shapes that name an assistant tool. Deliberately narrow:
 # these match attribution, not prose, so a how-to that names an MCP
 # client as a supported integration is not caught.
-ATTRIBUTION_RE='@anthropic\.com|claude\.ai/code|Claude-Session:|Co-[Aa]uthored-[Bb]y:.*(Claude|Copilot|Codex|ChatGPT|Gemini|anthropic|openai)|Generated with \[?(Claude|Copilot|Codex|Cursor)|^(Claude|Copilot|Codex|Cursor|ChatGPT|Gemini)( |$)'
+ATTRIBUTION_RE='@(anthropic|cursor|openai)\.com|claude\.ai/code|Claude-Session:|Co-[Aa]uthored-[Bb]y:.*(Claude|Copilot|Codex|Cursor|ChatGPT|Gemini|anthropic|openai)|Generated with \[?(Claude|Copilot|Codex|Cursor)|^(Claude|Copilot|Codex|Cursor|ChatGPT|Gemini)( |$)'
 
 is_public_remote() {
   case "$1" in
