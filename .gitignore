@@ -35,6 +35,7 @@ SCP11/eim_local/eim_last_response_hex.txt
 SCP11/eim_local/eim_response_log.jsonl
 SCP11/eim_local/eim_poll_audit.sqlite3
 SCP11/eim_local/eim_runtime_state.json
+SCP11/SGP.26_test_Certs/
 
 *.pem
 *.der

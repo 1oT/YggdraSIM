@@ -61,6 +61,10 @@ class FrozenRuntimePathTests(unittest.TestCase):
             )
             self.assertTrue((runtime_root / "Workspace" / "LocalSMDPP" / "certs").is_dir())
             self.assertTrue((runtime_root / "Workspace" / "LocalSMDPP" / "profile").is_dir())
+            # The workspace tree is created; its contents are not asserted.
+            # The SGP.26 material is operator-supplied and untracked, so a
+            # clean checkout seeds an empty directory and _copy_file_if_missing
+            # returns without copying.
             self.assertTrue(
                 (
                     runtime_root
@@ -68,11 +72,7 @@ class FrozenRuntimePathTests(unittest.TestCase):
                     / "SCP11"
                     / "SGP.26_test_Certs"
                     / "Valid Test Cases"
-                    / "Variant O"
-                    / "SM-DP+"
-                    / "SM_DPauth"
-                    / "SM_DPauth-csr.cnf"
-                ).exists()
+                ).is_dir()
             )
             self.assertTrue((runtime_root / "Workspace" / "LocalSMDPP" / "profile" / "test_profile.txt").exists())
             self.assertTrue(
