@@ -18,6 +18,8 @@ file) may change without notice between minor releases.
 
 ## [Unreleased]
 
+## [2.1.0] -- 2026-08-18
+
 ### Added
 
 - `Tools/ApduDissector/` is a Wireshark and tshark dissector for the
@@ -166,6 +168,19 @@ file) may change without notice between minor releases.
   hardening, BYO-Open5GS resilience checks, and the public docs
   pass for these modules are still pending -- they are not part of
   the v1.0.0 promise.
+
+### Removed
+
+- `.gitlab-ci.yml`. The GitLab remote is an internal mirror, not a build
+  surface: releases are produced by the GitHub workflows under
+  `.github/workflows/`, so a second pipeline definition duplicated that
+  work and ran on every internal push. The file stays recoverable from
+  history if GitLab CI is wanted again.
+
+- The tracked GSMA SGP.26 reference certificates, the SM-DP+ test keys and
+  `SCP03/script.txt`. Certificates and private keys are operator-supplied
+  material even when the values are reference ones; the guides document
+  where to place them. See `guides/REMOTES_AND_PUBLICATION.md`.
 
 ## [1.0.1] -- 2026-06-05
 
@@ -338,6 +353,7 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
   values; pushing them to a shared remote was a foot-gun. The
   `reports/.gitkeep` placeholder documents the intended layout.
 
-[Unreleased]: https://example.invalid/yggdrasim/compare/v1.0.1...HEAD
+[Unreleased]: https://example.invalid/yggdrasim/compare/v2.1.0...HEAD
+[2.1.0]: https://example.invalid/yggdrasim/releases/tag/v2.1.0
 [1.0.1]: https://example.invalid/yggdrasim/releases/tag/v1.0.1
 [1.0.0]: https://example.invalid/yggdrasim/releases/tag/v1.0.0

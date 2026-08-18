@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yggdrasim"
-version = "2.0.0"
+version = "2.1.0"
 description = "YggdraSIM secure-element, eUICC, OTA, and SAIP toolkit."
 readme = "README.md"
 requires-python = ">=3.10"
