@@ -61,6 +61,14 @@ classifiers = [
 # live under optional extras so Windows, macOS, and Raspberry Pi installs stay
 # lean. See guides/INSTALL_CLEAN.md and guides/INSTALL_FULL.md for the two
 # supported bundling paths.
+#
+# Two entries below are PEP 508 direct references (``... @ git+https``).
+# PyPI rejects uploads whose ``Requires-Dist`` carries a direct
+# reference, so ``pipx install yggdrasim`` cannot resolve from PyPI
+# while they live here; pipx installs use a path or git specifier
+# instead (see scripts/install/README.md). pip honours direct
+# references from a local build, so source, editable, and pipx-from-git
+# installs are unaffected.
 dependencies = [
     "pyscard",
     "cryptography",
@@ -226,6 +234,19 @@ yggdrasim-session-diff = "yggdrasim_common.console_scripts:session_diff"
 yggdrasim-yggdracore = "yggdrasim_common.console_scripts:yggdracore"
 yggdrasim-card-clone = "yggdrasim_common.console_scripts:card_clone"
 
+# Windowless desktop launcher. setuptools writes ``gui-scripts`` against
+# ``pythonw.exe`` on Windows, so a double-clicked shortcut opens the
+# Command Center without a console window behind it; on Linux and macOS
+# the generated script is identical to a console entry. It is a separate
+# name rather than a second declaration of ``yggdrasim-gui`` because both
+# tables generate ``yggdrasim-gui.exe`` and the loser is overwritten
+# silently. ``yggdrasim-gui`` stays a console script for terminal use
+# (``yggdrasim-gui --web-server --token-file ...``); pipx exposes both
+# tables as apps, so both land on PATH. scripts/install_shortcuts.py
+# prefers this name when it writes the native launchers.
+[project.gui-scripts]
+yggdrasim-desktop = "yggdrasim_common.console_scripts:gui"
+
 [project.urls]
 Homepage = "https://github.com/1oT/YggdraSIM"
 Documentation = "https://github.com/1oT/YggdraSIM/tree/main/guides"
@@ -298,6 +319,16 @@ include-package-data = true
     "eim_identity_template.json",
     "isdr_config_template.json",
 ]
+# The launcher mark, byte-identical to site-docs/assets/images/
+# yggdrasil-mark.svg (guarded by tests/test_install_shortcuts.py).
+# scripts/install_shortcuts.py reads these from the installed package
+# when it writes native desktop launchers, so a pipx install carries
+# the icon without the source tree.
+"yggdrasim_common" = [
+    "assets/yggdrasim.svg",
+    "assets/yggdrasim-256.png",
+    "assets/yggdrasim-512.png",
+]
 "yggdrasim_common.gui_server" = [
     "static/app.css",
     "static/app.js",
@@ -315,6 +346,12 @@ include-package-data = true
 # present or setuptools is reusing stale egg-info.
 "SCP11" = ["es9_ca_lookup.json"]
 "SCP11.live" = ["es9_ca_lookup.json"]
+# The Wireshark capability probe is a diagnostic an engineer runs by hand
+# against a local tshark; the file's own header states it is not shipped.
+# The ``lua/*.lua`` include glob above would otherwise sweep it into the
+# wheel, where scripts/release/verify_wheel.py rejects it as a resource
+# outside scripts/release/bundle-data.json.
+"Tools.ApduDissector" = ["lua/probe_wireshark_env.lua"]
 
 [tool.black]
 # Canonical formatter target for the "style only" sweep flagged by audit

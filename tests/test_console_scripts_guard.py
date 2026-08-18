@@ -125,7 +125,7 @@ class GuardIntegrationWithEntryPointsTests(unittest.TestCase):
 
 
 class ConsoleScriptsResolveTests(unittest.TestCase):
-    """Every ``[project.scripts]`` entry in ``pyproject.toml`` must resolve.
+    """Every declared entry point in ``pyproject.toml`` must resolve.
 
     Closes the release-checklist item "console scripts launch via
     ``--cmd``" at the import-time level: each entry point must point at
@@ -133,14 +133,46 @@ class ConsoleScriptsResolveTests(unittest.TestCase):
     because several of them drop straight into an interactive shell;
     the PyInstaller bundle smoke in ``.github/workflows/build.yml``
     exercises the actual process-launch path.
+
+    ``[project.gui-scripts]`` is checked alongside ``[project.scripts]``
+    so the windowless desktop entry cannot lose the import check by
+    living in the other table.
     """
 
     def _load_project_scripts(self) -> dict[str, str]:
         with (_REPO_ROOT / "pyproject.toml").open("rb") as handle:
             payload = tomllib.load(handle)
-        scripts = payload.get("project", {}).get("scripts", {})
+        project = payload.get("project", {})
+        scripts = project.get("scripts", {})
+        gui_scripts = project.get("gui-scripts", {})
         self.assertIsInstance(scripts, dict)
-        return dict(scripts)
+        self.assertIsInstance(gui_scripts, dict)
+        collisions = set(scripts) & set(gui_scripts)
+        self.assertEqual(
+            collisions,
+            set(),
+            msg=(
+                "a name in both tables generates two launchers with the same "
+                f"file name and one is overwritten: {sorted(collisions)}"
+            ),
+        )
+        merged = dict(scripts)
+        merged.update(gui_scripts)
+        return merged
+
+    def test_windowless_desktop_entry_is_declared_as_a_gui_script(self) -> None:
+        with (_REPO_ROOT / "pyproject.toml").open("rb") as handle:
+            payload = tomllib.load(handle)
+        gui_scripts = payload.get("project", {}).get("gui-scripts", {})
+        self.assertIn(
+            "yggdrasim-desktop",
+            gui_scripts,
+            msg=(
+                "scripts/install_shortcuts.py prefers this name for native "
+                "launchers because gui-scripts is what makes the Windows "
+                "launcher pythonw-backed and windowless"
+            ),
+        )
 
     def test_every_registered_console_script_resolves_to_callable(self) -> None:
         scripts = self._load_project_scripts()

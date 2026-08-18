@@ -499,8 +499,18 @@ def _invoke_profile_saip_tool(arguments: Sequence[str]) -> int:
     return int(run_cli(arguments))
 
 
-def _install_missing_standard_streams() -> list[tuple[str, TextIO]]:
-    """Repair ``pythonw``/PyInstaller windowed streams for internal children."""
+def install_missing_standard_streams() -> list[tuple[str, TextIO]]:
+    """Repair ``pythonw``/PyInstaller windowed streams that are ``None``.
+
+    A windowless launcher (``pythonw.exe`` behind a ``.lnk``, a macOS
+    ``.app`` bundle, a ``.desktop`` entry with ``Terminal=false``) can
+    start the process with no standard streams at all. Any later
+    ``print`` then raises ``AttributeError`` on ``None``, so a
+    double-clicked launcher dies silently instead of reporting why.
+    Callers that keep running past the repair leave the replacements in
+    place; internal children pass them to
+    :func:`_restore_standard_streams` when the child returns.
+    """
     replacements: list[tuple[str, TextIO]] = []
     for attribute, descriptor, mode in (
         ("stdin", 0, "r"),
@@ -589,7 +599,7 @@ def dispatch_internal_entry(
     arguments = list(sys.argv[1:] if argv is None else argv)
     if len(arguments) == 0 or arguments[0] != INTERNAL_ENTRY_FLAG:
         return None
-    stream_replacements = _install_missing_standard_streams()
+    stream_replacements = install_missing_standard_streams()
     error_stream = stderr if stderr is not None else sys.stderr
     try:
         try:
@@ -628,6 +638,7 @@ __all__ = [
     "command_targets_internal_entry",
     "dispatch_internal_entry",
     "hidden_window_subprocess_kwargs",
+    "install_missing_standard_streams",
     "internal_entry_id_for_module",
     "launcher_targets_application_bundle",
     "resolve_source_python",
