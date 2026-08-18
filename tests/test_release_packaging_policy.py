@@ -450,12 +450,15 @@ class ReleaseMetadataTests(unittest.TestCase):
             )
 
     def test_tag_must_exactly_match_project_version(self) -> None:
+        # The literals track pyproject's version deliberately: deriving them
+        # from project_version() would restate validate_tag's own comparison
+        # and pass even with the function gutted. Bump them with the release.
         self.assertEqual(
-            release_validation.validate_tag(REPO_ROOT, "v2.0.0"),
-            "2.0.0",
+            release_validation.validate_tag(REPO_ROOT, "v2.1.0"),
+            "2.1.0",
         )
         with self.assertRaises(release_validation.ReleaseValidationError):
-            release_validation.validate_tag(REPO_ROOT, "v2.0.1")
+            release_validation.validate_tag(REPO_ROOT, "v2.1.1")
 
     def test_archive_listing_scan_matches_real_directory_components(self) -> None:
         listing = (

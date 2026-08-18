@@ -41,6 +41,7 @@
     "SCP11.test",
     "SIMCARD",
     "Tools",
+    "Tools.ApduDissector",
     "Tools.ApduFuzz",
     "Tools.Asn1TlvDecode",
     "Tools.CardBridge",
