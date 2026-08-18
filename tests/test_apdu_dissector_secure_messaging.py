@@ -183,6 +183,11 @@ class PlaintextFromSidecar(unittest.TestCase):
         )
         cls.keybag = _keybag(directory / "scp.keys.json")
 
+        # Gate before building the sidecar, not after: build_sidecar runs
+        # tshark itself, so a host without it raised TsharkMissingError out
+        # of setUpClass instead of skipping the class.
+        require_working_tshark(cls.capture)
+
         from Tools.ApduDissector.sidecar import build_sidecar
 
         cls.sidecar_path = directory / "scp.sidecar.json"
@@ -192,7 +197,6 @@ class PlaintextFromSidecar(unittest.TestCase):
             output_path=cls.sidecar_path,
         )
         cls.sidecar_path.chmod(0o644)
-        require_working_tshark(cls.capture)
 
     @classmethod
     def tearDownClass(cls) -> None:

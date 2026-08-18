@@ -688,7 +688,7 @@ def render_applescript(target: LauncherTarget) -> str:
 
 
 def apply_macos_icon(app_path: Path, *, dry_run: bool) -> None:
-    """Replace the applet's icon with the YggdraSIM mark.
+    """Replace the applet icon with the YggdraSIM mark.
 
     ``sips`` ships with macOS and converts the PNG straight to the
     ``.icns`` the bundle expects. A host without it keeps the default

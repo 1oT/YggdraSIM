@@ -1795,7 +1795,7 @@ local function add_atr_subtree(tree, payload, atr)
         if range ~= nil then
             local label = interface_byte.name
             if interface_byte.detail ~= nil then
-                label = label .. " — " .. interface_byte.detail
+                label = label .. " - " .. interface_byte.detail
             end
             item:add(fields.atr_interface, range)
                 :append_text(string.format(" (%s)", label))
