@@ -353,6 +353,29 @@ class CaptureApduChannel:
         return b""
 
 
+def _require_sgp26_bundle(case: unittest.TestCase) -> Path:
+    """Return the SGP.26 bundle root, or skip when it is not populated.
+
+    The bundle is GSMA reference material: ``.der`` is gitignored, while the
+    ``.cnf`` files beside it are tracked. A directory check therefore passes
+    on a fresh clone that holds no certificates at all, and the test fails
+    on a missing fixture rather than skipping. Probing for a certificate the
+    resolver must match is what actually distinguishes the two.
+    """
+    project_root = Path(__file__).resolve().parent.parent
+    valid_root = project_root / "SCP11" / "SGP.26_test_Certs" / "Valid Test Cases"
+    probe = (
+        valid_root
+        / "Variant O"
+        / "SM-DP+"
+        / "SM_DPauth"
+        / "CERT_S_SM_DPauth_VARO_SIG_NIST.der"
+    )
+    if not probe.is_file():
+        case.skipTest("SGP.26 reference certificates absent from this checkout")
+    return valid_root
+
+
 class LocalAccessSessionTests(unittest.TestCase):
     def test_local_access_dependency_stubs_are_scoped_to_context(self):
         for module_name in [
@@ -1308,13 +1331,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         )
 
     def test_real_sgp26_bundle_resolves_variant_o_nist_auth_and_pb(self):
-        project_root = Path(__file__).resolve().parent.parent
-        valid_root = project_root / "SCP11" / "SGP.26_test_Certs" / "Valid Test Cases"
-        # The SGP.26 bundle is GSMA reference material and is not tracked.
-        # A checkout that has not been populated with it skips rather than
-        # reporting a resolution failure that is really a missing fixture.
-        if not valid_root.is_dir():
-            self.skipTest("SGP.26 reference certificates absent from this checkout")
+        valid_root = _require_sgp26_bundle(self)
         store = LocalSgp26CertStore(str(valid_root), prefer_curve="NIST")
 
         auth_record = store.resolve_auth_record(["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"])
@@ -1330,6 +1347,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("Variant O/SM-DP+/SM_DPpb/CERT_S_SM_DPpb_VARO_SIG_NIST.der", pb_record.certificate_path)
 
     def test_open_session_uses_preloaded_bundle_when_certs_folder_has_no_override(self):
+        _require_sgp26_bundle(self)
         with tempfile.TemporaryDirectory() as temp_dir:
             certs_dir = Path(temp_dir)
             cfg = LocalAccessConfig(
@@ -1348,6 +1366,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("Variant O/SM-DP+/SM_DPauth/CERT_S_SM_DPauth_VARO_SIG_NIST.der", session.state.selected_auth_certificate_path)
 
     def test_partial_manual_override_pair_falls_back_to_bundle(self):
+        _require_sgp26_bundle(self)
         with tempfile.TemporaryDirectory() as temp_dir:
             certs_dir = Path(temp_dir)
             certs_dir.joinpath("CERT.DPauth.ECDSA.der").write_bytes(b"\x30\x00")
