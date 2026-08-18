@@ -12,6 +12,8 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+
+from tests.sgp26_support import require_sgp26_bundle
 from unittest import mock
 
 from cryptography import x509 as crypto_x509
@@ -414,6 +416,10 @@ def load_local_sgp26_auth_and_pb_material() -> tuple[
         / "Variant O"
         / "SM-DP+"
     )
+    # Skip rather than fail when the GSMA bundle was never placed in this
+    # checkout; the guard covers every caller of this loader.
+    require_sgp26_bundle()
+
     # Operator workstations may have applied envelope encryption (gpg) to
     # the SGP.26 reference material. read_secret_file_bytes transparently
     # decrypts PGP-wrapped payloads for both the CERT_*.der and SK_*.pem
