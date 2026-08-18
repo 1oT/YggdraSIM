@@ -10,7 +10,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-
 # Testing Guide
 
 YggdraSIM uses pytest and has strict operator rules around how the suite is
@@ -37,7 +36,7 @@ to a subsystem or a cross-cutting concern. Representative file patterns:
 | `tests/test_polling_plugin_*.py` | plugin runtime behavior |
 | `tests/test_apdu_fuzzer*.py` | APDU mutation fuzzer (allow-list, mutators, transports) |
 | `tests/test_eum_diag*.py` | EUM / SM-DP+ session-key diagnostics + Lua dissector |
-| `tests/test_yggdracore_*.py` *(post-v1 staging)* | YggdraCore AUSF / AAnF stubs, FastAPI loopback, Open5GS bridge |
+| `tests/test_yggdracore_*.py` | YggdraCore AUSF / AAnF stubs, FastAPI loopback, Open5GS bridge |
 | `tests/test_yggdrasim_common_*.py` | shared helpers |
 
 ## Scoping conventions

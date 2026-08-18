@@ -37,7 +37,7 @@ read next.
 | your own SCP03 keyset / KVN / AID / ADM PIN                                   | [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-parameters)             |
 | OTA / SCP80 secrets keyed per ICCID                                           | [§ SCP80 OTA parameters](#scp80-ota-parameters)                                         |
 | SUCI Profile A / B home-network keys for the simulated USIM                   | [§ SUCI key files](#suci-key-files)                                                     |
-| K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber *(post-v1 staging)* | [§ YggdraCore subscription material](#yggdracore-subscription-material)                 |
+| K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber | [§ YggdraCore subscription material](#yggdracore-subscription-material)                 |
 | ShS-ENC / ShS-MAC / DEK from an EUM database for a failing PCAP               | [§ EUM session-key bundles](#eum-session-key-bundles)                                   |
 | an SCP03 / SCP11c session you want re-decoded from a saved pcap               | [§ HIL pcap keybags](#hil-pcap-keybags)                                                 |
 | an `ADD-EIM` / profile-download trigger JSON package                          | [§ eIM packages and hotfolder](#eim-packages-and-hotfolder)                             |
@@ -606,8 +606,6 @@ yggdrasim-suci-tool --cmd "USE keys/operator-alpha.key; STATUS; DUMP; EXIT"
 
 ## YggdraCore subscription material
 
-> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
-
 **Consumer.** The in-process AUSF / AAnF stubs under `Tools/YggdraCore/`.
 
 **Storage.** Process-local
@@ -972,7 +970,7 @@ non-test environment.
 6. **SUCI keys.** Author per home-network. Never reuse a Profile A / B
    key file across operators.
 7. **YggdraCore subscribers.** Provision through `upsert(...)` or the
-   BYO Open5GS bridge. Stub state is intentionally non-persistent. (post-v1 staging — not part of this release.)
+   BYO Open5GS bridge. Stub state is intentionally non-persistent.
 8. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
    chmod 0600, point `YGGDRASIM_EUM_SESSION_KEYS` at the file.
 9. **HIL keybags.** Drop next to the pcap; auto-discovery picks them
@@ -996,7 +994,7 @@ non-test environment.
 | Inventory crypto envelope           | [`yggdrasim_common/inventory_crypto.py`](https://github.com/1oT/YggdraSIM/blob/main/yggdrasim_common/inventory_crypto.py)           |
 | EUM session-key contract            | [`Tools/EumDiag/session_keys.py`](https://github.com/1oT/YggdraSIM/blob/main/Tools/EumDiag/session_keys.py)                         |
 | HIL keybag schema                   | [`Tools/HilBridge/scp_keybag_export.py`](https://github.com/1oT/YggdraSIM/blob/main/Tools/HilBridge/scp_keybag_export.py)           |
-| YggdraCore subscriber store *(post-v1 staging)* | [`Tools/YggdraCore/subscription_store.py`](https://github.com/1oT/YggdraSIM/blob/main/Tools/YggdraCore/subscription_store.py)       |
+| YggdraCore subscriber store | [`Tools/YggdraCore/subscription_store.py`](https://github.com/1oT/YggdraSIM/blob/main/Tools/YggdraCore/subscription_store.py)       |
 | Runtime root resolution             | [`yggdrasim_common/runtime_paths.py`](https://github.com/1oT/YggdraSIM/blob/main/yggdrasim_common/runtime_paths.py)                 |
 | AddEim identity sheet               | [`Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md`](https://github.com/1oT/YggdraSIM/blob/main/Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md) |
 | HSM seam (planned)                  | not part of this release                                          |

@@ -8,7 +8,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-
 # Subsystems
 
 Subsystem pages are the operator-facing guides. Each page covers:
@@ -136,8 +135,6 @@ Subsystem pages are the operator-facing guides. Each page covers:
 
     ---
 
-    > **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
-
     In-process AUSF and AAnF stubs for 5G AKA, EAP-AKA', and AKMA round-trips, plus a BYO-Open5GS provisioning bridge.
 
     Library + FastAPI loopback (`YGGDRASIM_5GCORE_MODE=stub`).
@@ -160,4 +157,4 @@ Subsystem pages are the operator-facing guides. Each page covers:
 | SUCI Tool | [3GPP NAA](../concepts/3gpp-naa.md) |
 | APDU Mutation Fuzzer | [Secure Element Primer](../concepts/secure-element-primer.md) |
 | EUM Diagnostics | [RSP Architecture](../concepts/rsp-architecture.md), [SAIP Profiles](../concepts/saip-profiles.md) |
-| YggdraCore (5G core stubs) *(post-v1 staging)* | [3GPP NAA](../concepts/3gpp-naa.md) |
+| YggdraCore (5G core stubs) | [3GPP NAA](../concepts/3gpp-naa.md) |

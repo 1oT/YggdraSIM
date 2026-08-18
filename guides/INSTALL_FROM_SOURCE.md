@@ -121,7 +121,7 @@ python -m pip install -e '.[gui-server]' # headless web server only
 # Common remote-lab profile: HIL/RemSIM/CardBridge code + desktop GUI.
 python -m pip install -e '.[full,build,test,gui]'
 
-# Optional: YggdraCore BYO-Open5GS bridge (lazy pymongo). (post-v1 staging — not part of this release.)
+# Optional: YggdraCore BYO-Open5GS bridge (lazy pymongo).
 python -m pip install -e '.[open5gs]'
 
 # Optional: docs site tooling for `mkdocs build` / `mkdocs serve`.

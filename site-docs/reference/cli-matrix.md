@@ -9,7 +9,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-
 # CLI Matrix
 
 Every operator surface, every launch form, and every piping pattern the
@@ -109,7 +108,7 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | `YGGDRASIM_RUNTIME_ROOT` | force a specific runtime root directory |
 | `YGGDRASIM_CARD_BACKEND` | preselect `reader` / `sim` when no `--card-backend` is passed |
 | `YGGDRASIM_FLAVOR` | force `clean` / `full` / `source` when probing from a shared tree |
-| `YGGDRASIM_5GCORE_MODE` *(post-v1 staging)* | switch YggdraCore between in-process stub and BYO-Open5GS bridge |
+| `YGGDRASIM_5GCORE_MODE` | switch YggdraCore between in-process stub and BYO-Open5GS bridge |
 | `YGGDRASIM_SIM_BEHAVIOUR_PROFILE` | card-behaviour profile the simulator loads; `none` disables it |
 | `YGGDRASIM_5GCORE_HOST` / `YGGDRASIM_5GCORE_PORT` | bind address / port for the YggdraCore stub AUSF |
 | `YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK` | permit a non-loopback bind for the stub AUSF (sealed lab only) |

@@ -24,7 +24,7 @@ YggdraSIM currently provides:
   AKMA / SUCI surfaces
 - in-process 5G-core stubs (`Tools/YggdraCore`: AUSF, AAnF, subscription
   store) plus a BYO-Open5GS provisioning bridge for hosts that already run
-  a real 5GC. (post-v1 staging — not part of this release.)
+  a real 5GC.
 - a hardware-in-the-loop SIMtrace2 bridge (`Tools/HilBridge`) with RSPRO
   relay, GSMTAP mirror, AT+CSIM / AT+CRSM
   transcoding (`at_simlink`), and offline pcap review
@@ -64,7 +64,7 @@ command or every internal helper.
 | `Tools/ApduFuzz/` | Opt-in APDU mutation fuzzer | deterministic mutators, PC/SC/null transports, safety gate, crash dumps | `Tools/ApduFuzz/` sources |
 | `Tools/EumDiag/` | EUM / SM-DP+ diagnostics | session-key injection, BF36 Lua dissector, tshark runner, BPP decode | `Tools/EumDiag/` sources |
 | `Tools/SuciTool/` | SUCI shell | key selection, key generation, public-key export | `README.md` |
-| `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G-core stubs | AUSF (`Nausf_UEAuthentication_Authenticate`), AAnF (`Naanf_AKMA_*`), subscription store, opt-in FastAPI loopback, BYO-Open5GS provisioning bridge | `docs/akma_overview.md` |
+| `Tools/YggdraCore/` | In-process 5G-core stubs | AUSF (`Nausf_UEAuthentication_Authenticate`), AAnF (`Naanf_AKMA_*`), subscription store, opt-in FastAPI loopback, BYO-Open5GS provisioning bridge | `docs/akma_overview.md` |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI | typed action registry, FastAPI API + pywebview desktop or headless lab server, live APDU dock | `guides/GUI_HOST_SHELL_GUIDE.md` |
 
 ## 3. Launcher And Entry-Point Capabilities
@@ -474,8 +474,6 @@ relay. Current capabilities include:
   (`--open-pcap <path> [--keybag <path>]` from the launcher)
 
 ## 11. YggdraCore 5G Core Stub Capabilities
-
-> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
 
 `Tools/YggdraCore/` provides in-process 5G-core stubs and a BYO-Open5GS
 provisioning bridge:

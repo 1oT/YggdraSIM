@@ -13,8 +13,7 @@ SCP03 / SCP11 / SCP80 / SIMCARD module entry points, and the
 `yggdrasim_common` helpers consumed by external integrators.
 
 Internal helpers (modules under leading-underscore names, undocumented
-SAIP wrappers, and any path explicitly marked post-v1 staging in this
-file) may change without notice between minor releases.
+SAIP wrappers) may change without notice between minor releases.
 
 ## [Unreleased]
 
