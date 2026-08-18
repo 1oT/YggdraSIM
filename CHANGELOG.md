@@ -18,6 +18,71 @@ file) may change without notice between minor releases.
 
 ## [Unreleased]
 
+### Added
+
+- `yggdrasim-desktop` is a `[project.gui-scripts]` entry point for the
+  Command Center. setuptools backs a gui-script with `pythonw` on
+  Windows, so a shortcut opens the GUI without a console window behind
+  it. `yggdrasim-gui` stays a console script for terminal use such as
+  `yggdrasim-gui --web-server --token-file <path>`.
+
+- `scripts/install_shortcuts.py` writes a native launcher per host: a
+  `Terminal=false` desktop entry on Linux, a `WScript.Shell` shortcut in
+  the Windows Start Menu, and an `osacompile` applet in `~/Applications`
+  on macOS. It resolves the launcher to an absolute path at install
+  time, because desktop sessions and Explorer do not inherit the shell
+  `PATH`. `--dry-run`, `--force`, `--uninstall`, `--target`,
+  `--install-dir`, and `--no-icon` are supported.
+
+- The launchers carry the YggdraSIM mark, shipped as `yggdrasim_common`
+  package data so a pipx install has it without the source tree. The
+  Windows `.ico` is written from the packaged PNG at install time, which
+  needs no image library on the host.
+
+- `pipx install '.[gui,saip]'` is documented in
+  `scripts/install/README.md`, including why the bare package name does
+  not resolve from PyPI: two base dependencies are PEP 508 direct
+  references, which PyPI rejects in `Requires-Dist`.
+
+### Fixed
+
+- The Command Center's Stop control now ends a running action. The
+  route set the run's cancel event, but `_stream_console` never accepted
+  it, so every `scp11_live` streaming action was uncancellable and an
+  eIM poll cadence ran until the process exited. The flag now travels to
+  the console through `yggdrasim_common/cancellation.py`, and cadence
+  waits are interruptible.
+
+- Closing the desktop window ends the process instead of waiting on a
+  stream that never finishes. A graceful uvicorn stop drains open
+  connections, which a poll WebSocket will supply indefinitely; teardown
+  now cancels in-flight runs, forces the server down, and bounds the
+  cleanup that stops external services.
+
+- A windowless launcher can start the process with no standard streams,
+  where the missing-`[gui]`-extra diagnostic raised `AttributeError` on
+  `None` and the shortcut appeared to do nothing.
+
+- `euicc_config_live` actions have their own eSIM Management tab rather
+  than falling into the SGP.22 bucket, whose label describes none of
+  them.
+
+- The Wireshark capability probe no longer enters the wheel or the
+  source distribution. The `lua/*.lua` globs swept it in against the
+  statement in its own header, and `verify_wheel.py` rejects it as a
+  resource outside the release allowlist, so no wheel could verify.
+
+- `uv.lock` records the current version, `Tools.ApduDissector` is in the
+  reviewed-package manifest, and the SGP.26 suites skip on a checkout
+  without the GSMA bundle rather than failing on a missing fixture.
+
+### Changed
+
+- No SGP.26 certificate, key, or reference bundle is tracked. The tree
+  is gitignored and an operator supplies it locally;
+  `SCP11/TEST_MATERIAL_NOTICE.md` records where it goes and how the
+  suites behave without it.
+
 ## [2.1.0] -- 2026-08-18
 
 ### Added

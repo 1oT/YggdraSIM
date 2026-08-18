@@ -78,9 +78,10 @@ In scope:
 
 Out of scope (these are intentional research surfaces):
 
-- The bundled GSMA **SGP.26 test certificates and keys** under
-  `SCP11/` and `SCP11/SGP.26_test_Certs/`. They are publicly known
-  test material; see `SCP11/TEST_MATERIAL_NOTICE.md`.
+- The GSMA **SGP.26 test certificates and keys** an operator places
+  under `SCP11/` and `SCP11/SGP.26_test_Certs/`. They are publicly
+  known test material and are not tracked in this repository; see
+  `SCP11/TEST_MATERIAL_NOTICE.md`.
 - Demo SCP03 / SCP80 keys gated by
   `YGGDRASIM_ALLOW_DEMO_KEYS=1`.
 - Quirks / plugin loading paths gated by

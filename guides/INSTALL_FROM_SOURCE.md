@@ -133,6 +133,38 @@ installable on Windows / macOS — the package simply gets skipped. The
 extras can be combined: `pip install -e '.[full,build,test,gui,open5gs]'` is a
 common Linux-developer profile.
 
+## 3b. Or install with pipx
+
+`pipx` manages the virtualenv for you and puts every console entry point
+on `PATH`, which suits an operator who wants the commands without
+maintaining a checkout venv:
+
+```bash
+pipx install '.[gui,saip]'                                   # from this checkout
+pipx install --editable '.[gui,saip]'                        # tracks the checkout live
+```
+
+The editable form is worth knowing: a plain `pipx install` copies the
+project, so repository edits need `pipx install --force` to take effect,
+while `--editable` imports straight from the checkout. Editable also
+makes `runtime_root()` resolve to the checkout, so plugins, profiles and
+state match a source run.
+
+`pipx install yggdrasim` by name does not resolve from PyPI. Two base
+dependencies are PEP 508 direct references (the pinned `asn1tools` fork
+and Osmocom `pySim`), and PyPI rejects a `Requires-Dist` containing one.
+A path or git specifier is what lets pip honour them.
+
+A pipx install always reports the `source` flavor, since the clean/full
+split is stamped at bundle build time. The extras are the equivalent
+knob: `[hil]` or `[full]` for a HIL-capable install, omit them
+otherwise. Set `YGGDRASIM_FLAVOR=clean` to make the HIL guard refuse
+explicitly.
+
+After installing, `python scripts/install_shortcuts.py` writes a native
+desktop launcher pointed at the `yggdrasim-desktop` entry point. See
+`scripts/install/README.md`.
+
 The Python extras do not install SIMtrace2 firmware, `pcscd`,
 `osmo-remsim-client-st2`, SSH tunnels, or remote HIL services. Use
 `site-docs/how-to/install-remsim-apdu-streaming.md` when the checkout

@@ -160,6 +160,13 @@ The committed `yggdrasim_main.spec` builds the unified `main/main.py`
 launcher as a CLI executable plus a desktop GUI companion for the same
 flavor.
 
+Wheel and pipx installs get their launchers from two entry-point tables
+instead. `[project.scripts]` holds the console commands;
+`[project.gui-scripts]` holds `yggdrasim-desktop`, which setuptools backs
+with `pythonw` on Windows so a shortcut opens no console window. A name
+must not appear in both tables: each generates the same executable and
+the loser is overwritten silently.
+
 Install the build dependencies first:
 
 ```bash

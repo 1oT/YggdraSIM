@@ -17,13 +17,14 @@ YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/e
 
 ## Distribution at a glance
 
-YggdraSIM is offered in three shapes:
+YggdraSIM is offered in four shapes:
 
 | Flavor                           | Platforms                                              | Card Bridge / remote APDU | Direct SIMtrace2 HIL | Guide |
 |----------------------------------|--------------------------------------------------------|---------------------------|----------------------|-------|
 | **Clean executable**             | Windows / macOS / Linux x86_64 / Raspberry Pi (arm64)  | Yes                       | No                   | [`guides/INSTALL_CLEAN.md`](guides/INSTALL_CLEAN.md) |
 | **Full executable**              | Linux x86_64 / Raspberry Pi (arm64)                    | Yes                       | Yes                  | [`guides/INSTALL_FULL.md`](guides/INSTALL_FULL.md) |
 | **Source checkout (`pip install -e .`)** | Any OS, direct HIL opt-in on Linux             | Yes                       | Linux only           | [`guides/INSTALL_FROM_SOURCE.md`](guides/INSTALL_FROM_SOURCE.md) |
+| **pipx (`pipx install '.[gui,saip]'`)** | Any OS with Python 3.10+                        | Yes                       | Linux only           | [`scripts/install/README.md`](scripts/install/README.md) |
 
 The **clean** flavor is the default distribution. It ships Card Bridge and
 remote APDU streaming on Windows, macOS, Linux, and Raspberry Pi, but omits
@@ -172,6 +173,7 @@ The editable install also provides installed commands:
 yggdrasim
 yggdrasim-cli
 yggdrasim-gui
+yggdrasim-desktop
 yggdrasim-web-server
 yggdrasim-scp03
 yggdrasim-scp80
@@ -296,6 +298,7 @@ Installed command equivalents after editable install:
 yggdrasim
 yggdrasim-cli
 yggdrasim-gui
+yggdrasim-desktop
 yggdrasim-web-server
 yggdrasim-scp03
 yggdrasim-scp80

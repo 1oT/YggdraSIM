@@ -11,12 +11,13 @@ workflow needs to be exercised.
 
 Use this file as the entry point for choosing the correct `SCP11` module.
 
-> **Test material notice.** The `*.pem` / `*.der` files at the root of
-> `SCP11/` and the entire `SCP11/SGP.26_test_Certs/` subtree are the
-> publicly-known GSMA **SGP.26 test certificates and private keys**.
-> They are tracked because the SGP.26 conformance flows require them.
-> They must not be used against live infrastructure. See
-> `SCP11/TEST_MATERIAL_NOTICE.md` for the full breakdown.
+> **Test material notice.** No certificate or private key is tracked in
+> this repository. The `*.pem` / `*.der` paths referenced under `SCP11/`
+> and the whole `SCP11/SGP.26_test_Certs/` subtree are gitignored; an
+> operator supplies the GSMA **SGP.26 test material** locally, and the
+> suites that need it skip when it is absent. It must not be used
+> against live infrastructure. See `SCP11/TEST_MATERIAL_NOTICE.md` for
+> where the bundle goes.
 
 ## Module map
 
