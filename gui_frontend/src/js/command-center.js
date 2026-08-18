@@ -2821,6 +2821,11 @@
       label: "SGP.32 IoT (IPA-d)",
       hint: "IPA-d / eIM discovery, authentication, package exchange, metadata, policy, and RAT operations.",
     },
+    euicc_config: {
+      id: "euicc_config",
+      label: "SGP.32 eUICC Configuration (live)",
+      hint: "Live eUICC configuration: eUICC data reads, default SM-DP+ address, and fallback attribute control.",
+    },
   };
 
   var CC_ESIM_CONSOLIDATED_READ_SUFFIXES = {
@@ -2850,6 +2855,9 @@
   function ccEsimActionFlavor(action) {
     var id = String(action && action.id || "").toLowerCase();
     var suffix = ccActionSuffix(id);
+    if (id.indexOf(".euicc_config_live.") !== -1) {
+      return "euicc_config";
+    }
     if (
       id.indexOf(".eim_") !== -1
       || suffix === "discover"
@@ -2872,8 +2880,9 @@
     var groups = [
       { meta: CC_ESIM_ACTION_FLAVORS.sgp22, items: [] },
       { meta: CC_ESIM_ACTION_FLAVORS.sgp32, items: [] },
+      { meta: CC_ESIM_ACTION_FLAVORS.euicc_config, items: [] },
     ];
-    var byFlavor = { sgp22: groups[0], sgp32: groups[1] };
+    var byFlavor = { sgp22: groups[0], sgp32: groups[1], euicc_config: groups[2] };
     (actions || []).forEach(function (action) {
       var flavor = ccEsimActionFlavor(action);
       (byFlavor[flavor] || byFlavor.sgp22).items.push(action);
