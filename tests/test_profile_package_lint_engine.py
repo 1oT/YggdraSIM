@@ -431,10 +431,10 @@ class SaipProfileLinterTests(unittest.TestCase):
         # 8-digit IMSI: digit_count=8 (even), parity=9.
         # Body: 08 91 10 10 10 FF FF FF FF — wait, lots of filler.
         # Easier: 7 digits "0123456" → first_digit=0, then 6 digits "123456".
-        # Actually let's go with 8 digits: "01234567" → parity=9 (even).
+        # 8 digits: "01234567" → parity=9 (even).
         # first_digit=0, parity=9 → parity_byte=0x09.
         # rest 7 digits "1234567" → pad to "1234567F" (8 nibbles, 4 bytes).
-        # swap pairs: "21436587" then "F7" → wait let me just do it.
+        # swap pairs: "21436587", then the "F7" filler nibble pair.
         # Pairs of "1234567F": (1,2)→"21", (3,4)→"43", (5,6)→"65", (7,F)→"F7"
         # So body = 08 09 21 43 65 F7 + 3 bytes filler FF FF FF
         # = 0809214365F7FFFFFF

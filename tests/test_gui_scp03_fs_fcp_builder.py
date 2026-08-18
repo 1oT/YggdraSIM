@@ -321,7 +321,7 @@ def test_wire_matches_cli_wizard_for_transparent_ef():
     )
     # Body: 82 02 41 21 | 83 02 2F 00 | 8A 01 05 | 8C 01 40 |
     #       80 02 00 10 | 88 00
-    # Total body = 2+2+3+3+3+3+3+2 = ... let's just recompute from the hex.
+    # Body length is recomputed from the hex rather than tracked by hand.
     expected_body = (
         "82024121"     # tag 82 transparent EF descriptor
         + "83022F00"   # tag 83 FID

@@ -302,7 +302,7 @@ def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
     # instead of letting them bubble into the FastAPI 500 path. The GUI
     # used to see a raw traceback ("NoCardException: Unable to connect"),
     # fall into recover-session + rescan, fail that too, and chew a whole
-    # extra second per file click. Now we raise a well-known RuntimeError
+    # extra second per file click. A well-known RuntimeError is raised instead,
     # whose message the route converts into ``{ok:false, error:...}`` —
     # the frontend pattern-matches ``no_card:`` and skips recovery.
     try:
@@ -721,7 +721,7 @@ def _dispatch_select_only(
     fs_controller = session.handle["fs"]
     # See _dispatch_read_selected for the rationale behind normalising
     # bare names to "MF/<name>" before calling select(). Keeps SELECT-
-    # by-path robust regardless of where the card's current DF sat.
+    # by-path correct regardless of where the card's current DF sat.
     walked_path = _normalise_fs_path(path_s)
 
     # Mirror the pre-restore guard from _dispatch_read_selected:
@@ -4934,7 +4934,7 @@ def _sgp32_run_section(
             raise ValueError("_sgp32_run_section requires es10_tag")
 
         # 1. Pull raw TLV bytes. _es10_retrieve_data already selects
-        #    ISD-R under the hood; we don't need to do it again.
+        #    ISD-R itself, so repeating it here is wasted work.
         raw = bytes(sgp22._es10_retrieve_data(es10_tag) or b"")
         section["hex"] = raw.hex().upper()
 

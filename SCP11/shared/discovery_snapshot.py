@@ -301,7 +301,7 @@ def render_card_overview_snapshot(
     notification_count: int | None = None,
     profile_table_title: str = "Profiles on Card",
 ) -> None:
-    """Render a comprehensive card-overview text block including EUICCInfo2, profile list, and installed apps."""
+    """Render the card-overview text block: EUICCInfo2, profile list, and installed apps."""
     eid = str(snapshot.get("eid", "")).strip()
     issuer_name = str(snapshot.get("issuer_name", "")).strip()
     issuer_number = str(snapshot.get("issuer_number", "")).strip()

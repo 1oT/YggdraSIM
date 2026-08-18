@@ -10,7 +10,7 @@ routinely need to provision new SCP03 / SCP02 key sets, rotate
 existing keys, drop compromised key sets, and append issuer-personalised
 STORE DATA blocks. The decoded-edit panel renders these as nested
 arrays which the generic JSON editor cannot grow safely (it can only
-mutate existing rows). This module provides the spec-aware list-mutating
+mutate existing rows). Here are the spec-aware list-mutating
 primitives that the GUI / TUI dispatchers wire up.
 
 Decoded shape post ``build_decoded_document_from_sequence``::

@@ -314,7 +314,7 @@ def test_read_selected_flow_calls_recovery_on_failure() -> None:
     js = _read("app.js")
     fn_idx = js.index("async function readSelectedForTab(tab, path, previewEl)")
     # 12k is generous — covers the whole phased flow. If this ever
-    # shrinks we'll catch it fast because the recovery call would
+    # shrinks the assertion fails fast, because the recovery call would
     # drop out of the substring.
     block = js[fn_idx:fn_idx + 12000]
     # Phase 1: optimistic cache render before the wire read.

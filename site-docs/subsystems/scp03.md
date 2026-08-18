@@ -232,7 +232,7 @@ SCP03 has an in-session guide and a grouped help surface.
 - `GUIDE` opens the topic menu
 - `GUIDE GP`, `GUIDE ETSI`, `GUIDE GSMA`, `GUIDE INSTALL`, `GUIDE SECURITY`,
   `GUIDE OTA`, `GUIDE CONFIG`, `GUIDE SAIP`, `GUIDE SUCI`, `GUIDE CLI` for
-  topic deep dives
+  per-topic references
 - `HELP` prints the grouped command reference
 
 The same content is mirrored under [Shell Guides](../shell-guides/index.md)

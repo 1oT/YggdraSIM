@@ -191,7 +191,7 @@ class ConfigManagerTests(unittest.TestCase):
 class LegacyKeyMigrationTests(unittest.TestCase):
     """Lock the soft-compat behaviour for pre-rename SCP80 config keys.
 
-    Pre-rename schema (unversioned ini files in the wild) carried:
+    Pre-rename schema (unversioned ini files already deployed) carried:
       - ``key_enc`` / ``key_mac``: 16-byte session keys.
       - ``kic`` / ``kid``: 2-hex-char ETSI TS 102 225 §5.1.1 indicator bytes.
     Current schema renames the session keys to ``kic`` / ``kid`` and the

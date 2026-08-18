@@ -4618,7 +4618,7 @@ def encode_application_provider_identifier_field(payload: dict[str, Any]) -> byt
 
     Preferred inputs (first non-empty wins):
     1. ``hex`` — verbatim passthrough (keeps bytes identical even for
-       non-canonical encodings found in the wild).
+       non-canonical encodings found in deployed packages).
     2. ``oid`` — dotted-decimal text; re-encoded per X.690 §8.19.
     """
 

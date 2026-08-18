@@ -6,7 +6,7 @@
 
 The TCA SAIP profile carries SecurityDomain install parameters as raw
 bytes (``applicationPrivileges`` 3-byte bitmask, ``lifeCycleState`` 1-byte
-enum). This module provides the lossless bytes ↔ symbolic round-trips the
+enum). Here are the lossless bytes ↔ symbolic round-trips the
 GUI / TUI wrap in their named-bit / named-state drop-downs.
 
 Spec references:

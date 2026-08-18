@@ -531,7 +531,7 @@ The SAIP/profile-package tool currently supports:
 - default transcode-directory management
 - override of the external `saip-tool` command path
 - `info`, `tree`, and `check` execution through the shell
-- comprehensive profile linting with:
+- profile linting with:
   - strict mode
   - metadata attachment
   - preset gate profiles

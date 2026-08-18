@@ -2364,7 +2364,7 @@ class SaipProfileLinter:
             return
 
         # Walk the MF section first; fall back to any section that
-        # carries an ef-iccid. Profiles in the wild almost always put
+        # carries an ef-iccid. Deployed profiles almost always put
         # EF.ICCID under MF (TS 102 221 §13.2) but the linter stays
         # tolerant of loaders that hoist it elsewhere.
         ef_iccid_pairs: list[tuple[str, str]] = []
