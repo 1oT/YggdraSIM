@@ -34,6 +34,8 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Optional
 
+from yggdrasim_common.cancellation import cancel_all_active_events
+
 from .auth import AuthMiddleware, FailureRateLimiter
 from .config import (
     GuiServerConfig,
@@ -67,6 +69,12 @@ _QTWEBENGINE_DEFAULT_FLAGS = (
     "--num-raster-threads=1",
     "--renderer-process-limit=1",
 )
+
+
+# Desktop teardown budget. The window is already gone by the time these
+# run, so a slow shutdown reads to the operator as a hung application.
+_SHUTDOWN_SERVER_TIMEOUT_SECONDS = 3.0
+_SHUTDOWN_CLEANUP_TIMEOUT_SECONDS = 5.0
 
 
 class _UvicornRunner:
@@ -105,10 +113,21 @@ class _UvicornRunner:
             time.sleep(0.05)
         return self.started
 
-    def stop(self) -> None:
+    def stop(self, *, force: bool = False, timeout: float = 10.0) -> None:
+        """Ask the server thread to exit, optionally without draining.
+
+        A graceful stop waits for open connections to finish. The desktop
+        window closing is not a request to finish them: a streaming
+        action that never ends -- a poll cadence -- would hold the server
+        open for as long as it keeps running. ``force`` sets uvicorn's
+        ``force_exit`` so the listener and its live WebSockets are
+        dropped instead of drained.
+        """
         self._server.should_exit = True
+        if force:
+            self._server.force_exit = True
         if self._thread is not None:
-            self._thread.join(timeout=10.0)
+            self._thread.join(timeout=max(0.0, float(timeout)))
 
 
 # --- app factory --------------------------------------------------------
@@ -368,7 +387,14 @@ def run_desktop(args: Any) -> int:
     except SystemExit:
         raise
     finally:
-        runner.stop()
+        # Order matters. Cancelling first gives a running poll loop the
+        # chance to unwind at its next checkpoint; forcing the server
+        # down then drops whatever did not, so the window closing ends
+        # the process instead of waiting on a cadence that never stops.
+        cancelled = cancel_all_active_events()
+        if cancelled > 0:
+            _LOGGER.info("GUI shutdown cancelled %d in-flight run(s)", cancelled)
+        runner.stop(force=True, timeout=_SHUTDOWN_SERVER_TIMEOUT_SECONDS)
         _cleanup_gui_runtime_on_shutdown(include_default_hil_service=True)
     return 0
 
@@ -484,19 +510,43 @@ def _register_shutdown_handler(app: Any, handler: Any) -> None:
     _LOGGER.warning("GUI shutdown cleanup could not be registered on this FastAPI stack.")
 
 
-def _cleanup_gui_runtime_on_shutdown(*, include_default_hil_service: bool) -> None:
-    """Release resources owned by the GUI server process."""
+def _cleanup_gui_runtime_on_shutdown(
+    *,
+    include_default_hil_service: bool,
+    timeout: float = _SHUTDOWN_CLEANUP_TIMEOUT_SECONDS,
+) -> None:
+    """Release resources owned by the GUI server process.
+
+    Cleanup stops external services and terminates registered child
+    processes, any of which can block on a process that will not die. It
+    therefore runs on a daemon thread with a deadline: closing the window
+    has to end the application even when a service refuses to stop.
+    """
     try:
         from yggdrasim_common.gui_server.lifecycle import cleanup_gui_runtime
     except Exception as error:  # noqa: BLE001
         _LOGGER.warning("GUI shutdown cleanup unavailable: %s", error)
         return
-    summary = cleanup_gui_runtime(
-        stop_external_services=True,
-        include_default_hil_service=include_default_hil_service,
-        include_card_bridge_state=include_default_hil_service,
+
+    def _run() -> None:
+        summary = cleanup_gui_runtime(
+            stop_external_services=True,
+            include_default_hil_service=include_default_hil_service,
+            include_card_bridge_state=include_default_hil_service,
+        )
+        _LOGGER.info("GUI shutdown cleanup: %s", summary)
+
+    worker = threading.Thread(
+        target=_run,
+        name="yggdrasim-gui-shutdown-cleanup",
+        daemon=True,
     )
-    _LOGGER.info("GUI shutdown cleanup: %s", summary)
+    worker.start()
+    worker.join(timeout=max(0.0, float(timeout)))
+    if worker.is_alive():
+        _LOGGER.warning(
+            "GUI shutdown cleanup exceeded %.1f s; exiting anyway", timeout
+        )
 
 
 def _ensure_self_signed_tls() -> tuple[str, str]:

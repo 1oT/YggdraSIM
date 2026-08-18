@@ -35,6 +35,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field
 
+from yggdrasim_common.cancellation import register_active_event
 from yggdrasim_common.gui_server.actions.registry import (
     ActionSpec,
     coerce_inputs,
@@ -136,6 +137,7 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
         raise HTTPException(status_code=422, detail=str(validation_error))
 
     cancel_event = threading.Event()
+    register_active_event(cancel_event)
     ctx = ActionContext(extras={"cancel_event": cancel_event})
     try:
         result = await _invoke_dispatcher(spec, ctx, coerced)
@@ -266,6 +268,7 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
         return
 
     cancel_event = threading.Event()
+    register_active_event(cancel_event)
     ctx = ActionContext(extras={"cancel_event": cancel_event})
     dispatcher = spec.dispatcher
     try:

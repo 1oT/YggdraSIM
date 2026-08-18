@@ -52,6 +52,7 @@ from dataclasses import replace
 from typing import Any, AsyncIterator, Callable, Optional
 
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
+from yggdrasim_common.cancellation import attach_cancel_event
 
 
 _LOGGER = logging.getLogger("yggdrasim.gui.actions.scp11_live")
@@ -965,6 +966,7 @@ async def _stream_console(
     command_name: Optional[str] = None,
     start_message: Optional[str] = None,
     done_message: str = "complete.",
+    cancel_event: Optional[threading.Event] = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Async-generator tee: run a console command in a background thread
     and yield every captured stdout line as a stream event.
@@ -972,6 +974,13 @@ async def _stream_console(
     The event contract matches the generic ``/api/actions/{id}/stream``
     route: each yielded dict has at least ``level`` + ``message``. A
     terminal ``level="done"`` event is always emitted (on error too).
+
+    ``cancel_event`` is the run's stop flag. It is published on the
+    console with :func:`yggdrasim_common.cancellation.attach_cancel_event`
+    so a command that loops -- an eIM poll cadence, a STATUS watchdog --
+    can end at its next checkpoint. Commands that never check the flag
+    keep running in their daemon worker; the stream still closes, so the
+    GUI stops waiting on a run the operator has already abandoned.
     """
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -991,6 +1000,7 @@ async def _stream_console(
             _post("error", f"reader bind failed: {type(error).__name__}: {error}")
             _post("done", done_message, ok=False)
             return
+        attach_cancel_event(console, cancel_event)
         try:
             command = str(command_name or "").strip().upper()
             use_command_policy = False
@@ -1044,7 +1054,25 @@ async def _stream_console(
     thread.start()
 
     while True:
-        event = await queue.get()
+        try:
+            event = await asyncio.wait_for(queue.get(), timeout=_CANCEL_POLL_SECONDS)
+        except asyncio.TimeoutError:
+            if cancel_event is None or not cancel_event.is_set():
+                continue
+            yield {
+                "level": "warn",
+                "message": (
+                    "cancel requested; the command stops at its next "
+                    "checkpoint."
+                ),
+            }
+            yield {
+                "level": "done",
+                "message": done_message,
+                "ok": False,
+                "cancelled": True,
+            }
+            return
         yield event
         if event.get("level") == "done":
             break
@@ -1053,6 +1081,22 @@ async def _stream_console(
 # ----------------------------------------------------------------------
 # Destructive-action confirm guard
 # ----------------------------------------------------------------------
+
+
+# Cadence for noticing a stop request while the worker thread is busy.
+# Short enough that Stop feels immediate, long enough not to spin.
+_CANCEL_POLL_SECONDS = 0.25
+
+
+def _cancel_event_from(ctx: Any) -> Optional[threading.Event]:
+    """Read the run's stop flag off an :class:`ActionContext`."""
+    extras = getattr(ctx, "extras", None)
+    if not isinstance(extras, dict):
+        return None
+    event = extras.get("cancel_event")
+    if isinstance(event, threading.Event):
+        return event
+    return None
 
 
 _CONFIRM_ERROR = (
@@ -2172,6 +2216,7 @@ async def _dispatch_stream_discover(
         command_name="DISCOVER",
         start_message=f"DISCOVER: reader={_reader_label(reader_name)}",
         done_message="DISCOVER complete.",
+        cancel_event=_cancel_event_from(ctx),
     ):
         yield event
 
@@ -2196,6 +2241,7 @@ async def _dispatch_stream_eim_authenticate(
             + (f" matchingId={identifier}" if identifier else "")
         ),
         done_message="EIM-AUTHENTICATE complete.",
+        cancel_event=_cancel_event_from(ctx),
     ):
         yield event
 
@@ -2215,6 +2261,7 @@ async def _dispatch_stream_eim_download(
         command_name="DOWNLOAD",
         start_message=f"EIM-DOWNLOAD: reader={_reader_label(reader_name)}",
         done_message="EIM-DOWNLOAD complete.",
+        cancel_event=_cancel_event_from(ctx),
     ):
         yield event
 
@@ -2239,6 +2286,7 @@ async def _dispatch_stream_eim_poll(
             + (f" args={argv}" if argv else "")
         ),
         done_message="EIM-POLL complete.",
+        cancel_event=_cancel_event_from(ctx),
     ):
         yield event
 
@@ -2269,6 +2317,7 @@ async def _dispatch_stream_download_profile_live(
         command_name="DOWNLOAD-PROFILE",
         start_message=f"DOWNLOAD-AC: reader={_reader_label(reader_name)}",
         done_message="DOWNLOAD-AC complete.",
+        cancel_event=_cancel_event_from(ctx),
     ):
         yield event
 
@@ -2298,6 +2347,7 @@ async def _dispatch_stream_flow(
             + (f" matchingId={identifier}" if identifier else "")
         ),
         done_message="FLOW complete.",
+        cancel_event=_cancel_event_from(ctx),
     ):
         yield event
 
@@ -2322,6 +2372,7 @@ async def _dispatch_stream_verify_scp11(
             + (f" matchingId={identifier}" if identifier else "")
         ),
         done_message="VERIFY-SCP11 complete.",
+        cancel_event=_cancel_event_from(ctx),
     ):
         yield event
 
