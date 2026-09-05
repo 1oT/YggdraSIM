@@ -26,6 +26,24 @@ on:
 permissions:
   contents: read
 
+# uv checks a git-sourced dependency (pySim, the asn1tools fork) out of
+# its cache with `git clone --local`, and git aborts that clone when a
+# file in the cache changes while the objects are being hardlinked
+# ("hardlink different from source"). git may start a background
+# maintenance run after the fetch that filled the cache; these settings
+# keep every git process on the runner from doing so and from writing
+# a commit-graph after a fetch. They travel in the environment, so no
+# config file is written. scripts/release/uv_sync_retry.sh covers what
+# is left by syncing again from an empty cache.
+env:
+  GIT_CONFIG_COUNT: "3"
+  GIT_CONFIG_KEY_0: maintenance.auto
+  GIT_CONFIG_VALUE_0: "false"
+  GIT_CONFIG_KEY_1: gc.auto
+  GIT_CONFIG_VALUE_1: "0"
+  GIT_CONFIG_KEY_2: fetch.writeCommitGraph
+  GIT_CONFIG_VALUE_2: "false"
+
 jobs:
   release-ref-policy:
     name: Release tag and ancestry policy
@@ -173,7 +191,7 @@ jobs:
 
       - name: Sync locked full test environment
         shell: bash
-        run: uv sync --frozen --extra full --extra test --extra mcp
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra full --extra test --extra mcp
 
       - name: Run fatal Python static-analysis gate
         shell: bash
@@ -251,12 +269,12 @@ jobs:
       - name: Install Python dependencies (clean)
         if: matrix.flavor == 'clean'
         shell: bash
-        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra saip --extra build --extra test --extra gui
 
       - name: Install Python dependencies (full)
         if: matrix.flavor == 'full'
         shell: bash
-        run: uv sync --frozen --extra full --extra saip --extra build --extra test --extra gui
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra full --extra saip --extra build --extra test --extra gui
 
       - name: Build Linux bundle
         env:
@@ -337,6 +355,9 @@ jobs:
           docker run --rm --platform linux/arm64 \
             -v "$PWD":/src -w /src \
             -e YGGDRASIM_FLAVOR=clean \
+            -e GIT_CONFIG_COUNT -e GIT_CONFIG_KEY_0 -e GIT_CONFIG_VALUE_0 \
+            -e GIT_CONFIG_KEY_1 -e GIT_CONFIG_VALUE_1 \
+            -e GIT_CONFIG_KEY_2 -e GIT_CONFIG_VALUE_2 \
             debian:bookworm-slim bash -lc '
               set -eux
               apt-get update
@@ -351,7 +372,7 @@ jobs:
               /opt/uv/bin/pip install "uv==0.5.9"
               python3 -m venv --system-site-packages /opt/venv
               export UV_PROJECT_ENVIRONMENT=/opt/venv
-              /opt/uv/bin/uv sync --frozen \
+              bash scripts/release/uv_sync_retry.sh /opt/uv/bin/uv sync --frozen \
                 --extra saip --extra build --extra test --extra gui
               /opt/uv/bin/uv run python -c \
                 "from qtpy import QtWebEngineWidgets; print(QtWebEngineWidgets.__name__)"
@@ -412,6 +433,9 @@ jobs:
           docker run --rm --platform linux/arm64 \
             -v "$PWD":/src -w /src \
             -e YGGDRASIM_FLAVOR=full \
+            -e GIT_CONFIG_COUNT -e GIT_CONFIG_KEY_0 -e GIT_CONFIG_VALUE_0 \
+            -e GIT_CONFIG_KEY_1 -e GIT_CONFIG_VALUE_1 \
+            -e GIT_CONFIG_KEY_2 -e GIT_CONFIG_VALUE_2 \
             debian:bookworm-slim bash -lc '
               set -eux
               apt-get update
@@ -426,7 +450,7 @@ jobs:
               /opt/uv/bin/pip install "uv==0.5.9"
               python3 -m venv --system-site-packages /opt/venv
               export UV_PROJECT_ENVIRONMENT=/opt/venv
-              /opt/uv/bin/uv sync --frozen \
+              bash scripts/release/uv_sync_retry.sh /opt/uv/bin/uv sync --frozen \
                 --extra full --extra saip --extra build --extra test --extra gui
               /opt/uv/bin/uv run python -c \
                 "from qtpy import QtWebEngineWidgets; print(QtWebEngineWidgets.__name__)"
@@ -488,8 +512,8 @@ jobs:
           enable-cache: false
 
       - name: Install Python dependencies
-        shell: pwsh
-        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
+        shell: bash
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra saip --extra build --extra test --extra gui
 
       - name: Verify portable Remote Lab and Card Bridge contracts
         shell: pwsh
@@ -624,7 +648,7 @@ jobs:
 
       - name: Install Python dependencies
         shell: bash
-        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra saip --extra build --extra test --extra gui
 
       - name: Verify portable Remote Lab and Card Bridge contracts
         shell: bash
