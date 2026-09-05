@@ -111,9 +111,9 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-hplmnwact": "6F62",
     "ef-fplmn": "6F7B",
     # DF.WLAN (5F40) — TS 31.102 §4.2.82 / §4.2.83 / §4.2.91.
-    "ef-uplmnwlan": "4F41",
-    "ef-oplmnwlan": "4F42",
-    "ef-wlrplmn": "4F47",
+    "ef-uplmnwlan": "4F42",
+    "ef-oplmnwlan": "4F43",
+    "ef-wlrplmn": "4F4A",
     "ef-pst": "4F10",
     "ef-gid1": "6F3E",
     "ef-gid2": "6F3F",
@@ -306,7 +306,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-emlpp": "6FB5",
     "ef-aaem": "6FB6",
     "ef-anl": "6F2E",
-    "ef-mexe-st": "6F3A",
+    "ef-mexe-st": "4F40",
     "ef-prose-pfsr": "4F30",
     "ef-vsuri": "6FE9",
     # 5x20 Pass B — CSIM (ADF.CSIM) EFs. Tokens namespaced as ``ef-csim-*``
@@ -332,6 +332,23 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-csim-mlpl": "6F4F",
     "ef-csim-meruiid": "6F5D",
     "ef-csim-st": "6F32",
+    # DF.MULTIMEDIA / DF.MMSS / DF.MCS / DF.V2X / DF.A2X, named as the
+    # SAIP ASN.1 template members spell them (TS 31.102 §4.6.3-§4.6.6).
+    "ef-mml": "4F47",
+    "ef-mmdf": "4F48",
+    "ef-mlpl": "4F20",
+    "ef-mspl": "4F21",
+    "ef-mmssmode": "4F22",
+    "ef-mcs-config": "4F02",
+    "ef-v2x-config": "4F02",
+    "ef-v2xp-pc5": "4F03",
+    "ef-v2xp-Uu": "4F04",
+    "ef-ast": "4F01",
+    "ef-a2x-config": "4F02",
+    "ef-a2xp-pc5": "4F03",
+    "ef-a2x-ddaap-pc5": "4F04",
+    "ef-a2x-dc2p-pc5": "4F05",
+    "ef-a2xp-Uu": "4F06",
     # 5x20 Pass C — Specialized (ISIM + MCPTT + V2X + ProSe + MCS).
     "ef-mst": "4F01",
     "ef-vst": "4F01",
@@ -630,6 +647,22 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-csim-mlpl": "adf-csim",
     "ef-csim-meruiid": "adf-csim",
     "ef-csim-st": "adf-csim",
+    # DF.MULTIMEDIA / DF.MMSS / DF.MCS / DF.V2X / DF.A2X.
+    "ef-mml": "df-multimedia",
+    "ef-mmdf": "df-multimedia",
+    "ef-mlpl": "df-mmss",
+    "ef-mspl": "df-mmss",
+    "ef-mmssmode": "df-mmss",
+    "ef-mcs-config": "df-mcs",
+    "ef-v2x-config": "df-v2x",
+    "ef-v2xp-pc5": "df-v2x",
+    "ef-v2xp-Uu": "df-v2x",
+    "ef-ast": "df-a2x",
+    "ef-a2x-config": "df-a2x",
+    "ef-a2xp-pc5": "df-a2x",
+    "ef-a2x-ddaap-pc5": "df-a2x",
+    "ef-a2x-dc2p-pc5": "df-a2x",
+    "ef-a2xp-Uu": "df-a2x",
     # ProSe / V2X / MCS application-specific EFs.
     "ef-pst": "df-prose",
     "ef-prose-pfidg": "adf-prose-ue",
@@ -2248,6 +2281,98 @@ def _decode_loci(hex_clean: str) -> dict[str, object] | None:
     }
 
 
+def _decode_eps_loci(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.EPSLOCI (TS 31.102 §4.2.91).
+
+    The first 12 bytes are not a bare PLMN/MME tuple.  They are the part of
+    the TS 24.301 EPS mobile-identity IE beginning at octet 2, so an assigned
+    GUTI starts with the one-byte identity length (``0B``) and the GUTI
+    identity header (``F6``).  An all-``FF`` GUTI is the standards-defined
+    unassigned/default form and is therefore accepted without a header.
+    """
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) != 18:
+        return None
+
+    guti = raw[:12]
+    guti_assigned = guti != b"\xFF" * 12
+    validation_errors: list[str] = []
+    guti_plmn: str | None = None
+    if guti_assigned:
+        if guti[0] != 0x0B:
+            validation_errors.append(
+                f"GUTI identity length is 0x{guti[0]:02X}; expected 0x0B"
+            )
+        if guti[1] != 0xF6:
+            validation_errors.append(
+                f"GUTI identity header is 0x{guti[1]:02X}; expected 0xF6"
+            )
+        guti_plmn = _decode_plmn_hex(guti[2:5].hex().upper())
+        if guti_plmn is None:
+            validation_errors.append("GUTI PLMN contains invalid BCD digits")
+
+    tai = raw[12:17]
+    tai_assigned = tai[0:3] != b"\xFF\xFF\xFF"
+    tai_plmn = (
+        _decode_plmn_hex(tai[0:3].hex().upper()) if tai_assigned else None
+    )
+    if tai_assigned and tai_plmn is None:
+        validation_errors.append("Last visited TAI PLMN contains invalid BCD digits")
+
+    status_byte = raw[17]
+    status_value = status_byte & 0x07
+    status_labels = {
+        0x00: "updated",
+        0x01: "not updated",
+        0x02: "roaming not allowed",
+        0x03: "reserved",
+        0x04: "reserved",
+        0x05: "reserved",
+        0x06: "reserved",
+        0x07: "reserved",
+    }
+    decoded: dict[str, object] = {
+        "format": "EPS Location Information",
+        "specReference": "TS 31.102 §4.2.91",
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        "guti": {
+            "assigned": guti_assigned,
+            "hex": guti.hex().upper(),
+            "identityLength": guti[0] if guti_assigned else None,
+            "identityLengthHex": f"{guti[0]:02X}" if guti_assigned else None,
+            "identityHeaderHex": f"{guti[1]:02X}" if guti_assigned else None,
+            "plmn": guti_plmn,
+            "plmnRaw": guti[2:5].hex().upper() if guti_assigned else None,
+            "mmeGroupIdHex": guti[5:7].hex().upper() if guti_assigned else None,
+            "mmeCodeHex": f"{guti[7]:02X}" if guti_assigned else None,
+            "mTmsiHex": guti[8:12].hex().upper() if guti_assigned else None,
+        },
+        "tai": {
+            "assigned": tai_assigned,
+            "hex": tai.hex().upper(),
+            "plmn": tai_plmn,
+            "plmnRaw": tai[0:3].hex().upper(),
+            "tacHex": tai[3:5].hex().upper(),
+            "tac": int.from_bytes(tai[3:5], "big"),
+        },
+        "updateStatus": {
+            "byte": f"0x{status_byte:02X}",
+            "value": status_value,
+            "label": status_labels[status_value],
+        },
+    }
+    if status_byte & 0xF8:
+        decoded["warnings"] = ["EPS update-status RFU bits 4..8 are non-zero"]
+    if validation_errors:
+        decoded["validationErrors"] = validation_errors
+    return decoded
+
+
 def _decode_msisdn(hex_clean: str) -> dict[str, object] | None:
     try:
         raw = bytes.fromhex(hex_clean)
@@ -3276,12 +3401,18 @@ _OPAQUE_PASSTHROUGH_EF_CATALOG: dict[str, str] = {
     "ef-mlpl": "TELECOM MMS List Preferred",
     "ef-mspl": "TELECOM MMS Sender Preferred",
     "ef-mmssmode": "TELECOM MMS Storage Mode",
-    "ef-mst": "TELECOM Multimedia Service Table",
+    "ef-mst": "TELECOM MCS Service Table",
     "ef-mcs-config": "TELECOM MCS Configuration",
     "ef-vst": "TELECOM V2X Service Table",
     "ef-v2x-config": "TELECOM V2X Configuration",
     "ef-v2xp-pc5": "TELECOM V2X PC5 Parameters",
     "ef-v2xp-Uu": "TELECOM V2X Uu Parameters",
+    "ef-ast": "TELECOM A2X Service Table",
+    "ef-a2x-config": "TELECOM A2X Configuration",
+    "ef-a2xp-pc5": "TELECOM A2X PC5 Policy",
+    "ef-a2x-ddaap-pc5": "TELECOM A2X Detect-And-Avoid Policy over PC5",
+    "ef-a2x-dc2p-pc5": "TELECOM A2X Direct C2 Policy over PC5",
+    "ef-a2xp-Uu": "TELECOM A2X Uu Policy",
 }
 
 
@@ -4256,12 +4387,16 @@ def _decode_5gs_loci(
 
     Fixed 20-byte layout:
 
-        [0..12]  5G-GUTI (13 bytes; TS 24.501 §9.11.3.4 — PLMN 3 || AMF
-                 Region ID 1 || AMF Set ID/Pointer 2 || 5G-TMSI 4 ||
-                 RFU padding 3)
+        [0..12]  5G-GUTI (13 bytes).  This is the TS 24.501 5GS
+                 mobile-identity IE beginning at octet 2: identity length 2
+                 (``000B``), identity header 1 (``F2``), PLMN 3, AMF Region
+                 ID 1, AMF Set ID/Pointer 2, and 5G-TMSI 4.
         [13..15] Last visited registered TAI — PLMN (BCD, swapped)
         [16..18] Last visited registered TAI — TAC
         [19]     5GS update status (TS 24.501 §9.11.3.2)
+
+    An all-``FF`` 13-byte GUTI is the unassigned/default form and does not
+    carry the otherwise mandatory ``000B F2`` identity prefix.
     """
 
     try:
@@ -4271,12 +4406,31 @@ def _decode_5gs_loci(
     if len(raw) != 20:
         return None
     guti = raw[:13]
-    guti_plmn = _decode_plmn_hex(guti[0:3].hex().upper())
-    amf_region_id = guti[3]
-    amf_set_pointer = guti[4:6]
-    tmsi = guti[6:10]
-    guti_rfu = guti[10:13]
-    tai_plmn = _decode_plmn_hex(raw[13:16].hex().upper())
+    guti_assigned = guti != b"\xFF" * 13
+    validation_errors: list[str] = []
+    guti_plmn: str | None = None
+    if guti_assigned:
+        identity_length = int.from_bytes(guti[0:2], "big")
+        if identity_length != 11:
+            validation_errors.append(
+                f"5G-GUTI identity length is {identity_length}; expected 11"
+            )
+        if guti[2] != 0xF2:
+            validation_errors.append(
+                f"5G-GUTI identity header is 0x{guti[2]:02X}; expected 0xF2"
+            )
+        guti_plmn = _decode_plmn_hex(guti[3:6].hex().upper())
+        if guti_plmn is None:
+            validation_errors.append("5G-GUTI PLMN contains invalid BCD digits")
+    amf_region_id = guti[6]
+    amf_set_pointer = guti[7:9]
+    tmsi = guti[9:13]
+    tai_assigned = raw[13:16] != b"\xFF\xFF\xFF"
+    tai_plmn = (
+        _decode_plmn_hex(raw[13:16].hex().upper()) if tai_assigned else None
+    )
+    if tai_assigned and tai_plmn is None:
+        validation_errors.append("Last visited TAI PLMN contains invalid BCD digits")
     tac = raw[16:19]
     status_byte = raw[19]
     status_label = _5GS_UPDATE_STATUS_LABELS.get(status_byte & 0x07)
@@ -4286,15 +4440,23 @@ def _decode_5gs_loci(
         "hex": raw.hex().upper(),
         "length": len(raw),
         "guti": {
+            "assigned": guti_assigned,
             "hex": guti.hex().upper(),
+            "identityLength": (
+                int.from_bytes(guti[0:2], "big") if guti_assigned else None
+            ),
+            "identityLengthHex": (
+                guti[0:2].hex().upper() if guti_assigned else None
+            ),
+            "identityHeaderHex": f"{guti[2]:02X}" if guti_assigned else None,
             "plmn": guti_plmn,
-            "plmnRaw": guti[0:3].hex().upper(),
+            "plmnRaw": guti[3:6].hex().upper() if guti_assigned else None,
             "amfRegionId": f"0x{amf_region_id:02X}",
             "amfSetAndPointerHex": amf_set_pointer.hex().upper(),
             "tmsiHex": tmsi.hex().upper(),
-            "rfuHex": guti_rfu.hex().upper(),
         },
         "tai": {
+            "assigned": tai_assigned,
             "hex": raw[13:19].hex().upper(),
             "plmn": tai_plmn,
             "plmnRaw": raw[13:16].hex().upper(),
@@ -4307,6 +4469,10 @@ def _decode_5gs_loci(
             "label": status_label if status_label is not None else "reserved",
         },
     }
+    if status_byte & 0xF8:
+        decoded["warnings"] = ["5GS update-status RFU bits 4..8 are non-zero"]
+    if validation_errors:
+        decoded["validationErrors"] = validation_errors
     return decoded
 
 
@@ -6948,6 +7114,246 @@ def _decode_ef_vst(hex_clean: str) -> dict[str, object] | None:
     }
 
 
+# A2X service table (TS 31.102 §4.6.6.2). Unlike EF.VST there is no
+# leading coding-indicator byte: byte 0 already carries services 1..8,
+# "same as coding of USIM Service Table".
+_EF_AST_SERVICE_NAMES: dict[int, str] = {
+    1: "A2X configuration data",
+    2: "A2X policy data over PC5",
+    3: "A2X Direct Detect And Avoid policy data over PC5",
+    4: "A2X Direct C2 communication policy data over PC5",
+    5: "A2X policy data over Uu",
+}
+
+
+def _decode_ef_ast(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.AST (TS 31.102 §4.6.6.2 -- A2X Service Table)."""
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) < 1:
+        return None
+    active_services: list[dict[str, object]] = []
+    active_lines: list[str] = []
+    for byte_index, byte_value in enumerate(raw):
+        for bit_index in range(8):
+            if byte_value & (1 << bit_index):
+                service_number = (byte_index * 8) + bit_index + 1
+                name = _EF_AST_SERVICE_NAMES.get(
+                    service_number, f"Service {service_number}"
+                )
+                active_services.append({"number": service_number, "name": name})
+                active_lines.append(f"{service_number}: {name}")
+    return {
+        "format": "A2X Service Table",
+        "reference": "TS 31.102 §4.6.6.2",
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        "services": active_services,
+        "activeServices": active_lines,
+        "activeCount": len(active_lines),
+    }
+
+
+def _decode_a2x_policy_ef(
+    hex_clean: str,
+    *,
+    format_name: str,
+    spec_reference: str,
+    tag_names: dict[str, str],
+    summary_prefix: str,
+) -> dict[str, object] | None:
+    """Decode one of the DF.A2X policy files.
+
+    Each is a transparent EF holding constructed 'A0' data objects whose
+    contents TS 24.578 defines. The five files differ only in their tag
+    names, so they share this body rather than repeating it.
+    """
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) == 0:
+        return None
+    value_decoders: dict[str, ValueDecoder] = {"80": _tlv_value_decoder_text}
+    items = _decode_field_ber_tlv_stream(
+        raw,
+        tag_names=tag_names,
+        value_decoders=value_decoders,
+    )
+    if len(items) == 0:
+        return _decode_spec_opaque_ef(
+            hex_clean,
+            format_name=format_name,
+            spec_reference=spec_reference,
+            summary_prefix=summary_prefix,
+        )
+    return {
+        "format": format_name,
+        "reference": spec_reference,
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        "items": items,
+    }
+
+
+def _decode_ef_a2x_config(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2X_CONFIG (TS 31.102 §4.6.6.3)."""
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X Configuration",
+        spec_reference="TS 31.102 §4.6.6.3",
+        tag_names={
+            "A0": "A2X configuration data",
+            "80": "UE policy part contents",
+        },
+        summary_prefix="A2X-CONFIG",
+    )
+
+
+def _decode_ef_a2xp_pc5(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2XP_PC5 (TS 31.102 §4.6.6.4)."""
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X PC5 Policy",
+        spec_reference="TS 31.102 §4.6.6.4",
+        tag_names={
+            "A0": "A2X policy data over PC5",
+            "80": "Served by NG-RAN",
+            "81": "Not served by NG-RAN",
+            "83": "Privacy config",
+            "84": "A2X communication in E-UTRA-PC5",
+            "85": "A2X communication in NR-PC5",
+        },
+        summary_prefix="A2XP-PC5",
+    )
+
+
+def _decode_ef_a2x_ddaap_pc5(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2X_DDAAP_PC5 (TS 31.102 §4.6.6.5).
+
+    Only the constructed 'A0' tag is named: the inner deconfliction tags
+    are laid out across a wrapped column in the spec table and are not
+    quoted here rather than guessed at.
+    """
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X Detect-And-Avoid Policy over PC5",
+        spec_reference="TS 31.102 §4.6.6.5",
+        tag_names={"A0": "A2X Direct Detect And Avoid policy data over PC5"},
+        summary_prefix="A2X-DDAAP-PC5",
+    )
+
+
+def _decode_ef_a2x_dc2p_pc5(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2X_DC2P_PC5 (TS 31.102 §4.6.6.6)."""
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X Direct C2 Policy over PC5",
+        spec_reference="TS 31.102 §4.6.6.6",
+        tag_names={
+            "A0": "A2X Direct C2 communication policy data over PC5",
+            "80": "Served by NG-RAN for DC2",
+            "81": "Not served by NG-RAN for DC2",
+        },
+        summary_prefix="A2X-DC2P-PC5",
+    )
+
+
+def _decode_ef_a2xp_uu(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.A2XP_Uu (TS 31.102 §4.6.6.7)."""
+
+    return _decode_a2x_policy_ef(
+        hex_clean,
+        format_name="A2X Uu Policy",
+        spec_reference="TS 31.102 §4.6.6.7",
+        tag_names={
+            "A0": "A2X data policy over Uu",
+            "81": "PLMN infos",
+        },
+        summary_prefix="A2XP-Uu",
+    )
+
+
+# Files the SAIP ProfileElement ASN.1 has no member for, so no profile
+# package can carry them -- either because the whole DF is absent from
+# the ASN.1, or, for EF.TVCONFIG, because the file is. TS 31.102 fixes
+# each identifier, structure and short identifier, but leaves the payload
+# layout to a companion spec -- TS 24.334 for the ProSe files, TS 23.003
+# for the WLAN identifier lists, TS 33.102 for the MExE root keys. The
+# payload is surfaced with that citation rather than guessed at.
+_REFERENCE_ONLY_EF_FORMATS: dict[str, tuple[str, str]] = {
+    "ef-sai": ("SoLSA Access Indicator", "TS 31.102 §4.4.1.1"),
+    "ef-sll": ("SoLSA LSA List", "TS 31.102 §4.4.1.2"),
+    "ef-orpk": ("MExE Operator Root Public Key", "TS 31.102 §4.4.4.2"),
+    "ef-arpk": ("MExE Administrator Root Public Key", "TS 31.102 §4.4.4.3"),
+    "ef-tprpk": ("MExE Third Party Root Public Key", "TS 31.102 §4.4.4.4"),
+    "ef-pseudo": ("I-WLAN Pseudonym", "TS 31.102 §4.4.5.1"),
+    "ef-uwsidl": (
+        "User-controlled WLAN Specific Identifier List", "TS 31.102 §4.4.5.4"
+    ),
+    "ef-owsidl": (
+        "Operator-controlled WLAN Specific Identifier List", "TS 31.102 §4.4.5.5"
+    ),
+    "ef-wri": ("I-WLAN Reauthentication Identity", "TS 31.102 §4.4.5.6"),
+    "ef-hwsidl": ("Home I-WLAN Specific Identifier List", "TS 31.102 §4.4.5.7"),
+    "ef-wehplmnpi": (
+        "I-WLAN Equivalent HPLMN Presentation Indication", "TS 31.102 §4.4.5.8"
+    ),
+    "ef-whpi": ("I-WLAN HPLMN Priority Indication", "TS 31.102 §4.4.5.9"),
+    "ef-hplmndai": ("HPLMN Direct Access Indicator", "TS 31.102 §4.4.5.11"),
+    "ef-prose-mon": ("ProSe Monitoring Parameters", "TS 31.102 §4.4.8.2"),
+    "ef-prose-ann": ("ProSe Announcing Parameters", "TS 31.102 §4.4.8.3"),
+    "ef-prosefunc": ("HPLMN ProSe Function", "TS 31.102 §4.4.8.4"),
+    "ef-prose-radio-com": (
+        "ProSe Direct Communication Radio Parameters", "TS 31.102 §4.4.8.5"
+    ),
+    "ef-prose-radio-mon": (
+        "ProSe Direct Discovery Monitoring Radio Parameters", "TS 31.102 §4.4.8.6"
+    ),
+    "ef-prose-radio-ann": (
+        "ProSe Direct Discovery Announcing Radio Parameters", "TS 31.102 §4.4.8.7"
+    ),
+    "ef-prose-policy": ("ProSe Policy Parameters", "TS 31.102 §4.4.8.8"),
+    "ef-prose-plmn": ("ProSe PLMN Parameters", "TS 31.102 §4.4.8.9"),
+    "ef-prose-gc": ("ProSe Group Counter", "TS 31.102 §4.4.8.10"),
+    "ef-prose-uirc": (
+        "ProSe Usage Information Reporting Configuration", "TS 31.102 §4.4.8.12"
+    ),
+    "ef-prose-gm-discovery": (
+        "ProSe Group Member Discovery Parameters", "TS 31.102 §4.4.8.12"
+    ),
+    "ef-prose-relay": ("ProSe Relay Parameters", "TS 31.102 §4.4.8.13"),
+    "ef-prose-relay-discovery": (
+        "ProSe Relay Discovery Parameters", "TS 31.102 §4.4.8.14"
+    ),
+    "ef-acdc-list": ("ACDC List", "TS 31.102 §4.4.9.2"),
+    "ef-tvconfig": ("TV Configuration", "TS 31.102 §4.2.108"),
+}
+
+
+def _decode_reference_only_ef(token: str, hex_clean: str) -> dict[str, object] | None:
+    """Surface a reference-only EF with its formal citation."""
+
+    entry = _REFERENCE_ONLY_EF_FORMATS.get(token)
+    if entry is None:
+        return None
+    format_name, spec_reference = entry
+    return _decode_spec_opaque_ef(
+        hex_clean,
+        format_name=format_name,
+        spec_reference=spec_reference,
+        summary_prefix=format_name,
+    )
+
+
 _EF_EAP_CURID_TAGS: dict[str, str] = {
     "80": "EAP Current ID (UTF-8)",
 }
@@ -8758,7 +9164,7 @@ _MEXE_ST_SERVICE_NAMES: dict[int, str] = {
 
 
 def _decode_ef_mexe_st(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MExE-ST (TS 31.102 §4.4.10.1) — MExE Service Table.
+    """Decode EF.MExE-ST (TS 31.102 §4.4.4.1) — MExE Service Table.
 
     Packed bit-map (service N at byte ``(N-1)//8`` bit ``(N-1)%8``).
     """
@@ -9390,8 +9796,12 @@ def _decode_puct(hex_clean: str) -> dict[str, object] | None:
     currency = _decode_printable_ascii(raw[0:3]) or raw[0:3].hex().upper()
     eppu = (raw[3] << 4) | (raw[4] & 0x0F)
     exp_nibble = (raw[4] >> 4) & 0x0F
-    sign = -1 if (exp_nibble & 0x08) else 1
-    exponent = sign * (exp_nibble & 0x07)
+    # TS 31.102 §4.2.18 numbers bits within the exponent nibble as
+    # b5..b8: b5 is the sign (1 = negative), while b6..b8 carry the
+    # magnitude.  In the ordinary integer representation of that
+    # high nibble this is therefore ``magnitude << 1 | sign``.
+    sign = -1 if (exp_nibble & 0x01) else 1
+    exponent = sign * ((exp_nibble >> 1) & 0x07)
     return {
         "currency": currency,
         "eppu": eppu,
@@ -9989,7 +10399,7 @@ def _decode_known_ef_payload(
         return _decode_iccid(hex_clean)
     if token == "ef-dir" or fid_upper == "2F00":
         return _decode_ef_dir_record(hex_clean)
-    if token == "ef-arr" or fid_upper in {"2F06", "6F06"}:
+    if token in {"ef-arr", "ef-arr-telecom"} or fid_upper in {"2F06", "6F06"}:
         return _decode_ef_arr(hex_clean)
     if token == "ef-pl" or fid_upper == "2F05":
         return _decode_two_byte_language_records(hex_clean)
@@ -10091,31 +10501,33 @@ def _decode_known_ef_payload(
         return _decode_plmn_list(hex_clean, with_act=True)
     if token == "ef-fplmn" or fid_upper == "6F7B":
         return _decode_plmn_list(hex_clean, with_act=False)
-    # DF.WLAN (5F40) — I-WLAN configuration files. TS 31.102 §4.2.82
-    # (UPLMNWLAN @ 4F41), §4.2.83 (OPLMNWLAN @ 4F42), §4.2.91
-    # (WLRPLMN @ 4F47). Token wins over FID; the FIDs are kept for
+    # DF.WLAN (5F40) — I-WLAN configuration files. TS 31.102 §4.4.5.2
+    # (UPLMNWLAN @ 4F42), §4.4.5.3 (OPLMNWLAN @ 4F43), §4.4.5.10
+    # (WLRPLMN @ 4F4A). Token wins over FID; the FIDs are kept for
     # legacy callers that strip the token.
-    if token == "ef-oplmnwlan" or fid_upper == "4F42":
+    if token == "ef-oplmnwlan" or fid_upper == "4F43":
         return _decode_wlan_plmn_list(
             hex_clean,
             format_name="Operator-controlled I-WLAN PLMN selector",
-            spec_reference="TS 31.102 §4.2.83",
+            spec_reference="TS 31.102 §4.4.5.3",
         )
-    if token == "ef-uplmnwlan" or fid_upper == "4F41":
+    if token == "ef-uplmnwlan" or fid_upper == "4F42":
         return _decode_wlan_plmn_list(
             hex_clean,
             format_name="User-controlled I-WLAN PLMN selector",
-            spec_reference="TS 31.102 §4.2.82",
+            spec_reference="TS 31.102 §4.4.5.2",
         )
-    if token == "ef-wlrplmn" or fid_upper == "4F47":
+    if token == "ef-wlrplmn" or fid_upper == "4F4A":
         return _decode_ef_wlrplmn(hex_clean)
     if token == "ef-bst":
         return _decode_ef_bst(hex_clean)
     if token == "ef-pst":
         return _decode_ef_pst(hex_clean)
-    if token in {"ef-loci", "ef-psloci", "ef-epsloci"}:
+    if token == "ef-epsloci" or fid_upper == "6FE3":
+        return _decode_eps_loci(hex_clean)
+    if token in {"ef-loci", "ef-psloci"}:
         return _decode_loci(hex_clean)
-    if fid_upper in {"6F7E", "6F73", "6FE3"}:
+    if fid_upper in {"6F7E", "6F73"}:
         return _decode_loci(hex_clean)
     if token == "ef-gid1" or fid_upper == "6F3E":
         return _decode_group_identifier(hex_clean, format_name="Group Identifier Level 1")
@@ -10665,6 +11077,54 @@ def _decode_known_ef_payload(
         return _decode_ef_v2xp_pc5(hex_clean)
     if token == "ef-vst":
         return _decode_ef_vst(hex_clean)
+    if token == "ef-ast":
+        return _decode_ef_ast(hex_clean)
+    if token == "ef-a2x-config":
+        return _decode_ef_a2x_config(hex_clean)
+    if token == "ef-a2xp-pc5":
+        return _decode_ef_a2xp_pc5(hex_clean)
+    if token == "ef-a2x-ddaap-pc5":
+        return _decode_ef_a2x_ddaap_pc5(hex_clean)
+    if token == "ef-a2x-dc2p-pc5":
+        return _decode_ef_a2x_dc2p_pc5(hex_clean)
+    if token == "ef-a2xp-uu":
+        return _decode_ef_a2xp_uu(hex_clean)
+    # DF.HNB operator variants share the format of the subscriber files.
+    if token == "ef-ocsgt":
+        return _decode_ef_csgt(hex_clean)
+    if token == "ef-ohnbn":
+        return _decode_ef_hnbn(hex_clean)
+    if token in {
+        "ef-sai",
+        "ef-sll",
+        "ef-orpk",
+        "ef-arpk",
+        "ef-tprpk",
+        "ef-pseudo",
+        "ef-uwsidl",
+        "ef-owsidl",
+        "ef-wri",
+        "ef-hwsidl",
+        "ef-wehplmnpi",
+        "ef-whpi",
+        "ef-hplmndai",
+        "ef-prose-mon",
+        "ef-prose-ann",
+        "ef-prosefunc",
+        "ef-prose-radio-com",
+        "ef-prose-radio-mon",
+        "ef-prose-radio-ann",
+        "ef-prose-policy",
+        "ef-prose-plmn",
+        "ef-prose-gc",
+        "ef-prose-uirc",
+        "ef-prose-gm-discovery",
+        "ef-prose-relay",
+        "ef-prose-relay-discovery",
+        "ef-acdc-list",
+        "ef-tvconfig",
+    }:
+        return _decode_reference_only_ef(token, hex_clean)
     if token == "ef-curid":
         return _decode_ef_eap_curid(hex_clean)
     if token == "ef-ps":
@@ -13168,11 +13628,6 @@ def _decode_connectivity_dcs(value_bytes: bytes) -> dict[str, object]:
     dcs = value_bytes[0]
     group = (dcs >> 4) & 0xF
     detail = dcs & 0xF
-    alphabet_names = {
-        0x0: "GSM 7-bit default alphabet",
-        0x4: "8-bit data",
-        0x8: "UCS2",
-    }
     class_names = {0b00: "Class 0", 0b01: "Class 1 (ME-specific)", 0b10: "Class 2 (U)SIM-specific", 0b11: "Class 3 (TE-specific)"}
     decoded: dict[str, object] = {"hex": value_bytes.hex().upper(), "decimal": dcs}
     if group in (0x0, 0x1, 0x2, 0x3):

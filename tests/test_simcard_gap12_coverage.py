@@ -53,8 +53,8 @@ class _ToolkitHarness(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
-            iccid="8949000000000000001",
+            eid="89049032123451234512345678901235",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",
@@ -197,7 +197,7 @@ class CallLifecycleEventTests(_ToolkitHarness):
 
 
 class UserActivityEventTests(_ToolkitHarness):
-    """ETSI TS 102 223 §7.4.4 User Activity Event."""
+    """ETSI TS 102 223 §7.5.5 User activity event."""
 
     def test_user_activity_counter_is_monotonic(self) -> None:
         for _ in range(3):
@@ -207,12 +207,12 @@ class UserActivityEventTests(_ToolkitHarness):
 
 
 class AccessTechnologyChangeTests(_ToolkitHarness):
-    """3GPP TS 31.111 §7.5.4 Access Technology Change Event."""
+    """ETSI TS 102 223 §7.5.12 Access Technology Change Event."""
 
     def test_access_tech_change_records_value_and_increment(self) -> None:
-        first = _event_payload(0x0D, tlv("BF", bytes((0x02,))))
-        second = _event_payload(0x0D, tlv("BF", bytes((0x03,))))
-        same_again = _event_payload(0x0D, tlv("BF", bytes((0x03,))))
+        first = _event_payload(0x0B, tlv("BF", bytes((0x02,))))
+        second = _event_payload(0x0B, tlv("BF", bytes((0x03,))))
+        same_again = _event_payload(0x0B, tlv("BF", bytes((0x03,))))
         self.toolkit.handle_envelope(first, self._fallback)
         self.toolkit.handle_envelope(second, self._fallback)
         self.toolkit.handle_envelope(same_again, self._fallback)
@@ -223,18 +223,18 @@ class AccessTechnologyChangeTests(_ToolkitHarness):
 
 
 class DisplayParametersChangeTests(_ToolkitHarness):
-    """ETSI TS 102 223 §7.4.14 Display Parameters Change Event."""
+    """ETSI TS 102 223 §7.5.13 Display parameters changed Event."""
 
     def test_display_params_blob_cached(self) -> None:
         params = bytes.fromhex("0F2014")
-        envelope = _event_payload(0x0E, tlv("C6", params))
+        envelope = _event_payload(0x0C, tlv("C6", params))
         self.toolkit.handle_envelope(envelope, self._fallback)
         toolkit = self.state.toolkit
         self.assertEqual(toolkit.last_display_parameters, params)
         self.assertEqual(toolkit.display_parameters_changes, 1)
 
     def test_empty_display_params_still_increments_counter(self) -> None:
-        envelope = _event_payload(0x0E)
+        envelope = _event_payload(0x0C)
         self.toolkit.handle_envelope(envelope, self._fallback)
         self.assertEqual(self.state.toolkit.display_parameters_changes, 1)
         self.assertEqual(self.state.toolkit.last_display_parameters, b"")

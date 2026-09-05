@@ -75,20 +75,21 @@ non-trivial, the row links to the page that explains it in full.
 | --- | --- | --- |
 | `CI PKID unavailable` at AuthenticateClient | SM-DP+ chain not trusted by the card | check `ES9-CERT-INFO`, `SET-ES9-CA`, pick a CI the card trusts |
 | TLS error at `InitiateAuthentication` | pinned CA or clock skew | check `SET-ES9-TLS`, `SET-ES9-CA`, host clock |
-| `self-signed certificate in certificate chain` on a freshly-seen eIM/SM-DP+ FQDN | no local trust anchor yet for this host | the client runs a TOFU chain read, verifies it against a local bundle, and persists the result. If you previously set `YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION=1`, unset it so auto-learn can bootstrap; subsequent runs will be fully pinned against the persisted bundle. |
+| `self-signed certificate in certificate chain` on a freshly-seen eIM/SM-DP+ FQDN | no local trust anchor for this host, and the first-contact chain read is refused by default | point the client at the anchor with `SET-ES9-CA --persist <pem>` (or `ES9_CA_BUNDLE_PATH`). Without a reviewed anchor to hand, set `YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION=1` for one run: the client reads the chain, verifies it, and persists it under `SCP11/<tree>/dynamic_ca`, after which the flag is no longer needed. Both routes are refused while `YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION=1`. |
 | BPP install fails mid-stream | insufficient memory or bad BPP segment | retry, free space, or relint the source package |
 
 ### TLS trust-posture knobs
 
-Three env flags govern SCP11 TLS posture. All three are unset by default.
+Four env flags govern SCP11 TLS posture. All four are unset by default. Two gates are independent: one covers request-carrying traffic, the other covers the read-only chain probe.
 
 | Env flag | Role | Default | When to set |
 | --- | --- | --- | --- |
 | `YGGDRASIM_SCP11_ALLOW_INSECURE_TLS` | Opt-in to unpinned *request* traffic (real ES9 POSTs, transport channel). Triggers a one-shot stderr warning banner per caller. | unset → refused | Dev boxes running against SGP.26 test vectors only. Never against a production RSP server. |
 | `YGGDRASIM_SCP11_REQUIRE_PINNED_TLS` | Hard-lock: refuse unpinned request traffic even if `ALLOW_INSECURE_TLS=1` is also set. | unset → opt-in still possible | Fleet or CI where nobody should ever downgrade a request. |
-| `YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION` | Hard-lock: refuse the read-only TOFU chain read that auto-learns new trust anchors. Use only when no new anchor may be learned at runtime. | unset → auto-learn allowed | Air-gapped or attestation-only deployments; pre-seed anchors under `SCP11/<tree>/certs` instead. |
+| `YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION` | Opt-in to the read-only chain probe that auto-learns a trust anchor on first contact. Sends no request body; persists the verified chain under `SCP11/<tree>/dynamic_ca`. | unset → refused | First contact with a lab SM-DP+ / eIM whose root you cannot pre-seed. Only on a network you trust -- an active attacker controls first contact. |
+| `YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION` | Hard-lock: refuse the chain probe even if `ALLOW_TLS_INTROSPECTION=1` is also set. | unset → opt-in still possible | Air-gapped or attestation-only deployments; point `ES9_CA_BUNDLE_PATH` at a reviewed anchor instead. |
 
-Auto-learn is intentionally the default. Popping in a new eUICC or registering against a new eIM FQDN works without any env dance: the client TOFUs the chain once, persists it as a local bundle, and every subsequent call verifies against that bundle with full pinning.
+Auto-learn is opt-in, not the default. A freshly-seen SM-DP+ or eIM FQDN whose root is not already trusted fails with `CERTIFICATE_VERIFY_FAILED` until either `ES9_CA_BUNDLE_PATH` names a reviewed anchor or `ALLOW_TLS_INTROSPECTION=1` permits one bootstrap read. After a successful bootstrap the persisted bundle pins every subsequent call, and the flag can be unset again.
 
 ### Plugin loader knobs
 

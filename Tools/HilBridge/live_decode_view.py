@@ -18,7 +18,34 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 DEFAULT_DECODE_RULE = "udp.port==4729,gsmtap"
+
+
+def apdu_dissector_args() -> list[str]:
+    """Return ``-X lua_script:...`` for the bundled APDU dissector.
+
+    Returns an empty list when the dissector is missing or the operator
+    set ``YGGDRASIM_APDU_DISSECTOR=0``, so callers can splat it into an
+    argv list unconditionally.
+
+    The decode rule above is unchanged: the dissector binds to the
+    gsmtap.type table rather than claiming UDP 4729, so it layers on top
+    of the stock GSMTAP dissector instead of competing with it. Every
+    surface that renders ``tshark -V`` or PDML -- the live decode view,
+    the detail pane, offline pcap review -- picks up the deeper tree
+    without any further change.
+    """
+    try:
+        from Tools.ApduDissector.tshark_runner import dissector_arguments
+    except ImportError:
+        # The clean executable does not bundle the dissector package.
+        return []
+    return dissector_arguments()
+
+
 SUMMARY_REFRESH_SECONDS = 0.35
+MAX_PDML_TEXT_CHARS = 8 * 1024 * 1024
+MAX_PDML_NODES = 100_000
+MAX_PDML_DEPTH = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +143,7 @@ def build_summary_command(
     normalized_filter = str(frame_filter or "").strip()
     if len(normalized_filter) > 0:
         command.extend(["-Y", normalized_filter])
+    command.extend(apdu_dissector_args())
     command.extend(["-d", str(decode_rule or DEFAULT_DECODE_RULE)])
     return command
 
@@ -139,6 +167,7 @@ def build_packet_detail_command(
         frame_filter,
         "-d",
         str(decode_rule or DEFAULT_DECODE_RULE),
+        *apdu_dissector_args(),
     ]
 
 
@@ -161,6 +190,7 @@ def build_packet_hex_command(
         frame_filter,
         "-d",
         str(decode_rule or DEFAULT_DECODE_RULE),
+        *apdu_dissector_args(),
     ]
 
 
@@ -184,6 +214,7 @@ def build_packet_field_range_command(
         frame_filter,
         "-d",
         str(decode_rule or DEFAULT_DECODE_RULE),
+        *apdu_dissector_args(),
     ]
 
 
@@ -247,6 +278,11 @@ def parse_packet_field_ranges(pdml_text: str) -> list[dict[str, object]]:
     normalized = str(pdml_text or "").strip()
     if len(normalized) == 0:
         return []
+    if len(normalized) > MAX_PDML_TEXT_CHARS:
+        return []
+    lowered = normalized.lower()
+    if "<!doctype" in lowered or "<!entity" in lowered:
+        return []
     try:
         root = ElementTree.fromstring(normalized)
     except ElementTree.ParseError:
@@ -254,7 +290,13 @@ def parse_packet_field_ranges(pdml_text: str) -> list[dict[str, object]]:
 
     ranges: list[dict[str, object]] = []
 
-    def _walk(node: ElementTree.Element, depth: int) -> None:
+    stack: list[tuple[ElementTree.Element, int]] = [(root, 0)]
+    visited = 0
+    while stack:
+        node, depth = stack.pop()
+        visited += 1
+        if visited > MAX_PDML_NODES or depth > MAX_PDML_DEPTH:
+            return []
         tag = _xml_local_name(node.tag)
         if tag in {"proto", "field"}:
             parsed = _pdml_node_range(node, depth)
@@ -263,10 +305,9 @@ def parse_packet_field_ranges(pdml_text: str) -> list[dict[str, object]]:
             next_depth = depth + 1 if tag == "field" else depth
         else:
             next_depth = depth
-        for child in list(node):
-            _walk(child, next_depth)
-
-    _walk(root, 0)
+        children = list(node)
+        for child in reversed(children):
+            stack.append((child, next_depth))
     ranges.sort(
         key=lambda item: (
             int(item.get("start", 0) or 0),

@@ -18,7 +18,7 @@
    noticeably darker than the editable rows below, which read as
    "clunky black boxes" in operator review. */
 .saip-detail-head-chips .cc-chip {
-  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--fg-muted);
@@ -28,10 +28,9 @@
 }
 
 .saip-detail-head-chips .cc-chip code {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   color: var(--fg);
   background: transparent;
   padding: 0;
 }
-

@@ -42,6 +42,7 @@ from SIMCARD.state import (
 from SIMCARD.utils import (
     decode_bcd_digits,
     encode_iccid_ef,
+    encode_length,
     find_first_tlv,
     read_tlv,
     read_tlv_header,
@@ -877,31 +878,156 @@ class SgpLogic:
     def _handle_load_crl(self, payload: bytes) -> tuple[bytes, int, int]:
         """SGP.22 v3 §5.7.13 ES10b.LoadCRL handler.
 
-        Request: ``BF35`` SEQUENCE { ``A0`` Crl OCTET STRING ... }.
+        Request: ``BF35`` SEQUENCE { ``A0`` CertificateList ... }.
         Response: ``BF35`` SEQUENCE { ``80`` LoadCRLResponseOk |
         ``81`` LoadCRLResponseError }.
 
-        The simulator records the CRL DER bytes in ``state.loaded_crls``
-        for introspection but does not enforce revocation today. The
-        eUICC therefore always replies ``ok(0)`` provided the request
-        carries a non-empty inner CRL TLV; an empty body returns
-        ``invalidSignature(2)`` to keep the bouncer behaviour honest.
+        The context-specific ``A0`` tag is the implicit replacement for
+        the X.509 ``CertificateList`` SEQUENCE tag. The simulator restores
+        canonical DER, validates time bounds and verifies the signature
+        against a configured issuer certificate before persisting it.
         """
 
-        crl_blob = bytes(payload[2:] if len(payload) > 2 else b"")
-        # Strip the outer length byte chain to reach the inner value.
-        inner_value = b""
         try:
-            _outer_tag, outer_value, _outer_raw, _outer_next = read_tlv(payload, 0)
-            inner_value = bytes(outer_value)
-        except (ValueError, IndexError):
-            pass
-        if len(inner_value) == 0:
-            error_response = tlv("BF35", tlv(b"\x81", encode_der_integer(2)))
-            return error_response, 0x90, 0x00
-        self.state.loaded_crls.append(inner_value)
+            outer_tag, outer_value, _outer_raw, outer_next = read_tlv(payload, 0)
+            if outer_tag != bytes.fromhex("BF35") or outer_next != len(payload):
+                raise ValueError("Malformed LoadCRL envelope.")
+            crl_tag, crl_value, _crl_raw, crl_next = read_tlv(outer_value, 0)
+            if crl_tag != b"\xA0" or crl_next != len(outer_value):
+                raise ValueError("LoadCRL must contain exactly one A0 CertificateList.")
+            # Older encoders have emitted [0] as an explicit wrapper around
+            # the imported CertificateList, while AUTOMATIC/IMPLICIT schemas
+            # replace its SEQUENCE tag. Accept both unambiguous forms and
+            # normalize state to one canonical DER representation.
+            crl_der = b""
+            try:
+                nested_tag, _nested_value, nested_raw, nested_next = read_tlv(crl_value, 0)
+            except ValueError:
+                pass
+            else:
+                if nested_tag == b"\x30" and nested_next == len(crl_value):
+                    crl_der = bytes(nested_raw)
+            if len(crl_der) == 0:
+                crl_der = b"\x30" + encode_length(len(crl_value)) + bytes(crl_value)
+            crl = crypto_x509.load_der_x509_crl(crl_der)
+        except (ValueError, TypeError):
+            return self._load_crl_error_response(), 0x90, 0x00
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        last_update = getattr(crl, "last_update_utc", None)
+        next_update = getattr(crl, "next_update_utc", None)
+        if last_update is None:
+            last_update = crl.last_update.replace(tzinfo=datetime.timezone.utc)
+        if next_update is None and crl.next_update is not None:
+            next_update = crl.next_update.replace(tzinfo=datetime.timezone.utc)
+        if last_update > now or (next_update is not None and next_update < now):
+            return self._load_crl_error_response(), 0x90, 0x00
+
+        issuer_verified = False
+        for certificate in self._trusted_crl_issuer_certificates():
+            if certificate.subject != crl.issuer:
+                continue
+            if self._certificate_can_sign_crl(certificate, now=now) is False:
+                continue
+            try:
+                if crl.is_signature_valid(certificate.public_key()):
+                    issuer_verified = True
+                    break
+            except Exception:
+                continue
+        if issuer_verified is False:
+            return self._load_crl_error_response(), 0x90, 0x00
+
+        if crl_der not in self.state.loaded_crls:
+            self.state.loaded_crls.append(crl_der)
         ok_response = tlv("BF35", tlv(b"\x80", encode_der_integer(0)))
         return ok_response, 0x90, 0x00
+
+    @staticmethod
+    def _load_crl_error_response() -> bytes:
+        return tlv("BF35", tlv(b"\x81", encode_der_integer(2)))
+
+    def _trusted_crl_issuer_certificates(self) -> list[crypto_x509.Certificate]:
+        """Return parseable configured certificates that may sign an RSP CRL."""
+
+        certificate_blobs: list[bytes] = [
+            bytes(self._ci_certificate_der or b""),
+            bytes(self.state.eum_certificate_der or b""),
+        ]
+        for entry in self.state.eim_entries:
+            candidate = bytes(entry.eim_public_key_data or b"")
+            if len(candidate) > 0:
+                try:
+                    tag, value, _raw, next_offset = read_tlv(candidate, 0)
+                except ValueError:
+                    pass
+                else:
+                    if tag in (b"\xA0", b"\xA1", b"\xA5") and next_offset == len(candidate):
+                        candidate = bytes(value)
+            certificate_blobs.append(candidate)
+
+        certificates: list[crypto_x509.Certificate] = []
+        seen_der: set[bytes] = set()
+        for candidate in certificate_blobs:
+            if len(candidate) == 0 or candidate in seen_der:
+                continue
+            try:
+                certificate = crypto_x509.load_der_x509_certificate(candidate)
+            except ValueError:
+                continue
+            seen_der.add(candidate)
+            certificates.append(certificate)
+        return certificates
+
+    @staticmethod
+    def _certificate_can_sign_crl(
+        certificate: crypto_x509.Certificate,
+        *,
+        now: datetime.datetime,
+    ) -> bool:
+        not_before = getattr(certificate, "not_valid_before_utc", None)
+        not_after = getattr(certificate, "not_valid_after_utc", None)
+        if not_before is None:
+            not_before = certificate.not_valid_before.replace(tzinfo=datetime.timezone.utc)
+        if not_after is None:
+            not_after = certificate.not_valid_after.replace(tzinfo=datetime.timezone.utc)
+        if now < not_before or now > not_after:
+            return False
+        try:
+            basic_constraints = certificate.extensions.get_extension_for_oid(
+                ExtensionOID.BASIC_CONSTRAINTS
+            ).value
+        except crypto_x509.ExtensionNotFound:
+            return False
+        if basic_constraints.ca is False:
+            return False
+        try:
+            key_usage = certificate.extensions.get_extension_for_oid(
+                ExtensionOID.KEY_USAGE
+            ).value
+        except crypto_x509.ExtensionNotFound:
+            return True
+        return bool(key_usage.crl_sign)
+
+    def _certificate_is_revoked(self, certificate: crypto_x509.Certificate) -> bool:
+        """Return whether an accepted, current CRL revokes *certificate*."""
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for crl_der in self.state.loaded_crls:
+            try:
+                crl = crypto_x509.load_der_x509_crl(bytes(crl_der))
+            except ValueError:
+                continue
+            if crl.issuer != certificate.issuer:
+                continue
+            next_update = getattr(crl, "next_update_utc", None)
+            if next_update is None and crl.next_update is not None:
+                next_update = crl.next_update.replace(tzinfo=datetime.timezone.utc)
+            if next_update is not None and next_update < now:
+                continue
+            if crl.get_revoked_certificate_by_serial_number(certificate.serial_number) is not None:
+                return True
+        return False
 
     def _handle_es10c_memory_reset(self, payload: bytes) -> tuple[bytes, int, int]:
         # SGP.22 v3 §5.7.19 ES10c.eUICCMemoryReset ::= [52] SEQUENCE { -- BF34
@@ -1082,7 +1208,10 @@ class SgpLogic:
         eim_id = host
         eim_id_type = 2
         if len(eim_id) == 0:
-            eim_id = f"legacy-eim-{hashlib.sha1(cert_bytes).hexdigest()[:16]}"
+            # Compatibility identifier only; SHA-1 is not used for trust,
+            # authentication, or signature validation on this path.
+            digest = hashlib.sha1(cert_bytes, usedforsecurity=False).hexdigest()
+            eim_id = f"legacy-eim-{digest[:16]}"
             eim_id_type = 3
         wrapped_certificate = tlv("A1", cert_bytes) if len(cert_bytes) > 0 else b""
         return SimEimEntry(
@@ -1373,7 +1502,7 @@ class SgpLogic:
     def _issue_card_challenge(self) -> bytes:
         challenge = hashlib.sha256(
             bytes.fromhex(self.state.eid)
-            + len(self.state.apdu_history).to_bytes(4, "big", signed=False)
+            + self.state.apdu_count.to_bytes(4, "big", signed=False)
         ).digest()[:16]
         self.state.sgp_session.card_challenge = challenge
         return challenge
@@ -2205,16 +2334,22 @@ class SgpLogic:
         return False
 
     def _build_notification_list_response(self, payload: bytes = b"") -> bytes:
-        filter_mask = self._extract_notification_filter(payload)
+        try:
+            selected_operations = self._extract_notification_filter(payload)
+        except ValueError:
+            return tlv("BF28", tlv("81", encode_der_integer(127)))
         selected: list[bytes] = []
         for notification in self.state.notifications:
-            op_bits = int(notification.operation or 0)
-            if filter_mask is not None and (op_bits & filter_mask) == 0:
+            operation = int(notification.operation or 0)
+            if (
+                selected_operations is not None
+                and operation not in selected_operations
+            ):
                 continue
             selected.append(
                 self._notification_metadata_tlv(
                     seq_number=notification.seq_number,
-                    operation=op_bits,
+                    operation=operation,
                     iccid=notification.iccid,
                     notification_address=notification.address,
                 )
@@ -2224,24 +2359,90 @@ class SgpLogic:
         return tlv("BF28", tlv("A0", b"".join(selected)))
 
     @staticmethod
-    def _extract_notification_filter(payload: bytes) -> int | None:
+    def _extract_notification_filter(payload: bytes) -> frozenset[int] | None:
+        """Decode the optional BF28/81 NotificationEvent filter.
+
+        ``NotificationEvent`` is an implicitly tagged ASN.1 BIT STRING,
+        so its first value octet is the unused-bit count rather than an
+        operation enum.  ``None`` means the optional filter was absent;
+        an empty set means the caller supplied a valid filter with no
+        event bits selected.
+        """
+
         body = bytes(payload or b"")
-        if len(body) == 0 or body.startswith(bytes.fromhex("BF28")) is False:
+        # Preserve the helper's no-argument behavior for internal callers;
+        # a real APDU request still arrives as the complete ``BF2800`` TLV.
+        if len(body) == 0:
             return None
         try:
-            _, inner, _, _ = read_tlv(body, 0)
-        except ValueError:
-            return None
-        tlv_81 = find_first_tlv(inner, "81")
-        if len(tlv_81) == 0:
+            root_tag, inner, _, root_end = read_tlv(body, 0)
+        except ValueError as exc:
+            raise ValueError("Malformed ListNotificationRequest.") from exc
+        if root_tag != bytes.fromhex("BF28") or root_end != len(body):
+            raise ValueError("Expected exactly one BF28 ListNotificationRequest.")
+        if len(inner) == 0:
             return None
         try:
-            _, filter_value, _, _ = read_tlv(tlv_81, 0)
-        except ValueError:
-            return None
-        if len(filter_value) == 0:
-            return None
-        return int.from_bytes(filter_value, "big", signed=False)
+            filter_tag, filter_value, _, filter_end = read_tlv(inner, 0)
+        except ValueError as exc:
+            raise ValueError("Malformed NotificationEvent filter.") from exc
+        if filter_tag != b"\x81" or filter_end != len(inner):
+            raise ValueError(
+                "ListNotificationRequest accepts only one optional 81 filter."
+            )
+        return SgpLogic._decode_notification_event_filter(filter_value)
+
+    @staticmethod
+    def _decode_notification_event_filter(value: bytes) -> frozenset[int]:
+        raw = bytes(value or b"")
+        if len(raw) == 0:
+            raise ValueError("NotificationEvent BIT STRING has no unused-bit octet.")
+        unused_bits = raw[0]
+        event_bytes = raw[1:]
+        if unused_bits > 7:
+            raise ValueError("NotificationEvent unused-bit count must be 0..7.")
+        if len(event_bytes) == 0:
+            if unused_bits != 0:
+                raise ValueError(
+                    "Empty NotificationEvent BIT STRING must have zero unused bits."
+                )
+            return frozenset()
+        if unused_bits and event_bytes[-1] & ((1 << unused_bits) - 1):
+            raise ValueError("NotificationEvent contains non-zero padding bits.")
+
+        operation_for_bit = {
+            0: SgpLogic.NOTIF_INSTALL,
+            1: SgpLogic.NOTIF_ENABLE,
+            2: SgpLogic.NOTIF_DISABLE,
+            3: SgpLogic.NOTIF_DELETE,
+        }
+        selected: set[int] = set()
+        significant_bit_count = (len(event_bytes) * 8) - unused_bits
+        for bit_index in range(significant_bit_count):
+            byte_value = event_bytes[bit_index // 8]
+            if byte_value & (0x80 >> (bit_index % 8)):
+                operation = operation_for_bit.get(bit_index)
+                if operation is not None:
+                    selected.add(operation)
+        return frozenset(selected)
+
+    @staticmethod
+    def _encode_notification_event(operation: int) -> bytes:
+        """Encode one internal lifecycle enum as NotificationEvent content."""
+
+        event_bit_for_operation = {
+            SgpLogic.NOTIF_INSTALL: 0,
+            SgpLogic.NOTIF_ENABLE: 1,
+            SgpLogic.NOTIF_DISABLE: 2,
+            SgpLogic.NOTIF_DELETE: 3,
+        }
+        try:
+            bit_index = event_bit_for_operation[int(operation)]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Unsupported notification operation: {operation!r}"
+            ) from exc
+        return bytes((7 - bit_index, 0x80 >> bit_index))
 
     def _build_notification_retrieve_all_response(self) -> bytes:
         if len(self.state.notifications) == 0:
@@ -2961,7 +3162,7 @@ class SgpLogic:
         return tlv(
             "BF2F",
             tlv("80", self._encode_notification_seq(seq_number))
-            + tlv("81", bytes([operation & 0xFF]))
+            + tlv("81", self._encode_notification_event(operation))
             + tlv("0C", profile_notification_address.encode("utf-8"))
             + tlv("5A", encode_iccid_ef(profile_iccid)),
         )
@@ -3119,6 +3320,8 @@ class SgpLogic:
             certificate = crypto_x509.load_der_x509_certificate(certificate_der)
         except Exception:
             return 0x02
+        if self._certificate_is_revoked(certificate):
+            return 0x02
 
         root_ci_id = bytes(parsed.get("root_ci_id", b""))
         configured_ci_pkids = self._configured_ci_pkids()
@@ -3236,6 +3439,8 @@ class SgpLogic:
         try:
             certificate = crypto_x509.load_der_x509_certificate(certificate_der)
         except Exception:
+            return 0x01
+        if self._certificate_is_revoked(certificate):
             return 0x01
         if self._prepare_download_certificate_continuation_valid(certificate_der, certificate, session) is False:
             return 0x01
@@ -3396,7 +3601,10 @@ class SgpLogic:
             while offset < len(entry_value):
                 field_tag, field_value, _, next_offset = read_tlv(entry_value, offset)
                 if field_tag == b"\x0C":
-                    notification_address = field_value.decode("utf-8", "ignore")
+                    # UTF8String is a typed ASN.1 field: malformed input
+                    # must reject the metadata request instead of silently
+                    # deleting bytes and persisting a different address.
+                    notification_address = field_value.decode("utf-8", "strict")
                 offset = next_offset
         return notification_address
 
@@ -3625,6 +3833,8 @@ class SgpLogic:
             + tlv("5F49", bytes(session.euicc_otpk))
         )
         certificate = crypto_x509.load_der_x509_certificate(certificate_der)
+        if self._certificate_is_revoked(certificate):
+            return False
         public_key = certificate.public_key()
         der_signature = asym_utils.encode_dss_signature(
             int.from_bytes(raw_signature[:32], "big", signed=False),

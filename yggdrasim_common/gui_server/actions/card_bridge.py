@@ -33,15 +33,22 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
-import sys
+import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from yggdrasim_common.frozen_dispatch import (
+    build_module_command,
+    command_targets_internal_entry,
+    hidden_window_subprocess_kwargs,
+)
 from yggdrasim_common.gui_server.actions.registry import (
     ActionContext,
     ActionField,
@@ -62,7 +69,7 @@ _DEFAULT_REMOTE_SERVICE_NAME = "yggdrasim-hil-supervisor.service"
 _DEFAULT_REMOTE_CARD_URL = "http://127.0.0.1:8642/apdu"
 _DEFAULT_REMOTE_TOKEN_FILE = "~/.config/yggdrasim/card_bridge/8642.token"
 _DEFAULT_REMOTE_WORKDIR = "~/YggdraSIM"
-_DEFAULT_REMOTE_PYTHON = "~/YggdraSIM/python/bin/python"
+_DEFAULT_REMOTE_PYTHON = "~/YggdraSIM/.venv/bin/python"
 _DEFAULT_REMSIM_BINARY = "osmo-remsim-client-st2"
 _REMOTE_GSMTAP_CAPTURE_RELATIVE = "state/hil_termshark/live_capture.pcap"
 _DEFAULT_GUI_PORT = 27854
@@ -70,7 +77,17 @@ _DEFAULT_CARD_PORT = 8642
 _DEFAULT_HIL_PORT = 9997
 _DEFAULT_APDU_TIMEOUT_MS = 30000
 _DEFAULT_USB_VIDPID = "1d50:60e3"
+# Pre-session SIMtrace2 reset knobs. Mirrored from
+# ``Tools.HilBridge.device_reset`` / ``yggdrasim_common.hil_bridge_runtime``
+# rather than imported: this module stays importable in the clean
+# cross-platform bundle, which excludes the local HIL stack entirely.
+_SIMTRACE_RESET_ENV = "YGGDRASIM_HIL_SIMTRACE_RESET"
+_UHUBCTL_BINARY_ENV = "YGGDRASIM_HIL_UHUBCTL_BINARY"
+_UHUBCTL_LOCATION_ENV = "YGGDRASIM_HIL_UHUBCTL_LOCATION"
+_UHUBCTL_PORT_ENV = "YGGDRASIM_HIL_UHUBCTL_PORT"
+_SIMTRACE_RESET_MODES = ("off", "usb-reset", "port-power", "auto")
 _SERVICE_NAME_RE = re.compile(r"^[A-Za-z0-9_.@-]+\.service$")
+_REMOTE_RIG_STATE_LOCK = threading.RLock()
 
 
 # ---------------------------------------------------------------------------
@@ -104,26 +121,47 @@ def _remote_rig_state_path() -> str:
 
 
 def _load_remote_rig_state() -> dict[str, Any]:
-    path = _remote_rig_state_path()
-    if os.path.isfile(path) is False:
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    with _REMOTE_RIG_STATE_LOCK:
+        path = _remote_rig_state_path()
+        if os.path.isfile(path) is False:
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
 
 def _write_remote_rig_state(updates: dict[str, Any]) -> dict[str, Any]:
-    state = _load_remote_rig_state()
-    state.update(updates)
-    state["updated_at"] = time.time()
-    path = _remote_rig_state_path()
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(state, handle, indent=2, sort_keys=True)
-        handle.write("\n")
-    return state
+    with _REMOTE_RIG_STATE_LOCK:
+        state = _load_remote_rig_state()
+        state.update(updates)
+        state["updated_at"] = time.time()
+        path = Path(_remote_rig_state_path())
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=str(path.parent),
+        )
+        try:
+            handle = os.fdopen(descriptor, "w", encoding="utf-8")
+            descriptor = -1
+            with handle:
+                json.dump(state, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, path)
+        except Exception:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
+            raise
+        return state
 
 
 def _tail_text_file(path: str | Path, *, max_bytes: int = 4096) -> str:
@@ -209,7 +247,12 @@ def _terminate_process_group(pid: Any) -> dict[str, Any]:
 def _detached_subprocess_kwargs() -> dict[str, Any]:
     """Return subprocess options for a separately terminable helper."""
     if os.name == "nt":
-        creation_flag = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        creation_flag = int(
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) or 0
+        )
+        creation_flag |= int(
+            hidden_window_subprocess_kwargs().get("creationflags", 0)
+        )
         if creation_flag:
             return {"creationflags": creation_flag}
         return {}
@@ -271,6 +314,8 @@ def _pid_cmdline(pid: int) -> list[str]:
 def _cmdline_is_card_bridge(command: list[str]) -> bool:
     if len(command) == 0:
         return False
+    if command_targets_internal_entry(command, "card-bridge"):
+        return True
     basenames = {Path(part).name for part in command}
     if "yggdrasim-card-bridge" in basenames:
         return True
@@ -348,6 +393,56 @@ def _validate_service_name(service_name: Any) -> str:
     return normalized
 
 
+def _resolve_ssh_binary(ssh_path: Any = None) -> str:
+    """Resolve an OpenSSH client without relying on a shell.
+
+    Windows does not always add its optional OpenSSH Client feature to the
+    GUI process' PATH. An explicit path is therefore accepted and persisted by
+    the remote-rig actions; command-name lookup still works on macOS and on
+    normally configured Windows installations.
+    """
+
+    configured = str(ssh_path or "").strip()
+    if (
+        len(configured) >= 2
+        and configured[0] == configured[-1]
+        and configured[0] in {'"', "'"}
+    ):
+        configured = configured[1:-1].strip()
+    if any(ord(character) < 32 for character in configured):
+        raise ValueError("SSH executable path contains control characters.")
+    candidate = os.path.expandvars(os.path.expanduser(configured or "ssh"))
+    resolved = shutil.which(candidate)
+    if resolved is None and not configured and os.name == "nt":
+        system_root = str(
+            os.environ.get("SystemRoot") or os.environ.get("WINDIR") or ""
+        ).strip()
+        if system_root:
+            windows_candidate = str(
+                PureWindowsPath(system_root)
+                / "System32"
+                / "OpenSSH"
+                / "ssh.exe"
+            )
+            resolved = shutil.which(windows_candidate)
+            if resolved is not None:
+                return windows_candidate
+    if resolved is None:
+        hint = (
+            f"Configured SSH executable was not found: {configured!r}. "
+            if configured
+            else "OpenSSH client was not found on PATH. "
+        )
+        raise ValueError(
+            hint
+            + "Install/enable OpenSSH Client or set SSH executable to its "
+            "full path (for example C:\\Windows\\System32\\OpenSSH\\ssh.exe)."
+        )
+    # Preserve a simple command name for readable diagnostics, but keep an
+    # explicit operator path exactly as resolved/expanded.
+    return candidate if configured else "ssh"
+
+
 def _ssh_base_command(
     *,
     ssh_target: Any,
@@ -356,7 +451,7 @@ def _ssh_base_command(
     connect_timeout: Any = None,
 ) -> list[str]:
     target = _validate_ssh_target(ssh_target)
-    binary = str(ssh_path or "ssh").strip() or "ssh"
+    binary = _resolve_ssh_binary(ssh_path)
     timeout_i = _coerce_positive_int(connect_timeout, 8)
     command = [
         binary,
@@ -367,7 +462,7 @@ def _ssh_base_command(
     ]
     identity = str(identity_file or "").strip()
     if len(identity) > 0:
-        command.extend(["-i", os.path.expanduser(identity)])
+        command.extend(["-i", os.path.expandvars(os.path.expanduser(identity))])
     command.append(target)
     return command
 
@@ -383,21 +478,47 @@ def _run_ssh_command(
     stdin_text: str = "",
 ) -> dict[str, Any]:
     timeout_i = _coerce_positive_int(timeout_seconds, 20)
-    command = _ssh_base_command(
-        ssh_target=ssh_target,
-        identity_file=identity_file,
-        ssh_path=ssh_path,
-        connect_timeout=connect_timeout,
-    )
+    try:
+        command = _ssh_base_command(
+            ssh_target=ssh_target,
+            identity_file=identity_file,
+            ssh_path=ssh_path,
+            connect_timeout=connect_timeout,
+        )
+    except ValueError as error:
+        return {
+            "ok": False,
+            "returncode": 127,
+            "stdout": "",
+            "stderr": str(error),
+            "command": [],
+        }
     command.append(str(remote_command or "").strip())
-    completed = subprocess.run(
-        command,
-        input=stdin_text if len(stdin_text) > 0 else None,
-        capture_output=True,
-        text=True,
-        timeout=timeout_i,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            input=stdin_text if len(stdin_text) > 0 else None,
+            capture_output=True,
+            text=True,
+            timeout=timeout_i,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "returncode": 124,
+            "stdout": "",
+            "stderr": f"SSH command timed out after {timeout_i} seconds.",
+            "command": _redact_command(command),
+        }
+    except OSError as error:
+        return {
+            "ok": False,
+            "returncode": 127,
+            "stdout": "",
+            "stderr": f"Cannot start SSH client: {type(error).__name__}: {error}",
+            "command": _redact_command(command),
+        }
     stdout_text = str(completed.stdout or "").strip()
     stderr_text = str(completed.stderr or "").strip()
     return {
@@ -469,10 +590,48 @@ def _build_ssh_tunnel_command(
     return command
 
 
+def _normalize_simtrace_reset_mode(value: Any) -> str:
+    """Return a known SIMtrace2 reset mode, or ``""`` to omit the flag.
+
+    Omitting leaves the remote supervisor on its own default
+    (``usb-reset``), so an unset or bogus value never renders a unit
+    the remote supervisor would refuse to start.
+    """
+    text = str(value or "").strip().lower().replace("_", "-")
+    if text in _SIMTRACE_RESET_MODES:
+        return text
+    return ""
+
+
+def _resolve_remote_simtrace_reset_settings(
+    *,
+    simtrace_reset: Any = None,
+    uhubctl_binary: Any = None,
+    uhubctl_location: Any = None,
+    uhubctl_port: Any = None,
+    environ: Any = None,
+) -> tuple[str, str, str, str]:
+    """Resolve the reset knobs for the remote rig's supervisor unit.
+
+    Explicit arguments win; anything left blank falls back to the
+    operator's local environment, so a rig configured once from the
+    workstation keeps its setting across reinstalls of the unit.
+    """
+    source = environ if environ is not None else os.environ
+    mode = _normalize_simtrace_reset_mode(simtrace_reset)
+    if len(mode) == 0:
+        mode = _normalize_simtrace_reset_mode(source.get(_SIMTRACE_RESET_ENV, ""))
+    binary = str(uhubctl_binary or "").strip() or str(source.get(_UHUBCTL_BINARY_ENV, "") or "").strip()
+    location = str(uhubctl_location or "").strip() or str(source.get(_UHUBCTL_LOCATION_ENV, "") or "").strip()
+    port = str(uhubctl_port or "").strip() or str(source.get(_UHUBCTL_PORT_ENV, "") or "").strip()
+    return mode, binary, location, port
+
+
 def _render_remote_hil_unit(
     *,
     remote_workdir: Any,
     remote_python: Any,
+    supervisor_command: Any = None,
     service_name: Any = None,
     remote_card_url: Any = None,
     remote_token_file: Any = None,
@@ -481,6 +640,10 @@ def _render_remote_hil_unit(
     hil_port: Any = None,
     apdu_timeout_ms: Any = None,
     gsmtap_capture_path: Any = None,
+    simtrace_reset: Any = None,
+    uhubctl_binary: Any = None,
+    uhubctl_location: Any = None,
+    uhubctl_port: Any = None,
 ) -> str:
     del service_name
     workdir = str(remote_workdir or "").strip()
@@ -496,10 +659,22 @@ def _render_remote_hil_unit(
     capture_path = str(
         gsmtap_capture_path or _remote_gsmtap_capture_path(workdir)
     ).strip()
+    command_prefix: list[str]
+    if isinstance(supervisor_command, (list, tuple)) and len(supervisor_command) > 0:
+        command_prefix = []
+        for raw_part in supervisor_command:
+            part = str(raw_part or "").strip()
+            if len(part) == 0 or any(ord(character) < 32 for character in part):
+                raise ValueError("remote supervisor command contains an invalid argument")
+            command_prefix.append(_systemd_path(part))
+    else:
+        command_prefix = [
+            python_executable,
+            "-m",
+            "Tools.HilBridge.supervisor",
+        ]
     exec_parts = [
-        python_executable,
-        "-m",
-        "Tools.HilBridge.supervisor",
+        *command_prefix,
         "--remote-card-url",
         card_url,
         "--remote-card-token-file",
@@ -524,6 +699,28 @@ def _render_remote_hil_unit(
                 _systemd_path(capture_path),
             ]
         )
+    # Pre-session SIMtrace2 reset. Unset knobs are omitted so the
+    # remote supervisor keeps its own default (usb-reset) and the
+    # rendered unit stays stable across reinstalls.
+    (
+        reset_mode,
+        reset_uhubctl_binary,
+        reset_uhubctl_location,
+        reset_uhubctl_port,
+    ) = _resolve_remote_simtrace_reset_settings(
+        simtrace_reset=simtrace_reset,
+        uhubctl_binary=uhubctl_binary,
+        uhubctl_location=uhubctl_location,
+        uhubctl_port=uhubctl_port,
+    )
+    if len(reset_mode) > 0:
+        exec_parts.extend(["--simtrace-reset", reset_mode])
+    if len(reset_uhubctl_binary) > 0:
+        exec_parts.extend(["--uhubctl-binary", _systemd_path(reset_uhubctl_binary)])
+    if len(reset_uhubctl_location) > 0:
+        exec_parts.extend(["--uhubctl-location", reset_uhubctl_location])
+    if len(reset_uhubctl_port) > 0:
+        exec_parts.extend(["--uhubctl-port", reset_uhubctl_port])
     exec_start = " ".join(_systemd_quote(part) for part in exec_parts)
     return (
         "[Unit]\n"
@@ -784,13 +981,11 @@ def _publish_local_card_relay_marker(
     reader: Any = "",
     atr: Any = "",
 ) -> dict[str, Any]:
-    from yggdrasim_common.hil_bridge_runtime import card_relay_state_path
+    from yggdrasim_common.card_backend import write_card_relay_marker
 
     port_i = _coerce_port(port, _DEFAULT_CARD_PORT)
     apdu_url = f"http://127.0.0.1:{port_i}/apdu"
     status_url = f"http://127.0.0.1:{port_i}/status"
-    marker_path = Path(card_relay_state_path())
-    marker_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "status": "ok",
         "url": apdu_url,
@@ -802,21 +997,19 @@ def _publish_local_card_relay_marker(
         "source": "card_bridge.remote_rig",
         "updatedAt": time.time(),
     }
-    with open(marker_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
-        handle.write("\n")
+    marker_path = write_card_relay_marker(payload)
     return {
         "ok": True,
-        "marker_path": str(marker_path),
+        "marker_path": marker_path,
         "url": apdu_url,
         "token_file": str(token_file or ""),
     }
 
 
 def _clear_local_card_relay_marker() -> None:
-    from yggdrasim_common.hil_bridge_runtime import clear_card_relay_state
+    from yggdrasim_common.card_backend import clear_card_relay_marker
 
-    clear_card_relay_state()
+    clear_card_relay_marker()
 
 
 def _clear_remote_hil_attachment_state() -> None:
@@ -992,6 +1185,7 @@ def _remote_card_ping(
     *,
     ssh_target: Any,
     identity_file: Any = None,
+    ssh_path: Any = None,
     remote_card_port: Any = None,
 ) -> dict[str, Any]:
     port_i = _coerce_port(remote_card_port, _DEFAULT_CARD_PORT)
@@ -999,6 +1193,7 @@ def _remote_card_ping(
     result = _run_ssh_command(
         ssh_target=ssh_target,
         identity_file=identity_file,
+        ssh_path=ssh_path,
         remote_command=f"curl -fsS --max-time 4 {shlex.quote(url)}",
         timeout_seconds=8,
     )
@@ -1017,6 +1212,7 @@ def _remote_card_status(
     *,
     ssh_target: Any,
     identity_file: Any = None,
+    ssh_path: Any = None,
     remote_card_port: Any = None,
     remote_token_file: Any = None,
 ) -> dict[str, Any]:
@@ -1031,6 +1227,7 @@ def _remote_card_status(
     result = _run_ssh_command(
         ssh_target=ssh_target,
         identity_file=identity_file,
+        ssh_path=ssh_path,
         remote_command=remote_command,
         timeout_seconds=10,
     )
@@ -1483,17 +1680,17 @@ def _dispatch_local_start(
             }
         _terminate_process_group(existing_pid)
 
-    command = [
-        sys.executable,
-        "-m",
+    command = build_module_command(
         "Tools.CardBridge",
-        "--port",
-        str(port_i),
-        "--apdu-timeout-ms",
-        str(timeout_i),
-        "--pcsc-share-mode",
-        "shared",
-    ]
+        [
+            "--port",
+            str(port_i),
+            "--apdu-timeout-ms",
+            str(timeout_i),
+            "--pcsc-share-mode",
+            "shared",
+        ],
+    )
     if len(reader_name_s) > 0:
         command.extend(["--reader-name", reader_name_s])
     else:
@@ -1591,6 +1788,7 @@ def _dispatch_tunnel_start(
     *,
     ssh_target: Any = None,
     identity_file: Any = None,
+    ssh_path: Any = None,
     local_card_port: Any = None,
     remote_card_port: Any = None,
     local_gui_port: Any = None,
@@ -1603,6 +1801,7 @@ def _dispatch_tunnel_start(
     if bool(confirm) is False:
         raise ValueError("confirm must be true — starting the tunnel opens SSH port forwards.")
     state = _load_remote_rig_state()
+    ssh_path_s = str(ssh_path or state.get("ssh_path") or "").strip()
     existing_pid = int(state.get("ssh_tunnel_pid", 0) or 0)
     if _pid_is_running(existing_pid):
         if bool(restart) is False:
@@ -1614,29 +1813,50 @@ def _dispatch_tunnel_start(
             }
         _terminate_process_group(existing_pid)
 
-    command = _build_ssh_tunnel_command(
-        ssh_target=ssh_target,
-        identity_file=identity_file,
-        local_card_port=local_card_port,
-        remote_card_port=remote_card_port,
-        local_gui_port=local_gui_port,
-        remote_gui_port=remote_gui_port,
-        forward_gui=forward_gui,
-    )
+    try:
+        command = _build_ssh_tunnel_command(
+            ssh_target=ssh_target,
+            identity_file=identity_file,
+            ssh_path=ssh_path_s,
+            local_card_port=local_card_port,
+            remote_card_port=remote_card_port,
+            local_gui_port=local_gui_port,
+            remote_gui_port=remote_gui_port,
+            forward_gui=forward_gui,
+        )
+    except ValueError as error:
+        return {
+            "ok": False,
+            "pid": 0,
+            "returncode": 127,
+            "stderr": str(error),
+            "note": str(error),
+        }
     log_path = Path(_remote_rig_state_path()).with_suffix(".ssh_tunnel.log")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "a", encoding="utf-8") as log_handle:
-        process = subprocess.Popen(
-            command,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            **_detached_subprocess_kwargs(),
-        )
+    try:
+        with open(log_path, "a", encoding="utf-8") as log_handle:
+            process = subprocess.Popen(
+                command,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                **_detached_subprocess_kwargs(),
+            )
+    except OSError as error:
+        return {
+            "ok": False,
+            "pid": 0,
+            "returncode": 127,
+            "stderr": f"Cannot start SSH client: {type(error).__name__}: {error}",
+            "log_path": str(log_path),
+            "note": "Cannot start the configured SSH client.",
+        }
     time.sleep(0.35)
     if process.poll() is not None:
         _write_remote_rig_state({
             "ssh_tunnel_pid": 0,
             "ssh_target": _validate_ssh_target(ssh_target),
+            "ssh_path": ssh_path_s,
             "ssh_tunnel_log": str(log_path),
             "ssh_tunnel_command": _redact_command(command),
         })
@@ -1660,6 +1880,7 @@ def _dispatch_tunnel_start(
     _write_remote_rig_state({
         "ssh_tunnel_pid": int(process.pid),
         "ssh_target": _validate_ssh_target(ssh_target),
+        "ssh_path": ssh_path_s,
         "remote_card_port": remote_card,
         "local_gui_port": local_gui,
         "remote_gui_port": _coerce_port(remote_gui_port, _DEFAULT_GUI_PORT),
@@ -1700,6 +1921,7 @@ def _dispatch_sync_token(
     *,
     ssh_target: Any = None,
     identity_file: Any = None,
+    ssh_path: Any = None,
     local_token_file: Any = None,
     remote_token_file: Any = None,
     confirm: Any = None,
@@ -1720,7 +1942,10 @@ def _dispatch_sync_token(
     if len(token) == 0:
         raise ValueError(f"local token file is empty: {local_path}")
     remote_path = str(remote_token_file or _DEFAULT_REMOTE_TOKEN_FILE).strip()
-    remote_dir = _remote_shell_path_expr(str(Path(remote_path).parent))
+    # The destination is on a Linux HIL host even when the GUI itself runs
+    # on Windows. PurePosixPath prevents ``~/.config`` becoming ``~\\.config``
+    # before it is sent to the remote shell.
+    remote_dir = _remote_shell_path_expr(str(PurePosixPath(remote_path).parent))
     remote_file = _remote_shell_path_expr(remote_path)
     remote_command = (
         f"mkdir -p {remote_dir} && "
@@ -1729,6 +1954,7 @@ def _dispatch_sync_token(
     result = _run_ssh_command(
         ssh_target=ssh_target,
         identity_file=identity_file,
+        ssh_path=ssh_path,
         remote_command=remote_command,
         stdin_text=token + "\n",
         timeout_seconds=20,
@@ -1747,6 +1973,7 @@ def _remote_remsim_binary_status(
     *,
     ssh_target: Any,
     identity_file: Any = None,
+    ssh_path: Any = None,
     remsim_binary: Any = None,
 ) -> dict[str, Any]:
     binary = str(remsim_binary or _DEFAULT_REMSIM_BINARY).strip()
@@ -1762,6 +1989,7 @@ def _remote_remsim_binary_status(
     result = _run_ssh_command(
         ssh_target=ssh_target,
         identity_file=identity_file,
+        ssh_path=ssh_path,
         remote_command=remote_command,
         timeout_seconds=10,
     )
@@ -1784,11 +2012,327 @@ def _remote_remsim_binary_status(
     }
 
 
+def _remote_hil_dependency_preflight(
+    *,
+    ssh_target: Any,
+    identity_file: Any = None,
+    ssh_path: Any = None,
+    remote_workdir: Any = None,
+    remote_python: Any = None,
+) -> dict[str, Any]:
+    """Resolve a usable remote HIL runtime and required Linux facilities.
+
+    The operator GUI may itself run on Windows or macOS; all checks execute
+    through OpenSSH on the Linux rig. The resolver accepts the documented
+    editable-install venv, an installed console script, or the allow-listed
+    internal entry in a full frozen Linux bundle.
+    """
+    workdir = str(remote_workdir or _DEFAULT_REMOTE_WORKDIR).strip()
+    configured_python = str(remote_python or _DEFAULT_REMOTE_PYTHON).strip()
+    remote_script = r"""
+import importlib.util
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+
+workdir = os.path.abspath(os.path.expanduser(os.environ.get("YGG_PREF_WORKDIR", "~/YggdraSIM")))
+configured_python = os.environ.get("YGG_PREF_PYTHON", "").strip()
+home = os.path.expanduser("~")
+payload = {
+    "platform": platform.system().lower(),
+    "runtime_kind": "",
+    "runtime_executable": "",
+    "supervisor_command": [],
+    "resolved_workdir": workdir if os.path.isdir(workdir) else home,
+    "systemctl": shutil.which("systemctl") or "",
+    "systemctl_user": False,
+    "pyudev": False,
+    "lsusb": shutil.which("lsusb") or "",
+    "curl": shutil.which("curl") or "",
+}
+
+def resolve(candidate):
+    text = os.path.expandvars(os.path.expanduser(str(candidate or "").strip()))
+    if not text:
+        return ""
+    if os.path.sep in text:
+        return os.path.abspath(text) if os.path.isfile(text) and os.access(text, os.X_OK) else ""
+    return shutil.which(text) or ""
+
+def succeeds(command, *, cwd=None):
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        payload["runtime_error"] = f"{exc.__class__.__name__}: {exc}"
+        return False
+    if completed.returncode != 0:
+        payload["runtime_error"] = (completed.stderr or "").strip()[-500:]
+        return False
+    return True
+
+if payload["systemctl"]:
+    try:
+        systemctl_result = subprocess.run(
+            [payload["systemctl"], "--user", "show-environment"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        payload["systemctl_user"] = systemctl_result.returncode == 0
+        if not payload["systemctl_user"]:
+            payload["systemctl_error"] = (systemctl_result.stderr or "").strip()[-500:]
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        payload["systemctl_error"] = f"{exc.__class__.__name__}: {exc}"
+
+source_candidates = [
+    configured_python,
+    os.path.join(workdir, ".venv", "bin", "python"),
+    os.path.join(workdir, "python", "bin", "python"),
+    "python3",
+]
+for candidate in source_candidates:
+    executable = resolve(candidate)
+    if not executable:
+        continue
+    if succeeds(
+        [executable, "-c", "import Tools.HilBridge.supervisor"],
+        cwd=payload["resolved_workdir"],
+    ):
+        payload["runtime_kind"] = "python-module"
+        payload["runtime_executable"] = executable
+        payload["supervisor_command"] = [
+            executable,
+            "-m",
+            "Tools.HilBridge.supervisor",
+        ]
+        break
+
+if not payload["supervisor_command"]:
+    console_candidates = [
+        os.path.join(workdir, ".venv", "bin", "yggdrasim-hil-supervisor"),
+        os.path.join(home, ".local", "bin", "yggdrasim-hil-supervisor"),
+        "yggdrasim-hil-supervisor",
+    ]
+    for candidate in console_candidates:
+        executable = resolve(candidate)
+        if executable and succeeds([executable, "--help"], cwd=payload["resolved_workdir"]):
+            payload["runtime_kind"] = "console-script"
+            payload["runtime_executable"] = executable
+            payload["supervisor_command"] = [executable]
+            break
+
+if not payload["supervisor_command"]:
+    frozen_candidates = [
+        os.path.join(home, ".local", "bin", "yggdrasim"),
+        "yggdrasim",
+    ]
+    for candidate in frozen_candidates:
+        executable = resolve(candidate)
+        command = [
+            executable,
+            "--yggdrasim-internal-entry",
+            "hil-supervisor",
+            "--",
+        ]
+        if executable and succeeds([*command, "--help"], cwd=payload["resolved_workdir"]):
+            payload["runtime_kind"] = "frozen-full"
+            payload["runtime_executable"] = executable
+            payload["supervisor_command"] = command
+            break
+
+runtime_python = ""
+if payload["runtime_kind"] == "python-module":
+    runtime_python = payload["runtime_executable"]
+elif payload["runtime_kind"] == "console-script":
+    runtime_python = resolve(
+        os.path.join(os.path.dirname(payload["runtime_executable"]), "python")
+    )
+if runtime_python:
+    payload["pyudev"] = succeeds(
+        [
+            runtime_python,
+            "-c",
+            "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('pyudev') else 1)",
+        ],
+        cwd=payload["resolved_workdir"],
+    )
+elif payload["runtime_kind"] == "frozen-full":
+    # The full release build includes the Linux-only pyudev dependency.
+    payload["pyudev"] = True
+
+requirements = {
+    "linux": payload["platform"] == "linux",
+    "supervisor": bool(payload["supervisor_command"]),
+    "systemctl_user": bool(payload["systemctl_user"]),
+    "usb_detector": bool(payload["pyudev"] or payload["lsusb"]),
+    "curl": bool(payload["curl"]),
+}
+payload["requirements"] = requirements
+payload["ok"] = all(requirements.values())
+if not requirements["linux"]:
+    payload["note"] = "The remote HIL host must run Linux."
+elif not requirements["supervisor"]:
+    payload["note"] = (
+        "No usable HIL supervisor was found. Install the full source/wheel "
+        "runtime or the full Linux release on the remote host."
+    )
+elif not requirements["systemctl_user"]:
+    payload["note"] = (
+        "The remote systemd user manager is unavailable. Enable a user "
+        "session/linger before installing the HIL service."
+    )
+elif not requirements["usb_detector"]:
+    payload["note"] = "Neither pyudev nor lsusb is available for SIMtrace2 detection."
+elif not requirements["curl"]:
+    payload["note"] = "curl is required for tunneled Card Bridge health checks."
+else:
+    payload["note"] = f"Remote HIL runtime ready ({payload['runtime_kind']})."
+print(json.dumps(payload, sort_keys=True))
+""".strip()
+    shell_fallback = (
+        "runtime=''; "
+        "if [ -x \"$HOME/.local/bin/yggdrasim\" ]; then "
+        "runtime=\"$HOME/.local/bin/yggdrasim\"; "
+        "elif command -v yggdrasim >/dev/null 2>&1; then "
+        "runtime=$(command -v yggdrasim); fi; "
+        "runtime_ok=0; "
+        "if [ -n \"$runtime\" ] && \"$runtime\" --yggdrasim-internal-entry "
+        "hil-supervisor -- --help >/dev/null 2>&1; then runtime_ok=1; fi; "
+        "systemctl_ok=0; "
+        "if command -v systemctl >/dev/null 2>&1 && "
+        "systemctl --user show-environment >/dev/null 2>&1; then systemctl_ok=1; fi; "
+        "lsusb_path=''; "
+        "if command -v lsusb >/dev/null 2>&1; then lsusb_path=$(command -v lsusb); fi; "
+        "ok=0; note='Python 3 is required for remote HIL dependency and readiness diagnostics.'; "
+        "if [ \"$runtime_ok\" -eq 0 ]; then "
+        "note='Python 3 is required, and no usable full HIL release executable was found.'; fi; "
+        "printf '%s\\n' 'YGG_PREF_V1' "
+        "\"ok=$ok\" 'runtime_kind=frozen-full' \"runtime_executable=$runtime\" "
+        "\"resolved_workdir=$HOME\" \"systemctl_user=$systemctl_ok\" "
+        "'pyudev=1' \"lsusb=$lsusb_path\" \"note=$note\""
+    )
+    remote_command = (
+        "if command -v python3 >/dev/null 2>&1; then "
+        f"YGG_PREF_WORKDIR={shlex.quote(workdir)} "
+        f"YGG_PREF_PYTHON={shlex.quote(configured_python)} "
+        "python3 - <<'PY'\n"
+        f"{remote_script}\n"
+        "PY\n"
+        "else "
+        f"{shell_fallback}; "
+        "fi"
+    )
+    result = _run_ssh_command(
+        ssh_target=ssh_target,
+        identity_file=identity_file,
+        ssh_path=ssh_path,
+        remote_command=remote_command,
+        timeout_seconds=35,
+    )
+    if bool(result.get("ok")) is False:
+        return {
+            "ok": False,
+            "returncode": result.get("returncode", 0),
+            "stderr": result.get("stderr", ""),
+            "note": (
+                "Remote HIL dependency preflight could not run. Ensure "
+                "Python 3 and OpenSSH access are available on the Linux rig."
+            ),
+        }
+    stdout_text = str(result.get("stdout") or "")
+    if stdout_text.startswith("YGG_PREF_V1\n"):
+        decoded = {}
+        for line in stdout_text.splitlines()[1:]:
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if any(ord(character) < 32 for character in key + value):
+                continue
+            decoded[key] = value
+        decoded["ok"] = decoded.get("ok") == "1"
+        decoded["systemctl_user"] = decoded.get("systemctl_user") == "1"
+        decoded["pyudev"] = decoded.get("pyudev") == "1"
+        runtime = str(decoded.get("runtime_executable") or "").strip()
+        decoded["supervisor_command"] = (
+            [
+                runtime,
+                "--yggdrasim-internal-entry",
+                "hil-supervisor",
+                "--",
+            ]
+            if runtime
+            else []
+        )
+    else:
+        try:
+            decoded = json.loads(stdout_text or "{}")
+        except json.JSONDecodeError as error:
+            return {
+                "ok": False,
+                "returncode": result.get("returncode", 0),
+                "stderr": result.get("stderr", ""),
+                "parse_error": f"JSONDecodeError: {error}",
+                "note": "Remote HIL dependency preflight returned invalid JSON.",
+            }
+    if isinstance(decoded, dict) is False:
+        return {
+            "ok": False,
+            "returncode": result.get("returncode", 0),
+            "stderr": result.get("stderr", ""),
+            "note": "Remote HIL dependency preflight returned an invalid payload.",
+        }
+    supervisor_command = decoded.get("supervisor_command", [])
+    if isinstance(supervisor_command, list) is False:
+        supervisor_command = []
+    normalized_command: list[str] = []
+    for raw_part in supervisor_command:
+        part = str(raw_part or "").strip()
+        if len(part) == 0 or any(ord(character) < 32 for character in part):
+            normalized_command = []
+            break
+        normalized_command.append(part)
+    ok = bool(decoded.get("ok")) and len(normalized_command) > 0
+    return {
+        **decoded,
+        "ok": ok,
+        "returncode": result.get("returncode", 0),
+        "stderr": result.get("stderr", ""),
+        "supervisor_command": normalized_command,
+        "resolved_remote_python": (
+            str(decoded.get("runtime_executable") or "")
+            if decoded.get("runtime_kind") == "python-module"
+            else ""
+        ),
+        "note": str(
+            decoded.get("note")
+            or (
+                "Remote HIL dependency preflight passed."
+                if ok
+                else "Remote HIL dependency preflight failed."
+            )
+        ),
+    }
+
+
 def _dispatch_install_remote_service(
     ctx: ActionContext,
     *,
     ssh_target: Any = None,
     identity_file: Any = None,
+    ssh_path: Any = None,
     service_name: Any = None,
     remote_workdir: Any = None,
     remote_python: Any = None,
@@ -1799,19 +2343,50 @@ def _dispatch_install_remote_service(
     hil_port: Any = None,
     apdu_timeout_ms: Any = None,
     gsmtap_capture_path: Any = None,
+    simtrace_reset: Any = None,
+    uhubctl_binary: Any = None,
+    uhubctl_location: Any = None,
+    uhubctl_port: Any = None,
     start_now: Any = None,
     confirm: Any = None,
+    _dependency_status: dict[str, Any] | None = None,
+    _remsim_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     del ctx
     if bool(confirm) is False:
         raise ValueError("confirm must be true — this writes a remote systemd user service.")
     service = _validate_service_name(service_name)
-    capture_path = str(
-        gsmtap_capture_path or _remote_gsmtap_capture_path(remote_workdir)
-    ).strip()
-    remsim_check = _remote_remsim_binary_status(
+    dependency_check = _dependency_status or _remote_hil_dependency_preflight(
         ssh_target=ssh_target,
         identity_file=identity_file,
+        ssh_path=ssh_path,
+        remote_workdir=remote_workdir,
+        remote_python=remote_python,
+    )
+    if bool(dependency_check.get("ok")) is False:
+        return {
+            **dependency_check,
+            "service_name": service,
+            "unit_path": f"~/.config/systemd/user/{service}",
+            "started": False,
+        }
+    resolved_workdir = str(
+        dependency_check.get("resolved_workdir")
+        or remote_workdir
+        or _DEFAULT_REMOTE_WORKDIR
+    ).strip()
+    resolved_python = str(
+        dependency_check.get("resolved_remote_python")
+        or remote_python
+        or _DEFAULT_REMOTE_PYTHON
+    ).strip()
+    capture_path = str(
+        gsmtap_capture_path or _remote_gsmtap_capture_path(resolved_workdir)
+    ).strip()
+    remsim_check = _remsim_status or _remote_remsim_binary_status(
+        ssh_target=ssh_target,
+        identity_file=identity_file,
+        ssh_path=ssh_path,
         remsim_binary=remsim_binary,
     )
     if bool(remsim_check.get("ok")) is False:
@@ -1823,8 +2398,9 @@ def _dispatch_install_remote_service(
             "started": False,
         }
     unit_text = _render_remote_hil_unit(
-        remote_workdir=remote_workdir,
-        remote_python=remote_python,
+        remote_workdir=resolved_workdir,
+        remote_python=resolved_python,
+        supervisor_command=dependency_check.get("supervisor_command"),
         service_name=service,
         remote_card_url=remote_card_url,
         remote_token_file=remote_token_file,
@@ -1833,6 +2409,10 @@ def _dispatch_install_remote_service(
         hil_port=hil_port,
         apdu_timeout_ms=apdu_timeout_ms,
         gsmtap_capture_path=capture_path,
+        simtrace_reset=simtrace_reset,
+        uhubctl_binary=uhubctl_binary,
+        uhubctl_location=uhubctl_location,
+        uhubctl_port=uhubctl_port,
     )
     unit_path = f"~/.config/systemd/user/{service}"
     quoted_unit_path = _remote_shell_path_expr(unit_path)
@@ -1847,6 +2427,7 @@ def _dispatch_install_remote_service(
     result = _run_ssh_command(
         ssh_target=ssh_target,
         identity_file=identity_file,
+        ssh_path=ssh_path,
         remote_command=remote_command,
         stdin_text=unit_text,
         timeout_seconds=25,
@@ -1855,8 +2436,18 @@ def _dispatch_install_remote_service(
         _write_remote_rig_state({
             "ssh_target": _validate_ssh_target(ssh_target),
             "identity_file": str(identity_file or "").strip(),
-            "remote_workdir": str(remote_workdir or _DEFAULT_REMOTE_WORKDIR).strip(),
-            "remote_python": str(remote_python or _DEFAULT_REMOTE_PYTHON).strip(),
+            "ssh_path": str(ssh_path or "").strip(),
+            "remote_workdir": resolved_workdir,
+            "remote_python": resolved_python,
+            "remote_hil_runtime_kind": str(
+                dependency_check.get("runtime_kind") or ""
+            ),
+            "remote_hil_runtime_executable": str(
+                dependency_check.get("runtime_executable") or ""
+            ),
+            "remote_hil_supervisor_command": list(
+                dependency_check.get("supervisor_command") or []
+            ),
             "remote_gsmtap_capture_path": capture_path,
         })
     return {
@@ -1882,6 +2473,7 @@ def _dispatch_remote_service_control(
     *,
     ssh_target: Any = None,
     identity_file: Any = None,
+    ssh_path: Any = None,
     service_name: Any = None,
     action: Any = None,
     confirm: Any = None,
@@ -1905,6 +2497,7 @@ def _dispatch_remote_service_control(
     result = _run_ssh_command(
         ssh_target=ssh_target,
         identity_file=identity_file,
+        ssh_path=ssh_path,
         remote_command=remote_command,
         timeout_seconds=20,
     )
@@ -1966,14 +2559,21 @@ def _remote_hil_runtime_status(
     *,
     ssh_target: Any,
     identity_file: Any = None,
+    ssh_path: Any = None,
     remote_workdir: Any = None,
     remote_python: Any = None,
 ) -> dict[str, Any]:
     target = _validate_ssh_target(ssh_target)
     workdir = str(remote_workdir or _DEFAULT_REMOTE_WORKDIR).strip()
     python_executable = str(remote_python or _DEFAULT_REMOTE_PYTHON).strip()
-    remote_script = """
+    rig_state = _load_remote_rig_state()
+    runtime_executable = str(
+        rig_state.get("remote_hil_runtime_executable") or ""
+    ).strip()
+    remote_script = r"""
 import json
+import os
+from urllib import request
 
 payload = {"supervisor": {}, "relay": {}, "bridge_status": {}}
 try:
@@ -1989,18 +2589,82 @@ try:
     except Exception as exc:
         payload["bridge_status_error"] = f"{exc.__class__.__name__}: {exc}"
 except Exception as exc:
-    payload["error"] = f"{exc.__class__.__name__}: {exc}"
+    payload["runtime_import_error"] = f"{exc.__class__.__name__}: {exc}"
+    workdir = os.path.abspath(
+        os.path.expanduser(os.environ.get("YGG_HIL_WORKDIR", "~/YggdraSIM"))
+    )
+    runtime_executable = os.path.abspath(
+        os.path.expanduser(os.environ.get("YGG_HIL_RUNTIME_EXECUTABLE", "") or workdir)
+    )
+    state_directories = [
+        os.path.join(workdir, "state"),
+        os.path.join(os.path.dirname(runtime_executable), "YggdraSIM-data", "state"),
+        os.path.expanduser("~/.local/share/YggdraSIM/state"),
+        os.path.expanduser("~/YggdraSIM-data/state"),
+    ]
+
+    def read_state(filename):
+        for directory in state_directories:
+            candidate = os.path.join(directory, filename)
+            try:
+                with open(candidate, "r", encoding="utf-8") as handle:
+                    decoded = json.load(handle)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(decoded, dict):
+                return decoded
+        return {}
+
+    payload["supervisor"] = read_state("hil_bridge_supervisor.json")
+    payload["relay"] = read_state("hil_bridge_card_relay.json")
+    status_url = str(payload["relay"].get("statusUrl") or "").strip()
+    if status_url:
+        headers = {"Accept": "application/json"}
+        token = str(payload["relay"].get("token") or "").strip()
+        token_file = os.path.expanduser(
+            str(payload["relay"].get("tokenFile") or "").strip()
+        )
+        if not token and token_file:
+            try:
+                with open(token_file, "r", encoding="utf-8") as handle:
+                    token = handle.read().strip()
+            except OSError:
+                token = ""
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            with request.urlopen(
+                request.Request(status_url, headers=headers, method="GET"),
+                timeout=4,
+            ) as response:
+                decoded = json.loads(response.read(65537).decode("utf-8"))
+            if isinstance(decoded, dict):
+                payload["bridge_status"] = decoded
+        except Exception as status_exc:
+            payload["bridge_status_error"] = (
+                f"{status_exc.__class__.__name__}: {status_exc}"
+            )
+    if payload["supervisor"] or payload["relay"]:
+        payload.pop("runtime_import_error", None)
+    else:
+        payload["error"] = payload.pop("runtime_import_error")
 print(json.dumps(payload, sort_keys=True))
 """.strip()
     remote_command = (
-        f"cd {_remote_shell_path_expr(workdir)} && "
-        f"{_remote_shell_path_expr(python_executable)} - <<'PY'\n"
+        f"configured_python={_remote_shell_path_expr(python_executable)}; "
+        "if [ -x \"$configured_python\" ]; then diagnostic_python=\"$configured_python\"; "
+        "elif command -v python3 >/dev/null 2>&1; then diagnostic_python=$(command -v python3); "
+        "else printf '%s\\n' 'python3 is required for HIL status diagnostics' >&2; exit 127; fi; "
+        f"YGG_HIL_WORKDIR={shlex.quote(workdir)} "
+        f"YGG_HIL_RUNTIME_EXECUTABLE={shlex.quote(runtime_executable)} "
+        "\"$diagnostic_python\" - <<'PY'\n"
         f"{remote_script}\n"
         "PY"
     )
     result = _run_ssh_command(
         ssh_target=target,
         identity_file=identity_file,
+        ssh_path=ssh_path,
         remote_command=remote_command,
         timeout_seconds=12,
     )
@@ -2096,6 +2760,7 @@ def _wait_for_remote_hil_ready(
     *,
     ssh_target: Any,
     identity_file: Any = None,
+    ssh_path: Any = None,
     remote_workdir: Any = None,
     remote_python: Any = None,
     timeout_seconds: float = 12.0,
@@ -2106,6 +2771,7 @@ def _wait_for_remote_hil_ready(
         last_payload = _remote_hil_runtime_status(
             ssh_target=ssh_target,
             identity_file=identity_file,
+            ssh_path=ssh_path,
             remote_workdir=remote_workdir,
             remote_python=remote_python,
         )
@@ -2158,6 +2824,12 @@ def _compact_remote_rig_step(name: str, payload: dict[str, Any]) -> dict[str, An
         "bridge_status_error",
         "remsim_binary",
         "resolved_remsim_binary",
+        "runtime_kind",
+        "runtime_executable",
+        "resolved_workdir",
+        "systemctl_user",
+        "pyudev",
+        "lsusb",
     ):
         value = payload.get(key)
         if value not in (None, ""):
@@ -2176,11 +2848,13 @@ def _remote_rig_finish(
     local_gui_port: Any,
     remote_workdir: Any = None,
     remote_python: Any = None,
+    ssh_path: Any = None,
 ) -> dict[str, Any]:
     status = _dispatch_remote_rig_status(
         ActionContext(),
         ssh_target=ssh_target,
         identity_file=identity_file,
+        ssh_path=ssh_path,
         service_name=service_name,
         local_gui_port=local_gui_port,
         remote_workdir=remote_workdir,
@@ -2200,6 +2874,7 @@ def _dispatch_remote_rig_start(
     *,
     ssh_target: Any = None,
     identity_file: Any = None,
+    ssh_path: Any = None,
     reader_index: Any = None,
     reader_name: Any = None,
     local_card_port: Any = None,
@@ -2229,6 +2904,7 @@ def _dispatch_remote_rig_start(
     local_gui = _coerce_port(local_gui_port, _DEFAULT_GUI_PORT)
     remote_gui = _coerce_port(remote_gui_port, _DEFAULT_GUI_PORT)
     target = _validate_ssh_target(ssh_target)
+    ssh_path_s = str(ssh_path or "").strip()
     service = _validate_service_name(service_name)
     workdir = str(remote_workdir or _DEFAULT_REMOTE_WORKDIR).strip()
     python_executable = str(remote_python or _DEFAULT_REMOTE_PYTHON).strip()
@@ -2240,6 +2916,58 @@ def _dispatch_remote_rig_start(
         gsmtap_capture_path or _remote_gsmtap_capture_path(workdir)
     ).strip()
     steps: list[dict[str, Any]] = []
+
+    dependency_check = _remote_hil_dependency_preflight(
+        ssh_target=target,
+        identity_file=identity_file,
+        ssh_path=ssh_path_s,
+        remote_workdir=workdir,
+        remote_python=python_executable,
+    )
+    steps.append(_compact_remote_rig_step("rpi_hil_preflight", dependency_check))
+    if bool(dependency_check.get("ok")) is False:
+        return _remote_rig_finish(
+            ok=False,
+            steps=steps,
+            note="Remote rig start stopped: RPi HIL dependencies are not ready.",
+            ssh_target=target,
+            identity_file=identity_file,
+            ssh_path=ssh_path_s,
+            service_name=service,
+            local_gui_port=local_gui,
+            remote_workdir=workdir,
+            remote_python=python_executable,
+        )
+    workdir = str(dependency_check.get("resolved_workdir") or workdir).strip()
+    python_executable = str(
+        dependency_check.get("resolved_remote_python") or python_executable
+    ).strip()
+    if len(str(gsmtap_capture_path or "").strip()) == 0:
+        capture_path = _remote_gsmtap_capture_path(workdir)
+
+    remsim_check = _remote_remsim_binary_status(
+        ssh_target=target,
+        identity_file=identity_file,
+        ssh_path=ssh_path_s,
+        remsim_binary=remsim_binary_s,
+    )
+    steps.append(_compact_remote_rig_step("rpi_remsim_binary", remsim_check))
+    if bool(remsim_check.get("ok")) is False:
+        return _remote_rig_finish(
+            ok=False,
+            steps=steps,
+            note="Remote rig start stopped: RPi REMSIM client is not installed or not executable.",
+            ssh_target=target,
+            identity_file=identity_file,
+            ssh_path=ssh_path_s,
+            service_name=service,
+            local_gui_port=local_gui,
+            remote_workdir=workdir,
+            remote_python=python_executable,
+        )
+    resolved_remsim_binary = str(
+        remsim_check.get("resolved_remsim_binary") or remsim_binary_s
+    )
 
     start_local = _dispatch_local_start(
         ctx,
@@ -2262,6 +2990,7 @@ def _dispatch_remote_rig_start(
             note="Remote rig start stopped: PC Card Bridge is not usable.",
             ssh_target=target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             local_gui_port=local_gui,
             remote_workdir=workdir,
@@ -2280,6 +3009,7 @@ def _dispatch_remote_rig_start(
             note="Remote rig start stopped: PC Card Bridge reset failed.",
             ssh_target=target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             local_gui_port=local_gui,
             remote_workdir=workdir,
@@ -2306,6 +3036,7 @@ def _dispatch_remote_rig_start(
         ctx,
         ssh_target=target,
         identity_file=identity_file,
+        ssh_path=ssh_path_s,
         local_card_port=local_card,
         remote_card_port=remote_card,
         local_gui_port=local_gui,
@@ -2319,6 +3050,7 @@ def _dispatch_remote_rig_start(
     remote_ping = _remote_card_ping(
         ssh_target=target,
         identity_file=identity_file,
+        ssh_path=ssh_path_s,
         remote_card_port=remote_card,
     )
     steps.append(_compact_remote_rig_step("rpi_bridge_ping", remote_ping))
@@ -2329,6 +3061,7 @@ def _dispatch_remote_rig_start(
             note="Remote rig start stopped: RPi cannot reach the PC Card Bridge.",
             ssh_target=target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             local_gui_port=local_gui,
             remote_workdir=workdir,
@@ -2339,6 +3072,7 @@ def _dispatch_remote_rig_start(
         ctx,
         ssh_target=target,
         identity_file=identity_file,
+        ssh_path=ssh_path_s,
         local_token_file=local_check.get("token_file"),
         remote_token_file=token_file,
         confirm=True,
@@ -2351,6 +3085,7 @@ def _dispatch_remote_rig_start(
             note="Remote rig start stopped: token sync failed.",
             ssh_target=target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             local_gui_port=local_gui,
             remote_workdir=workdir,
@@ -2360,6 +3095,7 @@ def _dispatch_remote_rig_start(
     remote_status = _remote_card_status(
         ssh_target=target,
         identity_file=identity_file,
+        ssh_path=ssh_path_s,
         remote_card_port=remote_card,
         remote_token_file=token_file,
     )
@@ -2371,37 +3107,19 @@ def _dispatch_remote_rig_start(
             note="Remote rig start stopped: RPi could not authenticate to the PC Card Bridge.",
             ssh_target=target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             local_gui_port=local_gui,
             remote_workdir=workdir,
             remote_python=python_executable,
         )
-
-    remsim_check = _remote_remsim_binary_status(
-        ssh_target=target,
-        identity_file=identity_file,
-        remsim_binary=remsim_binary_s,
-    )
-    steps.append(_compact_remote_rig_step("rpi_remsim_binary", remsim_check))
-    if bool(remsim_check.get("ok")) is False:
-        return _remote_rig_finish(
-            ok=False,
-            steps=steps,
-            note="Remote rig start stopped: RPi REMSIM client is not installed or not executable.",
-            ssh_target=target,
-            identity_file=identity_file,
-            service_name=service,
-            local_gui_port=local_gui,
-            remote_workdir=workdir,
-            remote_python=python_executable,
-        )
-    resolved_remsim_binary = str(remsim_check.get("resolved_remsim_binary") or remsim_binary_s)
 
     if bool(install_service):
         service_result = _dispatch_install_remote_service(
             ctx,
             ssh_target=target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             remote_workdir=workdir,
             remote_python=python_executable,
@@ -2414,12 +3132,15 @@ def _dispatch_remote_rig_start(
             gsmtap_capture_path=capture_path,
             start_now=True,
             confirm=True,
+            _dependency_status=dependency_check,
+            _remsim_status=remsim_check,
         )
     else:
         service_result = _dispatch_remote_service_control(
             ctx,
             ssh_target=target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             action="restart",
             confirm=True,
@@ -2432,6 +3153,7 @@ def _dispatch_remote_rig_start(
             note="Remote rig start stopped: RPi HIL service failed.",
             ssh_target=target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             local_gui_port=local_gui,
             remote_workdir=workdir,
@@ -2440,6 +3162,7 @@ def _dispatch_remote_rig_start(
     _write_remote_rig_state({
         "ssh_target": target,
         "identity_file": str(identity_file or "").strip(),
+        "ssh_path": ssh_path_s,
         "remote_workdir": workdir,
         "remote_python": python_executable,
         "remote_gsmtap_capture_path": str(
@@ -2450,6 +3173,7 @@ def _dispatch_remote_rig_start(
     hil_ready = _wait_for_remote_hil_ready(
         ssh_target=target,
         identity_file=identity_file,
+        ssh_path=ssh_path_s,
         remote_workdir=workdir,
         remote_python=python_executable,
         timeout_seconds=14.0,
@@ -2462,6 +3186,7 @@ def _dispatch_remote_rig_start(
             note="Remote rig start stopped: RPi HIL path is not ready for modem APDUs.",
             ssh_target=target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             local_gui_port=local_gui,
             remote_workdir=workdir,
@@ -2474,6 +3199,7 @@ def _dispatch_remote_rig_start(
         note="Remote HIL rig is ready: PC card bridge, tunnel, token, and RPi HIL service are active.",
         ssh_target=target,
         identity_file=identity_file,
+        ssh_path=ssh_path_s,
         service_name=service,
         local_gui_port=local_gui,
         remote_workdir=workdir,
@@ -2497,6 +3223,7 @@ def _dispatch_remote_rig_stop(
     *,
     ssh_target: Any = None,
     identity_file: Any = None,
+    ssh_path: Any = None,
     service_name: Any = None,
     local_gui_port: Any = None,
     remote_workdir: Any = None,
@@ -2509,6 +3236,7 @@ def _dispatch_remote_rig_stop(
     state = _load_remote_rig_state()
     target = str(ssh_target or state.get("ssh_target") or "").strip()
     identity = str(identity_file or state.get("identity_file") or "").strip()
+    ssh_path_s = str(ssh_path or state.get("ssh_path") or "").strip()
     service = _validate_service_name(service_name)
     local_gui = _coerce_port(
         local_gui_port,
@@ -2523,6 +3251,7 @@ def _dispatch_remote_rig_stop(
             ctx,
             ssh_target=target,
             identity_file=identity,
+            ssh_path=ssh_path_s,
             service_name=service,
             action="stop",
             confirm=True,
@@ -2555,6 +3284,7 @@ def _dispatch_remote_rig_stop(
         ActionContext(),
         ssh_target="",
         identity_file=identity,
+        ssh_path=ssh_path_s,
         service_name=service,
         local_gui_port=local_gui,
         remote_workdir=workdir,
@@ -2578,6 +3308,7 @@ def _dispatch_remote_rig_status(
     *,
     ssh_target: Any = None,
     identity_file: Any = None,
+    ssh_path: Any = None,
     service_name: Any = None,
     local_gui_port: Any = None,
     remote_workdir: Any = None,
@@ -2585,6 +3316,7 @@ def _dispatch_remote_rig_status(
 ) -> dict[str, Any]:
     del ctx
     state = _load_remote_rig_state()
+    ssh_path_s = str(ssh_path or state.get("ssh_path") or "").strip()
     local_pid = int(state.get("local_card_bridge_pid", 0) or 0)
     tunnel_pid = int(state.get("ssh_tunnel_pid", 0) or 0)
     local_card = _coerce_port(state.get("local_card_bridge_port", _DEFAULT_CARD_PORT), _DEFAULT_CARD_PORT)
@@ -2623,6 +3355,7 @@ def _dispatch_remote_rig_status(
             ActionContext(),
             ssh_target=ssh_target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             service_name=service,
             action="status",
         )
@@ -2632,6 +3365,7 @@ def _dispatch_remote_rig_status(
         runtime_status = _remote_hil_runtime_status(
             ssh_target=ssh_target,
             identity_file=identity_file,
+            ssh_path=ssh_path_s,
             remote_workdir=remote_workdir,
             remote_python=remote_python,
         )
@@ -2725,6 +3459,7 @@ REMOTE_RIG_START_SPEC = ActionSpec(
     inputs=(
         ActionField(name="ssh_target", label="SSH target", kind="string", required=True, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
+        ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),
         ActionField(name="reader_index", label="Reader index", kind="int", required=False, default=0, min_value=0),
         ActionField(name="reader_name", label="Reader name", kind="string", required=False),
         ActionField(name="local_card_port", label="Local card port", kind="int", required=False, default=_DEFAULT_CARD_PORT, min_value=1),
@@ -2766,6 +3501,7 @@ REMOTE_RIG_STOP_SPEC = ActionSpec(
     inputs=(
         ActionField(name="ssh_target", label="SSH target", kind="string", required=False, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
+        ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),
         ActionField(name="service_name", label="Service", kind="string", required=False, default=_DEFAULT_REMOTE_SERVICE_NAME),
         ActionField(name="local_gui_port", label="Local GUI port", kind="int", required=False, default=_DEFAULT_GUI_PORT, min_value=1),
         ActionField(name="remote_workdir", label="Remote repo directory", kind="string", required=False, default=_DEFAULT_REMOTE_WORKDIR),
@@ -2788,6 +3524,7 @@ TUNNEL_START_SPEC = ActionSpec(
     inputs=(
         ActionField(name="ssh_target", label="SSH target", kind="string", required=True, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
+        ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),
         ActionField(name="local_card_port", label="Local card port", kind="int", required=False, default=_DEFAULT_CARD_PORT, min_value=1),
         ActionField(name="remote_card_port", label="Remote card port", kind="int", required=False, default=_DEFAULT_CARD_PORT, min_value=1),
         ActionField(name="local_gui_port", label="Local GUI port", kind="int", required=False, default=_DEFAULT_GUI_PORT, min_value=1),
@@ -2826,6 +3563,7 @@ SYNC_TOKEN_SPEC = ActionSpec(
     inputs=(
         ActionField(name="ssh_target", label="SSH target", kind="string", required=True, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
+        ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),
         ActionField(name="local_token_file", label="Local token file", kind="path", required=False),
         ActionField(name="remote_token_file", label="Remote token file", kind="string", required=False, default=_DEFAULT_REMOTE_TOKEN_FILE),
         ActionField(name="confirm", label="Write remote token file", kind="bool", required=True, default=False),
@@ -2846,6 +3584,7 @@ INSTALL_REMOTE_SERVICE_SPEC = ActionSpec(
     inputs=(
         ActionField(name="ssh_target", label="SSH target", kind="string", required=True, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
+        ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),
         ActionField(name="service_name", label="Service", kind="string", required=False, default=_DEFAULT_REMOTE_SERVICE_NAME),
         ActionField(name="remote_workdir", label="Remote repo directory", kind="string", required=True, default=_DEFAULT_REMOTE_WORKDIR, placeholder="~/YggdraSIM"),
         ActionField(name="remote_python", label="Remote Python", kind="string", required=False, default=_DEFAULT_REMOTE_PYTHON),
@@ -2856,6 +3595,16 @@ INSTALL_REMOTE_SERVICE_SPEC = ActionSpec(
         ActionField(name="hil_port", label="HIL port", kind="int", required=False, default=_DEFAULT_HIL_PORT, min_value=1),
         ActionField(name="apdu_timeout_ms", label="APDU timeout (ms)", kind="int", required=False, default=_DEFAULT_APDU_TIMEOUT_MS, min_value=1),
         ActionField(name="gsmtap_capture_path", label="RPi GSMTAP capture path", kind="string", required=False),
+        ActionField(
+            name="simtrace_reset",
+            label="Pre-session SIMtrace2 reset",
+            kind="string",
+            required=False,
+            placeholder="usb-reset | port-power | auto | off",
+        ),
+        ActionField(name="uhubctl_binary", label="RPi uhubctl binary", kind="string", required=False),
+        ActionField(name="uhubctl_location", label="RPi hub location (uhubctl -l)", kind="string", required=False, placeholder="1-1"),
+        ActionField(name="uhubctl_port", label="RPi hub port (uhubctl -p)", kind="string", required=False),
         ActionField(name="start_now", label="Restart after install", kind="bool", required=False, default=True),
         ActionField(name="confirm", label="Install remote service", kind="bool", required=True, default=False),
     ),
@@ -2875,6 +3624,7 @@ REMOTE_SERVICE_CONTROL_SPEC = ActionSpec(
     inputs=(
         ActionField(name="ssh_target", label="SSH target", kind="string", required=True, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
+        ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),
         ActionField(name="service_name", label="Service", kind="string", required=False, default=_DEFAULT_REMOTE_SERVICE_NAME),
         ActionField(name="action", label="Action", kind="enum", required=True, choices=["status", "start", "restart", "stop"], default="status"),
         ActionField(name="confirm", label="Run service action", kind="bool", required=False, default=False),
@@ -2895,6 +3645,7 @@ REMOTE_RIG_STATUS_SPEC = ActionSpec(
     inputs=(
         ActionField(name="ssh_target", label="SSH target", kind="string", required=False, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
+        ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),
         ActionField(name="service_name", label="Service", kind="string", required=False, default=_DEFAULT_REMOTE_SERVICE_NAME),
         ActionField(name="local_gui_port", label="Local GUI port", kind="int", required=False, default=_DEFAULT_GUI_PORT, min_value=1),
         ActionField(name="remote_workdir", label="Remote repo directory", kind="string", required=False, default=_DEFAULT_REMOTE_WORKDIR),

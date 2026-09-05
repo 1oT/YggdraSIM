@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+name: CI Draft Cleanup
+
+# The manual test-build workflows deliberately carry no delete path, so aged
+# ``ci-main-*`` / ``ci-windows-main-*`` drafts are reaped here instead. This
+# workflow only ever deletes draft releases whose tag matches the exact
+# run-scoped form those workflows generate.
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-draft-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  reap:
+    name: Delete aged CI test drafts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Delete CI drafts older than the retention window
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RETENTION_DAYS: "7"
+        run: |
+          set -euo pipefail
+          CUTOFF="$(date -u -d "-${RETENTION_DAYS} days" +%s)"
+          CANDIDATES="${RUNNER_TEMP}/draft-candidates.tsv"
+          gh release list --limit 200 \
+            --json tagName,isDraft,createdAt \
+            --jq '.[] | select(.isDraft) | [.tagName, .createdAt] | @tsv' \
+            > "${CANDIDATES}"
+
+          DELETED=0
+          while IFS=$'\t' read -r TAG CREATED; do
+            # Only the exact generated form; never a hand-made or production tag.
+            if [[ ! "${TAG}" =~ ^ci-(main|windows-main)-[0-9]+-[0-9]+$ ]]; then
+              continue
+            fi
+            if [ "$(date -u -d "${CREATED}" +%s)" -ge "${CUTOFF}" ]; then
+              continue
+            fi
+            # Re-read the draft flag so a release published between the list
+            # and the delete is left alone.
+            test "$(gh release view "${TAG}" --json isDraft \
+              --jq '.isDraft')" = "true"
+            # No ``--cleanup-tag``: a draft has no Git ref, and this workflow
+            # must never be able to remove one.
+            gh release delete "${TAG}" --yes
+            printf -- '- deleted `%s` (created %s)\n' "${TAG}" "${CREATED}" \
+              >> "${GITHUB_STEP_SUMMARY}"
+            DELETED=$((DELETED + 1))
+          done < "${CANDIDATES}"
+
+          printf 'Reaped %s aged CI draft(s).\n' "${DELETED}" \
+            >> "${GITHUB_STEP_SUMMARY}"

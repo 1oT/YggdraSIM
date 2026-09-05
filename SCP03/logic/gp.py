@@ -32,6 +32,8 @@ from cryptography .hazmat .primitives .ciphers import algorithms
 from cryptography .hazmat .primitives import cmac 
 
 class GlobalPlatformManager :
+    MAX_GET_STATUS_PAGES =256
+
     def __init__ (self ,transport ,config_keys ):
         self .tp =transport 
         self .raw_keys =config_keys 
@@ -133,6 +135,19 @@ class GlobalPlatformManager :
             return self .authenticate_scp02 ()
         return self .authenticate_scp03 ()
 
+    @staticmethod
+    def _preferred_scp03_security_level (i_parameter :int )->int :
+        """Choose the strongest security level advertised by SCP03 ``i``."""
+        response_mode =int (i_parameter )&0x60
+        if response_mode ==0x40 :
+            raise ValueError ("SCP03 i parameter uses the reserved response mode 10b.")
+        security_level =0x03  # C-MAC + C-DECRYPTION
+        if response_mode in (0x20 ,0x60 ):
+            security_level |=0x10  # R-MAC
+        if response_mode ==0x60 :
+            security_level |=0x20  # R-ENCRYPTION
+        return security_level
+
     def authenticate_scp03 (self )->bool :
         """Run INITIALIZE-UPDATE + EXTERNAL-AUTHENTICATE to open an SCP03 admin session; return True on success."""
         if self .tp .session :
@@ -166,8 +181,11 @@ class GlobalPlatformManager :
 
         try :
             self .tp .session =Scp03Session (self .scp03_keys )
-            self .tp .session .sec_level =0x33 
             self .tp .session .derive_keys (host_challenge ,data )
+            security_level =self ._preferred_scp03_security_level (
+            self .tp .session .i_parameter
+            )
+            self .tp .session .sec_level =security_level
         except Exception as e :
             print (f"{Config.Colors.FAIL}[-] Key Derivation Failed: {e}{Config.Colors.ENDC}")
             return False 
@@ -175,7 +193,7 @@ class GlobalPlatformManager :
         host_crypto =self .tp .session .calculate_host_cryptogram ()
         self .tp .session .chaining_value =b'\x00'*16 
 
-        header =bytes ([0x84 ,0x82 ,0x33 ,0x00 ,0x10 ])
+        header =bytes ([0x84 ,0x82 ,security_level ,0x00 ,0x10 ])
 
         c_mac =cmac .CMAC (algorithms .AES (self .tp .session .s_mac ))
         c_mac .update (self .tp .session .chaining_value +header +host_crypto )
@@ -190,7 +208,7 @@ class GlobalPlatformManager :
             self .active_scp_protocol ="SCP03"
             self .tp .session .ssc =1 
             self .tp .session .is_authenticated =True 
-            print (f"{Config.Colors.GREEN}[+] SCP03 Authenticated (Level 0x33, KVN 0x{used_kvn:02X}){Config.Colors.ENDC}")
+            print (f"{Config.Colors.GREEN}[+] SCP03 Authenticated (Level 0x{security_level:02X}, KVN 0x{used_kvn:02X}){Config.Colors.ENDC}")
             self .get_keys_info (silent =True )
             return True 
         self .tp .reset_session_state ()
@@ -662,35 +680,130 @@ class GlobalPlatformManager :
             print (f"{Config.Colors.FAIL}[-] Error: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
     def _parse_key_template_entries (self ,data :bytes )->List [Dict [str ,Any ]]:
+        """Decode GP Key Information Template (E0/C0) entries.
+
+        A basic C0 value starts with KID/KVN and may contain more than one
+        key-type/key-length component pair.  The previous byte scanner only
+        recognized ``C0 04`` and could also false-match C0 bytes inside an
+        unrelated value.
+        """
+        try :
+            parsed =TlvParser .parse (bytes (data ))
+        except ValueError :
+            return []
+
+        template =parsed
+        if 0xE0 in parsed :
+            template =parsed [0xE0 ]
+            if isinstance (template ,bytes ):
+                try :
+                    template =TlvParser .parse (template )
+                except ValueError :
+                    return []
+        if not isinstance (template ,dict ):
+            return []
+
+        raw_c0_values =template .get (0xC0 ,[])
+        if isinstance (raw_c0_values ,bytes ):
+            raw_c0_values =[raw_c0_values ]
+        if not isinstance (raw_c0_values ,list ):
+            return []
+
+        type_map ={
+        0x80 :"DES",
+        0x85 :"TLS PSK",
+        0x88 :"AES",
+        0x89 :"SM4",
+        0xA0 :"RSA public exponent",
+        0xA1 :"RSA public modulus",
+        0xB0 :"ECC public",
+        0xB1 :"ECC private",
+        0xB8 :"SM2 public",
+        0xB9 :"SM2 private",
+        0xF0 :"ECC parameters reference",
+        }
         entries :List [Dict [str ,Any ]]=[]
-        i =0 
-        while i <len (data )-5 :
-            has_c0 =False 
-            if data [i ]==0xC0 :
-                if data [i +1 ]==0x04 :
-                    has_c0 =True 
-            if has_c0 :
-                kid =data [i +2 ]
-                kver =data [i +3 ]
-                ktype =data [i +4 ]
-                klen =data [i +5 ]
-                type_map ={
-                0x80 :"DES",
-                0x81 :"DES",
-                0x88 :"AES",
-                0xFF :"Ext"
-                }
-                entries .append (
-                {
-                "version":f"{kver:02X}",
-                "id":f"{kid:02X}",
-                "type":type_map .get (ktype ,f"{ktype:02X}"),
-                "length":klen 
-                }
-                )
-                i +=6 
-                continue 
-            i +=1 
+        for raw_value in raw_c0_values :
+            if not isinstance (raw_value ,(bytes ,bytearray ,memoryview )):
+                return []
+            value =bytes (raw_value )
+            if len (value )<4 :
+                return []
+
+            kid =value [0 ]
+            kver =value [1 ]
+            components :List [Dict [str ,Any ]]=[]
+            usage_qualifier =b""
+            access_condition =b""
+            if value [2 ]==0xFF :
+                cursor =2
+                while cursor +4 <=len (value )and value [cursor ]==0xFF :
+                    extended_type =f"FF{value[cursor +1]:02X}"
+                    extended_length =int .from_bytes (
+                    value [cursor +2 :cursor +4 ],"big"
+                    )
+                    if extended_length <1 or extended_length >0x7FFF :
+                        return []
+                    components .append (
+                    {
+                    "type":extended_type ,
+                    "type_code":extended_type ,
+                    "length":extended_length ,
+                    }
+                    )
+                    cursor +=4
+                if len (components )==0 or cursor >=len (value ):
+                    return []
+                usage_length =value [cursor ]
+                cursor +=1
+                if usage_length >2 or cursor +usage_length >len (value ):
+                    return []
+                usage_qualifier =value [cursor :cursor +usage_length ]
+                cursor +=usage_length
+                if cursor >=len (value ):
+                    return []
+                access_length =value [cursor ]
+                cursor +=1
+                if access_length >1 or cursor +access_length !=len (value ):
+                    return []
+                access_condition =value [cursor :cursor +access_length ]
+                entry_format ="extended"
+            else :
+                component_data =value [2 :]
+                if len (component_data )%2 !=0 :
+                    return []
+                for offset in range (0 ,len (component_data ),2 ):
+                    key_type =component_data [offset ]
+                    key_length =component_data [offset +1 ]
+                    if key_type ==0xFF :
+                        return []
+                    component :Dict [str ,Any ]={
+                    "type":type_map .get (key_type ,f"{key_type:02X}"),
+                    "type_code":f"{key_type:02X}",
+                    "length":">=256"if key_length ==0 else key_length ,
+                    }
+                    if key_length ==0 :
+                        component ["length_code"]="00"
+                        component ["minimum_length"]=256
+                    if key_type ==0x80 :
+                        component ["deprecated"]=True
+                    components .append (component )
+                entry_format ="basic"
+
+            first_component =components [0 ]
+            entries .append (
+            {
+            "version":f"{kver:02X}",
+            "id":f"{kid:02X}",
+            "type":first_component ["type"],
+            "length":first_component ["length"],
+            "format":entry_format ,
+            "components":components ,
+            "key_usage_qualifier":usage_qualifier .hex ().upper (),
+            "key_access_condition":access_condition .hex ().upper (),
+            "raw_hex":value .hex ().upper (),
+            }
+            )
         return entries 
 
     def get_keys_info_data (self ,target_aid_hex :Optional [str ]=None )->Dict [str ,Any ]:
@@ -722,11 +835,16 @@ class GlobalPlatformManager :
         """Print the GET STATUS application/package/SD registry for *kind* (APPS, PACKAGES, or SD)."""
         p1_map ={'APPS':0x40 ,'PACKAGES':0x20 ,'SD':0x80 }
 
+        kind =str (kind ).strip ().upper ()
+        if kind not in p1_map :
+            raise ValueError ("Registry kind must be APPS, PACKAGES, or SD.")
         p1 =p1_map .get (kind ,0x40 )
         p2 =0x00 
         full_data =bytearray ()
+        pages =0
 
         while True :
+            pages +=1
             cmd =f"80F2{p1:02X}{p2:02X}024F0000"
             data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =False )
 
@@ -736,7 +854,13 @@ class GlobalPlatformManager :
             if sw1 ==0x90 :
                 break 
             elif sw1 ==0x63 and sw2 ==0x10 :
-                p2 +=1 
+                if pages >=self .MAX_GET_STATUS_PAGES :
+                    print (
+                    f"{Config.Colors.FAIL}[-] Registry response exceeded "
+                    f"{self.MAX_GET_STATUS_PAGES} pages; stopping.{Config.Colors.ENDC}"
+                    )
+                    break
+                p2 =0x01
             elif sw1 ==0x6A and sw2 ==0x88 :
                 if not full_data :
                     print (f"[-] No {kind} found in registry.")
@@ -829,43 +953,70 @@ class GlobalPlatformManager :
         aid =data [aid_start :aid_end ].hex ().upper ()
         return aid ,state_byte ,extra ,next_offset
 
+    @staticmethod
+    def _registry_ber_length_at (data :bytes ,offset :int )->Tuple [int ,int ]:
+        if offset >=len (data ):
+            raise ValueError ("Registry TLV is missing its length.")
+        first =data [offset ]
+        offset +=1
+        if first <0x80 :
+            return first ,offset
+        count =first &0x7F
+        if count ==0 :
+            raise ValueError ("Registry TLV uses an indefinite BER length.")
+        if count >4 or offset +count >len (data ):
+            raise ValueError ("Registry TLV has a truncated BER length.")
+        if data [offset ]==0x00 :
+            raise ValueError ("Registry TLV uses a non-minimal BER length.")
+        length =int .from_bytes (data [offset :offset +count ],"big")
+        if length <0x80 :
+            raise ValueError ("Registry TLV uses a non-minimal BER length.")
+        return length ,offset +count
+
+    @staticmethod
+    def _registry_first_bytes (value :Any )->Optional [bytes ]:
+        if isinstance (value ,list ):
+            if len (value )==0 :
+                return None
+            value =value [0 ]
+        if isinstance (value ,(bytes ,bytearray ,memoryview )):
+            return bytes (value )
+        return None
+
     def _registry_rows_from_data (self ,data :bytes ,kind :str )->List [Tuple [str ,int ,str ]]:
         rows :List [Tuple [str ,int ,str ]]=[]
         if len (data )>0 and data [0 ]==0xE3 :
             i =0 
             while i <len (data ):
-                is_e3 =False 
-                if data [i ]==0xE3 :
-                    is_e3 =True 
-                if is_e3 ==False :
-                    return rows 
-                has_len =False 
-                if i +1 <len (data ):
-                    has_len =True 
-                if has_len ==False :
-                    break 
-                tag_len =data [i +1 ]
-                end =i +2 +tag_len 
-                in_range =False 
-                if end <=len (data ):
-                    in_range =True 
-                if in_range ==False :
-                    break 
-                entry =data [i +2 :end ]
+                if data [i ]!=0xE3 :
+                    return []
+                try :
+                    tag_len ,value_offset =self ._registry_ber_length_at (data ,i +1 )
+                except ValueError :
+                    return []
+                end =value_offset +tag_len
+                if end >len (data ):
+                    return []
+                entry =data [value_offset :end ]
                 i =end 
-                parsed =TlvParser .parse (entry )
+                try :
+                    parsed =TlvParser .parse (entry )
+                except ValueError :
+                    return []
 
-                aid =""
-                if 0x4F in parsed :
-                    aid =parsed [0x4F ].hex ().upper ()
-
-                lcs_byte =0 
-                if 0x9F70 in parsed :
-                    lcs_byte =parsed [0x9F70 ][0 ]
+                aid_value =self ._registry_first_bytes (parsed .get (0x4F ))
+                lcs_value =self ._registry_first_bytes (parsed .get (0x9F70 ))
+                if aid_value is None or not (5 <=len (aid_value )<=16 ):
+                    return []
+                if lcs_value is None or len (lcs_value )!=1 :
+                    return []
+                aid =aid_value .hex ().upper ()
+                lcs_byte =lcs_value [0 ]
 
                 extra =""
-                if 0xC5 in parsed :
-                    extra =parsed [0xC5 ].hex ().upper ()
+                extra_value =self ._registry_first_bytes (parsed .get (0xC5 ))
+                if extra_value is not None :
+                    extra =extra_value .hex ().upper ()
 
                 rows .append ((aid ,lcs_byte ,extra ))
             return rows 
@@ -874,7 +1025,7 @@ class GlobalPlatformManager :
         while i <len (data ):
             entry =self ._compact_registry_entry_at (data ,i ,kind )
             if entry is None :
-                return rows
+                return []
 
             aid ,lcs_byte ,extra ,next_i =entry
             rows .append ((aid ,lcs_byte ,extra ))
@@ -896,12 +1047,16 @@ class GlobalPlatformManager :
     def get_registry_data (self ,kind :str ='APPS')->Dict [str ,Any ]:
         """Return a dict of GET STATUS registry entries for *kind* (APPS, PACKAGES, or SD)."""
         p1_map ={'APPS':0x40 ,'PACKAGES':0x20 ,'SD':0x80 }
+        kind =str (kind ).strip ().upper ()
+        if kind not in p1_map :
+            raise ValueError ("Registry kind must be APPS, PACKAGES, or SD.")
         p1 =p1_map .get (kind ,0x40 )
         p2 =0x00 
         full_data =bytearray ()
         pages =0 
         last_sw1 =0x6F 
         last_sw2 =0x00 
+        truncated =False
 
         while True :
             cmd =f"80F2{p1:02X}{p2:02X}024F0000"
@@ -928,7 +1083,10 @@ class GlobalPlatformManager :
                 if sw2 ==0x10 :
                     has_more =True 
             if has_more :
-                p2 +=1 
+                if pages >=self .MAX_GET_STATUS_PAGES :
+                    truncated =True
+                    break
+                p2 =0x01
                 continue 
             break 
 
@@ -937,6 +1095,7 @@ class GlobalPlatformManager :
         "kind":kind ,
         "status":f"{last_sw1:02X}{last_sw2:02X}",
         "pages":pages ,
+        "truncated":truncated ,
         "count":len (entries ),
         "entries":entries ,
         "raw_hex":bytes (full_data ).hex ().upper ()
@@ -947,29 +1106,23 @@ class GlobalPlatformManager :
         print (f"\n{Config.Colors.HEADER}--- Card Key Registry ---{Config.Colors.ENDC}")
         print (f"{'Version':<10} | {'ID':<10} | {'Type':<12} | {'Length'}")
         print ("-"*50 )
-        found =False 
-        i =0 
-        while i <len (data )-5 :
-            if data [i ]==0xC0 and data [i +1 ]==0x04 :
-                kid =data [i +2 ]
-                kver =data [i +3 ]
-                ktype =data [i +4 ]
-                klen =data [i +5 ]
-                type_map ={
-                0x80 :"DES",
-                0x81 :"DES",
-                0x88 :"AES",
-                0xFF :"Ext"
-                }
+        entries =self ._parse_key_template_entries (data )
+        for entry in entries :
+            version =str (entry .get ("version","00"))
+            key_id =str (entry .get ("id","00"))
+            components =entry .get ("components",[])
+            if not isinstance (components ,list ):
+                components =[]
+            for component_index ,component in enumerate (components ):
+                if not isinstance (component ,dict ):
+                    continue
+                type_text =str (component .get ("type","Unknown"))
+                length =component .get ("length","Unknown")
+                version_text =f"0x{version}"if component_index ==0 else ""
+                id_text =f"0x{key_id}"if component_index ==0 else ""
+                print (f"{version_text:<10} | {id_text:<10} | {type_text:<12} | {length}")
 
-                t_str =type_map .get (ktype ,f"0x{ktype:02X}")
-                print (f"0x{kver:02X} ({kver:<3}) | 0x{kid:02X} ({kid:<3}) | {t_str:<12} | {klen}")
-                found =True 
-                i +=6 
-            else :
-                i +=1 
-
-        if not found :
+        if not entries :
             print ("  (No valid keys detected or parsing failed)")
         print ("-"*50 +"\n")
 
@@ -1045,17 +1198,24 @@ class GlobalPlatformManager :
                 val_hex =val .hex ().upper ()
                 ascii_str =""
                 try :
-                    s =val .decode ('utf-8','ignore')
+                    s =val .decode ('utf-8')
                     safe_chars =set ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_.:/,")
                     if len (s )>1 and all (c in safe_chars for c in s ):
                         ascii_str =f" ('{s}')"
-                except Exception :
+                except UnicodeDecodeError :
                     pass 
 
                 print (f"{indent_str}Tag {tag_hex} (L={len(val)}): {val_hex}{ascii_str}")
 
-    def set_status (self ,target_aid ,state_byte :int ):
-        """Send SET STATUS (GP Card Spec v2.3 §11.9) to transition the target application life-cycle state."""
+    def set_status (self ,target_aid ,state_byte :int ,status_type :int =0x40 ):
+        """Send SET STATUS (GPCS 2.3.1 §11.10) to transition a life-cycle state.
+
+        P1 carries the Status Type of Table 11-86, not zero: '80' for the
+        Issuer Security Domain, '40' for an Application or Supplementary
+        Security Domain, '60' for a Security Domain and its associated
+        Applications. Callers targeting an application AID want '40',
+        which is the default here.
+        """
         target =HexUtils .to_bytes (target_aid )
         state_name =f"{state_byte:02X}"
         if state_byte ==0x80 :
@@ -1064,7 +1224,7 @@ class GlobalPlatformManager :
             state_name ="SELECTABLE"
 
         print (f"{Config.Colors.CYAN}[*] Setting Status of {target.hex().upper()} to {state_name}...{Config.Colors.ENDC}")
-        cmd =f"80F000{state_byte:02X}{len(target):02X}{target.hex()}"
+        cmd =f"80F0{status_type:02X}{state_byte:02X}{len(target):02X}{target.hex()}"
         _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
         if sw1 ==0x90 :
             print (f"{Config.Colors.GREEN}[+] Status Updated.{Config.Colors.ENDC}")

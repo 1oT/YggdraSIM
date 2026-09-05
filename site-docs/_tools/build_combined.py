@@ -51,11 +51,15 @@ def repo_root() -> Path:
 def load_mkdocs_config() -> dict:
     path = repo_root() / "mkdocs.yml"
     with path.open("r", encoding="utf-8") as handle:
-        return yaml.load(handle, Loader=UnsafeLoader)
+        return yaml.load(handle, Loader=MkDocsTagTolerantLoader)
 
 
-class UnsafeLoader(yaml.SafeLoader):
-    """Permissive loader that ignores MkDocs custom tags like !!python/name."""
+class MkDocsTagTolerantLoader(yaml.SafeLoader):
+    """SafeLoader that ignores MkDocs custom tags like !!python/name.
+
+    Named for what it does. The previous name implied ``yaml.UnsafeLoader``,
+    which constructs arbitrary Python objects -- the opposite of this.
+    """
 
 
 def _ignore_unknown_tag(loader, tag_suffix, node):
@@ -68,9 +72,9 @@ def _ignore_unknown_tag(loader, tag_suffix, node):
     return None
 
 
-UnsafeLoader.add_multi_constructor("tag:yaml.org,2002:python/name:", _ignore_unknown_tag)
-UnsafeLoader.add_multi_constructor("!!python/name:", _ignore_unknown_tag)
-UnsafeLoader.add_multi_constructor("", _ignore_unknown_tag)
+MkDocsTagTolerantLoader.add_multi_constructor("tag:yaml.org,2002:python/name:", _ignore_unknown_tag)
+MkDocsTagTolerantLoader.add_multi_constructor("!!python/name:", _ignore_unknown_tag)
+MkDocsTagTolerantLoader.add_multi_constructor("", _ignore_unknown_tag)
 
 
 def slugify_path(relative: Path) -> str:

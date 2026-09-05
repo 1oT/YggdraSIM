@@ -350,7 +350,7 @@ def test_esim_action_runs_stay_in_flow_pane_not_popout() -> None:
     js = _read("app.js")
     assert "function ccActionShouldAutoRunInEsimFlowPane(action)" in js
     helper = js.split("function ccActionShouldAutoRunInEsimFlowPane(action)", 1)[1]
-    helper = helper.split("// -- Action popout builder", 1)[0]
+    helper = helper.split("// -- Action panel builder", 1)[0]
     assert "!ccActionNeedsManualInput(action)" in helper
     assert "action.streams" not in helper
 
@@ -384,14 +384,16 @@ def test_streaming_flow_error_frames_are_debug_gated() -> None:
     assert 'String(level || "info").toLowerCase() !== "error"' in helper
     assert "ccIsGlobalDebugEnabled()" in helper
 
-    stream_start = js.index("function runStreamingAction(action, inputs, statusEl, resultEl, card)")
+    stream_start = js.index(
+        "function runStreamingAction(action, inputs, statusEl, resultEl, card, form)"
+    )
     stream_window = js[stream_start : js.index("function renderReportSummary", stream_start)]
     for token in (
         "ccRefreshGlobalDebugFlag().then(function ()",
         "var hiddenErrorCount = 0",
         "var showFrame = ccShouldShowStreamFrame(level)",
         "hiddenErrorCount += 1",
-        "if (showFrame) {\n              statusEl.textContent = \"error\";",
+        'if (showFrame) {\n              ccSetActionStatus(statusEl, "error");',
         "Flow stopped before completion. Enable debug for details.",
     ):
         assert token in stream_window

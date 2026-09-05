@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ---- Hex-dump and decoded-hex toolbars (Data tab) ------------------ */
 
 .saip-hexdump-tools,
@@ -16,15 +17,15 @@
 
 .saip-hexdump-tools .btn.is-copied,
 .saip-decoded-hex-tools .btn.is-copied {
-  outline: 2px solid var(--ok, #a3be8c);
+  outline: 2px solid var(--ok);
   outline-offset: 2px;
 }
 
 .saip-hexdump {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 1.5;
-  background: var(--surface, rgba(0, 0, 0, 0.18));
+  background: var(--surface);
   color: var(--fg);
   padding: 10px 12px;
   border-radius: 6px;
@@ -49,9 +50,9 @@
   align-self: flex-end;
   padding: 2px;
   margin: 0 0 6px;
-  border: 1px solid var(--border, #3b4252);
+  border: 1px solid var(--border);
   border-radius: 5px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
 }
 
 .saip-file-data-viewbtn {
@@ -60,20 +61,20 @@
   border: 0;
   border-radius: 3px;
   background: transparent;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
 }
 
 .saip-file-data-viewbtn:hover {
-  color: var(--fg, #eceff4);
-  background: var(--surface, rgba(255, 255, 255, 0.04));
+  color: var(--fg);
+  background: var(--surface);
 }
 
 .saip-file-data-viewbtn.is-active {
-  color: var(--accent, #88c0d0);
-  background: var(--accent-soft, rgba(136, 192, 208, 0.14));
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .saip-file-data-view {
@@ -106,9 +107,9 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border, #3b4252);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
   overflow: hidden;
 }
 
@@ -118,8 +119,8 @@
   align-items: center;
   min-height: 28px;
   padding: 5px 8px;
-  border-bottom: 1px solid var(--border, #3b4252);
-  background: var(--surface, rgba(255, 255, 255, 0.02));
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .saip-file-data-pane-title {
@@ -127,7 +128,7 @@
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-file-data-pane-body {

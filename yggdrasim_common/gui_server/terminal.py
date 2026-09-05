@@ -33,14 +33,21 @@ from __future__ import annotations
 
 import asyncio
 import errno
-import fcntl
 import os
 import signal
 import struct
 import sys
-import termios
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
+
+from yggdrasim_common.frozen_dispatch import build_module_command
+
+try:  # POSIX-only; keep importing the GUI application safe on Windows.
+    import fcntl as _fcntl
+    import termios as _termios
+except ImportError:  # pragma: no cover - exercised by native Windows CI
+    _fcntl = None
+    _termios = None
 
 
 _DEFAULT_ROWS = 30
@@ -54,7 +61,11 @@ def is_supported() -> bool:
     implementation relies on the stdlib ``pty`` module which only
     exists on Linux/macOS/*BSD.
     """
-    return sys.platform != "win32"
+    return (
+        os.name == "posix"
+        and _fcntl is not None
+        and _termios is not None
+    )
 
 
 def is_allowed_module(module_name: str) -> bool:
@@ -133,7 +144,7 @@ class PtySession:
 
         import pty  # imported lazily so non-POSIX import paths are clean.
 
-        argv = [sys.executable, "-m", spec.module, *spec.extra_args]
+        argv = build_module_command(spec.module, spec.extra_args)
         env = dict(os.environ)
         if spec.env:
             env.update(spec.env)
@@ -162,13 +173,13 @@ class PtySession:
 
     def resize(self, rows: int, cols: int) -> None:
         """Forward TIOCSWINSZ to the child so curses-style UIs redraw."""
-        if self._master_fd < 0:
+        if self._master_fd < 0 or _fcntl is None or _termios is None:
             return
         rows = max(1, int(rows))
         cols = max(1, int(cols))
         try:
             winsize = struct.pack("HHHH", rows, cols, 0, 0)
-            fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
+            _fcntl.ioctl(self._master_fd, _termios.TIOCSWINSZ, winsize)
         except OSError:
             # Resizing a dying PTY is harmless.
             pass
@@ -244,8 +255,10 @@ class PtySession:
 
 
 def _set_nonblocking(fd: int) -> None:
-    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    if _fcntl is None:
+        raise RuntimeError("non-blocking PTY support is unavailable")
+    flags = _fcntl.fcntl(fd, _fcntl.F_GETFL)
+    _fcntl.fcntl(fd, _fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
 
 def _safe_read(fd: int, max_bytes: int) -> Optional[bytes]:

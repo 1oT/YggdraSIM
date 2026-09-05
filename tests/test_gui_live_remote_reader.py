@@ -30,6 +30,8 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import pytest
+
 try:
     _live_module = importlib.import_module(
         "yggdrasim_common.gui_server.routes.live"
@@ -134,6 +136,7 @@ class GuiLiveRemoteReaderTests(unittest.TestCase):
         result = _live_module._probe_remote_bridge_reader()
         self.assertIsNone(result)
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_configured_online_with_atr(self) -> None:
         bridge = _StubBridge(
             status_payload={
@@ -155,6 +158,7 @@ class GuiLiveRemoteReaderTests(unittest.TestCase):
         finally:
             bridge.close()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_configured_token_rejected_returns_401_status_text(self) -> None:
         bridge = _StubBridge(require_token="secret-3")
         try:
@@ -179,6 +183,7 @@ class GuiLiveRemoteReaderTests(unittest.TestCase):
         self.assertIn("unreachable", row.status.lower())
         self.assertEqual(row.atr_hex, "")
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_apdu_suffix_stripped_from_source_url(self) -> None:
         bridge = _StubBridge(
             status_payload={
@@ -196,6 +201,7 @@ class GuiLiveRemoteReaderTests(unittest.TestCase):
         finally:
             bridge.close()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_remote_only_backend_when_pyscard_missing(self) -> None:
         """When pyscard import fails the route still surfaces the remote row."""
         bridge = _StubBridge(

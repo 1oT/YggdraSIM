@@ -127,9 +127,10 @@ class CreateFileTests(_AdminEngineHarness):
 
     def test_create_linear_fixed_ef_with_records(self) -> None:
         self._select_mf()
-        # File descriptor: 0x02 linear-fixed, 0x21 0x21 padding,
-        # record length = 0x10, record count = 0x04.
-        descriptor = bytes((0x82, 0x06, 0x02, 0x21, 0x21, 0x00, 0x10, 0x04))
+        # TS 102 221 §11.1.1.4.3: file descriptor byte, data coding byte
+        # '21', record length over two octets, then the record count. The
+        # value is five octets for a record EF, not six.
+        descriptor = bytes((0x82, 0x05, 0x02, 0x21, 0x00, 0x10, 0x04))
         fid_tlv = bytes((0x83, 0x02, 0x77, 0x73))
         size_tlv = bytes((0x80, 0x02, 0x00, 0x40))
         fcp_body = descriptor + fid_tlv + size_tlv
@@ -193,8 +194,8 @@ class _ToolkitHarness(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
-            iccid="8949000000000000001",
+            eid="89049032123451234512345678901235",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",
@@ -313,7 +314,7 @@ class EventDownloadGap10Tests(_ToolkitHarness):
     def test_ims_registration_event_sets_status_and_payload(self) -> None:
         uri = b"sip:user@example.com"
         envelope = self._envelope(
-            tlv("99", b"\x18"),
+            tlv("99", b"\x17"),
             tlv("B9", b"\x01"),
             tlv("BA", uri),
         )
@@ -324,7 +325,7 @@ class EventDownloadGap10Tests(_ToolkitHarness):
     def test_ims_registration_deregister_clears_flag(self) -> None:
         self.state.toolkit.ims_registered = True
         envelope = self._envelope(
-            tlv("99", b"\x18"),
+            tlv("99", b"\x17"),
             tlv("B9", b"\x00"),
         )
         self.toolkit.handle_envelope(envelope, self._fallback)
@@ -333,12 +334,12 @@ class EventDownloadGap10Tests(_ToolkitHarness):
     def test_ims_incoming_data_caches_payload(self) -> None:
         payload = bytes.fromhex("4D45535341474520626F6479")
         envelope = self._envelope(
-            tlv("99", b"\x19"),
+            tlv("99", b"\x18"),
             tlv("BA", payload),
         )
         self.toolkit.handle_envelope(envelope, self._fallback)
         self.assertEqual(self.state.toolkit.last_ims_event_data, payload)
-        self.assertEqual(self.state.toolkit.last_event_code, 0x19)
+        self.assertEqual(self.state.toolkit.last_event_code, 0x18)
 
 
 if __name__ == "__main__":

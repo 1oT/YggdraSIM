@@ -24,7 +24,12 @@ required.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 
 # ----------------------------------------------------------------------
@@ -140,43 +145,149 @@ def _read(name: str) -> str:
     return (_STATIC / name).read_text(encoding="utf-8")
 
 
-def test_app_js_has_service_table_detector_and_renderer() -> None:
+def _extract_javascript_function(source: str, name: str) -> str:
+    """Return one function declaration without pinning its argument list."""
+
+    start = source.index(f"function {name}(")
+    brace = source.index("{", start)
+    depth = 0
+    quote = ""
+    escaped = False
+    line_comment = False
+    block_comment = False
+    index = brace
+    while index < len(source):
+        current = source[index]
+        following = source[index + 1] if index + 1 < len(source) else ""
+        if line_comment:
+            if current in "\r\n":
+                line_comment = False
+            index += 1
+            continue
+        if block_comment:
+            if current == "*" and following == "/":
+                block_comment = False
+                index += 2
+                continue
+            index += 1
+            continue
+        if quote:
+            if escaped:
+                escaped = False
+            elif current == "\\":
+                escaped = True
+            elif current == quote:
+                quote = ""
+            index += 1
+            continue
+        if current in ("'", '"', "`"):
+            quote = current
+            index += 1
+            continue
+        if current == "/" and following == "/":
+            line_comment = True
+            index += 2
+            continue
+        if current == "/" and following == "*":
+            block_comment = True
+            index += 2
+            continue
+        if current == "{":
+            depth += 1
+        elif current == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+        index += 1
+    raise AssertionError(f"unterminated JavaScript function: {name}")
+
+
+def test_app_js_renders_service_table_payload_behaviorally() -> None:
     js = _read("app.js")
-    assert "function isServiceTablePayload(value)" in js, \
-        "missing service-table detector"
-    assert "function renderPrettyServiceTable(value)" in js, \
-        "missing service-table renderer"
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the JavaScript renderer contract.")
 
-    # The detector must accept the explicit marker AND the structural
-    # fallback (so a backend that forgets the flag still renders).
-    assert "value.service_table === true" in js
-    assert "Array.isArray(value.active)" in js
-    assert "Array.isArray(value.inactive)" in js
-
-    # ``renderPrettyValue`` must dispatch to the renderer before the
-    # generic array / object branches — otherwise an object with both
-    # ``active`` and ``inactive`` would fall through to the dl walk.
-    render_pretty_pos = js.index("function renderPrettyValue(value, depth, options)")
-    detector_pos = js.index("isServiceTablePayload(value)", render_pretty_pos)
-    array_pos = js.index("if (Array.isArray(value)) {", render_pretty_pos)
-    assert detector_pos < array_pos, \
-        "service-table dispatch must come before the array branch"
-
-    # The two columns are rendered with stable class hooks the CSS
-    # contract pins to — keep them grepable. Class names are built via
-    # string concatenation in the renderer (``"cc-svc-table-row--" +
-    # modifier``), so we anchor on the prefixes plus the modifier
-    # literals that appear in the build helpers.
-    for hook in (
-        "cc-svc-table-row cc-svc-table-row--",
-        "cc-svc-table-col cc-svc-table-col--",
-        "cc-svc-table-summary",
-        "cc-svc-table-mark",
-        "cc-svc-table-name",
-        "\"active\", \"\\u25CF\"",
-        "\"inactive\", \"\\u25CB\"",
-    ):
-        assert hook in js, f"renderer no longer emits class hook: {hook}"
+    functions = "\n".join(
+        _extract_javascript_function(js, name)
+        for name in (
+            "renderPrettyServiceTable",
+            "isServiceTablePayload",
+            "renderPrettyValue",
+        )
+    )
+    harness = f"""
+class TestNode {{
+  constructor(tagName) {{
+    this.tagName = tagName;
+    this.className = "";
+    this.textContent = "";
+    this.children = [];
+    this.classList = {{ add: (...names) => {{
+      this.className = [this.className, ...names].filter(Boolean).join(" ");
+    }} }};
+  }}
+  appendChild(child) {{
+    this.children.push(child);
+    return child;
+  }}
+}}
+globalThis.document = {{
+  createElement: (tagName) => new TestNode(tagName)
+}};
+function renderPrettyPrimitive(value) {{
+  const node = new TestNode("span");
+  node.textContent = String(value);
+  return node;
+}}
+{functions}
+function flatten(node, rows) {{
+  rows.push({{
+    tagName: node.tagName,
+    className: node.className,
+    textContent: node.textContent
+  }});
+  node.children.forEach((child) => flatten(child, rows));
+}}
+const payload = {{
+  service_table: true,
+  table: "UST",
+  full_name: "USIM Service Table",
+  summary: "1 of 2 active",
+  active: ["1: Local Phone Book"],
+  inactive: ["2: FDN"]
+}};
+const rendered = renderPrettyValue(payload, 0, {{ legacyOption: true }});
+const rows = [];
+flatten(rendered, rows);
+process.stdout.write(JSON.stringify(rows));
+"""
+    completed = subprocess.run(
+        [node, "-e", harness],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+    rows = json.loads(completed.stdout)
+    by_class = {row["className"]: row["textContent"] for row in rows}
+    assert rows[0]["className"] == "cc-svc-table"
+    assert by_class["cc-svc-table-summary"] == "1 of 2 active"
+    assert by_class["cc-svc-table-name"] in {
+        "1: Local Phone Book",
+        "2: FDN",
+    }
+    assert {
+        row["textContent"]
+        for row in rows
+        if row["className"] == "cc-svc-table-name"
+    } == {"1: Local Phone Book", "2: FDN"}
+    assert {
+        row["textContent"]
+        for row in rows
+        if row["className"] == "cc-svc-table-mark"
+    } == {"\u25cf", "\u25cb"}
 
 
 def test_app_css_styles_service_table() -> None:

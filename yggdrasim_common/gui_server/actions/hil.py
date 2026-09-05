@@ -47,6 +47,8 @@ import sys
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from yggdrasim_common.frozen_dispatch import build_module_command
+
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
 
 
@@ -133,6 +135,13 @@ def _summary_lines_from_state(state: dict[str, Any]) -> list[dict[str, str]]:
         remsim_pid = int(state.get("remsimClientPid", 0) or 0)
         if remsim_pid > 0:
             lines.append({"key": "REMSIM pid", "value": str(remsim_pid)})
+    reset_state = state.get("simtraceReset")
+    if isinstance(reset_state, dict) and bool(reset_state.get("enabled", False)):
+        reset_value = f"{str(reset_state.get('mode') or 'usb-reset')} ({int(reset_state.get('count', 0) or 0)}x)"
+        last_reset = reset_state.get("last")
+        if isinstance(last_reset, dict) and len(str(last_reset.get("error") or "").strip()) > 0:
+            reset_value += f" — last failed: {str(last_reset.get('error'))}"
+        lines.append({"key": "SIMtrace2 pre-session reset", "value": reset_value})
     reader_index = int(state.get("readerIndex", -1) or -1)
     if reader_index >= 0:
         reader_label = str(state.get("readerName") or "").strip()
@@ -576,6 +585,7 @@ def _build_hil_bridge_service_options(
         guess_bridge_python_executable,
         read_supervisor_state,
         resolve_card_trace_enabled,
+        resolve_simtrace_reset_service_settings,
         split_shell_like_arguments,
     )
     from yggdrasim_common.runtime_paths import bundle_path
@@ -623,6 +633,12 @@ def _build_hil_bridge_service_options(
     remote_card_url, remote_card_token_file = _resolve_hil_remote_card_service_settings(
         supervisor_state
     )
+    (
+        simtrace_reset_mode,
+        uhubctl_binary,
+        uhubctl_location,
+        uhubctl_port,
+    ) = resolve_simtrace_reset_service_settings()
 
     return HilBridgeUserServiceOptions(
         python_executable=python_executable,
@@ -640,6 +656,10 @@ def _build_hil_bridge_service_options(
         remote_card_token_file=remote_card_token_file,
         remsim_binary=str(os.environ.get(REMSIM_BINARY_ENV, "") or "").strip(),
         remsim_args=remsim_args,
+        simtrace_reset_mode=simtrace_reset_mode,
+        uhubctl_binary=uhubctl_binary,
+        uhubctl_location=uhubctl_location,
+        uhubctl_port=uhubctl_port,
         documentation_path=bundle_path("guides", "HIL_BRIDGE_GUIDE.md"),
         environment_overrides=tuple(environment_overrides),
     )
@@ -2354,10 +2374,9 @@ def _dispatch_bridge_launch(
         raise ValueError("confirm must be true — launching the bridge starts a long-running subprocess.")
 
     import subprocess
-    import sys
     import shlex
 
-    cmd = [sys.executable, "-m", "Tools.HilBridge.main"]
+    cmd = build_module_command("Tools.HilBridge.main")
     try:
         proc = subprocess.Popen(
             cmd,
@@ -2420,13 +2439,12 @@ def _dispatch_supervisor_launch(
     confirm: Any = None,
 ) -> dict[str, Any]:
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — launching the supervisor starts a long-running subprocess.")
+        raise ValueError("confirm must be true -- launching the supervisor starts a long-running subprocess.")
 
     import subprocess
-    import sys
     import shlex
 
-    cmd = [sys.executable, "-m", "Tools.HilBridge.supervisor"]
+    cmd = build_module_command("Tools.HilBridge.supervisor")
     try:
         proc = subprocess.Popen(
             cmd,

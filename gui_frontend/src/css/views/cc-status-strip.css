@@ -3,8 +3,9 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* =====================================================================
-   SCP03 Workbench v2 — full-height session tabs + reader sidebar.
+   SCP03 Workbench v2 — internal session tabs + hidden legacy sidebar.
    Overrides the older inline "ribbon + card" layout defined earlier.
    ===================================================================== */
 
@@ -189,8 +190,8 @@
 }
 
 .scp03-reader-item.is-pending {
-  border-color: color-mix(in oklab, var(--accent-warning, #f0c674) 45%, transparent);
-  background: color-mix(in oklab, var(--accent-warning, #f0c674) 8%, transparent);
+  border-color: color-mix(in oklab, var(--accent-warning) 45%, transparent);
+  background: color-mix(in oklab, var(--accent-warning) 8%, transparent);
 }
 
 .scp03-reader-dot {
@@ -208,7 +209,7 @@
 }
 
 .scp03-reader-item.is-pending .scp03-reader-dot {
-  background: var(--accent-warning, #f0c674);
+  background: var(--accent-warning);
 }
 
 .scp03-reader-body {
@@ -244,7 +245,7 @@
 }
 
 .scp03-reader-state--open {
-  color: var(--ok, #8bd17c);
+  color: var(--ok);
 }
 
 .scp03-reader-state--idle {
@@ -252,7 +253,7 @@
 }
 
 .scp03-reader-state--error {
-  color: var(--fail, #ff8a95);
+  color: var(--fail);
 }
 
 .scp03-reader-empty {
@@ -314,7 +315,7 @@
   flex-wrap: wrap;
   gap: 2px;
   padding: 4px 6px 0;
-  background: color-mix(in oklab, var(--bg-elev-2, var(--bg-elev)), transparent 10%);
+  background: color-mix(in oklab, var(--bg-elev-2), transparent 10%);
   border-bottom: 1px solid var(--border);
 }
 
@@ -323,7 +324,8 @@
   border: 1px solid transparent;
   border-bottom: none;
   color: var(--fg-muted);
-  padding: 6px 14px 7px;
+  padding: 8px 14px;
+  min-height: 36px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -346,6 +348,11 @@
   border-bottom-color: var(--bg-elev);
 }
 
+.scp03-ribbon-tabbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .scp03-ribbon-section {
   display: flex;
   flex-wrap: wrap;
@@ -353,6 +360,17 @@
   padding: 10px 12px;
   align-items: stretch;
   min-height: 74px;
+}
+
+.scp03-ribbon-section:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scp03-ribbon-tabbtn {
+    transition: none;
+  }
 }
 
 .scp03-ribbon-section .ribbon-group {
@@ -420,6 +438,5 @@
   border: none;
   border-radius: 0;
   box-shadow: none;
-  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  background: var(--code-bg);
 }
-

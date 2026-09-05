@@ -114,8 +114,8 @@ $Arch = switch ($env:PROCESSOR_ARCHITECTURE) {
 if ($Arch -eq 'unknown') {
     Stop-YgError "unsupported CPU architecture: $env:PROCESSOR_ARCHITECTURE"
 }
-if ($Arch -ne 'x86_64') {
-    Write-YgWarn "no pre-built Windows release asset exists for '$Arch'; prefer -Mode source"
+if ($Mode -eq 'release' -and $Arch -ne 'x86_64') {
+    Stop-YgError "no pre-built Windows release is published for '$Arch'; use -Mode source on a supported Python host"
 }
 
 function Install-YgWindowsPrereqs {
@@ -152,14 +152,58 @@ function Resolve-YgReleaseUrl {
     return "$ReleaseBase/download/$VersionTag/$AssetName"
 }
 
+function Save-YgVerifiedReleaseAsset {
+    param(
+        [string] $VersionTag,
+        [string] $AssetName,
+        [string] $Destination
+    )
+    $manifestTemp = New-TemporaryFile
+    try {
+        $manifestUrl = Resolve-YgReleaseUrl -VersionTag $VersionTag -AssetName 'SHA256SUMS'
+        Write-YgInfo "downloading $manifestUrl"
+        Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestTemp -UseBasicParsing -MaximumRedirection 5
+
+        $assetUrl = Resolve-YgReleaseUrl -VersionTag $VersionTag -AssetName $AssetName
+        Write-YgInfo "downloading $assetUrl"
+        Invoke-WebRequest -Uri $assetUrl -OutFile $Destination -UseBasicParsing -MaximumRedirection 5
+
+        $expected = $null
+        foreach ($line in Get-Content -LiteralPath $manifestTemp) {
+            $match = [regex]::Match($line, '^(?<hash>[0-9A-Fa-f]{64})\s+\*?(?<name>.+)$')
+            if ($match.Success -and $match.Groups['name'].Value -ceq $AssetName) {
+                $expected = $match.Groups['hash'].Value.ToLowerInvariant()
+                break
+            }
+        }
+        if (-not $expected) {
+            Stop-YgError "SHA256SUMS has no valid entry for $AssetName"
+        }
+        $actual = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -cne $expected) {
+            Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+            Stop-YgError "checksum mismatch for $AssetName"
+        }
+        Write-YgInfo "verified SHA-256 for $AssetName"
+
+        $signature = Get-AuthenticodeSignature -LiteralPath $Destination
+        if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+            Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+            Stop-YgError "Authenticode verification failed for $AssetName ($($signature.Status))"
+        }
+        Write-YgInfo "verified Authenticode signature for $AssetName"
+    }
+    finally {
+        Remove-Item -LiteralPath $manifestTemp -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Install-YgFromRelease {
     $assetBase = "yggdrasim-windows-$Arch-$Flavor"
     $assetName = "$assetBase.exe"
-    $url = Resolve-YgReleaseUrl -VersionTag $Version -AssetName $assetName
     $tempFile = New-TemporaryFile
     try {
-        Write-YgInfo "downloading $url"
-        Invoke-WebRequest -Uri $url -OutFile $tempFile -UseBasicParsing -MaximumRedirection 5
+        Save-YgVerifiedReleaseAsset -VersionTag $Version -AssetName $assetName -Destination $tempFile
 
         if (-not (Test-Path -LiteralPath $InstallDir)) {
             New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -172,11 +216,9 @@ function Install-YgFromRelease {
         if ($WithGui.IsPresent) {
             $guiAssetBase = "yggdrasim-gui-windows-$Arch-$Flavor"
             $guiAssetName = "$guiAssetBase.exe"
-            $guiUrl = Resolve-YgReleaseUrl -VersionTag $Version -AssetName $guiAssetName
             $guiTempFile = New-TemporaryFile
             try {
-                Write-YgInfo "downloading $guiUrl"
-                Invoke-WebRequest -Uri $guiUrl -OutFile $guiTempFile -UseBasicParsing -MaximumRedirection 5
+                Save-YgVerifiedReleaseAsset -VersionTag $Version -AssetName $guiAssetName -Destination $guiTempFile
                 $guiTargetPath = Join-Path $InstallDir 'yggdrasim-gui.exe'
                 Copy-Item -LiteralPath $guiTempFile -Destination $guiTargetPath -Force
                 Write-YgInfo "installed $guiTargetPath"

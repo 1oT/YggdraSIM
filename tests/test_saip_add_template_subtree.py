@@ -213,7 +213,6 @@ class AddTemplateSubtreeEndToEndTests(unittest.TestCase):
         first_pe_name = addable_efs[0]["pe_name"]
 
         # Snapshot the PE state BEFORE the call so we can compare after.
-        from copy import deepcopy
 
         pes = self.handle["pes"]
         sections = list(self.handle["decoded_document"].get("sections") or {})

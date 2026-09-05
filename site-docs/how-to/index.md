@@ -66,6 +66,15 @@ subsystem page that contains the full surface.
 
     [Open guide](../subsystems/gui-command-center.md)
 
+-   :material-clipboard-check-outline: __Write a Profile Policy Pack__
+
+    ---
+
+    Make VALIDATE enforce operator house rules as data, instead of
+    patching the validator.
+
+    [Open recipe](write-a-profile-policy-pack.md)
+
 -   :material-access-point-network: __Remote APDU Streaming__
 
     ---
@@ -74,6 +83,33 @@ subsystem page that contains the full surface.
     remote-card mode.
 
     [Open recipe](remote-apdu-streaming.md)
+
+-   :material-server-network: __Run a Remote Lab Agent__
+
+    ---
+
+    Publish rigs to a team with per-person tokens and exclusive session
+    locking in front of Card Bridge.
+
+    [Open recipe](run-a-remote-lab-agent.md)
+
+-   :material-compare-horizontal: __Diff Two Session Recordings__
+
+    ---
+
+    Find where two cards, or one card before and after a change, stopped
+    agreeing.
+
+    [Open recipe](diff-two-session-recordings.md)
+
+-   :material-robot-outline: __Run the MCP Server__
+
+    ---
+
+    Expose the decode and lint tools to an AI assistant, with card access
+    off by default.
+
+    [Open recipe](run-the-mcp-server.md)
 
 -   :material-lan: __Install RemSIM / APDU Streaming__
 

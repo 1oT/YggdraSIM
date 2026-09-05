@@ -175,8 +175,12 @@ def _encode_ef_psloci(plmn_bytes: bytes) -> bytes:
 
 
 def _encode_ef_epsloci(plmn_bytes: bytes) -> bytes:
-    guti = bytes(plmn_bytes) + b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF"
-    tai = bytes(plmn_bytes) + b"\xFF\xFE"
+    # TS 31.102 §4.2.91 stores the TS 24.301 mobile-identity IE from
+    # octet 2 onwards.  An assigned GUTI would therefore start ``0B F6``;
+    # the standards-compliant default is the all-FF unassigned 12-byte
+    # form.  The last visited TAI is a separate field at bytes 13..17.
+    guti = b"\xFF" * 12
+    tai = bytes(plmn_bytes) + b"\x00\x00"
     status = b"\x01"
     return guti + tai + status
 
@@ -1116,7 +1120,16 @@ def _default_df_5gs_nodes(*, plmn_bytes: bytes) -> list[SimProfileFsNode]:
     # something deterministic instead of 6A82.
     suci_calc_info = bytes()  # populated when an SM-DP+ profile lands.
     routing_indicator = bytes.fromhex("00FF")  # default RI=0 + 0xFF padding
-    five_g_loci = bytes(plmn_bytes) + b"\xFF" * 13  # GUAMI placeholder + status
+    # TS 31.102 §4.4.11.2/.3: 5G-GUTI[13] || TAI[6] || status[1].
+    # An assigned 5G-GUTI begins with the TS 24.501 mobile-identity prefix
+    # ``00 0B F2``.  Defaults use the permitted all-FF unassigned GUTI,
+    # followed by the configured PLMN and an unknown TAC.
+    five_g_loci = (
+        (b"\xFF" * 13)
+        + bytes(plmn_bytes)
+        + b"\x00\x00\x00"
+        + b"\x01"
+    )
     five_g_nsc = b"\xFF" * 60
     return [
         SimProfileFsNode(
@@ -2581,18 +2594,18 @@ def _apply_security_domains_from_profile(
 def _hydrate_mno_scp03_keys(state: SimCardState, domain: SimProfileSecurityDomain) -> None:
     """Promote a SAIP SD's baseline keyset into ``state.scp03_keys``.
 
-    GP Card Spec v2.3.1 Amendment D §7.1.2 fixes the SCP03 baseline
-    keyset to KeyIdentifier 0x01 = ENC, 0x02 = MAC, 0x03 = DEK. The
-    KeyVersionNumber selects which baseline applies; SAIP profiles
-    typically place the live triplet at KVN 0x01 ("default keyset")
-    and any OTA / replacement keysets at KVN 0x40+ (e.g. SCP80 KICs
-    and KIDs). We promote the lowest-KVN triplet that supplies all
-    three keys so a profile that ships only SCP80 / SCP81 keys does
-    not silently zero the SCP03 keyset.
+    UICC Configuration v1.0.1 §4.3.2 reserves KVN ``0x30..0x3F``
+    for SCP03, with KeyIdentifier 0x01 = ENC, 0x02 = MAC and 0x03 =
+    DEK. Restricting candidates to that range prevents a complete
+    SCP80 triplet at KVN ``0x01..0x0F`` from being mistaken for the
+    card-administration keyset. Within the SCP03 range, promote the
+    lowest complete triplet.
     """
     candidates: dict[int, dict[int, bytes]] = {}
     for key_entry in domain.keys:
         key_version = int(key_entry.key_version) & 0xFF
+        if key_version < 0x30 or key_version > 0x3F:
+            continue
         key_id = int(key_entry.key_identifier) & 0xFF
         if key_id not in (0x01, 0x02, 0x03):
             continue
@@ -2612,15 +2625,16 @@ def _hydrate_mno_scp03_keys(state: SimCardState, domain: SimProfileSecurityDomai
         state.scp03_keys.kenc = selected_keys[0x01]
         state.scp03_keys.kmac = selected_keys[0x02]
         state.scp03_keys.dek = selected_keys[0x03]
-        state.scp03_keys.kvn = selected_kvn if selected_kvn != 0 else state.scp03_keys.kvn
+        state.scp03_keys.kvn = selected_kvn
 
 
 def _hydrate_mno_scp80_keys(state: SimCardState, domain: SimProfileSecurityDomain) -> None:
     """Promote a SAIP SD's SCP80 OTA keyset into ``state.scp80_security``.
 
-    GP Card Spec v2.3.1 Amendment B §B.4 reserves KeyVersionNumber
-    range ``0x40..0x4F`` for SCP80 ("OTA Master") keysets, and TS 102
-    225 §5.1 fixes the role of each key identifier inside the keyset:
+    UICC Configuration v1.0.1 §4.3.2 reserves KeyVersionNumber
+    range ``0x01..0x0F`` for SCP80. KVN ``0x40..0x4F`` belongs to
+    SCP81 and must not hydrate the SMS-PP OTA state. TS 102 225 §5.1
+    fixes the role of each key identifier inside an SCP80 keyset:
 
     - KeyIdentifier ``0x01`` → KIc (cipher / encryption key).
     - KeyIdentifier ``0x02`` → KID (signature / integrity key).
@@ -2637,7 +2651,7 @@ def _hydrate_mno_scp80_keys(state: SimCardState, domain: SimProfileSecurityDomai
     candidates: dict[int, dict[int, bytes]] = {}
     for key_entry in domain.keys:
         key_version = int(key_entry.key_version) & 0xFF
-        if key_version < 0x40 or key_version > 0x4F:
+        if key_version < 0x01 or key_version > 0x0F:
             continue
         key_id = int(key_entry.key_identifier) & 0xFF
         if key_id not in (0x01, 0x02):
@@ -2670,7 +2684,7 @@ def build_default_state() -> SimCardState:
     Creates the base ETSI file system tree, personalises it with synthetic test
     identifiers, and returns the singleton-ready state object.
     """
-    iccid = "89461111111111111112"
+    iccid = "89881111111111111112"
     # MCC/MNC 001/01 - 3GPP test PLMN. Keeps the default profile identity
     # compatible with osmo-hlr / open5gs / free5gc lab HSS configurations.
     imsi = "001010000000001"
@@ -2739,7 +2753,7 @@ def build_default_state() -> SimCardState:
     ]
     state = SimCardState(
         atr=DEFAULT_SIM_ATR,
-        eid="89049032123451234512345678901234",
+        eid="89049032123451234512345678901235",
         iccid=iccid,
         imsi=imsi,
         default_dp_address="rsp.example.com",
@@ -3392,16 +3406,17 @@ class EtsiFileSystem:
         Parses an FCP TLV (root tag ``62``) carried in the C-APDU
         body and creates a new EF as a child of the currently
         selected DF. The simulator implements the spec's most
-        common subset: transparent EFs (file descriptor byte
-        ``0x01``) and linear-fixed EFs (``0x02``); cyclic EFs are
-        also accepted (``0x06``). Recognised FCP children:
+        common subset: working and internal EFs whose structure bits
+        select transparent, linear fixed or cyclic. The shareable flag
+        and the file type bits are honoured, so both ``01`` and ``41``
+        describe a transparent EF. Recognised FCP children:
 
         - ``80`` File Size (transparent EF) or record length helper.
         - ``81`` Total File Size (optional).
-        - ``82`` File Descriptor: byte 0 is the file type / structure,
-          byte 1 + 2 are 0x21 (UICC), bytes 3..4 (record EFs only)
-          are the record length, byte 5 (record EFs only) is the
-          number of records.
+        - ``82`` File Descriptor: byte 0 is the file descriptor byte
+          (shareable flag, file type, EF structure), byte 1 is the data
+          coding byte, bytes 2..3 (record EFs only) are the record
+          length and byte 4 (record EFs only) the number of records.
         - ``83`` File ID (2 bytes, big-endian).
         - ``8A`` Lifecycle State (defaults to ``0x05`` operational).
 
@@ -3434,17 +3449,25 @@ class EtsiFileSystem:
         if len(descriptor) < 1:
             return b"", 0x6A, 0x80
         descriptor_byte = descriptor[0] & 0xFF
-        # TS 102 221 §11.1.1.4.3 Table 11.5 file-descriptor bytes:
-        # 0x01 working EF transparent, 0x02 working EF linear-fixed,
-        # 0x06 working EF cyclic.
-        structure = ""
-        if descriptor_byte == 0x01:
-            structure = "transparent"
-        elif descriptor_byte == 0x02:
-            structure = "linear-fixed"
-        elif descriptor_byte == 0x06:
-            structure = "cyclic"
-        else:
+        # TS 102 221 §11.1.1.4.3 table 11.5 packs three fields into the
+        # file descriptor byte: b7 shareable, b6 to b4 file type, b3 to b1
+        # EF structure. Only the structure bits pick the file layout, so a
+        # shareable transparent EF is '41' and a non-shareable one '01' --
+        # both describe the same structure, and build_fcp emits the
+        # shareable form.
+        if descriptor_byte & 0x80:
+            return b"", 0x6A, 0x80
+        file_type = (descriptor_byte >> 3) & 0x07
+        # 000 working EF, 001 internal EF. 111 is a DF, an ADF or a
+        # BER-TLV EF, none of which this creates.
+        if file_type not in (0b000, 0b001):
+            return b"", 0x6A, 0x80
+        structure = {
+            0b001: "transparent",
+            0b010: "linear-fixed",
+            0b110: "cyclic",
+        }.get(descriptor_byte & 0x07, "")
+        if structure == "":
             return b"", 0x6A, 0x80
         parent = self.current_node()
         if parent.kind not in ("df", "adf", "mf"):
@@ -3458,10 +3481,12 @@ class EtsiFileSystem:
         record_length = 0
         record_count = 0
         if structure in ("linear-fixed", "cyclic"):
-            if len(descriptor) < 5:
+            # Within the tag '82' value: [0] file descriptor byte, [1] data
+            # coding byte, [2:4] record length, [4] number of records.
+            if len(descriptor) < 4:
                 return b"", 0x6A, 0x80
-            record_length = int.from_bytes(descriptor[3:5], "big")
-            record_count = int(descriptor[5]) if len(descriptor) >= 6 else 0
+            record_length = int.from_bytes(descriptor[2:4], "big")
+            record_count = int(descriptor[4]) if len(descriptor) >= 5 else 0
             if record_count == 0 and size_bytes is not None and record_length > 0:
                 record_count = int.from_bytes(size_bytes, "big") // record_length
             if record_length == 0 or record_count == 0:

@@ -184,6 +184,7 @@ operator-relevant fields are:
 - `EIM_BASE_URL`
 - `EIM_TRANSPORT_MODE`
 - `EIM_TIMEOUT_SECONDS`
+- `BPP_INSTALL_USE_SECTION_FRAMING`
 
 Practical rule:
 
@@ -192,6 +193,24 @@ Practical rule:
 - `ES9_CA_BUNDLE_PATH` is empty by default, which means platform TLS trust;
   set it only when the target requires an explicit CA bundle
 - if the task is a lab replay, keep `TRANSPORT_MODE` set to `pcsc`
+
+### BPP install framing
+
+`BPP_INSTALL_USE_SECTION_FRAMING` defaults to `True` and should stay there.
+It makes ES10b install emit the A1/A2/A3 container headers as their own
+StoreData chains ahead of their 86/88 members, per SGP.22 Annex M. Setting
+it `False` selects the legacy flattened member-only mode, which sends the
+first bare `86` with no owning container. eUICCs have been observed to read
+that as a terminal `loadProfileElements` result and reply with a premature
+ProfileInstallationResult, leaving the remaining protected segments unsent
+and the SM-DP+ session pending.
+
+Only set it `False` for a physical card that is known to reject
+section-framed payloads, and confirm the install actually completed rather
+than trusting the first success-looking result. The install banner prints
+which mode is active. The flag is read only by `SCP11/live`; the segmenters
+in `SCP11/orchestrator.py` and `SCP11/local_access/session.py` are always
+section-framed.
 
 ## Related guides
 

@@ -11,7 +11,6 @@ import sys
 import json
 import datetime
 import tempfile
-import ssl
 import urllib.error
 import urllib.request
 from pathlib import Path

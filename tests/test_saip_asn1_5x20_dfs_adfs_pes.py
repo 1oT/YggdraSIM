@@ -41,6 +41,7 @@ from Tools.ProfilePackage.saip_asn1_decode import (
 from Tools.ProfilePackage.saip_asn1_encode import (
     RoundtripEncoderError,
     _BYTES_DISPATCHER,
+    _OID_DISPATCHER,
     _SCALAR_DISPATCHER,
     encode_decoded_roundtrip_bytes,
 )
@@ -381,21 +382,24 @@ class IdentificationFieldTests(unittest.TestCase):
 
 
 class ShortEfidFieldTests(unittest.TestCase):
-    def test_accepts_five_bit_range(self) -> None:
-        self.assertEqual(_SCALAR_DISPATCHER["shortEFID"]({"decimal": 0x1F}), 0x1F)
+    def test_accepts_one_octet(self) -> None:
+        self.assertEqual(_BYTES_DISPATCHER["shortEFID"]({"hex": "F8"}), b"\xF8")
 
-    def test_rejects_overflow(self) -> None:
+    def test_rejects_more_than_one_octet(self) -> None:
         with self.assertRaises(RoundtripEncoderError):
-            _SCALAR_DISPATCHER["shortEFID"]({"decimal": 0x20})
+            _BYTES_DISPATCHER["shortEFID"]({"hex": "0102"})
 
 
 class TemplateIdFieldTests(unittest.TestCase):
-    def test_accepts_zero(self) -> None:
-        self.assertEqual(_SCALAR_DISPATCHER["templateID"]({"decimal": 0}), 0)
+    def test_accepts_dotted_oid(self) -> None:
+        self.assertEqual(
+            _OID_DISPATCHER["templateID"]({"oid": "2.23.143.1.2.4"}),
+            "2.23.143.1.2.4",
+        )
 
-    def test_rejects_negative(self) -> None:
+    def test_rejects_invalid_oid(self) -> None:
         with self.assertRaises(RoundtripEncoderError):
-            _SCALAR_DISPATCHER["templateID"]({"decimal": -1})
+            _OID_DISPATCHER["templateID"]({"oid": "3.1"})
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +426,7 @@ class DispatcherAuditTests(unittest.TestCase):
             "customFieldOctets",
             "serialNumber",
             "notificationAddress",
+            "shortEFID",
         }
         missing = expected - set(_BYTES_DISPATCHER)
         self.assertEqual(missing, set(), f"missing bytes dispatchers: {missing}")
@@ -431,8 +436,6 @@ class DispatcherAuditTests(unittest.TestCase):
             "major-version",
             "minor-version",
             "identification",
-            "shortEFID",
-            "templateID",
         }
         missing = expected - set(_SCALAR_DISPATCHER)
         self.assertEqual(

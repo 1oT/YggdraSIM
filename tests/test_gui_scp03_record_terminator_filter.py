@@ -12,11 +12,10 @@ CLI / JSON consumers can audit *why* the walker stopped. The
 ``stop_reason`` field ("record_not_found" / "sw_6A86" / …) surfaces
 the same information at the header level.
 
-Operator feedback: "I also see that the 'end record scan' is
-presented, let's not present these for the file system." — the
-terminator sentinel appeared as an extra record row (``#2 · SW 6A83
-· 0 B · EMPTY``) after the last real record, which read as noise
-next to the genuine file content.
+Operator report: the end-of-record-scan row should not be presented
+in the file-system view. The terminator sentinel appeared there as an
+extra record row (``#2 · SW 6A83 · 0 B · EMPTY``) after the last real
+record, which read as noise next to the genuine file content.
 
 Fix: the file-system view filters terminator sentinels out before
 rendering, while the action JSON still returns the full list

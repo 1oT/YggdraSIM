@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ============================================================
  * Contextual FS-Admin action bar
  *
@@ -73,14 +74,14 @@
   align-items: center;
   gap: 4px;
   padding: 3px 6px;
-  background: var(--bg-elev, rgba(255, 255, 255, 0.03));
+  background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill, 999px);
+  border-radius: var(--radius-pill);
 }
 
 .cc-fs-actions-group--card {
-  background: var(--bg-danger-soft, rgba(217, 83, 79, 0.08));
-  border-color: var(--err-soft, rgba(217, 83, 79, 0.25));
+  background: var(--bg-danger-soft);
+  border-color: var(--err-soft);
 }
 
 .cc-fs-actions-hint {
@@ -101,37 +102,37 @@
   padding: 4px 12px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill, 999px);
+  border-radius: var(--radius-pill);
   color: var(--fg);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.25;
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--transition-fast, 120ms),
-              border-color var(--transition-fast, 120ms),
-              color var(--transition-fast, 120ms);
+  transition: background var(--transition-fast),
+              border-color var(--transition-fast),
+              color var(--transition-fast);
 }
 
 .cc-fs-action-btn:hover:not(.is-disabled) {
-  background: var(--bg-hover, var(--bg-elev));
-  border-color: var(--accent-soft, var(--border));
+  background: var(--bg-hover);
+  border-color: var(--accent-soft);
 }
 
 .cc-fs-action-btn:focus-visible {
-  outline: 2px solid var(--accent, #4a90e2);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .cc-fs-action-btn.is-danger {
-  color: var(--err, #d9534f);
-  border-color: rgba(217, 83, 79, 0.35);
+  color: var(--err);
+  border-color: color-mix(in oklab, var(--fail) 35%, transparent);
 }
 
 .cc-fs-action-btn.is-danger:hover:not(.is-disabled) {
-  background: rgba(217, 83, 79, 0.12);
-  border-color: var(--err, #d9534f);
-  color: var(--err, #d9534f);
+  background: var(--fail-soft);
+  border-color: var(--err);
+  color: var(--err);
 }
 
 /* Disabled state — greyed out but still visible. Keeping the
@@ -155,4 +156,3 @@
   color: var(--fg-muted);
   border-color: var(--border);
 }
-

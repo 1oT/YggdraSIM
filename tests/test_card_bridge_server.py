@@ -32,6 +32,8 @@ from unittest.mock import patch
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+import pytest
+
 from Tools.CardBridge.server import (
     CardBridgeConfig,
     CardBridgeError,
@@ -160,6 +162,7 @@ class ConfigBuildingTests(unittest.TestCase):
         self.assertEqual(exclusive_config.pcsc_share_mode, "exclusive")
 
 
+@pytest.mark.usefixtures("require_loopback_socket")
 class RunCardBridgeTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tempdir = TemporaryDirectory()
@@ -269,6 +272,7 @@ class RunCardBridgeTests(unittest.TestCase):
         self.assertIn("error", payload)
 
 
+@pytest.mark.usefixtures("require_loopback_socket")
 class StartupBannerTests(unittest.TestCase):
     def test_banner_emits_token_fingerprint_not_token(self) -> None:
         config, _ = RunCardBridgeTests._make_config(self, auth_token="confidential-token-value")

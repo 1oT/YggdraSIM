@@ -9,7 +9,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
+  min-height: 34px;
+  padding: 2px 8px 2px 10px;
   border-radius: var(--radius-pill);
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
@@ -22,6 +23,11 @@
   border-color: var(--accent);
 }
 
+.theme-picker:focus-within {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--focus-ring-soft);
+}
+
 .theme-picker label {
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -30,19 +36,19 @@
 }
 
 .theme-picker select {
-  background: transparent;
+  min-height: 28px;
+  background-color: transparent;
   color: var(--fg);
   border: 0;
-  padding: 2px 22px 2px 4px;
+  padding: 3px 24px 3px 4px;
   font-size: 11px;
   cursor: pointer;
   font-weight: 500;
 }
 
-.theme-picker select:focus {
-  outline: 2px solid var(--accent-soft);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
+.theme-picker select:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Match the popup to the page theme — the old rule hard-coded a light
@@ -53,4 +59,3 @@
   background-color: var(--bg-elev);
   color: var(--fg);
 }
-

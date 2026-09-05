@@ -15,15 +15,9 @@ GPC v2.3 Amendment D specifies SCP03 down to the byte. This suite uses
 * GPC §6.2.5 — C-MAC trailer for an SM-wrapped command on logical
   channel 0.
 
-Two known divergences from pySIM are intentional and asserted here so
-they cannot regress silently:
-
-1. **CLA byte on lchan>0**. Our wrap preserves the lchan bits in the
-   low nibble (``cla | 0x04``); pySIM zeroes them (``(cla & 0xF0) | 0x04``).
-   We need lchan-preservation for SGP.22 retry-ladder commands sent on
-   logical channel 1.
-2. (pySIM does not affect §5.1 SCP80 layout — see the SCP80 parity
-   suite for that.)
+The implementation additionally binds a Secure Channel Session to the
+logical channel on which it was authenticated. Cross-channel command
+wrapping is rejected rather than silently reusing session state.
 """
 
 from __future__ import annotations
@@ -74,7 +68,7 @@ def _synthetic_init_update_resp() -> bytes:
     c.update(crypt_in)
     card_cryptogram = c.finalize()[:8]
     # 10B div + KVN + scp_id 03 + i_param + 8B card_chal + 8B card_crypto
-    return b"\x00" * 10 + bytes([KVN, 0x03, 0x70]) + CARD_CHAL + card_cryptogram
+    return b"\x00" * 10 + bytes([KVN, 0x03, 0x60]) + CARD_CHAL + card_cryptogram
 
 
 @unittest.skipUnless(PYSIM_AVAILABLE, "pySim not installed (saip extra)")
@@ -184,53 +178,16 @@ class Scp03WrappedApduParityTests(unittest.TestCase):
         # Strip C-MAC (last 8 bytes); compare ciphertext + header.
         self.assertEqual(ours_w[:-8], pysim_w[:-8])
 
-    def test_lchan1_cla_diverges_intentionally(self) -> None:
-        """Pinned divergence: lchan>0 CLA preservation.
-
-        TS 102 221 §10.1.1 encodes the logical channel number in CLA bits
-        b1..b2. Our wrap preserves them (``cla | 0x04``); pySIM zeroes them
-        (``(cla & 0xF0) | 0x04``). We rely on preservation for the SGP.22
-        retry-ladder commands that target the eUICC on logical channel 1.
-        Should pySIM ever close this gap, this test flips and the
-        alignment can be reconsidered.
-
-        The C-DEC ciphertext bytes still match because both sides have
-        an aligned counter (1) at this point in the session (right after
-        EXT AUTH); only the CLA byte and the resulting C-MAC differ.
-        """
+    def test_lchan1_rejected_when_session_was_authenticated_on_lchan0(self) -> None:
+        """A Secure Channel Session cannot be reused on another channel."""
         apdu = bytes.fromhex("81E2910003BF2D00")  # SGP.22 STORE DATA on lchan 1
-        ours_w = bytes(self.ours.wrap_apdu(list(apdu)))
-        pysim_w = self.pysim.wrap_cmd_apdu(apdu)
-
-        self.assertEqual(ours_w[0], 0x85, "ours: CLA must keep lchan bits + SM bit")
-        self.assertEqual(pysim_w[0], 0x84, "pySIM: CLA drops lchan bits")
-        self.assertNotEqual(ours_w, pysim_w, "wrapped bytes must diverge for lchan>0")
-        # Encrypted payload (between header and C-MAC) matches because
-        # the C-DEC ICV is computed from the encryption counter, which
-        # is aligned across both impls after EXT AUTH (ours.ssc=1 with
-        # iv_ssc=0... wait — see Scp03ColdStartCounterSpecTests below).
-        # Body offset = 5 (header) .. -8 (MAC trailer).
-        self.assertEqual(ours_w[5:-8], pysim_w[5:-8])
+        with self.assertRaisesRegex(RuntimeError, "bound to logical channel 0"):
+            self.ours.wrap_apdu(list(apdu))
 
 
 @unittest.skipUnless(PYSIM_AVAILABLE, "pySim not installed (saip extra)")
-class Scp03ColdStartCounterDivergenceTests(unittest.TestCase):
-    """Pin the second known divergence — cold-start C-DEC counter.
-
-    GPC v2.3 Amd D §6.2.6 specifies the encryption counter SHALL start
-    at 1 for the first command APDU. pySIM follows that letter-for-letter
-    (``block_nr`` increments to 1 before the first ICV computation).
-    Our ``Scp03Session.wrap_apdu`` increments ``ssc`` once per call and
-    derives ``iv_ssc = (ssc - 1).to_bytes(16, 'big')`` — so on a cold
-    start the first encryption uses counter=0, off-by-one.
-
-    In production this is invisible because EXT AUTH is always wrapped
-    first (it bumps ``ssc`` to 1 without using it for C-DEC, courtesy of
-    the ``is_ext_auth`` bypass), so the first user command lands on
-    counter=1 in both impls. This test pins both behaviours so any
-    future refactor that touches counter accounting is forced to
-    consider the EXT-AUTH-as-counter-primer invariant.
-    """
+class Scp03ColdStartCounterSpecTests(unittest.TestCase):
+    """GPC §6.2.6 requires counter 1 for the first protected command."""
 
     def setUp(self) -> None:
         self.card_resp = _synthetic_init_update_resp()
@@ -247,16 +204,14 @@ class Scp03ColdStartCounterDivergenceTests(unittest.TestCase):
         self.pysim.parse_init_update_resp(self.card_resp)
         self.pysim.security_level = 0x33
 
-    def test_cold_start_first_cdec_diverges(self) -> None:
-        # Without EXT AUTH primer, the first wrap differs.
+    def test_cold_start_first_cdec_uses_counter_one(self) -> None:
         apdu = bytes.fromhex("80E2800003112233")
         ours_w = bytes(self.ours.wrap_apdu(list(apdu)))
         pysim_w = self.pysim.wrap_cmd_apdu(apdu)
-        self.assertNotEqual(
+        self.assertEqual(
             ours_w[5:-8],
             pysim_w[5:-8],
-            "Cold-start ciphertext should diverge: ours uses counter=0, "
-            "pySIM uses counter=1 per GPC §6.2.6.",
+            "Both implementations must use counter 1 per GPC §6.2.6.",
         )
 
     def test_ext_auth_primer_aligns_counter(self) -> None:

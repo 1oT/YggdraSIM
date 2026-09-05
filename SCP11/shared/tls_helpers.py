@@ -17,10 +17,9 @@ Two distinct trust-posture needs exist in the SCP11 tree:
    auto-learn a trust anchor for a freshly-seen FQDN and persist it
    under ``SCP11/<tree>/dynamic_ca/``. No request body is ever sent
    over this context — only the TLS handshake runs, and the socket is
-   closed immediately after the peer cert is read. Auto-learn is the
-   intended day-one behaviour for new eUICCs / new eIM endpoints, so
-   this path is allowed by default and can only be *tightened* for
-   locked-down deployments.
+   closed immediately after the peer cert is read. Because an active
+   attacker can control the first contact, this path is disabled by
+   default and requires an explicit operator opt-in.
 
 The two gates are:
 
@@ -34,10 +33,11 @@ The two gates are:
   downgrade a request.
 
 - ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION`` — separate
-  hard-lock that also disables the read-only TOFU bootstrap. Default:
-  unset, i.e. introspection is allowed. Only set this in air-gapped
-  or attestation-only environments where *no* new trust anchor may be
-  learned at runtime.
+  hard-lock that disables the read-only TOFU bootstrap even if its
+  opt-in is present.
+
+- ``YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION`` — explicit opt-in for a
+  read-only first-contact certificate-chain fetch. Default: refused.
 
 Call sites choose the correct gate based on what they intend to do:
 
@@ -61,6 +61,7 @@ __all__ = [
     "INSECURE_TLS_ENV",
     "REQUIRE_PINNED_TLS_ENV",
     "REQUIRE_PINNED_INTROSPECTION_TLS_ENV",
+    "ALLOW_TLS_INTROSPECTION_ENV",
     "insecure_tls_allowed",
     "introspection_tls_allowed",
     "create_insecure_context",
@@ -72,6 +73,7 @@ __all__ = [
 INSECURE_TLS_ENV = "YGGDRASIM_SCP11_ALLOW_INSECURE_TLS"
 REQUIRE_PINNED_TLS_ENV = "YGGDRASIM_SCP11_REQUIRE_PINNED_TLS"
 REQUIRE_PINNED_INTROSPECTION_TLS_ENV = "YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION"
+ALLOW_TLS_INTROSPECTION_ENV = "YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION"
 
 _BANNER_LOCK = threading.Lock()
 _BANNER_SEEN: set[str] = set()
@@ -89,8 +91,11 @@ def insecure_tls_allowed() -> bool:
 
 
 def introspection_tls_allowed() -> bool:
-    """Return True unless the operator has explicitly hard-locked TOFU."""
-    return _env_flag(REQUIRE_PINNED_INTROSPECTION_TLS_ENV) is False
+    """Return True only for an explicit opt-in without a hard lock."""
+    return (
+        _env_flag(ALLOW_TLS_INTROSPECTION_ENV)
+        and not _env_flag(REQUIRE_PINNED_INTROSPECTION_TLS_ENV)
+    )
 
 
 def _pinning_required() -> bool:
@@ -142,9 +147,13 @@ def _refuse(caller: str) -> None:
 def _refuse_introspection(caller: str) -> None:
     raise RuntimeError(
         "Refusing TLS chain introspection for "
-        f"{caller!r} because {REQUIRE_PINNED_INTROSPECTION_TLS_ENV}=1 "
-        "is set. Pre-seed the trust anchor under SCP11/<tree>/certs or "
-        "unset the variable to allow TOFU learning."
+        f"{caller!r}. Point ES9_CA_BUNDLE_PATH (console: SET-ES9-CA) at a "
+        "reviewed trust anchor, or explicitly set "
+        f"{ALLOW_TLS_INTROSPECTION_ENV}=1 for a read-only first-contact "
+        "chain fetch. A PEM merely dropped under SCP11/<tree>/certs does "
+        "not help here: the ES9 candidate-bundle scan only runs after this "
+        "fetch succeeds. The opt-in is ignored while "
+        f"{REQUIRE_PINNED_INTROSPECTION_TLS_ENV}=1."
     )
 
 
@@ -177,10 +186,9 @@ def configure_unpinned_context(context: ssl.SSLContext, caller: str) -> ssl.SSLC
 def create_introspection_context(caller: str) -> ssl.SSLContext:
     """Return an unverified SSL context intended for TOFU chain reads only.
 
-    Allowed by default so the client can auto-learn trust anchors for
-    freshly-seen FQDNs (new eUICC, new eIM operator, rotated TLS leaf).
-    Refused only when the operator explicitly sets
-    ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION=1``.
+    Refused by default. The operator must explicitly set
+    ``YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION=1`` and may hard-lock the
+    path off with ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION=1``.
 
     Callers must not send any request body on the returned context.
     They are expected to wrap the socket, read the presented chain via

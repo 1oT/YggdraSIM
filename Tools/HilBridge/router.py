@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 import logging
 import os
 import queue
@@ -18,8 +17,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from yggdrasim_common.card_backend import describe_card_backend, is_simulated_card_backend
-from yggdrasim_common.runtime_paths import ensure_runtime_dir, runtime_path
+from yggdrasim_common.card_backend import (
+    card_relay_marker_path,
+    clear_card_relay_marker,
+    describe_card_backend,
+    is_simulated_card_backend,
+    read_card_relay_marker,
+    write_card_relay_marker,
+)
 
 from .apdu_relay import ApduRelayConfig, HilBridgeApduRelayService
 from .pcsc import DEFAULT_APDU_TIMEOUT_MS, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
@@ -62,8 +67,8 @@ from .protocol import (
 )
 
 LOGGER = logging.getLogger(__name__)
-CARD_RELAY_MARKER_FILENAME = "hil_bridge_card_relay.json"
 CARD_TRACE_ENV = "YGGDRASIM_HIL_CARD_TRACE"
+RELAY_SESSION_RESET_ENV = "YGGDRASIM_HIL_RELAY_SESSION_RESET"
 _MALFORMED_ENVELOPE_STATUS = b"\x6F\x00"
 
 
@@ -104,6 +109,20 @@ def resolve_card_trace_enabled(value: Any = None) -> bool:
         return bool(value)
     text = str(os.environ.get(CARD_TRACE_ENV, "") or "").strip().lower()
     return text in {"1", "true", "yes", "on", "debug"}
+
+
+def resolve_relay_session_reset_enabled(value: Any = None) -> bool:
+    """Return whether relay-session boundaries power-cycle the card.
+
+    Enabled unless explicitly switched off, because leaving a shell's
+    secure-channel state on the card is the failure this guards.
+    """
+    if value is not None:
+        return bool(value)
+    text = str(os.environ.get(RELAY_SESSION_RESET_ENV, "") or "").strip().lower()
+    if len(text) == 0:
+        return True
+    return text not in {"0", "false", "no", "off", "disable", "disabled"}
 
 
 def _extract_apdu_data_field(apdu: bytes) -> tuple[bytes, str | None]:
@@ -388,6 +407,12 @@ class BridgeConfig:
     gsmtap_capture_path: str = ""
     gsmtap_capture_mirror_fifo_path: str = ""
     card_trace_enabled: bool = False
+    # Power-cycle the card when a relay session starts, is replaced, or
+    # ends. Operator shells leave secure-channel and logical-channel
+    # state on the card that the SIMtrace2 board reset cannot clear,
+    # because the card sits in the PC/SC reader rather than on the
+    # board. Disable only when a workflow deliberately spans sessions.
+    relay_session_reset_enabled: bool = True
 
 
 @dataclass(slots=True)
@@ -515,6 +540,20 @@ class CardWorker:
     @property
     def wakeup_fileno(self) -> int:
         return self._wakeup_r
+
+    def nudge(self) -> None:
+        """Wake the event loop without submitting an APDU.
+
+        Lets a non-event-loop thread hand deferred work to the loop:
+        it writes to the same pipe :meth:`poll_responses` drains, so the
+        loop runs its post-wakeup pass promptly instead of waiting out
+        the selector timeout. Safe to call from any thread, and a
+        failed write only costs promptness, never correctness.
+        """
+        try:
+            os.write(self._wakeup_w, b"\x00")
+        except (OSError, ValueError):
+            pass
 
     def submit_async(
         self,
@@ -718,6 +757,12 @@ class HilBridgeServer:
             selectors.EVENT_READ,
             self._wakeup_sentinel,
         )
+        # Relay-session bookkeeping. The id is written from the relay
+        # HTTP thread; the queue hands the socket half of a card
+        # power-cycle back to the event loop, which owns the selector.
+        self._relay_session_id = ""
+        self._relay_session_lock = threading.Lock()
+        self._pending_card_resync: queue.SimpleQueue = queue.SimpleQueue()
 
         self._gsmtap = GsmtapTap(
             host=config.gsmtap_host,
@@ -1132,6 +1177,10 @@ class HilBridgeServer:
         wakeup pipe.  Each completed exchange has its R-APDU queued on
         the originating bankd socket.
         """
+        # Card power-cycles requested from the relay thread land here
+        # first: their responses are already void, so the bankd side
+        # must go before any of them is forwarded.
+        self._drain_pending_card_resync()
         for completed in self._card_worker.poll_responses():
             pending = completed.pending
             if pending.context.closed:
@@ -1164,6 +1213,8 @@ class HilBridgeServer:
         if len(apdu) == 0:
             raise PcscBridgeError("Received empty relay APDU payload.")
 
+        self._note_relay_session_activity(session_id)
+
         if len(session_id) > 0:
             LOGGER.info("Relay[%s] -> card APDU %s", session_id, apdu.hex().upper())
         else:
@@ -1191,7 +1242,139 @@ class HilBridgeServer:
             reset_payload,
         )
 
-    def _handle_relay_card_reset(self, *, session_id: str = "") -> dict[str, Any]:
+    def _note_relay_session_activity(self, session_id: str) -> None:
+        """Cold-reset the card when the active relay session changes.
+
+        Operator shells (SCP03 / SCP11 / SCP80) drive the card through
+        the relay while a modem session may be live, and they leave
+        real state behind: a selected AID, open logical channels, an
+        established SCP03 / SCP11 secure channel, PIN verification
+        status. None of that is cleared by the SIMtrace2 board reset —
+        the card lives in the PC/SC reader, not on the board -- so
+        without this a shell session leaks its state into whatever
+        touches the card next.
+
+        The first APDU of a session id we have not seen is the session
+        boundary. ``_reset_card_and_resync`` power-cycles the card
+        before that APDU reaches it.
+        """
+        if self._config.relay_session_reset_enabled is False:
+            return
+        normalized_id = str(session_id or "").strip()
+        if len(normalized_id) == 0:
+            # Unidentified callers (older clients, ad-hoc curl) cannot
+            # be tracked; resetting on every such APDU would be absurd,
+            # so they keep the pre-existing shared-card behaviour.
+            return
+        # The relay serves concurrent HTTP threads, so claiming the
+        # session has to be atomic: two shells arriving together must
+        # produce one reset for the winner, not two interleaved ones.
+        with self._relay_session_lock:
+            if normalized_id == self._relay_session_id:
+                return
+            previous_id = self._relay_session_id
+            self._relay_session_id = normalized_id
+        boundary = "start" if len(previous_id) == 0 else "switch"
+        self._reset_card_and_resync(
+            reason=f"relay session {boundary} ({normalized_id})",
+        )
+
+    def _reset_card_and_resync(self, *, reason: str) -> dict[str, Any]:
+        """Power-cycle the card and make every consumer re-read it.
+
+        A cold reset drops the card's session state, so any modem
+        already attached is holding a stale view -- stale ATR, stale
+        channel state. Dropping the bankd side makes
+        ``osmo-remsim-client-st2`` re-handshake, which routes through
+        :meth:`_reset_card_for_modem_session` and re-sends the ATR the
+        card reports after this power-up. Yanking the card without that
+        resync is what leaves a modem talking to a card it no longer
+        understands.
+
+        Runs on the relay HTTP thread. The card half is safe there --
+        ``CardWorker`` serialises it -- but the socket half is not: the
+        selector belongs to the event loop, so the bankd close is
+        queued for :meth:`_process_completed_exchanges` instead of
+        being done here.
+        """
+        self._card_worker.drain(timeout=5.0)
+        with self._card_lock:
+            reset_payload = self._card.reset_card()
+            self._session.atr_bytes = self._card.get_atr()
+        self._session.proactive.clear()
+        # Clear the flag before handing off, so a ``clientSlotStatusInd``
+        # racing us cannot re-use an ATR captured before this power-up.
+        self._session.atr_sent = False
+        LOGGER.info(
+            "Card power-cycled (%s); reader %s ATR %s reset=%s",
+            reason,
+            self._card.reader_label,
+            self._session.atr_bytes.hex().upper(),
+            reset_payload,
+        )
+        self._pending_card_resync.put(str(reason))
+        self._card_worker.nudge()
+        return dict(reset_payload)
+
+    def _drain_pending_card_resync(self) -> None:
+        """Close the bankd side for card power-cycles queued off-thread.
+
+        Must run on the event-loop thread -- it touches the selector.
+        """
+        reasons: list[str] = []
+        while True:
+            try:
+                reasons.append(str(self._pending_card_resync.get_nowait()))
+            except queue.Empty:
+                break
+        if len(reasons) == 0:
+            return
+        if self._session.bankd is None:
+            # No modem attached; ``atr_sent`` was already cleared, so
+            # the next attach reads the post-power-up ATR.
+            return
+        self._close_bankd_side(f"card power-cycled: {reasons[-1]}")
+
+    def end_relay_session(self, session_id: str) -> dict[str, Any]:
+        """Close a relay session and hand a clean card back.
+
+        Called when an operator shell disconnects. Without it the card
+        keeps whatever secure channel or channel state that shell left
+        open, and the next modem session inherits it.
+        """
+        normalized_id = str(session_id or "").strip()
+        if len(normalized_id) == 0:
+            return {"status": "ignored", "reason": "No session id supplied."}
+        with self._relay_session_lock:
+            if normalized_id != self._relay_session_id:
+                # Already superseded by another session, which reset the
+                # card on its own way in.
+                return {
+                    "status": "ignored",
+                    "reason": "Session is not the active relay session.",
+                }
+            self._relay_session_id = ""
+        reset_payload = self._reset_card_and_resync(
+            reason=f"relay session end ({normalized_id})",
+        )
+        return {
+            "status": "reset",
+            "sessionId": normalized_id,
+            "boundary": "end",
+            "atr": self._session.atr_bytes.hex().upper(),
+            "reader": self._card.reader_label,
+            "reset": reset_payload,
+        }
+
+    def _handle_relay_card_reset(
+        self,
+        *,
+        session_id: str = "",
+        boundary: str = "",
+    ) -> dict[str, Any]:
+        if str(boundary or "").strip().lower() == "end":
+            return self.end_relay_session(session_id)
+
         self._card_worker.drain(timeout=5.0)
         with self._card_lock:
             reset_payload = self._card.reset_card()
@@ -1232,8 +1415,7 @@ class HilBridgeServer:
         return payload
 
     def _card_relay_marker_path(self) -> str:
-        ensure_runtime_dir("state")
-        return runtime_path("state", CARD_RELAY_MARKER_FILENAME)
+        return card_relay_marker_path()
 
     def _publish_card_relay_marker(self) -> None:
         if self._config.apdu_relay_enabled is False:
@@ -1241,31 +1423,14 @@ class HilBridgeServer:
 
         marker_payload = self._build_relay_status_payload()
         marker_payload["pid"] = os.getpid()
-        marker_path = self._card_relay_marker_path()
-        with open(marker_path, "w", encoding="utf-8") as handle:
-            json.dump(marker_payload, handle, indent=2, sort_keys=True)
-            handle.write("\n")
+        write_card_relay_marker(marker_payload)
 
     def _remove_card_relay_marker(self) -> None:
-        marker_path = self._card_relay_marker_path()
-        if os.path.isfile(marker_path) is False:
+        payload = read_card_relay_marker()
+        marker_pid = int(payload.get("pid", 0) or 0)
+        if marker_pid not in (0, os.getpid()):
             return
-
-        try:
-            with open(marker_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            payload = {}
-
-        if isinstance(payload, dict):
-            marker_pid = int(payload.get("pid", 0) or 0)
-            if marker_pid not in (0, os.getpid()):
-                return
-
-        try:
-            os.remove(marker_path)
-        except OSError:
-            pass
+        clear_card_relay_marker()
 
     def _queue_rspro_pdu(self, context: ConnectionContext, pdu: dict[str, Any]) -> None:
         message_name = get_pdu_message_name(pdu)
@@ -1321,7 +1486,7 @@ class HilBridgeServer:
 
     def _refresh_card(self, *, reconnect: bool) -> None:
         # Drain the worker before touching the card connection so
-        # the event loop never blocks on _card_lock — the worker
+        # the event loop never blocks on _card_lock -- the worker
         # is guaranteed idle by the time we acquire it.
         if reconnect:
             self._card_worker.drain(timeout=5.0)

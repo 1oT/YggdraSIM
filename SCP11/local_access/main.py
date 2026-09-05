@@ -31,7 +31,6 @@ from SCP11.shared.discovery_snapshot import (
 )
 from SCP11.shared.profile_actions import (
     ProfileActionAdapter,
-    is_enabled,
     run_delete_profile as shared_run_delete_profile,
     run_disable_profile as shared_run_disable_profile,
     run_enable_profile as shared_run_enable_profile,

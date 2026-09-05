@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Ocean · dark (deep navy + sky accent) ------------------------- */
 html[data-theme="ocean-dark"] {
   --bg: #0a1628;
@@ -15,7 +16,7 @@ html[data-theme="ocean-dark"] {
   --border-strong: rgba(148, 197, 255, 0.32);
   --fg: #e8f4ff;
   --fg-dim: #8fb4d9;
-  --fg-muted: #6b93b5;
+  --fg-muted: var(--fg-dim);
   --accent: #38bdf8;
   --accent-strong: #0ea5e9;
   --accent-soft: rgba(56, 189, 248, 0.14);
@@ -40,4 +41,3 @@ html[data-theme="ocean-dark"] {
     radial-gradient(circle at 6% 100%, rgba(167, 139, 250, 0.10), transparent 50%),
     radial-gradient(circle at 40% 55%, rgba(14, 165, 233, 0.05), transparent 55%);
 }
-

@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ----------------------------------------------------------------------
    SGP.32 bulk telemetry — structured report
    One titled sub-card per ES10 retrieval (scan, RAT, notifications,
@@ -17,7 +18,7 @@
   padding: 10px 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius-md);
 }
 
 .cc-sgp32-grid {
@@ -40,19 +41,19 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius-md);
 }
 
 .cc-sgp32-section.cc-sgp32-status-ok {
-  border-left-color: var(--ok, #3ec67a);
+  border-left-color: var(--ok);
 }
 
 .cc-sgp32-section.cc-sgp32-status-empty {
-  border-left-color: var(--warn, #d9a12c);
+  border-left-color: var(--warn);
 }
 
 .cc-sgp32-section.cc-sgp32-status-error {
-  border-left-color: var(--err, #d9534f);
+  border-left-color: var(--fail);
 }
 
 .cc-sgp32-section-head {
@@ -84,9 +85,9 @@
 
 .cc-sgp32-section-note {
   margin: 0;
-  font-style: italic;
   color: var(--fg-muted);
   font-size: 12px;
+  line-height: 1.5;
 }
 
 /* Inline trace block — rendered directly in the card body (no
@@ -98,10 +99,10 @@
 .cc-log-inline {
   margin: 8px 0 0;
   padding: 10px 12px;
-  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -121,8 +122,8 @@
 /* Status-coloured chip variants reused by the header + section chips. */
 .cc-chip.cc-chip-ok,
 .cc-sgp32-status-chip.cc-sgp32-status-chip-ok {
-  background: color-mix(in oklab, var(--ok, #3ec67a) 18%, var(--bg-hover));
-  border-color: color-mix(in oklab, var(--ok, #3ec67a) 38%, var(--border));
+  background: color-mix(in oklab, var(--ok) 18%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--ok) 38%, var(--border));
   color: var(--fg);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -132,8 +133,8 @@
 
 .cc-chip.cc-chip-warn,
 .cc-sgp32-status-chip.cc-sgp32-status-chip-empty {
-  background: color-mix(in oklab, var(--warn, #d9a12c) 18%, var(--bg-hover));
-  border-color: color-mix(in oklab, var(--warn, #d9a12c) 38%, var(--border));
+  background: color-mix(in oklab, var(--warn) 18%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--warn) 38%, var(--border));
   color: var(--fg);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -143,8 +144,8 @@
 
 .cc-chip.cc-chip-err,
 .cc-sgp32-status-chip.cc-sgp32-status-chip-error {
-  background: color-mix(in oklab, var(--err, #d9534f) 18%, var(--bg-hover));
-  border-color: color-mix(in oklab, var(--err, #d9534f) 38%, var(--border));
+  background: color-mix(in oklab, var(--fail) 18%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--fail) 38%, var(--border));
   color: var(--fg);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -168,7 +169,7 @@
   max-width: 640px;
   margin: 20px auto;
   text-align: center;
-  box-shadow: 0 6px 20px -12px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-card);
 }
 
 .scp03-session-welcome h3 {
@@ -196,8 +197,8 @@
    real regressions. */
 .cc-no-card-notice {
   padding: 14px 16px;
-  border: 1px solid var(--warn-border, #a67100);
-  background: var(--warn-bg, rgba(255, 170, 0, 0.08));
+  border: 1px solid color-mix(in oklab, var(--warn) 42%, var(--border));
+  background: var(--warn-soft);
   border-radius: 8px;
   color: var(--fg);
   font-size: 13px;
@@ -208,7 +209,7 @@
   display: block;
   font-size: 13.5px;
   margin-bottom: 6px;
-  color: var(--warn-strong, #d38f00);
+  color: var(--warn);
 }
 
 .cc-no-card-notice p {
@@ -227,9 +228,33 @@
   user-select: none;
 }
 
+.cc-no-card-notice details summary:hover {
+  color: var(--fg);
+}
+
+.cc-no-card-notice details summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  color: var(--fg);
+}
+
 .cc-no-card-notice pre.cc-log-inline {
   margin-top: 8px;
   max-height: 140px;
   overflow: auto;
 }
 
+@media (max-width: 640px) {
+  .cc-sgp32-section {
+    padding: 12px;
+  }
+
+  .scp03-session-welcome {
+    margin: 12px auto;
+    padding: 20px 16px;
+  }
+
+  .scp03-session-welcome .btn {
+    min-width: min(100%, 160px);
+  }
+}

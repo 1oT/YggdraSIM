@@ -12,6 +12,8 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+
+from tests.sgp26_support import require_sgp26_bundle
 from unittest import mock
 
 from cryptography import x509 as crypto_x509
@@ -414,6 +416,10 @@ def load_local_sgp26_auth_and_pb_material() -> tuple[
         / "Variant O"
         / "SM-DP+"
     )
+    # Skip rather than fail when the GSMA bundle was never placed in this
+    # checkout; the guard covers every caller of this loader.
+    require_sgp26_bundle()
+
     # Operator workstations may have applied envelope encryption (gpg) to
     # the SGP.26 reference material. read_secret_file_bytes transparently
     # decrypts PGP-wrapped payloads for both the CERT_*.der and SK_*.pem
@@ -521,7 +527,7 @@ def build_signed_bpp_segments(
     iccid: str,
     provider_name: str,
     profile_name: str,
-    imsi: str = "1234567812345678",
+    imsi: str = "123456781234567",
     impi: str = "user@example.test",
     upp_payload: bytes | None = None,
     a3_plaintext_chunk_size: int | None = None,
@@ -735,7 +741,7 @@ class SimulatedConnectionTests(unittest.TestCase):
 
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex("00B000000A")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(bytes(data).hex().upper(), "98641111111111111121")
+            self.assertEqual(bytes(data).hex().upper(), "98881111111111111121")
 
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex("00A40004022F00")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
@@ -753,7 +759,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             self.assertEqual(
                 bytes(data).hex().upper(),
-                "5A1089049032123451234512345678901234",
+                "5A1089049032123451234512345678901235",
             )
 
             data, sw1, sw2 = connection.transmit(
@@ -1666,13 +1672,6 @@ metadata_overrides = {{
             self.assertEqual(len(challenge_value), 16)
 
             transaction_id = bytes.fromhex("11223344556677889900AABBCCDDEEFF")
-            server_signed1 = wrap_tlv(
-                b"\x30",
-                wrap_tlv(b"\x80", transaction_id)
-                + wrap_tlv(b"\x81", challenge_value)
-                + wrap_tlv(b"\x83", b"rsp.example.com")
-                + wrap_tlv(b"\x84", b"\x22" * 16),
-            )
             cert_der, cert_private_key = build_self_signed_cert_and_key("Simulator DPpb")
             ctx_params = wrap_tlv(b"\xA0", wrap_tlv(b"\x81", wrap_tlv(b"\x04", b"ctx")))
             auth_payload = build_authenticate_server_payload(
@@ -1707,7 +1706,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89049032123451234512345678901234",
+                eid_hex="89049032123451234512345678901235",
                 cert_private_key=cert_private_key,
                 iccid="89881111111111111177",
                 provider_name="Test Provider",
@@ -1775,7 +1774,7 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex("00B000000A")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(bytes(data), encode_imsi_ef("1234567812345678"))
+            self.assertEqual(bytes(data), encode_imsi_ef("123456781234567"))
 
             impi_payload = b"user@example.test"
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex(f"00A4040010{ISIM_AID}")))
@@ -1823,7 +1822,9 @@ metadata_overrides = {{
             self.assertEqual(seq_number, 1)
 
             _, operation_value, _, _ = read_tlv(find_first_tlv(metadata_raw, "81"), 0)
-            self.assertEqual(operation_value, b"\x04")
+            # NotificationEvent is an implicitly-tagged ASN.1 BIT STRING:
+            # four unused bits followed by notificationLocalDelete(3).
+            self.assertEqual(operation_value, b"\x04\x10")
 
             _, address_value, _, _ = read_tlv(find_first_tlv(metadata_raw, "0C"), 0)
             self.assertEqual(address_value.decode("utf-8"), "rsp.example.com")
@@ -1842,7 +1843,7 @@ metadata_overrides = {{
             self.assertGreater(len(pending_metadata), 0)
 
             _, pending_operation_value, _, _ = read_tlv(find_first_tlv(pending_metadata, "81"), 0)
-            self.assertEqual(pending_operation_value, b"\x04")
+            self.assertEqual(pending_operation_value, b"\x04\x10")
 
             remove_request = wrap_tlv("BF30", wrap_tlv(b"\x80", seq_value))
             remove_response, sw1, sw2 = send_store_data_payload(connection, remove_request)
@@ -1889,7 +1890,7 @@ metadata_overrides = {{
 
             first, second = decoded["notifications"]
             self.assertEqual(first.get("seqNumber"), "1")
-            self.assertEqual(first.get("iccid"), "89461111111111111112")
+            self.assertEqual(first.get("iccid"), "89881111111111111112")
             self.assertEqual(first.get("notificationAddress"), '"rsp.example.com"')
             self.assertEqual(second.get("seqNumber"), "2")
             self.assertEqual(second.get("iccid"), "89881111111111111129")
@@ -1971,7 +1972,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89049032123451234512345678901234",
+                eid_hex="89049032123451234512345678901235",
                 cert_private_key=cert_private_key,
                 iccid="89881111111111111191",
                 provider_name="Chunked Provider",
@@ -2060,7 +2061,7 @@ metadata_overrides = {{
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
-                    eid_hex="89049032123451234512345678901234",
+                    eid_hex="89049032123451234512345678901235",
                     cert_private_key=cert_private_key,
                     iccid="89881111111111111222",
                     provider_name="Segmented Provider",
@@ -2115,13 +2116,6 @@ metadata_overrides = {{
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
 
                 transaction_id = bytes.fromhex("102030405060708090A0B0C0D0E0F000")
-                server_signed1 = wrap_tlv(
-                    b"\x30",
-                    wrap_tlv(b"\x80", transaction_id)
-                    + wrap_tlv(b"\x81", bytes(challenge))
-                    + wrap_tlv(b"\x83", b"persist.example.com")
-                    + wrap_tlv(b"\x84", b"\x44" * 16),
-                )
                 cert_der, cert_private_key = build_self_signed_cert_and_key("Persist DPpb")
                 auth_payload = build_authenticate_server_payload(
                     transaction_id=transaction_id,
@@ -2149,7 +2143,7 @@ metadata_overrides = {{
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
-                    eid_hex="89049032123451234512345678901234",
+                    eid_hex="89049032123451234512345678901235",
                     cert_private_key=cert_private_key,
                     iccid="89881111111111111166",
                     provider_name="Persistent Provider",
@@ -2198,7 +2192,7 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             data, sw1, sw2 = recreated_engine.fs.read_binary(offset=0, le=10)
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(bytes(data), encode_imsi_ef("1234567812345678"))
+            self.assertEqual(bytes(data), encode_imsi_ef("123456781234567"))
 
     def test_bpp_install_notification_address_prefers_active_server_address(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2255,7 +2249,7 @@ metadata_overrides = {{
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
-                    eid_hex="89049032123451234512345678901234",
+                    eid_hex="89049032123451234512345678901235",
                     cert_private_key=cert_private_key,
                     iccid="89881111111111111167",
                     provider_name="Notification Provider",
@@ -2339,7 +2333,7 @@ metadata_overrides = {{
             upp_path.write_bytes(
                 build_minimal_saip_upp(
                     iccid="89881111111111111144",
-                    imsi="1234567812345678",
+                    imsi="123456781234567",
                     impi="imported@example.test",
                     profile_name="Imported From ASN1",
                 )
@@ -2374,7 +2368,7 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             data, sw1, sw2 = recreated_engine.fs.read_binary(offset=0, le=10)
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(bytes(data), encode_imsi_ef("1234567812345678"))
+            self.assertEqual(bytes(data), encode_imsi_ef("123456781234567"))
 
     def test_import_profile_artifact_accepts_hex_text_der(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2383,7 +2377,7 @@ metadata_overrides = {{
             upp_hex_path.write_text(
                 build_minimal_saip_upp(
                     iccid="89881111111111111145",
-                    imsi="1234567812345678",
+                    imsi="123456781234567",
                     impi="hex@example.test",
                     profile_name="Imported From Hex Text",
                 ).hex().upper()
@@ -2441,7 +2435,7 @@ metadata_overrides = {{
                             "usim-header": {"mandated": None, "identification": 3},
                             "templateID": "2.23.143.1.2.4.2",
                             "adf-usim": [],
-                            "ef-imsi": [("fillFileContent", encode_imsi_ef("1234567812345678"))],
+                            "ef-imsi": [("fillFileContent", encode_imsi_ef("123456781234567"))],
                             "ef-arr": [],
                             "ef-ust": [],
                             "ef-spn": [],
@@ -2512,13 +2506,6 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
 
             transaction_id = bytes.fromhex("FFEEDDCCBBAA00998877665544332211")
-            server_signed1 = wrap_tlv(
-                b"\x30",
-                wrap_tlv(b"\x80", transaction_id)
-                + wrap_tlv(b"\x81", bytes(challenge))
-                + wrap_tlv(b"\x83", b"rsp.example.com")
-                + wrap_tlv(b"\x84", b"\x33" * 16),
-            )
             cert_der, cert_private_key = build_self_signed_cert_and_key("Tamper DPpb")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
@@ -2546,7 +2533,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89049032123451234512345678901234",
+                eid_hex="89049032123451234512345678901235",
                 cert_private_key=cert_private_key,
                 iccid="89881111111111111188",
                 provider_name="Tampered Provider",
@@ -2609,9 +2596,9 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89049032123451234512345678901234",
+                eid_hex="89049032123451234512345678901235",
                 cert_private_key=cert_private_key,
-                iccid="89461111111111111112",
+                iccid="89881111111111111112",
                 provider_name="Duplicate Provider",
                 profile_name="Duplicate ICCID",
                 upp_payload=b"\x01",
@@ -2667,7 +2654,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89049032123451234512345678901234",
+                eid_hex="89049032123451234512345678901235",
                 cert_private_key=cert_private_key,
                 iccid="89881111111111111178",
                 provider_name="Mismatch Provider",
@@ -3029,7 +3016,7 @@ class MainWrapperCardBackendTests(unittest.TestCase):
             artifact_path.write_bytes(
                 build_minimal_saip_upp(
                     iccid="89881111111111111155",
-                    imsi="1234567812345678",
+                    imsi="123456781234567",
                     impi="wrapper@example.test",
                     profile_name="Wrapper Import",
                 )
@@ -3139,7 +3126,7 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                     {
                         "profile_name": "Runtime Menu Import",
                         "iccid": "89881111111111111166",
-                        "imsi": "1234567812345678",
+                        "imsi": "123456781234567",
                         "impi": "runtime@example.test",
                         "nodes": [
                             {
@@ -3160,7 +3147,7 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                                 "kind": "ef",
                                 "fid": "6F07",
                                 "structure": "transparent",
-                                "data_hex": encode_imsi_ef("1234567812345678").hex().upper(),
+                                "data_hex": encode_imsi_ef("123456781234567").hex().upper(),
                                 "records_hex": [],
                                 "aid": "",
                                 "label": "",

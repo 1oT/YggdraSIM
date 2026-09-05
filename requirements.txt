@@ -41,15 +41,10 @@ requests>=2.31,<3.0
 # tests/test_scp03_pysim_parity.py and tests/test_scp80_pysim_parity.py
 # pin the deliberate divergences. Upstream does not publish wheels;
 # the install pulls the canonical tree from GitHub.
-pySim @ git+https://github.com/osmocom/pysim.git
+pySim @ git+https://github.com/osmocom/pysim.git@c50f4b4a0222a964710ce3124a66fe13c804be65
 
 # Interactive TUI
 textual>=0.47.0
-
-# HIL bridge runtime — Linux only. The PyPI package does not ship Windows
-# or macOS wheels and the HIL flow itself requires udev / SIMtrace2 /
-# osmo-remsim-client-st2, so the marker keeps the core install clean.
-pyudev; sys_platform == "linux"
 
 # External system tools used by selected features are not installed here.
 # Examples:

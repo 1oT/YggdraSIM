@@ -53,7 +53,6 @@ from textual.widgets import Button, Static
 from ..saip_apply_row import SaipApplyRow, normalize_hex_bytes_text
 from ._base import (
     BasePeEditor,
-    base_pe_type_for_section_key,
     hex_from_tagged_bytes,
     header_member_key_from_pe,
     header_value_from_pe,

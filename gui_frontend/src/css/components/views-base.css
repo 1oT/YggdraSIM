@@ -14,8 +14,29 @@
   animation: ygg-fade-in 260ms cubic-bezier(0.25, 0.8, 0.4, 1);
 }
 
+.skip-link {
+  position: fixed;
+  z-index: 10000;
+  top: 8px;
+  left: 8px;
+  padding: 8px 12px;
+  border: 2px solid var(--focus-ring);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(calc(-100% - 16px));
+  transition: transform var(--transition-fast);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 .view h1 {
   font-size: 26px;
+  line-height: 1.2;
   margin: 0 0 8px;
   font-weight: 700;
   letter-spacing: -0.015em;
@@ -46,7 +67,7 @@
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 16px;
 }
 
@@ -75,7 +96,6 @@
 }
 
 .card:hover {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-card-hover);
   border-color: var(--border-strong);
 }
@@ -143,6 +163,7 @@ dd {
   border: 1px solid var(--border-strong);
   color: var(--fg);
   padding: 7px 14px;
+  min-height: 34px;
   border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 12px;
@@ -165,7 +186,7 @@ dd {
 }
 
 .btn:focus-visible {
-  outline: 2px solid var(--accent-soft);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -307,6 +328,21 @@ dd {
 
 @keyframes ygg-spin {
   to { transform: rotate(360deg); }
+}
+
+@media (forced-colors: active) {
+  .brand-name,
+  .view h1,
+  .big-number {
+    background: none;
+    color: CanvasText;
+  }
+
+  .card,
+  .data-table,
+  .btn {
+    box-shadow: none;
+  }
 }
 
 .env-config-shell {

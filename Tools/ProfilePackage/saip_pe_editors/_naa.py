@@ -34,7 +34,6 @@ bodies instead of hunting through the PE editor.
 
 from __future__ import annotations
 
-from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Vertical

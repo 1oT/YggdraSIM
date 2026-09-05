@@ -11,7 +11,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-
 # 3GPP NAA
 
 Network Access Applications are the applets inside a UICC that actually
@@ -111,7 +110,7 @@ USIM `AUTHENTICATE`:
 The simulated UICC implements all three; the in-process YggdraCore stubs
 (`Tools/YggdraCore/`) close the loop on the network side with AUSF and
 AAnF surfaces so the round-trips can be exercised without an external 5G
-core. *(YggdraCore stubs: post-v1 staging — not part of this release.)*
+core.
 
 ## Where to look in YggdraSIM
 

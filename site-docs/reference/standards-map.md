@@ -9,7 +9,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-
 # Standards Map
 
 This page maps the published specifications YggdraSIM implements to the
@@ -30,6 +29,8 @@ package data so that the HIL bridge works from a plain `pip install`.
 | ETSI TS 102 222 | `docs/ts_102222v130000p.md` | SCP80 RFM payloads, [SCP80 OTA Shell](../subsystems/scp80.md) |
 | ETSI TS 102 225 | `docs/ts_102225v180000p.md` | [SCP80 OTA](../concepts/ota-scp80.md), [SCP80 OTA Shell](../subsystems/scp80.md) |
 | ETSI TS 102 226 | `docs/ts_102226v120000p.md` | [SCP80 OTA Shell](../subsystems/scp80.md) |
+| ETSI TS 102 223 (Card Application Toolkit, BIP) | -- | [APDU Dissector](../subsystems/apdu-dissector.md) -- clauses 8.7 device identities, 8.12 general result and its cause byte, 8.52 bearer, 8.56 channel status, 8.59 transport level |
+| ETSI TS 101 220 (COMPREHENSION-TLV tag allocation) | -- | [APDU Dissector](../subsystems/apdu-dissector.md) -- clause 7.1 tag and length forms, clause 7.2 tag values |
 
 ## 3GPP
 
@@ -38,9 +39,10 @@ package data so that the HIL bridge works from a plain `pip install`.
 | 3GPP TS 31.102 (USIM application + `GET IDENTITY`) | `docs/ts_131102v180400p.md` | [3GPP NAA](../concepts/3gpp-naa.md), [SCP03 Admin Shell](../subsystems/scp03.md), [SUCI Tool](../subsystems/suci-tool.md), [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
 | 3GPP TS 33.501 (5G AKA + SUCI Profile A / B) | `docs/ts_133501.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md), [SUCI Tool](../subsystems/suci-tool.md) |
 | 3GPP TS 33.402 (EAP-AKA') | `docs/ts_133402.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
-| 3GPP TS 33.535 (AKMA) | `docs/ts_133535.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md), YggdraCore AAnF stub *(post-v1 staging)* |
+| 3GPP TS 33.535 (AKMA) | `docs/ts_133535.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md), YggdraCore AAnF stub |
 | 3GPP TS 35.205 / 35.206 (Milenage) | `docs/ts_135205.md` / `docs/ts_135206.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
 | 3GPP TS 35.231 (TUAK) | `docs/ts_135231.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
+| 3GPP TS 31.111 (USIM Application Toolkit) | `docs/ts_131111v170600p.md` | [APDU Dissector](../subsystems/apdu-dissector.md) -- clause 9.1 BER-TLV envelope tags in the ME-to-UICC direction |
 
 ## GlobalPlatform
 
@@ -69,8 +71,9 @@ package data so that the HIL bridge works from a plain `pip install`.
 
 | Spec | Implemented at |
 | --- | --- |
-| ISO/IEC 7816-3 (electrical, transport) | every card-facing subsystem |
-| ISO/IEC 7816-4 (APDU, logical) | [Secure Element Primer](../concepts/secure-element-primer.md), every card-facing subsystem |
+| ISO/IEC 7816-3 (electrical, transport) | every card-facing subsystem; [APDU Dissector](../subsystems/apdu-dissector.md) decodes the ATR per clause 8.2 |
+| ISO/IEC 7816-4 (APDU, logical) | [Secure Element Primer](../concepts/secure-element-primer.md), every card-facing subsystem; [APDU Dissector](../subsystems/apdu-dissector.md) -- clause 5.1.3 status categories, clause 5.4.1 class byte, Table 3 secure messaging, Table 12 file descriptor, Table 13 life-cycle status |
+| ISO/IEC 8825-1 (BER-TLV) | [APDU Dissector](../subsystems/apdu-dissector.md); indefinite lengths are reported and refused, since DER prohibits them |
 
 ## Related pages
 

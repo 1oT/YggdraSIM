@@ -239,18 +239,38 @@ class PcscCardChannel:
             connection.disconnect(disposition=disposition)
 
     def disconnect(self) -> None:
-        """Disconnect the active PCSC reader connection."""
+        """Disconnect the active PCSC reader connection, unpowering the card.
+
+        The disposition is pinned rather than inherited. pyscard's
+        ``connect()`` does default ``self.disposition`` to
+        ``SCARD_UNPOWER_CARD``, but :meth:`reset_card` deliberately
+        rewrites that attribute mid-flight, and a caller that reaches
+        us with ``SCARD_LEAVE_CARD`` still set would leave the card
+        powered and holding its session state -- exactly the leak a
+        disconnect is supposed to close.
+        """
         if self._connection is None:
             return
+        connection = self._connection
+        self._connection = None
         try:
-            self._connection.disconnect()
+            _, _, _, unpower_card, _, _, _ = _load_smartcard_runtime()
+        except PcscBridgeError:
+            unpower_card = None
+        try:
+            if unpower_card is not None:
+                self._disconnect_with_disposition(
+                    self._unwrap_connection(connection),
+                    unpower_card,
+                )
+            else:
+                connection.disconnect()
         except Exception as disconnect_error:
             _LOGGER.debug(
                 "PC/SC disconnect swallowed %s: %s",
                 disconnect_error.__class__.__name__,
                 disconnect_error,
             )
-        self._connection = None
 
     def get_atr(self) -> bytes:
         connection = self._require_connection()

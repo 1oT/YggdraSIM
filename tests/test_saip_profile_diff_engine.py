@@ -42,8 +42,6 @@ from Tools.ProfilePackage.saip_profile_diff import (
     SEVERITY_INFO,
     SEVERITY_NOTE,
     SEVERITY_WARNING,
-    ProfileDiffEntry,
-    ProfileDiffReport,
     classify_diff_entry,
     compute_profile_diff,
     format_profile_diff_text,

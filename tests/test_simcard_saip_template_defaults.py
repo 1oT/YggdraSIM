@@ -3,14 +3,13 @@
 
 """SAIP template default-value fill-in regression suite.
 
-Operator BPPs routinely ship skeleton FCPs for template-defined EFs
+BPP issuers may ship skeleton FCPs for template-defined EFs
 without any ``fillFileContent`` directive, expecting the card to
 materialise the SAIP / TS 31.102 §9 template default at runtime
 (``EF.AD = 00000002``, ``EF.HPPLMN = 0A``, ``EF.PSLOCI = FFFFFFFFFF...0000FF01``,
 ``EF.Keys = 07FF...FF`` and so on). Without this fill-in the modem
-sees ``9000`` with an empty body when reading via SFI -- the exact
-symptom that surfaced in the
-``89880000000466311335`` HIL trace.
+sees ``9000`` with an empty body when reading via SFI -- the same
+failure shape covered by the synthetic regression below.
 
 These tests pin:
 
@@ -20,8 +19,8 @@ These tests pin:
 * the runtime fill-in pass (``_apply_saip_template_defaults_to_runtime``)
   invariants -- issuer wins, ``content_rqd=True`` is never
   fabricated, SFIs / structures are always synced;
-* an end-to-end replay of the production cold-attach SFI READ BINARY
-  sequence through ``EtsiFileSystem``.
+* an end-to-end replay of a cold-attach SFI READ BINARY sequence
+  through ``EtsiFileSystem``.
 
 Reference:
     SAIP / TCA Profile Interoperability v2.3.1 §9, 3GPP TS 31.102 §4.4
@@ -55,7 +54,14 @@ from SIMCARD.state import (
 )
 
 
-_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89880000000466311335_test.txt")
+_BPP_PATH = Path(
+    os.environ.get(
+        "YGGDRASIM_LOCAL_SAIP_BPP_FIXTURE",
+        "__optional_local_saip_bpp_fixture_not_configured__",
+    )
+)
+_SYNTHETIC_ICCID = "8901000000000000000"
+_SYNTHETIC_ICCID_20 = "89010000000000000000"
 
 
 def _find_ef(state, parent_name: str, fid: str) -> SimFileNode | None:
@@ -107,7 +113,7 @@ class SaipTemplateDefaultsRuntimeFillInTests(unittest.TestCase):
         state = SimCardState(
             atr=DEFAULT_SIM_ATR,
             eid="89049032000000000000000000000000",
-            iccid="89880000000000000000",
+            iccid=_SYNTHETIC_ICCID_20,
             imsi="001010000000001",
             default_dp_address="rsp.example.com",
             root_ci_pkid=b"\x00" * 20,
@@ -221,14 +227,13 @@ class SaipTemplateDefaultsRuntimeFillInTests(unittest.TestCase):
         self.assertIsNone(ef.sfi)
 
 
-@unittest.skipUnless(_BPP_PATH.is_file(), "operator BPP fixture missing")
+@unittest.skipUnless(_BPP_PATH.is_file(), "optional local BPP fixture not configured")
 class OperatorBppEndToEndReplayTests(unittest.TestCase):
-    """Replay the production cold-attach SFI READ BINARY sequence
-    against the rebuilt runtime FS and assert it matches the bytes a
-    real card would have served. This is the fix for the original
-    user-reported HIL hang where ``00B0830004`` returned ``6A82``
-    and ``00B0870009`` / ``00B0000004`` returned ``9000`` with no
-    body.
+    """Replay a cold-attach SFI READ BINARY sequence against the rebuilt
+    runtime FS and assert it matches the bytes a physical card would
+    serve. This covers the captured-style failure where ``00B0830004``
+    returned ``6A82`` and ``00B0870009`` / ``00B0000004`` returned
+    ``9000`` with no body.
     """
 
     def _build_runtime(self) -> SimCardState:

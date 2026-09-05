@@ -147,9 +147,20 @@ class SecurityController :
         self .fs =fs_ctrl 
 
     def _pad_pin (self ,pin_str :str )->str :
-        """Pads numeric PIN string to 8 bytes with 0xFF (ISO 7816-4)."""
-        pin_bytes =str (pin_str ).encode ('ascii')
-        if len (pin_bytes )>8 :return pin_bytes [:8 ].hex ().upper ()
+        """Encode a 1..8 byte ASCII PIN and pad it with ``FF``.
+
+        Credential input must never be truncated: doing so can verify a
+        different value and consume a retry without the operator noticing.
+        """
+        text =str (pin_str or "")
+        if len (text )==0 :
+            raise ValueError ("PIN must not be empty")
+        try :
+            pin_bytes =text .encode ("ascii")
+        except UnicodeEncodeError as error :
+            raise ValueError ("PIN must contain ASCII characters only")from error
+        if len (pin_bytes )>8 :
+            raise ValueError ("PIN must be at most 8 ASCII bytes")
         padding =b'\xFF'*(8 -len (pin_bytes ))
         return (pin_bytes +padding ).hex ().upper ()
 
@@ -169,7 +180,10 @@ class SecurityController :
         if len (numeric )==0 :
             raise ValueError ("PIN reference must not be empty")
 
-        ref_byte =int (numeric ,16 )if len (numeric )>1 else int (numeric )
+        is_hex =len (numeric )>1 or any (
+        character in "ABCDEFabcdef"for character in numeric
+        )
+        ref_byte =int (numeric ,16 )if is_hex else int (numeric )
         if ref_byte <0 or ref_byte >0xFF :
             raise ValueError ("PIN reference must fit in one byte")
         return ref_byte
@@ -727,7 +741,14 @@ class SecurityController :
                     inner =TlvParser .parse (inner_data )if isinstance (inner_data ,bytes )else inner_data 
 
                     aid =inner .get (0x4F ,b'').hex ().upper ()
-                    label =inner .get (0x50 ,b'').decode ('ascii','ignore')if inner .get (0x50 )else "Unknown"
+                    label_value =inner .get (0x50 ,b'')
+                    if label_value :
+                        try :
+                            label =label_value .decode ('ascii')
+                        except UnicodeDecodeError :
+                            label =f"HEX:{label_value.hex().upper()}"
+                    else :
+                        label ="Unknown"
 
                     is_match =False 
                     if target_type =="USIM"and aid .startswith ("A000000087")and "1002"in aid :is_match =True 
@@ -751,7 +772,13 @@ class SecurityController :
                  return (sw1 ==0x90 or sw1 ==0x61 )
         return False 
 
-    def run_auth (self ,rand :str ,autn :Optional [str ]=None ,app_context :str ="USIM"):
+    def run_auth (
+        self ,
+        rand :str ,
+        autn :Optional [str ]=None ,
+        app_context :str ="USIM",
+        reveal_sensitive :bool =False ,
+    ):
         """Send the AUTHENTICATE command with the given RAND/AUTN and print the decoded response."""
         try :
             rand_hex =rand .replace (" ","").upper ()
@@ -783,7 +810,7 @@ class SecurityController :
 
 
             if sw1 ==0x90 or sw1 ==0x61 :
-                self ._parse_auth_response (data )
+                self ._parse_auth_response (data ,reveal_sensitive =reveal_sensitive )
             elif sw1 ==0x98 and sw2 ==0x62 :
                 print (f"{Config.Colors.FAIL}[-] Auth Error: MAC verification failed (Key Mismatch?){Config.Colors.ENDC}")
             elif sw1 ==0xDC :
@@ -794,42 +821,122 @@ class SecurityController :
         except Exception as e :
             print (f"{Config.Colors.FAIL}[!] Error: {e}{Config.Colors.ENDC}")
 
-    def _parse_auth_response (self ,data :bytes ):
-        if not data :return 
-        if data [0 ]==0xDC :
+    @staticmethod
+    def _decode_auth_response_data (data :bytes )->dict [str ,object ]:
+        """Decode TS 31.102 AUTHENTICATE response LV fields strictly."""
+        payload =bytes (data or b"")
+        if len (payload )==0 :
+            raise ValueError ("AUTHENTICATE response is empty.")
+
+        def read_lv (offset :int ,label :str )->tuple [bytes ,int ]:
+            if offset >=len (payload ):
+                raise ValueError (f"AUTHENTICATE response is missing {label} length.")
+            value_length =payload [offset ]
+            value_start =offset +1
+            value_end =value_start +value_length
+            if value_end >len (payload ):
+                remaining =len (payload )-value_start
+                raise ValueError (
+                f"AUTHENTICATE {label} length {value_length} exceeds "
+                f"the {remaining} available byte(s)."
+                )
+            return payload [value_start :value_end ],value_end
+
+        if payload [0 ]==0xDC :
+            auts ,offset =read_lv (1 ,"AUTS")
+            if offset !=len (payload ):
+                raise ValueError ("AUTHENTICATE AUTS response contains trailing data.")
+            if len (auts )!=14 :
+                raise ValueError (
+                f"AUTHENTICATE AUTS must be 14 bytes, received {len(auts)}."
+                )
+            return {"status":"synchronization_failure","auts":auts }
+
+        if payload [0 ]==0xDB :
+            offset =1
+            res ,offset =read_lv (offset ,"RES")
+            ck ,offset =read_lv (offset ,"CK")
+            ik ,offset =read_lv (offset ,"IK")
+            if not (4 <=len (res )<=16 ):
+                raise ValueError (
+                f"AUTHENTICATE RES must be 4..16 bytes, received {len(res)}."
+                )
+            if len (ck )!=16 or len (ik )!=16 :
+                raise ValueError (
+                "AUTHENTICATE CK and IK must each be 16 bytes "
+                f"(received {len(ck)} and {len(ik)})."
+                )
+            decoded :dict [str ,object ]={
+            "status":"success",
+            "res":res ,
+            "ck":ck ,
+            "ik":ik ,
+            }
+            if offset <len (payload ):
+                kc ,offset =read_lv (offset ,"Kc")
+                if len (kc )!=8 :
+                    raise ValueError (
+                    f"AUTHENTICATE Kc must be 8 bytes, received {len(kc)}."
+                    )
+                decoded ["kc"]=kc
+            if offset !=len (payload ):
+                raise ValueError ("AUTHENTICATE success response contains trailing data.")
+            return decoded
+
+        offset =0
+        sres ,offset =read_lv (offset ,"SRES")
+        kc ,offset =read_lv (offset ,"Kc")
+        if offset !=len (payload ):
+            raise ValueError ("AUTHENTICATE GSM response contains trailing data.")
+        if len (sres )!=4 or len (kc )!=8 :
+            raise ValueError (
+            "AUTHENTICATE GSM SRES/Kc must be 4/8 bytes "
+            f"(received {len(sres)}/{len(kc)})."
+            )
+        return {"status":"gsm_success","sres":sres ,"kc":kc }
+
+    def _parse_auth_response (self ,data :bytes ,reveal_sensitive :bool =False ):
+        try :
+            decoded =self ._decode_auth_response_data (data )
+        except ValueError as error :
+            print (f"{Config.Colors.WARNING}[!] Malformed AUTHENTICATE response: {error}{Config.Colors.ENDC}")
+            return
+
+        status =decoded ["status"]
+        if status =="synchronization_failure":
             print (f"{Config.Colors.WARNING}[!] Synchronization Failure (AUTS returned){Config.Colors.ENDC}")
-            if len (data )>2 :print (f"    AUTS: {data[2:].hex().upper()}")
-            return 
+            auts =decoded ["auts"]
+            if isinstance (auts ,bytes ):
+                print (f"    AUTS: {auts.hex().upper()}")
+            return
 
-        if data [0 ]==0xDB :
+        if status =="success":
             print (f"{Config.Colors.GREEN}[+] Authentication Successful{Config.Colors.ENDC}")
-            idx =1 
-            if idx <len (data )and data [idx ]>0x80 :idx +=1 
-            elif idx <len (data ):idx +=1 
+            labels =(("res","RES "),)
+            for field_name ,label in labels :
+                value =decoded .get (field_name )
+                if isinstance (value ,bytes ):
+                    print (f"    {label}: {Config.Colors.GREEN}{value.hex().upper()}{Config.Colors.ENDC}")
+            if reveal_sensitive :
+                for field_name ,label in (("ck","CK  "),("ik","IK  "),("kc","Kc  ")):
+                    value =decoded .get (field_name )
+                    if isinstance (value ,bytes ):
+                        print (f"    {label}: {Config.Colors.GREEN}{value.hex().upper()}{Config.Colors.ENDC}")
+            else :
+                print (
+                f"    {Config.Colors.WARNING}CK/IK/Kc redacted. "
+                f"Enable explicit sensitive-output reveal to display them.{Config.Colors.ENDC}"
+                )
+            return
 
-            try :
-
-                if idx <len (data ):
-                    res_len =data [idx ];idx +=1 
-                    print (f"    RES : {Config.Colors.GREEN}{data[idx:idx+res_len].hex().upper()}{Config.Colors.ENDC}")
-                    idx +=res_len 
-
-                if idx <len (data ):
-                    ck_len =data [idx ];idx +=1 
-                    print (f"    CK  : {Config.Colors.GREEN}{data[idx:idx+ck_len].hex().upper()}{Config.Colors.ENDC}")
-                    idx +=ck_len 
-
-                if idx <len (data ):
-                    ik_len =data [idx ];idx +=1 
-                    print (f"    IK  : {Config.Colors.GREEN}{data[idx:idx+ik_len].hex().upper()}{Config.Colors.ENDC}")
-                    idx +=ik_len 
-
-                if idx <len (data ):
-                    kc_len =data [idx ];idx +=1 
-                    print (f"    Kc  : {Config.Colors.GREEN}{data[idx:idx+kc_len].hex().upper()}{Config.Colors.ENDC}")
-            except Exception :
-                print (f"{Config.Colors.WARNING}[!] Output truncated{Config.Colors.ENDC}")
-
-        elif len (data )>=12 :
-             print (f"    SRES: {Config.Colors.GREEN}{data[:4].hex().upper()}{Config.Colors.ENDC}")
-             print (f"    Kc  : {Config.Colors.GREEN}{data[4:12].hex().upper()}{Config.Colors.ENDC}")
+        sres =decoded .get ("sres")
+        kc =decoded .get ("kc")
+        if isinstance (sres ,bytes ):
+            print (f"    SRES: {Config.Colors.GREEN}{sres.hex().upper()}{Config.Colors.ENDC}")
+        if isinstance (kc ,bytes )and reveal_sensitive :
+            print (f"    Kc  : {Config.Colors.GREEN}{kc.hex().upper()}{Config.Colors.ENDC}")
+        elif isinstance (kc ,bytes ):
+            print (
+            f"    {Config.Colors.WARNING}Kc redacted. Enable explicit "
+            f"sensitive-output reveal to display it.{Config.Colors.ENDC}"
+            )

@@ -185,6 +185,23 @@ class MainWrapperProcessRouteTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mocked_decode.assert_called_once_with(["--format", "json", "--file", "sample.hex"])
 
+    def test_main_wrapper_doctor_uses_persistent_runtime_root(self) -> None:
+        persistent_root = "/persistent/yggdrasim"
+        with mock.patch.object(main_wrapper, "ensure_plugins_loaded"):
+            with mock.patch.object(main_wrapper, "_emit_plugin_load_banner"):
+                with mock.patch(
+                    "yggdrasim_common.runtime_paths.runtime_root",
+                    return_value=persistent_root,
+                ):
+                    with mock.patch(
+                        "yggdrasim_common.doctor.run_doctor",
+                        return_value=0,
+                    ) as mocked_doctor:
+                        exit_code = main_wrapper.run_cli(["--doctor"])
+
+        self.assertEqual(exit_code, 0)
+        mocked_doctor.assert_called_once_with(Path(persistent_root))
+
     def test_run_scp03_script_launches_script_execution_with_prompted_path(self) -> None:
         with mock.patch.object(main_wrapper, "clear_screen"):
             with mock.patch.object(main_wrapper, "pause") as mocked_pause:

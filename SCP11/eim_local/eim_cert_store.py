@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM certificate store: loads and validates the eIM identity certificate chain used for ES2+ mutual TLS."""
 import os
 from dataclasses import dataclass
@@ -78,15 +77,25 @@ class EimCertificateStore:
         return [record for record in self._records if record.role == "signing"]
 
     def record_for_path(self, path_text: str) -> Optional[EimCertificateRecord]:
-        """Return the certificate record whose key path matches *path*."""
-        self.load()
+        """Return the certificate record whose certificate path matches *path*.
+
+        An explicitly selected certificate must not depend on every unrelated
+        inventory entry being readable.  In particular, an encrypted
+        certificate whose operator key is unavailable must not prevent a
+        separate, explicitly supplied certificate from being used.
+        """
         normalized = self._normalize_path(path_text)
         if len(normalized) == 0:
             return None
         record = self._record_by_path.get(normalized)
         if record is not None:
             return record
-        return self._load_record(normalized, source=self._source_for_path(normalized))
+        record = self._load_record(normalized, source=self._source_for_path(normalized))
+        if record is not None and self._loaded:
+            self._record_by_path[normalized] = record
+            if all(existing.certificate_path != normalized for existing in self._records):
+                self._records.append(record)
+        return record
 
     def resolve_signing_record(
         self,

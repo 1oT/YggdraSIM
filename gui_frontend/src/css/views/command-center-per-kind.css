@@ -10,9 +10,9 @@
    match the legacy hard-coded RGB so non-Nord themes keep their
    established palette. */
 .cc-tree-icon--mf {
-  background: var(--tree-mf-bg, var(--accent-soft, rgba(99, 169, 255, 0.18)));
-  color: var(--tree-mf-fg, var(--accent, #6aa9ff));
-  border: 1px solid var(--tree-mf-edge, var(--accent, #6aa9ff));
+  background: var(--tree-mf-bg, var(--accent-soft));
+  color: var(--tree-mf-fg, var(--accent));
+  border: 1px solid var(--tree-mf-edge, var(--accent));
 }
 .cc-tree-icon--adf {
   background: var(--tree-adf-bg, rgba(255, 184, 92, 0.18));
@@ -101,4 +101,3 @@
 .cc-sw code {
   color: var(--accent);
 }
-

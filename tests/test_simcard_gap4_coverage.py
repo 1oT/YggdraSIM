@@ -17,7 +17,7 @@ a real UICC always exposes but the simulator was missing:
   CIN (00 45).
 * 3GPP TS 31.111 / TS 102 223 envelope dispatch by tag. The previous
   router treated every non-Event-Download envelope as SMS-PP; D2/D3/D4
-  /D5/D7/D8 now follow their spec-defined response shapes.
+  /D5/D7/D9 now follow their spec-defined response shapes.
 * SAIP profileHeader.connectivityParameters → SimProfileEntry. The
   bytes flow from the SAIP image into the entry so SGP.32 §5.9.24
   GetConnectivityParameters returns the same TLV stream a real card
@@ -192,7 +192,7 @@ class GetDataExtendedTagTests(unittest.TestCase):
         self.state = SimCardState(
             atr=b"",
             eid="89049032123451234512345678901235",
-            iccid="8949000000000000001",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="testsmdpplus.example.com",
             root_ci_pkid=b"",
@@ -245,8 +245,8 @@ class EnvelopeDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
-            iccid="8949000000000000001",
+            eid="89049032123451234512345678901235",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",
@@ -305,8 +305,9 @@ class EnvelopeDispatchTests(unittest.TestCase):
         self.assertEqual((data, sw1, sw2), (b"", 0x90, 0x00))
         self.assertEqual(len(self.fallback_called), 0)
 
-    def test_d8_ussd_download_returns_allowed_response(self) -> None:
-        envelope = bytes.fromhex("D803 0F02 41".replace(" ", ""))
+    def test_d9_ussd_download_returns_allowed_response(self) -> None:
+        # USSD download is 'D9' per TS 31.111 clause 9.1, not 'D8'.
+        envelope = bytes.fromhex("D903 0F02 41".replace(" ", ""))
         data, sw1, sw2 = self.toolkit.handle_envelope(envelope, self._fallback)
         self.assertEqual((sw1, sw2), (0x90, 0x00))
         tag, value, _raw, _next = read_tlv(data, 0)
@@ -321,14 +322,14 @@ class SaipConnectivityParametersTests(unittest.TestCase):
         image = SimProfileImage()
         decoded = {
             "profileType": "Test Profile",
-            "iccid": bytes.fromhex("8949000000000000001F"),
+            "iccid": bytes.fromhex("8988000000000000001F"),
             "connectivityParameters": bytes.fromhex(
                 "A118350702000003000002470D085465726D696E616C0361706E"
             ),
         }
         _consume_profile_element(image, "header", decoded)
         self.assertEqual(image.profile_name, "Test Profile")
-        self.assertTrue(image.iccid.startswith("89490000"))
+        self.assertTrue(image.iccid.startswith("89880000"))
         self.assertEqual(
             image.connectivity_params_http,
             bytes.fromhex(
@@ -340,7 +341,7 @@ class SaipConnectivityParametersTests(unittest.TestCase):
         image = SimProfileImage()
         decoded = {
             "profileType": "Test Profile",
-            "iccid": bytes.fromhex("8949000000000000001F"),
+            "iccid": bytes.fromhex("8988000000000000001F"),
         }
         _consume_profile_element(image, "header", decoded)
         self.assertEqual(image.connectivity_params_http, b"")

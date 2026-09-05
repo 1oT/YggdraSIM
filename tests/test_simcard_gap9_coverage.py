@@ -270,8 +270,8 @@ class _ToolkitHarness(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
-            iccid="8949000000000000001",
+            eid="89049032123451234512345678901235",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",

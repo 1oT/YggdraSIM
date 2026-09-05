@@ -17,16 +17,16 @@
 }
 
 .cc-path-drop-target.cc-path-drop-hover {
-  box-shadow: 0 0 0 2px var(--accent, #88c0d0);
-  border-radius: var(--radius-sm, 6px);
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: var(--radius-sm);
 }
 
 .cc-path-drop-target.cc-path-drop-hover::after {
-  content: "drop to paste path";
+  content: "Drop to use this path";
   position: absolute;
   inset: auto 0 -22px 0;
   font-size: 11px;
-  color: var(--accent, #88c0d0);
+  color: var(--accent);
   letter-spacing: 0.03em;
   text-transform: uppercase;
   pointer-events: none;
@@ -35,8 +35,8 @@
 }
 
 .cc-path-input.cc-path-drop-hover {
-  background: var(--accent-soft, rgba(136, 192, 208, 0.16));
-  border-color: var(--accent, #88c0d0);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .cc-checkbox {
@@ -45,11 +45,13 @@
   gap: 8px;
   color: var(--fg-muted);
   font-size: 13px;
+  min-height: 36px;
+  cursor: pointer;
 }
 
 .cc-checkbox input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   accent-color: var(--accent);
 }
 
@@ -66,7 +68,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12.5px;
-  color: var(--fg-muted, #c0c5d4);
+  color: var(--fg-muted);
   cursor: pointer;
   user-select: none;
 }
@@ -77,16 +79,45 @@
 }
 
 .cc-action-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
   font-size: 12px;
   font-family: var(--font-mono);
   color: var(--fg-muted);
-  padding: 4px 10px;
+  padding: 4px 11px;
   border-radius: var(--radius-pill);
   background: var(--bg-hover);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.cc-action-status[data-state="running"],
+.cc-action-status[data-state="starting"],
+.cc-action-status[data-state="cancelling"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: var(--accent-soft);
+}
+
+.cc-action-status[data-state="success"] {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 48%, var(--border));
+  background: var(--ok-soft);
+}
+
+.cc-action-status[data-state="error"],
+.cc-action-status[data-state="blocked"] {
+  color: var(--fail);
+  border-color: color-mix(in srgb, var(--fail) 48%, var(--border));
+  background: var(--fail-soft);
 }
 
 .cc-action-result {
   margin-top: 14px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  scroll-margin-block: 12px;
 }
 
 .cc-action-result:empty {
@@ -94,7 +125,7 @@
 }
 
 .cc-error {
-  background: var(--fail-soft, rgba(191, 97, 106, 0.14));
+  background: var(--fail-soft);
   border-left: 3px solid var(--fail);
   color: var(--fail);
   padding: 10px 14px;
@@ -102,11 +133,18 @@
   font-family: var(--font-mono);
   font-size: 12.5px;
   white-space: pre-wrap;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cc-error:focus {
+  outline: 2px solid color-mix(in srgb, var(--fail) 55%, transparent);
+  outline-offset: 2px;
 }
 
 .cc-json,
 .cc-hex {
-  background: var(--code-bg, var(--bg-hover));
+  background: var(--code-bg);
   color: var(--fg);
   padding: 12px 14px;
   border-radius: var(--radius-md);
@@ -138,3 +176,9 @@
   color: var(--fg);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .cc-path-drop-target,
+  .cc-action-status {
+    transition: none;
+  }
+}

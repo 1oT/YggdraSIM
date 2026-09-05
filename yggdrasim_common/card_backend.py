@@ -8,8 +8,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
+import tempfile
 import time
+import uuid
 from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -26,6 +29,7 @@ CARD_RELAY_URL_ENV = "YGGDRASIM_CARD_RELAY_URL"
 CARD_RELAY_TOKEN_ENV = "YGGDRASIM_CARD_RELAY_TOKEN"
 CARD_RELAY_TOKEN_FILE_ENV = "YGGDRASIM_CARD_RELAY_TOKEN_FILE"
 SIM_QUIRKS_ENV = "YGGDRASIM_SIM_QUIRKS"
+SIM_BEHAVIOUR_PROFILE_ENV = "YGGDRASIM_SIM_BEHAVIOUR_PROFILE"
 SIM_ISDR_CONFIG_ENV = "YGGDRASIM_SIM_ISDR_CONFIG"
 SIM_EIM_IDENTITY_ENV = "YGGDRASIM_SIM_EIM_IDENTITY"
 SIM_EUICC_STORE_ENV = "YGGDRASIM_SIM_EUICC_STORE"
@@ -44,6 +48,7 @@ SIM_QUIRKS_PATH_DISABLED_ALIASES = ("none", "off", "disabled", "disable")
 CARD_BACKEND_SETTINGS_FILENAME = "card_backend.json"
 _SETTINGS_KEY_CARD_BACKEND = "card_backend"
 _SETTINGS_KEY_SIM_QUIRKS_PATH = "sim_quirks_path"
+_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH = "sim_behaviour_profile_path"
 _SETTINGS_KEY_SIM_ISDR_CONFIG_PATH = "sim_isdr_config_path"
 _SETTINGS_KEY_SIM_EIM_IDENTITY_PATH = "sim_eim_identity_path"
 _SETTINGS_KEY_SIM_EUICC_STORE_ROOT = "sim_euicc_store_root"
@@ -57,6 +62,8 @@ SETTING_SOURCE_SAVED_SELECTION = "saved selection"
 SETTING_SOURCE_DISABLED = "disabled"
 CARD_RELAY_MARKER_FILENAME = "hil_bridge_card_relay.json"
 DEFAULT_CARD_RELAY_TIMEOUT_SECONDS = 30
+MAX_CARD_RELAY_RESPONSE_BYTES = 1024 * 1024
+MAX_CARD_RELAY_ERROR_DETAIL_CHARS = 512
 
 
 def normalize_card_backend(value: Any, default: str = CARD_BACKEND_READER) -> str:
@@ -438,6 +445,83 @@ def get_sim_quirks_path() -> str:
     return ""
 
 
+def get_default_sim_behaviour_profile_path() -> str:
+    """Default location for a charted card-behaviour profile."""
+    return os.path.join(
+        ensure_workspace_dir("SIMCARD", "behaviour_profiles"),
+        "card_behaviour_profile.json",
+    )
+
+
+def get_sim_behaviour_profile_path() -> str:
+    """Return the configured card-behaviour profile path, or "".
+
+    Mirrors :func:`get_sim_quirks_path`: the environment wins over the
+    persisted setting, and the shipped default is only used when the file
+    actually exists, so a stock checkout boots on the built-in personality.
+    """
+    configured = str(os.environ.get(SIM_BEHAVIOUR_PROFILE_ENV, "") or "").strip()
+    if _is_sim_quirks_disabled_sentinel(configured):
+        return ""
+    if len(configured) > 0:
+        return os.path.abspath(os.path.expanduser(configured))
+    persisted = _get_persisted_setting(_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH)
+    if _is_sim_quirks_disabled_sentinel(persisted):
+        return ""
+    if len(persisted) > 0:
+        return os.path.abspath(os.path.expanduser(persisted))
+    default_path = get_default_sim_behaviour_profile_path()
+    if os.path.isfile(default_path):
+        return default_path
+    return ""
+
+
+def set_sim_behaviour_profile_path(path: str, *, persist: bool = True) -> str:
+    """Point the simulator at a behaviour profile, or clear the selection.
+
+    Mirrors :func:`set_sim_quirks_path`. An empty path clears the setting
+    so the resolver falls back to its default probe; a disable sentinel
+    (``none`` / ``off`` / ``disabled``) records the canonical sentinel so
+    the resolver returns "" and does not fall through to a profile left
+    at the default location.
+    """
+    normalized = str(path or "").strip()
+    if len(normalized) == 0:
+        os.environ.pop(SIM_BEHAVIOUR_PROFILE_ENV, None)
+        if persist:
+            _try_persist_setting(_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH, "")
+        return ""
+    if _is_sim_quirks_disabled_sentinel(normalized):
+        os.environ[SIM_BEHAVIOUR_PROFILE_ENV] = SIM_QUIRKS_PATH_NONE
+        if persist:
+            _try_persist_setting(
+                _SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH, SIM_QUIRKS_PATH_NONE
+            )
+        return SIM_QUIRKS_PATH_NONE
+    absolute_path = os.path.abspath(os.path.expanduser(normalized))
+    os.environ[SIM_BEHAVIOUR_PROFILE_ENV] = absolute_path
+    if persist:
+        _try_persist_setting(_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH, absolute_path)
+    return absolute_path
+
+
+def get_sim_behaviour_profile_source() -> str:
+    """Return the effective source label for the behaviour-profile path."""
+    raw_configured = str(os.environ.get(SIM_BEHAVIOUR_PROFILE_ENV, "") or "").strip()
+    raw_persisted = _get_persisted_setting(_SETTINGS_KEY_SIM_BEHAVIOUR_PROFILE_PATH)
+    if _is_sim_quirks_disabled_sentinel(raw_configured):
+        return SETTING_SOURCE_DISABLED
+    if _is_sim_quirks_disabled_sentinel(raw_persisted):
+        return SETTING_SOURCE_DISABLED
+    if len(_normalize_optional_path(raw_configured)) > 0:
+        return SETTING_SOURCE_SESSION_OVERRIDE
+    if len(_normalize_optional_path(raw_persisted)) > 0:
+        return SETTING_SOURCE_SAVED_OVERRIDE
+    if os.path.isfile(get_default_sim_behaviour_profile_path()):
+        return SETTING_SOURCE_WORKSPACE_DEFAULT
+    return SETTING_SOURCE_DISABLED
+
+
 def get_default_sim_profile_store_path() -> str:
     return ensure_workspace_dir("SIMCARD", "profile_store")
 
@@ -524,8 +608,59 @@ def get_sim_quirks_source() -> str:
     return SETTING_SOURCE_WORKSPACE_DEFAULT
 
 
-def _card_relay_marker_path() -> str:
+def card_relay_marker_path() -> str:
+    """Return the shared Card Bridge/HIL relay marker path.
+
+    This lives in the portable card-backend module because clean desktop
+    bundles intentionally omit the Linux-only HIL runtime.
+    """
     return runtime_path("state", CARD_RELAY_MARKER_FILENAME)
+
+
+def write_card_relay_marker(payload: dict[str, Any]) -> str:
+    """Atomically publish *payload* and return the relay marker path."""
+    if isinstance(payload, dict) is False:
+        raise TypeError("card relay marker payload must be a dictionary")
+    marker_path = card_relay_marker_path()
+    marker_directory = os.path.dirname(marker_path)
+    os.makedirs(marker_directory, exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f".{CARD_RELAY_MARKER_FILENAME}.",
+        suffix=".tmp",
+        dir=marker_directory,
+    )
+    try:
+        try:
+            os.chmod(temporary_path, 0o600)
+        except OSError:
+            pass
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary_path, marker_path)
+    except Exception:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.remove(temporary_path)
+        except OSError:
+            pass
+        raise
+    return marker_path
+
+
+def clear_card_relay_marker() -> None:
+    """Remove the relay marker, tolerating a missing or locked file."""
+    try:
+        os.remove(card_relay_marker_path())
+    except (FileNotFoundError, OSError):
+        return
+
+
+def _card_relay_marker_path() -> str:
+    """Compatibility alias for older private callers."""
+    return card_relay_marker_path()
 
 
 def _normalize_card_relay_url(value: Any) -> str:
@@ -539,21 +674,41 @@ def _normalize_card_relay_url(value: Any) -> str:
     return text.rstrip("/") + "/apdu"
 
 
-def _build_card_relay_status_url(apdu_url: str) -> str:
+def _mint_card_relay_session_id() -> str:
+    """Return a process-unique relay session id.
+
+    Only has to be unique among the sessions one bridge sees, so the
+    pid plus a random suffix is plenty and stays readable in the
+    bridge log lines that quote it.
+    """
+    return f"ygg-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def _build_card_relay_sibling_url(apdu_url: str, leaf: str) -> str:
+    """Return the relay URL for *leaf* alongside the ``/apdu`` endpoint."""
+    normalized_leaf = "/" + str(leaf or "").strip().strip("/")
     parsed = urlparse(apdu_url)
     normalized_path = parsed.path.rstrip("/")
     if normalized_path.endswith("/apdu"):
-        status_path = normalized_path[: -len("/apdu")] + "/status"
+        sibling_path = normalized_path[: -len("/apdu")] + normalized_leaf
     elif normalized_path == "":
-        status_path = "/status"
+        sibling_path = normalized_leaf
     else:
-        status_path = normalized_path + "/status"
-    return urlunparse((parsed.scheme, parsed.netloc, status_path, "", "", ""))
+        sibling_path = normalized_path + normalized_leaf
+    return urlunparse((parsed.scheme, parsed.netloc, sibling_path, "", "", ""))
 
 
-def _read_card_relay_marker_payload() -> dict[str, Any]:
+def _build_card_relay_status_url(apdu_url: str) -> str:
+    return _build_card_relay_sibling_url(apdu_url, "status")
+
+
+def _build_card_relay_card_reset_url(apdu_url: str) -> str:
+    return _build_card_relay_sibling_url(apdu_url, "card/reset")
+
+
+def read_card_relay_marker() -> dict[str, Any]:
     """Return the parsed marker payload, or an empty dict on any failure."""
-    marker_path = _card_relay_marker_path()
+    marker_path = card_relay_marker_path()
     if os.path.isfile(marker_path) is False:
         return {}
     try:
@@ -570,6 +725,11 @@ def _read_card_relay_marker_payload() -> dict[str, Any]:
     if isinstance(payload, dict) is False:
         return {}
     return payload
+
+
+def _read_card_relay_marker_payload() -> dict[str, Any]:
+    """Compatibility alias for older private callers."""
+    return read_card_relay_marker()
 
 
 def _resolve_card_relay_url() -> tuple[str, str]:
@@ -660,24 +820,74 @@ def _request_card_relay_json(
             request,
             timeout=max(1, int(timeout_seconds or DEFAULT_CARD_RELAY_TIMEOUT_SECONDS)),
         ) as response:
-            raw_payload = response.read().decode("utf-8")
+            raw_bytes = response.read(MAX_CARD_RELAY_RESPONSE_BYTES + 1)
+            if len(raw_bytes) > MAX_CARD_RELAY_RESPONSE_BYTES:
+                raise RuntimeError(
+                    "Card relay response exceeds the 1 MiB safety limit."
+                )
+            raw_payload = raw_bytes.decode("utf-8", errors="replace")
     except urllib_error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace").strip()
-        detail = error_body or str(exc.reason)
-        raise RuntimeError(f"Card relay HTTP {exc.code}: {detail}") from exc
+        try:
+            error_bytes = exc.read(MAX_CARD_RELAY_RESPONSE_BYTES + 1)
+        except OSError:
+            error_bytes = b""
+        if len(error_bytes) > MAX_CARD_RELAY_RESPONSE_BYTES:
+            detail = "error response exceeded the 1 MiB safety limit"
+        else:
+            detail = _safe_card_relay_error_detail(
+                error_bytes.decode("utf-8", errors="replace"),
+                auth_token=auth_token,
+            )
+        raise RuntimeError(
+            f"Card relay HTTP {exc.code}: {detail or 'request rejected'}"
+        ) from exc
     except urllib_error.URLError as exc:
-        raise RuntimeError(f"Card relay connection failed: {exc}") from exc
+        reason = getattr(exc, "reason", exc)
+        raise RuntimeError(
+            f"Card relay connection failed ({type(reason).__name__})."
+        ) from exc
+    except TimeoutError as exc:
+        raise RuntimeError("Card relay connection timed out.") from exc
+    except OSError as exc:
+        raise RuntimeError(
+            f"Card relay connection failed ({type(exc).__name__})."
+        ) from exc
 
     try:
         payload = json.loads(raw_payload) if len(raw_payload) > 0 else {}
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Card relay returned invalid JSON: {raw_payload}") from exc
+        raise RuntimeError("Card relay returned invalid JSON.") from exc
     if isinstance(payload, dict) is False:
         raise RuntimeError("Card relay response is not a JSON object.")
     error_text = str(payload.get("error", "") or "").strip()
     if len(error_text) > 0:
-        raise RuntimeError(error_text)
+        raise RuntimeError(
+            _safe_card_relay_error_detail(error_text, auth_token=auth_token)
+            or "Card relay rejected the request."
+        )
     return payload
+
+
+def _safe_card_relay_error_detail(raw_text: str, *, auth_token: str = "") -> str:
+    """Return a short single-line relay error without credentials."""
+
+    text = str(raw_text or "").strip()
+    if len(text) == 0:
+        return ""
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        text = str(parsed.get("error") or parsed.get("message") or "").strip()
+    token = str(auth_token or "").strip()
+    if token:
+        text = text.replace(token, "<redacted>")
+    text = re.sub(r"(?i)(authorization\s*:\s*bearer|bearer)\s+\S+", r"\1 <redacted>", text)
+    text = " ".join(text.split())
+    if len(text) > MAX_CARD_RELAY_ERROR_DETAIL_CHARS:
+        text = text[:MAX_CARD_RELAY_ERROR_DETAIL_CHARS].rstrip() + "…"
+    return text
 
 
 class RelayCardConnection:
@@ -687,16 +897,30 @@ class RelayCardConnection:
         timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS,
         *,
         auth_token: str = "",
+        session_id: str = "",
     ):
         normalized_endpoint = _normalize_card_relay_url(endpoint)
         if len(normalized_endpoint) == 0:
             raise RuntimeError("Invalid card relay endpoint.")
         self._endpoint = normalized_endpoint
         self._status_url = _build_card_relay_status_url(normalized_endpoint)
+        self._card_reset_url = _build_card_relay_card_reset_url(normalized_endpoint)
         self._timeout_seconds = max(1, int(timeout_seconds or DEFAULT_CARD_RELAY_TIMEOUT_SECONDS))
         self._auth_token = str(auth_token or "").strip()
         self._connected = False
         self._atr: list[int] = []
+        # Identifies this shell's work to the relay. The bridge
+        # power-cycles the card when the id first appears and again
+        # when :meth:`disconnect` reports the session closed, so
+        # secure-channel and logical-channel state cannot leak between
+        # a shell session and whatever touches the card next.
+        self._session_id = str(session_id or "").strip() or _mint_card_relay_session_id()
+        self._session_announced = False
+
+    @property
+    def session_id(self) -> str:
+        """Return the relay session id this connection transacts under."""
+        return self._session_id
 
     @property
     def auth_token(self) -> str:
@@ -715,7 +939,35 @@ class RelayCardConnection:
         self._connected = True
 
     def disconnect(self) -> None:
+        """Close the relay session and hand a clean card back.
+
+        Best-effort by design: this runs on shell teardown, so a relay
+        that has already gone away, a revoked token, or a slow link
+        must not turn "the shell exited" into a traceback. Failing to
+        notify only costs the next consumer a dirty card, which is the
+        pre-existing behaviour.
+        """
+        was_announced = self._session_announced
         self._connected = False
+        self._session_announced = False
+        if was_announced is False:
+            # Nothing ever reached the card under this session id, so
+            # there is no state to clear and no reason to bounce a
+            # modem that may be mid-session.
+            return
+        try:
+            self._request_json(
+                self._card_reset_url,
+                method="POST",
+                request_json={"sessionId": self._session_id, "boundary": "end"},
+            )
+        except Exception as relay_error:  # noqa: BLE001 - teardown must not raise
+            _LOGGER.debug(
+                "card_backend: relay session end for %s was not acknowledged (%s: %s).",
+                self._session_id,
+                relay_error.__class__.__name__,
+                relay_error,
+            )
 
     def getATR(self):
         if self._connected is False:
@@ -730,8 +982,15 @@ class RelayCardConnection:
         payload = self._request_json(
             self._endpoint,
             method="POST",
-            request_json={"apdu": apdu_bytes.hex().upper()},
+            request_json={
+                "apdu": apdu_bytes.hex().upper(),
+                "sessionId": self._session_id,
+            },
         )
+        # Marked only after the first APDU is accepted, so a session
+        # that never reached the card does not trigger an end-of-session
+        # power-cycle on teardown.
+        self._session_announced = True
         data_hex = str(payload.get("data", "") or "").strip()
         sw1_hex = str(payload.get("sw1", "") or "").strip()
         sw2_hex = str(payload.get("sw2", "") or "").strip()

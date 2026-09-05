@@ -77,7 +77,14 @@ all of the following callables:
 
 - `extend_target(target)`
 - `handle_command(surface, command_name, target, argument)`
+- `register(mcp)` for the `mcp_extensions` capability, which adds tools,
+  resources, and prompts to the MCP server
 - any capability-specific parser or dispatcher the owning surface documents
+
+`mcp_extensions` is the route for operator-specific MCP surfaces: real PLMNs,
+house profile rules, and rig inventory stay here rather than in the published
+server. See `site-docs/internals/plugin-contract.md` for the provider shape and
+the failure handling around it.
 
 Capabilities may expose additional methods, but the core must always treat them
 as optional and capability-scoped.
@@ -121,6 +128,17 @@ class MyDiagnosticsCapability:
 def register_plugins(manager):
     manager.register_capability("example.diagnostics", MyDiagnosticsCapability())
 ```
+
+## Not every plugin is a capability provider
+
+A plugin may exist purely as internal tooling and register nothing. The
+pre-release sanitizer is the worked example: it holds the identifier rules
+this tree is scrubbed against, which cannot ship for the reason the rules
+themselves describe, and it deliberately exposes no MCP tool. Deciding
+whether a tree is publishable is a maintainer's call, not an agent's.
+
+Such a plugin needs no `register_plugins`; the loader skips it without
+complaint.
 
 ## Design notes
 

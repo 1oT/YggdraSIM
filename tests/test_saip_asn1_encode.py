@@ -45,7 +45,6 @@ from Tools.ProfilePackage.saip_asn1_decode import (
     _decode_rotation_constants,
     _decode_scalar_special_field,
     _decode_smss,
-    _decode_special_field,
     _decode_start_hfn,
     _decode_tar_value,
     _decode_three_byte_counter,

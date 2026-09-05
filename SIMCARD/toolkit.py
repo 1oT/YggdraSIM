@@ -6,9 +6,10 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 from typing import Any
 
-from SIMCARD.state import SimCardState, SimToolkitMenuItem
+from SIMCARD.state import SimCardState, SimToolkitMenuItem, append_bounded
 from SIMCARD.utils import read_tlv, tlv
 from Tools.HilBridge.protocol import (
     REFRESH_MODE_EUICC_PROFILE_STATE_CHANGE,
@@ -18,6 +19,7 @@ from Tools.HilBridge.protocol import (
 )
 from yggdrasim_common.plugin_runtime import extend_target_with_plugins
 
+# Type of Command values, ETSI TS 102 223 table 9.4.
 REFRESH_COMMAND = 0x01
 MORE_TIME_COMMAND = 0x02
 POLL_INTERVAL_COMMAND = 0x03
@@ -28,11 +30,11 @@ DECLARE_SERVICE_COMMAND = 0x47
 SERVICE_SEARCH_COMMAND = 0x45
 GET_SERVICE_INFORMATION_COMMAND = 0x46
 PERFORM_CARD_APDU_COMMAND = 0x30
-POWER_OFF_CARD_COMMAND = 0x31
-POWER_ON_CARD_COMMAND = 0x32
+POWER_ON_CARD_COMMAND = 0x31
+POWER_OFF_CARD_COMMAND = 0x32
 GET_READER_STATUS_COMMAND = 0x33
-SET_FRAMES_COMMAND = 0x60
-GET_FRAMES_STATUS_COMMAND = 0x61
+SET_FRAMES_COMMAND = 0x50
+GET_FRAMES_STATUS_COMMAND = 0x51
 SET_UP_CALL_COMMAND = 0x10
 SEND_SS_COMMAND = 0x11
 SEND_USSD_COMMAND = 0x12
@@ -352,13 +354,13 @@ class ToolkitLogic:
         ``D5`` MO Short Message Control     → spec-shaped Allowed reply.
         ``D6`` Event Download               → handled locally (existing).
         ``D7`` Timer Expiration             → recorded; SW=9000.
-        ``D8`` USSD Download                → spec-shaped Allowed reply.
+        ``D9`` USSD Download                → spec-shaped Allowed reply.
 
         Anything else falls through to the legacy SCP80 handler so
         plaintext OTA flows keep working.
         """
         normalized = bytes(payload or b"")
-        self.state.toolkit.envelope_history.append(normalized)
+        append_bounded(self.state.toolkit.envelope_history, normalized)
         envelope_tag = normalized[:1] if len(normalized) > 0 else b""
 
         if envelope_tag == b"\xD6":
@@ -434,11 +436,16 @@ class ToolkitLogic:
                 return self._pending_status()
             return response, 0x90, 0x00
 
-        if envelope_tag == b"\xD8":
-            # 3GPP TS 31.111 §7.3.3 USSD Download. Body carries
-            # the network-side USSD String (TLV 8A = DCS + text);
-            # round 19 decodes both halves into ``state.toolkit``.
-            # The reply remains "Allowed, no modification".
+        if envelope_tag == b"\xD9":
+            # 3GPP TS 31.111 §7.3.3 USSD Download. The tag is 'D9', not
+            # 'D8': clause 9.1 assigns USSD download to 'D9' and 'D8' is
+            # reserved for intra-UICC communication (ETSI TS 101 220
+            # §7.2). A 'D8' envelope therefore falls through to the OTA
+            # handler below rather than being answered as USSD -- a
+            # conformance simulator must not accept a tag no conformant
+            # terminal sends. Body carries the network-side USSD String
+            # (TLV 8A = DCS + text), decoded into ``state.toolkit``; the
+            # reply remains "Allowed, no modification".
             self._apply_ussd_download_envelope(normalized)
             response = bytes.fromhex("80 01 00".replace(" ", ""))
             if len(self.state.pending_fetch_queue) > 0:
@@ -999,7 +1006,7 @@ class ToolkitLogic:
         default_frame_identifier: int = 0,
         qualifier: int = 0x00,
     ) -> dict[str, str | int | list[str]]:
-        """ETSI TS 102 223 §6.4.36 SET FRAMES (proactive type 0x60).
+        """ETSI TS 102 223 §6.4.36 SET FRAMES (proactive type 0x50).
 
         Builds the proactive command body with:
 
@@ -1035,7 +1042,7 @@ class ToolkitLogic:
         *,
         qualifier: int = 0x00,
     ) -> dict[str, str | int | list[str]]:
-        """ETSI TS 102 223 §6.4.37 GET FRAMES STATUS (type 0x61).
+        """ETSI TS 102 223 §6.4.37 GET FRAMES STATUS (type 0x51).
 
         Empty body. The terminal returns a Frames Information TLV
         (``49`` / ``C9``) carrying the negotiated frames count and
@@ -1190,11 +1197,35 @@ class ToolkitLogic:
             return
         if len(bytes(toolkit.active_proactive_command or b"")) > 0:
             return
+        live_network = str(
+            os.environ.get("YGGDRASIM_SIMCARD_ALLOW_LIVE_BIP", "")
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if not live_network:
+            toolkit.bip_bootstrap_phase = "offline_disabled"
+            toolkit.bip_bootstrap_dns_query = b""
+            toolkit.bip_bootstrap_resolved_address = ""
+            return
         toolkit.bip_bootstrap_phase = "dns_open"
         toolkit.bip_bootstrap_dns_query = self._build_bootstrap_dns_query()
         toolkit.bip_bootstrap_resolved_address = ""
+        resolver = str(
+            os.environ.get(
+                "YGGDRASIM_SIMCARD_BIP_DNS_RESOLVER",
+                "192.0.2.53",
+            )
+        ).strip()
+        try:
+            resolver_address = ipaddress.ip_address(resolver)
+        except ValueError as error:
+            raise ValueError(
+                "YGGDRASIM_SIMCARD_BIP_DNS_RESOLVER must be an IP address"
+            ) from error
+        if resolver_address.is_unspecified or resolver_address.is_multicast:
+            raise ValueError(
+                "YGGDRASIM_SIMCARD_BIP_DNS_RESOLVER is not a usable endpoint"
+            )
         self.queue_open_channel(
-            remote_address="8.8.8.8",
+            remote_address=resolver,
             remote_port=53,
             transport_protocol_type=0x01,
             immediate=False,
@@ -1203,9 +1234,28 @@ class ToolkitLogic:
 
     @staticmethod
     def _build_bootstrap_dns_query() -> bytes:
+        configured_name = str(
+            os.environ.get(
+                "YGGDRASIM_SIMCARD_BIP_BOOTSTRAP_NAME",
+                "bootstrap.example",
+            )
+        ).strip().strip(".").lower()
+        raw_labels = configured_name.split(".")
+        if (
+            not raw_labels
+            or any(
+                not label
+                or len(label.encode("ascii", errors="ignore")) != len(label)
+                or len(label) > 63
+                for label in raw_labels
+            )
+        ):
+            raise ValueError("SIMCARD BIP bootstrap DNS name is invalid")
         labels = b"".join(
-            bytes((len(label),)) + label
-            for label in (b"yggdrasim", b"1ot", b"com")
+            bytes((len(label_bytes),)) + label_bytes
+            for label_bytes in (
+                label.encode("ascii") for label in raw_labels
+            )
         )
         return (
             bytes.fromhex("123401000001000000000000")
@@ -2606,11 +2656,9 @@ class ToolkitLogic:
         channel_data = bytes(response_fields.get("channel_data", b"") or b"")
         toolkit.last_received_channel_data = channel_data
         if len(channel_data) > 0:
-            toolkit.received_channel_history.append(channel_data)
+            append_bounded(toolkit.received_channel_history, channel_data)
         if str(toolkit.bip_bootstrap_phase or "") == "dns_receive":
             resolved_address = self._extract_dns_a_record_address(channel_data)
-            if resolved_address.startswith("198.51.100."):
-                resolved_address = "194.29.54.4"
             if len(resolved_address) > 0:
                 toolkit.bip_bootstrap_resolved_address = resolved_address
             toolkit.bip_bootstrap_phase = "dns_close"
@@ -2638,24 +2686,22 @@ class ToolkitLogic:
         if event_code is not None:
             code_int = int(event_code) & 0xFF
             toolkit.last_event_code = code_int
-            toolkit.event_history.append(code_int)
-            if code_int == 0x07:
-                # §7.4.7 Idle Screen Available -- the modem signals
+            append_bounded(toolkit.event_history, code_int)
+            if code_int == 0x05:
+                # §7.5.6 Idle screen available -- the modem signals
                 # the home screen is idle, so SET UP IDLE MODE TEXT
                 # can run.
                 toolkit.idle_screen_available = True
-            elif code_int == 0x09:
-                # §7.4.9 Browser Termination -- cache the cause so an
-                # STK applet can decide whether to re-launch. The
-                # same opcode is reused by some vendors for §7.4.10
-                # Data Available; that path is signalled by the
-                # presence of TLV 0x37 (Channel Data Length) instead
-                # of the browser-termination-cause TLV. Both TLVs
-                # are accepted on the same envelope so neither side
-                # of the dispatch fights the other.
+            elif code_int == 0x08:
+                # §7.5.9 Browser termination -- cache the cause so an
+                # STK applet can decide whether to re-launch.
                 cause_value = event_fields.get("browser_termination_cause", None)
                 if cause_value is not None:
                     toolkit.last_browser_termination_cause = int(cause_value) & 0xFF
+            elif code_int == 0x09:
+                # §7.5.10 Data available. The pending byte count comes
+                # in TLV 0x37 (Channel Data Length); the BIP bootstrap
+                # uses it to size the follow-up RECEIVE DATA.
                 channel_length_value = event_fields.get("channel_length", None)
                 if channel_length_value is not None:
                     toolkit.last_data_available_channel_length = int(channel_length_value) & 0xFF
@@ -2670,8 +2716,8 @@ class ToolkitLogic:
                         if requested_length > 0:
                             toolkit.bip_bootstrap_phase = "dns_receive"
                             self.queue_receive_data(requested_length)
-            elif code_int == 0x0F:
-                # 3GPP TS 31.111 §7.5.13 Network Rejection event
+            elif code_int == 0x12:
+                # 3GPP TS 31.111 §7.5.2 Network Rejection event
                 # download. The cause-bytes blob is stashed for later
                 # OTA-side correlation.
                 cause_blob = bytes(
@@ -2679,26 +2725,8 @@ class ToolkitLogic:
                 )
                 if len(cause_blob) > 0:
                     toolkit.last_network_rejection_cause = cause_blob
-            elif code_int == 0x0A:
-                # ETSI TS 102 223 §7.4.10 SS event download. The
-                # body carries the SS-string sent by the network in
-                # TLV 0x89 (Called-party-BCD-Number, TS 31.111
-                # §10.3.27); the simulator stores the raw value
-                # bytes for an applet to inspect.
-                ss_blob = bytes(event_fields.get("ss_event_data", b"") or b"")
-                if len(ss_blob) > 0:
-                    toolkit.last_ss_event_data = ss_blob
-            elif code_int == 0x0B:
-                # ETSI TS 102 223 §7.4.10 USSD event download. The
-                # body carries the USSD-string under TLV 0x8A (raw
-                # DCS + text); the simulator caches both fields.
-                ussd_blob = bytes(event_fields.get("ussd_event_data", b"") or b"")
-                ussd_dcs = int(event_fields.get("ussd_event_dcs", 0) or 0)
-                if len(ussd_blob) > 0:
-                    toolkit.last_ussd_event_data = ussd_blob
-                    toolkit.last_ussd_event_dcs = ussd_dcs & 0xFF
-            elif code_int == 0x0C:
-                # ETSI TS 102 223 §7.4.12 Local Connection event
+            elif code_int == 0x0D:
+                # ETSI TS 102 223 §7.5.14 Local Connection event
                 # download. The status byte (TLV 0x40 channel-status
                 # high nibble) tells whether the connection was
                 # established (0x8X) or terminated (0x0X).
@@ -2707,7 +2735,7 @@ class ToolkitLogic:
                 )
                 toolkit.local_connection_active = (status_value & 0x80) != 0
             elif code_int == 0x13:
-                # 3GPP TS 31.111 §7.5.x / TS 102 223 §7.4.13 HCI
+                # ETSI TS 102 223 §7.5.18 HCI
                 # Connectivity Event. Reuses TLV 0x40 to carry the
                 # connection state (0x80 = gate connected, 0x00 =
                 # gate disconnected).
@@ -2716,7 +2744,7 @@ class ToolkitLogic:
                 )
                 toolkit.hci_connectivity_active = (status_value & 0x80) != 0
             elif code_int == 0x16:
-                # ETSI TS 102 223 §7.4.20 Contactless State Request.
+                # ETSI TS 102 223 §7.5.19 Contactless state request.
                 # The contactless front-end signals activation /
                 # deactivation via the same TLV 0x40 status byte
                 # used for Local Connection / HCI Connectivity. The
@@ -2726,8 +2754,8 @@ class ToolkitLogic:
                     event_fields.get("contactless_status", 0) or 0
                 )
                 toolkit.contactless_active = (status_value & 0x80) != 0
-            elif code_int == 0x18:
-                # 3GPP TS 31.111 §7.5.16 IMS Registration Event.
+            elif code_int == 0x17:
+                # 3GPP TS 31.111 §7.5.21 IMS Registration Event.
                 # The status byte is carried in TLV 0xB9 (registered
                 # = 0x01, deregistered = 0x00); the optional
                 # payload (TLV 0xBA) carries the registered URI.
@@ -2740,8 +2768,8 @@ class ToolkitLogic:
                 )
                 if len(payload_blob) > 0:
                     toolkit.last_ims_event_data = payload_blob
-            elif code_int == 0x19:
-                # 3GPP TS 31.111 §7.5.17 IMS Incoming Data Event.
+            elif code_int == 0x18:
+                # 3GPP TS 31.111 §7.5.20 Incoming IMS Data Event.
                 # The data blob (TLV 0xBA) carries the SIP/IMS
                 # payload that triggered the notification; the
                 # simulator caches it for an applet to inspect.
@@ -2751,7 +2779,7 @@ class ToolkitLogic:
                 if len(payload_blob) > 0:
                     toolkit.last_ims_event_data = payload_blob
             elif code_int == 0x00:
-                # ETSI TS 102 223 §7.4.0 MT Call Event Download.
+                # ETSI TS 102 223 §7.5.1 MT call event download.
                 # The terminal forwards the calling-party number
                 # (TLV 06/86), the optional sub-address (TLV 08/88)
                 # and a transaction identifier (TLV 1C/9C). The
@@ -2770,7 +2798,7 @@ class ToolkitLogic:
                 )
                 toolkit.call_active = False
             elif code_int == 0x01:
-                # §7.4.1 Call Connected Event. The terminal signals
+                # §7.5.2 Call connected event. The terminal signals
                 # that the previously notified call has reached the
                 # connected phase; we flip ``call_active`` to True
                 # so a polling applet sees the same state as a real
@@ -2780,7 +2808,7 @@ class ToolkitLogic:
                 ) & 0xFF
                 toolkit.call_active = True
             elif code_int == 0x02:
-                # §7.4.2 Call Disconnected Event. The terminal may
+                # §7.5.3 Call disconnected event. The terminal may
                 # carry a cause TLV (1B / 9B); when present it is
                 # cached so an applet can decide whether the call
                 # tear-down was network-initiated or user-initiated.
@@ -2794,12 +2822,12 @@ class ToolkitLogic:
                     toolkit.last_call_disconnected_cause = cause_blob
                 toolkit.call_active = False
             elif code_int == 0x04:
-                # §7.4.4 User Activity Event. No payload of interest
+                # §7.5.5 User activity event. No payload of interest
                 # in the simulator -- we just bump a monotonic
                 # counter so periodic polling can derive a delta.
                 toolkit.user_activity_count += 1
-            elif code_int == 0x0D:
-                # 3GPP TS 31.111 §7.5.4 Access Technology Change
+            elif code_int == 0x0B:
+                # ETSI TS 102 223 §7.5.12 Access Technology Change
                 # Event. The 1-byte indicator (TLV 0x3F / 0xBF)
                 # marks the new RAT; the simulator records both the
                 # current value and a count of transitions.
@@ -2809,8 +2837,8 @@ class ToolkitLogic:
                 if tech_value != toolkit.last_access_technology:
                     toolkit.access_technology_changes += 1
                 toolkit.last_access_technology = tech_value
-            elif code_int == 0x0E:
-                # ETSI TS 102 223 §7.4.14 Display Parameters Change
+            elif code_int == 0x0C:
+                # ETSI TS 102 223 §7.5.13 Display parameters changed
                 # Event. The TLV payload (0x46 / 0xC6) carries the
                 # new display parameters; the simulator stashes the
                 # raw blob plus a counter to support polling.
@@ -2821,7 +2849,7 @@ class ToolkitLogic:
                     toolkit.last_display_parameters = blob
                 toolkit.display_parameters_changes += 1
             elif code_int == 0x03:
-                # ETSI TS 102 223 §7.4.4 Location Status Event. The
+                # ETSI TS 102 223 §7.5.4 Location status event. The
                 # 1-byte status (TLV 0x9B / 0x1B) flags whether the
                 # MS has full, limited or no service. The simulator
                 # latches the latest reading and bumps an events-
@@ -2835,7 +2863,7 @@ class ToolkitLogic:
                     toolkit.location_status_changes += 1
                     self._queue_location_bip_dns_bootstrap()
             elif code_int == 0x10:
-                # ETSI TS 102 223 §7.4.16 Frames Information Change
+                # ETSI TS 102 223 §7.5.17 Frames Information changed
                 # Event. The terminal raises this when the user
                 # reshapes the display frames; the new layout is
                 # carried under TLV 0x49 (Frames Information). The
@@ -2850,7 +2878,7 @@ class ToolkitLogic:
                     toolkit.last_frames_information = blob
                 toolkit.frames_information_changes += 1
             elif code_int == 0x06:
-                # ETSI TS 102 223 §7.4.7 Card Reader Status Event
+                # ETSI TS 102 223 §7.5.7 Card reader status event
                 # (multi-card terminals). The 1-byte status TLV
                 # (0xA0 / 0x20) packs reader-present / powered flags
                 # together with the affected reader id; the
@@ -3141,7 +3169,7 @@ class ToolkitLogic:
     def _apply_ussd_download_envelope(self, payload: bytes) -> None:
         """3GPP TS 31.111 §7.3.3 USSD Download envelope decoder.
 
-        Walks the ``D8`` envelope and extracts the USSD String
+        Walks the ``D9`` envelope and extracts the USSD String
         TLV (``8A`` / ``0A``). Byte 0 is the GSM-7 / UCS-2 DCS
         per TS 23.038; bytes 1.. carry the encoded text. The
         simulator latches the DCS, the raw bytes, and a
@@ -3154,7 +3182,7 @@ class ToolkitLogic:
             )
         except ValueError:
             return
-        if outer_tag != b"\xD8":
+        if outer_tag != b"\xD9":
             return
         toolkit = self.state.toolkit
         toolkit.ussd_downloads_received += 1
@@ -3522,6 +3550,8 @@ class ToolkitLogic:
             0x02: "TCP CLIENT REMOTE",
             0x03: "TCP SERVER",
             0x04: "UDP LOCAL",
+            0x05: "TCP CLIENT LOCAL",
+            0x06: "DIRECT CHANNEL",
         }.get(int(protocol_type) & 0xFF, f"0x{int(protocol_type) & 0xFF:02X}")
 
     def _parse_proactive_command(self, payload: bytes) -> dict[str, object] | None:
@@ -3899,18 +3929,6 @@ class ToolkitLogic:
                 # network-rejection events. Stored verbatim.
                 fields["network_rejection_cause"] = value_bytes
                 continue
-            if tag_bytes == b"\x89":
-                # TS 102 223 §8.13 SS-string sent in an SS event
-                # download. Kept raw because the digit decode is
-                # already handled by ``_decode_dialled_digits``.
-                fields["ss_event_data"] = value_bytes
-                continue
-            if tag_bytes == b"\x8A" and len(value_bytes) >= 1:
-                # TS 102 223 §8.10 USSD-string. Byte 0 is the DCS,
-                # bytes 1.. are the encoded text (GSM-7, UCS-2, ..).
-                fields["ussd_event_dcs"] = int(value_bytes[0])
-                fields["ussd_event_data"] = value_bytes[1:]
-                continue
             if tag_bytes == b"\x40" and len(value_bytes) >= 1:
                 # TS 102 223 §8.56 Local Connection status doubles
                 # as the HCI Connectivity / Contactless State byte
@@ -3931,7 +3949,7 @@ class ToolkitLogic:
             if tag_bytes == b"\xBA":
                 # 3GPP TS 31.111 §8.104 IMS Data (TLV 0xBA). Carries
                 # the SIP / IMS payload for both IMS Registration
-                # (event 0x18) and IMS Incoming Data (event 0x19).
+                # (event '17') and Incoming IMS Data (event '18').
                 # The apply layer routes the same blob into the
                 # right cache based on the event code.
                 fields["ims_registration_data"] = value_bytes
@@ -3970,7 +3988,7 @@ class ToolkitLogic:
                 continue
             if tag_bytes in (b"\x46", b"\xC6"):
                 # TS 102 223 §8.86 Display Parameters. Carried by
-                # the §7.4.x Display Parameters Change event; the
+                # the §7.5.13 Display parameters changed event; the
                 # simulator stashes the raw TLV value because the
                 # internal structure (rows / columns / chars) varies
                 # across vendors.
@@ -3978,7 +3996,7 @@ class ToolkitLogic:
                 continue
             if tag_bytes in (b"\x49", b"\xC9"):
                 # TS 102 223 §8.81 Frames Information carried by the
-                # §7.4.16 Frames Information Change Event. The TLV
+                # §7.5.17 Frames Information changed event. The TLV
                 # body lays out the new frame partitioning chosen by
                 # the user; we keep the raw bytes because vendors
                 # encode the layout differently and the apply layer
@@ -3987,7 +4005,7 @@ class ToolkitLogic:
                 continue
             if tag_bytes in (b"\xA0", b"\x20") and len(value_bytes) >= 1:
                 # TS 102 223 §8.34 Card Reader Status TLV (carried
-                # by the §7.4.7 Card Reader Status event for multi
+                # by the §7.5.7 Card reader status event for multi
                 # card terminals). Byte 0 packs:
                 #   bits 7..6  card present / powered flags
                 #   bits 3..0  reader identifier (1..7; 0 = the ME)

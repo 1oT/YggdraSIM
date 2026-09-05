@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Dracula (canonical purple/cyan dark, zenodb / vim) ----------- */
 html[data-theme="dracula"] {
   --bg: #282a36;
@@ -15,7 +16,7 @@ html[data-theme="dracula"] {
   --border-strong: rgba(248, 248, 242, 0.28);
   --fg: #f8f8f2;
   --fg-dim: #d8d8c8;
-  --fg-muted: #6272a4;
+  --fg-muted: var(--fg-dim);
   --accent: #bd93f9;
   --accent-strong: #ff79c6;
   --accent-soft: rgba(189, 147, 249, 0.14);
@@ -40,4 +41,3 @@ html[data-theme="dracula"] {
     radial-gradient(circle at 8% 94%, rgba(255, 121, 198, 0.10), transparent 48%),
     radial-gradient(circle at 50% 45%, rgba(139, 233, 253, 0.05), transparent 56%);
 }
-

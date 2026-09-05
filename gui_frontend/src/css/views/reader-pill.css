@@ -5,37 +5,50 @@
 
 /* --- reader pill ----------------------------------------------------- */
 
+.topbar-reader-pill-group {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  position: relative;
+}
+
 .topbar-reader-pill {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  min-height: 32px;
   padding: 4px 10px 4px 8px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill, 999px);
+  border-radius: var(--radius-pill);
   color: var(--fg);
   font-size: 12.5px;
   line-height: 1.2;
   cursor: pointer;
   white-space: nowrap;
   max-width: 220px;
-  flex: 0 0 auto;
-  transition: background var(--transition-fast, 120ms),
-              border-color var(--transition-fast, 120ms),
-              box-shadow var(--transition-fast, 120ms);
+  flex: 0 1 auto;
+  transition: background var(--transition-fast),
+              border-color var(--transition-fast),
+              box-shadow var(--transition-fast);
   position: relative;
 }
 
 .topbar-reader-pill:hover {
-  background: var(--bg-hover, var(--bg-elev));
-  border-color: var(--accent-soft, var(--border));
+  background: var(--bg-hover);
+  border-color: var(--accent-soft);
+}
+
+.topbar-reader-pill:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .topbar-reader-pill.is-active {
-  background: var(--bg-selected, var(--bg-elev));
-  border-color: var(--accent, #4a90e2);
-  box-shadow: 0 0 0 1px var(--accent, #4a90e2) inset,
-              0 2px 8px -3px var(--accent-glow, rgba(74, 144, 226, 0.35));
+  background: var(--bg-selected);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset,
+              0 2px 8px -3px var(--accent-glow);
 }
 
 .topbar-reader-pill-dot {
@@ -43,37 +56,37 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--fg-dim, #999);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  background: var(--fg-dim);
+  box-shadow: 0 0 0 1px var(--border) inset;
 }
 
 /* Traffic-light colours. We use explicit palette entries rather than
    the semantic --ok / --warn / --err so the dots stay vivid across
    every theme (Nord / 1oT / Matrix) regardless of token overrides. */
 .topbar-reader-pill-dot--green {
-  background: #3fb950;
+  background: var(--ok);
   box-shadow:
-    0 0 0 1px rgba(63, 185, 80, 0.35),
-    0 0 6px 1px rgba(63, 185, 80, 0.55);
+    0 0 0 1px color-mix(in oklab, var(--ok) 35%, transparent),
+    0 0 6px 1px color-mix(in oklab, var(--ok) 55%, transparent);
 }
 
 .topbar-reader-pill-dot--yellow {
-  background: #d4a54a;
+  background: var(--warn);
   box-shadow:
-    0 0 0 1px rgba(212, 165, 74, 0.35),
-    0 0 6px 1px rgba(212, 165, 74, 0.55);
+    0 0 0 1px color-mix(in oklab, var(--warn) 35%, transparent),
+    0 0 6px 1px color-mix(in oklab, var(--warn) 55%, transparent);
 }
 
 .topbar-reader-pill-dot--red {
-  background: #d9534f;
+  background: var(--fail);
   box-shadow:
-    0 0 0 1px rgba(217, 83, 79, 0.35),
-    0 0 5px 1px rgba(217, 83, 79, 0.45);
+    0 0 0 1px color-mix(in oklab, var(--fail) 35%, transparent),
+    0 0 5px 1px color-mix(in oklab, var(--fail) 45%, transparent);
 }
 
 .topbar-reader-pill-dot--gray {
-  background: var(--fg-dim, #6a7380);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  background: var(--fg-dim);
+  box-shadow: 0 0 0 1px var(--border-strong) inset;
 }
 
 .topbar-reader-pill-label {
@@ -85,8 +98,8 @@
 
 .topbar-reader-pill-close {
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -98,16 +111,28 @@
   line-height: 1;
   cursor: pointer;
   padding: 0;
-  margin-left: 2px;
+  margin-left: -34px;
+  margin-right: 4px;
+  position: relative;
+  z-index: 1;
 }
 
 .topbar-reader-pill-close:hover {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
-  color: var(--err, #d9534f);
+  background: var(--bg-hover);
+  color: var(--err);
 }
 
-.topbar-reader-pill[data-session="inactive"] .topbar-reader-pill-close {
+.topbar-reader-pill-close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.topbar-reader-pill-group[data-session="inactive"] .topbar-reader-pill-close {
   display: none;
+}
+
+.topbar-reader-pill-group[data-session="active"] .topbar-reader-pill {
+  padding-right: 38px;
 }
 
 /* Short status tooltip strip below the pill — rendered on :hover via

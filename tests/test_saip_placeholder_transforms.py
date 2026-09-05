@@ -18,23 +18,23 @@ from Tools.ProfilePackage.saip_json_codec import TokenExpansionContext
 
 
 class SwapNibblesTransformTests(unittest.TestCase):
-    """Byte-wise nibble swap: 8949...0F → 9894...F0 (ETSI TS 102 221 §13.2 BCD)."""
+    """Byte-wise nibble swap: 8988...0F → 9888...F0 (ETSI TS 102 221 §13.2 BCD)."""
 
     def test_bracket_form_swaps_nibbles(self) -> None:
         ctx = TokenExpansionContext(
-            defs={"ICCID": {"hex": "8949001304080000016F"}},
+            defs={"ICCID": {"hex": "8988001304080000014F"}},
             style="bracket",
         )
         out = ctx.expand_mixed_hex("[SwapNibbles(ICCID)]").hex().upper()
-        self.assertEqual(out, "989400314080000010F6")
+        self.assertEqual(out, "988800314080000010F4")
 
     def test_brace_form_swaps_nibbles(self) -> None:
         ctx = TokenExpansionContext(
-            defs={"ICCID": {"hex": "8949001304080000016F"}},
+            defs={"ICCID": {"hex": "8988001304080000014F"}},
             style="brace",
         )
         out = ctx.expand_mixed_hex("{SwapNibbles(ICCID)}").hex().upper()
-        self.assertEqual(out, "989400314080000010F6")
+        self.assertEqual(out, "988800314080000010F4")
 
     def test_transform_composes_with_literal_hex(self) -> None:
         ctx = TokenExpansionContext(
@@ -69,6 +69,39 @@ class EncodeEfImsiTransformTests(unittest.TestCase):
         # 14-digit IMSI → byte 2 = (digit1<<4)|0x1 = 0x01, last byte gets the
         # F filler nibble in the high position after nibble swap (8F → F8).
         self.assertEqual(out, "0801101010325476F8")
+
+    def test_encode_ef_imsi_accepts_packed_bcd_with_trailing_filler(self) -> None:
+        ctx = TokenExpansionContext(
+            defs={"IMSI": {"hex": "001010123456789F"}},
+            style="bracket",
+        )
+        out = ctx.expand_mixed_hex("[EncodeEfImsi(IMSI)]").hex().upper()
+        self.assertEqual(out, "080910101032547698")
+
+    def test_encode_ef_imsi_rejects_malformed_ascii_instead_of_filtering(self) -> None:
+        ctx = TokenExpansionContext(
+            # ASCII bytes for "00101A123456789".
+            defs={"IMSI": {"hex": "303031303141313233343536373839"}},
+            style="bracket",
+        )
+        with self.assertRaisesRegex(ValueError, "decimal digits only"):
+            ctx.expand_mixed_hex("[EncodeEfImsi(IMSI)]")
+
+    def test_encode_ef_imsi_rejects_non_decimal_packed_bcd_nibble(self) -> None:
+        ctx = TokenExpansionContext(
+            defs={"IMSI": {"hex": "00101A123456789F"}},
+            style="bracket",
+        )
+        with self.assertRaisesRegex(ValueError, "non-decimal nibble"):
+            ctx.expand_mixed_hex("[EncodeEfImsi(IMSI)]")
+
+    def test_encode_ef_imsi_rejects_digits_after_packed_bcd_filler(self) -> None:
+        ctx = TokenExpansionContext(
+            defs={"IMSI": {"hex": "00101F123456789F"}},
+            style="bracket",
+        )
+        with self.assertRaisesRegex(ValueError, "digit after"):
+            ctx.expand_mixed_hex("[EncodeEfImsi(IMSI)]")
 
     def test_encode_ef_imsi_rejects_oversized_input(self) -> None:
         ctx = TokenExpansionContext(

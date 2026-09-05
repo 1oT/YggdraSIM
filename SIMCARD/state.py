@@ -5,11 +5,54 @@
 """Simulated SIM persistent state: profile FS nodes, auth config, PIN/PUK entries, and SD key records serialised to JSON."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 
 DEFAULT_SIM_ATR = bytes.fromhex("3B9F96801FC78031A073BE21136743200718000001A5")
+
+_DEFAULT_HISTORY_ENTRIES = 256
+
+
+def _resolve_history_cap() -> int:
+    raw = str(os.environ.get("YGGDRASIM_SIM_HISTORY_CAP", "")).strip()
+    if len(raw) == 0:
+        return _DEFAULT_HISTORY_ENTRIES
+    try:
+        parsed = int(raw, 10)
+    except ValueError:
+        return _DEFAULT_HISTORY_ENTRIES
+    if parsed < 1:
+        return _DEFAULT_HISTORY_ENTRIES
+    return parsed
+
+
+MAX_HISTORY_ENTRIES = _resolve_history_cap()
+
+_HistoryItem = TypeVar("_HistoryItem")
+
+
+def append_bounded(
+    target: list[_HistoryItem],
+    value: _HistoryItem,
+    maxlen: int = 0,
+) -> list[_HistoryItem]:
+    """Append *value* to *target*, dropping oldest entries past the cap.
+
+    The engine is a process-wide singleton, so a list that grows once per
+    APDU or per envelope grows for the life of the process. The list type
+    stays ``list`` -- callers that index ``[-1]``, compare against a
+    literal list, or take ``len(...)`` keep working; only entries older
+    than the cap disappear. ``maxlen`` of 0 means MAX_HISTORY_ENTRIES,
+    which ``YGGDRASIM_SIM_HISTORY_CAP`` overrides at import time.
+    """
+    cap = MAX_HISTORY_ENTRIES if maxlen <= 0 else maxlen
+    target.append(value)
+    excess = len(target) - cap
+    if excess > 0:
+        del target[:excess]
+    return target
 
 
 def _default_stk_imei_bcd() -> bytes:
@@ -591,25 +634,17 @@ class SimToolkitState:
     last_channel_data_sent: int = 0
     last_received_channel_data: bytes = b""
     received_channel_history: list[bytes] = field(default_factory=list)
-    # ETSI TS 102 223 §7.4 Event Download bookkeeping. The simulator
+    # ETSI TS 102 223 §7.5 Event Download bookkeeping. The simulator
     # records the most recent event-code delivered by the terminal so
     # an STK applet can poll "did we just see an idle-screen / browser
-    # termination / network-rejection notification". The history list
-    # is unbounded by design; tests trim it explicitly when needed.
+    # termination / network-rejection notification". Bounded by
+    # ``append_bounded``; the oldest entries drop past the cap.
     event_history: list[int] = field(default_factory=list)
     last_event_code: int = 0
     idle_screen_available: bool = False
     last_browser_termination_cause: int = 0
     last_network_rejection_cause: bytes = b""
-    # ETSI TS 102 223 §7.4.10 SS Event (0x0A) -- the SS-string the
-    # terminal observed, raw payload of the matching D6 envelope.
-    last_ss_event_data: bytes = b""
-    # ETSI TS 102 223 §7.4.10 USSD Event (0x0B) -- the USSD-string
-    # decoded from the envelope (DCS-aware, falls back to the raw
-    # bytes when the DCS is unknown).
-    last_ussd_event_data: bytes = b""
-    last_ussd_event_dcs: int = 0
-    # ETSI TS 102 223 §7.4.12 Local Connection event (0x0C). Tracks
+    # ETSI TS 102 223 §7.5.14 Local Connection event ('0D'). Tracks
     # whether the most recent local-bearer notification reported the
     # connection as established (True) or terminated (False).
     local_connection_active: bool = False
@@ -1008,10 +1043,16 @@ class SimCardState:
     scp03_keys: SimScp03StaticKeys = field(default_factory=SimScp03StaticKeys)
     scp80_security: SimScp80SecurityConfig = field(default_factory=SimScp80SecurityConfig)
     current_node_id: str = "3F00"
-    ota_history: list[str] = field(default_factory=list)
-    apdu_history: list[str] = field(default_factory=list)
+    # Counters, not lists: the engine is a process-wide singleton and both
+    # of these grew once per APDU / per OTA payload for the life of the
+    # process. Only the count was ever read.
+    ota_count: int = 0
+    apdu_count: int = 0
     pending_fetch_queue: list[bytes] = field(default_factory=list)
     current_protocol: int | None = None
+    # Monotonic per-engine reset generation used by read-only validation to
+    # detect state changes between previewed APDU commands.
+    reset_counter: int = 0
     profiles: list[SimProfileEntry] = field(default_factory=list)
     nodes: dict[str, SimFileNode] = field(default_factory=dict)
     base_nodes: dict[str, SimFileNode] = field(default_factory=dict)
@@ -1021,10 +1062,9 @@ class SimCardState:
     # SGP.32 §2.11.2 stored eUICC Package Results (signed). Drained by the
     # IPA via ES10b.RemoveNotificationFromList referencing ``seq_number``.
     euicc_package_results: list[SimEuiccPackageResultEntry] = field(default_factory=list)
-    # SGP.22 §5.7.13 LoadCRL persistence. Each entry is the raw CRL DER
-    # bytes the eUICC accepted from the RSP server. The simulator does
-    # not enforce revocation today, but it persists the payloads so
-    # reports / GUIs can introspect "did the eIM push CRL N?".
+    # SGP.22 §5.7.13 LoadCRL persistence. Each entry is one canonical,
+    # signature-validated X.509 CRL in DER form. Server certificates are
+    # checked against current entries during authenticated RSP flows.
     loaded_crls: list[bytes] = field(default_factory=list)
     # SGP.32 §2.11.1 monotonic association-token allocator. Starts at 0 and
     # increments to produce the next association token; it MUST NOT be

@@ -26,7 +26,7 @@ inventory so stored per-card payloads are encrypted at rest.
 
 ## Default behavior
 
-Out of the box, `state/inventory_crypto.json` has `enabled: false`. Payloads
+By default, `state/inventory_crypto.json` has `enabled: false`. Payloads
 are stored in clear in the SQLite database. This is deliberate to keep
 onboarding simple. Sensitive labs should enable encryption as soon as the
 first real card state is written.

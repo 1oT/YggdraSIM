@@ -35,6 +35,7 @@ SCP11/eim_local/eim_last_response_hex.txt
 SCP11/eim_local/eim_response_log.jsonl
 SCP11/eim_local/eim_poll_audit.sqlite3
 SCP11/eim_local/eim_runtime_state.json
+SCP11/SGP.26_test_Certs/
 
 *.pem
 *.der
@@ -112,6 +113,13 @@ Tools/ProfilePackage/profile/transcode/example_test_profile.transcode.txt
 Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.txt
 *.transcode.txt
 Tools/ProfilePackage/transcode/_external/
+
+# Generated transcode artefacts. Only the reviewed example fixture is tracked;
+# anything else emitted here is operator output and must not be committed.
+Tools/ProfilePackage/transcode/*.transcode.json
+Tools/ProfilePackage/transcode/*.transcode.der
+Tools/ProfilePackage/transcode/*.transcode.txt
+!Tools/ProfilePackage/transcode/example_test_profile.transcode.json
 state/gpg_key.fingerprint
 SCP11/local_access/profile/Test_Profile_dummyvalues.txt
 plugins/*
@@ -130,13 +138,6 @@ reports/*
 !reports/.gitkeep
 
 yggdrasim.egg-info/
-
-gui_frontend/
-yggdrasim_common/gui_server/*
-!yggdrasim_common/gui_server/routes/
-yggdrasim_common/gui_server/routes/*
-!yggdrasim_common/gui_server/routes/remote_lab.py
-tests/test_gui_*.py
 
 V1_*.md
 V2_*.md
@@ -160,6 +161,14 @@ V2_*.md
 *_review.md
 *_AUDIT.md
 *_audit.md
+*_REMEDIATION.md
+*_remediation.md
+
+# Charted card-behaviour profiles. Written by Tools/CardClone against a
+# real card; the writer excludes identity, but a profile still describes
+# a specific piece of hardware someone owns.
+card_behaviour_profile*.json
+*_behaviour_profile.json
 *_HANDOFF.md
 *_handoff_*.md
 *_hand_off.md
@@ -176,6 +185,11 @@ site-docs/sources/V1_*.md
 site-docs/sources/V2_*.md
 site-docs/sources/*_REVIEW.md
 site-docs/sources/*_AUDIT.md
+site-docs/sources/*_REMEDIATION.md
 site-docs/sources/*_HANDOFF.md
 site-docs/sources/NEW_FEATURE_IDEAS.md
 site-docs/sources/reports/
+
+# Assistant-facing working notes. Kept on disk, never tracked.
+guides/AGENT_SECURE_ELEMENT.md
+site-docs/sources/guides/AGENT_SECURE_ELEMENT.md

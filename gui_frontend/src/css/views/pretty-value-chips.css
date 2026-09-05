@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Pretty primitives — type chips help an operator read a row without
    parsing it. Hex strings get their own monospace pill so an ICCID or
    IMSI is byte-grouped exactly like the hex dump panes. */
@@ -36,15 +37,15 @@
 }
 
 .cc-pv--bool-true {
-  color: var(--ok, #4caf50);
-  background: rgba(76, 175, 80, 0.12);
-  border-color: rgba(76, 175, 80, 0.35);
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: color-mix(in oklab, var(--ok) 35%, transparent);
 }
 
 .cc-pv--bool-false {
-  color: var(--err, #d9534f);
-  background: rgba(217, 83, 79, 0.10);
-  border-color: rgba(217, 83, 79, 0.35);
+  color: var(--err);
+  background: var(--fail-soft);
+  border-color: color-mix(in oklab, var(--fail) 35%, transparent);
 }
 
 .cc-pv--null {
@@ -59,7 +60,7 @@
 }
 
 .cc-pv--hex code {
-  background: var(--code-bg, var(--bg-hover));
+  background: var(--code-bg);
   border-radius: 3px;
   padding: 2px 6px;
   font-size: 11.5px;
@@ -110,4 +111,3 @@
   border: 1px solid color-mix(in oklab, var(--border), transparent 12%);
   background: color-mix(in oklab, var(--bg-hover), transparent 55%);
 }
-

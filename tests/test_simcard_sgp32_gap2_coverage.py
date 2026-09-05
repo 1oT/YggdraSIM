@@ -27,7 +27,7 @@ from __future__ import annotations
 import unittest
 
 from SIMCARD.sgp import SgpLogic
-from SIMCARD.state import SimCardState, SimEimEntry, SimProfileEntry
+from SIMCARD.state import SimEimEntry, SimProfileEntry
 from SIMCARD.utils import read_tlv, tlv
 
 from tests.test_simcard_sgp32_load_euicc_package import _build_state_with_test_eim
@@ -54,7 +54,7 @@ class ImmediateEnableTests(_Gap2Base):
         active.state = "enabled"
         candidate = SimProfileEntry(
             aid="A0000000871002FFFFFFFF8907090000",
-            iccid="8949000000000000200",
+            iccid="8988000000000000200",
             state="disabled",
             profile_class=active.profile_class,
             profile_name="Pending Immediate Enable",
@@ -101,7 +101,7 @@ class Es10cMemoryResetBf34Tests(_Gap2Base):
     def _add_operational_profile(self) -> SimProfileEntry:
         operational = SimProfileEntry(
             aid="A0000000871002FFFFFFFF8907090099",
-            iccid="8949000000000000999",
+            iccid="8988000000000000999",
             state="disabled",
             profile_class="operational",
             profile_name="Operational",
@@ -206,7 +206,7 @@ class EuiccMemoryResetBf64ExpandedTests(_Gap2Base):
         # second one so the bit-0 sweep clears at least two entries.
         operational_extra = SimProfileEntry(
             aid="A0000000871002FFFFFFFF8907090071",
-            iccid="894900000000000071",
+            iccid="8988000000000000710",
             state="disabled",
             profile_class="operational",
         )

@@ -54,7 +54,6 @@ from yggdrasim_common.process_debug import debug_print
 from yggdrasim_common.terminal_output import status_print as print
 
 try:
-    from .asn1_registry import ASN1Registry
     from .crypto_engine import CryptoEngine
     from .eim_packages import (
         TYPE_EUICC_CONFIGURATION,
@@ -92,7 +91,6 @@ try:
         verify_certificate_against_ca_bundle,
     )
 except ImportError:
-    from asn1_registry import ASN1Registry
     from crypto_engine import CryptoEngine
     from eim_packages import (
         TYPE_EUICC_CONFIGURATION,
@@ -129,6 +127,118 @@ except ImportError:
         get_certificate_authority_key_identifier,
         verify_certificate_against_ca_bundle,
     )
+
+
+_NOTIFICATION_OPERATION_BY_BIT = {
+    0: (1, "install"),
+    1: (2, "enable"),
+    2: (3, "disable"),
+    3: (4, "delete"),
+    4: (5, "rpm-enable"),
+    5: (6, "rpm-disable"),
+    6: (7, "rpm-delete"),
+    7: (8, "load-rpm-package-result"),
+}
+
+
+def _decode_notification_operation_contents(value: bytes) -> tuple[int, str]:
+    """Decode implicit ``NotificationEvent`` BIT STRING contents.
+
+    Tag ``81`` replaces the universal BIT STRING tag but retains its value
+    encoding: the first octet is the unused-bit count.  NotificationMetadata
+    permits exactly one named bit.
+    """
+
+    raw = bytes(value)
+    if len(raw) < 2:
+        raise ValueError(
+            "profileManagementOperation BIT STRING must contain an unused-bit "
+            "octet and event bits"
+        )
+
+    unused_bits = raw[0]
+    event_bytes = raw[1:]
+    if unused_bits > 7:
+        raise ValueError(
+            "profileManagementOperation BIT STRING unused-bit count must be 0..7"
+        )
+    if unused_bits and event_bytes[-1] & ((1 << unused_bits) - 1):
+        raise ValueError(
+            "profileManagementOperation BIT STRING has non-zero padding bits"
+        )
+
+    significant_bit_count = (len(event_bytes) * 8) - unused_bits
+    set_bits = [
+        bit_index
+        for bit_index in range(significant_bit_count)
+        if event_bytes[bit_index // 8] & (0x80 >> (bit_index % 8))
+    ]
+    if len(set_bits) != 1:
+        raise ValueError(
+            "profileManagementOperation in NotificationMetadata must set exactly one event bit"
+        )
+
+    bit_index = set_bits[0]
+    operation = _NOTIFICATION_OPERATION_BY_BIT.get(bit_index)
+    if operation is None:
+        raise ValueError(
+            f"profileManagementOperation uses unsupported event bit {bit_index}"
+        )
+    if significant_bit_count != bit_index + 1:
+        raise ValueError(
+            "profileManagementOperation BIT STRING is not canonical "
+            "(trailing zero event bits)"
+        )
+    return operation
+
+
+def _decode_notification_operation_decoded(value: Any) -> tuple[int, str]:
+    """Normalise a decoded ASN.1 BIT STRING or its implicit TLV contents."""
+
+    if isinstance(value, tuple) and len(value) == 2:
+        event_bytes, significant_bit_count = value
+        if not isinstance(event_bytes, (bytes, bytearray, memoryview)):
+            raise ValueError(
+                "decoded profileManagementOperation BIT STRING payload is not bytes"
+            )
+        if isinstance(significant_bit_count, bool) or not isinstance(
+            significant_bit_count, int
+        ):
+            raise ValueError(
+                "decoded profileManagementOperation BIT STRING length is not an integer"
+            )
+        raw_event_bytes = bytes(event_bytes)
+        if significant_bit_count <= 0:
+            raise ValueError(
+                "profileManagementOperation in NotificationMetadata must set one event bit"
+            )
+        expected_octets = (significant_bit_count + 7) // 8
+        if len(raw_event_bytes) != expected_octets:
+            raise ValueError(
+                "decoded profileManagementOperation BIT STRING length does not "
+                "match its payload"
+            )
+        unused_bits = (expected_octets * 8) - significant_bit_count
+        return _decode_notification_operation_contents(
+            bytes([unused_bits]) + raw_event_bytes
+        )
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return _decode_notification_operation_contents(bytes(value))
+    raise ValueError(
+        "profileManagementOperation is not a decoded ASN.1 BIT STRING"
+    )
+
+
+def _record_notification_parse_error(details: dict, error: object) -> None:
+    message = str(error).strip()
+    if len(message) == 0:
+        return
+    existing = details.get("notificationParseError")
+    if isinstance(existing, str) and len(existing) > 0:
+        if message not in existing:
+            details["notificationParseError"] = f"{existing}; {message}"
+        return
+    details["notificationParseError"] = message
 
 
 class SGP22Orchestrator:
@@ -2699,11 +2809,28 @@ class SGP22Orchestrator:
             print("[*] Provider authenticateClient payload parse failed (invalid smdpCertificate), fallback to local signing.")
             return None
         self.state.provider_smdp_certificate = smdp_certificate_raw
-        return PayloadBuilder.build_prepare_download_remote(
-            smdp_signed2_der=smdp_signed2_raw,
-            smdp_signature2=smdp_signature2_raw,
-            cert=smdp_certificate_raw,
-        )
+        try:
+            return PayloadBuilder.build_prepare_download_remote(
+                smdp_signed2_der=smdp_signed2_raw,
+                smdp_signature2=smdp_signature2_raw,
+                cert=smdp_certificate_raw,
+            )
+        except Exception as error:
+            # smdpSigned2 is re-encoded through the ASN.1 spec, so a
+            # truncated or malformed field from the provider surfaces as an
+            # asn1tools error rather than a decode result. The invalid
+            # smdpCertificate case a few lines up already falls back to
+            # local signing; take the same route instead of unwinding the
+            # whole flow with an upstream exception type.
+            if self._local_fallback_enabled() is False:
+                raise RuntimeError(
+                    f"Provider authenticateClient payload build failed: {error}"
+                ) from error
+            print(
+                f"[*] Provider authenticateClient payload build failed ({error}), "
+                "fallback to local signing."
+            )
+            return None
 
     @staticmethod
     def _provider_certificate_payload_supported(certificate_bytes: bytes) -> bool:
@@ -3041,9 +3168,17 @@ class SGP22Orchestrator:
             return ""
         candidate = details.get("notificationAddress")
         if isinstance(candidate, bytes):
+            raw_candidate = bytes(candidate)
             try:
-                candidate = candidate.decode("utf-8", "ignore")
-            except Exception:
+                candidate = raw_candidate.decode("utf-8")
+            except UnicodeDecodeError as error:
+                details["notificationAddressRawHex"] = (
+                    raw_candidate.hex().upper()
+                )
+                _record_notification_parse_error(
+                    details,
+                    f"notificationAddress is not valid UTF-8: {error}",
+                )
                 return ""
         if not isinstance(candidate, str):
             return ""
@@ -3236,21 +3371,57 @@ class SGP22Orchestrator:
         details = {
             "seqNumber": None,
             "profileManagementOperation": None,
+            "profileManagementOperationName": "",
+            "notificationParseError": "",
             "notificationAddress": "",
+            "notificationAddressRawHex": "",
             "iccid": "",
         }
         offset = 0
+        operation_seen = False
         while offset < len(value):
             try:
                 field_tag, field_value, _, next_offset = self._read_tlv(value, offset)
-            except Exception:
+            except Exception as error:
+                _record_notification_parse_error(
+                    details,
+                    f"Malformed NotificationMetadata TLV at offset {offset}: {error}",
+                )
                 return details
             if field_tag == b"\x80":
                 details["seqNumber"] = int.from_bytes(field_value, "big", signed=False)
             elif field_tag == b"\x81":
-                details["profileManagementOperation"] = int.from_bytes(field_value, "big", signed=False)
+                if operation_seen:
+                    details["profileManagementOperation"] = None
+                    details["profileManagementOperationName"] = ""
+                    _record_notification_parse_error(
+                        details,
+                        "NotificationMetadata contains duplicate "
+                        "profileManagementOperation fields",
+                    )
+                else:
+                    operation_seen = True
+                    try:
+                        operation_code, operation_name = (
+                            _decode_notification_operation_contents(field_value)
+                        )
+                    except ValueError as error:
+                        _record_notification_parse_error(details, error)
+                    else:
+                        details["profileManagementOperation"] = operation_code
+                        details["profileManagementOperationName"] = operation_name
             elif field_tag == b"\x0C":
-                details["notificationAddress"] = field_value.decode("utf-8", "ignore")
+                try:
+                    details["notificationAddress"] = field_value.decode("utf-8")
+                except UnicodeDecodeError as error:
+                    details["notificationAddress"] = ""
+                    details["notificationAddressRawHex"] = (
+                        field_value.hex().upper()
+                    )
+                    _record_notification_parse_error(
+                        details,
+                        f"notificationAddress is not valid UTF-8: {error}",
+                    )
             elif field_tag == b"\x5A":
                 details["iccid"] = self._decode_iccid_digits(field_value)
             offset = next_offset
@@ -3282,15 +3453,38 @@ class SGP22Orchestrator:
                 elif key == "seqNumber" and isinstance(value, int):
                     details.setdefault("seqNumber", value)
                 elif key == "profileManagementOperation":
-                    if isinstance(value, int):
-                        details.setdefault("profileManagementOperation", value)
-                    elif isinstance(value, bytes):
-                        details.setdefault("profileManagementOperation", int.from_bytes(value, "big", signed=False))
+                    try:
+                        operation_code, operation_name = (
+                            _decode_notification_operation_decoded(value)
+                        )
+                    except ValueError as error:
+                        _record_notification_parse_error(details, error)
+                    else:
+                        details.setdefault(
+                            "profileManagementOperation", operation_code
+                        )
+                        details.setdefault(
+                            "profileManagementOperationName", operation_name
+                        )
                 elif key == "notificationAddress":
                     if isinstance(value, str):
                         details.setdefault("notificationAddress", value)
                     elif isinstance(value, bytes):
-                        details.setdefault("notificationAddress", value.decode("utf-8", "ignore"))
+                        try:
+                            decoded_address = value.decode("utf-8")
+                        except UnicodeDecodeError as error:
+                            details.setdefault(
+                                "notificationAddressRawHex",
+                                value.hex().upper(),
+                            )
+                            _record_notification_parse_error(
+                                details,
+                                f"notificationAddress is not valid UTF-8: {error}",
+                            )
+                        else:
+                            details.setdefault(
+                                "notificationAddress", decoded_address
+                            )
                 elif key == "iccid":
                     if isinstance(value, bytes):
                         details.setdefault("iccid", self._decode_iccid_digits(value))
@@ -3318,13 +3512,34 @@ class SGP22Orchestrator:
         if len(details) == 0:
             return ""
         fragments = []
-        for key in ["choice", "seqNumber", "profileManagementOperation", "notificationAddress", "iccid", "smdpOid"]:
+        for key in [
+            "choice",
+            "seqNumber",
+            "notificationAddress",
+            "notificationAddressRawHex",
+            "iccid",
+            "smdpOid",
+        ]:
             value = details.get(key)
             if value is None:
                 continue
             if isinstance(value, str) and len(value) == 0:
                 continue
             fragments.append(f"{key}={value}")
+        operation_code = details.get("profileManagementOperation")
+        operation_name = details.get("profileManagementOperationName")
+        if isinstance(operation_code, int):
+            if isinstance(operation_name, str) and len(operation_name) > 0:
+                fragments.append(
+                    f"profileManagementOperation={operation_name}({operation_code})"
+                )
+            else:
+                fragments.append(
+                    f"profileManagementOperation={operation_code}"
+                )
+        parse_error = details.get("notificationParseError")
+        if isinstance(parse_error, str) and len(parse_error) > 0:
+            fragments.append(f"notificationParseError={parse_error}")
         result_code = details.get("resultCode")
         if isinstance(result_code, int):
             fragments.append(f"resultCode={result_code}")

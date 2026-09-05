@@ -130,9 +130,10 @@ class ApplyPySimAugmentationsTests(unittest.TestCase):
         specs = self._build_specs()
         apply_pysim_augmentations(specs)
 
-        # ``ef-mmsucp`` deliberately carries fid="" because the canonical
-        # 6FD2 collides with EF.VBSCA per legacy SAIP tooling. Augment
-        # must keep the empty FID even though pySim knows about 6FD2.
+        # The literal table owns the FID anchor. Where it sets one --
+        # including the empty string, which some entries use because no
+        # single FID is authoritative -- augment must leave it alone even
+        # though pySim has a value for the same key.
         self.assertEqual(specs["ef-mmsucp"]["fid"], "")
 
     def test_local_only_entries_are_left_alone(self) -> None:

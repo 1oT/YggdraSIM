@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ---- SA-G1: top-level tab strip ------------------------------------ */
 
 .saip-top-tabs {
@@ -21,7 +22,7 @@
   border: 1px solid var(--border);
   border-bottom-color: transparent;
   border-radius: 6px 6px 0 0;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   padding: 6px 14px;
   font-size: 12px;
   font-weight: 500;
@@ -32,7 +33,12 @@
 
 .saip-top-tab:hover:not(.is-disabled):not([disabled]) {
   color: var(--fg);
-  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  background: var(--surface-alt);
+}
+
+.saip-top-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .saip-top-tab.is-active {
@@ -44,7 +50,7 @@
 
 .saip-top-tab.is-disabled,
 .saip-top-tab[disabled] {
-  opacity: 0.45;
+  opacity: 0.52;
   cursor: not-allowed;
 }
 
@@ -54,10 +60,10 @@
 
 .saip-top-tab-badge {
   font-size: 10px;
-  font-family: var(--mono, "JetBrains Mono", monospace);
-  background: var(--surface-alt, rgba(255, 255, 255, 0.05));
+  font-family: var(--mono);
+  background: var(--surface-alt);
   border: 1px solid var(--border);
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   border-radius: 999px;
   padding: 0 7px;
   line-height: 18px;
@@ -67,7 +73,6 @@
 
 .saip-top-tab.is-active .saip-top-tab-badge {
   background: var(--accent);
-  color: var(--accent-fg, #0b1015);
+  color: var(--accent-fg);
   border-color: var(--accent);
 }
-

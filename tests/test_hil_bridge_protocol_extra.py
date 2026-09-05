@@ -17,7 +17,6 @@ import struct
 import unittest
 
 from Tools.HilBridge.protocol import (
-    IPA_MSGT_PING,
     IPA_MSGT_PONG,
     IPA_PROTO_CCM,
     build_bank_slot,

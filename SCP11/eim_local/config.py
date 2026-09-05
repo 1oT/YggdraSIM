@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM-local configuration: resolves cert, profile, and state directory paths for the local eIM simulator."""
 import os
 from dataclasses import dataclass, field
@@ -10,9 +9,9 @@ from yggdrasim_common.runtime_paths import (
     ensure_runtime_dir,
     ensure_seeded_workspace_file,
     ensure_seeded_workspace_tree,
-    ensure_workspace_dir,
     workspace_path,
 )
+from yggdrasim_common.secure_files import ensure_private_directory
 
 try:
     from SCP11.local_access.config import LocalAccessConfig
@@ -117,8 +116,21 @@ class EimLocalConfig(LocalAccessConfig):
     def __post_init__(self) -> None:
         super().__post_init__()
         ensure_runtime_dir("SCP11", "eim_local")
-        ensure_workspace_dir("LocalEIM", "debug")
         ensure_seeded_workspace_tree(("SCP11", "eim_local", "certs"), "LocalEIM", "certs")
         ensure_seeded_workspace_tree(("SCP11", "eim_local", "profile"), "LocalEIM", "profile")
         ensure_seeded_workspace_tree(("SCP11", "eim_local", "eim_packages"), "LocalEIM", "eim_packages")
         ensure_seeded_workspace_file(("SCP11", "eim_local", "eim_identity.json"), "LocalEIM", "eim_identity.json")
+        for required_directory in (
+            self.CERTS_DIR,
+            self.PROFILE_DIR,
+            self.METADATA_DIR,
+            self.DEBUG_DIR,
+            self.EIM_PACKAGES_DIR,
+            self.EIM_PACKAGE_TEMPLATES_DIR,
+            self.EIM_HOTFOLDER_DIR,
+            self.EIM_POLL_FIXTURES_DIR,
+            self.EIM_POLL_EIM_TO_ESIM_DIR,
+            self.EIM_POLL_ESIM_TO_EIM_DIR,
+            self.EIM_CERTS_DIR,
+        ):
+            ensure_private_directory(required_directory)

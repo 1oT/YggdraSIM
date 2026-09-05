@@ -13,12 +13,12 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
 
-# EUM Diagnostics "God-Mode"
+# EUM Diagnostics
 
 `Tools/EumDiag/` is the *server-side* diagnostic toolbox for
 ES8+ / Bound Profile Package (BPP) work. Its purpose is to take
-ShS-ENC / ShS-MAC / DEK session material — which an EUM or
-SM-DP+ operator already has in its session database — and turn
+ShS-ENC / ShS-MAC / DEK session material -- which an EUM or
+SM-DP+ operator already has in its session database -- and turn
 an otherwise opaque `BF36` capture into an analysable one through
 a Wireshark/tshark Lua dissector.
 
@@ -29,6 +29,13 @@ a Wireshark/tshark Lua dissector.
 - reproducing an ES8+ flow inside Wireshark / tshark during
   integration testing
 - offline BPP decode (requires the optional pySim checkout)
+
+!!! note "The dissector now lives in Tools/ApduDissector"
+    This tool no longer carries a Lua dissector of its own. It hands
+    captures to [the APDU dissector](apdu-dissector.md), which decodes
+    the `BF36` BoundProfilePackage as a tree and honours the same
+    `YGGDRASIM_EUM_SESSION_KEYS` variable. For plaintext rather than
+    structure, build a sidecar with `yggdrasim-apdu-dissect sidecar`.
 
 !!! info "Not a decryptor"
     The dissector annotates BPP TLVs with the provided key bundle.

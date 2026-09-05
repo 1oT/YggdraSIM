@@ -4,8 +4,8 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """WebSocket route that bridges xterm.js to a PTY child (Milestone B-2).
 
-The client is expected to connect to ``/api/terminal/<module>?t=<token>``
-after the normal SPA token hand-off. Framing:
+The client connects to ``/api/terminal/<module>`` with the bearer in the
+``Sec-WebSocket-Protocol`` header after the normal SPA token hand-off. Framing:
 
 * Server -> client: binary frames carry raw PTY output. A JSON text
   frame (``{"event": "exit", "status": <int>}``) is emitted right
@@ -29,7 +29,12 @@ from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from yggdrasim_common.gui_server import terminal as pty_module
-from yggdrasim_common.gui_server.auth import compare_tokens, token_id
+from yggdrasim_common.gui_server.auth import (
+    compare_tokens,
+    token_id,
+    websocket_accept_protocol,
+    websocket_bearer,
+)
 
 
 _LOGGER = logging.getLogger("yggdrasim.gui.terminal")
@@ -41,27 +46,8 @@ router = APIRouter(tags=["terminal"])
 
 
 def _extract_token(websocket: WebSocket) -> str:
-    """Pull the bearer token from (in order): ``Authorization`` header,
-    ``Sec-WebSocket-Protocol`` subprotocol, or ``?t=`` query parameter.
-
-    xterm.js does not set an ``Authorization`` header directly, so the
-    ``?t=`` fallback is the expected path in normal use. The subprotocol
-    path mirrors the pattern used by OpenTelemetry collectors.
-    """
-    header = websocket.headers.get("authorization") or ""
-    if header.lower().startswith("bearer "):
-        return header.split(" ", 1)[1].strip()
-
-    subproto = websocket.headers.get("sec-websocket-protocol") or ""
-    for fragment in (part.strip() for part in subproto.split(",")):
-        if fragment.lower().startswith("bearer."):
-            return fragment.split(".", 1)[1].strip()
-
-    qs_token = websocket.query_params.get("t")
-    if qs_token:
-        return str(qs_token)
-
-    return ""
+    """Pull the bearer from an auth header or WebSocket subprotocol."""
+    return websocket_bearer(websocket)
 
 
 def _expected_token(websocket: WebSocket) -> str:
@@ -103,7 +89,7 @@ async def terminal_socket(websocket: WebSocket, module: str) -> None:
         return
 
     if not pty_module.is_supported():
-        await websocket.accept()
+        await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
         await websocket.send_text(
             json.dumps({
                 "event": "error",
@@ -114,7 +100,7 @@ async def terminal_socket(websocket: WebSocket, module: str) -> None:
         return
 
     if not pty_module.is_allowed_module(module):
-        await websocket.accept()
+        await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
         await websocket.send_text(
             json.dumps({
                 "event": "error",
@@ -124,7 +110,7 @@ async def terminal_socket(websocket: WebSocket, module: str) -> None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="module")
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
     bound_reader = str(websocket.query_params.get("reader") or "").strip()
     _LOGGER.info(
         "gui.terminal.opened module=%s token=%s reader=%s",

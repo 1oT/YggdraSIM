@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from yggdrasim_common.gui_server import at_decoder
 

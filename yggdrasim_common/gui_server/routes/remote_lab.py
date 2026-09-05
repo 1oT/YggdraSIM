@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -18,7 +20,7 @@ from yggdrasim_common.remote_lab.client import RemoteLabAgentClient, RemoteLabCl
 from yggdrasim_common.remote_lab.registry import (
     export_invite,
     get_device,
-    import_invite,
+    import_invites,
     list_devices,
     load_registry,
     remove_device,
@@ -32,7 +34,7 @@ router = APIRouter(prefix="/api/remote-lab", tags=["remote-lab"])
 
 
 class ImportInviteRequest(BaseModel):
-    invite: dict[str, Any] = Field(default_factory=dict)
+    invite: dict[str, Any] | list[dict[str, Any]] = Field(default_factory=dict)
     replace: bool = True
 
 
@@ -54,7 +56,12 @@ def _control_token_for_device(device_id: str) -> str:
     device = get_device(device_id)
     if not device.token_file:
         raise RuntimeError("Remote Lab device has no token file.")
-    return read_token_file(device.token_file)
+    try:
+        return read_token_file(device.token_file)
+    except (OSError, UnicodeError) as exc:
+        raise RuntimeError(
+            "Remote Lab device token file is unavailable or invalid."
+        ) from exc
 
 
 def _client_for_device(device_id: str, *, timeout_seconds: float = 5.0) -> RemoteLabAgentClient:
@@ -84,20 +91,40 @@ def _open_remote_lab_scp03_session(
     device = get_device(device_id)
     client = _client_for_device(device.id, timeout_seconds=8.0)
     session_payload = client.create_session(
-        device.id,
+        device.remote_rig_id,
         user=user or os.environ.get("USER", "") or os.environ.get("USERNAME", ""),
         client_id=_client_id(),
         requested_ttl_seconds=requested_ttl_seconds,
     )
     remote_session_id = str(session_payload.get("session_id") or "").strip()
     remote_session_token = str(session_payload.get("session_token") or "").strip()
-    stream = session_payload.get("stream") if isinstance(session_payload.get("stream"), dict) else {}
+    stream = (
+        session_payload.get("stream")
+        if isinstance(session_payload.get("stream"), dict)
+        else {}
+    )
     relay_url = str(stream.get("url") or "").strip()
     if not remote_session_id or not remote_session_token or not relay_url:
+        if remote_session_id and remote_session_token:
+            try:
+                client.release(remote_session_id, remote_session_token)
+            except Exception:  # noqa: BLE001
+                pass
         raise RuntimeError("agent returned an incomplete session grant")
 
     stop_heartbeat = threading.Event()
-    heartbeat_interval = 10.0
+    try:
+        heartbeat_interval = float(
+            session_payload.get("heartbeat_interval_seconds") or 10.0
+        )
+    except (TypeError, ValueError):
+        heartbeat_interval = 10.0
+    if not math.isfinite(heartbeat_interval):
+        heartbeat_interval = 10.0
+    heartbeat_interval = min(30.0, max(1.0, heartbeat_interval))
+    release_lock = threading.Lock()
+    release_started = False
+    heartbeat_thread: threading.Thread | None = None
 
     def _heartbeat_loop() -> None:
         while not stop_heartbeat.wait(heartbeat_interval):
@@ -114,15 +141,21 @@ def _open_remote_lab_scp03_session(
 
     connection = RelayCardConnection(relay_url, auth_token=remote_session_token)
     transporter = None
-    heartbeat_thread = threading.Thread(
-        target=_heartbeat_loop,
-        name=f"remote-lab-heartbeat-{device.id}",
-        daemon=True,
-    )
-    heartbeat_thread.start()
 
     def _release_remote_session() -> None:
+        nonlocal release_started
+        with release_lock:
+            if release_started:
+                return
+            release_started = True
         stop_heartbeat.set()
+        thread = heartbeat_thread
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            thread.join(timeout=max(1.0, client.timeout_seconds + 1.0))
         try:
             client.release(remote_session_id, remote_session_token)
         except Exception as exc:  # noqa: BLE001
@@ -140,7 +173,9 @@ def _open_remote_lab_scp03_session(
         connection.connect()
         transporter = CardTransporter.__new__(CardTransporter)
         transporter.connection = connection
-        transporter.session = Scp03Session({"kenc": b"", "kmac": b"", "dek": b""})
+        transporter.session = Scp03Session(
+            {"kenc": b"", "kmac": b"", "dek": b""}
+        )
         transporter.verbose = False
         transporter.debug = False
         result = _scan_transporter_to_session(
@@ -151,18 +186,25 @@ def _open_remote_lab_scp03_session(
             metadata_extra={
                 "remote_lab": True,
                 "remote_lab_device_id": device.id,
-                "remote_lab_rig_id": device.id,
+                "remote_lab_rig_id": device.remote_rig_id,
                 "remote_lab_session_id": remote_session_id,
                 "remote_lab_agent": device.control_base_url,
             },
         )
+        if not stop_heartbeat.is_set():
+            heartbeat_thread = threading.Thread(
+                target=_heartbeat_loop,
+                name=f"remote-lab-heartbeat-{device.id}",
+                daemon=True,
+            )
+            heartbeat_thread.start()
     except Exception:
         _release_remote_session()
         raise
 
     result["remote_lab"] = {
         "device_id": device.id,
-        "rig_id": device.id,
+        "rig_id": device.remote_rig_id,
         "agent": device.control_base_url,
         "remote_session_id": remote_session_id,
         "expires_at": session_payload.get("expires_at") or "",
@@ -179,10 +221,18 @@ def devices() -> dict[str, Any]:
 @router.post("/import")
 def import_device(body: ImportInviteRequest) -> dict[str, Any]:
     try:
-        device = import_invite(body.invite, replace=body.replace)
+        imported_devices = import_invites(body.invite, replace=body.replace)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"ok": True, "device": device.redacted_dict()}
+    redacted = [device.redacted_dict() for device in imported_devices]
+    response: dict[str, Any] = {
+        "ok": True,
+        "count": len(redacted),
+        "devices": redacted,
+    }
+    if len(redacted) == 1:
+        response["device"] = redacted[0]
+    return response
 
 
 @router.get("/devices/{device_id}/export")
@@ -206,8 +256,13 @@ def delete_device(device_id: str, remove_token_file: bool = False) -> dict[str, 
 @router.get("/devices/{device_id}/status")
 def device_status(device_id: str) -> dict[str, Any]:
     try:
+        device = get_device(device_id)
         client = _client_for_device(device_id, timeout_seconds=4.0)
-        return client.status(device_id)
+        payload = client.status(device.remote_rig_id)
+        remote_id = str(payload.get("id") or device.remote_rig_id)
+        payload["id"] = device.id
+        payload["rig_id"] = remote_id
+        return payload
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RemoteLabClientError as exc:
@@ -217,13 +272,40 @@ def device_status(device_id: str) -> dict[str, Any]:
             "error": str(exc),
             "agent_status": exc.status,
         }
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {
+            "id": device_id,
+            "status": "offline",
+            "error": f"{type(exc).__name__}: {exc}",
+            "agent_status": 0,
+        }
 
 
 @router.get("/status")
 def all_status() -> dict[str, Any]:
-    statuses = []
-    for device_id in sorted(load_registry().keys()):
-        statuses.append(device_status(device_id))
+    device_ids = sorted(
+        load_registry().keys(),
+        key=lambda value: (value.casefold(), value),
+    )
+    if not device_ids:
+        return {"count": 0, "devices": []}
+
+    def _status_or_offline(device_id: str) -> dict[str, Any]:
+        try:
+            return device_status(device_id)
+        except HTTPException as exc:
+            return {
+                "id": device_id,
+                "status": "offline",
+                "error": str(exc.detail),
+                "agent_status": int(exc.status_code),
+            }
+
+    with ThreadPoolExecutor(
+        max_workers=min(8, len(device_ids)),
+        thread_name_prefix="remote-lab-status",
+    ) as executor:
+        statuses = list(executor.map(_status_or_offline, device_ids))
     return {"count": len(statuses), "devices": statuses}
 
 
@@ -292,8 +374,13 @@ def release_device_session(device_id: str, body: ReleaseRequest) -> dict[str, An
 @router.post("/devices/{device_id}/force-release")
 def force_release_device(device_id: str, body: ForceReleaseRequest) -> dict[str, Any]:
     try:
+        device = get_device(device_id)
         client = _client_for_device(device_id, timeout_seconds=5.0)
-        return client.force_release(device_id, admin_token=body.admin_token, reason=body.reason)
+        return client.force_release(
+            device.remote_rig_id,
+            admin_token=body.admin_token,
+            reason=body.reason,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RemoteLabClientError as exc:

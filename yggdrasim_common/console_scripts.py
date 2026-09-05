@@ -10,6 +10,7 @@ from typing import Any
 
 from yggdrasim_common.quit_control import QuitAllRequested
 from yggdrasim_common.flavor import hil_bridge_unavailable_reason
+from yggdrasim_common.frozen_dispatch import install_missing_standard_streams
 
 
 def _invoke(module_name: str, attribute_name: str) -> int:
@@ -65,6 +66,18 @@ def launcher() -> int:
 
 
 def gui() -> int:
+    """Desktop GUI entry, startable from a launcher that has no console.
+
+    The shortcuts written by ``scripts/install_shortcuts.py`` (a
+    ``Terminal=false`` desktop entry, a ``pythonw``-backed ``.lnk``, a
+    macOS applet) can start this process with ``sys.stdout`` and
+    ``sys.stderr`` set to ``None``. Repairing the streams before
+    ``main.main`` is imported keeps the diagnostics printable -- without
+    it, a host missing the ``[gui]`` extra raises ``AttributeError`` on
+    ``None`` instead of naming the extra to install, and the shortcut
+    looks like it did nothing.
+    """
+    install_missing_standard_streams()
     return _invoke_launcher("--gui")
 
 
@@ -114,6 +127,13 @@ def hil_bridge_supervisor() -> int:
     return _invoke("Tools.HilBridge.supervisor", "entry")
 
 
+def hil_bridge_reset() -> int:
+    guard_code = _guard_hil_bridge()
+    if guard_code != 0:
+        return guard_code
+    return _invoke("Tools.HilBridge.device_reset", "run_standalone")
+
+
 def card_bridge() -> int:
     """Reader-side APDU bridge CLI entry.
 
@@ -149,5 +169,40 @@ def eum_diag() -> int:
     return _invoke("Tools.EumDiag.main", "run_cli")
 
 
+def apdu_dissect() -> int:
+    return _invoke("Tools.ApduDissector.main", "run_cli")
+
+
 def asn1_tlv_decode() -> int:
     return _invoke("Tools.Asn1TlvDecode.main", "run_cli")
+
+
+def session_diff() -> int:
+    return _invoke("yggdrasim_common.session_diff", "run_cli")
+
+
+def card_clone() -> int:
+    return _invoke("Tools.CardClone.main", "run_cli")
+
+
+def yggdracore() -> int:
+    try:
+        return _invoke("Tools.YggdraCore.http_app", "main")
+    except ImportError as exc:
+        print(
+            "The YggdraCore stub AUSF needs FastAPI and uvicorn: "
+            f"pip install 'yggdrasim[test]' ({exc})",
+            file=sys.stderr,
+        )
+        return 3
+
+
+def mcp_server() -> int:
+    try:
+        return _invoke("Tools.YggdraMCP.server", "run_cli")
+    except ImportError as exc:
+        print(
+            f"The MCP server needs the 'mcp' extra: pip install 'yggdrasim[mcp]' ({exc})",
+            file=sys.stderr,
+        )
+        return 1

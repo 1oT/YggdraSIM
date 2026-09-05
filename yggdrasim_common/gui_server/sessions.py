@@ -14,6 +14,12 @@ from typing import Any, Callable, Optional
 _LOGGER = logging.getLogger("yggdrasim.gui.sessions")
 
 
+# In-memory authoring handles set this flag while they contain unsaved work.
+# The generic session manager deliberately does not inspect subsystem-specific
+# dirty-state shapes; this single opt-in key is the cross-subsystem contract.
+AUTO_CLOSE_PROTECTION_HANDLE_KEY = "__ygg_protect_from_automatic_close__"
+
+
 @dataclass
 class CardSession:
     id: str
@@ -25,6 +31,7 @@ class CardSession:
     idle_timeout_s: float
     metadata: dict[str, Any]
     _lock: threading.Lock
+    protect_from_auto_close: bool = False
 
     def touch(self) -> None:
         self.last_used_at = time.time()
@@ -40,8 +47,17 @@ class CardSession:
             "created_at": self.created_at,
             "last_used_at": self.last_used_at,
             "idle_timeout_s": self.idle_timeout_s,
+            "protect_from_auto_close": self.is_auto_close_protected(),
             "metadata": dict(self.metadata),
         }
+
+    def is_auto_close_protected(self) -> bool:
+        """Return whether idle/cap cleanup must leave this session alone."""
+        if self.protect_from_auto_close:
+            return True
+        if isinstance(self.handle, dict):
+            return bool(self.handle.get(AUTO_CLOSE_PROTECTION_HANDLE_KEY))
+        return False
 
 
 class SessionManager:
@@ -65,13 +81,26 @@ class SessionManager:
         handle: Any,
         close: Callable[[], None],
         idle_timeout_s: Optional[float] = None,
+        protect_from_auto_close: bool = False,
         metadata: Optional[dict[str, Any]] = None,
     ) -> CardSession:
         self._reap_idle_locked_unsafe()  # cheap no-op if no idle peers
         with self._lock:
             if len(self._sessions) >= self._max_sessions:
-                # Evict the oldest one to make room. Better than 503-ing.
-                oldest = min(self._sessions.values(), key=lambda entry: entry.last_used_at)
+                # Never discard protected authoring work to make room. Prefer
+                # the oldest unprotected session; if every live session is
+                # protected, make the caller ask the operator to close one.
+                candidates = [
+                    entry
+                    for entry in self._sessions.values()
+                    if entry.is_auto_close_protected() is False
+                ]
+                if len(candidates) == 0:
+                    raise RuntimeError(
+                        "session cap reached and every live session contains "
+                        "protected work; save or close a session before opening another."
+                    )
+                oldest = min(candidates, key=lambda entry: entry.last_used_at)
                 _LOGGER.info(
                     "session cap reached (%d); evicting %s/%s",
                     self._max_sessions,
@@ -90,6 +119,7 @@ class SessionManager:
                 created_at=now,
                 last_used_at=now,
                 idle_timeout_s=float(timeout),
+                protect_from_auto_close=bool(protect_from_auto_close),
                 metadata=dict(metadata or {}),
                 _lock=threading.Lock(),
             )
@@ -104,6 +134,10 @@ class SessionManager:
             return False
         self._invoke_close(session)
         return True
+
+    def release(self, session_id: str) -> bool:
+        """Compatibility alias for an explicit operator/test close."""
+        return self.close(session_id)
 
     def close_all(self) -> int:
         with self._lock:
@@ -127,6 +161,28 @@ class SessionManager:
                 session.id,
                 type(close_error).__name__,
                 close_error,
+            )
+        finally:
+            self._clear_apdu_raw_capture(session)
+
+    @staticmethod
+    def _clear_apdu_raw_capture(session: CardSession) -> None:
+        """Purge reader-scoped raw APDUs when their owning session closes."""
+        scope = str(session.metadata.get("apdu_scope") or "").strip()
+        if not scope:
+            scope = str(session.metadata.get("reader_name") or "").strip()
+        if not scope or scope == "(default)":
+            return
+        try:
+            from yggdrasim_common.apdu_recorder import get_recorder
+
+            get_recorder().disable_raw_capture(scope)
+        except Exception as cleanup_error:  # noqa: BLE001 — session close must continue
+            _LOGGER.warning(
+                "APDU raw-capture cleanup failed kind=%s id=%s (%s)",
+                session.kind,
+                session.id,
+                type(cleanup_error).__name__,
             )
 
     # ---- access -------------------------------------------------------
@@ -160,7 +216,10 @@ class SessionManager:
         victims: list[CardSession] = []
         with self._lock:
             for session in list(self._sessions.values()):
-                if session.is_idle(now=now):
+                if (
+                    session.is_idle(now=now)
+                    and session.is_auto_close_protected() is False
+                ):
                     victims.append(session)
                     self._sessions.pop(session.id, None)
         for session in victims:

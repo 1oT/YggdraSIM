@@ -11,7 +11,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-
 # Load Certificates and Configuration
 
 ## Goal
@@ -315,8 +314,6 @@ search.
 
 ## Recipe 8: Seed a YggdraCore subscription
 
-> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
-
 The in-process AUSF / AAnF stub holds subscribers in memory only.
 There is no on-disk format.
 
@@ -462,7 +459,7 @@ non-test environment:
 6. **SUCI keys.** Author per home-network. Never reuse across
    operators.
 7. **YggdraCore subscribers.** Provision through `upsert(...)` or the
-   BYO Open5GS bridge. Stub state is intentionally non-persistent. (post-v1 staging — not part of this release.)
+   BYO Open5GS bridge. Stub state is intentionally non-persistent.
 8. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
    chmod 0600, point `YGGDRASIM_EUM_SESSION_KEYS` at the file.
 9. **HIL keybags.** Drop next to the pcap; auto-discovery picks them

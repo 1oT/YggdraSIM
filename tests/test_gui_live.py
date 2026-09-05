@@ -99,7 +99,7 @@ class TestReaderRowHelpers:
         )
 
 
-# --- HTTP route with pyscard stubbed out -------------------------------
+# --- Route functions with pyscard stubbed out --------------------------
 
 
 @pytest.fixture()
@@ -154,75 +154,40 @@ def stub_pyscard(monkeypatch: pytest.MonkeyPatch):
     yield
 
 
-@pytest.fixture(scope="module")
-def test_client():
-    from starlette.testclient import TestClient
-
-    from yggdrasim_common.gui_server.app import create_app
-    from yggdrasim_common.gui_server.config import GuiServerConfig
-
-    config = GuiServerConfig(
-        mode="desktop",
-        host="127.0.0.1",
-        port=0,
-        token="abcdef1234567890abcdef1234567890",
-        allow_origins=tuple(),
-        tls_cert_path="",
-        tls_key_path="",
-        tls_self_signed=False,
-        token_source="test-fixture",
-        token_strength="generated",
-        allow_ephemeral_port=True,
-        idle_seconds=300,
-        webview_debug=False,
-    )
-    app = create_app(config)
-    client = TestClient(app)
-    client.headers.update({"Authorization": "Bearer " + config.token})
-    yield client
-
-
 class TestLiveReadersRoute:
-    def test_pyscard_missing_returns_200_with_note(self, test_client, monkeypatch) -> None:
+    def test_pyscard_missing_returns_note(self, monkeypatch) -> None:
         # Force the import path to fail.
         monkeypatch.setitem(sys.modules, "smartcard", None)
         monkeypatch.setitem(sys.modules, "smartcard.System", None)
-        response = test_client.get("/api/live/readers")
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["backend"] == "missing"
-        assert payload["readers"] == []
-        assert "pyscard" in payload["note"]
+        response = live_module.list_readers()
+        assert response.backend == "missing"
+        assert response.readers == []
+        assert "pyscard" in response.note
 
-    def test_pyscard_stub_lists_readers(self, test_client, stub_pyscard) -> None:
-        response = test_client.get("/api/live/readers")
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["backend"] == "pyscard"
-        assert len(payload["readers"]) == 2
-        first = payload["readers"][0]
-        assert first["name"].startswith("YggdraSIM Virtual Reader")
-        assert first["atr_hex"] == "3B9F96"
-        assert first["status"] == "card present"
-        second = payload["readers"][1]
-        assert second["atr_hex"] == ""
-        assert "no card" in second["status"]
+    def test_pyscard_stub_lists_readers(self, stub_pyscard) -> None:
+        response = live_module.list_readers()
+        assert response.backend == "pyscard"
+        assert len(response.readers) == 2
+        first = response.readers[0]
+        assert first.name.startswith("YggdraSIM Virtual Reader")
+        assert first.atr_hex == "3B9F96"
+        assert first.status == "card present"
+        second = response.readers[1]
+        assert second.atr_hex == ""
+        assert "no card" in second.status
 
-    def test_atr_probe_specific_reader(self, test_client, stub_pyscard) -> None:
-        response = test_client.post(
-            "/api/live/atr",
-            json={"reader": "YggdraSIM Virtual Reader 0"},
+    def test_atr_probe_specific_reader(self, stub_pyscard) -> None:
+        response = live_module.probe_single_atr(
+            live_module.AtrProbeRequest(reader="YggdraSIM Virtual Reader 0")
         )
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["atr_hex"] == "3B9F96"
+        assert response.atr_hex == "3B9F96"
 
-    def test_atr_probe_unknown_reader_404(self, test_client, stub_pyscard) -> None:
-        response = test_client.post(
-            "/api/live/atr",
-            json={"reader": "ghost"},
-        )
-        assert response.status_code == 404
+    def test_atr_probe_unknown_reader_404(self, stub_pyscard) -> None:
+        with pytest.raises(live_module.HTTPException) as raised:
+            live_module.probe_single_atr(
+                live_module.AtrProbeRequest(reader="ghost")
+            )
+        assert raised.value.status_code == 404
 
 
 # --- Regression: ATR probe must not power-cycle the card -----------------

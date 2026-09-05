@@ -15,294 +15,291 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-"""Wizard step runner: collects multi-step user input and returns a consolidated result dict."""
+"""Reusable terminal wizard with explicit validation and secret-safe input."""
+
+from __future__ import annotations
+
+import getpass
 import re
+from collections.abc import Callable, Iterable
+from typing import Any
 
-class InteractiveWizard :
-    def __init__ (self ,title ,colors_ref ,description =""):
-        self .title =title 
-        self .description =description 
-        self .steps =[]
-        self .current_idx =0 
-        self .results ={}
-        self .colors =colors_ref 
 
-    def add_step (self ,step_id ,prompt ,default =None ,is_bool =False ,indent =0 ,warning =None ,is_mandatory =False ,condition =None ,builder_func =None ):
-        """Append a new wizard step with *title* and *prompt* to the step list."""
-        step ={
-        "id":step_id ,
-        "prompt":prompt ,
-        "default":default ,
-        "is_bool":is_bool ,
-        "indent":indent ,
-        "warning":warning ,
-        "is_mandatory":is_mandatory ,
-        "condition":condition ,
-        "builder_func":builder_func ,
-        "value":None ,
-        "status":"pending"
-        }
-        self .steps .append (step )
+class InteractiveWizard:
+    """Collect a sequence of terminal inputs.
 
-    @staticmethod 
-    def _looks_like_hex_prompt (prompt :str )->bool :
-        if prompt is None :
-            return False 
-        prompt_l =prompt .lower ()
-        if re .search (r"\b\d+\s*=",prompt_l )is not None :
-            return False 
-        has_hex =False 
-        if "hex"in prompt_l :
-            has_hex =True 
-        return has_hex 
+    ``run`` returns ``None`` when the operator types ``CANCEL``/``ABORT``
+    (optionally prefixed with ``/``), presses Ctrl-C, or reaches EOF.  Callers
+    must treat that as a clean cancellation and avoid executing an operation.
 
-    @staticmethod 
-    def _is_valid_hex_string (raw_val :str )->bool :
-        cleaned =raw_val .replace (" ","")
-        is_even =False 
-        if (len (cleaned )%2 )==0 :
-            is_even =True 
-        if is_even ==False :
-            return False 
-        is_ok =True 
-        for ch in cleaned :
-            is_hex =False 
-            if ch in "0123456789abcdefABCDEF":
-                is_hex =True 
-            if is_hex ==False :
-                is_ok =False 
-                break 
-        return is_ok 
+    Legacy prompt-based hex detection remains available, but new call sites
+    should set ``input_kind="hex"`` or ``input_kind="text"`` explicitly.
+    """
 
-    def _render_completed_step (self ,step ):
-        indent_str ="  "*step ["indent"]
-        prompt_text =step ["prompt"]
+    _CANCEL_WORDS = frozenset({"CANCEL", "/CANCEL", "ABORT", "/ABORT"})
+    _YES_WORDS = frozenset({"Y", "YES", "TRUE", "1"})
+    _NO_WORDS = frozenset({"N", "NO", "FALSE", "0"})
 
-        is_skipped =False 
-        if step ["status"]=="skipped":
-            is_skipped =True 
+    def __init__(self, title, colors_ref, description=""):
+        self.title = title
+        self.description = description
+        self.steps: list[dict[str, Any]] = []
+        self.current_idx = 0
+        self.results: dict[str, Any] = {}
+        self.colors = colors_ref
 
-        if is_skipped :
-            print (f"{indent_str}{self.colors.WARNING}> {prompt_text} SKIPPED{self.colors.ENDC}")
-            return 
+    def add_step(
+        self,
+        step_id,
+        prompt,
+        default=None,
+        is_bool=False,
+        indent=0,
+        warning=None,
+        is_mandatory=False,
+        condition=None,
+        builder_func=None,
+        *,
+        input_kind: str | None = None,
+        choices: Iterable[str] | None = None,
+        secret: bool = False,
+        validator: Callable[[Any], str | None] | None = None,
+    ):
+        """Append a wizard step.
 
-        is_completed =False 
-        if step ["status"]=="completed":
-            is_completed =True 
+        ``choices`` contains canonical accepted values and is matched
+        case-insensitively. ``validator`` returns an error message or ``None``.
+        Secret values are collected with :mod:`getpass` and never echoed.
+        """
+        if input_kind not in (None, "hex", "text"):
+            raise ValueError("input_kind must be None, 'hex', or 'text'.")
+        canonical_choices = None
+        if choices is not None:
+            canonical_choices = tuple(str(value) for value in choices)
+            if not canonical_choices:
+                raise ValueError("choices cannot be empty.")
 
-        is_defaulted =False 
-        if step ["status"]=="defaulted":
-            is_defaulted =True 
+        self.steps.append(
+            {
+                "id": step_id,
+                "prompt": prompt,
+                "default": default,
+                "is_bool": is_bool,
+                "indent": indent,
+                "warning": warning,
+                "is_mandatory": is_mandatory,
+                "condition": condition,
+                "builder_func": builder_func,
+                "input_kind": input_kind,
+                "choices": canonical_choices,
+                "secret": bool(secret),
+                "validator": validator,
+                "value": None,
+                "status": "pending",
+            }
+        )
 
-        val_str =str (step ["value"])
+    @staticmethod
+    def _looks_like_hex_prompt(prompt: str | None) -> bool:
+        """Retain conservative compatibility for older wizard definitions."""
+        if prompt is None:
+            return False
+        prompt_l = prompt.lower()
+        if "hex/name" in prompt_l or "hex or name" in prompt_l:
+            return False
+        if re.search(r"\b\d+\s*=", prompt_l) is not None:
+            return False
+        return "hex" in prompt_l
 
-        is_bool_step =False 
-        if step ["is_bool"]:
-            is_bool_step =True 
+    @staticmethod
+    def _normalize_hex_string(raw_val: str) -> str:
+        cleaned = re.sub(r"[\s:_-]", "", str(raw_val).strip())
+        if cleaned.lower().startswith("0x"):
+            cleaned = cleaned[2:]
+        if not cleaned or len(cleaned) % 2:
+            raise ValueError(
+                "Invalid hex string. Use an even number of hexadecimal digits."
+            )
+        try:
+            bytes.fromhex(cleaned)
+        except ValueError as error:
+            raise ValueError(
+                "Invalid hex string. Use hexadecimal digits 0-9 and A-F only."
+            ) from error
+        return cleaned.upper()
 
-        if is_bool_step :
-            val_str ="Y"
-            is_false =False 
-            if step ["value"]==False :
-                is_false =True 
-            if is_false :
-                val_str ="N"
+    @staticmethod
+    def _is_valid_hex_string(raw_val: str) -> bool:
+        try:
+            InteractiveWizard._normalize_hex_string(raw_val)
+        except ValueError:
+            return False
+        return True
 
-        if is_completed :
-            print (f"{indent_str}{self.colors.GREEN}> {prompt_text} {val_str}{self.colors.ENDC}")
+    @staticmethod
+    def _canonical_choice(value: str, choices: tuple[str, ...]) -> str | None:
+        folded = value.casefold()
+        for candidate in choices:
+            if candidate.casefold() == folded:
+                return candidate
+        return None
 
-        if is_defaulted :
-            print (f"{indent_str}{self.colors.WARNING}> {prompt_text} {val_str}{self.colors.ENDC}")
+    def _render_completed_step(self, step) -> None:
+        indent_str = "  " * step["indent"]
+        prompt_text = step["prompt"]
+        if step["status"] == "skipped":
+            print(
+                f"{indent_str}{self.colors.WARNING}> {prompt_text} "
+                f"SKIPPED{self.colors.ENDC}"
+            )
+            return
 
-    def run (self ):
-        """Execute the wizard step sequence, collecting user input, and return the result dict."""
-        print (f"\n{self.colors.HEADER}--- {self.title} ---{self.colors.ENDC}")
+        value = step["value"]
+        if step["secret"]:
+            val_str = "<hidden>"
+        elif step["is_bool"]:
+            val_str = "Y" if value else "N"
+        else:
+            val_str = str(value)
 
-        has_desc =False 
-        if self .description :
-            has_desc =True 
+        color = self.colors.GREEN
+        if step["status"] == "defaulted":
+            color = self.colors.WARNING
+        print(f"{indent_str}{color}> {prompt_text} {val_str}{self.colors.ENDC}")
 
-        if has_desc :
-            print (f"{self.description}\n")
+    def _read(self, step, prompt_str: str) -> str:
+        if step["secret"]:
+            return getpass.getpass(prompt_str).strip()
+        return input(prompt_str).strip()
 
-        while self .current_idx <len (self .steps ):
-            step =self .steps [self .current_idx ]
-            indent_str ="  "*step ["indent"]
+    def _cancel(self) -> None:
+        print(f"{self.colors.WARNING}[-] Wizard cancelled; no action taken.{self.colors.ENDC}")
+        return None
 
-            has_cond =False 
-            if step ["condition"]is not None :
-                has_cond =True 
+    def _validate_value(self, step, value: Any) -> tuple[Any, str | None]:
+        if step["is_mandatory"] and (
+            value is None or value == "" or str(value).upper() == "SKIP"
+        ):
+            return value, "This field is mandatory and cannot be skipped."
 
-            if has_cond :
-                is_cond_met =step ["condition"](self .results )
-                is_skip_cond =False 
-                if is_cond_met ==False :
-                    is_skip_cond =True 
+        if value is None or value == "" or str(value).upper() == "SKIP":
+            return value, None
 
-                if is_skip_cond :
-                    step ["status"]="skipped"
-                    step ["value"]=None 
-                    self .results [step ["id"]]=None 
-                    self .current_idx +=1 
-                    continue 
+        choices = step["choices"]
+        if choices is not None:
+            canonical = self._canonical_choice(str(value), choices)
+            if canonical is None:
+                return value, f"Choose one of: {', '.join(choices)}."
+            value = canonical
 
-            has_warning =False 
-            if step ["warning"]:
-                has_warning =True 
+        input_kind = step["input_kind"]
+        if input_kind == "hex" or (
+            input_kind is None and self._looks_like_hex_prompt(step["prompt"])
+        ):
+            try:
+                value = self._normalize_hex_string(str(value))
+            except ValueError as error:
+                return value, str(error)
 
-            if has_warning :
-                print (f"{indent_str}{self.colors.WARNING}[!] {step['warning']}{self.colors.ENDC}")
+        validator = step["validator"]
+        if validator is not None:
+            try:
+                error_message = validator(value)
+            except (TypeError, ValueError) as error:
+                error_message = str(error)
+            if error_message:
+                return value, str(error_message)
 
-            prompt_str =f"{indent_str}{self.colors.BOLD}> {step['prompt']}{self.colors.ENDC} "
+        return value, None
 
-            user_input =input (prompt_str ).strip ()
+    def run(self):
+        """Run the steps and return their values, or ``None`` on cancellation."""
+        print(f"\n{self.colors.HEADER}--- {self.title} ---{self.colors.ENDC}")
+        if self.description:
+            print(f"{self.description}\n")
+        print(
+            f"{self.colors.CYAN}Type CANCEL at any prompt to abort safely."
+            f"{self.colors.ENDC}"
+        )
 
-            is_empty =False 
-            if len (user_input )==0 :
-                is_empty =True 
+        while self.current_idx < len(self.steps):
+            step = self.steps[self.current_idx]
+            indent_str = "  " * step["indent"]
 
-            if is_empty :
-                has_default =False 
-                if step ["default"]is not None :
-                    has_default =True 
+            if step["condition"] is not None and not step["condition"](self.results):
+                step["status"] = "skipped"
+                step["value"] = None
+                self.results[step["id"]] = None
+                self.current_idx += 1
+                continue
 
-                if has_default :
-                    step ["value"]=step ["default"]
-                    step ["status"]="defaulted"
+            if step["warning"]:
+                print(
+                    f"{indent_str}{self.colors.WARNING}[!] "
+                    f"{step['warning']}{self.colors.ENDC}"
+                )
 
-                no_default =False 
-                if step ["default"]is None :
-                    no_default =True 
+            prompt_str = (
+                f"{indent_str}{self.colors.BOLD}> {step['prompt']}"
+                f"{self.colors.ENDC} "
+            )
+            try:
+                user_input = self._read(step, prompt_str)
+            except (EOFError, KeyboardInterrupt):
+                print("")
+                return self._cancel()
 
-                if no_default :
-                    step ["value"]=None 
-                    step ["status"]="skipped"
+            if user_input.upper() in self._CANCEL_WORDS:
+                return self._cancel()
 
-            has_input =False 
-            if is_empty ==False :
-                has_input =True 
+            status = "completed"
+            if not user_input:
+                value = step["default"]
+                status = "defaulted" if value is not None else "skipped"
+            elif step["is_bool"]:
+                normalized = user_input.upper()
+                if normalized in self._YES_WORDS:
+                    value = True
+                elif normalized in self._NO_WORDS:
+                    value = False
+                else:
+                    print(
+                        f"{indent_str}{self.colors.WARNING}[!] Enter Y/YES or "
+                        f"N/NO.{self.colors.ENDC}"
+                    )
+                    continue
+            elif user_input.upper() == "SKIP":
+                value = "SKIP"
+                status = "skipped"
+            else:
+                value = user_input
 
-            if has_input :
-                is_bool =False 
-                if step ["is_bool"]:
-                    is_bool =True 
+            if isinstance(value, str) and value.upper() == "SKIP":
+                value = "SKIP"
+                status = "skipped"
 
-                if is_bool :
-                    is_yes =False 
-                    if user_input .lower ()=='y':
-                        is_yes =True 
+            value, error_message = self._validate_value(step, value)
+            if error_message:
+                print(
+                    f"{indent_str}{self.colors.WARNING}[!] "
+                    f"{error_message}{self.colors.ENDC}"
+                )
+                continue
 
-                    if is_yes :
-                        step ["value"]=True 
-                        step ["status"]="completed"
+            step["value"] = value
+            step["status"] = status
+            self.results[step["id"]] = value
+            self.current_idx += 1
+            self._render_completed_step(step)
 
-                    is_no =False 
-                    if is_yes ==False :
-                        is_no =True 
+            if (
+                step["builder_func"] is not None
+                and step["is_bool"]
+                and step["value"] is True
+            ):
+                built_val = step["builder_func"]()
+                if built_val is None:
+                    return None
+                self.results[step["id"] + "_built"] = built_val
 
-                    if is_no :
-                        step ["value"]=False 
-                        step ["status"]="defaulted"
-
-                is_str =False 
-                if is_bool ==False :
-                    is_str =True 
-
-                if is_str :
-                    is_skip_cmd =False 
-                    if user_input .upper ()=='SKIP':
-                        is_skip_cmd =True 
-
-                    if is_skip_cmd :
-                        step ["value"]=None 
-                        step ["status"]="skipped"
-
-                    is_val =False 
-                    if is_skip_cmd ==False :
-                        is_val =True 
-
-                    if is_val :
-                        looks_hex =InteractiveWizard ._looks_like_hex_prompt (step ["prompt"])
-                        if looks_hex :
-                            is_valid_hex =InteractiveWizard ._is_valid_hex_string (user_input )
-                            if is_valid_hex ==False :
-                                has_old_warning =False 
-                                if step ["warning"]:
-                                    has_old_warning =True 
-                                step ["status"]="pending"
-                                step ["warning"]="Invalid hex string. Use even-length hexadecimal characters only."
-                                if has_old_warning :
-                                    print ("\033[1A\033[2K\033[1A\033[2K",end ="")
-                                if has_old_warning ==False :
-                                    print ("\033[1A\033[2K",end ="")
-                                continue 
-                        step ["value"]=user_input 
-                        step ["status"]="completed"
-
-            is_mandatory =False 
-            if step ["is_mandatory"]:
-                is_mandatory =True 
-
-            if is_mandatory :
-                val =step ["value"]
-
-                is_val_none =False 
-                if val is None :
-                    is_val_none =True 
-
-                is_val_empty_str =False 
-                if val =="":
-                    is_val_empty_str =True 
-
-                is_missing_req =False 
-                if is_val_none :
-                    is_missing_req =True 
-                if is_val_empty_str :
-                    is_missing_req =True 
-
-                if is_missing_req :
-                    has_old_warning =False 
-                    if step ["warning"]:
-                        has_old_warning =True 
-
-                    step ["status"]="pending"
-                    step ["warning"]="This field is mandatory and cannot be empty."
-
-                    if has_old_warning :
-                        print ("\033[1A\033[2K\033[1A\033[2K",end ="")
-
-                    if has_old_warning ==False :
-                        print ("\033[1A\033[2K",end ="")
-                    continue 
-
-            has_old_warning =False 
-            if step ["warning"]:
-                has_old_warning =True 
-
-            step ["warning"]=None 
-            self .results [step ["id"]]=step ["value"]
-            self .current_idx +=1 
-
-            if has_old_warning :
-                print ("\033[1A\033[2K\033[1A\033[2K",end ="")
-
-            if has_old_warning ==False :
-                print ("\033[1A\033[2K",end ="")
-
-            self ._render_completed_step (step )
-
-            has_builder =False 
-            if step ["builder_func"]is not None :
-                has_builder =True 
-
-            if has_builder :
-                is_true_bool =False 
-                if step ["is_bool"]:
-                    if step ["value"]==True :
-                        is_true_bool =True 
-
-                if is_true_bool :
-                    built_val =step ["builder_func"]()
-                    self .results [step ["id"]+"_built"]=built_val 
-
-        return self .results 
+        return self.results

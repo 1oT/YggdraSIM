@@ -23,25 +23,157 @@ on:
     branches: [main, master, "release/**"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# uv checks a git-sourced dependency (pySim, the asn1tools fork) out of
+# its cache with `git clone --local`, and git aborts that clone when a
+# file in the cache changes while the objects are being hardlinked
+# ("hardlink different from source"). git may start a background
+# maintenance run after the fetch that filled the cache; these settings
+# keep every git process on the runner from doing so and from writing
+# a commit-graph after a fetch. They travel in the environment, so no
+# config file is written. scripts/release/uv_sync_retry.sh covers what
+# is left by syncing again from an empty cache.
+env:
+  GIT_CONFIG_COUNT: "3"
+  GIT_CONFIG_KEY_0: maintenance.auto
+  GIT_CONFIG_VALUE_0: "false"
+  GIT_CONFIG_KEY_1: gc.auto
+  GIT_CONFIG_VALUE_1: "0"
+  GIT_CONFIG_KEY_2: fetch.writeCommitGraph
+  GIT_CONFIG_VALUE_2: "false"
+
 jobs:
+  release-ref-policy:
+    name: Release tag and ancestry policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag_object_sha: ${{ steps.release-tag.outputs.tag_object_sha }}
+
+    steps:
+      - name: Checkout release history without stored credentials
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fail closed for production tags
+        id: release-tag
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF}" in
+            refs/tags/v*) ;;
+            *)
+              echo "not a production tag; release policy gate is not applicable"
+              exit 0
+              ;;
+          esac
+          VERSION="$(python3 -c \
+            "import tomllib; from pathlib import Path; print(tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])")"
+          TAG="${GITHUB_REF#refs/tags/}"
+          test "${TAG}" = "v${VERSION}"
+          # actions/checkout re-points refs/tags/<tag> at the commit it was
+          # given (actions/checkout issue 290), so an annotated tag looks
+          # lightweight in the checkout and `cat-file -t` answers "commit".
+          # Fetch the tag object back before judging it, with the header
+          # checkout itself uses, so a private repository passes too.
+          AUTH="$(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)"
+          git -c "http.${GITHUB_SERVER_URL}/.extraheader=AUTHORIZATION: basic ${AUTH}" \
+            fetch --force --no-tags origin "+refs/tags/${TAG}:refs/tags/${TAG}"
+          test "$(git cat-file -t "refs/tags/${TAG}")" = "tag"
+          TAG_OBJECT_SHA="$(git rev-parse "refs/tags/${TAG}^{tag}")"
+          test "$(git rev-list -n 1 "refs/tags/${TAG}")" = "${GITHUB_SHA}"
+          # A production tag is cut on main or on a release/<major>.<minor>.x
+          # branch (guides/REMOTES_AND_PUBLICATION.md); a tag on any other
+          # commit is refused before a single platform builds.
+          git show-ref --verify --quiet refs/remotes/origin/main
+          LINE=""
+          for ref in $(git for-each-ref --format='%(refname)' \
+              refs/remotes/origin/main 'refs/remotes/origin/release/*'); do
+            if git merge-base --is-ancestor "${GITHUB_SHA}" "${ref}"; then
+              LINE="${ref#refs/remotes/origin/}"
+              break
+            fi
+          done
+          test -n "${LINE}"
+          printf 'tag_object_sha=%s\n' "${TAG_OBJECT_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "validated annotated ${TAG} on the ${LINE} history"
+
+  dependency-policy:
+    name: Dependency lock and package boundary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
+      - name: Verify dependency lock is current
+        run: uv lock --check --python 3.11
+
+      - name: Verify frozen resource allowlists
+        shell: bash
+        run: |
+          python scripts/release/prepare_bundle_data.py \
+            --flavor clean --stage-dir "${RUNNER_TEMP}/bundle-data-clean"
+          python scripts/release/prepare_bundle_data.py \
+            --flavor full --stage-dir "${RUNNER_TEMP}/bundle-data-full"
+
+      - name: Build and inspect wheel
+        shell: bash
+        run: |
+          python scripts/release/source_boundary.py
+          uv build --sdist --out-dir "${RUNNER_TEMP}/sdist"
+          SDIST=$(find "${RUNNER_TEMP}/sdist" -maxdepth 1 -name '*.tar.gz' -print -quit)
+          test -n "${SDIST}"
+          python scripts/release/verify_sdist.py "${SDIST}"
+          uv build --wheel --out-dir "${RUNNER_TEMP}/wheel" "${SDIST}"
+          WHEEL=$(find "${RUNNER_TEMP}/wheel" -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "${WHEEL}"
+          python scripts/release/verify_wheel.py "${WHEEL}"
+
   docs-strict:
     name: Docs (mkdocs --strict)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
 
       - name: Install docs dependencies
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
+      - name: Sync locked docs environment
         shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-docs.txt
+        run: uv pip install --system -r requirements-docs.txt
 
       - name: Mirror repo docs into site-docs/sources/
         shell: bash
@@ -57,10 +189,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
 
@@ -71,10 +205,21 @@ jobs:
             libpcsclite-dev pcscd swig pkg-config gpg libudev-dev build-essential
 
       - name: Install Python dependencies (full + test extras)
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
+      - name: Sync locked full test environment
+        shell: bash
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra full --extra test --extra mcp
+
+      - name: Run fatal Python static-analysis gate
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[full]'
+          uv run ruff check \
+            main SCP03 SCP80 SCP11 SIMCARD Tools yggdrasim_common scripts tests \
+            --select E9,F
 
       - name: Run pytest suite
         shell: bash
@@ -90,11 +235,13 @@ jobs:
         # ``git clone https://gitlab.com/osmocom/pysim.git pysim`` into the
         # workspace prior to the pytest step.
         run: |
-          python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=5 tests/
+          uv run python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=5 tests/
 
   build-linux-x86_64:
     name: Linux x86_64 (${{ matrix.flavor }})
-    runs-on: ubuntu-latest
+    needs: release-ref-policy
+    # Build on the oldest supported glibc for forward-compatible bundles.
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -105,10 +252,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
 
@@ -127,26 +276,31 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libpcsclite-dev pcscd swig pkg-config gpg
+          sudo apt-get install -y --no-install-recommends \
+            libpcsclite-dev pcscd swig pkg-config gpg \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-keysyms1 libxcb-shape0 libxcb-icccm4 xauth xvfb
+
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
 
       - name: Install Python dependencies (clean)
         if: matrix.flavor == 'clean'
         shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[build,test,gui]'
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra saip --extra build --extra test --extra gui
 
       - name: Install Python dependencies (full)
         if: matrix.flavor == 'full'
         shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[full,gui]'
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra full --extra saip --extra build --extra test --extra gui
 
       - name: Build Linux bundle
         env:
           YGGDRASIM_FLAVOR: ${{ matrix.flavor }}
-        run: python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+        run: uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 
       - name: Smoke test Linux bundle
         shell: bash
@@ -159,24 +313,45 @@ jobs:
           chmod +x "${GUI_BIN}"
           "${BIN}" --version
           "${GUI_BIN}" --version
-          "${BIN}" --doctor || true
+          DOCTOR_OUTPUT=$("${BIN}" --doctor || true)
+          printf '%s\n' "${DOCTOR_OUTPUT}"
+          printf '%s\n' "${DOCTOR_OUTPUT}" | grep -E 'usable backends:.*qt'
+          uv run python scripts/release/validate_release.py artifact "${BIN}" "${GUI_BIN}"
+          set +e
+          timeout 12s xvfb-run -a "${GUI_BIN}" \
+            >"${RUNNER_TEMP}/yggdrasim-gui-smoke.log" 2>&1
+          GUI_STATUS=$?
+          set -e
+          case "${GUI_STATUS}" in
+            0|124) ;;
+            *)
+              cat "${RUNNER_TEMP}/yggdrasim-gui-smoke.log"
+              echo "GUI exited before the Xvfb smoke window could stay open" >&2
+              exit "${GUI_STATUS}"
+              ;;
+          esac
 
       - name: Upload Linux bundle artifact
-        uses: actions/upload-artifact@v6
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: |
             dist/yggdrasim-${{ matrix.flavor }}
             dist/yggdrasim-gui-${{ matrix.flavor }}
           if-no-files-found: error
+          retention-days: 7
 
   build-linux-arm64-clean:
     name: Linux arm64 clean (Raspberry Pi)
+    needs: release-ref-policy
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Resolve package metadata
         id: meta
@@ -187,57 +362,74 @@ jobs:
           echo "artifact_name=yggdrasim-linux-arm64-clean-${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU for arm64
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
         with:
           platforms: arm64
 
       - name: Build arm64 bundle inside Debian container
         shell: bash
-        # ``python3-dev`` is required for the ``pyscard`` C extension build
-        # (it pulls in ``Python.h``); ``git`` is required by pip when an
-        # extra resolves to a ``git+https://`` source. The clean flavor does
-        # not currently consume ``saip`` (which uses git+), but the clean
-        # ``[build,test]`` extras keep us future-proof against transitive
-        # changes.
+        # ``python3-dev`` supplies ``Python.h`` for pyscard. ``git`` resolves
+        # the commit-pinned pySim and asn1tools sources in the locked base
+        # dependency graph.
         run: |
           mkdir -p dist
           docker run --rm --platform linux/arm64 \
             -v "$PWD":/src -w /src \
             -e YGGDRASIM_FLAVOR=clean \
+            -e GIT_CONFIG_COUNT -e GIT_CONFIG_KEY_0 -e GIT_CONFIG_VALUE_0 \
+            -e GIT_CONFIG_KEY_1 -e GIT_CONFIG_VALUE_1 \
+            -e GIT_CONFIG_KEY_2 -e GIT_CONFIG_VALUE_2 \
             debian:bookworm-slim bash -lc '
               set -eux
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 python3 python3-pip python3-venv python3-dev \
+                python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel \
                 libpcsclite-dev pcscd swig pkg-config gpg git \
+                libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
                 build-essential
-              python3 -m venv /opt/venv
-              . /opt/venv/bin/activate
-              python -m pip install --upgrade pip
-              python -m pip install -e ".[build,test,gui]"
-              python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+              git config --global --add safe.directory /src
+              python3 -m venv /opt/uv
+              /opt/uv/bin/pip install "uv==0.5.9"
+              python3 -m venv --system-site-packages /opt/venv
+              export UV_PROJECT_ENVIRONMENT=/opt/venv
+              bash scripts/release/uv_sync_retry.sh /opt/uv/bin/uv sync --frozen \
+                --extra saip --extra build --extra test --extra gui
+              /opt/uv/bin/uv run python -c \
+                "from qtpy import QtWebEngineWidgets; print(QtWebEngineWidgets.__name__)"
+              /opt/uv/bin/uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
               chmod +x dist/yggdrasim-clean
               chmod +x dist/yggdrasim-gui-clean
               dist/yggdrasim-clean --version
               dist/yggdrasim-gui-clean --version
+              DOCTOR_OUTPUT=$(dist/yggdrasim-clean --doctor || true)
+              printf "%s\n" "${DOCTOR_OUTPUT}"
+              printf "%s\n" "${DOCTOR_OUTPUT}" | grep -E "usable backends:.*qt"
+              /opt/uv/bin/uv run python scripts/release/validate_release.py \
+                artifact dist/yggdrasim-clean dist/yggdrasim-gui-clean
             '
 
       - name: Upload arm64 bundle artifact
-        uses: actions/upload-artifact@v6
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: |
             dist/yggdrasim-clean
             dist/yggdrasim-gui-clean
           if-no-files-found: error
+          retention-days: 7
 
   build-linux-arm64-full:
     name: Linux arm64 full (Raspberry Pi + HIL)
+    needs: release-ref-policy
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Resolve package metadata
         id: meta
@@ -248,7 +440,7 @@ jobs:
           echo "artifact_name=yggdrasim-linux-arm64-full-${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU for arm64
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
         with:
           platforms: arm64
 
@@ -262,43 +454,65 @@ jobs:
           docker run --rm --platform linux/arm64 \
             -v "$PWD":/src -w /src \
             -e YGGDRASIM_FLAVOR=full \
+            -e GIT_CONFIG_COUNT -e GIT_CONFIG_KEY_0 -e GIT_CONFIG_VALUE_0 \
+            -e GIT_CONFIG_KEY_1 -e GIT_CONFIG_VALUE_1 \
+            -e GIT_CONFIG_KEY_2 -e GIT_CONFIG_VALUE_2 \
             debian:bookworm-slim bash -lc '
               set -eux
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 python3 python3-pip python3-venv python3-dev \
+                python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel \
                 libpcsclite-dev pcscd swig pkg-config gpg git \
-                libudev-dev build-essential
-              python3 -m venv /opt/venv
-              . /opt/venv/bin/activate
-              python -m pip install --upgrade pip
-              python -m pip install -e ".[full,gui]"
-              python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+                libudev-dev libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+                build-essential
+              git config --global --add safe.directory /src
+              python3 -m venv /opt/uv
+              /opt/uv/bin/pip install "uv==0.5.9"
+              python3 -m venv --system-site-packages /opt/venv
+              export UV_PROJECT_ENVIRONMENT=/opt/venv
+              bash scripts/release/uv_sync_retry.sh /opt/uv/bin/uv sync --frozen \
+                --extra full --extra saip --extra build --extra test --extra gui
+              /opt/uv/bin/uv run python -c \
+                "from qtpy import QtWebEngineWidgets; print(QtWebEngineWidgets.__name__)"
+              /opt/uv/bin/uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
               chmod +x dist/yggdrasim-full
               chmod +x dist/yggdrasim-gui-full
               dist/yggdrasim-full --version
               dist/yggdrasim-gui-full --version
+              DOCTOR_OUTPUT=$(dist/yggdrasim-full --doctor || true)
+              printf "%s\n" "${DOCTOR_OUTPUT}"
+              printf "%s\n" "${DOCTOR_OUTPUT}" | grep -E "usable backends:.*qt"
+              /opt/uv/bin/uv run python scripts/release/validate_release.py \
+                artifact dist/yggdrasim-full dist/yggdrasim-gui-full
             '
 
       - name: Upload arm64 full bundle artifact
-        uses: actions/upload-artifact@v6
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: |
             dist/yggdrasim-full
             dist/yggdrasim-gui-full
           if-no-files-found: error
+          retention-days: 7
 
   build-windows-clean:
     name: Windows x86_64 clean
+    needs: release-ref-policy
     runs-on: windows-latest
+    outputs:
+      signed: ${{ steps.codesign.outputs.signed }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
 
@@ -314,35 +528,119 @@ jobs:
         shell: pwsh
         run: choco install swig -y
 
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
       - name: Install Python dependencies
+        shell: bash
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra saip --extra build --extra test --extra gui
+
+      - name: Verify portable Remote Lab and Card Bridge contracts
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[build,test,gui]'
+          uv run python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=1 `
+            tests/test_remote_cross_platform_boundary.py `
+            tests/test_remote_lab.py `
+            tests/test_gui_card_bridge_actions.py `
+            tests/test_gui_card_bridge_actions_http.py `
+            tests/test_apdu_relay_service.py `
+            tests/test_card_backend_relay_token.py `
+            tests/test_hil_bridge_card_relay.py `
+            tests/test_secure_files_windows.py
 
       - name: Build Windows bundle
         shell: pwsh
         env:
           YGGDRASIM_FLAVOR: clean
-        run: python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+        run: uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      # A repository without code-signing secrets publishes unsigned
+      # binaries and the release notes say so (publish-release). A partial
+      # pair is a misconfiguration and fails the build.
+      - name: Resolve Authenticode credentials for the tagged release
+        id: codesign
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+        run: |
+          $havePfx = -not [string]::IsNullOrWhiteSpace($env:SIGNING_PFX_BASE64)
+          $havePassword = -not [string]::IsNullOrWhiteSpace($env:SIGNING_PASSWORD)
+          if ($havePfx -ne $havePassword) {
+            throw 'WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PASSWORD must be set together.'
+          }
+          if ($havePfx) {
+            "signed=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host 'No WINDOWS_CODESIGN_* secrets: the Windows binaries ship unsigned and the release notes say so.'
+            "signed=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Authenticode-sign Windows release binaries
+        if: startsWith(github.ref, 'refs/tags/v') && steps.codesign.outputs.signed == 'true'
+        shell: pwsh
+        env:
+          SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'yggdrasim-codesign.pfx'
+          try {
+            [IO.File]::WriteAllBytes(
+              $pfx,
+              [Convert]::FromBase64String($env:SIGNING_PFX_BASE64)
+            )
+            $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
+            foreach ($binary in @(
+              '.\dist\yggdrasim-clean.exe',
+              '.\dist\yggdrasim-gui-clean.exe'
+            )) {
+              & $signtool sign /fd SHA256 /td SHA256 `
+                /tr 'https://timestamp.digicert.com' `
+                /f $pfx /p $env:SIGNING_PASSWORD $binary
+              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $binary" }
+              & $signtool verify /pa /all $binary
+              if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $binary" }
+            }
+          }
+          finally {
+            Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Smoke test Windows bundle
         shell: pwsh
         run: |
           .\dist\yggdrasim-clean.exe --version
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows CLI --version smoke test failed.'
+          }
           .\dist\yggdrasim-gui-clean.exe --version
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows GUI --version smoke test failed.'
+          }
+          uv run python scripts/release/validate_release.py artifact `
+            .\dist\yggdrasim-clean.exe .\dist\yggdrasim-gui-clean.exe
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows release validation failed.'
+          }
 
       - name: Upload Windows bundle artifact
-        uses: actions/upload-artifact@v6
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: |
             dist/yggdrasim-clean.exe
             dist/yggdrasim-gui-clean.exe
           if-no-files-found: error
+          retention-days: 7
 
   build-macos-clean:
     name: macOS ${{ matrix.arch }} clean
+    needs: release-ref-policy
     strategy:
       fail-fast: false
       matrix:
@@ -350,13 +648,17 @@ jobs:
           - arch: arm64
             runner: macos-14
     runs-on: ${{ matrix.runner }}
+    outputs:
+      signed: ${{ steps.codesign.outputs.signed }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
 
@@ -374,17 +676,116 @@ jobs:
           brew update
           brew install swig || true
 
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.5.9"
+          enable-cache: false
+
       - name: Install Python dependencies
         shell: bash
+        run: bash scripts/release/uv_sync_retry.sh uv sync --frozen --extra saip --extra build --extra test --extra gui
+
+      - name: Verify portable Remote Lab and Card Bridge contracts
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[build,test,gui]'
+          uv run python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=1 \
+            tests/test_remote_cross_platform_boundary.py \
+            tests/test_remote_lab.py \
+            tests/test_gui_card_bridge_actions.py \
+            tests/test_gui_card_bridge_actions_http.py \
+            tests/test_apdu_relay_service.py \
+            tests/test_card_backend_relay_token.py \
+            tests/test_hil_bridge_card_relay.py
 
       - name: Build macOS bundle
         shell: bash
         env:
           YGGDRASIM_FLAVOR: clean
-        run: python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+        run: uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      # A repository without signing and notarization secrets publishes
+      # unsigned binaries and the release notes say so (publish-release).
+      # A partial set is a misconfiguration and fails the build.
+      - name: Resolve signing and notarization credentials for the tagged release
+        id: codesign
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CODESIGN_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CODESIGN_CERT_PASSWORD }}
+          CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          set -eu
+          present=""
+          missing=""
+          for name in CERT_P12_BASE64 CERT_PASSWORD CODESIGN_IDENTITY \
+            APPLE_ID APPLE_ID_PASSWORD APPLE_TEAM_ID; do
+            if [ -n "$(printenv "${name}")" ]; then
+              present="${present} ${name}"
+            else
+              missing="${missing} ${name}"
+            fi
+          done
+          if [ -n "${present}" ] && [ -n "${missing}" ]; then
+            echo "The MACOS_CODESIGN_* / MACOS_NOTARY_* secrets must be set together; missing:${missing}" >&2
+            exit 2
+          fi
+          if [ -n "${present}" ]; then
+            echo "signed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "No MACOS_CODESIGN_* / MACOS_NOTARY_* secrets: the macOS binaries ship unsigned and unnotarized, and the release notes say so."
+            echo "signed=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Sign and notarize macOS release binaries
+        if: startsWith(github.ref, 'refs/tags/v') && steps.codesign.outputs.signed == 'true'
+        shell: bash
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CODESIGN_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CODESIGN_CERT_PASSWORD }}
+          CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          set -eu
+          P12="${RUNNER_TEMP}/yggdrasim-codesign.p12"
+          KEYCHAIN="${RUNNER_TEMP}/yggdrasim-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          ARCHIVE="${RUNNER_TEMP}/yggdrasim-notary.zip"
+          GUI_ARCHIVE="${RUNNER_TEMP}/yggdrasim-gui-notary.zip"
+          cleanup() {
+            security delete-keychain "${KEYCHAIN}" >/dev/null 2>&1 || true
+            rm -f "${P12}" "${ARCHIVE}" "${GUI_ARCHIVE}"
+          }
+          trap cleanup EXIT
+          printf '%s' "${CERT_P12_BASE64}" | base64 --decode > "${P12}"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security import "${P12}" -k "${KEYCHAIN}" -P "${CERT_PASSWORD}" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security list-keychains -d user -s "${KEYCHAIN}"
+          for binary in dist/yggdrasim-clean dist/yggdrasim-gui-clean; do
+            codesign --force --options runtime --timestamp \
+              --keychain "${KEYCHAIN}" --sign "${CODESIGN_IDENTITY}" "${binary}"
+            codesign --verify --deep --strict --verbose=2 "${binary}"
+          done
+          ditto -c -k --keepParent dist/yggdrasim-clean "${ARCHIVE}"
+          ditto -c -k --keepParent dist/yggdrasim-gui-clean \
+            "${GUI_ARCHIVE}"
+          xcrun notarytool submit "${ARCHIVE}" --wait \
+            --apple-id "${APPLE_ID}" --password "${APPLE_ID_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}"
+          xcrun notarytool submit "${GUI_ARCHIVE}" --wait \
+            --apple-id "${APPLE_ID}" --password "${APPLE_ID_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}"
 
       - name: Smoke test macOS bundle
         shell: bash
@@ -393,25 +794,30 @@ jobs:
           chmod +x dist/yggdrasim-gui-clean
           dist/yggdrasim-clean --version
           dist/yggdrasim-gui-clean --version
+          uv run python scripts/release/validate_release.py artifact \
+            dist/yggdrasim-clean dist/yggdrasim-gui-clean
 
       - name: Upload macOS bundle artifact
-        uses: actions/upload-artifact@v6
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: |
             dist/yggdrasim-clean
             dist/yggdrasim-gui-clean
           if-no-files-found: error
+          retention-days: 7
 
   build-linux-deb-clean:
     name: Debian package (clean)
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs:
       - build-linux-x86_64
 
     steps:
       - name: Download clean Linux bundle
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: ${{ needs.build-linux-x86_64.outputs.clean_artifact_name }}
           path: dist
@@ -436,7 +842,7 @@ jobs:
           Priority: optional
           Architecture: ${ARCH}
           Maintainer: GitHub Actions
-          Depends: libpcsclite1, pcscd, gpg
+          Depends: libpcsclite1, pcscd, gpg, libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0, libxcb-keysyms1, libxcb-shape0, libxcb-icccm4
           Description: YggdraSIM secure-element and eUICC toolkit (clean flavor, no HIL bridge)
           EOF
           dpkg-deb --build "$PKGROOT" "dist/${DEB_NAME}"
@@ -444,17 +850,21 @@ jobs:
           echo "artifact_path=dist/${DEB_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Upload Debian package artifact
-        uses: actions/upload-artifact@v6
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ steps.deb.outputs.artifact_name }}
           path: ${{ steps.deb.outputs.artifact_path }}
           if-no-files-found: error
+          retention-days: 7
 
   publish-release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs:
+      - release-ref-policy
+      - dependency-policy
       - docs-strict
       - pytest-suite
       - build-linux-x86_64
@@ -465,10 +875,14 @@ jobs:
       - build-linux-deb-clean
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Resolve release metadata
         id: meta
@@ -476,6 +890,7 @@ jobs:
         run: |
           VERSION=$(python3 -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
           TAG="${GITHUB_REF#refs/tags/}"
+          python3 scripts/release/validate_release.py tag --tag "${TAG}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
@@ -486,43 +901,43 @@ jobs:
           mkdir -p dl
 
       - name: Download Linux x86_64 clean
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: yggdrasim-linux-x86_64-clean-${{ steps.meta.outputs.version }}
           path: dl/linux-x86_64-clean
 
       - name: Download Linux x86_64 full
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: yggdrasim-linux-x86_64-full-${{ steps.meta.outputs.version }}
           path: dl/linux-x86_64-full
 
       - name: Download Linux arm64 clean
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: yggdrasim-linux-arm64-clean-${{ steps.meta.outputs.version }}
           path: dl/linux-arm64-clean
 
       - name: Download Linux arm64 full
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: yggdrasim-linux-arm64-full-${{ steps.meta.outputs.version }}
           path: dl/linux-arm64-full
 
       - name: Download Windows x86_64 clean
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: yggdrasim-windows-x86_64-clean-${{ steps.meta.outputs.version }}
           path: dl/windows-x86_64-clean
 
       - name: Download macOS arm64 clean
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: yggdrasim-macos-arm64-clean-${{ steps.meta.outputs.version }}
           path: dl/macos-arm64-clean
 
       - name: Download Linux Debian package (clean)
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: yggdrasim-linux-deb-clean-${{ steps.meta.outputs.version }}
           path: dl/linux-deb-clean
@@ -549,6 +964,14 @@ jobs:
           install -m 0755 dl/windows-x86_64-clean/yggdrasim-clean.exe release-assets/yggdrasim-windows-x86_64-clean.exe
           install -m 0755 dl/windows-x86_64-clean/yggdrasim-gui-clean.exe release-assets/yggdrasim-gui-windows-x86_64-clean.exe
           cp dl/linux-deb-clean/yggdrasim-clean_${{ steps.meta.outputs.version }}_amd64.deb release-assets/
+
+      - name: Generate locked dependency SBOM
+        shell: bash
+        run: |
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+            python3 scripts/release/generate_sbom.py \
+            --version "${{ steps.meta.outputs.version }}" \
+            --output "release-assets/yggdrasim-${{ steps.meta.outputs.version }}.cdx.json"
 
       - name: Generate SHA256 manifest
         shell: bash
@@ -582,6 +1005,7 @@ jobs:
             yggdrasim-gui-macos-arm64-clean
             yggdrasim-windows-x86_64-clean.exe
             yggdrasim-gui-windows-x86_64-clean.exe
+            yggdrasim-${{ steps.meta.outputs.version }}.cdx.json
             SHA256SUMS
           "
           missing=
@@ -597,6 +1021,34 @@ jobs:
           echo 'all required release assets present'
           ls -la release-assets/
 
+      - name: Re-verify the immutable production tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_TAG_OBJECT: ${{ needs.release-ref-policy.outputs.tag_object_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          REMOTE_TYPE="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" \
+            --jq '.object.type')"
+          REMOTE_TAG_OBJECT="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" \
+            --jq '.object.sha')"
+          test "${REMOTE_TYPE}" = "tag"
+          test "${REMOTE_TAG_OBJECT}" = "${EXPECTED_TAG_OBJECT}"
+          test "$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/tags/${REMOTE_TAG_OBJECT}" \
+            --jq '.object.type')" = "commit"
+          test "$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/tags/${REMOTE_TAG_OBJECT}" \
+            --jq '.object.sha')" = "${GITHUB_SHA}"
+
+      - name: Sign release provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: release-assets/*
+
       # ``--notes-from-tag`` reuses the annotated tag message we shipped with
       # v1.0.0 (BCD EID marker + HIL fix + audit rectifications). Future tags
       # should keep the annotation pattern; ``release-checklist.md`` documents
@@ -607,8 +1059,29 @@ jobs:
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           TAG="${{ steps.meta.outputs.tag }}"
+          verify_remote_tag() {
+            local remote_type remote_tag_object tagged_type tagged_sha
+            remote_type="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" \
+              --jq '.object.type')"
+            remote_tag_object="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" \
+              --jq '.object.sha')"
+            test "${remote_type}" = "tag"
+            test "${remote_tag_object}" = \
+              "${{ needs.release-ref-policy.outputs.tag_object_sha }}"
+            tagged_type="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/tags/${remote_tag_object}" \
+              --jq '.object.type')"
+            tagged_sha="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/tags/${remote_tag_object}" \
+              --jq '.object.sha')"
+            test "${tagged_type}" = "commit"
+            test "${tagged_sha}" = "${GITHUB_SHA}"
+          }
+          verify_remote_tag
           PRERELEASE_FLAG=""
           case "${TAG}" in
             *-rc*|*-alpha*|*-beta*|*-pre*) PRERELEASE_FLAG="--prerelease" ;;
@@ -619,3 +1092,32 @@ jobs:
             --verify-tag \
             ${PRERELEASE_FLAG} \
             release-assets/*
+          verify_remote_tag
+
+      # ``--notes-from-tag`` carries the release note the tag was annotated
+      # with. When a platform shipped unsigned, the note gains a section
+      # saying so, so the warning a first launch produces is explained on
+      # the page the binary came from.
+      - name: Record unsigned platform binaries in the release notes
+        if: needs.build-windows-clean.outputs.signed != 'true' || needs.build-macos-clean.outputs.signed != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          WINDOWS_SIGNED: ${{ needs.build-windows-clean.outputs.signed }}
+          MACOS_SIGNED: ${{ needs.build-macos-clean.outputs.signed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+          NOTES="${RUNNER_TEMP}/release-notes.md"
+          gh release view "${TAG}" --json body --jq '.body' > "${NOTES}"
+          {
+            printf '\n## Code signing\n\n'
+            if [ "${WINDOWS_SIGNED}" != "true" ]; then
+              printf -- '- The Windows binaries are not Authenticode-signed: this repository holds no WINDOWS_CODESIGN_PFX_BASE64 / WINDOWS_CODESIGN_PASSWORD secrets. Microsoft Defender SmartScreen warns on the first launch.\n'
+            fi
+            if [ "${MACOS_SIGNED}" != "true" ]; then
+              printf -- '- The macOS binaries are not signed or notarized: this repository holds no MACOS_CODESIGN_* / MACOS_NOTARY_* secrets. Gatekeeper refuses them until the quarantine attribute is removed (`xattr -d com.apple.quarantine <binary>`) or they are opened once through the Finder context menu.\n'
+            fi
+          } >> "${NOTES}"
+          gh release edit "${TAG}" --notes-file "${NOTES}"

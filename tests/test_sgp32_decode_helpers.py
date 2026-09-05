@@ -56,7 +56,7 @@ class Sgp32DecodeHelperTests(unittest.TestCase):
         first = decoded["notifications"][0]
         self.assertEqual(first["seqNumber"], "7")
         self.assertIn("notificationInstall", first["operation"])
-        self.assertIn("notificationEnable", first["operation"])
+        self.assertIn("notificationLocalEnable", first["operation"])
         self.assertEqual(first["notificationAddress"], '"notify.example.com"')
         self.assertEqual(first["iccid"], "8901234567890123456")
 

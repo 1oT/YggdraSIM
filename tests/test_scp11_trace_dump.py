@@ -153,7 +153,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
         self.assertIn("87 eimSupportedProtocol len=2 value=eimRetrieveHttps (0780)", decoded)
         self.assertIn("89 indirectProfileDownload len=0", decoded)
         self.assertIn("SEQUENCE len=111", decoded)
-        self.assertIn("5F37 signature len=64 value=64B ECDSA-rs", decoded)
+        self.assertIn("5F37 eimSignature / EuiccSign len=64 value=64B ECDSA-rs", decoded)
         self.assertNotIn("primitive", decoded)
         self.assertNotIn("constructed", decoded)
         self.assertNotIn("context [", decoded)
@@ -183,7 +183,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
     def test_format_tlv_decode_names_profile_info_fields(self) -> None:
         profile_info = _tlv(
             "E3",
-            _tlv("5A", bytes.fromhex("98640283900000000068"))
+            _tlv("5A", bytes.fromhex("98880283900000000058"))
             + _tlv("4F", bytes.fromhex("A0000005591010FFFFFFFF8900001100"))
             + _tlv("9F70", b"\x01")
             + _tlv("91", b"Example")
@@ -197,7 +197,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
         decoded = "\n".join(format_tlv_decode(payload))
 
         self.assertIn("E3 ProfileInfo len=", decoded)
-        self.assertIn("5A ICCID len=10 value=89462038090000000086", decoded)
+        self.assertIn("5A ICCID len=10 value=89882038090000000085", decoded)
         self.assertIn("4F isdpAid len=16 value=A0000005591010FFFFFFFF8900001100", decoded)
         self.assertIn("9F70 profileState len=1 value=enabled (01)", decoded)
         self.assertIn('91 serviceProviderName len=7 value="Example"', decoded)
@@ -258,8 +258,8 @@ class Scp11TraceDumpTests(unittest.TestCase):
 
         decoded = "\n".join(format_tlv_decode(response))
 
-        self.assertIn("BF52 PackageData len=", decoded)
-        self.assertIn("A0 packageDataResponse len=", decoded)
+        self.assertIn("BF52 IpaEuiccDataResponse len=", decoded)
+        self.assertIn("A0 ipaEuiccData len=", decoded)
         self.assertIn("[+] RetrieveNotificationsList", decoded)
         self.assertIn("Notification Entries", decoded)
         self.assertIn("[+] EuiccConfiguredData", decoded)

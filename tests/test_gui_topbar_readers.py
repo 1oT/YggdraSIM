@@ -165,7 +165,6 @@ def test_reader_bar_bootstraps_at_init() -> None:
     js = _read("app.js")
     # init() must kick the reader bar so the pills appear on page load.
     init_start = js.index("function init()")
-    init_end = js.index("}", init_start + js[init_start:].index("{"))
     # Widen to the whole init body — the braces nested inside catch
     # blocks mean a naive index('}') would return early. Scan forward
     # until we reach a line containing 'logBus.emit' at init-level.

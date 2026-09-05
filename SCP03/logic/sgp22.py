@@ -471,14 +471,29 @@ class Sgp22Manager :
             offset =2
             if length &0x80 :
                 n =length &0x7F
+                if n ==0 or n >4 :
+                    i +=1
+                    continue
                 if i +2 +n >len (data ):
-                    break
-                length =int .from_bytes (data [i +2 :i +2 +n ],"big")
+                    i +=1
+                    continue
+                length_bytes =data [i +2 :i +2 +n ]
+                if length_bytes [0 ]==0:
+                    i +=1
+                    continue
+                length =int .from_bytes (length_bytes ,"big")
+                if length <0x80:
+                    i +=1
+                    continue
                 offset =2 +n
             end =i +offset +length
             if end >len (data ):
-                break
-            blobs .append (data [i +offset :end ])
+                i +=1
+                continue
+            blob =data [i +offset :end ]
+            parsed_blob =self ._safe_parse_tlv (blob )
+            if self ._looks_like_profile_node (parsed_blob ):
+                blobs .append (blob )
             i =end
         return blobs
 
@@ -730,15 +745,22 @@ class Sgp22Manager :
 
     @staticmethod
     def _decode_bcd_digits (value :bytes )->str :
-        digits =""
-        for byte in value :
+        digits =[]
+        raw =bytes (value or b"")
+        for byte_index ,byte in enumerate (raw ):
             high =(byte >>4 )&0x0F 
             low =byte &0x0F 
-            for nibble in [high ,low ]:
-                if nibble ==0x0F :
-                    continue 
-                digits +=str (nibble )
-        return digits
+            if high >9 :
+                return ""
+            digits .append (str (high ))
+            if low ==0x0F :
+                if byte_index !=len (raw )-1 :
+                    return ""
+                continue
+            if low >9 :
+                return ""
+            digits .append (str (low ))
+        return "".join (digits )
 
     def _decode_ecasd_issuer_number_from_result (self ,result_entry :Dict [str ,Any ])->str :
         if isinstance (result_entry ,dict )==False :
@@ -830,9 +852,9 @@ class Sgp22Manager :
             name_str ="Unknown"
             if isinstance (name_bytes ,bytes ):
                 try :
-                    name_str =name_bytes .decode ("utf-8","ignore").strip ()
-                except Exception :
-                    name_str =name_bytes .hex ()
+                    name_str =name_bytes .decode ("utf-8").strip ()
+                except UnicodeDecodeError :
+                    name_str =name_bytes .hex ().upper ()
             if name_str =="Unknown"and iccid_display :
                 name_str =f"ICCID-{iccid_display[-4:]}"
             return {
@@ -1075,18 +1097,36 @@ class Sgp22Manager :
         if not raw_oid :
             return ""
 
-        first =raw_oid [0 ]
-        oid_parts =[str (first //40 ),str (first %40 )]
-
-        value =0 
-        idx =1 
-        while idx <len (raw_oid ):
-            b =raw_oid [idx ]
+        subidentifiers =[]
+        value =0
+        at_subidentifier_start =True
+        for b in bytes (raw_oid ):
+            if at_subidentifier_start and b ==0x80 :
+                return f"Invalid OID ({bytes(raw_oid).hex().upper()}): non-minimal subidentifier"
             value =(value <<7 )|(b &0x7F )
             if (b &0x80 )==0 :
-                oid_parts .append (str (value ))
+                subidentifiers .append (value )
                 value =0 
-            idx +=1 
+                at_subidentifier_start =True
+            else :
+                at_subidentifier_start =False
+        if at_subidentifier_start ==False :
+            return f"Invalid OID ({bytes(raw_oid).hex().upper()}): truncated subidentifier"
+        if len (subidentifiers )==0 :
+            return f"Invalid OID ({bytes(raw_oid).hex().upper()}): missing first subidentifier"
+
+        first_subidentifier =subidentifiers [0 ]
+        if first_subidentifier <40 :
+            first_arc =0
+            second_arc =first_subidentifier
+        elif first_subidentifier <80 :
+            first_arc =1
+            second_arc =first_subidentifier -40
+        else :
+            first_arc =2
+            second_arc =first_subidentifier -80
+        oid_parts =[str (first_arc ),str (second_arc )]
+        oid_parts .extend (str (part )for part in subidentifiers [1 :])
 
         dotted =".".join (oid_parts )
         known ={
@@ -1140,10 +1180,66 @@ class Sgp22Manager :
             return f"v{val[0]}.{val[1]}.{val[2]} ({hex_str})"
 
 
-        if tag ==0xC0 and len (val )==4 :
-            k_type_map ={0x88 :'AES',0x80 :'DES',0x81 :'3DES',0x82 :'RSA'}
-            k_type =k_type_map .get (val [2 ],f"{val[2]:02X}")
-            return f"ID:{val[0]:02X} Ver:{val[1]:02X} Type:{k_type} Len:{val[3]}"
+        if tag ==0xC0 and len (val )>=4 :
+            k_type_map ={
+            0x80 :'DES (deprecated)',
+            0x85 :'TLS PSK',
+            0x88 :'AES',
+            0x89 :'SM4',
+            0xA0 :'RSA public exponent',
+            0xA1 :'RSA public modulus',
+            0xB0 :'ECC public',
+            0xB1 :'ECC private',
+            0xB8 :'SM2 public',
+            0xB9 :'SM2 private',
+            0xF0 :'ECC parameters reference',
+            }
+            component_data =val [2 :]
+            if val [2 ]!=0xFF and len (component_data )%2 ==0 :
+                components =[]
+                for offset in range (0 ,len (component_data ),2 ):
+                    key_type =component_data [offset ]
+                    key_length =component_data [offset +1 ]
+                    if key_type ==0xFF :
+                        components =[]
+                        break
+                    key_type_text =k_type_map .get (key_type ,f"{key_type:02X}")
+                    length_text =">=256"if key_length ==0 else str (key_length )
+                    components .append (f"{key_type_text}/{length_text}")
+                if components :
+                    return (
+                    f"ID:{val[0]:02X} Ver:{val[1]:02X} "
+                    f"Components:{', '.join(components)}"
+                    )
+            if val [2 ]==0xFF :
+                cursor =2
+                components =[]
+                while cursor +4 <=len (val )and val [cursor ]==0xFF :
+                    key_type =f"FF{val[cursor +1]:02X}"
+                    key_length =int .from_bytes (val [cursor +2 :cursor +4 ],"big")
+                    if key_length <1 or key_length >0x7FFF :
+                        components =[]
+                        break
+                    components .append (f"{key_type}/{key_length}")
+                    cursor +=4
+                if components and cursor <len (val ):
+                    usage_length =val [cursor ]
+                    cursor +=1
+                    usage_end =cursor +usage_length
+                    if usage_length <=2 and usage_end <len (val ):
+                        usage =val [cursor :usage_end ].hex ().upper ()
+                        cursor =usage_end
+                        access_length =val [cursor ]
+                        cursor +=1
+                        access_end =cursor +access_length
+                        if access_length <=1 and access_end ==len (val ):
+                            access =val [cursor :access_end ].hex ().upper ()
+                            return (
+                            f"ID:{val[0]:02X} Ver:{val[1]:02X} "
+                            f"Components:{', '.join(components)} "
+                            f"Usage:{usage or '-'} Access:{access or '-'} (extended)"
+                            )
+            return f"Malformed Key Information Data ({hex_str})"
 
 
         if tag ==0x06 :
@@ -1179,15 +1275,16 @@ class Sgp22Manager :
 
         if tag ==0x17 or tag ==0x18 :
             try :
-                return "\""+val .decode ("ascii","ignore")+"\""
-            except Exception :
+                return "\""+val .decode ("ascii")+"\""
+            except UnicodeDecodeError :
                 return hex_str 
 
 
         if tag ==0x0C or tag ==0x13 :
             try :
-                return "\""+val .decode ("utf-8","ignore")+"\""
-            except Exception :
+                encoding ="utf-8"if tag ==0x0C else "ascii"
+                return "\""+val .decode (encoding )+"\""
+            except UnicodeDecodeError :
                 return hex_str 
 
 
@@ -1196,10 +1293,16 @@ class Sgp22Manager :
             return f"{as_int} (0x{hex_str})"
 
 
-        if tag ==0x03 and len (val )>1 :
+        if tag ==0x03 and len (val )>=1 :
             unused_bits =val [0 ]
             bit_data =val [1 :]
             bit_hex =bit_data .hex ().upper ()
+            if unused_bits >7 :
+                return f"Malformed BIT STRING ({hex_str}): unused-bit count exceeds 7"
+            if len (bit_data )==0 and unused_bits !=0 :
+                return f"Malformed BIT STRING ({hex_str}): no content for unused bits"
+            if unused_bits and bit_data [-1 ]&((1 <<unused_bits )-1 ):
+                return f"Malformed BIT STRING ({hex_str}): non-zero padding bits"
 
 
             kind ="bits"
@@ -1442,12 +1545,26 @@ class Sgp22Manager :
                     print (f"{prefix}{name:<22}: {Config.Colors.CYAN}{decoded}{Config.Colors.ENDC}")
 
     def _swap_nibbles (self ,s :str )->str :
-        if not s :return ""
-        res =[]
-        for i in range (0 ,len (s ),2 ):
-            if i +1 <len (s ):res .append (s [i +1 ]+s [i ])
-            else :res .append (s [i ])
-        return "".join (res ).replace ('F','')
+        cleaned =str (s or "").strip ().upper ()
+        if len (cleaned )==0 :
+            return ""
+        if len (cleaned )%2 !=0 :
+            raise ValueError ("Nibble-swapped BCD input must contain full bytes.")
+        digits =[]
+        for offset in range (0 ,len (cleaned ),2 ):
+            high_char =cleaned [offset ]
+            low_char =cleaned [offset +1 ]
+            if low_char not in "0123456789":
+                raise ValueError (f"Invalid BCD nibble {low_char}.")
+            digits .append (low_char )
+            if high_char =="F":
+                if offset !=len (cleaned )-2 :
+                    raise ValueError ("BCD filler nibble is only valid at the end.")
+                continue
+            if high_char not in "0123456789":
+                raise ValueError (f"Invalid BCD nibble {high_char}.")
+            digits .append (high_char )
+        return "".join (digits )
 
     def _parse_profile_list (self ,data :bytes ):
         """Decodes BF2D (GetProfilesInfo) into a readable table."""

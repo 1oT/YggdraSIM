@@ -134,6 +134,17 @@ class UnwrapResult:
     lines: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class UnwrapBytes:
+    """A recovered exchange: the rendered lines plus the plaintext bytes."""
+
+    matched_label: str
+    lines: tuple[str, ...]
+    command_plaintext: bytes
+    response_plaintext: bytes
+    mac_ok: bool
+
+
 class KeybagError(RuntimeError):
     """Raised when a keybag JSON is malformed or references an unknown key."""
 
@@ -348,23 +359,61 @@ class ScpReplayEngine:
         cla_byte = int(command_bytes[0])
         if (cla_byte & SECURE_MESSAGING_CLA_BIT) == 0:
             return None
+        recovered = self._unwrap_exchange(context, command_bytes, response_bytes)
+        if recovered is None:
+            return None
+        return UnwrapResult(
+            matched_label=recovered.matched_label,
+            lines=recovered.lines,
+        )
+
+    def try_unwrap_bytes(
+        self,
+        context: UnwrapContext,
+        command_bytes: bytes,
+        response_bytes: bytes,
+    ) -> "UnwrapBytes | None":
+        """Recover the plaintext behind a secure-messaging exchange.
+
+        Same work as :meth:`try_unwrap`, returning the bytes rather than
+        rendered lines. The Wireshark dissector needs the plaintext so it
+        can re-run its own decode over it, and Wireshark's Lua binding
+        exposes no AES or CMAC, so the recovery has to happen here.
+
+        Advances the session's SSC and MAC chain exactly once, like
+        :meth:`try_unwrap`. Call one or the other for a given exchange,
+        never both.
+        """
+        return self._unwrap_exchange(context, command_bytes, response_bytes)
+
+    def _unwrap_exchange(
+        self,
+        context: UnwrapContext,
+        command_bytes: bytes,
+        response_bytes: bytes,
+    ) -> "UnwrapBytes | None":
         runtime = self._select_runtime(context)
         if runtime is None:
             return None
         # Parse the secure-messaging command per SCP03 C-MAC / C-ENCRYPTION.
-        command_lines, mac_ok = self._unwrap_command(runtime, command_bytes)
+        command_lines, mac_ok, command_plaintext = self._unwrap_command(
+            runtime, command_bytes
+        )
         # Response parsing depends on sec_level (R-MAC and R-ENCRYPTION bits).
         # We probe both candidates and fall through on MAC mismatch because
         # the on-wire frame carries no sec_level indicator.
-        response_lines = self._unwrap_response(
+        response_lines, response_plaintext = self._unwrap_response(
             runtime,
             response_bytes,
             command_had_mac=mac_ok,
         )
         combined_lines = list(command_lines) + list(response_lines)
-        return UnwrapResult(
+        return UnwrapBytes(
             matched_label=runtime.session.label,
             lines=tuple(combined_lines),
+            command_plaintext=command_plaintext,
+            response_plaintext=response_plaintext,
+            mac_ok=mac_ok,
         )
 
     def _select_runtime(self, context: UnwrapContext) -> _SessionRuntime | None:
@@ -397,10 +446,10 @@ class ScpReplayEngine:
         self,
         runtime: _SessionRuntime,
         command_bytes: bytes,
-    ) -> tuple[list[str], bool]:
+    ) -> tuple[list[str], bool, bytes]:
         lines: list[str] = []
         if len(command_bytes) < 5:
-            return lines, False
+            return lines, False, b""
         cla_byte = int(command_bytes[0])
         ins_byte = int(command_bytes[1])
         p1_byte = int(command_bytes[2])
@@ -408,14 +457,14 @@ class ScpReplayEngine:
         lc_byte = int(command_bytes[4])
         header = bytes([cla_byte, ins_byte, p1_byte, p2_byte, lc_byte])
         if len(command_bytes) < 5 + lc_byte:
-            return lines, False
+            return lines, False, b""
         body = bytes(command_bytes[5 : 5 + lc_byte])
         if len(body) < 8:
             lines.append(
                 f"SCP replay: {runtime.session.label}: command body too short for MAC "
                 f"(lc={lc_byte} < 8)"
             )
-            return lines, False
+            return lines, False, b""
         enc_payload = body[:-8]
         observed_mac = body[-8:]
         runtime.ssc = int(runtime.ssc) + 1
@@ -431,7 +480,7 @@ class ScpReplayEngine:
                 f"(ssc={runtime.ssc}, expected {expected_mac.hex().upper()}, "
                 f"observed {observed_mac.hex().upper()})"
             )
-            return lines, False
+            return lines, False, b""
         runtime.chaining_value = expected_full_mac
         runtime.command_count += 1
         lines.append(
@@ -452,7 +501,7 @@ class ScpReplayEngine:
         lines.append(
             f"SCP replay: command plaintext {cleartext_apdu.hex().upper()}"
         )
-        return lines, True
+        return lines, True, cleartext_apdu
 
     def _unwrap_response(
         self,
@@ -460,17 +509,17 @@ class ScpReplayEngine:
         response_bytes: bytes,
         *,
         command_had_mac: bool,
-    ) -> list[str]:
+    ) -> tuple[list[str], bytes]:
         # Response layout when R-MAC is present: [data..., mac[8], sw1, sw2].
         # When R-MAC is absent the whole response except SW is already plaintext.
         if len(response_bytes) < 2:
-            return []
+            return [], b""
         if command_had_mac is False:
-            return []
+            return [], b""
         sw_bytes = response_bytes[-2:]
         body_with_mac = response_bytes[:-2]
         if len(body_with_mac) < 8:
-            return []
+            return [], b""
         data_part = body_with_mac[:-8]
         observed_rmac = body_with_mac[-8:]
         expected_full_rmac = _aes_cmac(
@@ -479,19 +528,22 @@ class ScpReplayEngine:
         )
         expected_rmac = expected_full_rmac[:8]
         if expected_rmac != observed_rmac:
-            # Response has no R-MAC (sec_level bit clear) — silently skip.
-            return []
+            # Response has no R-MAC (sec_level bit clear) -- silently skip.
+            return [], b""
         runtime.response_count += 1
         plaintext_preview = data_part[:48].hex().upper()
         if len(data_part) > 48:
             plaintext_preview = plaintext_preview + "..."
-        return [
-            (
-                f"SCP replay: {runtime.session.label}: R-MAC ok "
-                f"({len(data_part)} data bytes, sw={sw_bytes.hex().upper()})"
-            ),
-            f"SCP replay: response plaintext {plaintext_preview}",
-        ]
+        return (
+            [
+                (
+                    f"SCP replay: {runtime.session.label}: R-MAC ok "
+                    f"({len(data_part)} data bytes, sw={sw_bytes.hex().upper()})"
+                ),
+                f"SCP replay: response plaintext {plaintext_preview}",
+            ],
+            data_part + sw_bytes,
+        )
 
 
 def _aes_cmac(key: bytes, data: bytes) -> bytes:

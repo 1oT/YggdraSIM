@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: GitHub · dark (Primer dark default, blue accent) ------------- */
 html[data-theme="github-dark"] {
   --bg: #0d1117;
@@ -15,13 +16,13 @@ html[data-theme="github-dark"] {
   --border-strong: rgba(201, 209, 217, 0.30);
   --fg: #c9d1d9;
   --fg-dim: #8b949e;
-  --fg-muted: #6e7681;
+  --fg-muted: var(--fg-dim);
   --accent: #58a6ff;
-  --accent-strong: #1f6feb;
+  --accent-strong: #388bfd;
   --accent-soft: rgba(56, 139, 253, 0.14);
   --accent-fg: #0d1117;
   --accent-glow: rgba(56, 139, 253, 0.42);
-  --gradient-accent: linear-gradient(135deg, #58a6ff 0%, #1f6feb 60%, #388bfd 100%);
+  --gradient-accent: linear-gradient(135deg, #58a6ff 0%, #388bfd 60%, #4493f8 100%);
   --gradient-brand: linear-gradient(135deg, #58a6ff 0%, #d2a8ff 100%);
   --ok: #3fb950;
   --ok-soft: rgba(63, 185, 80, 0.16);

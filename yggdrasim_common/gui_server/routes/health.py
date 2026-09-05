@@ -18,12 +18,16 @@ populates.
 from __future__ import annotations
 
 import os
-import resource
 import time
 from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
+
+try:  # POSIX-only module; psutil remains an optional portable fallback.
+    import resource as _resource
+except ImportError:  # pragma: no cover - native Windows
+    _resource = None
 
 
 router = APIRouter(prefix="/api", tags=["health"])
@@ -73,8 +77,16 @@ def get_health(request: Request) -> HealthResponse:
 
 def _rss_mib() -> float:
     """Best-effort RSS in MiB, returning ``-1.0`` if probing fails."""
+    if _resource is None:
+        try:
+            import psutil
+
+            rss = float(psutil.Process(os.getpid()).memory_info().rss)
+            return round(rss / (1024.0 * 1024.0), 3)
+        except (ImportError, OSError, ValueError):
+            return -1.0
     try:
-        usage = resource.getrusage(resource.RUSAGE_SELF)
+        usage = _resource.getrusage(_resource.RUSAGE_SELF)
     except (ValueError, OSError):
         return -1.0
     raw = float(getattr(usage, "ru_maxrss", -1.0))

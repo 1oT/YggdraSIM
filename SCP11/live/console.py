@@ -2226,6 +2226,21 @@ class SCP11Console:
         return True
 
     def _cmd_eim_poll(self, argument: str) -> bool:
+        # The polling plugin installs ``_eim_poll_runner`` (its STATUS-tick
+        # watchdog) when it extends this console; the orchestrator carries no
+        # watchdog of its own once the plugin owns the flow. Prefer the plugin
+        # runner, and fall back to the baseline parse-and-dispatch path only
+        # when no plugin is loaded (the CLI POLL command and the GUI EIM-POLL
+        # action both reach this handler).
+        plugin_runner = getattr(self, "_eim_poll_runner", None)
+        if callable(plugin_runner):
+            try:
+                plugin_runner(argument)
+            except KeyboardInterrupt:
+                print(f"{self._style.yellow}[*] POLL interrupted by user.{self._style.end}")
+            except Exception as error:
+                print(f"{self._style.red}[!] POLL failed: {error}{self._style.end}")
+            return True
         options = self._parse_eim_poll_options(argument)
         if options is None:
             print(

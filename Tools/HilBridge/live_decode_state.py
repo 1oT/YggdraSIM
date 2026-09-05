@@ -41,6 +41,13 @@ POLL_OFF_COMMAND = 0x04
 
 _POLL_INTERVAL_TIMER_ID = 0
 
+# Plausibility bounds for the RFC 1035 clause 4.1.1 header. A BIP channel
+# resolves one name at a time, so counts far above these mark bytes that are
+# not a DNS message at all. Kept in step with ``looks_like_dns`` in
+# Tools/ApduDissector/lua/yggdrasim_apdu/cat.lua.
+_MAX_DNS_QUESTION_COUNT = 16
+_MAX_DNS_RECORD_COUNT = 64
+
 _PROACTIVE_COMMAND_NAMES = {
     OPEN_CHANNEL_COMMAND: "OPEN CHANNEL",
     CLOSE_CHANNEL_COMMAND: "CLOSE CHANNEL",
@@ -50,7 +57,7 @@ _PROACTIVE_COMMAND_NAMES = {
     TIMER_MANAGEMENT_COMMAND: "TIMER MANAGEMENT",
     0x05: "SET UP EVENT LIST",
     POLL_INTERVAL_COMMAND: "POLL INTERVAL",
-    POLL_OFF_COMMAND: "POLL OFF",
+    POLL_OFF_COMMAND: "POLLING OFF",
     0x01: "REFRESH",
     0x02: "MORE TIME",
     0x26: "PROVIDE LOCAL INFORMATION",
@@ -61,7 +68,7 @@ _EVENT_NAMES = {
     0x09: "DATA AVAILABLE",
     0x0A: "CHANNEL STATUS",
     0x0B: "ACCESS TECHNOLOGY CHANGE",
-    0x0F: "NETWORK SEARCH MODE CHANGE",
+    0x0E: "NETWORK SEARCH MODE CHANGE",
 }
 
 _KNOWN_FILE_PATHS = {
@@ -75,6 +82,42 @@ _KNOWN_FILE_PATHS = {
     "6FAD": ("MF", "ADF.USIM", "EF.AD"),
     "7FF2": ("MF", "ADF.ISIM"),
     "6F02": ("MF", "ADF.ISIM", "EF.IMPI"),
+    "7FF3": ("MF", "ADF.CSIM"),
+    # MF elementary files (ETSI TS 102 221).
+    "2F05": ("MF", "EF.PL"),
+    "2F06": ("MF", "EF.ARR"),
+    "2F08": ("MF", "EF.UMPC"),
+    # DF.TELECOM and its sub-directories (3GPP TS 31.102).
+    "5F3A": ("MF", "DF.TELECOM", "DF.PHONEBOOK"),
+    "5F3B": ("MF", "DF.TELECOM", "DF.MULTIMEDIA"),
+    "5F50": ("MF", "DF.TELECOM", "DF.GRAPHICS"),
+    "4F30": ("MF", "DF.TELECOM", "DF.PHONEBOOK", "EF.PBR"),
+    # ADF.USIM elementary files (3GPP TS 31.102).
+    "6F05": ("MF", "ADF.USIM", "EF.LI"),
+    "6F06": ("MF", "ADF.USIM", "EF.ARR"),
+    "6F08": ("MF", "ADF.USIM", "EF.KEYS"),
+    "6F09": ("MF", "ADF.USIM", "EF.KEYSPS"),
+    "6F31": ("MF", "ADF.USIM", "EF.HPPLMN"),
+    "6F37": ("MF", "ADF.USIM", "EF.ACMMAX"),
+    "6F38": ("MF", "ADF.USIM", "EF.UST"),
+    "6F39": ("MF", "ADF.USIM", "EF.ACM"),
+    "6F3B": ("MF", "ADF.USIM", "EF.FDN"),
+    "6F3C": ("MF", "ADF.USIM", "EF.SMS"),
+    "6F3E": ("MF", "ADF.USIM", "EF.GID1"),
+    "6F3F": ("MF", "ADF.USIM", "EF.GID2"),
+    "6F40": ("MF", "ADF.USIM", "EF.MSISDN"),
+    "6F42": ("MF", "ADF.USIM", "EF.SMSP"),
+    "6F43": ("MF", "ADF.USIM", "EF.SMSS"),
+    "6F46": ("MF", "ADF.USIM", "EF.SPN"),
+    "6F56": ("MF", "ADF.USIM", "EF.EST"),
+    "6F73": ("MF", "ADF.USIM", "EF.PSLOCI"),
+    "6F78": ("MF", "ADF.USIM", "EF.ACC"),
+    "6F7B": ("MF", "ADF.USIM", "EF.FPLMN"),
+    "6F7E": ("MF", "ADF.USIM", "EF.LOCI"),
+    "6FB7": ("MF", "ADF.USIM", "EF.ECC"),
+    "6FC4": ("MF", "ADF.USIM", "EF.NETPAR"),
+    "6FE3": ("MF", "ADF.USIM", "EF.EPSLOCI"),
+    "6FE4": ("MF", "ADF.USIM", "EF.EPSNSC"),
 }
 
 _KNOWN_AID_PATHS = {
@@ -242,6 +285,9 @@ _REFRESH_QUALIFIER_NAMES: dict[int, str] = {
     0x05: "NAA Application Reset",
     0x06: "NAA Session Reset",
     0x07: "Steering of Roaming",
+    0x08: "Steering of Roaming for I-WLAN",
+    0x09: "eUICC Profile State Change",
+    0x0A: "Application Update",
 }
 # An idle gap in the capture (no APDU exchanges) longer than this many
 # seconds is treated as evidence of a card power-cycle / re-read, and the
@@ -804,8 +850,8 @@ class LiveDecodeStateTracker:
             timer_state.observed_remaining_seconds = 0
             timer_state.observed_at_seconds = self._current_row_time_seconds()
             timer_state.stop_frame = frame_number
-            summary_parts.append("POLL OFF")
-            frame_lines.append("POLL OFF disabled the active terminal polling cadence.")
+            summary_parts.append("POLLING OFF")
+            frame_lines.append("POLLING OFF disabled the active terminal polling cadence.")
 
         self._pending_proactive = pending_state
 
@@ -976,11 +1022,11 @@ class LiveDecodeStateTracker:
                     timer_state.observed_remaining_seconds = 0
                     timer_state.observed_at_seconds = self._current_row_time_seconds()
                     timer_state.stop_frame = frame_number
-                frame_lines.append("Terminal accepted POLL OFF.")
+                frame_lines.append("Terminal accepted POLLING OFF.")
             else:
-                summary_parts.append(f"POLL OFF FAIL 0x{result_code:02X}")
+                summary_parts.append(f"POLLING OFF FAIL 0x{result_code:02X}")
                 frame_lines.append(
-                    f"Terminal rejected POLL OFF with result 0x{result_code:02X}."
+                    f"Terminal rejected POLLING OFF with result 0x{result_code:02X}."
                 )
         elif pending_state.command_type == _REFRESH_PROACTIVE_COMMAND:
             # The terminal acknowledged (or rejected) a REFRESH request.
@@ -2258,6 +2304,21 @@ def _parse_dns_resource_record(value_bytes: bytes, offset: int) -> tuple[dict[st
     }, record_data_end
 
 
+def _dns_header_is_plausible(flags: int, question_count: int) -> bool:
+    """True when a 12-byte DNS header (RFC 1035 clause 4.1.1) is self-consistent.
+
+    A BIP channel carrying TLS hands this decoder record fragments that have
+    no framing of their own, so the header fields have to carry the
+    discrimination: OPCODE is 0 to 2, the Z field is reserved and must be
+    zero, and a message always asks at least one question.
+    """
+    if ((flags >> 11) & 0x0F) > 2:
+        return False
+    if ((flags >> 4) & 0x07) != 0:
+        return False
+    return 1 <= question_count <= _MAX_DNS_QUESTION_COUNT
+
+
 def _try_decode_dns_query(value_bytes: bytes) -> str:
     if len(value_bytes) < 17:
         return ""
@@ -2268,6 +2329,8 @@ def _try_decode_dns_query(value_bytes: bytes) -> str:
     answer_count = int.from_bytes(value_bytes[6:8], "big", signed=False)
     authority_count = int.from_bytes(value_bytes[8:10], "big", signed=False)
     if question_count != 1 or answer_count != 0 or authority_count != 0:
+        return ""
+    if not _dns_header_is_plausible(flags, question_count):
         return ""
     try:
         question, _ = _parse_dns_question(value_bytes, 12)
@@ -2302,16 +2365,28 @@ def _try_decode_dns_response(value_bytes: bytes) -> str:
     answer_count = int.from_bytes(value_bytes[6:8], "big", signed=False)
     authority_count = int.from_bytes(value_bytes[8:10], "big", signed=False)
     additional_count = int.from_bytes(value_bytes[10:12], "big", signed=False)
+    if not _dns_header_is_plausible(flags, question_count):
+        return ""
+    if max(answer_count, authority_count, additional_count) > _MAX_DNS_RECORD_COUNT:
+        return ""
     query_id = int.from_bytes(value_bytes[0:2], "big", signed=False)
     response_code = flags & 0x000F
     question_name = ""
     answer_summaries: list[str] = []
+    # A question that does not parse means these bytes were never a DNS
+    # message; reporting the header anyway invents a response out of
+    # whatever the channel happened to carry.
     try:
         offset = 12
         for question_index in range(question_count):
             question, offset = _parse_dns_question(value_bytes, offset)
             if question_index == 0:
                 question_name = str(question.get("qname", "")).strip()
+    except Exception:
+        return ""
+    if len(question_name) == 0:
+        return ""
+    try:
         for _ in range(min(answer_count, 6)):
             answer_record, offset = _parse_dns_resource_record(value_bytes, offset)
             record_type_name = _dns_record_type_name(int(answer_record.get("record_type", 0) or 0))
@@ -2320,7 +2395,6 @@ def _try_decode_dns_response(value_bytes: bytes) -> str:
                 continue
             answer_summaries.append(f"{record_type_name}:{record_value}")
     except Exception:
-        question_name = ""
         answer_summaries = []
     summary_text = f"DNS Response: id=0x{query_id:04X}"
     if len(question_name) > 0:
@@ -2354,7 +2428,11 @@ def _try_decode_tls_records(value_bytes: bytes) -> list[str]:
                 summaries.append(f"TLS Record: {record_name} ({record_length} byte(s))")
             else:
                 summaries.extend(handshake_summaries)
-        elif record_type == 0x15 and len(record_payload) >= 2:
+        elif record_type == 0x15 and record_length == 2:
+            # RFC 5246 clause 7.2 gives a plaintext alert exactly two bytes.
+            # Anything longer is protected, and its leading bytes are the
+            # explicit nonce -- decoding those yields an invented level and
+            # description, so a close_notify reads as a fatal failure.
             alert_level = record_payload[0]
             alert_description = record_payload[1]
             summaries.append(
@@ -2362,6 +2440,8 @@ def _try_decode_tls_records(value_bytes: bytes) -> list[str]:
                 f"{_tls_alert_level_name(alert_level)} "
                 f"{_tls_alert_description_name(alert_description)}"
             )
+        elif record_type == 0x15:
+            summaries.append(f"TLS Alert: encrypted ({record_length} byte(s))")
         else:
             summaries.append(f"TLS Record: {record_name} ({record_length} byte(s))")
         offset = record_end
@@ -2729,6 +2809,8 @@ def _transport_protocol_name(protocol_type: int) -> str:
         0x02: "TCP CLIENT REMOTE",
         0x03: "TCP SERVER",
         0x04: "UDP LOCAL",
+        0x05: "TCP CLIENT LOCAL",
+        0x06: "DIRECT CHANNEL",
     }.get(int(protocol_type) & 0xFF, f"0x{int(protocol_type) & 0xFF:02X}")
 
 

@@ -3,13 +3,14 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ---- SA-G3: file system tree -------------------------------------- */
 /*
  * Hierarchical tree view for the File System tab. Section roots
  * (MF / DF.TELECOM / ADF.USIM / …) sit at depth 0; mf / df-* / adf-*
  * containers sit at depth 1; EFs sit at depth 2 (or depth 1 in
- * sections without an explicit container row). Each row is a thin
- * 22 px lane with a caret + glyph + label + optional FID / sFID
+ * sections without an explicit container row). Each row is a compact
+ * lane with a caret + glyph + label + optional FID / sFID
  * badges; the active row picks up the accent ring in the same way
  * the PE cards do.
  */
@@ -30,41 +31,41 @@
 .saip-file-tree-search {
   flex: 1 1 auto;
   min-width: 0;
-  height: 26px;
+  height: 30px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg, transparent);
-  color: var(--fg, #eceff4);
+  background: var(--bg);
+  color: var(--fg);
   padding: 3px 7px;
   font-size: 11px;
 }
 
 .saip-file-tree-search:focus {
-  outline: 1px solid var(--accent, #88c0d0);
+  outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
 
 .saip-file-tree-sort {
   flex: 0 0 auto;
-  height: 26px;
+  height: 30px;
   max-width: 98px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg, transparent);
-  color: var(--fg-muted, #aaa);
+  background: var(--bg);
+  color: var(--fg-muted);
   font-size: 11px;
   padding: 2px 4px;
 }
 
 .saip-file-tree-clear {
-  height: 26px;
+  min-height: 30px;
   flex: 0 0 auto;
 }
 
 .saip-file-tree-count {
   flex: 0 0 auto;
-  color: var(--fg-muted, #888);
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  color: var(--fg-muted);
+  font-family: var(--mono);
   font-size: 10px;
   white-space: nowrap;
 }
@@ -106,7 +107,17 @@
 .saip-file-node-row--depth-8 { padding-left: 136px; }
 
 .saip-file-node-row:hover {
-  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  background: var(--surface-alt);
+}
+
+.saip-file-node:focus-visible {
+  outline: none;
+}
+
+.saip-file-node:focus-visible > .saip-file-node-row {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--surface-alt);
 }
 
 .saip-file-node-row.is-active {
@@ -116,35 +127,35 @@
 }
 
 .saip-file-node-row--search-match {
-  background: rgba(136, 192, 208, 0.11);
-  box-shadow: inset 2px 0 0 var(--accent, #88c0d0);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .saip-file-node-row--search-match:hover {
-  background: rgba(136, 192, 208, 0.16);
+  background: var(--accent-soft);
 }
 
 .saip-file-node-row--template-default {
   background:
-    linear-gradient(90deg, rgba(180, 207, 153, 0.10), transparent 62%);
+    linear-gradient(90deg, var(--ok-soft), transparent 62%);
 }
 
 .saip-file-node-row--template-default:hover {
   background:
-    linear-gradient(90deg, rgba(180, 207, 153, 0.16), transparent 68%),
-    var(--surface-alt, rgba(255, 255, 255, 0.04));
+    linear-gradient(90deg, var(--ok-soft), transparent 68%),
+    var(--surface-alt);
 }
 
 .saip-file-caret {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 24px;
+  height: 24px;
   font-size: 9px;
   border: none;
   background: transparent;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   cursor: pointer;
   padding: 0;
   user-select: none;
@@ -175,7 +186,7 @@
 .saip-file-glyph--mf      { color: #9fc8d6; }
 .saip-file-glyph--adf     { color: #b4cf99; }
 .saip-file-glyph--df      { color: #88c0d0; }
-.saip-file-glyph--ef      { color: var(--fg-muted, #888); }
+.saip-file-glyph--ef      { color: var(--fg-muted); }
 
 .saip-file-label {
   font-size: 12px;
@@ -196,14 +207,14 @@
 
 .saip-file-fid,
 .saip-file-sfid {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.04em;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.05));
+  background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0 4px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   flex-shrink: 0;
 }
 
@@ -222,10 +233,10 @@
    so the operator can tell at a glance which files come from
    pe-GenericFileManagement (vs from a template PE). */
 .saip-file-gfm {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 9px;
   letter-spacing: 0.06em;
-  background: var(--accent-soft, rgba(125, 200, 255, 0.12));
+  background: var(--accent-soft);
   border: 1px solid var(--accent-soft);
   border-radius: 4px;
   padding: 0 4px;
@@ -235,14 +246,14 @@
 }
 
 .saip-file-template-default {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 9px;
   letter-spacing: 0.06em;
-  background: rgba(180, 207, 153, 0.14);
-  border: 1px solid rgba(180, 207, 153, 0.38);
+  background: var(--ok-soft);
+  border: 1px solid color-mix(in oklab, var(--ok) 38%, transparent);
   border-radius: 4px;
   padding: 0 4px;
-  color: #b4cf99;
+  color: var(--ok);
   flex-shrink: 0;
   text-transform: uppercase;
 }

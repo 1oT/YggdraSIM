@@ -161,6 +161,51 @@ class InteractiveWizards :
         except ValueError :
             return cleaned
 
+    @staticmethod
+    def _hex_size_validator (
+        label :str ,
+        *,
+        exact_bytes :int |None =None ,
+        allowed_bytes :tuple [int ,...]|None =None ,
+        minimum_bytes :int |None =None ,
+        maximum_bytes :int |None =None ,
+        multiple_bytes :int |None =None ,
+        minimum_value :int |None =None ,
+        maximum_value :int |None =None ,
+    ):
+        def validate (value )->str |None :
+            if InteractiveWizards ._is_skip_value (value )or value =="":
+                return None
+            raw =bytes .fromhex (str (value ))
+            byte_len =len (raw )
+            if exact_bytes is not None and byte_len !=exact_bytes :
+                return f"{label} must be exactly {exact_bytes} byte(s)."
+            if allowed_bytes is not None and byte_len not in allowed_bytes :
+                choices =", ".join (str (item )for item in allowed_bytes )
+                return f"{label} must be {choices} byte(s)."
+            if minimum_bytes is not None and byte_len <minimum_bytes :
+                return f"{label} must be at least {minimum_bytes} byte(s)."
+            if maximum_bytes is not None and byte_len >maximum_bytes :
+                return f"{label} must be at most {maximum_bytes} byte(s)."
+            if multiple_bytes is not None and byte_len %multiple_bytes !=0 :
+                return f"{label} length must be a multiple of {multiple_bytes} bytes."
+            numeric =int .from_bytes (raw ,"big")if raw else 0
+            if minimum_value is not None and numeric <minimum_value :
+                return f"{label} must be at least {minimum_value:02X}."
+            if maximum_value is not None and numeric >maximum_value :
+                return f"{label} must not exceed {maximum_value:02X}."
+            return None
+        return validate
+
+    @staticmethod
+    def _normalize_user_path (value )->str :
+        text =str (value or "").strip ()
+        if len (text )>=2 and text [0 ]==text [-1 ]and text [0 ]in ("'",'"'):
+            text =text [1 :-1 ]
+        if os .name !="nt":
+            text =text .replace ("\\ "," ")
+        return os .path .expanduser (os .path .expandvars (text ))
+
     @staticmethod 
     def run_wizard_menu (tp_ctrl =None ,target_aid :str ="A000000151000000",gp_ctrl =None ):
         """Display an interactive wizard menu and return the user's selection."""
@@ -190,7 +235,15 @@ class InteractiveWizards :
         print ("  8. Full CAP Install Sequence - build or execute INSTALL/LOAD/INSTALL from CAP/IJC")
         print ("  0. Exit Menu")
 
-        choice =InteractiveWizards ._normalize_numeric_choice (input ("\nChoice [0-8]: ").strip ())
+        try :
+            raw_choice =input ("\nChoice [0-8, CANCEL to abort]: ").strip ()
+        except (EOFError ,KeyboardInterrupt ):
+            print ("\n[-] Wizard menu cancelled.")
+            return
+        if raw_choice .upper ()in ("CANCEL","/CANCEL","ABORT","/ABORT"):
+            print ("[-] Wizard menu cancelled.")
+            return
+        choice =InteractiveWizards ._normalize_numeric_choice (raw_choice )
 
         is_zero =False 
         if choice =='0':
@@ -268,7 +321,15 @@ class InteractiveWizards :
             is_eight =True 
 
         if is_eight :
-            filename =input ("Enter path to CAP/IJC file: ").strip ()
+            try :
+                filename =input ("Enter path to CAP/IJC file (or CANCEL): ").strip ()
+            except (EOFError ,KeyboardInterrupt ):
+                print ("\n[-] CAP install wizard cancelled.")
+                return
+            if filename .upper ()in ("CANCEL","/CANCEL","ABORT","/ABORT"):
+                print ("[-] CAP install wizard cancelled.")
+                return
+            filename =InteractiveWizards ._normalize_user_path (filename )
             InteractiveWizards .build_install_apdu (tp_ctrl ,filename ,gp_ctrl )
             return 
 
@@ -285,6 +346,8 @@ class InteractiveWizards :
         wiz .add_step ("cb","Non-Volatile Reserved Memory (Tag CB) [Hex]:",default ="SKIP")
 
         res =wiz .run ()
+        if res is None :
+            return None
         payload =bytearray ()
 
         try :
@@ -321,11 +384,33 @@ class InteractiveWizards :
     @staticmethod 
     def _build_access_domain_parameter (tag_hex :int ,tag_name :str )->bytes :
         wiz =InteractiveWizard (f"{tag_name} (ETSI TS 102 226 8.2.1.3.2.5)",Config .Colors )
-        wiz .add_step ("choice","1=Full(00), 2=UICC(02), 3=No Access(FF), 4=Raw Hex [Default: 4]:",default ="4")
-        wiz .add_step ("add","Access Domain Data (ADD, exactly 3 bytes) [Hex, for choice 2]:",default ="SKIP")
-        wiz .add_step ("raw","Raw Hex [for choice 4]:",default ="SKIP")
+        wiz .add_step (
+        "choice",
+        "1=Full(00), 2=UICC(02), 3=No Access(FF), 4=Raw Hex [Default: 4]:",
+        default ="4",choices =("1","2","3","4"),
+        )
+
+        def uicc_cond (values ):
+            return values .get ("choice")=="2"
+
+        def raw_cond (values ):
+            return values .get ("choice")=="4"
+
+        wiz .add_step (
+        "add","Access Domain Data (ADD, exactly 3 bytes) [Hex]:",
+        default ="",condition =uicc_cond,is_mandatory =True,input_kind ="hex",
+        validator =InteractiveWizards ._hex_size_validator (
+        "Access Domain Data",exact_bytes =3
+        ),
+        )
+        wiz .add_step (
+        "raw","Raw access-domain parameter value [Hex]:",
+        default ="",condition =raw_cond,is_mandatory =True,input_kind ="hex",
+        )
 
         res =wiz .run ()
+        if res is None :
+            return None
         choice =InteractiveWizards ._normalize_numeric_choice (res .get ("choice"))
 
         is_opt_1 =False 
@@ -396,6 +481,8 @@ class InteractiveWizards :
         wiz_main .add_step ("inc_82","Include Admin Access Parameters (Tag 82)? [y/N]:",default =False ,is_bool =True )
         wiz_main .add_step ("inc_83","Include Update Access Parameters (Tag 83)? [y/N]:",default =False ,is_bool =True )
         res_main =wiz_main .run ()
+        if res_main is None :
+            return None
 
         payload_ea =bytearray ()
 
@@ -405,16 +492,67 @@ class InteractiveWizards :
 
         if is_80_y :
             wiz_80 =InteractiveWizard ("Toolkit Parameters (8.2.1.3.2.2.1)",Config .Colors )
-            wiz_80 .add_step ("prio","Priority Level (01-FF) [Default: 01]:",default ="01")
-            wiz_80 .add_step ("timers","Max Timers (00-08) [Default: 00]:",default ="00")
-            wiz_80 .add_step ("text","Max Menu Text Length (Hex) [Default: 00]:",default ="00")
-            wiz_80 .add_step ("menu","Max Menu Entries (Hex) [Default: 00]:",default ="00")
-            wiz_80 .add_step ("menu_list","Menu Entries List (Position + ID hex string) [SKIP]:",default ="SKIP")
-            wiz_80 .add_step ("msl","Minimum Security Level (MSL) [Hex]:",default ="SKIP")
-            wiz_80 .add_step ("tar","TAR Value(s) (3 bytes each) [Hex]:",default ="SKIP")
-            wiz_80 .add_step ("chan","Max BIP Channels (Hex, 1 byte):",default ="SKIP")
-            wiz_80 .add_step ("srv","Max Services (Hex, 1 byte):",default ="SKIP")
+            byte_validator =InteractiveWizards ._hex_size_validator
+            wiz_80 .add_step (
+            "prio","Priority Level (01-FF) [Default: 01]:",default ="01",
+            input_kind ="hex",validator =byte_validator (
+            "Priority",exact_bytes =1,minimum_value =1
+            ),
+            )
+            wiz_80 .add_step (
+            "timers","Max Timers (00-08) [Default: 00]:",default ="00",
+            input_kind ="hex",validator =byte_validator (
+            "Maximum timers",exact_bytes =1,maximum_value =8
+            ),
+            )
+            wiz_80 .add_step (
+            "text","Max Menu Text Length (Hex) [Default: 00]:",default ="00",
+            input_kind ="hex",validator =byte_validator (
+            "Maximum menu text length",exact_bytes =1
+            ),
+            )
+            wiz_80 .add_step (
+            "menu","Max Menu Entries (Hex) [Default: 00]:",default ="00",
+            input_kind ="hex",validator =byte_validator (
+            "Maximum menu entries",exact_bytes =1
+            ),
+            )
+            wiz_80 .add_step (
+            "menu_list","Menu Entries List (Position + ID hex string) [SKIP]:",
+            default ="SKIP",input_kind ="hex",
+            validator =byte_validator (
+            "Menu entries list",maximum_bytes =510,multiple_bytes =2
+            ),
+            )
+            wiz_80 .add_step (
+            "msl","Minimum Security Level (MSL) [Hex]:",
+            default ="SKIP",input_kind ="hex",
+            validator =byte_validator ("MSL",maximum_bytes =0xFF ),
+            )
+            wiz_80 .add_step (
+            "tar","TAR Value(s) (3 bytes each) [Hex]:",
+            default ="SKIP",input_kind ="hex",
+            validator =byte_validator (
+            "TAR values",maximum_bytes =0xFF,multiple_bytes =3
+            ),
+            )
+            wiz_80 .add_step (
+            "chan","Max BIP Channels (Hex, 1 byte):",
+            default ="SKIP",input_kind ="hex",
+            validator =byte_validator (
+            "Maximum BIP channels",exact_bytes =1,maximum_value =7
+            ),
+            )
+            wiz_80 .add_step (
+            "srv","Max Services (Hex, 1 byte):",
+            default ="SKIP",input_kind ="hex",
+            validator =byte_validator (
+            "Maximum services",exact_bytes =1,maximum_value =8
+            ),
+            )
             res_80 =wiz_80 .run ()
+            if res_80 is None :
+                return None
 
             try :
                 payload_80 =bytearray ()
@@ -536,6 +674,8 @@ class InteractiveWizards :
             wiz_c3 =InteractiveWizard ("Toolkit Parameters DAP (Tag C3)",Config .Colors )
             wiz_c3 .add_step ("dap","DAP [Raw Hex]:",default ="SKIP")
             res_c3 =wiz_c3 .run ()
+            if res_c3 is None :
+                return None
             dap_val =res_c3 .get ("dap")
             if not InteractiveWizards ._is_skip_value (dap_val ):
                 try :
@@ -550,6 +690,8 @@ class InteractiveWizards :
 
         if is_81_y :
             tag_81_bytes =InteractiveWizards ._build_access_domain_parameter (0x81 ,"Access Parameters")
+            if tag_81_bytes is None :
+                return None
             payload_ea .extend (tag_81_bytes )
 
         is_82_y =False 
@@ -558,6 +700,8 @@ class InteractiveWizards :
 
         if is_82_y :
             tag_82_bytes =InteractiveWizards ._build_access_domain_parameter (0x82 ,"Admin Access Parameters")
+            if tag_82_bytes is None :
+                return None
             payload_ea .extend (tag_82_bytes )
 
         is_83_y =False 
@@ -566,6 +710,8 @@ class InteractiveWizards :
 
         if is_83_y :
             tag_83_bytes =InteractiveWizards ._build_access_domain_parameter (0x83 ,"Update Access Parameters")
+            if tag_83_bytes is None :
+                return None
             payload_ea .extend (tag_83_bytes )
 
         is_ea_empty =False 
@@ -599,6 +745,8 @@ class InteractiveWizards :
         wiz .add_step ("ea","Build UICC System Specific Parameters (Tag EA)? [y/N]:",default =False ,is_bool =True ,condition =ea_cond ,builder_func =InteractiveWizards ._build_toolkit_parameters_ea )
 
         res =wiz .run ()
+        if res is None :
+            return None
         payload =bytearray ()
 
         c9_val =res .get ("c9")
@@ -668,23 +816,13 @@ class InteractiveWizards :
 
     @staticmethod 
     def _build_lv_field (hex_val :str )->bytes :
-        if hex_val is None :
+        if InteractiveWizards ._is_skip_value (hex_val ):
             return bytes ([0x00 ])
 
-        try :
-            b =InteractiveWizards ._hex_bytes (hex_val ,"LV field")
-
-            is_too_long =False 
-            if len (b )>255 :
-                is_too_long =True 
-
-            if is_too_long :
-                raise ValueError ("LV field length exceeds 255 bytes.")
-
-            return bytes ([len (b )])+b 
-        except ValueError as e :
-            print (f"[-] {e} Defaulting to empty field (00).")
-            return bytes ([0x00 ])
+        b =InteractiveWizards ._hex_bytes (hex_val ,"LV field")
+        if len (b )>255 :
+            raise ValueError ("LV field length exceeds 255 bytes.")
+        return bytes ([len (b )])+b
 
     @staticmethod 
     def _build_privileges ()->str :
@@ -699,6 +837,8 @@ class InteractiveWizards :
         wiz .add_step ("b0","Mandated DAP Verification (Bit 0)? [y/N]:",default =False ,is_bool =True ,indent =1 )
 
         res =wiz .run ()
+        if res is None :
+            return None
         priv =0x00 
 
         has_b7 =False 
@@ -756,9 +896,24 @@ class InteractiveWizards :
     @staticmethod 
     def _run_install_load (tp_ctrl ,gp_ctrl =None )->None :
         wiz =InteractiveWizard ("Building INSTALL [for load] (P1=02)",Config .Colors )
-        wiz .add_step ("lf_aid","Executable Load File AID [Hex, optional]:",default ="")
-        wiz .add_step ("sd_aid","Target Security Domain AID [Hex, optional]:",default ="")
-        wiz .add_step ("lf_hash","Load File Data Block Hash [Hex, optional]:",default ="")
+        aid_validator =InteractiveWizards ._hex_size_validator (
+        "AID",minimum_bytes =5,maximum_bytes =16
+        )
+        lv_validator =InteractiveWizards ._hex_size_validator
+        wiz .add_step (
+        "lf_aid","Executable Load File AID [Hex]:",default ="",
+        is_mandatory =True,input_kind ="hex",validator =aid_validator,
+        )
+        wiz .add_step (
+        "sd_aid","Target Security Domain AID [Hex, optional]:",default ="",
+        input_kind ="hex",validator =aid_validator,
+        )
+        wiz .add_step (
+        "lf_hash","Load File Data Block Hash [Hex, optional]:",default ="",
+        input_kind ="hex",validator =lv_validator (
+        "Load File hash",maximum_bytes =255
+        ),
+        )
         wiz .add_step ("params","Launch Load Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def params_cond (res ):
@@ -767,10 +922,19 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_params","Load Parameters [Raw Hex only, optional]:",default ="",condition =params_cond )
-        wiz .add_step ("token","Load Token [Hex, optional]:",default ="")
+        wiz .add_step (
+        "raw_params","Load Parameters [Raw Hex only, optional]:",
+        default ="",condition =params_cond,input_kind ="hex",
+        validator =lv_validator ("Load parameters",maximum_bytes =255 ),
+        )
+        wiz .add_step (
+        "token","Load Token [Hex, optional]:",default ="",input_kind ="hex",
+        validator =lv_validator ("Load token",maximum_bytes =255 ),
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         payload =bytearray ()
 
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("lf_aid")))
@@ -805,9 +969,22 @@ class InteractiveWizards :
     @staticmethod 
     def _run_install_install (tp_ctrl ,gp_ctrl ,p1_hex :str ,desc :str )->None :
         wiz =InteractiveWizard (f"Building {desc} (P1={p1_hex})",Config .Colors )
-        wiz .add_step ("elf_aid","Executable Load File AID / Package AID [Hex]:",default ="",is_mandatory =True )
-        wiz .add_step ("em_aid","Executable Module AID [Hex]:",default ="",is_mandatory =True )
-        wiz .add_step ("app_aid","Target Application / Applet AID [Hex]:",default ="",is_mandatory =True )
+        aid_validator =InteractiveWizards ._hex_size_validator (
+        "AID",minimum_bytes =5,maximum_bytes =16
+        )
+        lv_validator =InteractiveWizards ._hex_size_validator
+        wiz .add_step (
+        "elf_aid","Executable Load File AID / Package AID [Hex]:",
+        default ="",is_mandatory =True,input_kind ="hex",validator =aid_validator,
+        )
+        wiz .add_step (
+        "em_aid","Executable Module AID [Hex]:",
+        default ="",is_mandatory =True,input_kind ="hex",validator =aid_validator,
+        )
+        wiz .add_step (
+        "app_aid","Target Application / Applet AID [Hex]:",
+        default ="",is_mandatory =True,input_kind ="hex",validator =aid_validator,
+        )
         wiz .add_step ("priv","Launch Privileges Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_privileges )
 
         def priv_cond (res ):
@@ -816,7 +993,11 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_priv","Privileges [Raw Hex bitmask, default 00]:",default ="00",condition =priv_cond )
+        wiz .add_step (
+        "raw_priv","Privileges [Raw Hex bitmask, default 00]:",
+        default ="00",condition =priv_cond,input_kind ="hex",
+        validator =lv_validator ("Privileges",allowed_bytes =(1 ,3 )),
+        )
         wiz .add_step ("params","Launch Install Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def params_cond (res ):
@@ -825,10 +1006,19 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_params","Install Parameters [Raw Hex TLV, default C900]:",default ="C900",condition =params_cond )
-        wiz .add_step ("token","Install Token [Hex, optional]:",default ="")
+        wiz .add_step (
+        "raw_params","Install Parameters [Raw Hex TLV, default C900]:",
+        default ="C900",condition =params_cond,input_kind ="hex",
+        validator =lv_validator ("Install parameters",maximum_bytes =255 ),
+        )
+        wiz .add_step (
+        "token","Install Token [Hex, optional]:",default ="",input_kind ="hex",
+        validator =lv_validator ("Install token",maximum_bytes =255 ),
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         payload =bytearray ()
 
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("elf_aid")))
@@ -886,7 +1076,14 @@ class InteractiveWizards :
     @staticmethod 
     def _run_install_make_selectable (tp_ctrl ,gp_ctrl =None )->None :
         wiz =InteractiveWizard ("Building INSTALL [for make selectable] (P1=08)",Config .Colors )
-        wiz .add_step ("app_aid","Target Application / Applet AID [Hex]:",default ="",is_mandatory =True )
+        aid_validator =InteractiveWizards ._hex_size_validator (
+        "AID",minimum_bytes =5,maximum_bytes =16
+        )
+        lv_validator =InteractiveWizards ._hex_size_validator
+        wiz .add_step (
+        "app_aid","Target Application / Applet AID [Hex]:",
+        default ="",is_mandatory =True,input_kind ="hex",validator =aid_validator,
+        )
         wiz .add_step ("priv","Launch Privileges Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_privileges )
 
         def priv_cond (res ):
@@ -895,7 +1092,11 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_priv","Privileges [Raw Hex bitmask, default 00]:",default ="00",condition =priv_cond )
+        wiz .add_step (
+        "raw_priv","Privileges [Raw Hex bitmask, default 00]:",
+        default ="00",condition =priv_cond,input_kind ="hex",
+        validator =lv_validator ("Privileges",allowed_bytes =(1 ,3 )),
+        )
         wiz .add_step ("params","Launch Install Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def params_cond (res ):
@@ -904,10 +1105,19 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_params","Install Parameters [Raw Hex TLV, optional]:",default ="",condition =params_cond )
-        wiz .add_step ("token","Install Token [Hex, optional]:",default ="")
+        wiz .add_step (
+        "raw_params","Install Parameters [Raw Hex TLV, optional]:",
+        default ="",condition =params_cond,input_kind ="hex",
+        validator =lv_validator ("Install parameters",maximum_bytes =255 ),
+        )
+        wiz .add_step (
+        "token","Install Token [Hex, optional]:",default ="",input_kind ="hex",
+        validator =lv_validator ("Install token",maximum_bytes =255 ),
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         payload =bytearray ()
 
         payload .extend (InteractiveWizards ._build_lv_field (""))
@@ -965,11 +1175,27 @@ class InteractiveWizards :
     @staticmethod 
     def _run_install_extradition (tp_ctrl ,gp_ctrl =None )->None :
         wiz =InteractiveWizard ("Building INSTALL [for extradition] (P1=10)",Config .Colors )
-        wiz .add_step ("sd_aid","Destination Security Domain AID [Hex]:",default ="",is_mandatory =True )
-        wiz .add_step ("app_aid","Application / ELF AID being extradited [Hex]:",default ="",is_mandatory =True )
-        wiz .add_step ("token","Extradition Token [Hex, optional]:",default ="")
+        aid_validator =InteractiveWizards ._hex_size_validator (
+        "AID",minimum_bytes =5,maximum_bytes =16
+        )
+        wiz .add_step (
+        "sd_aid","Destination Security Domain AID [Hex]:",
+        default ="",is_mandatory =True,input_kind ="hex",validator =aid_validator,
+        )
+        wiz .add_step (
+        "app_aid","Application / ELF AID being extradited [Hex]:",
+        default ="",is_mandatory =True,input_kind ="hex",validator =aid_validator,
+        )
+        wiz .add_step (
+        "token","Extradition Token [Hex, optional]:",default ="",input_kind ="hex",
+        validator =InteractiveWizards ._hex_size_validator (
+        "Extradition token",maximum_bytes =255
+        ),
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         payload =bytearray ()
 
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("sd_aid")))
@@ -983,7 +1209,14 @@ class InteractiveWizards :
     @staticmethod 
     def _run_install_registry_update (tp_ctrl ,gp_ctrl =None )->None :
         wiz =InteractiveWizard ("Building INSTALL [for registry update] (P1=40)",Config .Colors )
-        wiz .add_step ("app_aid","Application / ELF AID to update [Hex]:",default ="",is_mandatory =True )
+        aid_validator =InteractiveWizards ._hex_size_validator (
+        "AID",minimum_bytes =5,maximum_bytes =16
+        )
+        lv_validator =InteractiveWizards ._hex_size_validator
+        wiz .add_step (
+        "app_aid","Application / ELF AID to update [Hex]:",
+        default ="",is_mandatory =True,input_kind ="hex",validator =aid_validator,
+        )
         wiz .add_step ("priv","Launch Privileges Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_privileges )
 
         def priv_cond (res ):
@@ -992,7 +1225,11 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_priv","Privileges [Raw Hex bitmask, default 00]:",default ="00",condition =priv_cond )
+        wiz .add_step (
+        "raw_priv","Privileges [Raw Hex bitmask, default 00]:",
+        default ="00",condition =priv_cond,input_kind ="hex",
+        validator =lv_validator ("Privileges",allowed_bytes =(1 ,3 )),
+        )
         wiz .add_step ("params","Launch Install Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def params_cond (res ):
@@ -1001,10 +1238,19 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_params","Install Parameters [Raw Hex TLV, optional]:",default ="",condition =params_cond )
-        wiz .add_step ("token","Install Token [Hex, optional]:",default ="")
+        wiz .add_step (
+        "raw_params","Install Parameters [Raw Hex TLV, optional]:",
+        default ="",condition =params_cond,input_kind ="hex",
+        validator =lv_validator ("Install parameters",maximum_bytes =255 ),
+        )
+        wiz .add_step (
+        "token","Install Token [Hex, optional]:",default ="",input_kind ="hex",
+        validator =lv_validator ("Install token",maximum_bytes =255 ),
+        )
 
         res =wiz .run ()
+        if res is None :
+            return
         payload =bytearray ()
 
         payload .append (0x00 )
@@ -1091,6 +1337,8 @@ class InteractiveWizards :
             wiz =InteractiveWizard ("Transmit Confirmation",Config .Colors )
             wiz .add_step ("tx","Transmit APDU to card? [y/N]:",default =False ,is_bool =True )
             res_wiz =wiz .run ()
+            if res_wiz is None :
+                return
 
             do_send =False 
             if res_wiz .get ("tx"):
@@ -1119,9 +1367,10 @@ class InteractiveWizards :
     @staticmethod 
     def build_install_apdu (tp_ctrl ,filename :str ,gp_ctrl =None ):
         """Build a GP INSTALL [for install] APDU from the supplied parameters."""
+        filename =InteractiveWizards ._normalize_user_path (filename )
         is_valid_file =False 
         if filename :
-            if os .path .exists (filename ):
+            if os .path .isfile (filename ):
                 is_valid_file =True 
 
         if is_valid_file ==False :
@@ -1141,7 +1390,7 @@ class InteractiveWizards :
 
         print (f"Extracted Package AID: {pkg_aid.hex().upper()}")
 
-        def_app_aid ="None"
+        def_app_aid =""
 
         has_app_aids =False 
         if len (app_aids )>0 :
@@ -1150,12 +1399,41 @@ class InteractiveWizards :
         if has_app_aids :
             def_app_aid =app_aids [0 ].hex ().upper ()
 
-        print (f"Extracted Applet AID : {def_app_aid}")
+        print (f"Extracted Applet AID : {def_app_aid or '(none found)'}")
 
         wiz =InteractiveWizard ("CAP File Install Configuration",Config .Colors ,"Build dry-run APDUs, or execute the full CAP load directly on the connected SIM.")
-        wiz .add_step ("app_aid",f"Target Applet AID [Hex, default from CAP: {def_app_aid}]:",default =def_app_aid )
-        wiz .add_step ("mod_aid","Target Module AID [Hex, default=MIRROR -> same as applet AID]:",default ="MIRROR")
-        wiz .add_step ("priv","Privileges [Hex bitmask, default 00]:",default ="00")
+        aid_validator =InteractiveWizards ._hex_size_validator (
+        "AID",minimum_bytes =5,maximum_bytes =16
+        )
+        wiz .add_step (
+        "app_aid",
+        f"Target Applet AID [Hex, default from CAP: {def_app_aid or 'none'}]:",
+        default =def_app_aid,is_mandatory =True,input_kind ="hex",
+        validator =aid_validator,
+        )
+
+        def module_validator (value )->str |None :
+            if str (value ).strip ().upper ()=="MIRROR":
+                return None
+            try :
+                cleaned =InteractiveWizards ._clean_hex_input (
+                value ,"module AID",allow_empty =False
+                )
+            except ValueError as error :
+                return str (error )
+            return aid_validator (cleaned )
+
+        wiz .add_step (
+        "mod_aid",
+        "Target Module AID [Hex, default=MIRROR -> same as applet AID]:",
+        default ="MIRROR",input_kind ="text",validator =module_validator,
+        )
+        wiz .add_step (
+        "priv","Privileges [Hex bitmask, default 00]:",default ="00",
+        input_kind ="hex",validator =InteractiveWizards ._hex_size_validator (
+        "Privileges",minimum_bytes =1,maximum_bytes =3
+        ),
+        )
         wiz .add_step ("run_b","Launch interactive TLV builder for Install Parameters? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def run_b_cond (res ):
@@ -1164,31 +1442,42 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_p","Install Parameters [Raw Hex TLV, default C900]:",default ="C900",condition =run_b_cond )
+        wiz .add_step (
+        "raw_p","Install Parameters [Raw Hex TLV, default C900]:",
+        default ="C900",condition =run_b_cond,input_kind ="hex",
+        validator =InteractiveWizards ._hex_size_validator (
+        "Install parameters",maximum_bytes =255
+        ),
+        )
         wiz .add_step ("ota","Format LOAD blocks for OTA / SMS-PP size limits? [y/N]:",default =False ,is_bool =True )
-        wiz .add_step ("algo","OTA encryption profile [1=3DES-sized chunks, 2=AES-sized chunks]:",default ="1")
+
+        def ota_cond (values ):
+            return bool (values .get ("ota"))
+
+        wiz .add_step (
+        "algo","OTA encryption profile [1=3DES-sized chunks, 2=AES-sized chunks]:",
+        default ="1",condition =ota_cond,choices =("1","2"),
+        )
         if gp_ctrl is not None :
             wiz .add_step ("execute","Execute full CAP install directly on the connected SIM after generation? [y/N]:",default =False ,is_bool =True )
 
         res =wiz .run ()
+        if res is None :
+            return
 
         app_aid_hex =res .get ("app_aid")
 
-        is_app_aid_none =False 
-        if app_aid_hex =="None":
-            is_app_aid_none =True 
-
-        if is_app_aid_none :
-            print (f"{Config.Colors.FAIL}[!] No Applet AID found in CAP. Aborting.{Config.Colors.ENDC}")
-            return 
-
         mod_aid_hex =res .get ("mod_aid")
         is_mirror =False 
-        if mod_aid_hex =="MIRROR":
+        if str (mod_aid_hex ).strip ().upper ()=="MIRROR":
             is_mirror =True 
 
         if is_mirror :
             mod_aid_hex =app_aid_hex 
+        else :
+            mod_aid_hex =InteractiveWizards ._clean_hex_input (
+            mod_aid_hex ,"module AID",allow_empty =False
+            )
 
         priv_hex =res .get ("priv")
 
@@ -1337,7 +1626,12 @@ class InteractiveWizards :
     def run_dgi_personalization (tp_ctrl ,gp_ctrl ,target_aid :str )->None :
         """Run the interactive DGI personalisation wizard for a loaded CAP package."""
         mode_wiz =InteractiveWizard ("Personalization / STORE DATA",Config .Colors ,"Choose whether to open INSTALL [for personalization] against a target AID first, or to send STORE DATA directly.")
-        mode_wiz .add_step ("target_mode","Mode [1=Target AID via INSTALL for personalization, 2=Direct STORE DATA only]:",default ="1")
+        mode_wiz .add_step (
+        "target_mode",
+        "Mode [1=Target AID via INSTALL for personalization, "
+        "2=Direct STORE DATA only]:",
+        default ="1",choices =("1","2"),
+        )
 
         def target_aid_cond (res ):
             return InteractiveWizards ._normalize_numeric_choice (res .get ("target_mode","1"),"1")=='1'
@@ -1348,11 +1642,32 @@ class InteractiveWizards :
         def builder_mode_cond (res ):
             return InteractiveWizards ._normalize_numeric_choice (res .get ("input_mode","1"),"1")!='2'
 
-        mode_wiz .add_step ("target_aid",f"Target AID for INSTALL [for personalization] [Hex, default: {target_aid}]:",default =target_aid ,condition =target_aid_cond )
-        mode_wiz .add_step ("input_mode","STORE DATA payload input [1=Structured TLV builder, 2=Raw payload hex only]:",default ="2")
-        mode_wiz .add_step ("store_p1","STORE DATA P1 [Hex, default 90]:",default ="90")
-        mode_wiz .add_step ("store_p2","STORE DATA P2 [Hex, default 00]:",default ="00")
-        mode_wiz .add_step ("raw_payload","STORE DATA payload only [Hex, no CLA/INS/P1/P2/Lc]:",default ="",condition =raw_mode_cond )
+        mode_wiz .add_step (
+        "target_aid",
+        f"Target AID for INSTALL [for personalization] [Hex, default: {target_aid}]:",
+        default =target_aid ,condition =target_aid_cond,is_mandatory =True,
+        input_kind ="hex",validator =InteractiveWizards ._hex_size_validator (
+        "Target AID",minimum_bytes =5,maximum_bytes =16
+        ),
+        )
+        mode_wiz .add_step (
+        "input_mode",
+        "STORE DATA payload input [1=Structured TLV builder, 2=Raw payload hex only]:",
+        default ="2",choices =("1","2"),
+        )
+        one_byte =InteractiveWizards ._hex_size_validator
+        mode_wiz .add_step (
+        "store_p1","STORE DATA P1 [Hex, default 90]:",default ="90",
+        input_kind ="hex",validator =one_byte ("STORE DATA P1",exact_bytes =1 ),
+        )
+        mode_wiz .add_step (
+        "store_p2","STORE DATA P2 [Hex, default 00]:",default ="00",
+        input_kind ="hex",validator =one_byte ("STORE DATA P2",exact_bytes =1 ),
+        )
+        mode_wiz .add_step (
+        "raw_payload","STORE DATA payload only [Hex, no CLA/INS/P1/P2/Lc]:",
+        default ="",condition =raw_mode_cond,is_mandatory =True,input_kind ="hex",
+        )
         mode_wiz .add_step ("42","Issuer/SD ID (Tag 42) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
         mode_wiz .add_step ("45","Card/SD Image Number (Tag 45) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
         mode_wiz .add_step ("4F","Issuer Security Domain AID (Tag 4F) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
@@ -1362,9 +1677,24 @@ class InteractiveWizards :
         mode_wiz .add_step ("86","Security Level (Tag 86) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
         mode_wiz .add_step ("8A","Admin IP/Host (Tag 8A) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
         mode_wiz .add_step ("8C","Admin URL (Tag 8C) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
-        mode_wiz .add_step ("custom","Add Custom TLV String [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+        def tlv_stream_validator (value )->str |None :
+            if InteractiveWizards ._is_skip_value (value ):
+                return None
+            try :
+                InteractiveWizards ._remove_tag_from_payload (str (value ),"00")
+            except ValueError as error :
+                return f"Custom TLV stream is invalid: {error}"
+            return None
+
+        mode_wiz .add_step (
+        "custom","Add Custom TLV String [Hex, Default: SKIP]:",
+        default ="SKIP",condition =builder_mode_cond,input_kind ="hex",
+        validator =tlv_stream_validator,
+        )
 
         res =mode_wiz .run ()
+        if res is None :
+            return
 
         payload =""
         is_raw_mode =False 
@@ -1466,6 +1796,8 @@ class InteractiveWizards :
         tx_wiz =InteractiveWizard ("Transmit Confirmation",Config .Colors )
         tx_wiz .add_step ("tx","Transmit the generated INSTALL / STORE DATA sequence to the card now? [y/N]:",default =False ,is_bool =True )
         res_tx =tx_wiz .run ()
+        if res_tx is None :
+            return
 
         do_transmit =False 
         if res_tx .get ("tx"):
@@ -1477,21 +1809,34 @@ class InteractiveWizards :
     @staticmethod 
     def _patch_dgi (base_dgi :str ,new_tlv :str )->str :
         try :
+            base_dgi =InteractiveWizards ._clean_hex_input (
+            base_dgi ,"base DGI",allow_empty =False
+            )
+            new_tlv =InteractiveWizards ._clean_hex_input (
+            new_tlv ,"replacement TLV",allow_empty =False
+            )
+            if len (base_dgi )<6 :
+                raise ValueError ("Base DGI must contain a two-byte tag and a length.")
             dgi_tag =base_dgi [:4 ]
             remainder =base_dgi [4 :]
 
             dgi_len ,len_bytes_consumed =InteractiveWizards ._decode_ber_tlv_length (remainder )
             payload_start_idx =len_bytes_consumed *2 
             dgi_payload =remainder [payload_start_idx :]
+            if len (dgi_payload )!=dgi_len *2 :
+                raise ValueError (
+                f"Base DGI declares {dgi_len} bytes but contains "
+                f"{len(dgi_payload)//2}."
+                )
 
             target_tag_hex =InteractiveWizards ._extract_tag_from_tlv (new_tlv )
-
-            is_target_empty =False 
-            if len (target_tag_hex )==0 :
-                is_target_empty =True 
-
-            if is_target_empty :
-                return ""
+            tag_chars =len (target_tag_hex )
+            new_len ,new_len_bytes =InteractiveWizards ._decode_ber_tlv_length (
+            new_tlv [tag_chars :]
+            )
+            expected_new_chars =tag_chars +(new_len_bytes *2 )+(new_len *2 )
+            if expected_new_chars !=len (new_tlv ):
+                raise ValueError ("Replacement TLV length does not match its value.")
 
             cleaned_payload =InteractiveWizards ._remove_tag_from_payload (dgi_payload ,target_tag_hex )
             new_payload =cleaned_payload +new_tlv 
@@ -1507,21 +1852,29 @@ class InteractiveWizards :
 
     @staticmethod 
     def _decode_ber_tlv_length (hex_str :str )->Tuple [int ,int ]:
-        first_byte =int (hex_str [:2 ],16 )
-
-        is_single_byte =False 
+        cleaned =InteractiveWizards ._clean_hex_input (
+        hex_str ,"BER length",allow_empty =False
+        )
+        first_byte =int (cleaned [:2 ],16 )
         if first_byte <=0x7F :
-            is_single_byte =True 
-
-        if is_single_byte :
-            return first_byte ,1 
+            return first_byte ,1
 
         num_bytes =first_byte &0x7F 
-        length_hex =hex_str [2 :2 +(num_bytes *2 )]
+        if num_bytes ==0 :
+            raise ValueError ("Indefinite BER lengths are not supported.")
+        if num_bytes >2 :
+            raise ValueError ("BER lengths longer than two bytes are not supported.")
+        if len (cleaned )<2 +(num_bytes *2 ):
+            raise ValueError ("Truncated BER length.")
+        length_hex =cleaned [2 :2 +(num_bytes *2 )]
+        if length_hex .startswith ("00"):
+            raise ValueError ("BER length contains a redundant leading zero.")
         return int (length_hex ,16 ),1 +num_bytes 
 
     @staticmethod 
     def _encode_ber_tlv_length (length :int )->str :
+        if length <0 :
+            raise ValueError ("BER-TLV length cannot be negative.")
         is_short =False 
         if length <=0x7F :
             is_short =True 
@@ -1547,38 +1900,53 @@ class InteractiveWizards :
 
     @staticmethod 
     def _extract_tag_from_tlv (tlv :str )->str :
-        first_byte =int (tlv [:2 ],16 )
+        cleaned =InteractiveWizards ._clean_hex_input (
+        tlv ,"BER-TLV",allow_empty =False
+        )
+        first_byte =int (cleaned [:2 ],16 )
+        if first_byte in (0x00 ,0xFF ):
+            raise ValueError (f"Reserved BER tag octet {first_byte:02X}.")
+        if (first_byte &0x1F )!=0x1F :
+            return cleaned [:2 ]
 
-        is_two_byte_tag =False 
-        if (first_byte &0x1F )==0x1F :
-            is_two_byte_tag =True 
-
-        if is_two_byte_tag :
-            return tlv [:4 ]
-
-        return tlv [:2 ]
+        offset =2
+        tag_bytes =1
+        while True :
+            if offset +2 >len (cleaned ):
+                raise ValueError ("Truncated high-tag-number BER tag.")
+            current =int (cleaned [offset :offset +2 ],16 )
+            if tag_bytes ==1 and (current &0x7F )==0 :
+                raise ValueError ("Invalid high-tag-number BER tag.")
+            if tag_bytes ==1 and (current &0x80 )==0 and current <0x1F :
+                raise ValueError ("Non-minimal high-tag-number BER tag.")
+            offset +=2
+            tag_bytes +=1
+            if tag_bytes >4 :
+                raise ValueError ("BER tags longer than four bytes are not supported.")
+            if (current &0x80 )==0 :
+                return cleaned [:offset ]
 
     @staticmethod 
     def _remove_tag_from_payload (payload :str ,target_tag :str )->str :
+        payload =InteractiveWizards ._clean_hex_input (payload ,"TLV payload")
+        target_tag =InteractiveWizards ._clean_hex_input (
+        target_tag ,"target tag",allow_empty =False
+        )
         idx =0 
         rebuilt_payload =""
 
         while idx <len (payload ):
-            current_tag =payload [idx :idx +2 ]
-            tag_len_chars =2 
-
-            is_complex_tag =False 
-            if (int (current_tag ,16 )&0x1F )==0x1F :
-                is_complex_tag =True 
-
-            if is_complex_tag :
-                current_tag =payload [idx :idx +4 ]
-                tag_len_chars =4 
+            current_tag =InteractiveWizards ._extract_tag_from_tlv (payload [idx :])
+            tag_len_chars =len (current_tag )
 
             remainder =payload [idx +tag_len_chars :]
             tlv_len ,len_bytes =InteractiveWizards ._decode_ber_tlv_length (remainder )
 
             total_tlv_chars =tag_len_chars +(len_bytes *2 )+(tlv_len *2 )
+            if idx +total_tlv_chars >len (payload ):
+                raise ValueError (
+                f"TLV {current_tag} length exceeds the remaining payload."
+                )
             full_current_tlv =payload [idx :idx +total_tlv_chars ]
 
             is_match =False 
@@ -1590,6 +1958,8 @@ class InteractiveWizards :
 
             idx +=total_tlv_chars 
 
+        if idx !=len (payload ):
+            raise ValueError ("TLV payload contains trailing data.")
         return rebuilt_payload 
 
     @staticmethod 
@@ -1657,113 +2027,94 @@ class InteractiveWizards :
             print (f"[-] STORE DATA rejected: {sw1:02X}{sw2:02X}.")
 
     @staticmethod 
-    def _prompt_flat_tag (tag_hex_str :str ,tag_name :str )->str :
+    def _prompt_flat_tag (tag_hex_str :str ,tag_name :str )->str |None :
         wiz =InteractiveWizard (f"Build {tag_name}",Config .Colors )
         wiz .add_step ("add",f"Add {tag_name} (Tag {tag_hex_str})? [y/N]:",default =False ,is_bool =True )
-        wiz .add_step ("val","Enter Value (Hex):",default ="SKIP")
+        wiz .add_step (
+        "val","Enter Value (Hex):",default ="",
+        condition =lambda values :bool (values .get ("add")),
+        is_mandatory =True,input_kind ="hex",
+        )
         res =wiz .run ()
+        if res is None :
+            return None
 
-        is_y =False 
-        if res .get ("add"):
-            is_y =True 
-
-        if is_y ==False :
+        if not res .get ("add"):
             return ""
 
-        val =res .get ("val").replace (" ","")
-
-        is_skip =False 
-        if val =="SKIP":
-            is_skip =True 
-
-        if is_skip :
-            return ""
-
-        try :
-            val_bytes =bytes .fromhex (val )
-            len_hex =InteractiveWizards ._encode_ber_tlv_length (len (val_bytes ))
-            return tag_hex_str +len_hex +val .upper ()
-        except ValueError :
-            print (f"[-] Invalid Hex. Skipping Tag {tag_hex_str}.")
-            return ""
+        val =str (res .get ("val"))
+        val_bytes =bytes .fromhex (val )
+        len_hex =InteractiveWizards ._encode_ber_tlv_length (len (val_bytes ))
+        return tag_hex_str +len_hex +val .upper ()
 
     @staticmethod 
-    def _build_tag_67 ()->str :
+    def _build_tag_67 ()->str |None :
         wiz =InteractiveWizard ("Card Capability Info (Tag 67)",Config .Colors )
         wiz .add_step ("scp","Add Secure Channel Protocol (SCP) Info (Tag A0)? [y/N]:",default =False ,is_bool =True )
-        wiz .add_step ("scp_id","SCP Identifier (Tag 80) [Hex, e.g. 03]:",default ="SKIP")
-        wiz .add_step ("scp_opt","SCP Options (Tag 81) [Hex, e.g. 70 or 7071]:",default ="SKIP")
-        wiz .add_step ("scp_mask","SCP Mask Options (Tag 91) [Hex]:",default ="SKIP")
-        wiz .add_step ("other","Add other capabilities to Tag 67 [Raw Hex]:",default ="SKIP")
+
+        def scp_cond (values ):
+            return bool (values .get ("scp"))
+
+        one_byte =InteractiveWizards ._hex_size_validator
+        wiz .add_step (
+        "scp_id","SCP Identifier (Tag 80) [Hex, e.g. 03]:",
+        default ="SKIP",condition =scp_cond,input_kind ="hex",
+        validator =one_byte ("SCP identifier",exact_bytes =1 ),
+        )
+        wiz .add_step (
+        "scp_opt","SCP Options (Tag 81) [Hex, e.g. 70 or 7071]:",
+        default ="SKIP",condition =scp_cond,input_kind ="hex",
+        validator =one_byte ("SCP options",minimum_bytes =1,maximum_bytes =255 ),
+        )
+        wiz .add_step (
+        "scp_mask","SCP Mask Options (Tag 91) [Hex]:",
+        default ="SKIP",condition =scp_cond,input_kind ="hex",
+        validator =one_byte ("SCP mask options",minimum_bytes =1,maximum_bytes =255 ),
+        )
+
+        def tlv_stream_validator (value )->str |None :
+            if InteractiveWizards ._is_skip_value (value ):
+                return None
+            try :
+                InteractiveWizards ._remove_tag_from_payload (str (value ),"00")
+            except ValueError as error :
+                return f"Capability TLV stream is invalid: {error}"
+            return None
+
+        wiz .add_step (
+        "other","Add other capabilities to Tag 67 [BER-TLV Hex]:",
+        default ="SKIP",input_kind ="hex",validator =tlv_stream_validator,
+        )
 
         res =wiz .run ()
+        if res is None :
+            return None
 
         payload_67 =""
 
-        is_a0_y =False 
         if res .get ("scp"):
-            is_a0_y =True 
-
-        if is_a0_y :
             payload_a0 =""
 
-            scp_id =res .get ("scp_id")
-            has_scp_id =False 
-            if scp_id !="SKIP":
-                has_scp_id =True 
+            for tag ,field_name in (("80","scp_id"),("81","scp_opt"),("91","scp_mask")):
+                value =res .get (field_name )
+                if InteractiveWizards ._is_skip_value (value ):
+                    continue
+                value_bytes =bytes .fromhex (str (value ))
+                payload_a0 +=(
+                tag
+                +InteractiveWizards ._encode_ber_tlv_length (len (value_bytes ))
+                +str (value ).upper ()
+                )
 
-            if has_scp_id :
-                try :
-                    b =bytes .fromhex (scp_id .replace (" ",""))
-                    payload_a0 +="80"+InteractiveWizards ._encode_ber_tlv_length (len (b ))+scp_id .upper ()
-                except ValueError :
-                    print ("[-] Invalid Hex. Skipping Tag 80.")
-
-            scp_opt =res .get ("scp_opt")
-            has_scp_opt =False 
-            if scp_opt !="SKIP":
-                has_scp_opt =True 
-
-            if has_scp_opt :
-                try :
-                    b =bytes .fromhex (scp_opt .replace (" ",""))
-                    payload_a0 +="81"+InteractiveWizards ._encode_ber_tlv_length (len (b ))+scp_opt .upper ()
-                except ValueError :
-                    print ("[-] Invalid Hex. Skipping Tag 81.")
-
-            scp_mask =res .get ("scp_mask")
-            has_scp_mask =False 
-            if scp_mask !="SKIP":
-                has_scp_mask =True 
-
-            if has_scp_mask :
-                try :
-                    b =bytes .fromhex (scp_mask .replace (" ",""))
-                    payload_a0 +="91"+InteractiveWizards ._encode_ber_tlv_length (len (b ))+scp_mask .upper ()
-                except ValueError :
-                    print ("[-] Invalid Hex. Skipping Tag 91.")
-
-            has_a0_payload =False 
-            if len (payload_a0 )>0 :
-                has_a0_payload =True 
-
-            if has_a0_payload :
+            if payload_a0 :
                 a0_len =InteractiveWizards ._encode_ber_tlv_length (len (payload_a0 )//2 )
                 payload_67 +="A0"+a0_len +payload_a0 
 
         other_67 =res .get ("other")
-        has_other =False 
-        if other_67 !="SKIP":
-            has_other =True 
+        if not InteractiveWizards ._is_skip_value (other_67 ):
+            payload_67 +=str (other_67 ).upper ()
 
-        if has_other :
-            payload_67 +=other_67 .replace (" ","").upper ()
-
-        has_67_payload =False 
-        if len (payload_67 )>0 :
-            has_67_payload =True 
-
-        if has_67_payload :
+        if payload_67 :
             len_67 =InteractiveWizards ._encode_ber_tlv_length (len (payload_67 )//2 )
             return "67"+len_67 +payload_67 
 

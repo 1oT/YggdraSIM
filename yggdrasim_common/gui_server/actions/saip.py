@@ -37,14 +37,16 @@ transcoding / editing remains the domain of the standalone
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import logging
 import os
 import re
 import tempfile
+import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from yggdrasim_common.gui_server.actions.registry import (
     ActionContext,
@@ -68,6 +70,31 @@ def _workspace_root() -> Path:
         if (candidate / "pyproject.toml").is_file():
             return candidate
     return here.parents[-1]
+
+
+def _atomic_write_text(
+    path: Path,
+    text: str,
+    *,
+    overwrite: bool = True,
+) -> Path:
+    """Publish UTF-8 text without exposing a truncated partial artifact."""
+    from yggdrasim_common.secure_files import atomic_write_bytes
+
+    return atomic_write_bytes(
+        path,
+        str(text).encode("utf-8"),
+        overwrite=overwrite,
+    )
+
+
+def _raise_if_action_cancelled(ctx: ActionContext | None) -> None:
+    """Cooperatively stop a long-running SAIP one-shot."""
+    extras = getattr(ctx, "extras", None)
+    event = extras.get("cancel_event") if isinstance(extras, dict) else None
+    if event is not None and callable(getattr(event, "is_set", None)):
+        if event.is_set():
+            raise ValueError("SAIP operation cancelled.")
 
 
 def _ensure_pysim_importable() -> None:
@@ -160,13 +187,90 @@ def _patch_pysim_profile_element() -> None:
 _TEMPLATE_HEX_INPUT_SUFFIXES = {".varder"}
 _HEX_INPUT_SUFFIXES = {".hex", ".txt"} | _TEMPLATE_HEX_INPUT_SUFFIXES
 _ASN_VALUE_INPUT_SUFFIXES = {".asn", ".asn1"}
+_SPREADSHEET_INPUT_SUFFIXES = frozenset({".xlsx", ".xlsm", ".xls", ".ods"})
+_MAX_SAIP_UPLOAD_BYTES = 64 * 1024 * 1024
+_MAX_SAIP_UPLOAD_BASE64_CHARS = 4 * ((_MAX_SAIP_UPLOAD_BYTES + 2) // 3)
+_ZIP_MAGIC_PREFIXES = (
+    b"PK\x03\x04",  # local file header
+    b"PK\x05\x06",  # empty archive / end of central directory
+    b"PK\x07\x08",  # spanned archive data descriptor
+)
 _SIMPLE_PLACEHOLDER_RE = re.compile(
     r"\{#?[A-Za-z][A-Za-z0-9_]*\}|\[#?[A-Za-z][A-Za-z0-9_]*\]"
 )
+_TOKEN_MAPPING_LOCK = threading.RLock()
 
 
 class _HexTemplateInputError(ValueError):
     """Raised when hex text is a template that needs materialisation first."""
+
+
+def _read_bounded_saip_file(path: Path, *, label: str = "SAIP input") -> bytes:
+    """Read one stable local file snapshot with the same limit as uploads."""
+    from yggdrasim_common.secure_files import read_bounded_regular_file
+
+    try:
+        return read_bounded_regular_file(path, _MAX_SAIP_UPLOAD_BYTES)
+    except ValueError as error:
+        raise ValueError(
+            f"{label} exceeds the 64 MiB GUI limit: {path}"
+        ) from error
+    except OSError as error:
+        raise ValueError(
+            f"{label} could not be read as one stable regular file: "
+            f"{path}: {error.strerror or error}"
+        ) from error
+
+
+def _looks_like_zip_archive(raw: bytes) -> bool:
+    """Return whether *raw* is ZIP content rather than a SAIP package.
+
+    XLSX and related Office documents are ZIP containers.  Checking both
+    their normal leading signatures and ``zipfile``'s central-directory
+    probe catches workbooks renamed to ``.der`` (including ZIPs with a
+    self-extracting/preamble prefix) before BER recovery can mistake an
+    archive member header for a ProfileElement.
+    """
+    if any(raw.startswith(prefix) for prefix in _ZIP_MAGIC_PREFIXES):
+        return True
+    if len(raw) < 22:
+        return False
+
+    import io
+    import zipfile
+
+    try:
+        return zipfile.is_zipfile(io.BytesIO(raw))
+    except (OSError, ValueError):
+        return False
+
+
+def _pe_has_usable_type(pe: Any) -> bool:
+    """Return whether a decoded PE exposes a non-empty string type.
+
+    A pySim ``ProfileElement`` can be returned for an unrecognised BER tag
+    with ``type=None`` and an empty decoded body (for example ``50 00``).
+    Such an object is not a recoverable SAIP PE.  Non-empty types remain
+    accepted even when pySim has no specialised class for them; that is an
+    intentional compatibility path for valid newer/nonstandard ASN.1 choices.
+    """
+    try:
+        pe_type = getattr(pe, "type", None)
+    except Exception:  # noqa: BLE001 - defensive against foreign PE wrappers
+        return False
+    return isinstance(pe_type, str) and bool(pe_type.strip())
+
+
+def _require_usable_pe_types(pes: Any) -> None:
+    """Raise when a strictly decoded sequence contains a typeless PE."""
+    for index, pe in enumerate(pes.pe_list):
+        if _pe_has_usable_type(pe):
+            continue
+        pe_type = getattr(pe, "type", None)
+        raise ValueError(
+            "decoded ProfileElement at index "
+            f"{index} has no usable non-empty string type (got {pe_type!r})"
+        )
 
 
 def _looks_like_ascii_hex(raw: bytes) -> bool:
@@ -330,12 +434,20 @@ def _sniff_encoding(raw: bytes) -> str:
     return "der"
 
 
-def _load_asn1_value_package(resolved_path: Path) -> dict[str, Any]:
+def _load_asn1_value_package(
+    resolved_path: Path,
+    raw_input_bytes: bytes | None = None,
+) -> dict[str, Any]:
     """Load SAIP ASN.1 value notation as a decoded PE sequence."""
     from Tools.ProfilePackage.saip_asn1_value import parse_asn1_value_profile
 
+    raw = (
+        bytes(raw_input_bytes)
+        if raw_input_bytes is not None
+        else _read_bounded_saip_file(resolved_path)
+    )
     try:
-        text_payload = resolved_path.read_text(encoding="utf-8-sig")
+        text_payload = raw.decode("utf-8-sig")
     except UnicodeDecodeError as decode_err:
         raise ValueError(
             f"ASN.1 value-notation file is not UTF-8 decodable: "
@@ -351,10 +463,133 @@ def _load_asn1_value_package(resolved_path: Path) -> dict[str, Any]:
         "encoding": "asn",
         "warnings": [],
         "inline_placeholder_records": parsed.inline_placeholder_records,
+        "placeholder_paths": [],
+        "undefined_tokens": [],
+        "raw_input_bytes": raw,
+        "strict_complete": True,
+        "strict_failure": None,
     }
 
 
-def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
+def _restore_inline_placeholder_sentinels_in_tagged_json(
+    text_payload: str,
+) -> tuple[str, list[Any]]:
+    """Reverse JSON display literals to their persisted sentinel bytes.
+
+    Tagged JSON saves keep unresolved compact placeholders visible in ``hex``
+    leaves and persist the exact per-occurrence sentinel mapping under
+    ``__ygg_inline_placeholders__``.  The normal template-aware JSON parser
+    treats an undefined compact token as an empty byte string, which changes
+    ASN.1 field geometry and can make an otherwise valid saved authoring
+    document impossible to reopen.  Restore the recorded sentinels before
+    parsing, then return the records so the live session can continue to show
+    and materialise the unresolved variables.
+    """
+
+    loaded = json.loads(text_payload)
+    if not isinstance(loaded, dict):
+        return text_payload, []
+    sidecar_payload = loaded.get("__ygg_inline_placeholders__")
+    if sidecar_payload is None:
+        return text_payload, []
+
+    from Tools.ProfilePackage.saip_hex_template import (
+        sidecar_payload_to_records,
+    )
+
+    records = sidecar_payload_to_records(sidecar_payload)
+    if not records:
+        return text_payload, []
+    sections = loaded.get("sections")
+    if not isinstance(sections, dict):
+        raise ValueError(
+            "Tagged JSON inline-placeholder sidecar requires a sections object."
+        )
+
+    leaves: list[tuple[dict[str, Any], str]] = []
+
+    def _collect_hex_leaves(node: Any) -> None:
+        if isinstance(node, dict):
+            for raw_key, value in node.items():
+                key = str(raw_key)
+                if key in {"hex", "__ygg_saip_bytes__"} and isinstance(value, str):
+                    leaves.append((node, raw_key))
+                    continue
+                _collect_hex_leaves(value)
+            return
+        if isinstance(node, list):
+            for value in node:
+                _collect_hex_leaves(value)
+
+    _collect_hex_leaves(sections)
+    ordered_records = sorted(
+        records,
+        key=lambda record: int(getattr(record, "index", 0)),
+    )
+    seen_indices: set[int] = set()
+    for record in ordered_records:
+        record_index = int(getattr(record, "index", 0))
+        if record_index in seen_indices:
+            raise ValueError(
+                "Tagged JSON inline-placeholder sidecar contains duplicate "
+                f"record index {record_index}."
+            )
+        seen_indices.add(record_index)
+        literal = str(getattr(record, "literal", "") or "")
+        sentinel_hex = str(getattr(record, "sentinel_hex", "") or "").upper()
+        byte_length = int(getattr(record, "byte_length", 0) or 0)
+        if not literal:
+            raise ValueError(
+                f"Tagged JSON inline-placeholder record {record_index} has no literal."
+            )
+        if (
+            byte_length <= 0
+            or len(sentinel_hex) != byte_length * 2
+            or any(character not in "0123456789ABCDEF" for character in sentinel_hex)
+        ):
+            raise ValueError(
+                "Tagged JSON inline-placeholder record "
+                f"{record_index} has an invalid sentinel."
+            )
+
+        replaced = False
+        for container, key in leaves:
+            value = str(container[key])
+            offset = value.find(literal)
+            if offset < 0:
+                continue
+            container[key] = (
+                value[:offset]
+                + sentinel_hex
+                + value[offset + len(literal):]
+            )
+            replaced = True
+            break
+        if not replaced:
+            raise ValueError(
+                "Tagged JSON inline-placeholder sidecar record "
+                f"{record_index} ({literal}) has no matching hex literal."
+            )
+
+    described_literals = {
+        str(getattr(record, "literal", "") or "") for record in ordered_records
+    }
+    for container, key in leaves:
+        value = str(container[key])
+        unexpected = next(
+            (literal for literal in described_literals if literal and literal in value),
+            None,
+        )
+        if unexpected is not None:
+            raise ValueError(
+                "Tagged JSON contains more inline placeholder occurrences than "
+                f"its sidecar describes ({unexpected})."
+            )
+
+    return json.dumps(loaded, ensure_ascii=False), ordered_records
+
+
+def _load_package_payload_impl(resolved_path: Path) -> dict[str, Any]:
     """Return ``{"pes", "decoded_document", "encoding", "warnings"}`` for a package.
 
     Supports four input flavours, matching what the SAIP TUI accepts
@@ -391,6 +626,23 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
     describing what the operator may have handed us (wrapped response,
     JSON-misnamed-as-DER, etc.).
     """
+    suffix = resolved_path.suffix.lower()
+    if suffix in _SPREADSHEET_INPUT_SUFFIXES:
+        raise ValueError(
+            f"Excel workbook {resolved_path.name!r} is not a SAIP package and "
+            "cannot be opened with Package > Open. Enable an Excel-to-SAIP "
+            "generator plugin and use its Excel → SAIP template action."
+        )
+
+    raw_disk = _read_bounded_saip_file(resolved_path)
+    if _looks_like_zip_archive(raw_disk):
+        raise ValueError(
+            f"ZIP archive content detected in {resolved_path.name!r}; it is not "
+            "a SAIP package and cannot be opened with Package > Open. Excel "
+            "workbooks are ZIP containers even when renamed. Restore the "
+            "workbook extension and use an Excel → SAIP template action."
+        )
+
     _ensure_pysim_importable()
 
     from pySim.esim.saip import ProfileElementSequence
@@ -399,10 +651,12 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
         parse_editor_json_template_aware,
     )
 
-    raw_disk = resolved_path.read_bytes()
-    suffix = resolved_path.suffix.lower()
     warnings: list[dict[str, Any]] = []
     inline_placeholder_records: list[Any] = []
+    placeholder_paths: list[str] = []
+    undefined_tokens: list[str] = []
+    strict_complete = True
+    strict_failure: str | None = None
 
     # Suffix wins over content sniffing — operators occasionally save
     # genuine DER under a ``.txt`` extension; we still want to honour
@@ -412,7 +666,7 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
     # the tolerant DER parser's BER-TLV diagnostics. Extension-less
     # inputs use the heuristic.
     if suffix in _ASN_VALUE_INPUT_SUFFIXES:
-        return _load_asn1_value_package(resolved_path)
+        return _load_asn1_value_package(resolved_path, raw_disk)
     if suffix in _HEX_INPUT_SUFFIXES:
         try:
             raw, inline_placeholder_records = (
@@ -434,7 +688,7 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
     else:
         encoding = _sniff_encoding(raw_disk)
         if encoding == "asn":
-            return _load_asn1_value_package(resolved_path)
+            return _load_asn1_value_package(resolved_path, raw_disk)
         if encoding == "hex":
             raw, inline_placeholder_records = (
                 _decode_hex_text_payload_with_placeholders(resolved_path, raw_disk)
@@ -443,17 +697,55 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
             raw = raw_disk
 
     if encoding == "json":
-        decoded_document, _placeholders, _undefined = parse_editor_json_template_aware(
-            raw.decode("utf-8", errors="replace"),
+        try:
+            json_text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise ValueError(
+                "Decoded SAIP JSON must be valid UTF-8; invalid byte "
+                f"at offset {error.start} in {resolved_path}."
+            ) from error
+        json_text, persisted_inline_records = (
+            _restore_inline_placeholder_sentinels_in_tagged_json(json_text)
         )
+        decoded_document, placeholders, undefined = parse_editor_json_template_aware(
+            json_text,
+        )
+        placeholder_paths = sorted(str(path) for path in placeholders)
+        undefined_tokens = sorted(str(token) for token in undefined)
+        inline_placeholder_payload = None
+        if persisted_inline_records:
+            inline_placeholder_records = persisted_inline_records
+        else:
+            inline_placeholder_payload = decoded_document.get(
+                "__ygg_inline_placeholders__"
+            )
+        if not persisted_inline_records and inline_placeholder_payload is not None:
+            from Tools.ProfilePackage.saip_hex_template import (
+                sidecar_payload_to_records,
+            )
+
+            inline_placeholder_records = sidecar_payload_to_records(
+                inline_placeholder_payload
+            )
         pes = build_profile_sequence_from_document(
             decoded_document, workspace_root=_workspace_root()
         )
     else:
         try:
             pes = ProfileElementSequence.from_der(raw)
+            _require_usable_pe_types(pes)
         except Exception as strict_err:  # noqa: BLE001 — any asn1tools/pySim error
+            strict_complete = False
+            strict_failure = (
+                f"{strict_err.__class__.__name__}: {strict_err}"
+            )
             pes, warnings, first_fail = _parse_pes_tolerant(raw)
+            if first_fail is not None and first_fail not in warnings:
+                # A TLV-chop failure can occur after one or more valid PEs were
+                # recovered. Preserve that terminal diagnostic as evidence;
+                # otherwise callers would see an incomplete strict decode
+                # without a warning explaining where recovery stopped.
+                warnings.append(dict(first_fail))
             if len(pes.pe_list) == 0:
                 raise _make_saip_load_error(
                     resolved_path, raw, strict_err, first_fail
@@ -466,7 +758,25 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
         "encoding": encoding,
         "warnings": warnings,
         "inline_placeholder_records": inline_placeholder_records,
+        "placeholder_paths": placeholder_paths,
+        "undefined_tokens": undefined_tokens,
+        "raw_input_bytes": raw_disk,
+        "strict_complete": strict_complete,
+        "strict_failure": strict_failure,
     }
+
+
+def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
+    """Compatibility mapping backed by the public SAIP artifact loader.
+
+    The GUI historically consumed a dictionary from this private helper.
+    Keep that surface intact while routing all new and existing callers through
+    :func:`Tools.ProfilePackage.saip_artifact_loader.load_saip_artifact`, the
+    stable boundary used by validation plug-ins and other non-GUI consumers.
+    """
+    from Tools.ProfilePackage.saip_artifact_loader import load_saip_artifact
+
+    return load_saip_artifact(resolved_path).to_legacy_mapping()
 
 
 def _parse_pes_tolerant(
@@ -533,6 +843,12 @@ def _parse_pes_tolerant(
 
         try:
             pe = ProfileElement.from_der(first_tlv, pe_sequence=pes)
+            if _pe_has_usable_type(pe) is False:
+                pe_type = getattr(pe, "type", None)
+                raise ValueError(
+                    "decoded ProfileElement has no usable non-empty string "
+                    f"type (got {pe_type!r})"
+                )
             pes.pe_list.append(pe)
         except Exception as err:  # noqa: BLE001 — any asn1tools/pySim error
             entry = {
@@ -2667,6 +2983,7 @@ def _template_parent_chain_fids(
     ft: Any,
     *,
     extended_root_chain: list[str] | None = None,
+    fid_overrides: dict[str, str] | None = None,
 ) -> list[str]:
     """Return the chain segments from the root down to ``ft`` (inclusive).
 
@@ -2716,7 +3033,10 @@ def _template_parent_chain_fids(
         adf_label = str(getattr(root, "name", "") or "").strip() or "ADF"
         chain: list[str] = [adf_label]
         for node in nodes[1:]:
-            fid_hex = _fid_int_to_hex(getattr(node, "fid", None))
+            pe_name = str(getattr(node, "pe_name", "") or "")
+            fid_hex = (fid_overrides or {}).get(pe_name) or _fid_int_to_hex(
+                getattr(node, "fid", None)
+            )
             if fid_hex:
                 chain.append(fid_hex)
         return chain
@@ -2724,14 +3044,20 @@ def _template_parent_chain_fids(
     if extended_root_chain and root_type != "MF":
         chain = list(extended_root_chain)
         for node in nodes:
-            fid_hex = _fid_int_to_hex(getattr(node, "fid", None))
+            pe_name = str(getattr(node, "pe_name", "") or "")
+            fid_hex = (fid_overrides or {}).get(pe_name) or _fid_int_to_hex(
+                getattr(node, "fid", None)
+            )
             if fid_hex:
                 chain.append(fid_hex)
         return chain
 
     chain = []
     for node in nodes:
-        fid_hex = _fid_int_to_hex(getattr(node, "fid", None))
+        pe_name = str(getattr(node, "pe_name", "") or "")
+        fid_hex = (fid_overrides or {}).get(pe_name) or _fid_int_to_hex(
+            getattr(node, "fid", None)
+        )
         if fid_hex:
             chain.append(fid_hex)
     if len(chain) > 0 and chain[0].upper() != "3F00":
@@ -2763,6 +3089,18 @@ def _emit_template_filesystem_rows(
     files_by_pename: dict[str, Any] = {}
     if template is not None:
         files_by_pename = getattr(template, "files_by_pename", None) or {}
+
+    # Native templates provide the hierarchy, but an imported profile may
+    # explicitly override any member's FID in its file descriptor.  Keep a
+    # section-wide map so both the row itself and all descendants use the
+    # effective workbook/profile FID instead of the template default.
+    fid_overrides: dict[str, str] = {}
+    for raw_key, raw_value in payload.items():
+        if not isinstance(raw_value, list):
+            continue
+        explicit_fid = _choice_list_field_hex(raw_value, "fileID")
+        if explicit_fid:
+            fid_overrides[str(raw_key)] = explicit_fid
 
     # Optional templates (FilesUsimOptional, FilesIsimOptional, …) carry
     # ``extends = <mandatory template>`` and their first file is a plain
@@ -2806,7 +3144,9 @@ def _emit_template_filesystem_rows(
         is_adf_container = key_text.startswith("adf-")
         template_chain = (
             _template_parent_chain_fids(
-                ft, extended_root_chain=extended_root_chain or None
+                ft,
+                extended_root_chain=extended_root_chain or None,
+                fid_overrides=fid_overrides,
             )
             if ft is not None
             else []
@@ -3253,14 +3593,393 @@ _EDITABLE_SUB_FIELDS: frozenset[str] = frozenset(
 
 def _ensure_session_state(handle: dict[str, Any]) -> None:
     """Initialise SA-3 scratch state on a session handle (idempotent)."""
+    if not isinstance(handle, dict):
+        raise RuntimeError("SAIP session handle is malformed.")
+    if "pes" not in handle or not isinstance(handle.get("decoded_document"), dict):
+        raise RuntimeError(
+            "SAIP session handle is missing its profile sequence or decoded document."
+        )
     handle.setdefault("dirty_pes", set())
     handle.setdefault("applied_overrides", {})
+    records = handle.get("inline_placeholder_records") or []
+    handle.setdefault(
+        "inline_variable_names",
+        {
+            str(getattr(record, "variable_name", "") or "").casefold()
+            for record in records
+            if str(getattr(record, "variable_name", "") or "").strip()
+        },
+    )
+    _sync_session_auto_close_protection(handle)
+
+
+def _require_saip_session(session_id: Any) -> tuple[Any, dict[str, Any]]:
+    """Return one live SAIP session and reject cross-subsystem handles.
+
+    Session ids are intentionally opaque, but every action still has to verify
+    the owning subsystem.  In particular, ``saip.close_package`` must never be
+    able to close a card or remote-lab session merely because its id was pasted
+    into the wrong form.
+    """
+    from yggdrasim_common.gui_server.sessions import get_manager
+
+    sid = str(session_id or "").strip()
+    if not sid:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    session = get_manager().get(sid)
+    if session.kind != "saip":
+        raise ValueError(
+            f"session {sid!r} is {session.kind!r}, not a SAIP authoring session."
+        )
+    handle = session.handle
+    _ensure_session_state(handle)
+    return session, handle
+
+
+def _sync_session_auto_close_protection(handle: dict[str, Any]) -> None:
+    """Protect only sessions whose in-memory authoring state is dirty."""
+    from yggdrasim_common.gui_server.sessions import (
+        AUTO_CLOSE_PROTECTION_HANDLE_KEY,
+    )
+
+    handle[AUTO_CLOSE_PROTECTION_HANDLE_KEY] = bool(handle.get("dirty_pes"))
+
+
+def _replace_dirty_pes(handle: dict[str, Any], values: Any) -> None:
+    """Replace dirty indices and keep automatic-close protection in sync."""
+    handle["dirty_pes"] = {int(value) for value in (values or set())}
+    _sync_session_auto_close_protection(handle)
+
+
+_GENERATION_META_KEY = "__ygg_generation__"
+_GENERATION_LOCK_KEY = "__ygg_generation_lock__"
+_GENERATION_PROVENANCE_KEY = "__ygg_generation_provenance__"
+_FILESYSTEM_ONLY_ALLOWED_PE_TYPES = frozenset(
+    {
+        "header",
+        "end",
+        "mf",
+        "telecom",
+        "cd",
+        "usim",
+        "opt-usim",
+        "isim",
+        "opt-isim",
+        "csim",
+        "opt-csim",
+        "phonebook",
+        "gsm-access",
+        "df-5gs",
+        "eap",
+        "df-saip",
+        "df-snpn",
+        "df-5gprose",
+        "iot",
+        "opt-iot",
+        "genericfilemanagement",
+    }
+)
+
+
+def _generation_policy_from_document(
+    decoded_document: dict[str, Any],
+) -> dict[str, Any] | None:
+    generation = decoded_document.get(_GENERATION_META_KEY)
+    generation_lock = decoded_document.get(_GENERATION_LOCK_KEY)
+    generation_provenance = decoded_document.get(_GENERATION_PROVENANCE_KEY)
+    if (
+        generation is None
+        and generation_lock is None
+        and generation_provenance is None
+    ):
+        return None
+    if generation is not None and not isinstance(generation, dict):
+        raise ValueError(f"{_GENERATION_META_KEY} must be an object.")
+    if generation_lock is not None and not isinstance(generation_lock, dict):
+        raise ValueError(f"{_GENERATION_LOCK_KEY} must be an object.")
+    if generation_provenance is not None and not isinstance(
+        generation_provenance, dict
+    ):
+        raise ValueError(f"{_GENERATION_PROVENANCE_KEY} must be an object.")
+    from Tools.ProfilePackage.saip_json_codec import (
+        inspect_generation_provenance,
+    )
+
+    provenance_status = inspect_generation_provenance(decoded_document)
+    unresolved = (
+        generation.get("unresolved_requirements")
+        if isinstance(generation, dict)
+        else None
+    )
+    generation_scope = (
+        str(generation.get("generation_scope") or "")
+        if isinstance(generation, dict)
+        else ""
+    )
+    lock_scope = (
+        str(generation_lock.get("generation_scope") or "")
+        if isinstance(generation_lock, dict)
+        else ""
+    )
+    generation_completeness = (
+        str(generation.get("completeness") or "")
+        if isinstance(generation, dict)
+        else ""
+    )
+    lock_completeness = (
+        str(generation_lock.get("completeness") or "")
+        if isinstance(generation_lock, dict)
+        else ""
+    )
+    marker_pair_intact = (
+        isinstance(generation, dict)
+        and isinstance(generation_lock, dict)
+        and generation.get("concrete_export_allowed") is False
+        and generation_lock.get("concrete_export_allowed") is False
+        and bool(generation_scope)
+        and generation_scope == lock_scope
+        and bool(generation_completeness)
+        and generation_completeness == lock_completeness
+    )
+    intact_partial = bool(
+        marker_pair_intact
+        and provenance_status.get("valid") is True
+        and provenance_status.get("matches_markers") is True
+    )
+    if intact_partial:
+        effective_scope = str(provenance_status.get("generation_scope") or "")
+        effective_completeness = str(
+            provenance_status.get("completeness") or ""
+        )
+    elif provenance_status.get("valid") is True:
+        # The independent provenance record is installed at the trusted
+        # generated-session handoff.  It remains the narrowest known scope if
+        # either primary marker is removed or the pair is edited in concert.
+        # Integrity still becomes UNTRUSTED_PARTIAL, making the session
+        # read-only, but marker edits can never widen the original boundary.
+        effective_scope = str(
+            provenance_status.get("generation_scope") or "UNTRUSTED_PARTIAL"
+        )
+        effective_completeness = str(
+            provenance_status.get("completeness")
+            or "PARTIAL_AUTHORING_ARTIFACT"
+        )
+    elif "FILESYSTEM_ONLY" in {
+        generation_scope.upper(),
+        lock_scope.upper(),
+    }:
+        # A mismatched redundant marker can never expand a filesystem-only
+        # draft into a broader mutation scope.
+        effective_scope = "FILESYSTEM_ONLY"
+        effective_completeness = "PARTIAL_AUTHORING_ARTIFACT"
+    else:
+        effective_scope = "UNTRUSTED_PARTIAL"
+        effective_completeness = "PARTIAL_AUTHORING_ARTIFACT"
+    if intact_partial and isinstance(generation, dict):
+        reason = str(
+            generation.get("export_block_reason")
+            or "Generated authoring artifact has not completed production policy."
+        )
+    else:
+        reason = (
+            "Generated-partial metadata is missing or mutated; concrete export "
+            "remains blocked."
+        )
+    return {
+        "concrete_export_allowed": False,
+        "generation_scope": str(effective_scope or "UNTRUSTED_PARTIAL"),
+        "completeness": str(
+            effective_completeness or "PARTIAL_AUTHORING_ARTIFACT"
+        ),
+        "reason": reason,
+        "unresolved_requirements": (
+            [str(item) for item in unresolved]
+            if isinstance(unresolved, list)
+            else []
+        ),
+        "integrity_state": (
+            "LOCKED_PARTIAL" if intact_partial else "UNTRUSTED_PARTIAL"
+        ),
+    }
+
+
+def _apply_generation_session_policy(handle: dict[str, Any]) -> None:
+    """Install a server-side scope/export lock from document metadata."""
+    document = handle.get("decoded_document")
+    if not isinstance(document, dict):
+        return
+    policy = _generation_policy_from_document(document)
+    if policy is None:
+        return
+    # These handle fields are never projected through the decoded editor, so
+    # deleting JSON metadata in a live session cannot promote the artifact.
+    handle["export_policy"] = policy
+    handle["scope_lock"] = policy["generation_scope"]
+
+
+def _assert_pe_type_allowed_for_scope(scope: str, pe_type: str) -> None:
+    """Keep filesystem-only drafts inside their declared PE boundary."""
+    normalized_scope = str(scope or "").strip().upper()
+    if normalized_scope == "UNTRUSTED_PARTIAL":
+        raise ValueError(
+            "Profile-element mutation is blocked because the generated-partial "
+            "scope markers disagree. Restore the tagged JSON from a trusted "
+            "authoring copy."
+        )
+    if normalized_scope != "FILESYSTEM_ONLY":
+        return
+    normalized = str(pe_type or "").strip().lower()
+    if normalized in _FILESYSTEM_ONLY_ALLOWED_PE_TYPES:
+        return
+    raise ValueError(
+        f"PE type {pe_type!r} is outside the FILESYSTEM_ONLY scope lock. "
+        "Complete-profile, Security Domain, credential, and application PEs "
+        "must be added by a later scoped composer."
+    )
+
+
+def _assert_handle_pe_type_allowed(handle: dict[str, Any], pe_type: str) -> None:
+    _assert_handle_mutation_allowed(handle)
+    normalized = str(pe_type or "").strip().lower()
+    if normalized in {"header", "end"}:
+        raise ValueError(
+            "ProfileHeader and PE-End are sequence anchors and cannot be "
+            "added or imported into an existing package."
+        )
+    _assert_pe_type_allowed_for_scope(str(handle.get("scope_lock") or ""), pe_type)
+
+
+def _assert_handle_mutation_allowed(handle: dict[str, Any]) -> None:
+    """Keep marker-damaged generated documents read-only for recovery."""
+    policy = handle.get("export_policy")
+    if (
+        isinstance(policy, dict)
+        and policy.get("integrity_state") == "UNTRUSTED_PARTIAL"
+    ):
+        raise ValueError(
+            "Profile-element mutation is blocked for an UNTRUSTED_PARTIAL "
+            "document. Restore both generation markers from a trusted copy."
+        )
+
+
+def _assert_sequence_allowed_for_scope(scope: str, pes: Any) -> None:
+    pe_types = [str(getattr(pe, "type", "")) for pe in pes.pe_list]
+    if len(pe_types) < 2:
+        raise ValueError("Generated SAIP documents require ProfileHeader and PE-End.")
+    if pe_types[0] != "header" or pe_types.count("header") != 1:
+        raise ValueError(
+            "Generated SAIP documents require exactly one ProfileHeader at index 0."
+        )
+    if pe_types[-1] != "end" or pe_types.count("end") != 1:
+        raise ValueError(
+            "Generated SAIP documents require exactly one PE-End at the last index."
+        )
+    normalized_scope = str(scope or "").strip().upper()
+    if normalized_scope == "FILESYSTEM_ONLY":
+        if pe_types.count("mf") != 1 or pe_types[1] != "mf":
+            raise ValueError(
+                "FILESYSTEM_ONLY documents require exactly one PE-MF directly "
+                "after ProfileHeader."
+            )
+    for pe_type in pe_types:
+        _assert_pe_type_allowed_for_scope(scope, pe_type)
+
+
+def _assert_handle_sequence_allowed(
+    handle: dict[str, Any],
+    pe_list: list[Any],
+) -> None:
+    """Validate a proposed mutation against an active generated scope lock."""
+    scope = str(handle.get("scope_lock") or "")
+    if not scope:
+        return
+
+    class _SequenceView:
+        def __init__(self, values: list[Any]) -> None:
+            self.pe_list = values
+
+    _assert_sequence_allowed_for_scope(scope, _SequenceView(pe_list))
+
+
+def _generation_response_fields(handle: dict[str, Any]) -> dict[str, Any]:
+    document = handle.get("decoded_document")
+    generation = (
+        document.get(_GENERATION_META_KEY)
+        if isinstance(document, dict)
+        else None
+    )
+    policy = handle.get("export_policy")
+    return {
+        "generation": dict(generation) if isinstance(generation, dict) else None,
+        "scope_lock": str(handle.get("scope_lock") or ""),
+        "export_guard": dict(policy) if isinstance(policy, dict) else None,
+    }
+
+
+def _dirty_response_fields(handle: dict[str, Any]) -> dict[str, Any]:
+    """Project server-side dirty state into an open/save response."""
+    raw_dirty = sorted(int(index) for index in (handle.get("dirty_pes") or set()))
+    return {
+        "dirty": len(raw_dirty) > 0,
+        "dirty_pe_indices": [index for index in raw_dirty if index >= 0],
+        "dirty_sequence_wide": any(index < 0 for index in raw_dirty),
+    }
+
+
+def _assert_handle_concrete_export_allowed(handle: dict[str, Any]) -> None:
+    """Enforce both the immutable session lock and persisted metadata."""
+    inline_placeholders = handle.get("inline_placeholder_records")
+    if isinstance(inline_placeholders, list) and inline_placeholders:
+        raise ValueError(
+            "Concrete DER/HEX export is blocked while the opened template "
+            f"contains {len(inline_placeholders)} unresolved inline "
+            "placeholder occurrence(s). Materialise every variable first."
+        )
+    policy = handle.get("export_policy")
+    if isinstance(policy, dict) and policy.get("concrete_export_allowed") is False:
+        scope = str(policy.get("generation_scope") or "GENERATED_PARTIAL")
+        unresolved = policy.get("unresolved_requirements")
+        count = len(unresolved) if isinstance(unresolved, list) else 0
+        detail = f" ({count} unresolved requirement(s))" if count else ""
+        raise ValueError(
+            f"Concrete DER/HEX export is blocked for {scope}{detail}. "
+            "Save tagged JSON for continued authoring; only an explicit "
+            "profile-completion flow may create a deployable artifact."
+        )
+    from Tools.ProfilePackage.saip_json_codec import (
+        assert_concrete_export_allowed,
+    )
+
+    assert_concrete_export_allowed(handle.get("decoded_document") or {})
 
 
 def _sections_by_pe_index(decoded_document: dict[str, Any]) -> list[str]:
     """Section keys in PE order (mirrors ``_build_decoded_document``)."""
     sections = decoded_document.get("sections") or {}
     return list(sections.keys())
+
+
+def _rebuilt_document_preserving_metadata(
+    pes: Any,
+    previous_document: dict[str, Any],
+) -> dict[str, Any]:
+    """Rebuild PE sections while retaining all document-level metadata."""
+    from Tools.ProfilePackage.saip_json_codec import (
+        build_decoded_document_from_sequence,
+    )
+
+    intro = previous_document.get("intro") or [
+        f"Profile with {len(pes.pe_list)} profile elements",
+    ]
+    if isinstance(intro, list) is False:
+        intro = [str(intro)]
+    rebuilt = build_decoded_document_from_sequence(pes, list(intro))
+    for key, value in previous_document.items():
+        if key in ("intro", "sections"):
+            continue
+        if key not in rebuilt:
+            rebuilt[key] = value
+    return rebuilt
 
 
 def _resolve_pe_index(
@@ -3277,15 +3996,11 @@ def _resolve_pe_index(
 def _refresh_decoded_document(handle: dict[str, Any]) -> None:
     """Rebuild the cached document from the live ProfileElementSequence."""
     _ensure_pysim_importable()
-    from Tools.ProfilePackage.saip_json_codec import (
-        build_decoded_document_from_sequence,
+    previous = handle.get("decoded_document") or {}
+    handle["decoded_document"] = _rebuilt_document_preserving_metadata(
+        handle["pes"],
+        previous,
     )
-
-    pes = handle["pes"]
-    intro = handle.get("decoded_document", {}).get("intro") or [
-        f"Profile with {len(pes.pe_list)} profile elements",
-    ]
-    handle["decoded_document"] = build_decoded_document_from_sequence(pes, intro)
 
 
 def _apply_hex_mutation(
@@ -3451,6 +4166,7 @@ def _validate_sub_field_value(sub_key: str, raw: bytes) -> None:
 
 def _mark_dirty(handle: dict[str, Any], pe_index: int) -> None:
     handle["dirty_pes"].add(int(pe_index))
+    _sync_session_auto_close_protection(handle)
 
 
 # --------------------------------------------------------------------
@@ -3458,9 +4174,9 @@ def _mark_dirty(handle: dict[str, Any], pe_index: int) -> None:
 #
 # Mutating dispatchers call ``_history_snapshot`` immediately after
 # claiming the session handle and before mutating the document. The
-# snapshot is a deep copy of ``decoded_document`` so subsequent edits
-# do not leak into the saved state. The redo stack is cleared on any
-# new edit (standard linear-history semantics).
+# snapshot is a deep copy of the decoded document and every handle-level
+# variable state that is not encoded inside it. The redo stack is cleared on
+# any new edit (standard linear-history semantics).
 #
 # A capped stack avoids unbounded memory growth on long-lived sessions
 # — the SAIP authoring UI is interactive so 64 steps is plenty for the
@@ -3468,6 +4184,7 @@ def _mark_dirty(handle: dict[str, Any], pe_index: int) -> None:
 # --------------------------------------------------------------------
 
 SAIP_HISTORY_LIMIT = 64
+_SESSION_HISTORY_SNAPSHOT_SCHEMA = "yggdrasim.saip-session-history/v1"
 
 
 def _history_init(handle: dict[str, Any]) -> dict[str, list[Any]]:
@@ -3481,65 +4198,225 @@ def _history_init(handle: dict[str, Any]) -> dict[str, list[Any]]:
 
 
 def _history_snapshot(handle: dict[str, Any]) -> None:
-    """Push a deep-copy of the current document onto the undo stack.
+    """Push an atomic authoring-state snapshot onto the undo stack.
 
     Discards the redo stack (linear history). Capped at
     :data:`SAIP_HISTORY_LIMIT` entries.
     """
-    import copy as _copy
-
-    document = handle.get("decoded_document")
-    if document is None:
+    if handle.get("decoded_document") is None:
         return
     history = _history_init(handle)
-    history["undo"].append(_copy.deepcopy(document))
+    history["undo"].append(_capture_history_snapshot(handle))
     while len(history["undo"]) > SAIP_HISTORY_LIMIT:
         history["undo"].pop(0)
     history["redo"].clear()
 
 
-def _with_history(dispatcher: Any) -> Any:
-    """Wrap a mutating dispatcher so it records an undo snapshot first.
+def _capture_history_snapshot(handle: dict[str, Any]) -> dict[str, Any]:
+    """Copy document, overrides, and inline-template state as one unit."""
+    import copy as _copy
 
-    The wrapper is intentionally lenient — failures to claim the
-    session or take the snapshot are swallowed so the underlying
-    dispatcher's own error path remains the source of truth for the
-    caller. When ``session_id`` is missing (one-shot dispatchers like
-    ``saip.lint_path``) the wrapper is a no-op.
+    return {
+        "schema": _SESSION_HISTORY_SNAPSHOT_SCHEMA,
+        "decoded_document": _copy.deepcopy(handle.get("decoded_document")),
+        "applied_overrides": _copy.deepcopy(
+            dict(handle.get("applied_overrides") or {})
+        ),
+        "inline_placeholder_records": _copy.deepcopy(
+            list(handle.get("inline_placeholder_records") or [])
+        ),
+    }
+
+
+def _history_snapshot_parts(
+    snapshot: Any,
+) -> tuple[dict[str, Any], dict[str, Any], list[Any]]:
+    """Return current snapshot parts while accepting legacy document-only entries."""
+    import copy as _copy
+
+    if (
+        isinstance(snapshot, dict)
+        and snapshot.get("schema") == _SESSION_HISTORY_SNAPSHOT_SCHEMA
+    ):
+        document = snapshot.get("decoded_document")
+        if not isinstance(document, dict):
+            raise RuntimeError("SAIP history snapshot has no decoded document.")
+        overrides = snapshot.get("applied_overrides")
+        inline_records = snapshot.get("inline_placeholder_records")
+        return (
+            _copy.deepcopy(document),
+            _copy.deepcopy(dict(overrides or {})),
+            _copy.deepcopy(list(inline_records or [])),
+        )
+    if not isinstance(snapshot, dict):
+        raise RuntimeError("SAIP history snapshot is malformed.")
+    # Sessions created before this schema landed held the decoded document
+    # directly. Keeping this fallback makes an in-process upgrade harmless.
+    return _copy.deepcopy(snapshot), {}, []
+
+
+def _with_history(dispatcher: Any) -> Any:
+    """Serialize one mutation and record an undo snapshot atomically.
+
+    Synchronous GUI actions run in worker threads, so rapid edits can reach the
+    same in-memory document concurrently.  Hold the session lock across both
+    history capture and the dispatcher.  If the dispatcher raises after a
+    partial mutation, restore the pre-edit document, sequence, bookkeeping, and
+    history rather than leaving a half-updated session behind.
     """
+    import functools as _functools
+    import copy as _copy
+
+    @_functools.wraps(dispatcher)
+    def _wrapper(ctx: Any, **kwargs: Any) -> Any:
+        sid = str(kwargs.get("session_id") or "").strip()
+        if not sid:
+            return dispatcher(ctx, **kwargs)
+
+        session, handle = _require_saip_session(sid)
+        with session._lock:
+            # ``_require_saip_session`` resolves before waiting for this
+            # lock. A concurrent Close may therefore win the lock, remove the
+            # session, and finish cleanup first. Do not continue mutating that
+            # now-detached handle after the wait.
+            from yggdrasim_common.gui_server.sessions import get_manager
+
+            if get_manager().get(sid) is not session:
+                raise RuntimeError("SAIP session identity changed while waiting.")
+            prior_protection = session.protect_from_auto_close
+            session.protect_from_auto_close = True
+            try:
+                _assert_handle_mutation_allowed(handle)
+                snapshot = _capture_history_snapshot(handle)
+                dirty_before = set(handle.get("dirty_pes") or set())
+                history = _history_init(handle)
+                undo_before = _copy.deepcopy(history["undo"])
+                redo_before = _copy.deepcopy(history["redo"])
+                try:
+                    _history_snapshot(handle)
+                    return dispatcher(ctx, **kwargs)
+                except Exception:
+                    document, overrides, inline_records = _history_snapshot_parts(
+                        snapshot
+                    )
+                    from Tools.ProfilePackage.saip_json_codec import (
+                        build_profile_sequence_from_document,
+                    )
+
+                    restored_pes = build_profile_sequence_from_document(
+                        document,
+                        workspace_root=_workspace_root(),
+                    )
+                    handle["decoded_document"] = document
+                    handle["pes"] = restored_pes
+                    handle["applied_overrides"] = overrides
+                    handle["inline_placeholder_records"] = inline_records
+                    handle["inline_variable_names"] = {
+                        str(getattr(record, "variable_name", "") or "").casefold()
+                        for record in inline_records
+                        if str(getattr(record, "variable_name", "") or "").strip()
+                    }
+                    _replace_dirty_pes(handle, dirty_before)
+                    history["undo"] = undo_before
+                    history["redo"] = redo_before
+                    raise
+            finally:
+                session.protect_from_auto_close = prior_protection
+
+    return _wrapper
+
+
+def _with_session_lock(dispatcher: Any) -> Any:
+    """Serialize a non-history session operation such as Save or Revert."""
     import functools as _functools
 
     @_functools.wraps(dispatcher)
     def _wrapper(ctx: Any, **kwargs: Any) -> Any:
         sid = str(kwargs.get("session_id") or "").strip()
-        if len(sid) > 0:
-            try:
-                from yggdrasim_common.gui_server.sessions import get_manager
+        if not sid:
+            return dispatcher(ctx, **kwargs)
+        session, _handle = _require_saip_session(sid)
+        with session._lock:
+            from yggdrasim_common.gui_server.sessions import get_manager
 
-                handle = get_manager().claim(sid)
-                _ensure_session_state(handle)
-                _history_snapshot(handle)
-            except Exception:
-                # The dispatcher will surface a clean error if the
-                # session truly is gone; we don't want to mask its
-                # message with one from the history layer.
-                pass
-        return dispatcher(ctx, **kwargs)
+            if get_manager().get(sid) is not session:
+                raise RuntimeError("SAIP session identity changed while waiting.")
+            prior_protection = session.protect_from_auto_close
+            session.protect_from_auto_close = True
+            try:
+                return dispatcher(ctx, **kwargs)
+            finally:
+                session.protect_from_auto_close = prior_protection
 
     return _wrapper
 
 
+def _require_session_source(handle: dict[str, Any], operation: str) -> str:
+    """Return the backing path or explain how an in-memory draft gets one."""
+    source = (
+        handle.get("source_backing_path")
+        if "source_backing_path" in handle
+        else handle.get("source_path")
+    )
+    if not source:
+        raise RuntimeError(
+            f"{operation} requires an on-disk source. Save the in-memory "
+            "profile as tagged JSON first."
+        )
+    if str(source).startswith("upload:"):
+        raise RuntimeError(
+            f"{operation} requires the uploaded package's private backing file, "
+            "but it is no longer available. Save the package first."
+        )
+    return str(source)
+
+
 def _reload_source_into_handle(handle: dict[str, Any]) -> None:
     """Re-open the on-disk source and swap fresh state in-place."""
-    source = handle.get("source_path")
-    if not source:
-        raise RuntimeError("session has no source_path; cannot revert.")
+    source = _require_session_source(handle, "Revert/reset")
     package = _load_package_from_path(Path(source))
+    existing_policy = handle.get("export_policy")
+    existing_block = bool(
+        isinstance(existing_policy, dict)
+        and existing_policy.get("concrete_export_allowed") is False
+    )
+    replacement_policy = _generation_policy_from_document(
+        package["decoded_document"]
+    )
+    validation_policy = existing_policy if existing_block else replacement_policy
+    if (
+        isinstance(validation_policy, dict)
+        and validation_policy.get("integrity_state") == "LOCKED_PARTIAL"
+    ):
+        _assert_sequence_allowed_for_scope(
+            str(validation_policy.get("generation_scope") or ""),
+            package["pes"],
+        )
     handle["pes"] = package["pes"]
     handle["decoded_document"] = package["decoded_document"]
     handle["encoding"] = package["encoding"]
-    handle["dirty_pes"] = set()
+    handle["inline_placeholder_records"] = list(
+        package.get("inline_placeholder_records") or []
+    )
+    handle["inline_variable_names"] = {
+        str(getattr(record, "variable_name", "") or "").casefold()
+        for record in handle["inline_placeholder_records"]
+        if str(getattr(record, "variable_name", "") or "").strip()
+    }
+    _replace_dirty_pes(handle, set())
     handle["applied_overrides"] = {}
+    if existing_block:
+        # Session policy is monotonic. Editing the backing JSON outside the
+        # process and pressing Revert can refresh authoring data, but can never
+        # declassify a guarded session. Completion must open a new session.
+        handle["export_policy"] = existing_policy
+        handle["scope_lock"] = str(
+            existing_policy.get("generation_scope") or handle.get("scope_lock") or ""
+        )
+    else:
+        handle.pop("export_policy", None)
+        handle.pop("scope_lock", None)
+        _apply_generation_session_policy(handle)
 
 
 # ----------------------------------------------------------------------
@@ -3599,11 +4476,18 @@ def _file_row_signature(row: dict[str, Any]) -> str:
     return "|".join(str(row.get(k, "")) for k in keys)
 
 
-def _collect_variables(decoded_document: dict[str, Any]) -> dict[str, Any]:
-    """Return variable definitions + usage counts from a decoded document."""
+def _collect_variables(
+    decoded_document: dict[str, Any],
+    inline_placeholder_records: Any = (),
+) -> dict[str, Any]:
+    """Return legacy, semantic-catalog, and inline-template variables."""
     _ensure_pysim_importable()
     from Tools.ProfilePackage.saip_profile_template import (
         extract_template_placeholder_names,
+    )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        catalog_variables,
+        variable_is_secret,
     )
 
     token_defs = decoded_document.get("__ygg_token_defs__")
@@ -3620,8 +4504,92 @@ def _collect_variables(decoded_document: dict[str, Any]) -> dict[str, Any]:
             else:
                 defs_map[str(name)] = {"value": str(definition)}
 
+    variables_by_name: dict[str, dict[str, Any]] = {}
+    for catalog_row in catalog_variables(decoded_document):
+        name = str(catalog_row.get("id") or "")
+        input_spec = catalog_row.get("input")
+        input_map = input_spec if isinstance(input_spec, dict) else {}
+        classification = str(catalog_row.get("classification") or "")
+        bindings = catalog_row.get("bindings")
+        binding_count = len(bindings) if isinstance(bindings, list) else 0
+        secret = variable_is_secret(name, classification)
+        variables_by_name[name.casefold()] = {
+            "name": name,
+            "label": str(catalog_row.get("label") or name),
+            "aliases": [str(item) for item in catalog_row.get("aliases") or []],
+            "value": "",
+            "kind": str(input_map.get("kind") or ""),
+            "input_format": str(input_map.get("format") or ""),
+            "constraints": dict(input_map.get("constraints") or {}),
+            "classification": classification,
+            "required": bool(catalog_row.get("required")),
+            "status": str(catalog_row.get("status") or ""),
+            "defined": False,
+            "used_in_document": binding_count > 0,
+            "binding_count": binding_count,
+            "source": "semantic_catalog",
+            "secret": secret,
+            "masked": secret,
+        }
+
+    inline_groups: dict[str, list[Any]] = {}
+    for record in inline_placeholder_records or []:
+        record_name = str(getattr(record, "variable_name", "") or "").strip()
+        if record_name:
+            inline_groups.setdefault(record_name.casefold(), []).append(record)
+    for normalized_name, records in inline_groups.items():
+        first = records[0]
+        name = str(getattr(first, "variable_name", "") or "")
+        type_names = sorted({str(getattr(item, "type_name", "") or "") for item in records})
+        modifiers = sorted(
+            {
+                str(getattr(item, "modifier", "") or "")
+                for item in records
+                if str(getattr(item, "modifier", "") or "")
+            }
+        )
+        secret = variable_is_secret(name)
+        existing = variables_by_name.get(normalized_name)
+        if existing is not None:
+            existing.update(
+                {
+                    "status": "BOUND_INLINE_UNRESOLVED",
+                    "used_in_document": True,
+                    "inline_occurrence_count": len(records),
+                    "source": "semantic_catalog+inline_varder",
+                    "secret": bool(existing.get("secret")) or secret,
+                    "masked": bool(existing.get("secret")) or secret,
+                }
+            )
+            continue
+        kind = "/".join(type_names)
+        if modifiers:
+            kind += f" ({'/'.join(modifiers)})"
+        variables_by_name[normalized_name] = {
+            "name": name,
+            "label": name,
+            "aliases": [],
+            "value": "",
+            "kind": kind,
+            "input_format": type_names[0] if len(type_names) == 1 else "TYPED_INLINE",
+            "constraints": {
+                "occurrence_byte_lengths": sorted(
+                    {int(getattr(item, "byte_length", 0) or 0) for item in records}
+                )
+            },
+            "classification": "SECRET" if secret else "INLINE_TEMPLATE_VALUE",
+            "required": True,
+            "status": "BOUND_INLINE_UNRESOLVED",
+            "defined": False,
+            "used_in_document": True,
+            "binding_count": len(records),
+            "inline_occurrence_count": len(records),
+            "source": "inline_varder",
+            "secret": secret,
+            "masked": secret,
+        }
+
     all_names = set(defs_map.keys()) | {str(n) for n in names_from_doc}
-    variables: list[dict[str, Any]] = []
     for name in sorted(all_names):
         definition = defs_map.get(name, {})
         # Token defs written by build_override_token_definitions store
@@ -3633,20 +4601,78 @@ def _collect_variables(decoded_document: dict[str, Any]) -> dict[str, Any]:
             or definition.get("text")
             or ""
         )
-        variables.append(
-            {
-                "name": name,
-                "value": str(resolved_value),
-                "kind": str(definition.get("kind") or definition.get("encoding") or ""),
-                "defined": name in defs_map,
-                "used_in_document": name in names_from_doc,
-            }
-        )
+        existing = variables_by_name.get(name.casefold())
+        if existing is not None:
+            existing["defined"] = name in defs_map
+            existing["used_in_document"] = bool(existing["used_in_document"]) or (
+                name in names_from_doc
+            )
+            if not existing.get("secret"):
+                existing["value"] = str(resolved_value)
+            continue
+        secret = variable_is_secret(name)
+        variables_by_name[name.casefold()] = {
+            "name": name,
+            "label": name,
+            "aliases": [],
+            "value": "" if secret else str(resolved_value),
+            "kind": str(definition.get("kind") or definition.get("encoding") or ""),
+            "input_format": "",
+            "constraints": {},
+            "classification": "SECRET" if secret else "",
+            "required": False,
+            "status": "DEFINED" if name in defs_map else "REFERENCED",
+            "defined": name in defs_map,
+            "used_in_document": name in names_from_doc,
+            "binding_count": 0,
+            "source": "legacy_token",
+            "secret": secret,
+            "masked": secret,
+        }
+    variables = sorted(variables_by_name.values(), key=lambda row: str(row["name"]).casefold())
     return {
         "count": len(variables),
         "style": style,
         "variables": variables,
     }
+
+
+def _redacted_applied_overrides(
+    overrides: Mapping[str, Any],
+    variables: Iterable[Mapping[str, Any]],
+) -> dict[str, str]:
+    """Project override presence without returning credential/key material."""
+    from Tools.ProfilePackage.saip_variable_materialization import variable_is_secret
+
+    secret_by_name = {
+        str(row.get("name") or "").casefold(): bool(row.get("secret"))
+        for row in variables
+    }
+    return {
+        str(name): (
+            ""
+            if secret_by_name.get(str(name).casefold(), variable_is_secret(str(name)))
+            else str(value)
+        )
+        for name, value in overrides.items()
+    }
+
+
+def _redact_secret_assignment_text(
+    text: Any,
+    assignments: Mapping[str, Any],
+) -> str:
+    """Remove submitted secret values from an exception/report string."""
+    from Tools.ProfilePackage.saip_variable_materialization import variable_is_secret
+
+    redacted = str(text)
+    for name, value in assignments.items():
+        if not variable_is_secret(str(name)):
+            continue
+        literal = str(value)
+        if literal:
+            redacted = redacted.replace(literal, "[secret value redacted]")
+    return redacted
 
 
 # ----------------------------------------------------------------------
@@ -3675,6 +4701,12 @@ def _dispatch_open_package(
     encoding = package["encoding"]
     warnings = package.get("warnings") or []
     inline_placeholder_records = package.get("inline_placeholder_records") or []
+    raw_input = package.get("raw_input_bytes")
+    size_bytes = (
+        len(raw_input)
+        if isinstance(raw_input, (bytes, bytearray))
+        else resolved.stat().st_size
+    )
 
     manager = get_manager()
     handle = {
@@ -3682,11 +4714,21 @@ def _dispatch_open_package(
         "decoded_document": decoded_document,
         "encoding": encoding,
         "source_path": str(resolved),
-        "size_bytes": resolved.stat().st_size,
+        "size_bytes": size_bytes,
         "load_warnings": warnings,
         "inline_placeholder_records": inline_placeholder_records,
     }
     _ensure_session_state(handle)
+    _apply_generation_session_policy(handle)
+    policy = handle.get("export_policy")
+    if (
+        isinstance(policy, dict)
+        and policy.get("integrity_state") == "LOCKED_PARTIAL"
+    ):
+        _assert_sequence_allowed_for_scope(
+            str(policy.get("generation_scope") or ""),
+            handle["pes"],
+        )
     session = manager.open(
         kind="saip",
         handle=handle,
@@ -3700,11 +4742,11 @@ def _dispatch_open_package(
         },
     )
 
-    return {
+    response = {
         "session_id": session.id,
         "source_path": str(resolved),
         "file_name": resolved.name,
-        "size_bytes": resolved.stat().st_size,
+        "size_bytes": size_bytes,
         "encoding": encoding,
         "pe_count": len(pes.pe_list),
         "pe_types": sorted(
@@ -3713,6 +4755,9 @@ def _dispatch_open_package(
         "load_warnings": warnings,
         "inline_placeholder_count": len(inline_placeholder_records),
     }
+    response.update(_generation_response_fields(handle))
+    response.update(_dirty_response_fields(handle))
+    return response
 
 
 def _dispatch_open_package_upload(
@@ -3729,31 +4774,74 @@ def _dispatch_open_package_upload(
     payload_text = str(content_base64 or "").strip()
     if len(payload_text) == 0:
         raise ValueError("content_base64 is required.")
+    if len(payload_text) > _MAX_SAIP_UPLOAD_BASE64_CHARS:
+        raise ValueError(
+            "uploaded file exceeds the 64 MiB SAIP upload limit."
+        )
     try:
         raw = base64.b64decode(payload_text, validate=True)
-    except Exception as error:
+    except (binascii.Error, ValueError) as error:
         raise ValueError("content_base64 is not valid base64.") from error
     if len(raw) == 0:
         raise ValueError("uploaded file is empty.")
+    if len(raw) > _MAX_SAIP_UPLOAD_BYTES:
+        raise ValueError(
+            "uploaded file exceeds the 64 MiB SAIP upload limit."
+        )
 
-    upload_dir = Path(tempfile.gettempdir()) / "yggdrasim-saip-uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    import shutil
+
+    from yggdrasim_common.secure_files import (
+        atomic_write_bytes,
+        ensure_private_directory,
+    )
+    from yggdrasim_common.gui_server.sessions import get_manager
+
+    upload_dir = ensure_private_directory(
+        tempfile.mkdtemp(
+            prefix="yggdrasim-saip-upload-",
+            dir=tempfile.gettempdir(),
+        )
+    )
     target = upload_dir / safe_name
-    if target.exists():
-        stem = target.stem or "dropped-profile"
-        suffix = target.suffix
-        counter = 1
-        while target.exists():
-            target = upload_dir / f"{stem}-{counter}{suffix}"
-            counter += 1
-    target.write_bytes(raw)
+    atomic_write_bytes(target, raw, overwrite=False)
 
-    opened = _dispatch_open_package(ctx, path=str(target))
+    def _cleanup_upload() -> None:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+
+    try:
+        opened = _dispatch_open_package(ctx, path=str(target))
+    except Exception:
+        _cleanup_upload()
+        raise
+
+    session = get_manager().get(str(opened["session_id"]))
+    prior_close = session.close
+
+    def _close_uploaded_session() -> None:
+        try:
+            prior_close()
+        finally:
+            _cleanup_upload()
+
+    session.close = _close_uploaded_session
+    public_source = f"upload:{safe_name}"
+    if isinstance(session.handle, dict):
+        # Keep the real, private temporary file as the reload source for the
+        # lifetime of the session.  Only the display label is projected to the
+        # browser; replacing ``source_path`` outright used to make Revert and
+        # Reset Variable try to open a literal ``upload:filename`` path.
+        session.handle["source_backing_path"] = str(target)
+        session.handle["source_path"] = public_source
+        session.handle["upload_size_bytes"] = len(raw)
+    session.metadata["source_path"] = public_source
+    opened["source_path"] = public_source
     opened["uploaded"] = True
     opened["uploaded_file_name"] = safe_name
     return opened
 
 
+@_with_session_lock
 def _dispatch_list_pes(
     ctx: ActionContext,
     *,
@@ -3780,6 +4868,7 @@ def _dispatch_list_pes(
     }
 
 
+@_with_session_lock
 def _dispatch_show_pe(
     ctx: ActionContext,
     *,
@@ -3825,14 +4914,19 @@ def _dispatch_show_pe(
     # card instead of crashing.
     pe_hex = ""
     pe_byte_len = 0
-    try:
-        encoded_bytes = pe.to_der()
-        if isinstance(encoded_bytes, (bytes, bytearray)):
-            pe_hex = bytes(encoded_bytes).hex().upper()
-            pe_byte_len = len(encoded_bytes)
-    except Exception:
-        pe_hex = ""
-        pe_byte_len = 0
+    preview_blocked = bool(
+        isinstance(handle.get("export_policy"), dict)
+        and handle["export_policy"].get("concrete_export_allowed") is False
+    )
+    if preview_blocked is False:
+        try:
+            encoded_bytes = pe.to_der()
+            if isinstance(encoded_bytes, (bytes, bytearray)):
+                pe_hex = bytes(encoded_bytes).hex().upper()
+                pe_byte_len = len(encoded_bytes)
+        except Exception:
+            pe_hex = ""
+            pe_byte_len = 0
 
     # Enrich securityDomain-like PEs with decoded DGI records so the
     # GUI can render the sdPersoData as connectivity / key-object tables
@@ -3892,6 +4986,7 @@ def _dispatch_show_pe(
         # that case rather than rendering a misleading 0-byte image.
         "pe_hex": pe_hex,
         "pe_size": pe_byte_len,
+        "pe_hex_export_blocked": preview_blocked,
         # Phase 3: lets the GUI gate the "Add file…" button on PEs that
         # actually expose ``create_file()``. PE types without a
         # filesystem template (PIN, PUK, AKA, SecurityDomain, GFM, etc.)
@@ -4438,7 +5533,7 @@ def _dispatch_add_template_subtree(
         except Exception:
             pass
         handle["decoded_document"] = document_snapshot
-        handle["dirty_pes"] = dirty_snapshot
+        _replace_dirty_pes(handle, dirty_snapshot)
         raise ValueError(
             "add_template_subtree rolled back after "
             f"{len(added)} of {len(names)} additions: {exc!s}"
@@ -4769,6 +5864,7 @@ _LIST_FILES_SORT_KEYS: dict[str, callable] = {
 }
 
 
+@_with_session_lock
 def _dispatch_list_files(
     ctx: ActionContext,
     *,
@@ -4882,6 +5978,7 @@ def _filesystem_row_matches_query(
     return False
 
 
+@_with_session_lock
 def _dispatch_search_files(
     ctx: ActionContext,
     *,
@@ -4955,10 +6052,11 @@ def _dispatch_search_files(
 # Remote File / App Management surfaces (``rfm`` / ``ram``). For each
 # row we surface the canonical GP bookkeeping fields — Instance AID,
 # Class AID, Load Package AID, decoded privileges, decoded lifecycle
-# state, key-list size — so the GUI can render a Comprion-style
+# state, key-list size — so the GUI can render a profile-authoring
 # Applications view without re-decoding the JSON tree client-side.
 # ---------------------------------------------------------------------
 
+@_with_session_lock
 def _dispatch_list_applications(
     ctx: ActionContext,
     *,
@@ -5068,6 +6166,7 @@ def _is_arr_field_path(field_path: Any) -> bool:
     )
 
 
+@_with_session_lock
 def _dispatch_show_file(
     ctx: ActionContext,
     *,
@@ -5508,6 +6607,93 @@ def _file_body_from_pe(
     )
 
 
+def snapshot_saip_session(session_id: str) -> dict[str, Any]:
+    """Return a coherent, read-only snapshot of one live SAIP session.
+
+    Optional exporters and validators need the operator's current in-memory
+    document, including unsaved edits, without reaching into the session
+    manager's mutable handle.  This bridge takes the session lock, copies the
+    decoded document and placeholder sidecars, and projects the effective file
+    images while the matching pySim sequence is still protected by that lock.
+
+    The returned mapping is an internal service value, not an action response:
+    it can contain sensitive profile material.  Callers must apply their own
+    output policy and must never log or return the document/file values.
+    """
+    import copy as _copy
+    import hashlib as _hashlib
+    import json as _json
+
+    from Tools.ProfilePackage.saip_json_codec import jsonify_document
+    from yggdrasim_common.gui_server.sessions import get_manager
+
+    sid = str(session_id or "").strip()
+    if not sid:
+        raise ValueError("session_id is required.")
+    session = get_manager().get(sid)
+    if session.kind != "saip":
+        raise ValueError(
+            f"session {sid!r} is {session.kind!r}, not a SAIP authoring session."
+        )
+    if not isinstance(session.handle, dict):
+        raise RuntimeError("SAIP session handle is malformed.")
+
+    with session._lock:
+        handle = session.handle
+        decoded_document = _copy.deepcopy(handle.get("decoded_document"))
+        if not isinstance(decoded_document, dict):
+            raise RuntimeError("SAIP session has no decoded document.")
+        inline_records = _copy.deepcopy(
+            list(handle.get("inline_placeholder_records") or [])
+        )
+        source_path = str(handle.get("source_path") or "")
+        encoding = str(handle.get("encoding") or "der")
+        dirty = bool(handle.get("dirty_pes"))
+        warnings = _copy.deepcopy(list(handle.get("load_warnings") or []))
+        pes = handle.get("pes")
+        pe_list = list(getattr(pes, "pe_list", ()) or ())
+        pe_types = [str(getattr(pe, "type", "unknown")) for pe in pe_list]
+
+        filesystem_rows = _copy.deepcopy(
+            _filesystem_tree_rows(handle["decoded_document"])
+        )
+        for row in filesystem_rows:
+            resolved = _file_body_from_pe(
+                pes=pes,
+                decoded_document=handle["decoded_document"],
+                section_key=str(row.get("section_key") or ""),
+                field_path=str(row.get("field_path") or ""),
+            )
+            if resolved is None:
+                continue
+            body, record_length, record_count, file_size = resolved
+            row["effective_content_hex"] = body.hex().upper()
+            row["effective_record_length"] = record_length
+            row["effective_record_count"] = record_count
+            row["effective_file_size"] = file_size
+
+    tagged_document = jsonify_document(decoded_document)
+    semantic_bytes = _json.dumps(
+        tagged_document,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return {
+        "schema": "yggdrasim.saip-session-snapshot/v1",
+        "session_id": sid,
+        "decoded_document": decoded_document,
+        "inline_placeholder_records": inline_records,
+        "source_path": source_path,
+        "encoding": encoding,
+        "dirty": dirty,
+        "load_warnings": warnings,
+        "pe_types": pe_types,
+        "filesystem_rows": filesystem_rows,
+        "semantic_sha256": _hashlib.sha256(semantic_bytes).hexdigest(),
+    }
+
+
 def _jsonify_decoded(value: Any) -> Any:
     """Coerce a decoder payload into a JSON-safe shape.
 
@@ -5705,6 +6891,7 @@ def _locate_file_payload(
     return None
 
 
+@_with_session_lock
 def _dispatch_validate(
     ctx: ActionContext,
     *,
@@ -5899,22 +7086,37 @@ def _dispatch_close_package(
     ctx: ActionContext,
     *,
     session_id: Any = None,
+    discard_changes: Any = None,
 ) -> dict[str, Any]:
     from yggdrasim_common.gui_server.sessions import get_manager
 
     sid = str(session_id or "").strip()
     if len(sid) == 0:
         raise ValueError("session_id is required.")
-    closed = get_manager().close(sid)
+    session, handle = _require_saip_session(sid)
+    discard_flag = (
+        discard_changes is True
+        or str(discard_changes or "").strip().lower() in {"1", "true", "yes", "on"}
+    )
+    with session._lock:
+        had_dirty_changes = bool(handle.get("dirty_pes"))
+        if had_dirty_changes and not discard_flag:
+            raise ValueError(
+                "Package has unsaved changes. Save it first or confirm "
+                "discard_changes=true."
+            )
+        closed = get_manager().close(sid)
     return {
         "session_id": sid,
         "closed": bool(closed),
+        "discarded_changes": had_dirty_changes and discard_flag,
     }
 
 
 # -- SA-3 editor dispatchers -------------------------------------------
 
 
+@_with_session_lock
 def _dispatch_get_dirty(
     ctx: ActionContext,
     *,
@@ -6318,14 +7520,130 @@ def _dispatch_update_file_content(
     }
 
 
-_SAVE_PACKAGE_FORMATS: tuple[str, ...] = ("der", "hex", "json")
+_SAVE_PACKAGE_FORMATS: tuple[str, ...] = (
+    "der",
+    "hex",
+    "asn1",
+    "varder",
+    "json",
+)
+_SAVE_PACKAGE_FORMAT_ALIASES: dict[str, str] = {
+    "asn": "asn1",
+}
 _SAVE_PACKAGE_DEFAULT_EXTS: dict[str, str] = {
+    "der": ".der",
+    "hex": ".hex",
+    "asn1": ".asn",
+    "varder": ".varder",
+    "json": ".json",
+}
+_EXPORT_PE_FORMATS: tuple[str, ...] = ("der", "hex", "json")
+_EXPORT_PE_DEFAULT_EXTS: dict[str, str] = {
     "der": ".der",
     "hex": ".hex",
     "json": ".json",
 }
+_GENERATED_SOURCE_WORKBOOK_SUFFIXES = frozenset(
+    {".xlsx", ".xlsm", ".xltx", ".xltm"}
+)
 
 
+def _normalize_save_package_format(value: Any) -> str:
+    """Return the canonical package-save format name."""
+
+    normalized = str(value or "der").strip().lower() or "der"
+    normalized = _SAVE_PACKAGE_FORMAT_ALIASES.get(normalized, normalized)
+    if normalized not in _SAVE_PACKAGE_FORMATS:
+        accepted = [
+            *_SAVE_PACKAGE_FORMATS,
+            *_SAVE_PACKAGE_FORMAT_ALIASES,
+        ]
+        raise ValueError(
+            f"format must be one of {', '.join(accepted)} "
+            f"(got {normalized!r})."
+        )
+    return normalized
+
+
+def _unresolved_inline_placeholder_records(handle: Mapping[str, Any]) -> list[Any]:
+    """Return the active unresolved inline-template occurrence records."""
+
+    raw_records = handle.get("inline_placeholder_records")
+    if isinstance(raw_records, (list, tuple)):
+        return list(raw_records)
+    return []
+
+
+def _assert_asn1_save_allowed(
+    handle: Mapping[str, Any],
+    inline_placeholder_records: list[Any],
+) -> None:
+    """Prevent a guarded partial draft becoming concrete unguarded ASN.1."""
+
+    policy = handle.get("export_policy")
+    if (
+        isinstance(policy, dict)
+        and policy.get("concrete_export_allowed") is False
+        and not inline_placeholder_records
+    ):
+        scope = str(policy.get("generation_scope") or "GENERATED_PARTIAL")
+        raise ValueError(
+            f"ASN.1 value-notation export is blocked for {scope} once no "
+            "unresolved inline template placeholders remain. Save tagged JSON "
+            "to retain the generated-partial scope and export guard."
+        )
+
+
+def _render_varder_from_sequence(
+    pes: Any,
+    inline_placeholder_records: list[Any],
+) -> str:
+    """Project a live sentinel-bearing sequence back to compact varder."""
+
+    if not inline_placeholder_records:
+        raise ValueError(
+            "Varder save requires an unresolved inline-template session. "
+            "Use DER, ASN.1, or JSON for a concrete profile."
+        )
+    text = bytes(pes.to_der()).hex().upper()
+    for record in sorted(
+        inline_placeholder_records,
+        key=lambda item: int(getattr(item, "index", 0)),
+    ):
+        literal = str(getattr(record, "literal", "") or "")
+        sentinel_hex = str(getattr(record, "sentinel_hex", "") or "").upper()
+        occurrences = text.count(sentinel_hex) if sentinel_hex else 0
+        if not literal or occurrences != 1:
+            raise ValueError(
+                "Cannot reconstruct varder placeholder "
+                f"{literal or '<missing>'!r}: expected one sentinel occurrence, "
+                f"found {occurrences}."
+            )
+        text = text.replace(sentinel_hex, literal, 1)
+    return text
+
+
+def _assert_generated_save_target_allowed(
+    handle: dict[str, Any],
+    target: Path,
+) -> None:
+    """Keep generated authoring Save As from clobbering a spreadsheet source."""
+
+    policy = handle.get("export_policy")
+    if not isinstance(policy, dict):
+        return
+    if policy.get("concrete_export_allowed") is not False:
+        return
+    if target.suffix.lower() not in _GENERATED_SOURCE_WORKBOOK_SUFFIXES:
+        return
+    raise ValueError(
+        "Generated authoring artifacts cannot be saved to an Excel workbook "
+        "path. Choose an SAIP output extension so the source workbook cannot "
+        "be overwritten."
+    )
+
+
+@_with_session_lock
 def _dispatch_save_package(
     ctx: ActionContext,
     *,
@@ -6341,27 +7659,27 @@ def _dispatch_save_package(
       * ``der`` — binary DER, default extension ``.der``.
       * ``hex`` — ASCII hex of the DER, default ``.hex``. Round-
         trippable through ``saip.open_package``.
+      * ``asn1`` (alias ``asn``) — ASN.1 value notation, default
+        ``.asn``. Preserves unresolved inline template literals.
+      * ``varder`` — compact typed-placeholder DER text, default
+        ``.varder``. Available only while inline placeholders remain.
       * ``json`` — transcoded JSON document, default ``.json``.
-        Preserves PE names / variable references the DER format
-        cannot carry.
+        Preserves PE names, variable references, placeholder literals,
+        and their exact sentinel sidecar.
 
     By default refuses to overwrite an existing target — pass
     ``overwrite=true`` to replace. The format-default extension is
     appended when the supplied path has no suffix.
     """
-    from yggdrasim_common.gui_server.sessions import get_manager
+    from yggdrasim_common.secure_files import atomic_write_bytes
 
     sid = str(session_id or "").strip()
     out_text = str(output_path or "").strip()
-    fmt = str(format or "der").strip().lower()
     if len(sid) == 0:
         raise ValueError("session_id is required (run saip.open_package first).")
     if len(out_text) == 0:
         raise ValueError("output_path is required.")
-    if fmt not in _SAVE_PACKAGE_FORMATS:
-        raise ValueError(
-            f"format must be one of {', '.join(_SAVE_PACKAGE_FORMATS)} (got {fmt!r}).",
-        )
+    fmt = _normalize_save_package_format(format)
     overwrite_flag = bool(overwrite) if overwrite is not None else False
 
     out_path = Path(os.path.expanduser(out_text)).resolve()
@@ -6371,17 +7689,34 @@ def _dispatch_save_package(
         raise FileExistsError(
             f"target already exists (pass overwrite=true to replace): {out_path}",
         )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    handle = get_manager().claim(sid)
-    _ensure_session_state(handle)
+    session, handle = _require_saip_session(sid)
+    inline_placeholder_records = _unresolved_inline_placeholder_records(handle)
+    if fmt in ("der", "hex"):
+        _assert_handle_concrete_export_allowed(handle)
+    elif fmt == "asn1":
+        _assert_asn1_save_allowed(handle, inline_placeholder_records)
+    elif fmt == "varder" and not inline_placeholder_records:
+        policy = handle.get("export_policy")
+        if (
+            isinstance(policy, dict)
+            and policy.get("concrete_export_allowed") is False
+        ):
+            raise ValueError(
+                "Varder save requires unresolved inline placeholders. Save "
+                "tagged JSON to continue authoring this guarded partial "
+                "profile, then use the explicit completion flow before "
+                "concrete export."
+            )
+        raise ValueError(
+            "Varder save requires an unresolved inline-template session. "
+            "Use DER, ASN.1, or JSON for a concrete profile."
+        )
+    _assert_generated_save_target_allowed(handle, out_path)
     pes = handle["pes"]
     warnings: list[str] = []
 
     if fmt == "der":
-        data = pes.to_der()
-        out_path.write_bytes(data)
-        size = len(data)
+        output_bytes = bytes(pes.to_der())
         warnings.append(
             "DER format does not carry PE names, formatting, or "
             "variable references; round-trip via JSON to preserve those.",
@@ -6389,37 +7724,118 @@ def _dispatch_save_package(
     elif fmt == "hex":
         data = pes.to_der()
         text = data.hex().upper() + "\n"
-        out_path.write_text(text, encoding="utf-8")
-        size = len(text.encode("utf-8"))
+        output_bytes = text.encode("utf-8")
         warnings.append(
             "Hex DER preserves the wire bytes but drops PE names / "
             "formatting / variable references (same as binary DER).",
         )
+    elif fmt == "asn1":
+        from Tools.ProfilePackage.saip_asn1_value import (
+            render_asn1_value_profile,
+        )
+
+        text = render_asn1_value_profile(
+            pes,
+            inline_placeholder_records=inline_placeholder_records,
+        )
+        output_bytes = text.encode("utf-8")
+        warnings.append(
+            "ASN.1 value notation is an editable textual projection; DER is "
+            "the canonical wire encoding for a concrete profile.",
+        )
+    elif fmt == "varder":
+        text = _render_varder_from_sequence(
+            pes,
+            inline_placeholder_records,
+        )
+        output_bytes = b"\xef\xbb\xbf" + text.encode("utf-8")
+        warnings.append(
+            "Varder is a template artifact with unresolved typed placeholders; "
+            "materialise every variable before concrete DER export.",
+        )
     else:
+        import copy as _copy
+
         _refresh_decoded_document(handle)
-        doc = handle["decoded_document"]
+        # The placeholder sidecar is a serialization detail.  Mutating the
+        # live decoded document here used to leave sentinel metadata behind
+        # after Save As, breaking later in-session Excel/template exports.
+        doc = _copy.deepcopy(handle["decoded_document"])
         _ensure_pysim_importable()
         from Tools.ProfilePackage.saip_json_codec import jsonify_document
+        from Tools.ProfilePackage.saip_hex_template import (
+            records_to_sidecar_payload,
+            splice_literals_into_tagged_document,
+        )
+
+        if inline_placeholder_records:
+            doc["__ygg_inline_placeholders__"] = records_to_sidecar_payload(
+                inline_placeholder_records
+            )
+        else:
+            doc.pop("__ygg_inline_placeholders__", None)
 
         tagged = jsonify_document(doc)
+        if inline_placeholder_records:
+            replacement_count = splice_literals_into_tagged_document(
+                tagged,
+                inline_placeholder_records,
+            )
+            if replacement_count != len(inline_placeholder_records):
+                raise ValueError(
+                    "Could not preserve every inline placeholder in tagged JSON: "
+                    f"expected {len(inline_placeholder_records)} occurrence(s), "
+                    f"replaced {replacement_count}."
+                )
         text = json.dumps(tagged, indent=2, ensure_ascii=False)
-        out_path.write_text(text, encoding="utf-8")
-        size = len(text.encode("utf-8"))
+        output_bytes = text.encode("utf-8")
+
+    atomic_write_bytes(
+        out_path,
+        output_bytes,
+        overwrite=overwrite_flag,
+    )
+    size = len(output_bytes)
 
     if bool(clear_dirty) if clear_dirty is not None else True:
-        handle["dirty_pes"] = set()
+        _replace_dirty_pes(handle, set())
 
-    return {
+    # A successful Save As establishes the new file as the session source.
+    # Keep the immutable export policy/scope lock on the handle: a later
+    # Revert may refresh authoring bytes from this file but can never
+    # declassify a generated-partial session.
+    handle["source_path"] = str(out_path)
+    handle["source_backing_path"] = str(out_path)
+    handle["encoding"] = fmt
+    handle["size_bytes"] = size
+    session.metadata.update(
+        {
+            "source_path": str(out_path),
+            "encoding": fmt,
+            "pe_count": len(pes.pe_list),
+            "scope_lock": str(handle.get("scope_lock") or ""),
+        }
+    )
+
+    response = {
         "session_id": sid,
         "output_path": str(out_path),
+        "source_path": str(out_path),
+        "file_name": out_path.name,
         "format": fmt,
+        "encoding": fmt,
         "size_bytes": size,
         "pe_count": len(pes.pe_list),
         "dirty_cleared": bool(clear_dirty) if clear_dirty is not None else True,
+        "remaining_inline_placeholder_count": len(inline_placeholder_records),
         "warnings": warnings,
     }
+    response.update(_generation_response_fields(handle))
+    response.update(_dirty_response_fields(handle))
+    return response
 
 
+@_with_session_lock
 def _dispatch_revert_changes(
     ctx: ActionContext,
     *,
@@ -6433,12 +7849,19 @@ def _dispatch_revert_changes(
         raise ValueError("session_id is required (run saip.open_package first).")
     handle = get_manager().claim(sid)
     _reload_source_into_handle(handle)
-    return {
+    # Revert is an explicit discard boundary; stale undo entries must not
+    # resurrect the edits the operator just chose to drop.
+    handle["history"] = {"undo": [], "redo": []}
+    response = {
         "session_id": sid,
         "source_path": handle["source_path"],
         "pe_count": len(handle["pes"].pe_list),
         "dirty": False,
+        "remaining_inline_placeholder_count": len(handle.get("inline_placeholder_records") or []),
     }
+    response.update(_generation_response_fields(handle))
+    response.update(_dirty_response_fields(handle))
+    return response
 
 
 # ----------------------------------------------------------------------
@@ -7154,19 +8577,14 @@ def _dispatch_diff_against_source(
         raise ValueError("session_id is required (run saip.open_package first).")
 
     handle = get_manager().claim(sid)
-    source = handle.get("source_path")
-    if source is None or len(str(source)) == 0:
-        raise RuntimeError(
-            "Session has no source_path on file; cannot diff against source. "
-            "Re-open the package via saip.open_package."
-        )
+    source = _require_session_source(handle, "cannot diff against source")
 
-    fresh_package = _load_package_from_path(Path(str(source)))
+    fresh_package = _load_package_from_path(Path(source))
     fresh_document = jsonify_document(fresh_package["decoded_document"])
     session_document = _jsonified_session_document(handle)
 
-    label_left = f"{Path(str(source)).name} (on disk)"
-    label_right = f"{Path(str(source)).name} (session edits)"
+    label_left = f"{Path(source).name} (on disk)"
+    label_right = f"{Path(source).name} (session edits)"
     report = compute_profile_diff(
         fresh_document,
         session_document,
@@ -7175,7 +8593,7 @@ def _dispatch_diff_against_source(
     )
     payload = report.to_dict()
     payload["session_id"] = sid
-    payload["source_path"] = str(source)
+    payload["source_path"] = source
     return payload
 
 
@@ -7231,6 +8649,7 @@ def _dispatch_diff_against_path(
 # -- SA-4 variables dispatchers ----------------------------------------
 
 
+@_with_session_lock
 def _dispatch_list_variables(
     ctx: ActionContext,
     *,
@@ -7244,10 +8663,134 @@ def _dispatch_list_variables(
         raise ValueError("session_id is required (run saip.open_package first).")
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
-    payload = _collect_variables(handle["decoded_document"])
+    payload = _collect_variables(
+        handle["decoded_document"],
+        handle.get("inline_placeholder_records") or [],
+    )
     payload["session_id"] = sid
-    payload["overrides_applied"] = dict(handle.get("applied_overrides") or {})
+    payload["overrides_applied"] = _redacted_applied_overrides(
+        dict(handle.get("applied_overrides") or {}),
+        payload["variables"],
+    )
+    payload["override_names"] = sorted(
+        str(name) for name in (handle.get("applied_overrides") or {})
+    )
     return payload
+
+
+def _apply_variable_to_handle(
+    handle: dict[str, Any],
+    name_text: str,
+    value_text: str,
+) -> dict[str, Any]:
+    """Apply one variable through inline, catalog, or legacy semantics."""
+    import copy as _copy
+
+    from Tools.ProfilePackage.saip_json_codec import (
+        build_profile_sequence_from_document,
+    )
+    from Tools.ProfilePackage.saip_profile_template import (
+        apply_placeholder_overrides_to_loaded_document,
+        normalize_placeholder_name,
+    )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        find_catalog_variable,
+        materialize_catalog_variable,
+        materialize_inline_variable,
+        variable_is_secret,
+    )
+
+    catalog_variable = find_catalog_variable(handle["decoded_document"], name_text)
+    normalised = (
+        str(catalog_variable.get("id") or "").strip()
+        if catalog_variable is not None
+        else normalize_placeholder_name(name_text)
+    )
+    records = list(handle.get("inline_placeholder_records") or [])
+    inline_matches = [
+        record
+        for record in records
+        if str(getattr(record, "variable_name", "") or "").casefold()
+        == normalised.casefold()
+    ]
+    warnings: list[str] = []
+
+    if inline_matches:
+        candidate_document, remaining, result = materialize_inline_variable(
+            handle["decoded_document"],
+            records,
+            normalised,
+            value_text,
+        )
+        candidate_pes = build_profile_sequence_from_document(
+            candidate_document,
+            workspace_root=_workspace_root(),
+        )
+        candidate_pes.to_der()
+        _assert_handle_sequence_allowed(handle, list(candidate_pes.pe_list))
+        handle["decoded_document"] = candidate_document
+        handle["pes"] = candidate_pes
+        handle["inline_placeholder_records"] = remaining
+        _refresh_decoded_document(handle)
+        canonical_name = result.variable_name
+        summaries = [
+            f"{canonical_name} materialized at {result.binding_count} inline occurrence(s)."
+        ]
+        secret = result.secret
+        source = result.source
+    elif catalog_variable is not None:
+        candidate_pes = build_profile_sequence_from_document(
+            handle["decoded_document"],
+            workspace_root=_workspace_root(),
+        )
+        result = materialize_catalog_variable(
+            candidate_pes,
+            handle["decoded_document"],
+            normalised,
+            value_text,
+        )
+        candidate_pes.to_der()
+        _assert_handle_sequence_allowed(handle, list(candidate_pes.pe_list))
+        handle["pes"] = candidate_pes
+        _refresh_decoded_document(handle)
+        canonical_name = result.variable_name
+        summaries = [
+            f"{canonical_name} materialized at {result.binding_count} semantic binding(s)."
+        ]
+        secret = result.secret
+        source = result.source
+    else:
+        if normalised.casefold() in set(handle.get("inline_variable_names") or set()):
+            raise ValueError(
+                f"Inline variable {normalised!r} is already materialized. Reset it to "
+                "the source template before assigning a different value."
+            )
+        candidate_document = _copy.deepcopy(handle["decoded_document"])
+        summaries = apply_placeholder_overrides_to_loaded_document(
+            candidate_document,
+            {normalised: value_text},
+        )
+        candidate_pes = build_profile_sequence_from_document(
+            candidate_document,
+            workspace_root=_workspace_root(),
+        )
+        candidate_pes.to_der()
+        _assert_handle_sequence_allowed(handle, list(candidate_pes.pe_list))
+        handle["decoded_document"] = candidate_document
+        handle["pes"] = candidate_pes
+        canonical_name = normalised
+        secret = variable_is_secret(normalised)
+        source = "legacy_token"
+
+    handle["applied_overrides"][canonical_name] = value_text
+    _mark_dirty(handle, -1)
+    return {
+        "name": canonical_name,
+        "secret": secret,
+        "source": source,
+        "summaries": summaries,
+        "warnings": warnings,
+    }
 
 
 def _dispatch_set_variable(
@@ -7257,7 +8800,7 @@ def _dispatch_set_variable(
     name: Any = None,
     value: Any = None,
 ) -> dict[str, Any]:
-    """Apply a placeholder override (ICCID / IMSI / arbitrary name)."""
+    """Materialize a typed catalog/inline variable or set a legacy token."""
     from yggdrasim_common.gui_server.sessions import get_manager
 
     sid = str(session_id or "").strip()
@@ -7268,51 +8811,28 @@ def _dispatch_set_variable(
     if len(name_text) == 0:
         raise ValueError("name is required.")
 
-    _ensure_pysim_importable()
-    from Tools.ProfilePackage.saip_profile_template import (
-        apply_placeholder_overrides_to_loaded_document,
-        normalize_placeholder_name,
-    )
-
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
-    assignments = {name_text: value_text}
-    summaries = apply_placeholder_overrides_to_loaded_document(
+    applied = _apply_variable_to_handle(handle, name_text, value_text)
+    variable_payload = _collect_variables(
         handle["decoded_document"],
-        assignments,
+        handle.get("inline_placeholder_records") or [],
     )
-    normalised = normalize_placeholder_name(name_text)
-    handle["applied_overrides"][normalised] = value_text
-    # Re-encode via build_profile_sequence_from_document so pes stays
-    # in sync with the override'd document.
-    from Tools.ProfilePackage.saip_json_codec import (
-        build_profile_sequence_from_document,
-    )
-
-    try:
-        handle["pes"] = build_profile_sequence_from_document(
-            handle["decoded_document"], workspace_root=_workspace_root()
-        )
-        _mark_dirty(handle, -1)  # sequence-wide dirty marker
-    except Exception as error:
-        # Override may have introduced undefined placeholders; keep the
-        # document changes but report the warning so the GUI can surface it.
-        return {
-            "session_id": sid,
-            "name": normalised,
-            "value": value_text,
-            "summaries": summaries,
-            "warnings": [
-                f"Document mutated; re-encode failed: {error}",
-            ],
-        }
-
     return {
         "session_id": sid,
-        "name": normalised,
-        "value": value_text,
-        "summaries": summaries,
-        "overrides_applied": dict(handle["applied_overrides"]),
+        "name": applied["name"],
+        "value": "" if applied["secret"] else value_text,
+        "value_redacted": bool(applied["secret"]),
+        "materialization_source": applied["source"],
+        "summaries": applied["summaries"],
+        "warnings": applied["warnings"],
+        "overrides_applied": _redacted_applied_overrides(
+            dict(handle["applied_overrides"]),
+            variable_payload["variables"],
+        ),
+        "remaining_inline_placeholder_count": len(
+            handle.get("inline_placeholder_records") or []
+        ),
     }
 
 
@@ -7341,20 +8861,24 @@ def _dispatch_reset_variable(
         raise ValueError("name is required.")
 
     _ensure_pysim_importable()
-    from Tools.ProfilePackage.saip_profile_template import (
-        apply_placeholder_overrides_to_loaded_document,
-        normalize_placeholder_name,
-    )
-    from Tools.ProfilePackage.saip_json_codec import (
-        build_profile_sequence_from_document,
-    )
+    from Tools.ProfilePackage.saip_profile_template import normalize_placeholder_name
+    from Tools.ProfilePackage.saip_variable_materialization import find_catalog_variable
 
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
 
-    normalised = normalize_placeholder_name(name_text)
+    catalog_variable = find_catalog_variable(handle["decoded_document"], name_text)
+    normalised = (
+        str(catalog_variable.get("id") or "").strip()
+        if catalog_variable is not None
+        else normalize_placeholder_name(name_text)
+    )
     overrides = dict(handle.get("applied_overrides") or {})
-    if normalised not in overrides:
+    override_name = next(
+        (name for name in overrides if str(name).casefold() == normalised.casefold()),
+        normalised,
+    )
+    if override_name not in overrides:
         # Nothing to do — surface the no-op so the GUI can downgrade
         # the toast severity. This is *not* an error: the operator
         # may have already reset the value in a sibling tab.
@@ -7362,11 +8886,21 @@ def _dispatch_reset_variable(
             "session_id": sid,
             "name": normalised,
             "removed": False,
-            "overrides_applied": overrides,
+            "overrides_applied": _redacted_applied_overrides(
+                overrides,
+                _collect_variables(
+                    handle["decoded_document"],
+                    handle.get("inline_placeholder_records") or [],
+                )["variables"],
+            ),
+            "remaining_inline_placeholder_count": len(
+                handle.get("inline_placeholder_records") or []
+            ),
             "summaries": [f"{normalised} was not overridden; nothing to reset."],
         }
 
-    overrides.pop(normalised, None)
+    _require_session_source(handle, "Variable reset")
+    overrides.pop(override_name, None)
 
     # Reload the document from disk so __ygg_token_defs__ goes back
     # to whatever the source carried, then layer the remaining
@@ -7375,41 +8909,35 @@ def _dispatch_reset_variable(
     handle["applied_overrides"] = {}
 
     summaries: list[str] = [f"{normalised} reset to source."]
-    if len(overrides) > 0:
-        replay_summaries = apply_placeholder_overrides_to_loaded_document(
-            handle["decoded_document"],
-            overrides,
+    warnings: list[str] = []
+    for replay_name, replay_value in overrides.items():
+        replay = _apply_variable_to_handle(
+            handle,
+            str(replay_name),
+            str(replay_value),
         )
-        for replay in replay_summaries:
-            summaries.append(replay)
-        handle["applied_overrides"] = dict(overrides)
+        summaries.extend(str(item) for item in replay["summaries"])
+        warnings.extend(str(item) for item in replay["warnings"])
+    # The whole sequence was rebuilt from the source even when no overrides
+    # remain. Flag it sequence-wide so every workbench cache refreshes.
+    _mark_dirty(handle, -1)
 
-    try:
-        handle["pes"] = build_profile_sequence_from_document(
-            handle["decoded_document"], workspace_root=_workspace_root()
-        )
-        # The whole sequence was just rebuilt — flag everything dirty
-        # so cache-clearing GUI flows still trigger.
-        _mark_dirty(handle, -1)
-    except Exception as error:
-        return {
-            "session_id": sid,
-            "name": normalised,
-            "removed": True,
-            "overrides_applied": dict(handle["applied_overrides"]),
-            "summaries": summaries,
-            "warnings": [
-                f"Document reset; re-encode failed after replaying "
-                f"remaining overrides: {error}",
-            ],
-        }
+    variable_payload = _collect_variables(
+        handle["decoded_document"],
+        handle.get("inline_placeholder_records") or [],
+    )
 
     return {
         "session_id": sid,
         "name": normalised,
         "removed": True,
-        "overrides_applied": dict(handle["applied_overrides"]),
+        "overrides_applied": _redacted_applied_overrides(
+            dict(handle["applied_overrides"]),
+            variable_payload["variables"],
+        ),
+        "remaining_inline_placeholder_count": len(handle.get("inline_placeholder_records") or []),
         "summaries": summaries,
+        "warnings": warnings,
     }
 
 
@@ -7765,7 +9293,6 @@ def _dispatch_add_pe(
     """
     from yggdrasim_common.gui_server.sessions import get_manager
     from Tools.ProfilePackage.saip_json_codec import (
-        build_decoded_document_from_sequence,
         build_profile_sequence_from_document,
     )
 
@@ -7775,6 +9302,7 @@ def _dispatch_add_pe(
         raise ValueError("session_id and pe_type are required.")
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
+    _assert_handle_pe_type_allowed(handle, pe_type_text)
     pes = handle["pes"]
     n = len(pes.pe_list)
     try:
@@ -7810,6 +9338,7 @@ def _dispatch_add_pe(
 
     new_list = list(pes.pe_list)
     new_list.insert(idx, new_pe)
+    _assert_handle_sequence_allowed(handle, new_list)
     pes.pe_list = new_list
 
     # Renumber identification across the whole sequence so the new
@@ -7824,10 +9353,9 @@ def _dispatch_add_pe(
         # sequences. Swallow so the insert still lands.
         pass
 
-    handle["decoded_document"] = build_decoded_document_from_sequence(
+    handle["decoded_document"] = _rebuilt_document_preserving_metadata(
         pes,
-        handle.get("decoded_document", {}).get("intro")
-        or [f"Profile with {len(pes.pe_list)} profile elements"],
+        handle.get("decoded_document") or {},
     )
     warnings: list[str] = []
     try:
@@ -7875,7 +9403,6 @@ def _dispatch_delete_pe(
     """Drop the PE at ``pe_index``; the header / end anchors are protected."""
     from yggdrasim_common.gui_server.sessions import get_manager
     from Tools.ProfilePackage.saip_json_codec import (
-        build_decoded_document_from_sequence,
         build_profile_sequence_from_document,
     )
 
@@ -7888,6 +9415,7 @@ def _dispatch_delete_pe(
         raise ValueError(f"pe_index must be an integer: {pe_index!r}") from error
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
+    _assert_handle_mutation_allowed(handle)
     pes = handle["pes"]
     n = len(pes.pe_list)
     if idx < 0 or idx >= n:
@@ -7906,12 +9434,12 @@ def _dispatch_delete_pe(
     label = _pe_display_label(removed)
     new_list = list(pes.pe_list)
     new_list.pop(idx)
+    _assert_handle_sequence_allowed(handle, new_list)
     pes.pe_list = new_list
 
-    handle["decoded_document"] = build_decoded_document_from_sequence(
+    handle["decoded_document"] = _rebuilt_document_preserving_metadata(
         pes,
-        handle.get("decoded_document", {}).get("intro")
-        or [f"Profile with {len(pes.pe_list)} profile elements"],
+        handle.get("decoded_document") or {},
     )
     warnings: list[str] = []
     try:
@@ -7936,7 +9464,7 @@ def _dispatch_delete_pe(
 def _decode_imported_pe_bytes(input_path: Path) -> Any:
     """Decode the file at ``input_path`` into a single ProfileElement."""
     _ensure_pysim_importable()
-    from pySim.esim.saip import ProfileElement, ProfileElementSequence
+    from pySim.esim.saip import ProfileElementSequence
 
     suffix = input_path.suffix.lower()
     if suffix == ".xml":
@@ -7944,7 +9472,10 @@ def _decode_imported_pe_bytes(input_path: Path) -> Any:
             "XML imports (File Tree Express) are not implemented in this "
             "release; convert to .der or .asn1 hex before reloading.",
         )
-    raw = input_path.read_bytes()
+    raw = _read_bounded_saip_file(
+        input_path,
+        label="Profile-element import",
+    )
     if suffix in _IMPORT_PE_JSON_SUFFIXES:
         # Treat as a single-PE JSON snippet — wrap it in a tiny
         # document and re-encode to extract the PE.
@@ -7972,7 +9503,13 @@ def _decode_imported_pe_bytes(input_path: Path) -> Any:
 
     der_bytes: bytes
     if suffix in _IMPORT_PE_HEX_SUFFIXES:
-        text = raw.decode("utf-8", errors="ignore")
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise ValueError(
+                "Profile-element hex text must be valid UTF-8; invalid byte "
+                f"at offset {error.start} in {input_path}."
+            ) from error
         cleaned = "".join(text.split())
         try:
             der_bytes = bytes.fromhex(cleaned)
@@ -8012,7 +9549,6 @@ def _dispatch_import_pe(
     """
     from yggdrasim_common.gui_server.sessions import get_manager
     from Tools.ProfilePackage.saip_json_codec import (
-        build_decoded_document_from_sequence,
         build_profile_sequence_from_document,
     )
 
@@ -8042,14 +9578,15 @@ def _dispatch_import_pe(
         )
 
     new_pe = _decode_imported_pe_bytes(source)
+    _assert_handle_pe_type_allowed(handle, str(getattr(new_pe, "type", "")))
     new_list = list(pes.pe_list)
     new_list.insert(idx, new_pe)
+    _assert_handle_sequence_allowed(handle, new_list)
     pes.pe_list = new_list
 
-    handle["decoded_document"] = build_decoded_document_from_sequence(
+    handle["decoded_document"] = _rebuilt_document_preserving_metadata(
         pes,
-        handle.get("decoded_document", {}).get("intro")
-        or [f"Profile with {len(pes.pe_list)} profile elements"],
+        handle.get("decoded_document") or {},
     )
     warnings: list[str] = []
     try:
@@ -8071,6 +9608,7 @@ def _dispatch_import_pe(
     }
 
 
+@_with_session_lock
 def _dispatch_export_pe(
     ctx: ActionContext,
     *,
@@ -8097,14 +9635,16 @@ def _dispatch_export_pe(
     except Exception as error:
         raise ValueError(f"pe_index must be an integer: {pe_index!r}") from error
     fmt = str(format or "der").strip().lower() or "der"
-    if fmt not in _SAVE_PACKAGE_FORMATS:
+    if fmt not in _EXPORT_PE_FORMATS:
         raise ValueError(
-            f"unknown format {format!r}; allowed: {', '.join(_SAVE_PACKAGE_FORMATS)}",
+            f"unknown format {format!r}; allowed: {', '.join(_EXPORT_PE_FORMATS)}",
         )
     overwrite_flag = bool(overwrite) if overwrite is not None else False
 
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
+    if fmt in ("der", "hex"):
+        _assert_handle_concrete_export_allowed(handle)
     pes = handle["pes"]
     n = len(pes.pe_list)
     if idx < 0 or idx >= n:
@@ -8113,27 +9653,24 @@ def _dispatch_export_pe(
 
     target = Path(os.path.expanduser(out_text)).resolve()
     if target.suffix == "":
-        target = target.with_suffix(_SAVE_PACKAGE_DEFAULT_EXTS[fmt])
+        target = target.with_suffix(_EXPORT_PE_DEFAULT_EXTS[fmt])
     if target.exists() and overwrite_flag is False:
         raise FileExistsError(
             f"target already exists (pass overwrite=true to replace): {target}",
         )
-    target.parent.mkdir(parents=True, exist_ok=True)
-
-    bytes_written = 0
     if fmt == "der":
-        der = pe.to_der()
-        target.write_bytes(der)
-        bytes_written = len(der)
+        output_bytes = bytes(pe.to_der())
     elif fmt == "hex":
         der = pe.to_der()
-        target.write_text(der.hex().upper() + "\n", encoding="utf-8")
-        bytes_written = target.stat().st_size
+        output_bytes = (der.hex().upper() + "\n").encode("utf-8")
     else:
         decoded = _jsonify_decoded(getattr(pe, "decoded", {}))
         text = json.dumps(decoded, indent=2, ensure_ascii=False) + "\n"
-        target.write_text(text, encoding="utf-8")
-        bytes_written = target.stat().st_size
+        output_bytes = text.encode("utf-8")
+    from yggdrasim_common.secure_files import atomic_write_bytes
+
+    atomic_write_bytes(target, output_bytes, overwrite=overwrite_flag)
+    bytes_written = len(output_bytes)
 
     return {
         "session_id": sid,
@@ -8192,6 +9729,160 @@ def _new_empty_pes(
     ]
     seq.renumber_identification()
     return seq
+
+
+def open_saip_document_session(
+    decoded_document: dict[str, Any],
+    *,
+    file_name: str = "generated-profile.json",
+    encoding: str = "json",
+    source_path: str = "",
+    intro_summary: str = "Generated SAIP authoring document",
+    inline_template_text: str | None = None,
+) -> dict[str, Any]:
+    """Validate a complete decoded document and open one dirty SAIP session.
+
+    This is the supported handoff for optional generators.  Providers build
+    and validate their document off-session; the core then owns pySim
+    reconstruction, canonical handle fields, generation-scope enforcement,
+    and the response shape consumed by the normal SAIP workbench.
+    """
+    import copy as _copy
+
+    if not isinstance(decoded_document, dict):
+        raise ValueError("decoded_document must be an object.")
+    document = _copy.deepcopy(decoded_document)
+    sections = document.get("sections")
+    if not isinstance(sections, dict) or len(sections) == 0:
+        raise ValueError("decoded_document must contain non-empty sections.")
+    from Tools.ProfilePackage.saip_json_codec import (
+        install_generation_provenance,
+    )
+
+    # This is the only trusted generated-document handoff.  Install an
+    # independent persisted provenance seal before deriving session policy so
+    # saved tagged JSON cannot shed both primary markers or widen their scope
+    # on reopen and be mistaken for an ordinary imported profile.
+    install_generation_provenance(document)
+    generation_policy = _generation_policy_from_document(document)
+    if (
+        generation_policy is None
+        or generation_policy.get("integrity_state") != "LOCKED_PARTIAL"
+    ):
+        raise ValueError(
+            "Generated SAIP session handoff requires an intact partial-artifact "
+            "generation envelope and generation lock."
+        )
+
+    _ensure_pysim_importable()
+    from Tools.ProfilePackage.saip_json_codec import (
+        build_profile_sequence_from_document,
+    )
+    from yggdrasim_common.gui_server.sessions import get_manager
+
+    decoded_pes = build_profile_sequence_from_document(
+        document,
+        workspace_root=_workspace_root(),
+    )
+    inline_placeholder_records: list[Any] = []
+    pes = decoded_pes
+    if inline_template_text is not None:
+        from Tools.ProfilePackage.saip_hex_template import (
+            substitute_inline_placeholders,
+        )
+        from pySim.esim.saip import ProfileElementSequence
+
+        template_text = str(inline_template_text).lstrip("\ufeff")
+        if not template_text.strip():
+            raise ValueError("inline_template_text must not be empty.")
+        substituted_text, inline_placeholder_records = substitute_inline_placeholders(template_text)
+        compact_hex = "".join(substituted_text.split())
+        try:
+            template_der = bytes.fromhex(compact_hex)
+        except ValueError as error:
+            raise ValueError(
+                "inline_template_text must reduce to compact SAIP DER hex "
+                "after placeholder substitution."
+            ) from error
+        try:
+            template_pes = ProfileElementSequence.from_der(template_der)
+            _require_usable_pe_types(template_pes)
+        except Exception as error:
+            raise ValueError(
+                "inline_template_text did not decode as a SAIP ProfileElement " f"sequence: {error}"
+            ) from error
+        decoded_types = tuple(str(getattr(pe, "type", "")) for pe in decoded_pes.pe_list)
+        template_types = tuple(str(getattr(pe, "type", "")) for pe in template_pes.pe_list)
+        if template_types != decoded_types:
+            raise ValueError(
+                "inline_template_text ProfileElement type/order does not match "
+                "decoded_document: "
+                f"expected {list(decoded_types)!r}, got {list(template_types)!r}."
+            )
+        pes = template_pes
+        document = _rebuilt_document_preserving_metadata(pes, document)
+
+    if len(pes.pe_list) < 2:
+        raise ValueError("generated SAIP document must contain header and end PEs.")
+    if str(getattr(pes.pe_list[0], "type", "")) != "header":
+        raise ValueError("generated SAIP document must begin with ProfileHeader.")
+    if str(getattr(pes.pe_list[-1], "type", "")) != "end":
+        raise ValueError("generated SAIP document must end with PE-End.")
+    _assert_sequence_allowed_for_scope(
+        str(generation_policy.get("generation_scope") or ""),
+        pes,
+    )
+
+    safe_file_name = Path(str(file_name or "generated-profile.json")).name
+    handle = {
+        "pes": pes,
+        "decoded_document": document,
+        "encoding": str(encoding or "json"),
+        "source_path": str(source_path or ""),
+        # Generated handoffs are in-memory authoring documents.  ``source_path``
+        # is presentation/provenance only and must never be treated as a
+        # reloadable package (it may point to the source workbook).
+        "source_backing_path": "",
+        "size_bytes": 0,
+        "load_warnings": [],
+        "inline_placeholder_records": inline_placeholder_records,
+    }
+    _ensure_session_state(handle)
+    _apply_generation_session_policy(handle)
+    # The generated document has no backing authoring JSON yet. Mark and
+    # protect it before registration so session-cap/idle cleanup cannot race
+    # the first GUI paint and discard the only live copy.
+    _replace_dirty_pes(handle, {-1})
+    session = get_manager().open(
+        kind="saip",
+        handle=handle,
+        close=lambda: None,
+        metadata={
+            "source_path": str(source_path or ""),
+            "encoding": str(encoding or "json"),
+            "pe_count": len(pes.pe_list),
+            "load_warning_count": 0,
+            "inline_placeholder_count": len(inline_placeholder_records),
+            "scope_lock": str(handle.get("scope_lock") or ""),
+        },
+    )
+    response = {
+        "session_id": session.id,
+        "source_path": str(source_path or ""),
+        "file_name": safe_file_name,
+        "size_bytes": 0,
+        "encoding": str(encoding or "json"),
+        "pe_count": len(pes.pe_list),
+        "pe_types": sorted(
+            {str(getattr(pe, "type", "unknown")) for pe in pes.pe_list}
+        ),
+        "load_warnings": [],
+        "inline_placeholder_count": len(inline_placeholder_records),
+        "summary": str(intro_summary or "Generated SAIP authoring document"),
+    }
+    response.update(_generation_response_fields(handle))
+    response.update(_dirty_response_fields(handle))
+    return response
 
 
 def _dispatch_create_package(
@@ -8263,6 +9954,9 @@ def _dispatch_create_package(
         "load_warnings": [],
     }
     _ensure_session_state(handle)
+    # New sessions are dirty from the start — there's nothing on disk yet to
+    # compare against. Protect the live copy until its first successful save.
+    _replace_dirty_pes(handle, {-1})
     session = get_manager().open(
         kind="saip",
         handle=handle,
@@ -8274,12 +9968,7 @@ def _dispatch_create_package(
             "load_warning_count": 0,
         },
     )
-    # New sessions are dirty from the start — there's nothing on disk
-    # yet to compare against, so the GUI's "unsaved changes" banner
-    # should fire until the operator runs saip.save_package.
-    handle["dirty_pes"] = {-1}
-
-    return {
+    response = {
         "session_id": session.id,
         "source_path": "",
         "file_name": "",
@@ -8297,6 +9986,8 @@ def _dispatch_create_package(
             "Run saip.save_package to persist; saip.add_pe to extend."
         ),
     }
+    response.update(_dirty_response_fields(handle))
+    return response
 
 
 def _walk_for_dict_placeholder_bindings(node: Any) -> set[str]:
@@ -8338,27 +10029,35 @@ def _parse_sidecar_variables_csv(csv_path: Path) -> list[tuple[str, str]]:
     header-row DictReader CSV.
     """
     import csv as _csv
+    import io as _io
 
     pairs: list[tuple[str, str]] = []
-    with csv_path.open("r", encoding="utf-8", newline="") as stream:
-        reader = _csv.reader(stream)
-        for raw_row in reader:
-            row = [str(cell).strip() for cell in (raw_row or [])]
-            # Skip blank lines and comment lines — these are the
-            # separators between record sets in the manual's format.
-            if len(row) == 0 or all(cell == "" for cell in row):
-                if len(pairs) > 0:
-                    break
-                continue
-            if row[0].startswith("#"):
-                continue
-            if len(row) < 2:
-                continue
-            name = row[0]
-            value = row[1]
-            if name == "" or value == "":
-                continue
-            pairs.append((name, value))
+    raw = _read_bounded_saip_file(csv_path, label="Token-list CSV")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise ValueError(
+            f"Token-list CSV must be valid UTF-8: {csv_path}: "
+            f"invalid byte at offset {error.start}."
+        ) from error
+    reader = _csv.reader(_io.StringIO(text, newline=""))
+    for raw_row in reader:
+        row = [str(cell).strip() for cell in (raw_row or [])]
+        # Skip blank lines and comment lines — these are the
+        # separators between record sets in the manual's format.
+        if len(row) == 0 or all(cell == "" for cell in row):
+            if len(pairs) > 0:
+                break
+            continue
+        if row[0].startswith("#"):
+            continue
+        if len(row) < 2:
+            continue
+        name = row[0]
+        value = row[1]
+        if name == "" or value == "":
+            continue
+        pairs.append((name, value))
     return pairs
 
 
@@ -8386,40 +10085,54 @@ def _token_mapping_store_path() -> Path:
     return Path(runtime_path("state", "saip_token_mappings.json"))
 
 
-def _load_token_mappings() -> dict[str, dict[str, Any]]:
+def _load_token_mappings(
+    *,
+    strict: bool = False,
+) -> dict[str, dict[str, Any]]:
     """Load the file→token-list map (returns ``{}`` when absent)."""
-    store = _token_mapping_store_path()
-    if store.is_file() is False:
-        return {}
-    try:
-        raw = json.loads(store.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    mappings = raw.get("mappings") if isinstance(raw, dict) else None
-    if isinstance(mappings, dict) is False:
-        return {}
-    cleaned: dict[str, dict[str, Any]] = {}
-    for key, entry in mappings.items():
-        if isinstance(entry, dict) is False:
-            continue
-        tokens_path = str(entry.get("tokens_path") or "").strip()
-        if tokens_path == "":
-            continue
-        cleaned[str(key)] = {
-            "tokens_path": tokens_path,
-            "last_used": entry.get("last_used"),
-        }
-    return cleaned
+    with _TOKEN_MAPPING_LOCK:
+        store = _token_mapping_store_path()
+        if store.is_file() is False:
+            return {}
+        try:
+            raw = json.loads(store.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            if strict:
+                raise ValueError(
+                    f"Token-mapping store is unreadable or corrupt: {store}: {error}"
+                ) from error
+            return {}
+        mappings = raw.get("mappings") if isinstance(raw, dict) else None
+        if isinstance(mappings, dict) is False:
+            if strict:
+                raise ValueError(
+                    f"Token-mapping store has no mappings object: {store}"
+                )
+            return {}
+        cleaned: dict[str, dict[str, Any]] = {}
+        for key, entry in mappings.items():
+            if isinstance(entry, dict) is False:
+                continue
+            tokens_path = str(entry.get("tokens_path") or "").strip()
+            if tokens_path == "":
+                continue
+            cleaned[str(key)] = {
+                "tokens_path": tokens_path,
+                "last_used": entry.get("last_used"),
+            }
+        return cleaned
 
 
 def _save_token_mappings(mappings: dict[str, dict[str, Any]]) -> None:
-    store = _token_mapping_store_path()
-    store.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"mappings": mappings}
-    store.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    from yggdrasim_common.secure_files import atomic_write_bytes
+
+    with _TOKEN_MAPPING_LOCK:
+        store = _token_mapping_store_path()
+        payload = {"mappings": mappings}
+        encoded = (
+            json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        atomic_write_bytes(store, encoded, overwrite=True)
 
 
 def _resolve_token_mapping(pkg_path: Path) -> Path | None:
@@ -8434,50 +10147,68 @@ def _resolve_token_mapping(pkg_path: Path) -> Path | None:
     targets are reported by the open dispatcher rather than silently
     skipped so the operator can repair the mapping.
     """
-    mappings = _load_token_mappings()
-    if len(mappings) == 0:
-        return None
-    candidates = [
-        str(pkg_path),
-        pkg_path.name,
-        pkg_path.stem,
-    ]
-    for key in candidates:
-        entry = mappings.get(key)
-        if entry is None:
-            continue
-        target = Path(os.path.expanduser(str(entry.get("tokens_path") or "")))
-        if target.is_file():
+    with _TOKEN_MAPPING_LOCK:
+        mappings = _load_token_mappings()
+        if len(mappings) == 0:
+            return None
+        candidates = [
+            str(pkg_path),
+            pkg_path.name,
+            pkg_path.stem,
+        ]
+        for candidate in candidates:
+            entry = mappings.get(candidate)
+            if entry is None:
+                folded_matches = [
+                    stored_key
+                    for stored_key in mappings
+                    if stored_key.casefold() == candidate.casefold()
+                ]
+                if len(folded_matches) == 1:
+                    entry = mappings[folded_matches[0]]
+            if entry is None:
+                continue
+            target = Path(
+                os.path.expanduser(str(entry.get("tokens_path") or ""))
+            ).resolve()
+            if target.is_file():
+                return target
+            # File moved / deleted — surface the broken mapping by
+            # returning the bad path; caller turns it into a warning.
             return target
-        # File moved / deleted — surface the broken mapping by
-        # returning the bad path; caller turns it into a warning.
-        return target
-    return None
+        return None
 
 
 def _touch_token_mapping(pkg_path: Path) -> None:
     """Update the ``last_used`` timestamp for the matching mapping (no-op when absent)."""
     import time
 
-    mappings = _load_token_mappings()
-    if len(mappings) == 0:
-        return
-    candidates = [str(pkg_path), pkg_path.name, pkg_path.stem]
-    changed = False
-    for key in candidates:
-        if key in mappings:
-            mappings[key]["last_used"] = int(time.time())
-            changed = True
-            break
-    if changed:
-        _save_token_mappings(mappings)
+    with _TOKEN_MAPPING_LOCK:
+        mappings = _load_token_mappings()
+        if len(mappings) == 0:
+            return
+        candidates = [str(pkg_path), pkg_path.name, pkg_path.stem]
+        changed = False
+        for candidate in candidates:
+            matches = [
+                key
+                for key in mappings
+                if key == candidate or key.casefold() == candidate.casefold()
+            ]
+            if len(matches) == 1:
+                mappings[matches[0]]["last_used"] = int(time.time())
+                changed = True
+                break
+        if changed:
+            _save_token_mappings(mappings)
 
 
 def _dispatch_list_token_mappings(
     ctx: ActionContext,
 ) -> dict[str, Any]:
     """Return every persisted package→token-list mapping."""
-    mappings = _load_token_mappings()
+    with _TOKEN_MAPPING_LOCK:
+        mappings = _load_token_mappings(strict=True)
     rows = [
         {
             "filename": key,
@@ -8509,15 +10240,20 @@ def _dispatch_set_token_mapping(
     when the target turns out to be missing on disk.
     """
     fname = str(filename or "").strip()
-    tpath = str(tokens_path or "").strip()
-    if fname == "" or tpath == "":
+    tpath_text = str(tokens_path or "").strip()
+    if fname == "" or tpath_text == "":
         raise ValueError("filename and tokens_path are required.")
-    mappings = _load_token_mappings()
-    mappings[fname] = {
-        "tokens_path": tpath,
-        "last_used": mappings.get(fname, {}).get("last_used"),
-    }
-    _save_token_mappings(mappings)
+    filename_path = Path(os.path.expanduser(fname))
+    if filename_path.is_absolute():
+        fname = str(filename_path.resolve())
+    tpath = str(Path(os.path.expanduser(tpath_text)).resolve())
+    with _TOKEN_MAPPING_LOCK:
+        mappings = _load_token_mappings(strict=True)
+        mappings[fname] = {
+            "tokens_path": tpath,
+            "last_used": mappings.get(fname, {}).get("last_used"),
+        }
+        _save_token_mappings(mappings)
     return {
         "filename": fname,
         "tokens_path": tpath,
@@ -8535,9 +10271,21 @@ def _dispatch_remove_token_mapping(
     fname = str(filename or "").strip()
     if fname == "":
         raise ValueError("filename is required.")
-    mappings = _load_token_mappings()
-    removed = mappings.pop(fname, None)
-    _save_token_mappings(mappings)
+    filename_path = Path(os.path.expanduser(fname))
+    if filename_path.is_absolute():
+        fname = str(filename_path.resolve())
+    with _TOKEN_MAPPING_LOCK:
+        mappings = _load_token_mappings(strict=True)
+        key = next(
+            (
+                stored_key
+                for stored_key in mappings
+                if stored_key == fname or stored_key.casefold() == fname.casefold()
+            ),
+            fname,
+        )
+        removed = mappings.pop(key, None)
+        _save_token_mappings(mappings)
     return {
         "filename": fname,
         "removed": removed is not None,
@@ -8582,17 +10330,17 @@ def _dispatch_open_package_with_variables(
         normalize_placeholder_name,
     )
     from yggdrasim_common.gui_server.sessions import get_manager
+    import copy as _copy
 
     path_text = str(path or "").strip()
     if len(path_text) == 0:
         raise ValueError("path is required (file to open).")
 
-    base_response = _dispatch_open_package(ctx=ctx, path=path_text)
-
     pkg_path = Path(os.path.expanduser(path_text)).resolve()
     csv_text = str(variables_path or "").strip()
     csv_resolution = "explicit"
     csv_warning: str | None = None
+    touch_pinned = False
     if csv_text == "":
         # 1) Pinned mapping (operator-curated). Touch the
         #    last-used timestamp so the GUI can sort recently
@@ -8601,7 +10349,7 @@ def _dispatch_open_package_with_variables(
         if pinned is not None and pinned.is_file():
             csv_path = pinned
             csv_resolution = "pinned"
-            _touch_token_mapping(pkg_path)
+            touch_pinned = True
         elif pinned is not None:
             csv_path = None
             csv_warning = (
@@ -8622,6 +10370,24 @@ def _dispatch_open_package_with_variables(
         if csv_path.is_file() is False:
             raise FileNotFoundError(f"variables_path not found: {csv_path}")
 
+    pairs = _parse_sidecar_variables_csv(csv_path) if csv_path is not None else []
+    assignments: dict[str, str] = {}
+    seen_assignment_names: set[str] = set()
+    for raw_name, raw_value in pairs:
+        normalized_name = normalize_placeholder_name(raw_name)
+        folded_name = normalized_name.casefold()
+        if folded_name in seen_assignment_names:
+            raise ValueError(
+                f"token-list {csv_path} defines {normalized_name!r} more than once "
+                "in its first record set."
+            )
+        seen_assignment_names.add(folded_name)
+        assignments[normalized_name] = str(raw_value)
+
+    # Open only after every sidecar path/CSV precondition has passed.  The old
+    # ordering leaked an unreachable SAIP session whenever an explicit CSV was
+    # missing or malformed.
+    base_response = _dispatch_open_package(ctx=ctx, path=path_text)
     sid = base_response["session_id"]
     if csv_path is None:
         base_response["variables_loaded"] = {
@@ -8635,10 +10401,7 @@ def _dispatch_open_package_with_variables(
         }
         return base_response
 
-    handle = get_manager().claim(sid)
-    _ensure_session_state(handle)
-    pairs = _parse_sidecar_variables_csv(csv_path)
-    if len(pairs) == 0:
+    if len(assignments) == 0:
         base_response["variables_loaded"] = {
             "path": str(csv_path),
             "resolution": csv_resolution,
@@ -8647,34 +10410,49 @@ def _dispatch_open_package_with_variables(
         }
         return base_response
 
-    assignments = {name: value for name, value in pairs}
     from Tools.ProfilePackage.saip_profile_template import (
         apply_placeholder_overrides_to_loaded_document,
     )
-    summaries = apply_placeholder_overrides_to_loaded_document(
-        handle["decoded_document"], assignments
-    )
-    for raw_name, raw_value in assignments.items():
-        handle["applied_overrides"][normalize_placeholder_name(raw_name)] = str(raw_value)
-
     from Tools.ProfilePackage.saip_json_codec import (
         build_profile_sequence_from_document,
     )
-    warnings: list[str] = []
+
     try:
-        handle["pes"] = build_profile_sequence_from_document(
-            handle["decoded_document"], workspace_root=_workspace_root()
-        )
-        _mark_dirty(handle, -1)
+        session, handle = _require_saip_session(sid)
+        with session._lock:
+            _assert_handle_mutation_allowed(handle)
+            candidate_document = _copy.deepcopy(handle["decoded_document"])
+            summaries = apply_placeholder_overrides_to_loaded_document(
+                candidate_document,
+                assignments,
+            )
+            candidate_pes = build_profile_sequence_from_document(
+                candidate_document,
+                workspace_root=_workspace_root(),
+            )
+            candidate_pes.to_der()
+            _assert_handle_sequence_allowed(handle, list(candidate_pes.pe_list))
+            handle["decoded_document"] = candidate_document
+            handle["pes"] = candidate_pes
+            for normalized_name, raw_value in assignments.items():
+                handle["applied_overrides"][normalized_name] = str(raw_value)
+            _mark_dirty(handle, -1)
     except Exception as error:
-        warnings.append(f"Document mutated; re-encode failed: {error}")
+        get_manager().close(sid)
+        redacted_error = _redact_secret_assignment_text(error, assignments)
+        if redacted_error != str(error):
+            raise ValueError(redacted_error) from error
+        raise
+
+    if touch_pinned:
+        _touch_token_mapping(pkg_path)
 
     base_response["variables_loaded"] = {
         "path": str(csv_path),
         "resolution": csv_resolution,
         "applied_count": len(assignments),
         "summaries": summaries,
-        "warnings": warnings,
+        "warnings": [],
         "summary": (
             f"Applied {len(assignments)} variable(s) from {csv_path.name} "
             f"({csv_resolution})."
@@ -8703,6 +10481,9 @@ def _dispatch_add_variable_definition(
     from Tools.ProfilePackage.saip_profile_template import (
         normalize_placeholder_name,
     )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        variable_is_secret,
+    )
 
     sid = str(session_id or "").strip()
     name_text = str(name or "").strip()
@@ -8712,6 +10493,16 @@ def _dispatch_add_variable_definition(
         raise ValueError("session_id and name are required.")
     if enc_text not in ("hex", "utf8", "ascii"):
         raise ValueError(f"encoding must be hex / utf8 / ascii (got {enc_text!r}).")
+    if value_text:
+        if enc_text == "hex":
+            value_text = _normalise_hex_input(value_text).hex().upper()
+        elif enc_text == "ascii":
+            try:
+                value_text.encode("ascii")
+            except UnicodeEncodeError as error:
+                raise ValueError(
+                    "ASCII variable definitions cannot contain non-ASCII text."
+                ) from error
     overwrite_flag = bool(overwrite) if overwrite is not None else False
 
     handle = get_manager().claim(sid)
@@ -8731,13 +10522,16 @@ def _dispatch_add_variable_definition(
         "encoding": enc_text,
         "kind": "manual",
     }
+    secret = variable_is_secret(normalised)
+    _mark_dirty(handle, -1)
     return {
         "session_id": sid,
         "name": normalised,
-        "value": value_text,
+        "value": "" if secret else value_text,
+        "value_redacted": secret,
         "encoding": enc_text,
         "definitions_count": len(token_defs),
-        "summary": f"Registered placeholder [{normalised}] = {value_text!r}.",
+        "summary": f"Registered placeholder [{normalised}].",
     }
 
 
@@ -8761,6 +10555,9 @@ def _dispatch_remove_variable_definition(
         extract_template_placeholder_names,
         normalize_placeholder_name,
     )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        variable_is_secret,
+    )
 
     sid = str(session_id or "").strip()
     name_text = str(name or "").strip()
@@ -8772,7 +10569,7 @@ def _dispatch_remove_variable_definition(
     _ensure_session_state(handle)
     token_defs = handle["decoded_document"].get("__ygg_token_defs__")
     if isinstance(token_defs, dict) is False or len(token_defs) == 0:
-        raise LookupError(f"no placeholder definitions registered on this session.")
+        raise LookupError("no placeholder definitions registered on this session.")
 
     normalised = normalize_placeholder_name(name_text)
     if normalised not in token_defs:
@@ -8798,10 +10595,14 @@ def _dispatch_remove_variable_definition(
         )
 
     removed = token_defs.pop(normalised, None)
+    removed_value = str((removed or {}).get("value", ""))
+    secret = variable_is_secret(normalised)
+    _mark_dirty(handle, -1)
     return {
         "session_id": sid,
         "name": normalised,
-        "removed_value": (removed or {}).get("value", ""),
+        "removed_value": "" if secret else removed_value,
+        "removed_value_redacted": secret,
         "definitions_count": len(token_defs),
         "summary": (
             f"Removed placeholder [{normalised}]"
@@ -8834,8 +10635,6 @@ def _dispatch_compare_applications(
     sets on (pe_type, primary AID). Returns the per-row delta plus
     a counts-by-status summary for the report banner.
     """
-    from yggdrasim_common.gui_server.sessions import get_manager
-
     sid = str(session_id or "").strip()
     target_text = str(target_path or "").strip()
     if len(sid) == 0:
@@ -9076,19 +10875,18 @@ def _dispatch_product_summary(
         raise FileExistsError(
             f"target already exists (pass overwrite=true to replace): {target}",
         )
-    target.parent.mkdir(parents=True, exist_ok=True)
-
     if fmt == "html":
-        target.write_text(_format_product_summary_html(summary), encoding="utf-8")
+        output_text = _format_product_summary_html(summary)
     elif fmt == "xml":
-        target.write_text(_format_product_summary_xml(summary), encoding="utf-8")
+        output_text = _format_product_summary_xml(summary)
     else:
-        target.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        output_text = json.dumps(summary, indent=2, ensure_ascii=False)
+    _atomic_write_text(target, output_text, overwrite=overwrite_flag)
 
     return {
         "format": fmt,
         "output_path": str(target),
-        "bytes_written": target.stat().st_size,
+        "bytes_written": len(output_text.encode("utf-8")),
         "action_count": len(summary["actions"]),
     }
 
@@ -9265,11 +11063,23 @@ def _dispatch_add_variable_to_pe(
     if isinstance(current_value, (bytes, bytearray)):
         captured = bytes(current_value).hex().upper()
         if enc_text != "hex":
-            captured = bytes(current_value).decode("utf-8", errors="replace")
+            codec = "ascii" if enc_text == "ascii" else "utf-8"
+            try:
+                captured = bytes(current_value).decode(codec)
+            except UnicodeDecodeError as error:
+                raise ValueError(
+                    f"{section_key}.{path_text} is not valid {codec} text; "
+                    "choose hex encoding to preserve its bytes exactly."
+                ) from error
     else:
         captured = str(current_value)
 
     normalised = normalize_placeholder_name(name_text)
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        variable_is_secret,
+    )
+
+    secret = variable_is_secret(normalised)
     token_defs = handle["decoded_document"].get("__ygg_token_defs__")
     if isinstance(token_defs, dict) is False:
         token_defs = {}
@@ -9295,7 +11105,8 @@ def _dispatch_add_variable_to_pe(
         "field_path": path_text,
         "variable_name": normalised,
         "encoding": enc_text,
-        "captured_value": captured,
+        "captured_value": "" if secret else captured,
+        "captured_value_redacted": secret,
         "summary": (
             f"Replaced {section_key}.{path_text} with [{normalised}]; "
             f"original value captured into __ygg_token_defs__."
@@ -9762,7 +11573,6 @@ def _dispatch_reorder_pes(
     """
     from yggdrasim_common.gui_server.sessions import get_manager
     from Tools.ProfilePackage.saip_json_codec import (
-        build_decoded_document_from_sequence,
         build_profile_sequence_from_document,
     )
 
@@ -9814,15 +11624,15 @@ def _dispatch_reorder_pes(
     pe_list = list(pes.pe_list)
     moved = pe_list.pop(src)
     pe_list.insert(dst, moved)
+    _assert_handle_sequence_allowed(handle, pe_list)
     pes.pe_list = pe_list
 
     # Rebuild the decoded document so section ordering matches the new
     # PE sequence; downstream ``_resolve_pe_index`` lookups depend on
     # this. Then re-encode (ensures the bytes view stays consistent).
-    handle["decoded_document"] = build_decoded_document_from_sequence(
+    handle["decoded_document"] = _rebuilt_document_preserving_metadata(
         pes,
-        handle.get("decoded_document", {}).get("intro")
-        or [f"Profile with {len(pes.pe_list)} profile elements"],
+        handle.get("decoded_document") or {},
     )
     warnings: list[str] = []
     try:
@@ -9854,11 +11664,32 @@ def _dispatch_reorder_pes(
 # operators can edit large variable sets in a spreadsheet.
 
 
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def _spreadsheet_safe_csv_cell(value: Any) -> str:
+    """Prevent exported variable text from becoming a spreadsheet formula."""
+    text = str(value if value is not None else "")
+    if text.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + text
+    return text
+
+
+def _restore_spreadsheet_safe_csv_cell(value: Any) -> str:
+    """Undo only the apostrophe added by :func:`_spreadsheet_safe_csv_cell`."""
+    text = str(value if value is not None else "")
+    if len(text) >= 2 and text[0] == "'" and text[1] in _CSV_FORMULA_PREFIXES:
+        return text[1:]
+    return text
+
+
+@_with_session_lock
 def _dispatch_export_variables_csv(
     ctx: ActionContext,
     *,
     session_id: Any = None,
     output_path: Any = None,
+    overwrite: Any = None,
 ) -> dict[str, Any]:
     """Export every variable + current value to a CSV file.
 
@@ -9871,6 +11702,7 @@ def _dispatch_export_variables_csv(
     operator on a sister profile).
     """
     import csv as _csv
+    import io as _io
     from yggdrasim_common.gui_server.sessions import get_manager
 
     sid = str(session_id or "").strip()
@@ -9878,18 +11710,25 @@ def _dispatch_export_variables_csv(
     if len(sid) == 0 or len(out_text) == 0:
         raise ValueError("session_id and output_path are required.")
     target = Path(os.path.expanduser(out_text)).resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
+    overwrite_flag = bool(overwrite) if overwrite is not None else False
 
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
     payload = _collect_variables(handle["decoded_document"])
     rows = payload.get("variables") or []
     fieldnames = ["name", "value", "kind", "defined", "used_in_document"]
-    with target.open("w", encoding="utf-8", newline="") as stream:
-        writer = _csv.DictWriter(stream, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: row.get(key, "") for key in fieldnames})
+    stream = _io.StringIO(newline="")
+    writer = _csv.DictWriter(stream, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(
+            {
+                key: _spreadsheet_safe_csv_cell(row.get(key, ""))
+                for key in fieldnames
+            }
+        )
+    output_text = stream.getvalue()
+    _atomic_write_text(target, output_text, overwrite=overwrite_flag)
     return {
         "session_id": sid,
         "output_path": str(target),
@@ -9914,6 +11753,8 @@ def _dispatch_import_variables_csv(
     skipped and reported in ``skipped_rows``.
     """
     import csv as _csv
+    import copy as _copy
+    import io as _io
     from yggdrasim_common.gui_server.sessions import get_manager
     from Tools.ProfilePackage.saip_profile_template import (
         apply_placeholder_overrides_to_loaded_document,
@@ -9938,24 +11779,43 @@ def _dispatch_import_variables_csv(
     _ensure_session_state(handle)
 
     assignments: dict[str, str] = {}
+    seen_assignment_names: set[str] = set()
     skipped: list[dict[str, Any]] = []
-    with source.open("r", encoding="utf-8", newline="") as stream:
-        reader = _csv.DictReader(stream)
-        if reader.fieldnames is None or name_col not in reader.fieldnames:
+    raw_csv = _read_bounded_saip_file(source, label="Variable CSV")
+    try:
+        csv_text = raw_csv.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise ValueError(
+            f"Variable CSV must be valid UTF-8: {source}: "
+            f"invalid byte at offset {error.start}."
+        ) from error
+    reader = _csv.DictReader(_io.StringIO(csv_text, newline=""))
+    if reader.fieldnames is None or name_col not in reader.fieldnames:
+        raise ValueError(
+            f"CSV header missing required column {name_col!r}; "
+            f"available: {reader.fieldnames}",
+        )
+    for row_index, row in enumerate(reader, start=2):
+        name = _restore_spreadsheet_safe_csv_cell(
+            row.get(name_col) or ""
+        ).strip()
+        if len(name) == 0:
+            skipped.append({"row": row_index, "reason": "empty name"})
+            continue
+        if value_col not in row:
+            skipped.append({"row": row_index, "reason": f"missing {value_col!r}"})
+            continue
+        value = _restore_spreadsheet_safe_csv_cell(
+            row.get(value_col) or ""
+        )
+        normalized_name = normalize_placeholder_name(name)
+        folded_name = normalized_name.casefold()
+        if folded_name in seen_assignment_names:
             raise ValueError(
-                f"CSV header missing required column {name_col!r}; "
-                f"available: {reader.fieldnames}",
+                f"Variable CSV defines {normalized_name!r} more than once."
             )
-        for row_index, row in enumerate(reader, start=2):
-            name = str(row.get(name_col) or "").strip()
-            if len(name) == 0:
-                skipped.append({"row": row_index, "reason": "empty name"})
-                continue
-            if value_col not in row:
-                skipped.append({"row": row_index, "reason": f"missing {value_col!r}"})
-                continue
-            value = str(row.get(value_col) or "")
-            assignments[name] = value
+        seen_assignment_names.add(folded_name)
+        assignments[normalized_name] = value
 
     if len(assignments) == 0:
         return {
@@ -9966,22 +11826,33 @@ def _dispatch_import_variables_csv(
             "summaries": ["CSV contained no usable rows."],
         }
 
-    summaries = apply_placeholder_overrides_to_loaded_document(
-        handle["decoded_document"],
-        assignments,
-    )
+    candidate_document = _copy.deepcopy(handle["decoded_document"])
+    try:
+        summaries = apply_placeholder_overrides_to_loaded_document(
+            candidate_document,
+            assignments,
+        )
+        candidate_pes = build_profile_sequence_from_document(
+            candidate_document,
+            workspace_root=_workspace_root(),
+        )
+        candidate_pes.to_der()
+    except Exception as error:
+        redacted_error = _redact_secret_assignment_text(error, assignments)
+        if redacted_error != str(error):
+            raise ValueError(redacted_error) from error
+        raise
+    _assert_handle_sequence_allowed(handle, list(candidate_pes.pe_list))
+    handle["decoded_document"] = candidate_document
+    handle["pes"] = candidate_pes
     for name, value in assignments.items():
         normalised = normalize_placeholder_name(name)
         handle["applied_overrides"][normalised] = value
-
-    warnings: list[str] = []
-    try:
-        handle["pes"] = build_profile_sequence_from_document(
-            handle["decoded_document"], workspace_root=_workspace_root()
-        )
-        _mark_dirty(handle, -1)
-    except Exception as error:
-        warnings.append(f"Document mutated; re-encode failed: {error}")
+    _mark_dirty(handle, -1)
+    variable_payload = _collect_variables(
+        handle["decoded_document"],
+        handle.get("inline_placeholder_records") or [],
+    )
 
     return {
         "session_id": sid,
@@ -9989,8 +11860,11 @@ def _dispatch_import_variables_csv(
         "applied_count": len(assignments),
         "skipped_rows": skipped,
         "summaries": summaries,
-        "overrides_applied": dict(handle["applied_overrides"]),
-        "warnings": warnings,
+        "overrides_applied": _redacted_applied_overrides(
+            dict(handle["applied_overrides"]),
+            variable_payload["variables"],
+        ),
+        "warnings": [],
     }
 
 
@@ -10035,7 +11909,7 @@ def _format_html_diff_report(report: dict[str, Any]) -> str:
         "</style></head><body>"
     )
     body_parts: list[str] = [
-        f"<h1>SAIP profile compare</h1>",
+        "<h1>SAIP profile compare</h1>",
         f"<div class='meta'><strong>A:</strong> {label_a} &middot; "
         f"<strong>B:</strong> {label_b}</div>",
     ]
@@ -10081,12 +11955,14 @@ def _format_html_diff_report(report: dict[str, Any]) -> str:
     return head + "".join(body_parts)
 
 
+@_with_session_lock
 def _dispatch_compare_report_html(
     ctx: ActionContext,
     *,
     session_id: Any = None,
     target_path: Any = None,
     output_path: Any = None,
+    overwrite: Any = None,
 ) -> dict[str, Any]:
     """Run ``saip.compare_to_path`` and write the report as HTML.
 
@@ -10101,14 +11977,18 @@ def _dispatch_compare_report_html(
         raise ValueError(
             "session_id, target_path, and output_path are all required.",
         )
-    report = _dispatch_compare_to_path(
+    report = _dispatch_diff_against_path(
         ctx=ctx,
         session_id=sid,
-        target_path=target_text,
+        path=target_text,
     )
     target = Path(os.path.expanduser(out_text)).resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(_format_html_diff_report(report), encoding="utf-8")
+    overwrite_flag = bool(overwrite) if overwrite is not None else False
+    _atomic_write_text(
+        target,
+        _format_html_diff_report(report),
+        overwrite=overwrite_flag,
+    )
     return {
         "session_id": sid,
         "target_path": report.get("target_path", target_text),
@@ -10154,20 +12034,19 @@ def _dispatch_search_pe_text(
     pes = handle["pes"]
     section_keys = _sections_by_pe_index(handle["decoded_document"])
 
+    pattern: re.Pattern[str] | None = None
+    needle = query_text if case_flag else query_text.lower()
     if mode_text == "regex":
         flags = 0 if case_flag else re.IGNORECASE
         try:
             pattern = re.compile(query_text, flags)
         except re.error as error:
             raise ValueError(f"invalid regex {query_text!r}: {error}") from error
-        matcher = lambda haystack: pattern.search(haystack) is not None
-    else:
-        needle = query_text if case_flag else query_text.lower()
-        matcher = (
-            (lambda haystack: needle in haystack)
-            if case_flag
-            else (lambda haystack: needle in haystack.lower())
-        )
+
+    def matcher(haystack: str) -> bool:
+        if pattern is not None:
+            return pattern.search(haystack) is not None
+        return needle in (haystack if case_flag else haystack.lower())
 
     matches: list[dict[str, Any]] = []
     for index, pe in enumerate(pes.pe_list):
@@ -12327,7 +14206,16 @@ def _dispatch_ssim_eaptls_inspect(
     else:
         raise ValueError("pem_or_der must be bytes or string.")
     info = parse_pem_or_der(raw)
-    info["requested_role"] = str(role or "auto").strip().lower()
+    if str(info.get("kind") or "").lower().startswith("private_key"):
+        info.pop("der_hex", None)
+        info["secret_outputs_redacted"] = ["der_hex"]
+    role_text = str(role or "auto").strip().lower() or "auto"
+    allowed_roles = {"auto", "device_certificate", "private_key", "ca"}
+    if role_text not in allowed_roles:
+        raise ValueError(
+            "role must be auto / device_certificate / private_key / ca."
+        )
+    info["requested_role"] = role_text
     return info
 
 
@@ -12440,6 +14328,7 @@ OPEN_UPLOAD_SPEC = ActionSpec(
             kind="string",
             required=True,
             help="Base64-encoded file payload supplied by the browser.",
+            secret=True,
         ),
     ),
     output_kind="json",
@@ -12511,9 +14400,10 @@ LIST_FILES_SPEC = ActionSpec(
         ActionField(
             name="sort_by",
             label="Sort by",
-            kind="string",
+            kind="enum",
             required=False,
             default="natural",
+            choices=["natural", "file_id", "name", "kind", "parent_path", "size"],
             help="natural | file_id | name | kind | parent_path | size",
         ),
         ActionField(
@@ -12555,9 +14445,10 @@ SEARCH_FILES_SPEC = ActionSpec(
         ActionField(
             name="mode",
             label="Search area",
-            kind="string",
+            kind="enum",
             required=False,
             default="all",
+            choices=["all", "name", "fid", "description", "translation"],
             help=(
                 "One of: all (default), name, fid, description, "
                 "translation. ``name`` matches friendly_name + pename; "
@@ -12570,7 +14461,7 @@ SEARCH_FILES_SPEC = ActionSpec(
         ActionField(
             name="regex",
             label="Regex mode",
-            kind="boolean",
+            kind="bool",
             required=False,
             default=False,
             help="Interpret ``query`` as a regex (re.IGNORECASE).",
@@ -12798,7 +14689,7 @@ GFM_ADD_FILE_ELEMENT_SPEC = ActionSpec(
         ActionField(
             name="transaction_index",
             label="Transaction index",
-            kind="integer",
+            kind="int",
             required=False,
             help="Existing fileManagementCMD index to extend. Omit to "
                  "append the new pair as its own transaction.",
@@ -12935,7 +14826,17 @@ CLOSE_SPEC = ActionSpec(
     subsystem="SAIP",
     title="Close package",
     description="Drop the SAIP session and free its in-memory state.",
-    inputs=(_SESSION_FIELD,),
+    inputs=(
+        _SESSION_FIELD,
+        ActionField(
+            name="discard_changes",
+            label="Discard unsaved changes",
+            kind="bool",
+            required=False,
+            default=False,
+            help="Must be enabled to close a package with unsaved edits.",
+        ),
+    ),
     output_kind="json",
     dispatcher=_dispatch_close_package,
     requires_card=False,
@@ -13161,8 +15062,10 @@ SAVE_PACKAGE_SPEC = ActionSpec(
     description=(
         "Persist the current in-memory package to disk. Supports DER "
         "(raw bytes), HEX (ASCII hex of the DER, round-trippable via "
-        "saip.open_package), and decoded JSON (preserves PE names and "
-        "variable bindings the wire DER cannot carry). Format-default "
+        "saip.open_package), ASN.1 value notation, unresolved varder "
+        "templates, and decoded JSON (preserves PE names, variable "
+        "bindings, and placeholder metadata the wire DER cannot carry). "
+        "Format-default "
         "extension is appended when the supplied path has none. By "
         "default refuses to overwrite an existing target — pass "
         "overwrite=true to replace. Clears the dirty flag on success "
@@ -13175,16 +15078,24 @@ SAVE_PACKAGE_SPEC = ActionSpec(
             label="Output path",
             kind="save_path",
             required=True,
-            help="Destination file path (.der / .hex / .json). Double-click to browse.",
+            help=(
+                "Destination file path (.der / .hex / .asn / .varder / .json). "
+                "Double-click to browse."
+            ),
             placeholder="/path/to/profile.der",
         ),
         ActionField(
             name="format",
             label="Output format",
-            kind="string",
+            kind="enum",
             required=False,
             default="der",
-            help="'der' (raw DER), 'hex' (ASCII hex), or 'json' (decoded).",
+            choices=["der", "hex", "asn1", "asn", "varder", "json"],
+            help=(
+                "'der' (raw DER), 'hex' (legacy ASCII hex), 'asn1'/'asn' "
+                "(ASN.1 value notation), 'varder' (unresolved template only), "
+                "or 'json' (decoded tagged authoring document)."
+            ),
         ),
         ActionField(
             name="overwrite",
@@ -14722,6 +16633,7 @@ def _dispatch_batch_lint_paths(
         "errored": 0,
     }
     for resolved in expanded:
+        _raise_if_action_cancelled(ctx)
         entry: dict[str, Any] = {"path": str(resolved)}
         if resolved.is_file() is False:
             entry["error"] = f"not a file: {resolved}"
@@ -14834,11 +16746,30 @@ def _dispatch_batch_personalize(
         load_batch_placeholder_records,
         validate_batch_record_assignments,
     )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        variable_is_secret,
+    )
+    from yggdrasim_common.secure_files import atomic_write_bytes
 
-    raw_text = template_resolved.read_text(encoding="utf-8")
+    template_raw = _read_bounded_saip_file(
+        template_resolved,
+        label="Batch personalization template",
+    )
+    try:
+        raw_text = template_raw.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise ValueError(
+            "Batch personalization template must be valid UTF-8: "
+            f"{template_resolved}: invalid byte at offset {error.start}."
+        ) from error
     loaded_template = json.loads(raw_text)
     if isinstance(loaded_template, dict) is False:
         raise ValueError("Template root JSON value must be an object.")
+    from Tools.ProfilePackage.saip_json_codec import (
+        assert_concrete_export_allowed,
+    )
+
+    assert_concrete_export_allowed(loaded_template)
 
     placeholders = extract_template_placeholder_names(loaded_template)
     if len(placeholders) == 0:
@@ -14846,12 +16777,19 @@ def _dispatch_batch_personalize(
     token_defs_raw = loaded_template.get("__ygg_token_defs__", {})
     token_defs = dict(token_defs_raw) if isinstance(token_defs_raw, dict) else {}
 
+    # Enforce the GUI boundary before the format-specific loader reads the
+    # file.  (The loader may be CSV/JSON/JSONL/YAML.)
+    _read_bounded_saip_file(
+        data_resolved,
+        label="Batch personalization data",
+    )
     records = load_batch_placeholder_records(data_resolved)
     if len(records) == 0:
         raise ValueError("Batch data file did not contain any records.")
 
     validated: list[tuple[str, dict[str, str]]] = []
     for record in records:
+        _raise_if_action_cancelled(ctx)
         try:
             assignments = validate_batch_record_assignments(
                 record.values,
@@ -14868,13 +16806,19 @@ def _dispatch_batch_personalize(
     skipped: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     for index, (label, assignments) in enumerate(validated, start=1):
+        _raise_if_action_cancelled(ctx)
         loaded = _copy.deepcopy(loaded_template)
         try:
             apply_placeholder_overrides_to_loaded_document(loaded, assignments)
             document = dejsonify_document(loaded)
             der = encode_der_from_document(document, _workspace_root())
         except Exception as error:
-            failed.append({"label": label, "error": str(error)})
+            failed.append(
+                {
+                    "label": label,
+                    "error": _redact_secret_assignment_text(error, assignments),
+                }
+            )
             continue
 
         base_stem = batch_output_stem(assignments, index=index)
@@ -14888,13 +16832,33 @@ def _dispatch_batch_personalize(
         if target.exists() and overwrite_flag is False:
             skipped.append({"label": label, "path": str(target)})
             continue
-        target.write_bytes(der)
+        _raise_if_action_cancelled(ctx)
+        try:
+            atomic_write_bytes(
+                target,
+                bytes(der),
+                overwrite=overwrite_flag,
+            )
+        except FileExistsError:
+            skipped.append({"label": label, "path": str(target)})
+            continue
+        redacted_assignments = {
+            str(name): (
+                "" if variable_is_secret(str(name)) else str(value)
+            )
+            for name, value in assignments.items()
+        }
         generated.append(
             {
                 "label": label,
                 "path": str(target),
                 "size_bytes": len(der),
-                "assignments": assignments,
+                "assignments": redacted_assignments,
+                "secret_assignments_redacted": sorted(
+                    str(name)
+                    for name in assignments
+                    if variable_is_secret(str(name))
+                ),
             }
         )
 
@@ -14971,6 +16935,7 @@ def _dispatch_decode_to_json(
     *,
     path: Any = None,
     output_path: Any = None,
+    overwrite: Any = None,
 ) -> dict[str, Any]:
     """One-shot DER / JSON → decoded JSON file writer.
 
@@ -14988,7 +16953,7 @@ def _dispatch_decode_to_json(
     if resolved.is_file() is False:
         raise FileNotFoundError(f"not a file: {resolved}")
     out_resolved = Path(os.path.expanduser(out_text)).resolve()
-    out_resolved.parent.mkdir(parents=True, exist_ok=True)
+    overwrite_flag = bool(overwrite) if overwrite is not None else False
 
     package = _load_package_from_path(resolved)
     _ensure_pysim_importable()
@@ -14996,7 +16961,7 @@ def _dispatch_decode_to_json(
 
     tagged = jsonify_document(package["decoded_document"])
     text = json.dumps(tagged, indent=2, ensure_ascii=False)
-    out_resolved.write_text(text, encoding="utf-8")
+    _atomic_write_text(out_resolved, text, overwrite=overwrite_flag)
     return {
         "input_path": str(resolved),
         "output_path": str(out_resolved),
@@ -15031,8 +16996,7 @@ def _dispatch_save_text_file(
         raise FileExistsError(
             f"target already exists (pass overwrite=true to replace): {target}",
         )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(body, encoding="utf-8")
+    _atomic_write_text(target, body, overwrite=overwrite_flag)
     return {
         "output_path": str(target),
         "bytes_written": len(body.encode("utf-8")),
@@ -15127,12 +17091,12 @@ def _history_apply_swap(
     pop_from: str,
     push_to: str,
 ) -> dict[str, Any]:
-    """Pop a snapshot off ``pop_from``, swap it in, push old onto ``push_to``."""
-    import copy as _copy
+    """Atomically restore one snapshot and preserve the inverse for redo."""
     from Tools.ProfilePackage.saip_json_codec import (
         build_profile_sequence_from_document,
     )
 
+    _assert_handle_mutation_allowed(handle)
     history = _history_init(handle)
     if len(history[pop_from]) == 0:
         verb = "undo" if pop_from == "undo" else "redo"
@@ -15142,35 +17106,50 @@ def _history_apply_swap(
             "undo_depth": len(history["undo"]),
             "redo_depth": len(history["redo"]),
         }
-    snapshot = history[pop_from].pop()
-    history[push_to].append(_copy.deepcopy(handle.get("decoded_document")))
-    while len(history[push_to]) > SAIP_HISTORY_LIMIT:
-        history[push_to].pop(0)
-    handle["decoded_document"] = snapshot
-
-    warnings: list[str] = []
+    snapshot = history[pop_from][-1]
+    target_document, target_overrides, target_inline_records = (
+        _history_snapshot_parts(snapshot)
+    )
+    # Rebuild and scope-check before mutating either the session or its history
+    # stacks. A malformed snapshot can therefore never leave document/PE state
+    # half-swapped.
     try:
-        handle["pes"] = build_profile_sequence_from_document(
-            handle["decoded_document"], workspace_root=_workspace_root()
+        target_pes = build_profile_sequence_from_document(
+            target_document,
+            workspace_root=_workspace_root(),
         )
     except Exception as error:
-        warnings.append(f"Document mutated; re-encode failed: {error}")
+        raise RuntimeError(
+            f"SAIP history snapshot could not be restored: {error}"
+        ) from error
+    _assert_handle_sequence_allowed(handle, list(target_pes.pe_list))
+
+    current_snapshot = _capture_history_snapshot(handle)
+    history[pop_from].pop()
+    history[push_to].append(current_snapshot)
+    while len(history[push_to]) > SAIP_HISTORY_LIMIT:
+        history[push_to].pop(0)
+    handle["decoded_document"] = target_document
+    handle["pes"] = target_pes
+    handle["applied_overrides"] = target_overrides
+    handle["inline_placeholder_records"] = target_inline_records
     # We don't know exactly which PE changed (snapshots are document-
     # wide), so mark every PE dirty so the GUI reflects all changes.
     for index in range(len(handle["pes"].pe_list)):
-        handle["dirty_pes"].add(index)
+        _mark_dirty(handle, index)
 
     return {
         "applied": True,
         "summary": (
             "undid last edit." if pop_from == "undo" else "redid last edit."
         ),
-        "warnings": warnings,
+        "warnings": [],
         "undo_depth": len(history["undo"]),
         "redo_depth": len(history["redo"]),
     }
 
 
+@_with_session_lock
 def _dispatch_undo(
     ctx: ActionContext,
     *,
@@ -15189,6 +17168,7 @@ def _dispatch_undo(
     return result
 
 
+@_with_session_lock
 def _dispatch_redo(
     ctx: ActionContext,
     *,
@@ -15293,9 +17273,10 @@ PRODUCT_SUMMARY_SPEC = ActionSpec(
         ActionField(
             name="format",
             label="Format",
-            kind="string",
+            kind="enum",
             required=False,
             default="html",
+            choices=["html", "xml", "json"],
             help="html | xml | json (json default when output_path is empty).",
         ),
         ActionField(
@@ -15381,9 +17362,10 @@ ADD_VARIABLE_TO_PE_SPEC = ActionSpec(
         ActionField(
             name="encoding",
             label="Encoding hint",
-            kind="string",
+            kind="enum",
             required=False,
             default="hex",
+            choices=["hex", "utf8", "ascii"],
             help="hex | utf8 | ascii — controls how the captured value is stored.",
         ),
     ),
@@ -15531,6 +17513,14 @@ EXPORT_VARIABLES_CSV_SPEC = ActionSpec(
             required=True,
             help="Destination .csv file; parent directories are created.",
         ),
+        ActionField(
+            name="overwrite",
+            label="Overwrite existing",
+            kind="bool",
+            required=False,
+            default=False,
+            help="When false, an existing CSV file is left untouched.",
+        ),
     ),
     output_kind="json",
     dispatcher=_dispatch_export_variables_csv,
@@ -15611,6 +17601,14 @@ COMPARE_REPORT_HTML_SPEC = ActionSpec(
             required=True,
             help="Destination .html file; parent directories are created.",
         ),
+        ActionField(
+            name="overwrite",
+            label="Overwrite existing",
+            kind="bool",
+            required=False,
+            default=False,
+            help="When false, an existing report is left untouched.",
+        ),
     ),
     output_kind="json",
     dispatcher=_dispatch_compare_report_html,
@@ -15642,9 +17640,10 @@ SEARCH_PE_TEXT_SPEC = ActionSpec(
         ActionField(
             name="mode",
             label="Mode",
-            kind="string",
+            kind="enum",
             required=False,
             default="substring",
+            choices=["substring", "regex"],
             help='"substring" (default) or "regex".',
         ),
         ActionField(
@@ -16029,9 +18028,10 @@ ADD_VARIABLE_DEFINITION_SPEC = ActionSpec(
         ActionField(
             name="encoding",
             label="Encoding hint",
-            kind="string",
+            kind="enum",
             required=False,
             default="hex",
+            choices=["hex", "utf8", "ascii"],
             help="hex | utf8 | ascii — controls how the value is interpreted.",
         ),
         ActionField(
@@ -16117,9 +18117,10 @@ EXPORT_PE_SPEC = ActionSpec(
         ActionField(
             name="format",
             label="Format",
-            kind="string",
+            kind="enum",
             required=False,
             default="der",
+            choices=["der", "hex", "json"],
             help="der | hex | json",
         ),
         ActionField(
@@ -16211,6 +18212,14 @@ DECODE_TO_JSON_SPEC = ActionSpec(
             kind="save_path",
             required=True,
             help="Destination .json path; parent directories are created.",
+        ),
+        ActionField(
+            name="overwrite",
+            label="Overwrite existing",
+            kind="bool",
+            required=False,
+            default=False,
+            help="When false, an existing JSON file is left untouched.",
         ),
     ),
     output_kind="json",
@@ -16918,12 +18927,15 @@ SSIM_EAPTLS_INSPECT_SPEC = ActionSpec(
             kind="string",
             required=True,
             help="PEM block (with -----BEGIN-----) or hex-encoded DER bytes.",
+            secret=True,
         ),
         ActionField(
             name="role",
             label="Intended role",
-            kind="string",
+            kind="enum",
             required=False,
+            default="auto",
+            choices=["auto", "device_certificate", "private_key", "ca"],
             help="auto (default) / device_certificate / private_key / ca.",
         ),
     ),
@@ -16948,7 +18960,13 @@ SSIM_EAPTLS_MATCH_PAIR_SPEC = ActionSpec(
     ),
     inputs=(
         ActionField(name="certificate", label="Certificate", kind="string", required=True),
-        ActionField(name="private_key", label="Private key", kind="string", required=True),
+        ActionField(
+            name="private_key",
+            label="Private key",
+            kind="string",
+            required=True,
+            secret=True,
+        ),
     ),
     output_kind="json",
     dispatcher=_dispatch_ssim_eaptls_match_pair,

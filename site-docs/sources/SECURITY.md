@@ -17,8 +17,9 @@ Security fixes are accepted on the actively-maintained line:
 
 | Version line | Supported | Notes |
 | --- | --- | --- |
-| `1.0.x` (released `v1.0.0`) | Yes | Tracked on the `release/1.0.x` branch and the `v1.0.0` tag. |
-| `main` (post-v1 R2 staging) | Yes | Pre-release work-in-progress; fixes that apply to v1 are back-ported. |
+| `2.0.x` (released `v2.0.0`) | Yes | Current release line, tracked on `release/2.0.x`. |
+| `1.0.x` (latest `v1.0.2`) | Yes | Security-maintenance line, tracked on `release/1.0.x`. |
+| `main` | Yes | Active development; applicable fixes are back-ported to supported release lines. |
 | Any earlier RC tag (`Feb 2026 RCs`) | No | Superseded by `v1.0.0`. Re-base onto a supported line. |
 
 ## How to report a vulnerability
@@ -77,9 +78,10 @@ In scope:
 
 Out of scope (these are intentional research surfaces):
 
-- The bundled GSMA **SGP.26 test certificates and keys** under
-  `SCP11/` and `SCP11/SGP.26_test_Certs/`. They are publicly known
-  test material; see `SCP11/TEST_MATERIAL_NOTICE.md`.
+- The GSMA **SGP.26 test certificates and keys** an operator places
+  under `SCP11/` and `SCP11/SGP.26_test_Certs/`. They are publicly
+  known test material and are not tracked in this repository; see
+  `SCP11/TEST_MATERIAL_NOTICE.md`.
 - Demo SCP03 / SCP80 keys gated by
   `YGGDRASIM_ALLOW_DEMO_KEYS=1`.
 - Quirks / plugin loading paths gated by
@@ -110,3 +112,8 @@ For context, the following hardening landed before `v1.0.0`:
 - `pyscard`, `pysim`, and operator-only state directories are
   excluded from the published wheel and Docker image (see
   `.gitignore`, `.dockerignore`, `MANIFEST.in`).
+- The GUI file picker is constrained to the directories it offers
+  when running `--web-server`, so an off-host session cannot
+  enumerate the whole filesystem (`YGGDRASIM_GUI_FS_ROOTS` to
+  override). `--gui` stays unrestricted because it is bound to
+  loopback on the operator's own machine.

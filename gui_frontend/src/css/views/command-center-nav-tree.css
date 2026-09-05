@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Command Center nav tree (Card Admin / eSIM / Tools / Env) --------- */
 
 #command-center-nav {
@@ -72,6 +73,12 @@
   margin-left: 10px;
 }
 
+.cc-nav-leaf-item {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .cc-nav-group.is-open > .cc-nav-children {
   display: flex;
 }
@@ -99,4 +106,3 @@
 #command-center-nav .cc-nav-leaf.is-stub:hover {
   opacity: 0.85;
 }
-

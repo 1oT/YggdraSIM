@@ -154,8 +154,8 @@ class _ToolkitHarness(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
-            iccid="8949000000000000001",
+            eid="89049032123451234512345678901235",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",
@@ -336,7 +336,7 @@ class GetReaderStatusTests(_ToolkitHarness):
 
 
 class EventDownloadGap8Tests(_ToolkitHarness):
-    """Round-8 Event Download additions: SS, USSD, Local Connection."""
+    """ETSI TS 102 223 §7.5.14 Local Connection event download."""
 
     def _envelope(self, *body: bytes) -> bytes:
         joined = b"".join(body)
@@ -346,40 +346,19 @@ class EventDownloadGap8Tests(_ToolkitHarness):
         del payload
         return b"", 0x90, 0x00
 
-    def test_ss_event_latches_ss_string(self) -> None:
-        ss_blob = bytes.fromhex("8101FF")
-        envelope = self._envelope(
-            tlv("99", b"\x0A"),
-            tlv("89", ss_blob),
-        )
-        self.toolkit.handle_envelope(envelope, self._fallback)
-        self.assertEqual(self.state.toolkit.last_event_code, 0x0A)
-        self.assertEqual(self.state.toolkit.last_ss_event_data, ss_blob)
-
-    def test_ussd_event_latches_dcs_and_text(self) -> None:
-        text = b"hello"
-        envelope = self._envelope(
-            tlv("99", b"\x0B"),
-            tlv("8A", b"\x0F" + text),
-        )
-        self.toolkit.handle_envelope(envelope, self._fallback)
-        self.assertEqual(self.state.toolkit.last_event_code, 0x0B)
-        self.assertEqual(self.state.toolkit.last_ussd_event_dcs, 0x0F)
-        self.assertEqual(self.state.toolkit.last_ussd_event_data, text)
-
     def test_local_connection_event_sets_active_flag(self) -> None:
         envelope = self._envelope(
-            tlv("99", b"\x0C"),
+            tlv("99", b"\x0D"),
             tlv("40", b"\x80"),
         )
         self.toolkit.handle_envelope(envelope, self._fallback)
         self.assertTrue(self.state.toolkit.local_connection_active)
-        self.assertEqual(self.state.toolkit.last_event_code, 0x0C)
+        self.assertEqual(self.state.toolkit.last_event_code, 0x0D)
 
     def test_local_connection_event_clears_active_flag_on_terminate(self) -> None:
         self.state.toolkit.local_connection_active = True
         envelope = self._envelope(
-            tlv("99", b"\x0C"),
+            tlv("99", b"\x0D"),
             tlv("40", b"\x00"),
         )
         self.toolkit.handle_envelope(envelope, self._fallback)

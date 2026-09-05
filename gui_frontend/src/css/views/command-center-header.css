@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Command Center (R2-004 Phase C) ------------------------------------ */
 
 #command-center-nav .subsystem-entry {
@@ -41,7 +42,7 @@
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  border: 1px solid rgba(163, 190, 140, 0.42);
+  border: 1px solid color-mix(in oklab, var(--ok) 42%, transparent);
   border-radius: var(--radius-pill);
   background: var(--ok-soft);
   color: var(--ok);
@@ -71,12 +72,12 @@
 
 .overview-module-card[data-cb-state="running"],
 .overview-module-card[data-hil-trace-state="running"] {
-  border-color: rgba(163, 190, 140, 0.45);
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
 }
 
 .overview-module-card[data-cb-state="running"] .overview-module-card-badge,
 .overview-module-card[data-hil-trace-state="running"] .overview-module-card-badge {
-  border-color: rgba(163, 190, 140, 0.42);
+  border-color: color-mix(in oklab, var(--ok) 42%, transparent);
   background: var(--ok-soft);
   color: var(--ok);
 }
@@ -121,7 +122,7 @@
 
 .overview-module-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: 12px;
 }
 
@@ -167,7 +168,7 @@
   background: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 11px 12px;
   cursor: pointer;
   transition: border-color var(--transition-fast),
@@ -183,8 +184,12 @@
   outline: none;
 }
 
+.overview-module-card:focus-visible {
+  box-shadow: 0 0 0 3px var(--focus-ring-soft);
+}
+
 .overview-module-card.is-stub {
-  opacity: 0.7;
+  border-style: dashed;
 }
 
 .overview-module-card-title {
@@ -201,7 +206,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: var(--fg-dim);
-  background: var(--bg-elev2);
+  background: var(--bg-elev-2);
   padding: 2px 7px;
   font-size: 10px;
   font-weight: 600;

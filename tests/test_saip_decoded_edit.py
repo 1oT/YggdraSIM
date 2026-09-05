@@ -443,7 +443,7 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
     def test_enumerates_fillFileContent_for_iccid_and_imsi(self) -> None:
         pe_value = {
             "ef-iccid": [
-                {"@": ["fillFileContent", {_TAG_BYTES: "98640000000000000000"}]},
+                {"@": ["fillFileContent", {_TAG_BYTES: "98880000000000000000"}]},
             ],
             "ef-imsi": [
                 {"@": ["fillFileContent", {_TAG_BYTES: "0829012345678901234F"}]},
@@ -524,7 +524,10 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
                         "createFCP",
                         {
                             "fileDescriptor": {_TAG_BYTES: "4121"},
-                            "fileID": {_TAG_BYTES: "4F41"},
+                            # 4F42 per TS 31.102 §4.4.5.2. 4F41 in DF.WLAN
+                            # is EF.Pseudo, which holds a pseudonym rather
+                            # than the PLMN list filled in below.
+                            "fileID": {_TAG_BYTES: "4F42"},
                         },
                     ]},
                     {"@": ["fillFileContent", {_TAG_BYTES: "32F410FFFF"}]},
@@ -606,7 +609,7 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
     def test_rel_path_round_trips_back_to_raw_value(self) -> None:
         pe_value = {
             "ef-iccid": [
-                {"@": ["fillFileContent", {_TAG_BYTES: "98640000000000000000"}]},
+                {"@": ["fillFileContent", {_TAG_BYTES: "98880000000000000000"}]},
             ],
         }
         entries = enumerate_pe_decodable_fields(pe_value, pe_section_key="usim")

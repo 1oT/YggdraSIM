@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- scan result layout -------------------------------------------------- */
 
 .cc-scan-header {
@@ -24,7 +25,7 @@
 }
 
 .cc-tree {
-  background: var(--code-bg, var(--bg-hover));
+  background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 10px 12px;

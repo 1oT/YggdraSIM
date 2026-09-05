@@ -136,6 +136,12 @@ class SingletonDuplicateTests(unittest.TestCase):
 class PeIdentificationTests(unittest.TestCase):
     """YRL-PID-001: PE missing identification. YRL-PID-002: duplicate values."""
 
+    def test_pid001_does_not_require_identification_on_profile_header(self) -> None:
+        doc = _make_doc(rfm={"identification": 5, "type": "rfm"})
+        doc["sections"]["header"].pop("identification")
+        codes = _codes(doc)
+        self.assertNotIn("YRL-PID-001", codes)
+
     def test_pid001_missing_identification(self) -> None:
         doc = _make_doc(rfm={"type": "rfm"})
         codes = _codes(doc)

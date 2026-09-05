@@ -175,16 +175,15 @@ def test_linear_fixed_ef_computes_total_from_rec_len_times_num_rec():
     assert out["rec_len"] == 0x14
     assert out["num_rec"] == 0x0A
     assert out["file_size"] == 0x14 * 0x0A  # 200 = 0xC8
-    # Tag 82 linear = 82 04 42 21 <RECLEN_16>.
-    assert "8204422100" in out["fcp_hex"]  # 82 04 42 21 00 14
-    assert "0014" in out["fcp_hex"]
+    # Tag 82 linear = descriptor/coding + RECLEN_16 + NUM_RECORDS_8.
+    assert "8205422100140A" in out["fcp_hex"]
     # Tag 80 size = 2 bytes carrying 0x00C8.
     assert "800200C8" in out["fcp_hex"]
 
 
 def test_linear_fixed_ef_rejects_zero_records():
     build = _build()
-    with pytest.raises(ValueError, match="positive"):
+    with pytest.raises(ValueError, match="range 1..255"):
         build(
             file_type="LINEAR_FIXED_EF",
             full_path="3F006F3A",
@@ -271,17 +270,32 @@ def test_full_path_empty_rejected():
         )
 
 
-def test_fcp_body_longer_than_127_bytes_errors_cleanly():
+def test_fcp_body_longer_than_127_bytes_uses_canonical_long_form():
     build = _build()
-    # Force a pathological security-attribute TLV to overflow short-form.
+    # Force the outer FCP beyond short-form BER while keeping the inner
+    # security-attribute TLV valid.
     huge_sec = "8C" + f"{120:02X}" + ("FF" * 120)  # 122 bytes
-    with pytest.raises(ValueError, match="short-form length"):
-        build(
-            file_type="TRANSPARENT_EF",
-            full_path="3F002F00",
-            sec_attr_hex=huge_sec,
-            file_size_hex="0010",
-        )
+    result = build(
+        file_type="TRANSPARENT_EF",
+        full_path="3F002F00",
+        sec_attr_hex=huge_sec,
+        file_size_hex="0010",
+    )
+    raw = bytes.fromhex(result["fcp_hex"])
+    assert raw[:2] == b"\x62\x81"
+    assert raw[2] == len(raw) - 3
+
+
+def test_a5_value_longer_than_127_bytes_uses_canonical_long_form():
+    build = _build()
+    result = build(
+        file_type="TRANSPARENT_EF",
+        full_path="3F002F00",
+        sec_attr_hex="8C0140",
+        file_size_hex="0010",
+        prop_a5_hex="AA" * 128,
+    )
+    assert "A58180" + ("AA" * 128) in result["fcp_hex"]
 
 
 # ----------------------------------------------------------------------
@@ -307,7 +321,7 @@ def test_wire_matches_cli_wizard_for_transparent_ef():
     )
     # Body: 82 02 41 21 | 83 02 2F 00 | 8A 01 05 | 8C 01 40 |
     #       80 02 00 10 | 88 00
-    # Total body = 2+2+3+3+3+3+3+2 = ... let's just recompute from the hex.
+    # Body length is recomputed from the hex rather than tracked by hand.
     expected_body = (
         "82024121"     # tag 82 transparent EF descriptor
         + "83022F00"   # tag 83 FID

@@ -23,6 +23,7 @@ whole heavyweight pySim stack.
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from yggdrasim_common.gui_server.actions.saip import (
     _filesystem_tree_rows,
@@ -117,6 +118,36 @@ class TemplateFilesystemTreeTests(unittest.TestCase):
         self.assertEqual(row["parent_path"], "3F00")
         self.assertTrue(row["fid_chain"].startswith("3F00/2F02"))
         self.assertEqual(row["friendly_name"], "EF.ICCID")
+
+    def test_explicit_ef_fid_override_replaces_template_leaf_in_chain(self) -> None:
+        document = self._document()
+        descriptor = document["sections"]["mf"]["ef-iccid"][0][1]
+        descriptor["fileID"] = _hex("2FE2")
+
+        rows = _filesystem_tree_rows(document)
+        row = next(r for r in rows if r["field_path"] == "ef-iccid")
+
+        self.assertEqual(row["file_id"], "2FE2")
+        self.assertEqual(row["parent_path"], "3F00")
+        self.assertEqual(row["fid_chain"], "3F00/2FE2")
+
+    def test_explicit_df_fid_override_propagates_to_child_chain(self) -> None:
+        document = self._document()
+        document["sections"]["telecom"]["df-telecom"][0][1]["fileID"] = _hex(
+            "7F11"
+        )
+
+        rows = _filesystem_tree_rows(document)
+        df_telecom = next(r for r in rows if r["field_path"] == "df-telecom")
+        ef_arr = next(
+            r
+            for r in rows
+            if r["section_key"] == "telecom" and r["field_path"] == "ef-arr"
+        )
+
+        self.assertEqual(df_telecom["fid_chain"], "3F00/7F11")
+        self.assertEqual(ef_arr["parent_path"], "3F00/7F11")
+        self.assertEqual(ef_arr["fid_chain"], "3F00/7F11/6F06")
 
     def test_df_phonebook_nests_under_df_telecom(self) -> None:
         rows = _filesystem_tree_rows(self._document())
@@ -750,6 +781,11 @@ class SearchFilesDispatcherTests(unittest.TestCase):
         # Two ADFs sharing FID 6F40 + a GFM-created EF.ADN under DF.TELECOM.
         # Built directly so the test does not need a real session manager.
         return {
+            # A live SAIP session always carries both the decoded projection
+            # and its ProfileElementSequence.  The search dispatcher only
+            # reads the projection, so an empty sequence-shaped stub is
+            # sufficient here while still exercising the real session guard.
+            "pes": SimpleNamespace(pe_list=[]),
             "decoded_document": {
                 "sections": {
                     "usim": {

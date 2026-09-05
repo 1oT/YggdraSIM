@@ -19,11 +19,24 @@ from datetime import datetime, timezone
 from threading import Event
 from typing import Any, Protocol
 
+# ``signal.SIGKILL`` is POSIX-only and is evaluated at the call site, so it
+# cannot sit behind the platform guard inside the callee.
+_SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
 from yggdrasim_common.card_backend import CARD_RELAY_MARKER_FILENAME, is_simulated_card_backend
+from yggdrasim_common.frozen_dispatch import build_module_command
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 from yggdrasim_common.runtime_paths import ensure_runtime_dir, runtime_path
 
+from .device_reset import (
+    SimtraceResetConfig,
+    SimtraceResetOutcome,
+    add_reset_arguments,
+    build_reset_config_from_args,
+    normalize_reset_mode,
+    reset_simtrace_device,
+)
 from .main import add_bridge_runtime_arguments, build_bridge_config_from_args
 from .router import BridgeConfig
 
@@ -447,6 +460,7 @@ def create_usb_presence_monitor(
 class HilBridgeSupervisorConfig:
     bridge: BridgeConfig
     remsim_client: "RemsimClientConfig" = field(default_factory=lambda: RemsimClientConfig())
+    device_reset: SimtraceResetConfig = field(default_factory=SimtraceResetConfig)
     debug_enabled: bool = False
     bridge_python: str = sys.executable
     usb_match_terms: tuple[str, ...] = DEFAULT_USB_MATCH_TERMS
@@ -483,6 +497,10 @@ class HilBridgeSupervisor:
     _next_start_not_before: float = field(default=0.0, init=False, repr=False)
     _next_remsim_start_not_before: float = field(default=0.0, init=False, repr=False)
     _next_start_reason: str = field(default="", init=False, repr=False)
+    _next_device_reset_not_before: float = field(default=0.0, init=False, repr=False)
+    _device_reset_outcome: SimtraceResetOutcome | None = field(default=None, init=False, repr=False)
+    _device_reset_at: str = field(default="", init=False, repr=False)
+    _device_reset_count: int = field(default=0, init=False, repr=False)
 
     def request_stop(self) -> None:
         self._stop_event.set()
@@ -566,6 +584,12 @@ class HilBridgeSupervisor:
                         reason=self._bridge_restart_pending_reason(remaining),
                     )
                     return
+                # Clear the board before every new session generation.
+                # The reset re-enumerates the SIMtrace2 under a fresh USB
+                # address, so both children below must be started from the
+                # snapshot this returns rather than the pre-reset one.
+                snapshot = self._reset_device_before_session(snapshot)
+                remsim_allowed = bool(self.config.remsim_client.enabled) and bool(snapshot.present)
                 self._start_bridge_child(snapshot)
                 bridge_running = self._bridge_is_running()
 
@@ -645,6 +669,91 @@ class HilBridgeSupervisor:
         if len(self._next_start_reason.strip()) == 0:
             return base
         return f"{base} {self._next_start_reason.strip()}"
+
+    def _reset_device_before_session(self, snapshot: UsbPresenceSnapshot) -> UsbPresenceSnapshot:
+        """Reboot the SIMtrace2 board before a new bridge generation starts.
+
+        This is the remote stand-in for the board's physical reset
+        button: the cardem firmware reboots its microcontroller as soon
+        as USB drops below the ``CONFIGURED`` state, so a host-issued
+        USB reset (or a VBUS cycle) leaves the card-emulation state
+        machine as clean as a power-up.
+
+        Returns the snapshot later starts should use. A successful
+        reset re-enumerates the board under a *new* USB device address,
+        and ``osmo-remsim-client-st2`` is pinned to that address with
+        ``-A``, so continuing with the pre-reset snapshot would hand the
+        client a stale selector.
+        """
+        config = self.config.device_reset
+        if config.enabled is False:
+            return snapshot
+        if bool(snapshot.present) is False:
+            return snapshot
+
+        now = float(self.monotonic())
+        if now < self._next_device_reset_not_before:
+            LOGGER.debug(
+                "Skipping SIMtrace2 reset; next attempt allowed in %.1fs",
+                max(0.0, self._next_device_reset_not_before - now),
+            )
+            return snapshot
+
+        if self._remsim_is_running():
+            # Never reset the bus underneath an open libusb handle.
+            self._stop_remsim_child("resetting the SIMtrace2 board")
+
+        device = next(
+            (candidate for candidate in snapshot.devices if candidate.usable_for_remsim),
+            None,
+        )
+        outcome = reset_simtrace_device(
+            config=config,
+            bus=getattr(device, "bus", 0),
+            address=getattr(device, "address", 0),
+            presence_probe=self._usb_presence_probe,
+        )
+        self._next_device_reset_not_before = float(self.monotonic()) + max(
+            0.0,
+            float(config.min_interval_seconds or 0.0),
+        )
+        self._device_reset_outcome = outcome
+        self._device_reset_at = _utc_timestamp()
+        if outcome.performed:
+            self._device_reset_count += 1
+            LOGGER.info("SIMtrace2 reset before session (%s): %s", outcome.mode, outcome.detail)
+        else:
+            LOGGER.warning(
+                "SIMtrace2 reset before session did not run: %s",
+                outcome.error or outcome.detail,
+            )
+            return snapshot
+
+        refreshed = self.usb_monitor.snapshot()
+        if refreshed.detection_ok and refreshed.present:
+            return refreshed
+        return snapshot
+
+    def _usb_presence_probe(self) -> bool:
+        snapshot = self.usb_monitor.snapshot()
+        return bool(snapshot.detection_ok) and bool(snapshot.present)
+
+    def _device_reset_state_payload(self) -> dict[str, Any]:
+        config = self.config.device_reset
+        payload: dict[str, Any] = {
+            "mode": normalize_reset_mode(config.mode),
+            "enabled": bool(config.enabled),
+            "count": int(self._device_reset_count),
+            "lastAt": str(self._device_reset_at or ""),
+            "minIntervalSeconds": float(config.min_interval_seconds or 0.0),
+            "settleTimeoutSeconds": float(config.settle_timeout_seconds or 0.0),
+            "uhubctlLocation": str(config.uhubctl_location or ""),
+            "uhubctlPort": str(config.uhubctl_port or ""),
+        }
+        outcome = self._device_reset_outcome
+        if outcome is not None:
+            payload["last"] = outcome.as_state_payload()
+        return payload
 
     def _start_bridge_child(self, snapshot: UsbPresenceSnapshot) -> None:
         self._cleanup_stale_bridge_marker()
@@ -739,7 +848,7 @@ class HilBridgeSupervisor:
         try:
             child.wait(timeout=max(1.0, float(self.config.termination_timeout_seconds)))
         except (subprocess.TimeoutExpired, OSError):
-            killed_group = self._signal_child_process_group(pid, signal.SIGKILL)
+            killed_group = self._signal_child_process_group(pid, _SIGKILL)
             if killed_group is False:
                 try:
                     child.kill()
@@ -770,7 +879,7 @@ class HilBridgeSupervisor:
         try:
             child.wait(timeout=max(1.0, float(self.config.termination_timeout_seconds)))
         except (subprocess.TimeoutExpired, OSError):
-            killed_group = self._signal_child_process_group(pid, signal.SIGKILL)
+            killed_group = self._signal_child_process_group(pid, _SIGKILL)
             if killed_group is False:
                 try:
                     child.kill()
@@ -836,11 +945,10 @@ class HilBridgeSupervisor:
 
     def _build_bridge_command(self) -> list[str]:
         bridge = self.config.bridge
-        command = [
-            str(self.config.bridge_python or sys.executable),
-            "-m",
+        command = build_module_command(
             "Tools.HilBridge.main",
-        ]
+            source_python=str(self.config.bridge_python or "").strip() or None,
+        )
         if self.config.debug_enabled:
             command.append("--debug")
         command.extend(
@@ -889,6 +997,8 @@ class HilBridgeSupervisor:
             command.append("--no-gsmtap")
         if bridge.card_trace_enabled:
             command.append("--card-trace")
+        if getattr(bridge, "relay_session_reset_enabled", True) is False:
+            command.append("--no-relay-session-reset")
         # Card-source overrides — when the operator has pinned a remote
         # ``yggdrasim-card-bridge`` URL on the supervisor, propagate it
         # to the spawned bridge subprocess so the card-stream feature
@@ -1027,6 +1137,7 @@ class HilBridgeSupervisor:
             "remsimClientCommand": self._build_remsim_command(snapshot=snapshot) if self.config.remsim_client.enabled else [],
             "remsimClientHost": self._remsim_host(),
             "remsimClientPort": self._remsim_port(),
+            "simtraceReset": self._device_reset_state_payload(),
             "readerIndex": int(self.config.bridge.reader_index),
             "readerName": str(self.config.bridge.reader_name),
             "remoteCardUrl": str(getattr(self.config.bridge, "remote_card_url", "") or ""),
@@ -1148,7 +1259,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--bridge-python",
         type=str,
         default=sys.executable,
-        help="Python interpreter used to spawn the bridge child process.",
+        help=(
+            "Python interpreter used to spawn the bridge child in source mode. "
+            "Frozen bundles use the allow-listed internal dispatcher."
+        ),
     )
     parser.add_argument(
         "--no-remsim-client",
@@ -1191,6 +1305,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Additional raw argument forwarded to osmo-remsim-client-st2. Repeat as needed. Use --remsim-arg=<value> for forwarded flags such as -V or -H.",
     )
+    add_reset_arguments(parser)
     add_bridge_runtime_arguments(parser, include_list_readers=False)
     return parser
 
@@ -1223,6 +1338,7 @@ def build_supervisor_config_from_args(args: argparse.Namespace) -> HilBridgeSupe
             client_slot=getattr(args, "remsim_client_slot", None),
             extra_args=_normalize_cli_args(getattr(args, "remsim_arg", [])),
         ),
+        device_reset=build_reset_config_from_args(args),
         debug_enabled=bool(getattr(args, "debug", False)),
         bridge_python=str(args.bridge_python or sys.executable),
         usb_match_terms=_normalize_usb_match_terms(args.usb_match),

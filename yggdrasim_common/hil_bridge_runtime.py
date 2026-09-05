@@ -16,11 +16,18 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
+from .card_backend import (
+    CARD_RELAY_MARKER_FILENAME,
+    card_relay_marker_path,
+    clear_card_relay_marker,
+    read_card_relay_marker,
+)
+from .frozen_dispatch import build_module_command
 from .progress import progress_session
-from .runtime_paths import runtime_path
+from .runtime_paths import is_frozen, runtime_path
 
 SUPERVISOR_STATE_FILENAME = "hil_bridge_supervisor.json"
-CARD_RELAY_STATE_FILENAME = "hil_bridge_card_relay.json"
+CARD_RELAY_STATE_FILENAME = CARD_RELAY_MARKER_FILENAME
 DEFAULT_SERVICE_NAME = "yggdrasim-hil-supervisor.service"
 DEFAULT_USB_VIDPID = "1d50:60e3"
 DEFAULT_HTTP_TIMEOUT_SECONDS = 5.0
@@ -30,6 +37,10 @@ DEFAULT_BRIDGE_READY_POLL_SECONDS = 0.25
 REMSIM_BINARY_ENV = "YGGDRASIM_HIL_REMSIM_BINARY"
 REMSIM_ARGS_ENV = "YGGDRASIM_HIL_REMSIM_ARGS"
 CARD_TRACE_ENV = "YGGDRASIM_HIL_CARD_TRACE"
+SIMTRACE_RESET_ENV = "YGGDRASIM_HIL_SIMTRACE_RESET"
+UHUBCTL_LOCATION_ENV = "YGGDRASIM_HIL_UHUBCTL_LOCATION"
+UHUBCTL_PORT_ENV = "YGGDRASIM_HIL_UHUBCTL_PORT"
+UHUBCTL_BINARY_ENV = "YGGDRASIM_HIL_UHUBCTL_BINARY"
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on", "debug"}
 _REMSIM_VALUE_FLAGS = {"-i", "-p", "-c", "-n", "-V", "-P", "-C", "-I", "-S", "-A", "-H"}
 
@@ -51,6 +62,10 @@ class HilBridgeUserServiceOptions:
     remote_card_token_file: str = ""
     remsim_binary: str = ""
     remsim_args: tuple[str, ...] = ()
+    simtrace_reset_mode: str = ""
+    uhubctl_binary: str = ""
+    uhubctl_location: str = ""
+    uhubctl_port: str = ""
     service_name: str = DEFAULT_SERVICE_NAME
     documentation_path: str = ""
     environment_overrides: tuple[tuple[str, str], ...] = ()
@@ -61,7 +76,7 @@ def supervisor_state_path() -> str:
 
 
 def card_relay_state_path() -> str:
-    return runtime_path("state", CARD_RELAY_STATE_FILENAME)
+    return card_relay_marker_path()
 
 
 def load_json_file(path: str) -> dict[str, Any]:
@@ -86,7 +101,7 @@ def read_supervisor_state() -> dict[str, Any]:
 
 
 def read_card_relay_state() -> dict[str, Any]:
-    return load_json_file(card_relay_state_path())
+    return read_card_relay_marker()
 
 
 def guess_bridge_python_executable(
@@ -146,6 +161,45 @@ def split_shell_like_arguments(argument_text: str) -> tuple[str, ...]:
     return tuple(shlex.split(normalized_text))
 
 
+def normalize_simtrace_reset_mode(value: Any) -> str:
+    """Normalise a SIMtrace2 reset-mode string, or return ``""``.
+
+    An empty result means "leave the supervisor on its own default"
+    (``usb-reset``) so the rendered unit stays free of redundant flags.
+    Validation is delegated to the HIL bridge module that owns the mode
+    vocabulary; when that module is unavailable — clean-flavor bundles
+    exclude it — nothing is emitted rather than a possibly bogus flag.
+    """
+    text = str(value or "").strip().lower()
+    if len(text) == 0:
+        return ""
+    try:
+        from Tools.HilBridge.device_reset import RESET_MODES, normalize_reset_mode
+    except ImportError:
+        return ""
+    normalized = normalize_reset_mode(text)
+    if normalized not in RESET_MODES:
+        return ""
+    return normalized
+
+
+def resolve_simtrace_reset_service_settings(
+    environ: Any = None,
+) -> tuple[str, str, str, str]:
+    """Read the pre-session reset settings that belong in the service unit.
+
+    Returns ``(mode, uhubctl_binary, uhubctl_location, uhubctl_port)``
+    with empty strings for anything the operator has not configured.
+    """
+    source = environ if environ is not None else os.environ
+    return (
+        normalize_simtrace_reset_mode(source.get(SIMTRACE_RESET_ENV, "")),
+        str(source.get(UHUBCTL_BINARY_ENV, "") or "").strip(),
+        str(source.get(UHUBCTL_LOCATION_ENV, "") or "").strip(),
+        str(source.get(UHUBCTL_PORT_ENV, "") or "").strip(),
+    )
+
+
 def resolve_card_trace_enabled(value: Any = None) -> bool:
     if value is not None:
         return bool(value)
@@ -178,21 +232,22 @@ def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
         assignment = f"{normalized_key}={str(value_text or '').strip()}"
         environment_lines += f"Environment={_systemd_quote(assignment)}\n"
 
-    command = [
-        str(options.python_executable or "").strip(),
-        "-m",
+    command = build_module_command(
         "Tools.HilBridge.supervisor",
-        "--reader-index",
-        str(int(options.reader_index)),
-        "--host",
-        str(options.host or "").strip(),
-        "--port",
-        str(int(options.port)),
-        "--advertise-host",
-        str(options.advertise_host or "").strip(),
-        "--usb-vidpid",
-        str(options.usb_vidpid or "").strip(),
-    ]
+        [
+            "--reader-index",
+            str(int(options.reader_index)),
+            "--host",
+            str(options.host or "").strip(),
+            "--port",
+            str(int(options.port)),
+            "--advertise-host",
+            str(options.advertise_host or "").strip(),
+            "--usb-vidpid",
+            str(options.usb_vidpid or "").strip(),
+        ],
+        source_python=str(options.python_executable or "").strip() or None,
+    )
     reader_name = str(options.reader_name or "").strip()
     if len(reader_name) > 0:
         command.extend(["--reader-name", reader_name])
@@ -219,9 +274,30 @@ def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
         command.extend(["--remsim-binary", remsim_binary])
     for remsim_arg in options.remsim_args:
         command.append(f"--remsim-arg={str(remsim_arg or '').strip()}")
+    # Pre-session SIMtrace2 reset. The supervisor defaults to
+    # ``usb-reset`` on its own, so these only appear once the operator
+    # has picked a non-default mode or configured a uhubctl port; a
+    # blank value keeps the rendered unit byte-identical to before.
+    simtrace_reset_mode = str(options.simtrace_reset_mode or "").strip()
+    if len(simtrace_reset_mode) > 0:
+        command.extend(["--simtrace-reset", simtrace_reset_mode])
+    uhubctl_binary = str(options.uhubctl_binary or "").strip()
+    if len(uhubctl_binary) > 0:
+        command.extend(["--uhubctl-binary", uhubctl_binary])
+    uhubctl_location = str(options.uhubctl_location or "").strip()
+    if len(uhubctl_location) > 0:
+        command.extend(["--uhubctl-location", uhubctl_location])
+    uhubctl_port = str(options.uhubctl_port or "").strip()
+    if len(uhubctl_port) > 0:
+        command.extend(["--uhubctl-port", uhubctl_port])
 
     exec_start = " ".join(_systemd_quote(part) for part in command if len(str(part or "").strip()) > 0)
-    working_directory = _systemd_quote(str(options.working_directory or "").strip())
+    working_directory_text = str(options.working_directory or "").strip()
+    if is_frozen():
+        working_directory_text = os.path.dirname(
+            os.path.abspath(str(sys.executable or ""))
+        )
+    working_directory = _systemd_quote(working_directory_text)
     return (
         "[Unit]\n"
         "Description=YggdraSIM HIL bridge supervisor\n"
@@ -309,13 +385,7 @@ def clear_card_relay_state() -> None:
     publishes a fresh marker once it is fully up. Missing files are
     tolerated quietly.
     """
-    relay_path = card_relay_state_path()
-    try:
-        os.remove(relay_path)
-    except FileNotFoundError:
-        return
-    except OSError:
-        return
+    clear_card_relay_marker()
 
 
 def clear_supervisor_state() -> None:
@@ -585,8 +655,8 @@ def _compose_bridge_ready_failure(
 
     The supervisor publishes a ``status`` field (``running``,
     ``restart-pending``, ``start-failed``, ``usb-detect-error`` …) and
-    a free-form ``reason``. Surfacing the raw ``reason`` on timeout —
-    as the previous implementation did — was misleading because a
+    a free-form ``reason``. Surfacing the raw ``reason`` on timeout --
+    as the previous implementation did -- was misleading because a
     transient ``restart-pending`` reason like
     ``Waiting 1.0s before bridge restart (simulated card backend).``
     looks like a non-fatal hint but is actually the symptom of a

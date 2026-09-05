@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Theme: Catppuccin · Latte (warm pastel light, mauve accent) --------- */
 html[data-theme="catppuccin-latte"] {
   --bg: #eff1f5;
@@ -14,18 +15,18 @@ html[data-theme="catppuccin-latte"] {
   --border: rgba(76, 79, 105, 0.16);
   --border-strong: rgba(76, 79, 105, 0.30);
   --fg: #4c4f69;
-  --fg-dim: #6c6f85;
-  --fg-muted: #8c8fa1;
+  --fg-dim: #626579;
+  --fg-muted: var(--fg-dim);
   --accent: #8839ef;
-  --accent-strong: #7287fd;
+  --accent-strong: #1e66d0;
   --accent-soft: rgba(136, 57, 239, 0.10);
   --accent-fg: #ffffff;
   --accent-glow: rgba(136, 57, 239, 0.32);
-  --gradient-accent: linear-gradient(135deg, #8839ef 0%, #1e66f5 60%, #04a5e5 100%);
-  --gradient-brand: linear-gradient(135deg, #8839ef 0%, #ea76cb 100%);
-  --ok: #40a02b;
+  --gradient-accent: linear-gradient(135deg, #8839ef 0%, #1e66d0 60%, #0e6097 100%);
+  --gradient-brand: linear-gradient(135deg, #8839ef 0%, #8f3b80 100%);
+  --ok: #246817;
   --ok-soft: rgba(64, 160, 43, 0.14);
-  --warn: #df8e1d;
+  --warn: #8a5200;
   --warn-soft: rgba(223, 142, 29, 0.14);
   --fail: #d20f39;
   --fail-soft: rgba(210, 15, 57, 0.14);
@@ -40,4 +41,3 @@ html[data-theme="catppuccin-latte"] {
     radial-gradient(circle at 90% 96%, rgba(30, 102, 245, 0.08), transparent 46%),
     radial-gradient(circle at 60% 40%, rgba(64, 160, 43, 0.05), transparent 50%);
 }
-

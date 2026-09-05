@@ -182,7 +182,6 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         populate the file tree via the filesystem editor before encoding
         to DER — ``to_der()`` will fail on the bare skeleton.
         """
-        from pySim.esim.saip.oid import OID
         from pySim.esim.saip.templates import ProfileTemplateRegistry
 
         header_name = pe_type.replace("-", "") + "-header"

@@ -551,7 +551,7 @@ def test_action_popout_auto_runs_without_manual_fields() -> None:
     needs = js.split("function ccActionNeedsManualInput(action)", 1)[1]
     needs = needs.split("function ccActionShouldAutoRunOnOpen", 1)[0]
     assert "ccShouldHideReaderField(action, field)" in needs
-    popout = js.split("function _ccBuildActionPopout(action)", 1)[1]
+    popout = js.split("function _ccBuildActionPopout(action, initialValues)", 1)[1]
     popout = popout.split("function renderCompactWorkbench", 1)[0]
     assert "ccActionShouldAutoRunOnOpen(action)" in popout
     assert 'runBtn.textContent = "Re-run"' in popout
@@ -746,8 +746,8 @@ def test_local_smdp_path_inputs_are_themed() -> None:
     assert "color-scheme: dark;" in block
     assert "color: var(--fg);" in block
     assert "caret-color: var(--accent);" in block
-    assert "border: 1px solid var(--border-soft, var(--border));" in block
-    assert "border-radius: var(--radius-sm, 6px);" in block
+    assert "border: 1px solid var(--border-soft);" in block
+    assert "border-radius: var(--radius-sm);" in block
     assert "color: var(--fg-dim);" in placeholder
     assert "background:" in hover
     assert "border-color: var(--accent);" in focus
@@ -760,14 +760,16 @@ def test_hil_modem_shell_tab_contract() -> None:
     css = _read("app.css")
 
     assert 'hilTabButton("modem", "Modem shell")' in js
-    assert 'HIL_MODEM_DEFAULT_COMMAND = "sudo tio /dev/ttyUSB2"' in js
+    assert 'HIL_MODEM_DEFAULT_COMMAND = "tio /dev/ttyUSB2"' in js
     assert "modemShellDefaultCommand" in js
     assert "default_command_source" in js
     assert '"remote-card-bridge"' in js
     assert '"/api/host-shell"' in js
     assert '"/api/host-shell/capabilities?scope=hil-modem"' in js
-    assert '"&scope=hil-modem"' in js
-    assert '"&command="' in js
+    assert '"?scope=hil-modem"' in js
+    assert 'type: "start"' in js
+    assert "command: command" in js
+    assert '"&command="' not in js
     assert 'state.activeTab === "dissector"' in js
 
     for selector in (
@@ -1165,7 +1167,7 @@ def test_drop_hover_visual_state_styled() -> None:
     assert ".cc-path-drop-target" in css
     assert ".cc-path-drop-target.cc-path-drop-hover" in css
     # The after-element prompts the operator with a drop hint.
-    assert "drop to paste path" in css
+    assert 'content: "Drop to use this path"' in css
 
 
 def test_card_bridge_remote_rig_promotes_one_click_start() -> None:

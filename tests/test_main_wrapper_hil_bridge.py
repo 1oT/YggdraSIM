@@ -272,15 +272,29 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
 
         mocked_action.assert_called_once_with("card_bridge.local_stop", {"confirm": True})
 
-    def test_launch_hil_bridge_wireshark_uses_dark_adwaita_style(self) -> None:
+    def _wireshark_argv(self, dissector_args: list[str]) -> list[str]:
+        """Capture the argv Wireshark is launched with.
+
+        The dissector arguments are stubbed rather than computed: the real
+        helper returns an absolute path to the Lua tree, which differs per
+        checkout and would pin the assertion to one machine.
+        """
         with mock.patch.object(main_wrapper, "_hil_bridge_wireshark_binary_path", return_value="/usr/bin/wireshark"):
             with mock.patch.object(main_wrapper, "_hil_bridge_capture_interface", return_value="lo"):
-                with mock.patch.object(main_wrapper.subprocess, "Popen") as mocked_popen:
-                    main_wrapper._launch_hil_bridge_wireshark()
+                with mock.patch.object(
+                    main_wrapper,
+                    "_hil_bridge_apdu_dissector_args",
+                    return_value=list(dissector_args),
+                ):
+                    with mock.patch.object(main_wrapper.subprocess, "Popen") as mocked_popen:
+                        main_wrapper._launch_hil_bridge_wireshark()
 
         mocked_popen.assert_called_once()
+        return list(mocked_popen.call_args.args[0])
+
+    def test_launch_hil_bridge_wireshark_uses_dark_adwaita_style(self) -> None:
         self.assertEqual(
-            mocked_popen.call_args.args[0],
+            self._wireshark_argv([]),
             [
                 "/usr/bin/wireshark",
                 "-k",
@@ -288,6 +302,25 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
                 "lo",
                 "-f",
                 "udp port 4729",
+                "-style",
+                "Adwaita-Dark",
+            ],
+        )
+
+    def test_launch_hil_bridge_wireshark_loads_the_apdu_dissector(self) -> None:
+        # The dissector arguments belong to the capture, so they precede the
+        # style flags rather than trailing the command.
+        self.assertEqual(
+            self._wireshark_argv(["-X", "lua_script:/tmp/yggdrasim_apdu.lua"]),
+            [
+                "/usr/bin/wireshark",
+                "-k",
+                "-i",
+                "lo",
+                "-f",
+                "udp port 4729",
+                "-X",
+                "lua_script:/tmp/yggdrasim_apdu.lua",
                 "-style",
                 "Adwaita-Dark",
             ],

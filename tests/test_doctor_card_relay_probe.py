@@ -29,6 +29,8 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import pytest
+
 from yggdrasim_common.card_backend import (
     CARD_RELAY_TOKEN_ENV,
     CARD_RELAY_TOKEN_FILE_ENV,
@@ -169,6 +171,7 @@ class DoctorCardRelayProbeTests(unittest.TestCase):
         self.assertEqual(row.status, "warn")
         self.assertIn("unreachable", row.detail.lower())
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_ping_non_200_warns(self) -> None:
         bridge = _StubBridge(ping_status=503)
         try:
@@ -182,6 +185,7 @@ class DoctorCardRelayProbeTests(unittest.TestCase):
         finally:
             bridge.close()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_status_requires_token_but_none_present(self) -> None:
         bridge = _StubBridge(
             require_token="secret-1",
@@ -202,6 +206,7 @@ class DoctorCardRelayProbeTests(unittest.TestCase):
         finally:
             bridge.close()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_token_accepted_on_loopback(self) -> None:
         bridge = _StubBridge(
             require_token="secret-2",
@@ -225,6 +230,7 @@ class DoctorCardRelayProbeTests(unittest.TestCase):
         finally:
             bridge.close()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_unauthenticated_non_loopback_rejected(self) -> None:
         bridge = _StubBridge(
             status_payload={
@@ -243,6 +249,7 @@ class DoctorCardRelayProbeTests(unittest.TestCase):
         finally:
             bridge.close()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_loopback_no_auth_required_ok(self) -> None:
         bridge = _StubBridge(
             status_payload={
@@ -263,6 +270,7 @@ class DoctorCardRelayProbeTests(unittest.TestCase):
         finally:
             bridge.close()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_url_with_apdu_suffix_is_normalised(self) -> None:
         bridge = _StubBridge(
             status_payload={

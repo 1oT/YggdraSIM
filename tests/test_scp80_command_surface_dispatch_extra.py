@@ -50,7 +50,6 @@ def _install_smartcard_stubs() -> None:
 
 _install_smartcard_stubs()
 
-import SCP80.cli as scp80_cli
 from SCP80.cli import OtaShell
 
 

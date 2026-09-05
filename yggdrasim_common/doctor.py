@@ -667,6 +667,7 @@ def _detect_webview_backends() -> tuple[list[str], list[str]]:
     backend without instantiating a window, so ``--doctor`` can fail
     fast before ``webview.start()`` raises at runtime.
     """
+    import platform as _platform
     import sys as _sys
 
     available: list[str] = []
@@ -690,10 +691,19 @@ def _detect_webview_backends() -> tuple[list[str], list[str]]:
 
             available.append("qt")
         except Exception:
-            hints.append(
-                "Qt backend (pip-only): "
-                "`pip install 'qtpy>=2.4' 'PyQt6>=6.7' 'PyQt6-WebEngine>=6.7'`."
-            )
+            if _platform.machine().lower() in {"aarch64", "arm64"}:
+                hints.append(
+                    "Qt backend (Linux arm64): install "
+                    "`python3-pyqt5 python3-pyqt5.qtwebengine "
+                    "python3-pyqt5.qtwebchannel`, create the venv with "
+                    "`--system-site-packages`, then install `qtpy>=2.4`."
+                )
+            else:
+                hints.append(
+                    "Qt backend (pip-only): "
+                    "`pip install 'qtpy>=2.4' 'PyQt6>=6.7' "
+                    "'PyQt6-WebEngine>=6.7'`."
+                )
     elif _sys.platform == "darwin":
         try:
             import webview.platforms.cocoa  # type: ignore  # noqa: F401

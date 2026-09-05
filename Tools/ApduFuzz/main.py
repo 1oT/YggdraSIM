@@ -18,6 +18,11 @@ Transport selection:
 * ``--transport null`` — in-process smoke test harness. Always
   returns the fake probe ``("fake", "fake")`` and replies ``9000`` to
   every APDU. Useful for CI.
+* ``--transport sim`` -- the in-process simulated eUICC. No hardware and
+  nothing to brick, so this is the one target that can run unattended.
+  The safety gate still applies unchanged; the CLI seeds the allow-list
+  from the simulator's own probed identity when no ``--allow-iccid`` /
+  ``--allow-imsi`` was supplied, and says so on stdout.
 
 The runner itself lives in :mod:`Tools.ApduFuzz.runner`.
 """
@@ -68,6 +73,39 @@ def _build_null_transport(args: argparse.Namespace) -> _NullTransport:
     if len(iccid) == 0 and len(imsi) == 0:
         iccid = "8988000000000000TEST"
     return _NullTransport(iccid=iccid, imsi=imsi)
+
+
+class _SimulatorTransport:
+    """Transport backed by the in-process simulated eUICC.
+
+    ``SimulatedSimCardEngine.transmit`` returns ``(data, SW1, SW2)``;
+    the runner contract wants ``(data, sw)``, so the two status bytes are
+    folded here.
+    """
+
+    def __init__(self) -> None:
+        from SIMCARD.connection import get_shared_engine
+
+        self._engine = get_shared_engine()
+
+    def probe_card_identity(self) -> tuple[str, str]:
+        """Return the simulator's configured (ICCID, IMSI) pair."""
+        state = self._engine.state
+        iccid = str(getattr(state, "iccid", "") or "").strip()
+        imsi = str(getattr(state, "imsi", "") or "").strip()
+        return iccid, imsi
+
+    def transmit(self, apdu: bytes) -> tuple[bytes, int]:
+        data, sw1, sw2 = self._engine.transmit(bytes(apdu))
+        return bytes(data), ((int(sw1) & 0xFF) << 8) | (int(sw2) & 0xFF)
+
+    def close(self) -> None:
+        """The simulator is a process-wide singleton; nothing to release."""
+        return None
+
+
+def _build_sim_transport(_args: argparse.Namespace) -> _SimulatorTransport:
+    return _SimulatorTransport()
 
 
 def _build_pcsc_transport(args: argparse.Namespace):
@@ -211,9 +249,12 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--transport",
-        choices=["pcsc", "null"],
+        choices=["pcsc", "null", "sim"],
         default="null",
-        help="Transport backend. 'null' is a fake that always returns 9000.",
+        help=(
+            "Transport backend. 'null' is a fake that always returns 9000; "
+            "'sim' drives the in-process simulated eUICC."
+        ),
     )
     parser.add_argument(
         "--reader",
@@ -262,11 +303,30 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
         if len(str(args.crash_dump_root or "").strip()) > 0
         else None
     )
+    allowed_iccids = build_allow_set(args.allow_iccid)
+    allowed_imsis = build_allow_set(args.allow_imsi)
+
+    # The simulator is in-process and has no physical card behind it, so the
+    # allow-list has nothing to protect. Seed it from the simulator's own
+    # identity rather than adding a gate bypass: assert_safety_gate still
+    # runs, still matches, and the physical-card path is untouched.
+    prebuilt_transport = None
+    if args.transport == "sim":
+        prebuilt_transport = _build_sim_transport(args)
+        if len(allowed_iccids) == 0 and len(allowed_imsis) == 0:
+            sim_iccid, sim_imsi = prebuilt_transport.probe_card_identity()
+            allowed_iccids = build_allow_set([sim_iccid] if sim_iccid else [])
+            allowed_imsis = build_allow_set([sim_imsi] if sim_imsi else [])
+            sys.stdout.write(
+                "[*] simulator target: seeded allow-list from the simulated card "
+                f"(ICCID={sim_iccid or 'unknown'} IMSI={sim_imsi or 'unknown'})\n"
+            )
+
     config = SafetyConfig(
         workspace_root=workspace_root,
         i_mean_it=bool(args.i_mean_it),
-        allowed_iccids=build_allow_set(args.allow_iccid),
-        allowed_imsis=build_allow_set(args.allow_imsi),
+        allowed_iccids=allowed_iccids,
+        allowed_imsis=allowed_imsis,
         crash_dump_root=crash_dump_root,
         max_apdus_per_run=max(1, int(args.max_apdus_per_run)),
     )
@@ -284,7 +344,9 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
         sys.stderr.write("[-] corpus yielded zero commands. Nothing to fuzz.\n")
         return 4
 
-    if args.transport == "pcsc":
+    if prebuilt_transport is not None:
+        transport = prebuilt_transport
+    elif args.transport == "pcsc":
         transport = _build_pcsc_transport(args)
     else:
         transport = _build_null_transport(args)

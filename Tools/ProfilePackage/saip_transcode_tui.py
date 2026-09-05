@@ -402,8 +402,6 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         BasePeEditor,
         FileSystemView,
         GenericPeEditor,
-        PE_EDITOR_REGISTRY,
-        base_pe_type_for_section_key,
         lookup_pe_editor,
     )
     from .saip_token_sidecar import (
@@ -457,7 +455,6 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         load_pane_layout_prefs,
         load_split_size_prefs,
         load_transcode_tui_prefs,
-        next_theme_in_cycle,
         persist_outline_prefs,
         persist_pane_layout_prefs,
         persist_split_sizes,

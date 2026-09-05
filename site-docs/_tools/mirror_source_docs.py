@@ -18,12 +18,22 @@ INCLUDED_TOP_LEVEL_DIRS = {
     "tests",
 }
 
+# Runtime plugin implementations are private/operator-supplied by default.
+# Only the repository's public plugin contract README may enter generated docs.
+PUBLIC_PLUGIN_MARKDOWN = {
+    Path("plugins/README.md"),
+}
+
 EXCLUDED_SOURCE_PARTS = {
     ("plugins", "polling"),
 }
 
 EXCLUDED_SOURCE_FILES = {
     "tests/eim-sh/" + "EIM_" + "POLL" + "_SEQUENCE.md",
+    # Assistant-facing working notes. Kept on disk for local use, never
+    # tracked and never published, so the generated index stays identical
+    # between a working checkout and a fresh clone.
+    "guides/AGENT_SECURE_ELEMENT.md",
 }
 
 # Top-level Markdown files that should be mirrored alongside the README so
@@ -91,6 +101,8 @@ def iter_markdown_sources() -> list[Path]:
         relative_path = path.relative_to(root)
         relative_posix = relative_path.as_posix()
         if any(part.startswith(".") for part in relative_path.parts):
+            continue
+        if relative_path.parts[0] == "plugins" and relative_path not in PUBLIC_PLUGIN_MARKDOWN:
             continue
         if relative_posix in EXCLUDED_SOURCE_FILES:
             continue

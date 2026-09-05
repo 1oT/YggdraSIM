@@ -19,17 +19,14 @@ import unittest
 from typing import Any
 
 from textual.app import App
-from textual.widgets import Input
 
 from Tools.ProfilePackage.saip_pe_editors import (
     AkaParameterEditor,
     ApplicationsView,
-    BasePeEditor,
     FileSystemView,
     GenericPeEditor,
     NaaPeEditor,
     PE_EDITOR_REGISTRY,
-    PeEditorChanged,
     PinCodesEditor,
     PukCodesEditor,
     SecurityDomainEditor,

@@ -99,8 +99,9 @@ python -m Tools.CardBridge \
 
 The bridge binds to `127.0.0.1`, writes a bearer token under
 `${XDG_CONFIG_HOME:-~/.config}/yggdrasim/card_bridge/<port>.token`, and
-prints the `/apdu`, `/status`, and `/card/reset` URLs. The token file is
-created with mode `0600`.
+prints the `/apdu` and `/status` URLs in its startup banner. `/card/reset`
+and `/ping` are served on the same base URL. The token file is created with
+mode `0600`.
 
 Use `--reader-index 0` instead of `--reader-name` when reader ordering is
 stable. In the interactive launcher, the same controls are available under
@@ -240,12 +241,21 @@ Look for a running supervisor, an `ok` card relay, and a non-empty ATR.
 | --- | --- | --- |
 | `/ping` works, `/status` returns 401 | wrong or missing bearer token | copy the token again and verify mode `0600` |
 | YggdraSIM still opens the local reader | remote-card URL not applied | pass `--remote-card-url` on the exact command being run, or export the env vars |
-| `reader busy` on the reader host | another process owns the PC/SC reader | close local shells or start Card Bridge with `--pcsc-share-mode shared` |
+| `reader busy` on the reader host | another process holds the PC/SC reader exclusively | close the local shell or GUI that owns it; Card Bridge already defaults to `--pcsc-share-mode shared`, so passing it again changes nothing |
 | HIL starts but no modem APDUs appear | RemSIM/SIMtrace2 side not attached | validate `osmo-remsim-client-st2`, SIMtrace2 firmware, and USB permissions |
 | APDUs time out over WAN | SSH path too slow for default timeout | raise `--apdu-timeout-ms` on Card Bridge and HIL |
 
+## Sharing rigs across a team
+
+One Card Bridge plus one SSH forward serves one operator. When several people
+share a set of rigs, put a Remote Lab agent in front: it keeps this same
+`/apdu` data plane and adds rig inventory, per-person tokens, and exclusive
+session locking so two operators cannot drive one card at once. See
+[Run a Remote Lab Agent](run-a-remote-lab-agent.md).
+
 ## Related pages
 
+- [Run a Remote Lab Agent](run-a-remote-lab-agent.md)
 - [Universal GUI Command Center](../subsystems/gui-command-center.md)
 - [Install RemSIM / APDU Streaming](install-remsim-apdu-streaming.md)
 - [HIL Bridge](../subsystems/hil-bridge.md)

@@ -45,6 +45,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
+from yggdrasim_common.frozen_dispatch import (
+    build_module_command,
+    launcher_targets_application_bundle,
+)
+from yggdrasim_common.runtime_paths import is_frozen
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -252,23 +258,20 @@ def _build_default_tui_command(arrival: ProfileArrival) -> list[str]:
         raise RuntimeError(
             f"Arrival {arrival.iccid} has no usable profile file on disk"
         )
-    python_binary = sys.executable or "python3"
     # Previous iterations of this hook invoked the diff TUI with the
     # same profile on both sides, which always produced "no
     # differences" — useless for an operator. Instead drop the new
     # profile into the profile-package shell with a three-command
     # inspect batch so the operator sees profile_name/iccid/imsi plus
     # the TREE of PE sections immediately.
-    batch_cmd = (
-        f"USE {shlex.quote(str(target))}; INFO; TREE; EXIT"
-    )
-    return [
-        python_binary,
-        "-m",
+    batch_cmd = f"USE {shlex.quote(str(target))}; INFO; TREE; EXIT"
+    return build_module_command(
         "Tools.ProfilePackage",
-        "--cmd",
-        batch_cmd,
-    ]
+        [
+            "--cmd",
+            batch_cmd,
+        ],
+    )
 
 
 _LAUNCHER_TEMPLATE_VARIABLES: tuple[str, ...] = (
@@ -296,7 +299,9 @@ def _expand_launcher_template(
     * ``{profile_dir}``   — the per-profile directory.
     * ``{manifest}``      — the manifest JSON path (empty string if the
       arrival did not ship a manifest).
-    * ``{python}``        — ``sys.executable``.
+    * ``{python}``        — the source interpreter or frozen application
+      launcher. Frozen ``{python} -m ...`` templates are translated only for
+      modules on YggdraSIM's internal child allow-list.
 
     Unknown tokens are substituted with empty strings rather than
     raising: a typo in the operator's ``--launcher`` string must not
@@ -306,13 +311,14 @@ def _expand_launcher_template(
     if target is None:
         return []
     manifest = arrival.manifest_path
+    python_marker = "__YGGDRASIM_PYTHON_LAUNCHER__"
     substitutions = {
         "iccid": arrival.iccid,
         "profile": str(target),
         "profile_path": str(target),
         "profile_dir": str(arrival.profile_dir),
         "manifest": str(manifest) if manifest is not None else "",
-        "python": sys.executable or "python3",
+        "python": python_marker,
     }
     # Use a defaultdict-style fallback so unknown placeholders render
     # as empty strings. str.format_map is the right primitive here
@@ -338,6 +344,12 @@ def _expand_launcher_template(
             split_error,
         )
         return []
+    python_launcher = str(sys.executable or "python3")
+    argv = [
+        python_launcher if token == python_marker else token
+        for token in argv
+    ]
+    argv = _normalize_launcher_command_for_runtime(argv)
     if len(argv) == 0:
         return []
     binary = argv[0]
@@ -347,6 +359,32 @@ def _expand_launcher_template(
             binary,
         )
     return argv
+
+
+def _normalize_launcher_command_for_runtime(command: Sequence[str]) -> list[str]:
+    """Translate an allow-listed ``{python} -m`` template when frozen.
+
+    Operator-supplied launchers that point at a separate executable remain
+    unchanged. Only commands aimed at the current frozen application require
+    translation; arbitrary module, code-string, and script execution through
+    that application are rejected.
+    """
+    normalized = [str(part) for part in command]
+    if is_frozen() is False or len(normalized) == 0:
+        return normalized
+    if launcher_targets_application_bundle(normalized[0]) is False:
+        return normalized
+    if len(normalized) >= 3 and normalized[1] == "-m":
+        try:
+            return build_module_command(normalized[2], normalized[3:])
+        except ValueError as error:
+            _LOGGER.warning("rejected frozen launcher module: %s", error)
+            return []
+    _LOGGER.warning(
+        "rejected frozen launcher that tried to use the application as a "
+        "general Python interpreter"
+    )
+    return []
 
 
 def _spawn_launcher(

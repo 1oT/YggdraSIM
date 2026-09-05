@@ -26,12 +26,7 @@ from Tools.ProfilePackage.saip_asn1_decode import (
     _decode_link_path,
     _decode_pin_secret_value,
     _decode_pin_status_template_do,
-    _decode_pkcs15_accf,
-    _decode_pkcs15_acm,
-    _decode_pkcs15_dodf,
-    _decode_pkcs15_odf,
     _decode_sd_install_parameters,
-    _decode_special_field,
     _decode_special_file_information,
     _decode_uicc_toolkit_parameters,
 )

@@ -284,6 +284,31 @@ class SecretFileEncryptionTests(unittest.TestCase):
             self.assertTrue(_FakeFileCryptoManager.is_encrypted_file_bytes(cert_path.read_bytes()))
             self.assertTrue(_FakeFileCryptoManager.is_encrypted_file_bytes(key_path.read_bytes()))
 
+    def test_eim_explicit_certificate_does_not_scan_unrelated_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            inventory_root = temp_path / "inventory"
+            inventory_root.mkdir()
+            explicit_cert = temp_path / "CERT_S_EIMsign_EXPLICIT.der"
+            cert_der, _ = _build_self_signed_cert_and_key("explicit-eim")
+            explicit_cert.write_bytes(cert_der)
+
+            store = EimCertificateStore(
+                local_cert_root=str(inventory_root),
+                sgp26_valid_cert_root=str(temp_path / "sgp26"),
+            )
+            with mock.patch.object(
+                store,
+                "load",
+                side_effect=AssertionError("explicit lookup scanned unrelated inventory"),
+            ):
+                record = store.record_for_path(str(explicit_cert))
+
+            self.assertIsNotNone(record)
+            assert record is not None
+            self.assertEqual(record.certificate_path, str(explicit_cert))
+            self.assertEqual(record.role, "signing")
+
 
 if __name__ == "__main__":
     unittest.main()

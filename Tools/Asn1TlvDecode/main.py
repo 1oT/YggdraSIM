@@ -122,7 +122,7 @@ _FALLBACK_TAGS: dict[str, tuple[str, str]] = {
     "BF4E": ("TRANSFER_EIM_PACKAGE", "SGP.32"),
     "BF4F": ("GET_EIM_PACKAGE", "SGP.32"),
     "BF50": ("PROVIDE_EIM_PACKAGE_RESULT", "SGP.32"),
-    "BF51": ("EIM_PACKAGE", "SGP.32 §6.3.2.6/§6.3.2.7"),
+    "BF51": ("EUICC_PACKAGE", "SGP.32 §6.3.2.6/§6.3.2.7"),
     "BF52": ("PACKAGE_DATA", "SGP.32"),
     "BF53": ("EIM_ACKNOWLEDGEMENTS", "SGP.32"),
     "BF54": ("PROFILE_DOWNLOAD_TRIGGER", "SGP.32"),
@@ -146,7 +146,11 @@ _FALLBACK_TAGS: dict[str, tuple[str, str]] = {
 }
 
 _FALLBACK_ALIASES: dict[str, tuple[str, ...]] = {
-    "BF51": ("EUICC_PACKAGE",),
+    # EUICC_PACKAGE is now the primary name; the former primary
+    # EIM_PACKAGE stays as an alias so anything that searched by it
+    # still resolves. BF51 is the eUICC package -- the eIM packages are
+    # BF4E/BF4F/BF50 -- so naming it "EIM" pointed at the wrong entity.
+    "BF51": ("EIM_PACKAGE",),
 }
 
 
@@ -458,23 +462,23 @@ def render_asn1_notation(items: list[dict[str, Any]]) -> str:
     for index, item in enumerate(items):
         if index > 0:
             lines.append("")
-        if _is_sgp32_eim_package(item):
-            lines.extend(_render_sgp32_eim_package(item, indent=0))
+        if _is_sgp32_euicc_package(item):
+            lines.extend(_render_sgp32_euicc_package(item, indent=0))
         else:
             lines.extend(_render_item_notation(item, indent=0, assignment=True))
     return "\n".join(lines)
 
 
-def _is_sgp32_eim_package(item: dict[str, Any]) -> bool:
-    return item.get("tag") == "BF51" and item.get("name") == "EIM_PACKAGE"
+def _is_sgp32_euicc_package(item: dict[str, Any]) -> bool:
+    return item.get("tag") == "BF51"
 
 
-def _render_sgp32_eim_package(item: dict[str, Any], *, indent: int) -> list[str]:
+def _render_sgp32_euicc_package(item: dict[str, Any], *, indent: int) -> list[str]:
     prefix = " " * indent
     children = _child_items(item)
     if not children:
-        return [f"{prefix}EIM_PACKAGE [BF51] ::= {{}}"]
-    lines = [f"{prefix}EIM_PACKAGE [BF51] ::= EuiccPackageRequest {{"]
+        return [f"{prefix}EUICC_PACKAGE [BF51] ::= {{}}"]
+    lines = [f"{prefix}EUICC_PACKAGE [BF51] ::= EuiccPackageRequest {{"]
     for index, child in enumerate(children):
         if child.get("tag") == "30":
             child_lines = _render_euicc_package_signed(child, indent=indent + 2)

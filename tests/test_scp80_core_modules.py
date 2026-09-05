@@ -191,7 +191,7 @@ class ConfigManagerTests(unittest.TestCase):
 class LegacyKeyMigrationTests(unittest.TestCase):
     """Lock the soft-compat behaviour for pre-rename SCP80 config keys.
 
-    Pre-rename schema (unversioned ini files in the wild) carried:
+    Pre-rename schema (unversioned ini files already deployed) carried:
       - ``key_enc`` / ``key_mac``: 16-byte session keys.
       - ``kic`` / ``kid``: 2-hex-char ETSI TS 102 225 §5.1.1 indicator bytes.
     Current schema renames the session keys to ``kic`` / ``kid`` and the
@@ -323,7 +323,7 @@ class OtaPacketBuilderTests(unittest.TestCase):
         self.assertEqual(len(plan.apdus), 1)
         self.assertEqual(len(plan.reader_apdus), 1)
         self.assertEqual(plan.payload_hex, "AA" * 10)
-        self.assertIn("02028281060280018B", plan.apdus[0].apdu_hex)
+        self.assertIn("02028381060280018B", plan.apdus[0].apdu_hex)
         self.assertNotIn("820283818B", plan.apdus[0].apdu_hex)
         self.assertIn("4005811250F341F62222222222222225027000", plan.apdus[0].apdu_hex)
 
@@ -437,8 +437,10 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(decoded["cntr"], "000000FFFF")
         self.assertEqual(decoded["pcntr"], "00")
         self.assertEqual(decoded["command_count"], 1)
-        self.assertEqual(decoded["command_response"], "9000")
+        # Status bytes first, then response data; this script returned
+        # none, so command_response is empty.
         self.assertEqual(decoded["command_sw"], "9000")
+        self.assertEqual(decoded["command_response"], "")
         self.assertEqual(decoded["fetch_sw"], "9130")
 
     def test_decode_por_error_response_packet(self) -> None:

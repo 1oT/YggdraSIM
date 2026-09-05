@@ -210,7 +210,85 @@ Two moving parts are worth refreshing together:
 Always rerun `python main/main.py --doctor` after upgrading any of
 those; the HIL probes will call out regressions immediately.
 
-## 9. Troubleshooting checklist
+## 9. Resetting the board without touching it
+
+Unattended rigs need the reset button to be reachable from software.
+The good news is that the stock cardem firmware already does the work —
+no modified firmware, no custom vendor command, no `dfu-util`.
+
+### Why a USB reset reboots the board
+
+The cardem application's main loop treats any loss of USB configuration
+as a hard fault and reboots the microcontroller
+(`firmware/apps/cardem/main.c` in `osmocom/simtrace2`):
+
+```c
+if (USBD_GetState() < USBD_STATE_CONFIGURED) {
+    /* HACK: we don't really deal with USB disconnect yet,
+     * so let's just reset the entire uC if this happens */
+    TRACE_INFO("Resetting uC on USB disconnect\n\r");
+    NVIC_SystemReset();
+}
+```
+
+`NVIC_SystemReset()` is the same reset path the board's reset button
+drives, and the reboot leaves no DFU magic behind, so the bootloader
+hands control straight back to the application. A host-issued USB port
+reset is therefore a faithful remote stand-in for the button:
+
+```bash
+# what YggdraSIM does internally (USBDEVFS_RESET on the usbfs node)
+yggdrasim-hil-reset --usb-vidpid 1d50:60e3
+```
+
+YggdraSIM runs this automatically before every HIL session; see
+[`HIL_BRIDGE_GUIDE.md` §5.1](HIL_BRIDGE_GUIDE.md#51-pre-session-board-reset-remote-reset-button-equivalent)
+for the modes, the udev rule, and the `uhubctl` VBUS variant.
+
+### What a reset does *not* clear
+
+`NVIC_SystemReset()` reboots the SAM3 only, and in the YggdraSIM
+cardem/remsim topology that is further from the card than it looks:
+
+```text
+modem ← SIMtrace2 (emulates a card) ← osmo-remsim-client-st2
+      → RSPRO → YggdraSIM HIL bridge → PC/SC reader → real SIM
+```
+
+The board never holds the card. Resetting it — by button, by
+`usb-reset`, or by cutting its VBUS with `uhubctl` — leaves the SIM in
+the reader powered, with its selected AID, open logical channels, and
+any established secure channel intact. `port-power` only reaches the
+card if the reader shares the switched hub port.
+
+Card state is cleared by the bridge instead, with
+`SCardReconnect(..., SCARD_UNPOWER_CARD)` at modem- and relay-session
+boundaries. See
+[`HIL_BRIDGE_GUIDE.md` §5.2](HIL_BRIDGE_GUIDE.md#52-card-session-hygiene).
+
+Note also that the same firmware check fires on USB *suspend*
+(`USBD_STATE_SUSPENDED` sorts below `USBD_STATE_CONFIGURED`). If a host
+autosuspends the board mid-session it will reboot on its own. On rigs
+that show unexplained mid-session resets, pin autosuspend off:
+
+```bash
+echo 'ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="60e3", TEST=="power/control", ATTR{power/control}="on"' \
+    | sudo tee /etc/udev/rules.d/61-simtrace2-nosuspend.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+### Why not `dfu-util --detach`
+
+It looks like the obvious remote reset and it is a trap. The DFU
+runtime handler stores `USB_DFU_MAGIC` before resetting
+(`DFURT_SwitchToDFU` in
+`firmware/atmel_softpack_libraries/usb/device/dfu/dfu_runtime.c`), the
+bootloader honours that magic on the next boot, and it has no auto-boot
+timeout. The board stays at `1d50:4004` until it is physically
+power-cycled or re-flashed -- the worst possible outcome for a board in
+another building. Keep `dfu-util` for firmware updates only.
+
+## 10. Troubleshooting checklist
 
 - `dfu-util` reports `No DFU capable USB device available` → re-enter
   DFU with the board button; some hubs also mis-advertise `1d50:4004`,
@@ -228,9 +306,9 @@ those; the HIL probes will call out regressions immediately.
 
 ## Related guides
 
-- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) — operator flow.
-- [`INSTALL_FULL.md`](INSTALL_FULL.md) — HIL-capable executable install.
-- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) — Pi-specific HIL notes.
+- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) -- operator flow.
+- [`INSTALL_FULL.md`](INSTALL_FULL.md) -- HIL-capable executable install.
+- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) -- Pi-specific HIL notes.
 - Osmocom upstream documentation:
   - <https://osmocom.org/projects/sim-card/wiki/SIMtrace2>
   - <https://osmocom.org/projects/osmo-remsim/wiki>

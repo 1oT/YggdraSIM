@@ -61,7 +61,7 @@ class _EmergencyProfileBase(_Gap3Base):
             self.state.active_profile_aid = str(active.aid or "")
         emergency = SimProfileEntry(
             aid="A0000000871002FFFFFFFF8907090111",
-            iccid="894900000000000111",
+            iccid="8988000000000001110",
             state=emergency_state,
             profile_class="operational",
             profile_name="eCall",

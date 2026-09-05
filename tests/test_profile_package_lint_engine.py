@@ -210,8 +210,8 @@ class SaipProfileLinterTests(unittest.TestCase):
             check_return_code=0,
         )
 
-        info_codes = [item.code for item in report.findings if item.severity == "INFO"]
-        self.assertIn("YRL-UST-001", info_codes)
+        fail_codes = [item.code for item in report.findings if item.severity == "FAIL"]
+        self.assertIn("YRL-UST-001", fail_codes)
 
     def test_gate_by_prefix_and_min_score(self) -> None:
         decoded_document = {
@@ -298,13 +298,13 @@ class SaipProfileLinterTests(unittest.TestCase):
         )
 
     def test_iccid_consistency_pass_on_match(self) -> None:
-        # Header bytes 89460811...12 (printable BCD) and EF bytes
-        # 98648011...21 (nibble-swapped BCD) decode to the same
+        # Header bytes 89880811...11 (printable BCD) and EF bytes
+        # 98888011...11 (nibble-swapped BCD) decode to the same
         # printable digit string — this is the canonical SAIP
         # arrangement.
         doc = self._profile_with_iccid_fields(
-            header_iccid=bytes.fromhex("89460811111111111112"),
-            ef_iccid_content=bytes.fromhex("98648011111111111121"),
+            header_iccid=bytes.fromhex("89880811111111111111"),
+            ef_iccid_content=bytes.fromhex("98888011111111111111"),
         )
         report = SaipProfileLinter(strict=False).lint_decoded_document(
             decoded_document=doc, profile_label="t",
@@ -314,7 +314,7 @@ class SaipProfileLinterTests(unittest.TestCase):
 
     def test_iccid_consistency_skip_when_ef_iccid_absent(self) -> None:
         doc = self._profile_with_iccid_fields(
-            header_iccid=bytes.fromhex("89460811111111111112"),
+            header_iccid=bytes.fromhex("89880811111111111111"),
             ef_iccid_content=None,
         )
         report = SaipProfileLinter(strict=False).lint_decoded_document(
@@ -330,8 +330,8 @@ class SaipProfileLinterTests(unittest.TestCase):
         # the **leading** nibble of the last byte. Both decode to the
         # same 19-digit string, so the consistency check must pass.
         doc = self._profile_with_iccid_fields(
-            header_iccid=bytes.fromhex("8946081111111111111F"),
-            ef_iccid_content=bytes.fromhex("986480111111111111F1"),
+            header_iccid=bytes.fromhex("8988081111111111113F"),
+            ef_iccid_content=bytes.fromhex("988880111111111111F3"),
         )
         report = SaipProfileLinter(strict=False).lint_decoded_document(
             decoded_document=doc, profile_label="t",
@@ -431,10 +431,10 @@ class SaipProfileLinterTests(unittest.TestCase):
         # 8-digit IMSI: digit_count=8 (even), parity=9.
         # Body: 08 91 10 10 10 FF FF FF FF — wait, lots of filler.
         # Easier: 7 digits "0123456" → first_digit=0, then 6 digits "123456".
-        # Actually let's go with 8 digits: "01234567" → parity=9 (even).
+        # 8 digits: "01234567" → parity=9 (even).
         # first_digit=0, parity=9 → parity_byte=0x09.
         # rest 7 digits "1234567" → pad to "1234567F" (8 nibbles, 4 bytes).
-        # swap pairs: "21436587" then "F7" → wait let me just do it.
+        # swap pairs: "21436587", then the "F7" filler nibble pair.
         # Pairs of "1234567F": (1,2)→"21", (3,4)→"43", (5,6)→"65", (7,F)→"F7"
         # So body = 08 09 21 43 65 F7 + 3 bytes filler FF FF FF
         # = 0809214365F7FFFFFF

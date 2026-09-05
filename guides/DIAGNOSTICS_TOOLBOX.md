@@ -224,7 +224,7 @@ card).
 
 ---
 
-## 4. EUM Diagnostics "God-Mode"
+## 4. EUM Diagnostics
 
 ### 4.1 What it does
 
@@ -250,7 +250,7 @@ yggdrasim-eum-diag inject-keys \
     --shs-enc <32 hex chars> \
     --shs-mac <32 hex chars> \
     --dek     <32 hex chars> \
-    --pcap    /captures/provisioning-2026-04-19.pcapng
+    --pcap    /captures/provisioning-example.pcapng
 
 # Write keys only (useful when a separate tshark/wireshark session
 # already has the dissector loaded):
@@ -304,7 +304,7 @@ guides because they sit on top of larger subsystems:
   `Nausf_UEAuthentication_Authenticate` round trip against the
   simulated USIM without standing up Open5GS. The opt-in FastAPI
   loopback is gated by `YGGDRASIM_5GCORE_MODE=stub`. See
-  `guides/CAPABILITIES.md` §11. (post-v1 staging — not part of this release.)
+  `guides/CAPABILITIES.md` §11.
 - **`main/main.py --doctor`.** Read-only preflight covering Python
   version, `cryptography`, `pycryptodomex`, `asn1tools`, optional
   on-disk `pysim/` clone, SQLite, optional `textual` (TUI), PC/SC

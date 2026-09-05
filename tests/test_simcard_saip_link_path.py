@@ -4,7 +4,7 @@
 """Regression coverage for SAIP / TCA Profile Interoperability §8.3.5
 explicit ``Fcp.linkPath`` aliases.
 
-A real-world operator BPP encodes most cross-DF aliases through the
+A standards-conformant BPP may encode cross-DF aliases through the
 ``linkPath`` PRIVATE 7 OCTET STRING inside the FCP rather than relying
 on the TS 31.102 Annex H "shared EFs" convention. Every USIM-side
 EF.IMSI / EF.AD / EF.SPN / EF.HPPLMN points back to DF.GSM via
@@ -29,9 +29,9 @@ Tests in this module pin:
    Annex H mirror.
 5. Cycles, self-references and unresolved targets are silent no-ops,
    so a malformed BPP never aborts profile activation.
-6. End-to-end against the operator BPP fixture: every FID the modem
-   reads via SFI on cold attach now returns the issuer payload that
-   would otherwise live only under DF.GSM / DF.TELECOM.
+6. Optional end-to-end coverage against a locally selected BPP: every
+   FID read via SFI on cold attach returns the issuer payload that would
+   otherwise live only under DF.GSM / DF.TELECOM.
 
 Reference:
     SAIP / TCA Profile Interoperability v2.3.1 §8.3.5
@@ -73,7 +73,14 @@ from SIMCARD.state import (
 )
 
 
-_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89880000000466311335_test.txt")
+_BPP_PATH = Path(
+    os.environ.get(
+        "YGGDRASIM_LOCAL_SAIP_BPP_FIXTURE",
+        "__optional_local_saip_bpp_fixture_not_configured__",
+    )
+)
+_SYNTHETIC_ICCID = "8901000000000000000"
+_SYNTHETIC_ICCID_20 = "89010000000000000000"
 
 
 def _walk_efs(state, root_node_id: str):
@@ -172,7 +179,7 @@ class _LinkRuntimeFixture(unittest.TestCase):
         state = SimCardState(
             atr=DEFAULT_SIM_ATR,
             eid="89049032000000000000000000000000",
-            iccid="89880000000000000000",
+            iccid=_SYNTHETIC_ICCID_20,
             imsi="001010000000001",
             default_dp_address="rsp.example.com",
             root_ci_pkid=b"\x00" * 20,
@@ -373,7 +380,7 @@ class UsimOnlyEfPreservedTests(unittest.TestCase):
 
         image = SimProfileImage(
             profile_name="usim-only fixture",
-            iccid="8988000000000000001",
+            iccid=_SYNTHETIC_ICCID,
             imsi="001010000000002",
             nodes=[
                 SimProfileFsNode(
@@ -427,13 +434,13 @@ class UsimOnlyEfPreservedTests(unittest.TestCase):
         self.assertEqual(getattr(usim_op, "link_path", ()), ())
 
 
-@unittest.skipUnless(_BPP_PATH.is_file(), "operator BPP fixture missing")
+@unittest.skipUnless(_BPP_PATH.is_file(), "optional local BPP fixture not configured")
 class OperatorBppLinkPathTests(unittest.TestCase):
-    """End-to-end: load the user's BPP, rebuild the runtime FS and
-    verify that every linkPath the issuer encoded resolves to the
+    """End-to-end: load an explicitly selected local BPP, rebuild the
+    runtime FS and verify every issuer linkPath resolves to the
     canonical bytes from DF.GSM / DF.TELECOM.
 
-    Reproduces the original lab failure -- READ BINARY via SFI under
+    Reproduces the captured-style failure -- READ BINARY via SFI under
     ADF.USIM returning ``9000`` with empty body -- and asserts the
     fix.
     """
@@ -448,7 +455,7 @@ class OperatorBppLinkPathTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8988000000000000000",
+                iccid=image.iccid or _SYNTHETIC_ICCID,
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name or "Linkpath BPP probe",
@@ -461,15 +468,11 @@ class OperatorBppLinkPathTests(unittest.TestCase):
         rebuild_runtime_filesystem(state)
         return state
 
-    def test_decoder_picks_up_at_least_thirty_link_paths(self) -> None:
+    def test_decoder_picks_up_declared_link_paths(self) -> None:
         upp = _decode_hex_text_upp(_BPP_PATH)
         image = decode_profile_image(upp)
         linked = [n for n in image.nodes if n.kind == "ef" and len(n.link_path) > 0]
-        # The user's BPP carries 33 known linkPath entries across
-        # USIM, ISIM, GSM-ACCESS and DF.GSM. Drop a generous lower
-        # bound so the test does not break if the operator adds /
-        # removes a couple of optional EFs in a future revision.
-        self.assertGreaterEqual(len(linked), 30)
+        self.assertGreaterEqual(len(linked), 1)
 
     def test_usim_imsi_mirrors_df_gsm_imsi_via_link_path(self) -> None:
         state = self._activate_bpp()
@@ -526,7 +529,7 @@ class OperatorBppLinkPathTests(unittest.TestCase):
         )
 
     def test_read_binary_via_sfi_for_ef_imsi_returns_full_payload(self) -> None:
-        # Reproduces the production trace ``00B0870009`` (READ BINARY
+        # Reproduces a captured-style ``00B0870009`` (READ BINARY
         # SFI=0x07 select-and-read of EF.IMSI through ADF.USIM).
         # Pre-fix: 9000 with empty body. Post-fix: 9 bytes of IMSI.
         state = self._activate_bpp()

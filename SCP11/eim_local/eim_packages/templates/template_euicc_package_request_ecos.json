@@ -1,7 +1,7 @@
 {
   "package_type": "euicc_package_request_ecos",
   "package_version": "2.0.0",
-  "spec_target": "SGP.32 eIM Package Request / EuiccPackageRequest Containing eCOs",
+  "spec_target": "SGP.32 v1.2 \u00a72.11.2.1 EuiccPackageRequest Containing eCOs",
   "sgp32": {
     "euicc_package_request": {
       "include": true,
@@ -11,7 +11,19 @@
         "ecos": [
           {
             "include": true,
-            "description": "Example eCO payload container",
+            "description": "Typed eCO: register an eIM",
+            "operation": "add_eim",
+            "eim_id": "EIM-EXAMPLE",
+            "eim_fqdn": "eim.example.test",
+            "eim_id_type": 1,
+            "supported_protocols": [
+              "https_over_tcp_retrieval"
+            ],
+            "indirect_profile_download": true
+          },
+          {
+            "include": false,
+            "description": "Raw passthrough: pre-encoded eCO command TLV",
             "value_hex": ""
           }
         ],

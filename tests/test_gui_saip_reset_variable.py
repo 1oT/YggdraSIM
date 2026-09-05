@@ -37,8 +37,16 @@ from yggdrasim_common.gui_server.actions.registry import get_registry
 from yggdrasim_common.gui_server.sessions import get_manager
 
 
-_REFERENCE_PROFILE = pathlib.Path(
-    "Workspace/SAIP/profile/transcoded/1oT_test_profile.transcode.der"
+_REFERENCE_PROFILE = next(
+    (
+        candidate
+        for candidate in (
+            pathlib.Path("Workspace/SAIP/profile/transcoded/reference_test_profile.transcode.der"),
+            pathlib.Path("Workspace/SAIP/profile/transcoded/1oT_test_profile.transcode.der"),
+        )
+        if candidate.exists()
+    ),
+    pathlib.Path("Workspace/SAIP/profile/transcoded/reference_test_profile.transcode.der"),
 )
 
 
@@ -138,6 +146,7 @@ class TestSingleOverrideRollback:
         )
         assert result["removed"] is True
         assert result["overrides_applied"] == {}
+        assert result["remaining_inline_placeholder_count"] == 0
         assert any("reset to source" in s.lower() for s in result["summaries"])
 
         listing = _dispatch_list_variables(None, session_id=saip_session.id)

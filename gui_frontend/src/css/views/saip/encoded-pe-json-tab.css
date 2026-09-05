@@ -17,10 +17,10 @@
 }
 
 .saip-pe-bytes-chip {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 10px;
-  color: var(--fg-muted, #888);
-  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  color: var(--fg-muted);
+  background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1px 6px;
@@ -29,10 +29,10 @@
 }
 
 .saip-pe-bytes-dump {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 1.55;
-  background: var(--surface, rgba(0, 0, 0, 0.18));
+  background: var(--surface);
   color: var(--fg);
   padding: 10px 12px;
   border-radius: 6px;
@@ -50,9 +50,9 @@
 }
 
 .saip-pe-json-size {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 10px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   align-self: center;
   margin-left: 8px;
 }
@@ -60,8 +60,7 @@
 .saip-pe-json-text {
   width: 100%;
   min-height: 240px;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 1.5;
 }
-

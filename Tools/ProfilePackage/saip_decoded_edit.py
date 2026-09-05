@@ -47,6 +47,7 @@ from .saip_asn1_encode import (
     RoundtripEncoderError,
     encode_decoded_roundtrip_bytes,
     encode_decoded_roundtrip_ef_content,
+    encode_decoded_roundtrip_oid,
     encode_decoded_roundtrip_scalar,
     roundtrip_capable_ef_keys,
     roundtrip_capable_fields,
@@ -1179,6 +1180,10 @@ def build_decoded_value_roundtrip_model(
     normalized_ef_raw = str(last_ef_key or "").strip()
     normalized_ef = normalized_ef_raw.lower() if len(normalized_ef_raw) > 0 else None
     normalized_pe = str(pe_section_key or "").strip() or None
+    if normalized_field == "shortEFID":
+        # The dedicated SFI editor handles the OCTET STRING wire encoding
+        # and provides a clearer supported/SFI form than the generic model.
+        return None
 
     if normalized_field == "fillFileContent" and normalized_ef is not None:
         if normalized_ef not in roundtrip_capable_ef_keys():
@@ -1272,6 +1277,25 @@ def build_decoded_value_roundtrip_model(
             "payload": _roundtrip_editor_payload(decoded_scalar),
         }
 
+    if kind == "oid":
+        if not isinstance(raw_value, str):
+            return None
+        try:
+            canonical = encode_decoded_roundtrip_oid(
+                normalized_field,
+                {"oid": raw_value},
+            )
+        except RoundtripEncoderError:
+            return None
+        if canonical is None:
+            return None
+        return {
+            "title": _roundtrip_editor_title(normalized_field, normalized_ef_raw),
+            "note": "Edit the dotted numeric ASN.1 object identifier.",
+            "editor_kind": _ROUNDTRIP_EDITOR_KIND,
+            "payload": {"oid": canonical},
+        }
+
     return None
 
 
@@ -1329,6 +1353,20 @@ def _encode_roundtrip_replacement(
                 f"No round-trip scalar encoder registered for field {normalized_field!r}."
             )
         return encoded_scalar
+
+    if kind == "oid":
+        try:
+            encoded_oid = encode_decoded_roundtrip_oid(
+                normalized_field,
+                editor_payload,
+            )
+        except RoundtripEncoderError as exc:
+            raise ValueError(str(exc)) from exc
+        if encoded_oid is None:
+            raise ValueError(
+                f"No round-trip OID encoder registered for field {normalized_field!r}."
+            )
+        return encoded_oid
 
     raise ValueError(
         f"Round-trip decoded editor does not support field {normalized_field!r}."

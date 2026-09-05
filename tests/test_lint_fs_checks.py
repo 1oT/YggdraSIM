@@ -362,11 +362,16 @@ class SdKeyListLintTests(unittest.TestCase):
 
     def test_valid_key_entry_no_sdk_findings(self) -> None:
         # version=1, AES type, non-zero usage qualifier
-        doc = _sd_profile("01", "80", "3C")
+        doc = _sd_profile("01", "88", "3C")
         codes = [f.code for f in _lint(doc)]
         self.assertNotIn("YRL-SDK-001", codes)
         self.assertNotIn("YRL-SDK-002", codes)
         self.assertNotIn("YRL-SDK-003", codes)
+
+    def test_tls_psk_key_type_no_sdk002_finding(self) -> None:
+        doc = _sd_profile("40", "85", "3C")
+        codes = [f.code for f in _lint(doc)]
+        self.assertNotIn("YRL-SDK-002", codes)
 
     def test_key_version_zero_warns(self) -> None:
         doc = _sd_profile("00", "80", "3C")
@@ -385,6 +390,8 @@ class SdKeyListLintTests(unittest.TestCase):
         hit = next(f for f in findings if f.code == "YRL-SDK-002")
         self.assertEqual(hit.severity, "WARN")
         self.assertEqual(hit.evidence["keyType"], "F0")
+        self.assertIn("0x85 for TLS-PSK", hit.recommendation)
+        self.assertIn("0x88 for AES", hit.recommendation)
 
     def test_missing_usage_qualifier_warns(self) -> None:
         # kuq_hex=None → field absent

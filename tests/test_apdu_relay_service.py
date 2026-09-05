@@ -11,13 +11,17 @@ No sockets are opened; the exchange and status callbacks are mocked.
 
 from __future__ import annotations
 
+import socket
 import time
 import unittest
-from unittest.mock import MagicMock
+from http.server import ThreadingHTTPServer
+from unittest.mock import MagicMock, patch
 
 from Tools.HilBridge.apdu_relay import (
     ApduRelayConfig,
     HilBridgeApduRelayService,
+    _ApduRelayHandler,
+    _ApduRelayHttpServer,
 )
 
 
@@ -42,6 +46,29 @@ def _make_service(
         status_callback=status_cb,
         card_reset_callback=reset_cb,
     )
+
+
+class RelayAddressFamilyTests(unittest.TestCase):
+    def test_ipv6_bind_selects_af_inet6_before_server_creation(self) -> None:
+        with patch.object(ThreadingHTTPServer, "__init__", return_value=None) as initialize:
+            server = _ApduRelayHttpServer(
+                ("::1", 0),
+                _ApduRelayHandler,
+                MagicMock(),
+            )
+
+        self.assertEqual(server.address_family, socket.AF_INET6)
+        initialize.assert_called_once_with(("::1", 0), _ApduRelayHandler)
+
+    def test_ipv6_base_url_uses_rfc_3986_brackets(self) -> None:
+        service = HilBridgeApduRelayService(
+            config=ApduRelayConfig(host="::1", port=8642),
+            exchange_callback=MagicMock(return_value=(b"", 0x90, 0x00)),
+            status_callback=MagicMock(return_value={}),
+        )
+
+        self.assertEqual(service.base_url, "http://[::1]:8642")
+        self.assertEqual(service.apdu_url, "http://[::1]:8642/apdu")
 
 
 class ExpectedTokenTests(unittest.TestCase):

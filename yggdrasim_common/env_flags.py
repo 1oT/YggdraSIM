@@ -455,6 +455,25 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_RUNTIME,
     ),
     EnvFlag(
+        name="YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION",
+        category=CATEGORY_SCP11_TLS,
+        summary="Allow read-only TOFU chain reads on first contact",
+        description=(
+            "Opt-in to the read-only certificate-chain probe that\n"
+            "auto-learns a trust anchor for a freshly-seen SM-DP+ / eIM\n"
+            "FQDN. The probe sends no request body: it reads the\n"
+            "presented chain, verifies it against a local bundle, and\n"
+            "persists the result under SCP11/<tree>/dynamic_ca before any\n"
+            "ES9 call goes out. An active attacker controls first\n"
+            "contact, so prefer pointing ES9_CA_BUNDLE_PATH at a reviewed\n"
+            "anchor. Refused while REQUIRE_PINNED_TLS_INTROSPECTION=1."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset → first-contact chain reads are refused",
+        applies=APPLIES_RUNTIME,
+        sensitive=True,
+    ),
+    EnvFlag(
         name="YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION",
         category=CATEGORY_SCP11_TLS,
         summary="Hard-lock: refuse TOFU chain reads",
@@ -462,10 +481,10 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
             "Hard-lock for the read-only TOFU chain probe used to\n"
             "auto-learn trust anchors on first contact. Use when no new\n"
             "anchor may be learned at runtime (attestation / air-gapped)\n"
-            "and pre-seed anchors manually under SCP11/<tree>/certs."
+            "and point ES9_CA_BUNDLE_PATH at a pre-seeded anchor instead."
         ),
         kind=KIND_BOOL_TOGGLE,
-        default_hint="unset → auto-learn allowed",
+        default_hint="unset → ALLOW_TLS_INTROSPECTION=1 still required",
         applies=APPLIES_RUNTIME,
     ),
 
@@ -574,6 +593,77 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         ),
         kind=KIND_STRING,
         default_hint="auto-detect (prefers screen-256color / tmux-256color / xterm-256color)",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_RELAY_SESSION_RESET",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Power-cycle the card at relay-session boundaries",
+        description=(
+            "The bridge cold-resets the physical card when an operator\n"
+            "shell's relay session starts, is replaced, or ends, so a\n"
+            "selected AID, an open logical channel, or an established\n"
+            "SCP03 / SCP11 secure channel cannot leak into the modem\n"
+            "session. Set to 0 only for workflows that deliberately\n"
+            "carry card state across sessions."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="enabled",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_SIMTRACE_RESET",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="How the supervisor clears the SIMtrace2 board before a session",
+        description=(
+            "Remote stand-in for the board's physical reset button. The\n"
+            "cardem firmware reboots its microcontroller whenever USB\n"
+            "drops below CONFIGURED, so the supervisor forces that before\n"
+            "every session start. Accepts 'usb-reset' (USBDEVFS_RESET on\n"
+            "the usbfs node), 'port-power' (uhubctl VBUS cycle, also\n"
+            "power-cycles the SIM), 'auto' (usb-reset then port-power),\n"
+            "or 'off'."
+        ),
+        kind=KIND_STRING,
+        default_hint="usb-reset",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_UHUBCTL_LOCATION",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Hub location for the port-power SIMtrace2 reset",
+        description=(
+            "Value passed to 'uhubctl -l', for example '1-1'. Required by\n"
+            "the 'port-power' reset mode and by 'auto' before it will fall\n"
+            "back to a VBUS cycle. Find it with 'uhubctl'."
+        ),
+        kind=KIND_STRING,
+        default_hint="unset (port-power reset disabled)",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_UHUBCTL_PORT",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Hub port for the port-power SIMtrace2 reset",
+        description=(
+            "Value passed to 'uhubctl -p'. Leave unset to cycle every port\n"
+            "on the selected hub, which also power-cycles anything else\n"
+            "plugged into it."
+        ),
+        kind=KIND_STRING,
+        default_hint="unset (all ports on the hub)",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_UHUBCTL_BINARY",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Path to the uhubctl binary",
+        description=(
+            "Explicit uhubctl executable used by the 'port-power' reset\n"
+            "mode. Only needed when uhubctl is not on PATH."
+        ),
+        kind=KIND_PATH,
+        default_hint="uhubctl (resolved from PATH)",
         applies=APPLIES_RUNTIME,
     ),
     EnvFlag(
@@ -774,6 +864,26 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         default_hint="unset",
         applies=APPLIES_STARTUP,
         sensitive=True,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_FS_ROOTS",
+        category=CATEGORY_GUI,
+        summary="Directories the in-app file picker may list",
+        description=(
+            "os.pathsep-separated list of directories the /api/fs/browse\n"
+            "endpoint may enumerate. Overrides the per-mode default in\n"
+            "both directions: --gui browses the whole filesystem because\n"
+            "it is loopback-bound on the operator's own machine, while\n"
+            "--web-server is reachable off-host and is limited to the\n"
+            "picker's shortcut roots (home, working dir, workspace,\n"
+            "Documents, Downloads, Desktop). Set this to widen a lab\n"
+            "deployment that browses a mount, or to tighten a desktop\n"
+            "one. Paths are compared after resolution, so a symlink is\n"
+            "judged by its target."
+        ),
+        kind=KIND_PATH,
+        default_hint="unset -> whole filesystem for --gui, shortcut roots for --web-server",
+        applies=APPLIES_STARTUP,
     ),
     EnvFlag(
         name="YGGDRASIM_GUI_TLS_CERT",

@@ -9,6 +9,7 @@ import importlib.util
 import os
 import sys
 import threading
+from importlib.machinery import ModuleSpec
 from types import ModuleType
 from typing import Any
 
@@ -74,6 +75,46 @@ def _plugin_loading_block_reason() -> str:
     )
 
 
+def _ensure_plugins_namespace(plugins_dir: str) -> None:
+    """Make drop-in directory plugins importable as ``plugins.<name>``."""
+    namespace_name = "plugins"
+    normalized_dir = os.path.abspath(plugins_dir)
+    existing = sys.modules.get(namespace_name)
+    if existing is None:
+        module = ModuleType(namespace_name)
+        module.__package__ = namespace_name
+        module.__path__ = [normalized_dir]
+        spec = ModuleSpec(namespace_name, loader=None, is_package=True)
+        spec.submodule_search_locations = [normalized_dir]
+        module.__spec__ = spec
+        sys.modules[namespace_name] = module
+        return
+
+    namespace_paths = getattr(existing, "__path__", None)
+    if namespace_paths is None:
+        raise RuntimeError(
+            "Cannot load directory plugins because 'plugins' is already a non-package module."
+        )
+    paths = [os.path.abspath(str(path)) for path in namespace_paths]
+    if normalized_dir not in paths:
+        paths.append(normalized_dir)
+        existing.__path__ = paths
+    spec = getattr(existing, "__spec__", None)
+    if spec is not None:
+        spec.submodule_search_locations = list(paths)
+
+
+def _plugin_label(source_path: str) -> str:
+    """Display name for a plugin path — ``pkg/`` for a directory plugin,
+    ``file.py`` for a single-file plugin. Kept in one place so the startup
+    banner and the operator-facing status report always agree.
+    """
+    base = os.path.basename(source_path)
+    if base == "__init__.py":
+        return os.path.basename(os.path.dirname(source_path)) + "/"
+    return base
+
+
 class PluginManager:
     def __init__(self) -> None:
         self._loaded = False
@@ -111,6 +152,12 @@ class PluginManager:
                     self._load_errors["__gate__"] = (
                         f"{_plugin_loading_block_reason()} Directory: {plugins_dir}."
                     )
+                    self._loaded = True
+                    return
+                try:
+                    _ensure_plugins_namespace(plugins_dir)
+                except Exception as error:
+                    self._load_errors["__namespace__"] = str(error)
                     self._loaded = True
                     return
                 loaded_paths: list[str] = []
@@ -160,16 +207,7 @@ class PluginManager:
         # actually executing at startup. Matches the COMMON-P4-02
         # audit intent ("print a banner listing every loaded plugin
         # path").
-        label_parts: list[str] = []
-        for path in loaded_paths:
-            base = os.path.basename(path)
-            if base == "__init__.py":
-                # Directory-based plugin: surface the package name, not
-                # the boilerplate ``__init__.py`` filename.
-                label_parts.append(os.path.basename(os.path.dirname(path)) + "/")
-            else:
-                label_parts.append(base)
-        labels = ", ".join(label_parts)
+        labels = ", ".join(_plugin_label(path) for path in loaded_paths)
         sys.stderr.write(
             f"[plugins] loaded {len(loaded_paths)}: {labels} "
             f"({_ALLOW_PLUGINS_ENV}=1; set {_DISALLOW_PLUGINS_ENV}=1 "
@@ -182,15 +220,37 @@ class PluginManager:
         source_path: str,
         legacy_alias: str = "",
     ) -> bool:
+        capabilities_before = dict(self._capabilities)
+        modules_before = set(sys.modules)
         try:
             # If the module (or its namespace package wrapper) is
             # already in sys.modules because an earlier ``import
             # plugins.<name>`` beat the runtime to the punch, reuse
             # that object. This prevents sys.modules from forking into
-            # two distinct copies of the same plugin — a condition
+            # two distinct copies of the same plugin -- a condition
             # that silently breaks ``mock.patch`` targets in tests.
             existing = sys.modules.get(module_name)
-            if existing is not None and getattr(existing, "__file__", None) == source_path:
+            if existing is not None:
+                existing_path = str(getattr(existing, "__file__", "") or "")
+                if (
+                    len(existing_path) == 0
+                    or os.path.realpath(existing_path) != os.path.realpath(source_path)
+                ):
+                    raise RuntimeError(
+                        f"Plugin module name collision for {module_name!r}: "
+                        f"existing path {existing_path!r}, requested path {source_path!r}."
+                    )
+            elif any(name.startswith(f"{module_name}.") for name in sys.modules):
+                raise RuntimeError(
+                    f"Plugin module prefix collision for {module_name!r}."
+                )
+            alias = str(legacy_alias or "").strip()
+            alias_existing = sys.modules.get(alias) if alias else None
+            if alias_existing is not None and alias_existing is not existing:
+                raise RuntimeError(
+                    f"Plugin legacy alias collision for {alias!r}."
+                )
+            if existing is not None:
                 module = existing
                 if getattr(module, "__spec__", None) is None:
                     module.__spec__ = importlib.util.spec_from_file_location(
@@ -212,7 +272,6 @@ class PluginManager:
             # tooling and transcripts resolving correctly. The alias
             # points to the canonical module object; patching through
             # either path hits the same attribute table.
-            alias = str(legacy_alias or "").strip()
             if len(alias) > 0 and alias != module_name:
                 sys.modules.setdefault(alias, module)
                 prefix_with_dot = f"{module_name}."
@@ -223,6 +282,13 @@ class PluginManager:
                     sys.modules.setdefault(f"{alias}.{suffix}", sys.modules[loaded_name])
             return True
         except Exception as error:
+            self._capabilities.clear()
+            self._capabilities.update(capabilities_before)
+            for loaded_name in tuple(sys.modules):
+                if loaded_name in modules_before:
+                    continue
+                if loaded_name == module_name or loaded_name.startswith(f"{module_name}."):
+                    sys.modules.pop(loaded_name, None)
             self._load_errors[module_name] = str(error)
             return False
 
@@ -230,6 +296,13 @@ class PluginManager:
         capability_name = str(name or "").strip().lower()
         if len(capability_name) == 0:
             raise ValueError("Plugin capability name must not be empty.")
+        if provider is None:
+            raise ValueError("Plugin capability provider must not be None.")
+        existing = self._capabilities.get(capability_name)
+        if existing is provider:
+            return
+        if capability_name in self._capabilities:
+            raise ValueError(f"Plugin capability name already registered: {capability_name!r}.")
         self._capabilities[capability_name] = provider
 
     def get_capability(self, name: str) -> Any:
@@ -246,6 +319,33 @@ class PluginManager:
         self.ensure_loaded()
         return dict(self._load_errors)
 
+    def loaded_plugins(self) -> list[dict[str, str]]:
+        """Return the plugin modules that imported successfully at load time.
+
+        Each entry carries the import ``name``, a display ``label`` (matching
+        the startup banner), and the source ``path`` (absolute; callers that
+        expose this over HTTP should relativise it first).
+        """
+        self.ensure_loaded()
+        with self._lock:
+            plugins: list[dict[str, str]] = []
+            for name, module in sorted(self._modules.items()):
+                source = str(getattr(module, "__file__", "") or "")
+                plugins.append(
+                    {
+                        "name": name,
+                        "label": _plugin_label(source) if source else name,
+                        "path": source,
+                    }
+                )
+            return plugins
+
+    def capabilities(self) -> list[str]:
+        """Return the sorted names of registered plugin capabilities."""
+        self.ensure_loaded()
+        with self._lock:
+            return sorted(self._capabilities)
+
     def extend_target(self, target: Any) -> Any:
         """Extend *target* with the callables registered for the named extension point."""
         self.ensure_loaded()
@@ -256,13 +356,46 @@ class PluginManager:
         if isinstance(applied, set) is False:
             applied = set()
             target_dict["_yggdrasim_applied_plugin_capabilities"] = applied
+        applied_providers = target_dict.get("_yggdrasim_applied_plugin_providers")
+        if isinstance(applied_providers, set) is False:
+            applied_providers = set()
+            target_dict["_yggdrasim_applied_plugin_providers"] = applied_providers
         for capability_name, provider in self._capabilities.items():
             if capability_name in applied:
                 continue
+            provider_identity = id(provider)
+            if provider_identity in applied_providers:
+                applied.add(capability_name)
+                continue
+            health = getattr(provider, "health", None)
+            if callable(health):
+                try:
+                    health_report = health()
+                except Exception as error:
+                    self._load_errors[f"{capability_name}:health"] = (
+                        f"Plugin health check failed: {error}"
+                    )
+                    applied.add(capability_name)
+                    applied_providers.add(provider_identity)
+                    continue
+                if (
+                    isinstance(health_report, dict)
+                    and health_report.get("actions_available") is False
+                ):
+                    issues = health_report.get("dependency_issues") or ()
+                    detail = "; ".join(str(item) for item in issues if str(item))
+                    self._load_errors[f"{capability_name}:health"] = (
+                        "Plugin actions are unavailable"
+                        + (f": {detail}" if detail else ".")
+                    )
+                    applied.add(capability_name)
+                    applied_providers.add(provider_identity)
+                    continue
             extender = getattr(provider, "extend_target", None)
             if callable(extender):
                 extender(target)
             applied.add(capability_name)
+            applied_providers.add(provider_identity)
         return target
 
 
@@ -300,6 +433,61 @@ def has_capability(name: str) -> bool:
 
 def plugin_load_errors() -> dict[str, str]:
     return get_plugin_manager().load_errors()
+
+
+def plugin_status_report() -> dict[str, Any]:
+    """Summarise plugin-loading state for operator surfaces (GUI / CLI).
+
+    Reflects what the singleton manager actually did: plugin loading is
+    evaluated once at process start and latched, so the report also computes
+    ``requires_restart`` when the live ``YGGDRASIM_ALLOW_PLUGINS`` /
+    ``YGGDRASIM_DISALLOW_PLUGINS`` gate now disagrees with that latched
+    decision (e.g. the operator just toggled the flag from the UI).
+
+    Synthetic ``_load_errors`` keys are split out so callers can render them
+    distinctly: ``__gate__`` / ``__namespace__`` say why nothing loaded,
+    ``<capability>:health`` are health-check failures, and the remainder are
+    genuine per-plugin import errors.
+    """
+    manager = ensure_plugins_loaded()
+    errors = manager.load_errors()
+
+    block_reason = errors.pop("__gate__", "")
+    namespace_error = errors.pop("__namespace__", "")
+    health_errors = {
+        key: errors.pop(key) for key in list(errors) if key.endswith(":health")
+    }
+
+    loaded_at_startup = len(block_reason) == 0 and len(namespace_error) == 0
+    requires_restart = _plugin_loading_allowed() != loaded_at_startup
+
+    plugins_dir = ""
+    try:
+        plugins_dir = ensure_runtime_dir(_PLUGIN_DIR_NAME)
+    except Exception:  # noqa: BLE001 -- never let reporting raise
+        plugins_dir = ""
+
+    plugins: list[dict[str, str]] = []
+    for entry in manager.loaded_plugins():
+        source = entry.get("path", "")
+        shown = source
+        if source:
+            try:
+                shown = os.path.relpath(source, plugins_dir) if plugins_dir else os.path.basename(source)
+            except ValueError:
+                shown = os.path.basename(source)
+        plugins.append({"name": entry["name"], "label": entry["label"], "path": shown})
+
+    return {
+        "allowed": loaded_at_startup,
+        "requires_restart": requires_restart,
+        "block_reason": block_reason,
+        "namespace_error": namespace_error,
+        "plugins": plugins,
+        "capabilities": manager.capabilities(),
+        "health_errors": health_errors,
+        "errors": errors,
+    }
 
 
 def extend_target_with_plugins(target: Any) -> Any:

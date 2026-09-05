@@ -1,0 +1,343 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+name: Windows Test Artifact
+
+# An operator-only Windows build. It probes the Actions artifact service, but
+# always keeps a verified private draft-Release fallback so a full artifact
+# quota cannot make the requested bundle inaccessible.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-test-artifact
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.5.9"
+
+jobs:
+  preflight:
+    name: Require an exact main-branch dispatch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Reject non-main revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${GITHUB_SHA}" = "${{ github.sha }}"
+
+  build-windows:
+    name: Windows x86_64 clean artifact
+    if: github.ref == 'refs/heads/main' && needs.preflight.result == 'success'
+    needs: preflight
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout the requested revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Resolve immutable build metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF -ne 'refs/heads/main') {
+            throw 'Windows artifacts may only be built from main.'
+          }
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) {
+            throw 'Checkout does not match the requested GitHub SHA.'
+          }
+          $version = python -c "import tomllib; from pathlib import Path; print(tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read the project version.' }
+          if ($version -notmatch '^[A-Za-z0-9][A-Za-z0-9.-]*$') {
+            throw 'Project version is unsafe for a GitHub asset name.'
+          }
+          $shortSha = $env:GITHUB_SHA.Substring(0, 12)
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
+          "tag=ci-windows-main-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_OUTPUT
+
+      - name: Install Windows build dependencies
+        shell: pwsh
+        run: choco install swig -y
+
+      - name: Set up locked resolver
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install locked Python dependencies
+        shell: pwsh
+        run: uv sync --frozen --extra saip --extra build --extra test --extra gui
+
+      - name: Verify portable Remote Lab and Card Bridge contracts
+        shell: pwsh
+        run: |
+          uv run python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=1 `
+            tests/test_remote_cross_platform_boundary.py `
+            tests/test_remote_lab.py `
+            tests/test_gui_card_bridge_actions.py `
+            tests/test_gui_card_bridge_actions_http.py `
+            tests/test_apdu_relay_service.py `
+            tests/test_card_backend_relay_token.py `
+            tests/test_hil_bridge_card_relay.py `
+            tests/test_secure_files_windows.py
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows Remote Lab/Card Bridge contract tests failed.'
+          }
+
+      - name: Build the unsigned Windows bundle
+        shell: pwsh
+        env:
+          YGGDRASIM_FLAVOR: clean
+        run: |
+          if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture `
+              -ne [System.Runtime.InteropServices.Architecture]::X64) {
+            throw 'Expected an x86_64 Windows runner.'
+          }
+          uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+          if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
+
+      - name: Smoke test the Windows bundle
+        shell: pwsh
+        run: |
+          .\dist\yggdrasim-clean.exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'Windows CLI smoke test failed.' }
+          .\dist\yggdrasim-gui-clean.exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'Windows GUI smoke test failed.' }
+          uv run python scripts/release/validate_release.py artifact `
+            .\dist\yggdrasim-clean.exe .\dist\yggdrasim-gui-clean.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Release validation failed.' }
+
+      - name: Package the unsigned Windows artifact
+        id: package
+        shell: pwsh
+        env:
+          SHORT_SHA: ${{ steps.meta.outputs.short_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'windows-release-assets'
+          $bundle = Join-Path $env:RUNNER_TEMP 'windows-clean-bundle'
+          New-Item -ItemType Directory -Force -Path $stage, $bundle | Out-Null
+          Copy-Item -LiteralPath '.\dist\yggdrasim-clean.exe' `
+            -Destination (Join-Path $bundle 'yggdrasim-clean.exe')
+          Copy-Item -LiteralPath '.\dist\yggdrasim-gui-clean.exe' `
+            -Destination (Join-Path $bundle 'yggdrasim-gui-clean.exe')
+          @"
+          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          Commit: $env:GITHUB_SHA
+          Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          Platform: Windows x86_64
+          These executables are not Authenticode-signed and Microsoft Defender
+          SmartScreen may warn or block them.
+          "@ | Set-Content -Encoding utf8 `
+            -LiteralPath (Join-Path $bundle 'UNSIGNED-TEST-BUILD.txt')
+
+          $identity = "$env:SHORT_SHA-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $asset = "yggdrasim-windows-x86_64-clean-UNSIGNED-TEST-$identity.zip"
+          $archive = Join-Path $stage $asset
+          Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $archive
+          $hash = (Get-FileHash -Algorithm SHA256 `
+            -LiteralPath $archive).Hash.ToLowerInvariant()
+          $sidecar = "$archive.sha256"
+          "$hash  $asset" | Set-Content -Encoding ascii -LiteralPath $sidecar
+
+          "asset_name=$asset" >> $env:GITHUB_OUTPUT
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+          "sidecar=$sidecar" >> $env:GITHUB_OUTPUT
+          "artifact_name=yggdrasim-windows-x86_64-clean-$identity" >> $env:GITHUB_OUTPUT
+
+      - name: Try the GitHub Actions artifact service
+        id: actions-artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.sidecar }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+      - name: Create the isolated Windows draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ steps.meta.outputs.tag }}
+          ARTIFACT_OUTCOME: ${{ steps.actions-artifact.outcome }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $notes = Join-Path $env:RUNNER_TEMP 'windows-draft-notes.md'
+          @"
+          # INCOMPLETE — WINDOWS UNSIGNED TEST BUILD — DO NOT USE
+
+          Exact revision: ``$env:GITHUB_SHA``
+
+          Workflow run:
+          $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+
+          Actions artifact service outcome: ``$env:ARTIFACT_OUTCOME``
+
+          The Windows executables are not Authenticode-signed and may trigger
+          Microsoft Defender SmartScreen. This draft is not a production release.
+          "@ | Set-Content -Encoding utf8 -LiteralPath $notes
+          & gh release create $env:TEST_TAG `
+            --draft `
+            --prerelease `
+            --latest=false `
+            --target $env:GITHUB_SHA `
+            --title "INCOMPLETE — WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
+            --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create draft Release.' }
+
+      - name: Upload and verify the Windows draft assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ steps.meta.outputs.tag }}
+          ASSET_NAME: ${{ steps.package.outputs.asset_name }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          SIDECAR: ${{ steps.package.outputs.sidecar }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assetPaths = @($env:ARCHIVE, $env:SIDECAR)
+          & gh release upload $env:TEST_TAG @assetPaths
+          if ($LASTEXITCODE -ne 0) { throw 'Draft Release upload failed.' }
+
+          $releaseJson = & gh release view $env:TEST_TAG `
+            --json isDraft,isPrerelease,tagName,targetCommitish
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect draft Release.' }
+          $release = $releaseJson | ConvertFrom-Json
+          if (-not $release.isDraft -or -not $release.isPrerelease) {
+            throw 'Windows test Release must remain a draft and prerelease.'
+          }
+          if ($release.tagName -ne $env:TEST_TAG -or
+              $release.targetCommitish -ne $env:GITHUB_SHA) {
+            throw 'Windows test Release is not bound to the requested SHA.'
+          }
+
+          $verify = Join-Path $env:RUNNER_TEMP 'verify-windows-release'
+          New-Item -ItemType Directory -Force -Path $verify | Out-Null
+          & gh release download $env:TEST_TAG --dir $verify
+          if ($LASTEXITCODE -ne 0) { throw 'Draft Release download failed.' }
+
+          $actualNames = @(Get-ChildItem -LiteralPath $verify -File |
+            ForEach-Object { $_.Name } | Sort-Object)
+          $expectedNames = @($env:ASSET_NAME, "$env:ASSET_NAME.sha256") |
+            Sort-Object
+          if (($actualNames -join "`n") -ne ($expectedNames -join "`n")) {
+            throw "Unexpected draft asset set: $($actualNames -join ', ')"
+          }
+
+          $downloadedArchive = Join-Path $verify $env:ASSET_NAME
+          $downloadedSidecar = "$downloadedArchive.sha256"
+          $checksumLine = (Get-Content -LiteralPath $downloadedSidecar -Raw).Trim()
+          if ($checksumLine -notmatch '^([0-9a-f]{64})  (.+)$') {
+            throw 'Malformed SHA-256 sidecar.'
+          }
+          if ($Matches[2] -ne $env:ASSET_NAME) {
+            throw 'SHA-256 sidecar names the wrong asset.'
+          }
+          $downloadedHash = (Get-FileHash -Algorithm SHA256 `
+            -LiteralPath $downloadedArchive).Hash.ToLowerInvariant()
+          if ($downloadedHash -ne $Matches[1]) {
+            throw 'Downloaded Windows archive failed SHA-256 verification.'
+          }
+
+          $extracted = Join-Path $env:RUNNER_TEMP 'verify-windows-bundle'
+          Expand-Archive -LiteralPath $downloadedArchive -DestinationPath $extracted
+          $bundleNames = @(Get-ChildItem -LiteralPath $extracted -File |
+            ForEach-Object { $_.Name } | Sort-Object)
+          $expectedBundleNames = @(
+            'UNSIGNED-TEST-BUILD.txt',
+            'yggdrasim-clean.exe',
+            'yggdrasim-gui-clean.exe'
+          ) | Sort-Object
+          if (($bundleNames -join "`n") -ne ($expectedBundleNames -join "`n")) {
+            throw "Unexpected archive contents: $($bundleNames -join ', ')"
+          }
+          & (Join-Path $extracted 'yggdrasim-clean.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'Downloaded CLI smoke test failed.' }
+          & (Join-Path $extracted 'yggdrasim-gui-clean.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'Downloaded GUI smoke test failed.' }
+
+      - name: Mark the verified Windows draft complete
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ steps.meta.outputs.tag }}
+          ARTIFACT_OUTCOME: ${{ steps.actions-artifact.outcome }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $notes = Join-Path $env:RUNNER_TEMP 'windows-complete-notes.md'
+          @"
+          # COMPLETE — WINDOWS UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+
+          The Windows ZIP and its SHA-256 sidecar were uploaded, redownloaded,
+          checksum-verified, extracted, and both executables passed ``--version``
+          for exact revision ``$env:GITHUB_SHA``.
+
+          Workflow run:
+          $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+
+          Actions artifact service outcome: ``$env:ARTIFACT_OUTCOME``
+
+          These executables are not Authenticode-signed and may trigger
+          Microsoft Defender SmartScreen. This draft is not a production release.
+          "@ | Set-Content -Encoding utf8 -LiteralPath $notes
+          & gh release edit $env:TEST_TAG `
+            --title "COMPLETE — WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
+            --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Could not finalize draft Release.' }
+          & gh release view $env:TEST_TAG --json url `
+            --jq '"Windows draft: " + .url' >> $env:GITHUB_STEP_SUMMARY
+          "Actions artifact outcome: $env:ARTIFACT_OUTCOME" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Mark a created Windows draft incomplete after failure
+        if: ${{ failure() }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEST_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          & gh release view $env:TEST_TAG *> $null
+          if ($LASTEXITCODE -ne 0) { exit 0 }
+          $notes = Join-Path $env:RUNNER_TEMP 'windows-incomplete-notes.md'
+          @"
+          # INCOMPLETE — WINDOWS UNSIGNED TEST BUILD — DO NOT USE
+
+          A build, upload, or verification step failed for exact revision
+          ``$env:GITHUB_SHA``. Inspect:
+          $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          "@ | Set-Content -Encoding utf8 -LiteralPath $notes
+          & gh release edit $env:TEST_TAG `
+            --title "INCOMPLETE — WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
+            --notes-file $notes
+          # Best effort: the run has already failed, and a cleanup blip must
+          # not mask the real failure with a second red step.
+          exit 0

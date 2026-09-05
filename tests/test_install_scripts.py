@@ -20,6 +20,7 @@ so the test suite stays runnable on Linux / macOS CI hosts.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import unittest
@@ -28,6 +29,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALL_DIR = REPO_ROOT / "scripts" / "install"
+PINNED_ACTION = re.compile(r"[^@\s]+@[0-9a-f]{40}")
 
 POSIX_SCRIPTS = (
     "install-linux.sh",
@@ -36,6 +38,15 @@ POSIX_SCRIPTS = (
 )
 WINDOWS_SCRIPT = "install-windows.ps1"
 SHARED_HELPERS = "_common.sh"
+LINUX_GUI_RUNTIME_PACKAGES = (
+    "libegl1",
+    "libgl1",
+    "libxkbcommon-x11-0",
+    "libxcb-cursor0",
+    "libxcb-keysyms1",
+    "libxcb-shape0",
+    "libxcb-icccm4",
+)
 
 
 class InstallScriptLayoutTests(unittest.TestCase):
@@ -58,6 +69,26 @@ class InstallScriptLayoutTests(unittest.TestCase):
     def test_common_helpers_present(self) -> None:
         path = INSTALL_DIR / SHARED_HELPERS
         self.assertTrue(path.is_file(), f"missing: {path}")
+
+    def test_full_linux_installers_verify_exact_remsim_client_binary(self) -> None:
+        helpers = (INSTALL_DIR / SHARED_HELPERS).read_text(encoding="utf-8")
+        exact_package = helpers.index("yg_apt_install osmo-remsim-client-st2")
+        compatibility_package = helpers.index("yg_apt_install osmo-remsim-client || true")
+        self.assertLess(exact_package, compatibility_package)
+        self.assertIn("command -v osmo-remsim-client-st2", helpers)
+        self.assertIn(
+            "yg_die \"required HIL executable 'osmo-remsim-client-st2'",
+            helpers,
+        )
+        for script in ("install-linux.sh", "install-raspberrypi.sh"):
+            text = (INSTALL_DIR / script).read_text(encoding="utf-8")
+            self.assertIn("yg_install_remsim_client", text)
+
+    def test_linux_gui_installers_include_qt_xcb_runtime_dependencies(self) -> None:
+        for script in ("install-linux.sh", "install-raspberrypi.sh"):
+            text = (INSTALL_DIR / script).read_text(encoding="utf-8")
+            for package in LINUX_GUI_RUNTIME_PACKAGES:
+                self.assertIn(package, text, f"{script} missing {package}")
 
     def test_windows_script_present(self) -> None:
         path = INSTALL_DIR / WINDOWS_SCRIPT
@@ -222,6 +253,134 @@ class CiWorkflowCoverageTests(unittest.TestCase):
             "yggdrasim-gui-windows-x86_64-clean.exe",
         ):
             self.assertIn(asset, text)
+
+    def test_workflow_builds_and_packages_linux_gui_runtime_dependencies(
+        self,
+    ) -> None:
+        workflow = (
+            REPO_ROOT / ".github" / "workflows" / "build.yml"
+        ).read_text(encoding="utf-8")
+        x86_job = workflow.split("build-linux-x86_64:", 1)[1].split(
+            "build-linux-arm64-clean:",
+            1,
+        )[0]
+        deb_job = workflow.split("build-linux-deb-clean:", 1)[1].split(
+            "publish-release:",
+            1,
+        )[0]
+
+        for package in LINUX_GUI_RUNTIME_PACKAGES:
+            self.assertIn(package, x86_job)
+            self.assertIn(package, deb_job)
+
+    def test_workflow_artifacts_use_short_retention(self) -> None:
+        build_workflow = (
+            REPO_ROOT / ".github" / "workflows" / "build.yml"
+        ).read_text(encoding="utf-8")
+        docker_workflow = (
+            REPO_ROOT / ".github" / "workflows" / "docker.yml"
+        ).read_text(encoding="utf-8")
+
+        upload_action = (
+            "uses: actions/upload-artifact@"
+            "b7c566a772e6b6bfb58ed0dc250532a479d7789f"
+        )
+        self.assertEqual(build_workflow.count(upload_action), 6)
+        build_lines = build_workflow.splitlines()
+        upload_indexes = [
+            index
+            for index, line in enumerate(build_lines)
+            if upload_action in line
+        ]
+        for upload_index in upload_indexes:
+            next_step = next(
+                (
+                    index
+                    for index in range(upload_index + 1, len(build_lines))
+                    if build_lines[index].startswith("      - name:")
+                ),
+                len(build_lines),
+            )
+            upload_step = "\n".join(build_lines[upload_index:next_step])
+            self.assertIn("retention-days: 7", upload_step)
+
+        docker_lines = docker_workflow.splitlines()
+        docker_build_action = (
+            "uses: docker/build-push-action@"
+            "53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
+        )
+        build_index = next(
+            index
+            for index, line in enumerate(docker_lines)
+            if docker_build_action in line
+        )
+        next_step = next(
+            (
+                index
+                for index in range(build_index + 1, len(docker_lines))
+                if docker_lines[index].startswith("      - name:")
+            ),
+            len(docker_lines),
+        )
+        docker_step = "\n".join(docker_lines[build_index:next_step])
+        self.assertIn('DOCKER_BUILD_RECORD_UPLOAD: "false"', docker_step)
+        self.assertNotIn("DOCKER_BUILD_RECORD_RETENTION_DAYS", docker_step)
+
+    def test_docker_publish_actions_are_immutable(self) -> None:
+        workflow = (
+            REPO_ROOT / ".github" / "workflows" / "docker.yml"
+        ).read_text(encoding="utf-8")
+        for action in (
+            "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
+            "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
+            "docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0",
+            "docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302",
+            "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a",
+        ):
+            self.assertIn(action, workflow)
+        checkout_step = workflow.split("- name: Checkout code", 1)[1].split(
+            "- name: Set up Docker Buildx",
+            1,
+        )[0]
+        self.assertIn("persist-credentials: false", checkout_step)
+
+    def test_full_suite_jobs_install_every_extra_a_reviewed_module_needs(self) -> None:
+        """Reviewed packages must be importable in the CI test environment.
+
+        ``tests/test_repo_module_import_smoke.py`` imports every module on the
+        publication boundary. ``Tools.YggdraMCP.server`` needs the ``mcp``
+        extra the same way ``Tools.YggdraCore`` needs ``fastapi`` from
+        ``full``, so a job that runs the whole suite has to sync it.
+        """
+        for name in ("build.yml", "main-test-release.yml"):
+            workflow = (REPO_ROOT / ".github" / "workflows" / name).read_text(
+                encoding="utf-8"
+            )
+            sync = [
+                line.strip()
+                for line in workflow.splitlines()
+                if "uv sync --frozen --extra full --extra test" in line
+            ]
+            self.assertEqual(len(sync), 1, f"{name}: expected one full-suite sync")
+            self.assertIn("--extra mcp", sync[0], name)
+
+    def test_every_workflow_action_is_pinned_to_a_commit_sha(self) -> None:
+        workflow_dir = REPO_ROOT / ".github" / "workflows"
+        workflows = sorted(workflow_dir.glob("*.yml"))
+        self.assertTrue(workflows, "no workflows found to audit")
+        unpinned: list[str] = []
+        for workflow in workflows:
+            text = workflow.read_text(encoding="utf-8")
+            for match in re.finditer(r"(?m)^\s*uses:\s*([^\s#]+)", text):
+                action_ref = match.group(1)
+                if not PINNED_ACTION.fullmatch(action_ref):
+                    unpinned.append(f"{workflow.name}: {action_ref}")
+        self.assertEqual(
+            unpinned,
+            [],
+            "a mutable tag lets an upstream retag change what CI runs: "
+            + ", ".join(unpinned),
+        )
 
 
 if __name__ == "__main__":

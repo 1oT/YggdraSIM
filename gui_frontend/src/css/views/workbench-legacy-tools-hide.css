@@ -3,8 +3,8 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Hide the legacy inline tools row when a ribbon is also present. */
 .cc-wb-session .cc-wb-session-tools {
   display: none;
 }
-

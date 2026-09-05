@@ -30,6 +30,8 @@ from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from Tools.CardBridge.server import CardBridgeConfig, run_card_bridge
 from Tools.HilBridge.pcsc import PcscBridgeError
 from Tools.HilBridge.remote_card import (
@@ -232,6 +234,7 @@ class ResolveTokenTests(unittest.TestCase):
 
 
 class RoundTripTests(unittest.TestCase):
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_remote_channel_proxies_apdu(self) -> None:
         with _RunningBridge(auth_token="rt-token") as (apdu_url, fake_channel):
             channel = RemoteRelayCardChannel(
@@ -248,6 +251,7 @@ class RoundTripTests(unittest.TestCase):
             )
             channel.disconnect()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_remote_channel_authentication_failure(self) -> None:
         with _RunningBridge(auth_token="correct") as (apdu_url, _):
             channel = RemoteRelayCardChannel(url=apdu_url, auth_token="wrong")
@@ -259,6 +263,7 @@ class RoundTripTests(unittest.TestCase):
         with self.assertRaises(PcscBridgeError):
             channel.connect()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_proactive_status_empty_for_remote_card(self) -> None:
         with _RunningBridge(auth_token="rt-token") as (apdu_url, _):
             channel = RemoteRelayCardChannel(
@@ -270,6 +275,7 @@ class RoundTripTests(unittest.TestCase):
             finally:
                 channel.disconnect()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_remote_channel_forwards_card_reset(self) -> None:
         with _RunningBridge(auth_token="rt-token") as (apdu_url, fake_channel):
             channel = RemoteRelayCardChannel(
@@ -310,6 +316,7 @@ class BackendSelectionTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._env_patch.stop()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_remote_url_selects_remote_channel(self) -> None:
         from Tools.HilBridge.router import BackendCardChannel
 
@@ -328,6 +335,7 @@ class BackendSelectionTests(unittest.TestCase):
             finally:
                 channel.disconnect()
 
+    @pytest.mark.usefixtures("require_loopback_socket")
     def test_env_url_selects_remote_channel(self) -> None:
         from Tools.HilBridge.router import BackendCardChannel
 

@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Sidebar --------------------------------------------------------------- */
 
 .sidebar {
@@ -10,6 +11,9 @@
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  min-width: 0;
+  min-height: 0;
   padding: 10px 10px 24px;
 }
 
@@ -43,7 +47,14 @@
 
 .subsystem-entry {
   position: relative;
-  padding: 8px 12px 8px 16px;
+  display: block;
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 12px 9px 16px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   font-size: 13px;
   color: var(--fg);
@@ -74,6 +85,12 @@
   transform: translateX(2px);
 }
 
+.subsystem-entry:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  background: var(--bg-hover);
+}
+
 .subsystem-entry.active {
   background: var(--accent-soft);
   color: var(--fg);
@@ -101,9 +118,16 @@
 
 .main {
   grid-area: main;
-  overflow-y: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
   padding: 28px 36px 44px;
   position: relative;
+}
+
+.main:focus {
+  outline: none;
 }
 
 .statusbar {
@@ -114,9 +138,18 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scrollbar-width: none;
   font-size: 11px;
   color: var(--fg-dim);
   letter-spacing: 0.02em;
+}
+
+.statusbar::-webkit-scrollbar {
+  display: none;
 }
 
 .statusbar .sep {
@@ -152,3 +185,14 @@
 
 .status-error { color: var(--fail); font-weight: 600; }
 
+@media (max-width: 1100px) {
+  .main {
+    padding: 22px 24px 36px;
+  }
+}
+
+@media (max-width: 760px) {
+  .main {
+    padding: 18px 16px 30px;
+  }
+}

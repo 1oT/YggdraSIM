@@ -23,7 +23,6 @@ Notes:
 
 ## Authored Guides
 
-- [`guides/AGENT_SECURE_ELEMENT.md`](sources/guides/AGENT_SECURE_ELEMENT.md)
 - [`guides/ARCHITECTURE.md`](sources/guides/ARCHITECTURE.md)
 - [`guides/BUILD_AND_PACKAGING.md`](sources/guides/BUILD_AND_PACKAGING.md)
 - [`guides/CAPABILITIES.md`](sources/guides/CAPABILITIES.md)
@@ -40,6 +39,7 @@ Notes:
 - [`guides/NAMING_CONVENTIONS.md`](sources/guides/NAMING_CONVENTIONS.md)
 - [`guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`](sources/guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md)
 - [`guides/README.md`](sources/guides/README.md)
+- [`guides/REMOTES_AND_PUBLICATION.md`](sources/guides/REMOTES_AND_PUBLICATION.md)
 - [`guides/SIMTRACE2_CARDEM_GUIDE.md`](sources/guides/SIMTRACE2_CARDEM_GUIDE.md)
 - [`guides/TEMPLATE_AND_TOKENS.md`](sources/guides/TEMPLATE_AND_TOKENS.md)
 

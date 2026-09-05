@@ -28,8 +28,6 @@ from Tools.ProfilePackage.saip_profile_randomizer import (
     resolve_auto_value,
 )
 from Tools.ProfilePackage.saip_profile_scaffold import (
-    ProfilePreset,
-    default_preset_id,
     describe_menu_id,
     describe_preset,
     diff_presets,
@@ -102,8 +100,8 @@ class RandomizerTests(unittest.TestCase):
         self.assertEqual(total % 10, 0)
 
     def test_generate_random_iccid_respects_prefix_digits(self) -> None:
-        value = generate_random_iccid(prefix="8946")
-        self.assertTrue(value.startswith("8946"))
+        value = generate_random_iccid(prefix="8988")
+        self.assertTrue(value.startswith("8988"))
 
     def test_generate_random_imsi_default_uses_test_mcc_and_is_15_digits(self) -> None:
         value = generate_random_imsi()

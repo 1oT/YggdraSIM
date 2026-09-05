@@ -12,6 +12,7 @@ editor.  It handles hex→DER conversion, per-call caching, placeholder
 sidecar injection, and pySim path discovery.
 """
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -23,7 +24,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
-from yggdrasim_common.runtime_paths import remap_legacy_workspace_relative
+from yggdrasim_common.frozen_dispatch import (
+    build_profile_saip_tool_command,
+    build_pysim_saip_tool_command,
+    build_tk_file_picker_command,
+    command_targets_internal_entry,
+    hidden_window_subprocess_kwargs,
+    launcher_targets_application_bundle,
+)
+from yggdrasim_common.runtime_paths import is_frozen, remap_legacy_workspace_relative
+from yggdrasim_common.secure_files import (
+    atomic_write_bytes,
+    ensure_private_directory,
+    read_bounded_regular_file,
+)
 from .saip_hex_template import (
     InlinePlaceholderRecord,
     detect_inline_placeholders,
@@ -44,6 +58,119 @@ _TOOL_TIMEOUT_ENV = "YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS"
 _MAX_CACHE_FILES = 64
 _CACHE_MAX_BYTES_ENV = "YGGDRASIM_SAIP_TOOL_CACHE_MAX_BYTES"
 _DEFAULT_CACHE_MAX_BYTES = 256 * 1024 * 1024
+_MAX_PROFILE_INPUT_BYTES = 128 * 1024 * 1024
+_WINDOWS_DIRECT_EXECUTABLE_RE = re.compile(
+    r"^\s*((?:[A-Za-z]:[\\/]|\\\\)[^\r\n]*?\.(?:exe|com|cmd|bat|py))"
+    r"(?=\s|$)(.*)$",
+    re.IGNORECASE,
+)
+
+
+def _split_windows_command_line(command_text: str) -> list[str]:
+    """Split a Windows command line without treating backslashes as escapes.
+
+    This follows the Microsoft C-runtime quote/backslash rules closely enough
+    for executable paths and fixed arguments while keeping execution in
+    ``shell=False`` mode.
+    """
+    arguments: list[str] = []
+    length = len(command_text)
+    index = 0
+    while index < length:
+        while index < length and command_text[index].isspace():
+            index += 1
+        if index >= length:
+            break
+
+        argument: list[str] = []
+        argument_started = False
+        in_quotes = False
+        while index < length:
+            character = command_text[index]
+            if character.isspace() and in_quotes is False:
+                break
+            if character == "\\":
+                slash_start = index
+                while index < length and command_text[index] == "\\":
+                    index += 1
+                slash_count = index - slash_start
+                if index < length and command_text[index] == '"':
+                    argument.extend("\\" * (slash_count // 2))
+                    if slash_count % 2:
+                        argument.append('"')
+                    elif (
+                        in_quotes
+                        and index + 1 < length
+                        and command_text[index + 1] == '"'
+                    ):
+                        argument.append('"')
+                        index += 1
+                    else:
+                        in_quotes = not in_quotes
+                    argument_started = True
+                    index += 1
+                    continue
+                argument.extend("\\" * slash_count)
+                argument_started = True
+                continue
+            if character == '"':
+                if (
+                    in_quotes
+                    and index + 1 < length
+                    and command_text[index + 1] == '"'
+                ):
+                    argument.append('"')
+                    index += 2
+                else:
+                    in_quotes = not in_quotes
+                    index += 1
+                argument_started = True
+                continue
+            argument.append(character)
+            argument_started = True
+            index += 1
+
+        if in_quotes:
+            raise ValueError("Tool command contains an unterminated quote.")
+        if argument_started:
+            arguments.append("".join(argument))
+        while index < length and command_text[index].isspace():
+            index += 1
+    return arguments
+
+
+def _split_tool_command(command_text: str) -> list[str]:
+    """Split an optional SAIP tool override using host command-line rules."""
+    stripped = command_text.strip()
+    if sys.platform != "win32":
+        return shlex.split(stripped)
+
+    # Operators commonly paste an unquoted absolute Windows executable path.
+    # Recover that fixed launcher prefix before parsing its remaining args.
+    if stripped and stripped[0] != '"':
+        direct_match = _WINDOWS_DIRECT_EXECUTABLE_RE.match(stripped)
+        if direct_match is not None:
+            executable, remainder = direct_match.groups()
+            return [executable, *_split_windows_command_line(remainder)]
+    return _split_windows_command_line(stripped)
+
+
+def _validated_tool_command_for_runtime(
+    command: Sequence[object],
+) -> list[str]:
+    """Refuse legacy commands that treat the frozen app as Python."""
+    normalized = [str(part) for part in command]
+    if is_frozen() is False or len(normalized) == 0:
+        return normalized
+    if launcher_targets_application_bundle(normalized[0]) is False:
+        return normalized
+    if command_targets_internal_entry(normalized, "profile-saip-tool"):
+        return normalized
+    raise ValueError(
+        "the frozen YggdraSIM application cannot be configured as a Python "
+        "interpreter; use the bundled saip-tool dispatcher or a separate "
+        "saip-tool executable"
+    )
 
 
 def _resolve_cache_max_bytes() -> int:
@@ -169,6 +296,8 @@ def _parse_timeout_seconds(raw_value: object) -> int:
 
 
 def _desktop_file_picker_supported() -> bool:
+    if sys.platform in {"darwin", "win32"}:
+        return True
     display_value = str(os.environ.get("DISPLAY", "") or "").strip()
     if len(display_value) > 0:
         return True
@@ -186,6 +315,7 @@ def _run_file_picker_command(command: Sequence[str]) -> str | None:
             capture_output=True,
             text=True,
             timeout=600,
+            **hidden_window_subprocess_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise RuntimeError(f"Failed to launch desktop file picker: {error}") from error
@@ -258,41 +388,17 @@ def _pick_existing_file_path(
             return None
         return Path(selected_path).expanduser().resolve()
 
-    python_executable = str(sys.executable or "").strip()
-    if len(python_executable) > 0:
-        tkinter_script = (
-            "import sys\n"
-            "import tkinter as tk\n"
-            "from tkinter import filedialog\n"
-            "root = tk.Tk()\n"
-            "root.withdraw()\n"
-            "path = filedialog.askopenfilename(\n"
-            "    title=sys.argv[1],\n"
-            "    initialdir=sys.argv[2],\n"
-            "    filetypes=[(sys.argv[3], sys.argv[4]), ('All files', '*')],\n"
-            ")\n"
-            "root.update()\n"
-            "root.destroy()\n"
-            "print(path)\n"
+    selected_path = _run_file_picker_command(
+        build_tk_file_picker_command(
+            title=title,
+            initial_directory=normalized_initial_directory,
+            file_filter_label=file_filter_label,
+            file_filter_glob=file_filter_glob,
         )
-        selected_path = _run_file_picker_command(
-            [
-                python_executable,
-                "-c",
-                tkinter_script,
-                title,
-                str(normalized_initial_directory),
-                file_filter_label,
-                file_filter_glob,
-            ]
-        )
-        if selected_path is None:
-            return None
-        return Path(selected_path).expanduser().resolve()
-
-    raise RuntimeError(
-        "No supported desktop file picker is available. Install zenity, qarma, yad, kdialog, or Tk support."
     )
+    if selected_path is None:
+        return None
+    return Path(selected_path).expanduser().resolve()
 
 
 class SaipToolBridge:
@@ -488,21 +594,27 @@ class SaipToolBridge:
         return self.current_input_file
 
     def set_tool_command(self, command_text: str) -> list[str]:
-        """Parse and persist an explicit tool command string (shell-split tokens)."""
-        tokens = shlex.split(command_text.strip())
+        """Parse and persist an explicit tool command string."""
+        tokens = _split_tool_command(command_text)
         if len(tokens) == 0:
             raise ValueError("Tool command cannot be empty.")
-        self._tool_command = tokens
+        self._tool_command = _validated_tool_command_for_runtime(tokens)
         return list(self._tool_command)
 
     def get_tool_command(self) -> list[str]:
         """Resolve the effective tool command, consulting ``YGGDRASIM_SAIP_TOOL`` env and bundled script."""
         if self._tool_command is not None:
-            return list(self._tool_command)
+            return _validated_tool_command_for_runtime(self._tool_command)
 
         configured_value = os.environ.get("YGGDRASIM_SAIP_TOOL", "").strip()
         if len(configured_value) > 0:
-            self._tool_command = shlex.split(configured_value)
+            self._tool_command = _validated_tool_command_for_runtime(
+                _split_tool_command(configured_value)
+            )
+            return list(self._tool_command)
+
+        if is_frozen():
+            self._tool_command = build_profile_saip_tool_command()
             return list(self._tool_command)
 
         for candidate in ("saip-tool.py", "saip-tool"):
@@ -518,17 +630,18 @@ class SaipToolBridge:
                 continue
             seen_script.add(bundled_script)
             if bundled_script.is_file():
-                self._tool_command = [sys.executable, str(bundled_script)]
+                try:
+                    self._tool_command = build_pysim_saip_tool_command(
+                        bundled_script
+                    )
+                except ValueError:
+                    # Frozen children may execute only the exact script shipped
+                    # in the application bundle, never a workspace lookalike.
+                    continue
                 return list(self._tool_command)
 
-        raise RuntimeError(
-            "saip-tool was not found. Install pySim saip-tool, set YGGDRASIM_SAIP_TOOL, "
-            "or clone the upstream pySim tree so "
-            "<YggdraSIM>/pysim/contrib/saip-tool.py is present "
-            "(git clone https://gitlab.com/osmocom/pysim.git pysim). "
-            f"Checked workspace {self.workspace_root}, bundle root {self.bundle_root}, "
-            f"and module root {_repo_root_from_saip_module()}."
-        )
+        self._tool_command = build_profile_saip_tool_command()
+        return list(self._tool_command)
 
     def describe_status(self) -> str:
         """Return a one-line status string for display in the GUI status bar."""
@@ -688,21 +801,27 @@ class SaipToolBridge:
         """
         resolved_input = self.resolve_input_path(str(self.get_input_file()), must_exist=True)
         prepared_input = self._prepare_input_for_tool(resolved_input)
-        pysim_dirs = self._pysim_source_dirs()
-        if len(pysim_dirs) == 0:
-            raise RuntimeError(
-                "Local pySim source tree not found under workspace, bundle root, or module root."
-            )
-        pysim_root = pysim_dirs[0]
-
-        pysim_root_text = str(pysim_root)
-        if pysim_root_text not in sys.path:
-            sys.path.insert(0, pysim_root_text)
-
-        from pySim.esim.saip import ProfileElementSequence
+        if is_frozen() is False:
+            for pysim_root in self._pysim_source_dirs():
+                pysim_root_text = str(pysim_root)
+                if pysim_root_text not in sys.path:
+                    sys.path.insert(0, pysim_root_text)
 
         try:
-            pes = ProfileElementSequence.from_der(prepared_input.read_bytes())
+            from pySim.esim.saip import ProfileElementSequence
+        except ImportError as error:
+            raise RuntimeError(
+                "pySim SAIP support is not installed and no compatible "
+                "source checkout was found."
+            ) from error
+
+        try:
+            pes = ProfileElementSequence.from_der(
+                read_bounded_regular_file(
+                    prepared_input,
+                    _MAX_PROFILE_INPUT_BYTES,
+                )
+            )
         except Exception as error:
             detail = _describe_exception_chain(error)
             raise ValueError(
@@ -791,10 +910,17 @@ class SaipToolBridge:
         return normalized
 
     def _pysim_source_dirs(self) -> list[Path]:
-        """Directories that contain the `pySim` package (optional on-disk checkouts under .../pysim)."""
+        """Return import roots containing an installed or checked-out pySim."""
         roots: list[Path] = []
         seen: set[Path] = set()
-        for base in (self.workspace_root, self.bundle_root, _repo_root_from_saip_module()):
+        source_bases = ()
+        if is_frozen() is False:
+            source_bases = (
+                self.workspace_root,
+                self.bundle_root,
+                _repo_root_from_saip_module(),
+            )
+        for base in source_bases:
             candidate = (base / "pysim").resolve()
             if candidate.is_dir() is False:
                 continue
@@ -802,10 +928,22 @@ class SaipToolBridge:
                 continue
             seen.add(candidate)
             roots.append(candidate)
+        try:
+            module_spec = importlib.util.find_spec("pySim")
+        except (ImportError, AttributeError, ValueError):
+            module_spec = None
+        origin_text = str(getattr(module_spec, "origin", "") or "").strip()
+        if len(origin_text) > 0 and origin_text not in {"built-in", "frozen"}:
+            installed_root = Path(origin_text).resolve().parent.parent
+            if installed_root.is_dir() and installed_root not in seen:
+                roots.append(installed_root)
         return roots
 
     def _subprocess_env_with_pysim(self) -> dict[str, str]:
         env = dict(os.environ)
+        if is_frozen():
+            env.pop("PYTHONPATH", None)
+            return env
         pysim_dirs = self._pysim_source_dirs()
         if len(pysim_dirs) == 0:
             return env
@@ -832,6 +970,7 @@ class SaipToolBridge:
                 text=True,
                 env=self._subprocess_env_with_pysim(),
                 timeout=self.command_timeout_seconds,
+                **hidden_window_subprocess_kwargs(),
             )
         except subprocess.TimeoutExpired as error:
             stdout_text = getattr(error, "stdout", None)
@@ -862,7 +1001,16 @@ class SaipToolBridge:
         if resolved_input.suffix.lower() not in self._HEX_INPUT_SUFFIXES:
             return resolved_input
 
-        text_payload = resolved_input.read_text(encoding="utf-8-sig")
+        encoded_payload = read_bounded_regular_file(
+            resolved_input,
+            _MAX_PROFILE_INPUT_BYTES,
+        )
+        try:
+            text_payload = encoded_payload.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise ValueError(
+                f"Hex input file is not valid UTF-8 text: {resolved_input}"
+            ) from error
         placeholder_records: list[InlinePlaceholderRecord] = []
         if detect_inline_placeholders(text_payload):
             substituted_text, placeholder_records = substitute_inline_placeholders(
@@ -883,11 +1031,16 @@ class SaipToolBridge:
             raise ValueError(f"Hex input file has odd-length payload: {resolved_input}")
 
         binary_payload = bytes.fromhex(normalized_hex)
-        cache_dir = self.workspace_root / ".profilepackage-cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        if len(binary_payload) > _MAX_PROFILE_INPUT_BYTES:
+            raise ValueError(
+                f"Decoded profile exceeds the {_MAX_PROFILE_INPUT_BYTES}-byte limit"
+            )
+        cache_dir = ensure_private_directory(
+            self.workspace_root / ".profilepackage-cache"
+        )
         digest = hashlib.sha256(resolved_input.as_posix().encode("utf-8") + binary_payload).hexdigest()
         cache_path = cache_dir / f"{resolved_input.stem}-{digest[:16]}.der"
-        cache_path.write_bytes(binary_payload)
+        atomic_write_bytes(cache_path, binary_payload)
         sidecar_path = sidecar_path_for_cache(cache_path)
         if len(placeholder_records) > 0:
             write_sidecar(sidecar_path, placeholder_records)

@@ -24,7 +24,7 @@ YggdraSIM currently provides:
   AKMA / SUCI surfaces
 - in-process 5G-core stubs (`Tools/YggdraCore`: AUSF, AAnF, subscription
   store) plus a BYO-Open5GS provisioning bridge for hosts that already run
-  a real 5GC. (post-v1 staging — not part of this release.)
+  a real 5GC.
 - a hardware-in-the-loop SIMtrace2 bridge (`Tools/HilBridge`) with RSPRO
   relay, GSMTAP mirror, AT+CSIM / AT+CRSM
   transcoding (`at_simlink`), and offline pcap review
@@ -35,9 +35,10 @@ YggdraSIM currently provides:
 - shared mutable state through SQLite, keyed by card identity or eIM identity
 - optional encryption for stored runtime payloads
 - a writable runtime-tree model for frozen executables
-- optional upstream `pySim` integration for SAIP and SCP11-related flows
-  (`pip install -e '.[saip]'` is the supported path; a local `pysim/`
-  developer checkout still takes priority when present)
+- commit-pinned upstream `pySim` integration for SAIP, SCP03/SCP80, and
+  SCP11-related flows; `[saip]` adds dependencies for spreadsheet extensions
+  that are supplied as plugins rather than shipped here, while a local
+  `pysim/` developer checkout still takes priority when present
 - a repository-local registry for stable entry points and symbols
 - a first-party pytest suite covering module behavior and regressions
 
@@ -63,7 +64,7 @@ command or every internal helper.
 | `Tools/ApduFuzz/` | Opt-in APDU mutation fuzzer | deterministic mutators, PC/SC/null transports, safety gate, crash dumps | `Tools/ApduFuzz/` sources |
 | `Tools/EumDiag/` | EUM / SM-DP+ diagnostics | session-key injection, BF36 Lua dissector, tshark runner, BPP decode | `Tools/EumDiag/` sources |
 | `Tools/SuciTool/` | SUCI shell | key selection, key generation, public-key export | `README.md` |
-| `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G-core stubs | AUSF (`Nausf_UEAuthentication_Authenticate`), AAnF (`Naanf_AKMA_*`), subscription store, opt-in FastAPI loopback, BYO-Open5GS provisioning bridge | `docs/akma_overview.md` |
+| `Tools/YggdraCore/` | In-process 5G-core stubs | AUSF (`Nausf_UEAuthentication_Authenticate`), AAnF (`Naanf_AKMA_*`), subscription store, opt-in FastAPI loopback, BYO-Open5GS provisioning bridge | `docs/akma_overview.md` |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI | typed action registry, FastAPI API + pywebview desktop or headless lab server, live APDU dock | `guides/GUI_HOST_SHELL_GUIDE.md` |
 
 ## 3. Launcher And Entry-Point Capabilities
@@ -474,8 +475,6 @@ relay. Current capabilities include:
 
 ## 11. YggdraCore 5G Core Stub Capabilities
 
-> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
-
 `Tools/YggdraCore/` provides in-process 5G-core stubs and a BYO-Open5GS
 provisioning bridge:
 
@@ -532,7 +531,7 @@ The SAIP/profile-package tool currently supports:
 - default transcode-directory management
 - override of the external `saip-tool` command path
 - `info`, `tree`, and `check` execution through the shell
-- comprehensive profile linting with:
+- profile linting with:
   - strict mode
   - metadata attachment
   - preset gate profiles

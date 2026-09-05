@@ -1,0 +1,200 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Remote Lab --------------------------------------------------------- */
+
+.remote-lab-toolbar,
+.remote-lab-import-actions,
+.remote-lab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.remote-lab-shell > .cc-wb-page-header {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.remote-lab-toolbar {
+  flex: 0 0 auto;
+}
+
+.remote-lab-import-panel {
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+}
+
+.remote-lab-import-panel label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.remote-lab-import-panel textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  color: var(--fg);
+  caret-color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.remote-lab-import-panel textarea:hover {
+  border-color: var(--accent);
+}
+
+.remote-lab-import-panel textarea:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.remote-lab-import-panel input[type="file"] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.remote-lab-devices {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(100%, 280px), 1fr)
+  );
+  gap: 12px;
+}
+
+.remote-lab-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: var(--bg-elev);
+  min-width: 0;
+}
+
+.remote-lab-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.remote-lab-title {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.remote-lab-status {
+  --remote-lab-status-color: var(--fg-dim);
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-pill);
+  padding: 3px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-dim);
+}
+
+.remote-lab-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--remote-lab-status-color);
+}
+
+.remote-lab-status--available {
+  --remote-lab-status-color: var(--ok);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--ok) 42%, var(--border));
+  background: var(--ok-soft);
+}
+
+.remote-lab-status--busy,
+.remote-lab-status--reserved {
+  --remote-lab-status-color: var(--warn);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
+  background: var(--warn-soft);
+}
+
+.remote-lab-status--error,
+.remote-lab-status--offline {
+  --remote-lab-status-color: var(--fail);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--fail) 42%, var(--border));
+  background: var(--fail-soft);
+}
+
+.remote-lab-meta,
+.remote-lab-detail {
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.remote-lab-detail {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+}
+
+.remote-lab-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.remote-lab-actions .btn {
+  flex: 0 1 auto;
+}
+
+@media (max-width: 640px) {
+  .remote-lab-shell > .cc-wb-page-header {
+    flex-direction: column;
+  }
+
+  .remote-lab-toolbar,
+  .remote-lab-import-actions {
+    width: 100%;
+  }
+
+  .remote-lab-toolbar .btn,
+  .remote-lab-import-actions .btn {
+    flex: 1 1 140px;
+  }
+
+  .remote-lab-card-head {
+    align-items: flex-start;
+  }
+}

@@ -6,7 +6,6 @@
 import atexit
 import ast
 import copy
-import ipaddress
 import json
 import os
 import re
@@ -2646,7 +2645,7 @@ class ProfilePackageShell:
         print("  TREE                       Run `tree`.")
         print("  CHECK                      Run `check`.")
         print("  LINT [options] [> output_file]")
-        print("                             Run comprehensive profile linting across SAIP structure,")
+        print("                             Lint the profile across SAIP structure,")
         print("                             mandatory services, AID integrity, APDU/hex sanity, and metadata coherence.")
         print("                             For detailed lint options run: LINT HELP")
         print("                             For preset gate profiles run: LINT PROFILES")

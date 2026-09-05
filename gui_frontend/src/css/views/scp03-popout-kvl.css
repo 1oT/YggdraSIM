@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* SCP03 action popouts: KVL meta strip + primary block (table / JSON /
    trace) + optional ``details`` raw hex. Mirrors ``Profiles (ES10c)``.
    Used by registry, keys, GET DATA, GetCerts, eUICC scan, etc. */
@@ -17,7 +18,7 @@
 }
 
 .cc-action-datasheet-meta {
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: linear-gradient(
     135deg,
@@ -40,9 +41,10 @@
   max-width: 100%;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
-  overflow: hidden;
-  background: var(--surface, rgba(255, 255, 255, 0.02));
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--surface);
 }
 
 .cc-action-datasheet-main .data-table {
@@ -50,6 +52,12 @@
   border: none;
   border-radius: 0;
   box-shadow: none;
+}
+
+.cc-action-datasheet-main .data-table th,
+.cc-action-datasheet-main .data-table td {
+  max-width: min(44vw, 520px);
+  overflow-wrap: anywhere;
 }
 
 .cc-action-datasheet-main > .cc-json {
@@ -102,5 +110,5 @@
 }
 
 .cc-action-datasheet-main--decoded {
-  border-left: 3px solid color-mix(in oklab, var(--ok, #3ec67a) 65%, var(--border));
+  border-left: 3px solid color-mix(in oklab, var(--ok) 65%, var(--border));
 }

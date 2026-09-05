@@ -10,7 +10,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-
 # SIMCARD Simulator
 
 `SIMCARD/` is the simulator backend used when the operator shells run without
@@ -187,7 +186,7 @@ through the wrapper menu.
 - an ETSI TS 102 223 Toolkit / BIP runtime that routes envelopes by
   root tag (D1 SMS-PP, D2 Cell Broadcast, D3 Menu Selection, D4 Call
   Control, D5 MO-SMS Control, D6 Event Download, D7 Timer Expiration,
-  D8 USSD Download)
+  D9 USSD Download; D8 is reserved for intra-UICC communication)
 - a Milenage / TUAK 3GPP TS 35.205 / 35.231 AKA core
 - a 5G authentication stack:
     - 3GPP TS 33.501 5G AKA (`AUTHENTICATE`, `RES*`)
@@ -394,7 +393,7 @@ relevant section of TS 102 223 / TS 31.111:
 | `D5` | MO Short Message Control | `80 01 00` per TS 31.111 §7.3.2. |
 | `D6` | Event Download | Existing local handler that updates `state.toolkit` and queues follow-up proactive commands. |
 | `D7` | Timer Expiration | `90 00`, no body. |
-| `D8` | USSD Download | `80 01 00` per TS 31.111 §7.3.3. |
+| `D9` | USSD Download | `80 01 00` per TS 31.111 §7.3.3 (tag `D9` per §9.1; `D8` reserved). |
 | other | Legacy passthrough | Falls through to the SCP80 handler so plaintext OTA traffic keeps working. |
 
 When a proactive command queues into `state.pending_fetch_queue` while
@@ -443,11 +442,11 @@ bookkeeping for the events the simulator can react to:
 
 | Event code | Spec | Latch |
 | --- | --- | --- |
-| `0x03` | TS 102 223 §7.4.3 Location Status | `location_information` |
-| `0x07` | TS 102 223 §7.4.7 Idle Screen Available | `idle_screen_available` |
-| `0x09` | TS 102 223 §7.4.9 Browser Termination | `last_browser_termination_cause` |
-| `0x0B` | TS 102 223 §7.4.11 Channel Status | `open_channel_active` |
-| `0x0F` | 3GPP TS 31.111 §7.5.13 Network Rejection | `last_network_rejection_cause` |
+| `0x03` | TS 102 223 §7.5.4 Location status | `location_information` |
+| `0x05` | TS 102 223 §7.5.6 Idle screen available | `idle_screen_available` |
+| `0x08` | TS 102 223 §7.5.9 Browser termination | `last_browser_termination_cause` |
+| `0x0A` | TS 102 223 §7.5.11 Channel status | `open_channel_active` |
+| `0x12` | 3GPP TS 31.111 §7.5.2 Network Rejection | `last_network_rejection_cause` |
 
 Every received event also updates `last_event_code` and appends
 to `event_history` so the order and number of received events is
@@ -503,7 +502,6 @@ through the `toolkit` block in
 
 Defaults (`SimToolkitState`) match the JSON template, so a fresh
 manual configuration.
-
 
 `_apply_timer_expiration` drives the SGP.32 §3.5 polling
 cadence. Each `D7` envelope queues a two-leg BIP cycle followed
@@ -793,7 +791,6 @@ via a follow-up `RemoveNotificationFromList` (BF30) before they
 go away. This mirrors a real card: notifications stay pinned
 until explicitly cleared, so the eIM and eUICC share the same
 
-
 Two integration suites pin the IPA contract end-to-end:
 
 - **Mode A (ISD-R discovery + AddInitialEim)** --
@@ -1032,11 +1029,11 @@ file.
 Regression coverage in `tests/test_simcard_saip_link_path.py` pins
 the OCTET-STRING decoder, the runtime resolver, the
 "USIM-only EF (no link, no peer) preserved verbatim" contract, and
-an end-to-end replay against the operator BPP fixture that asserts
+an optional end-to-end replay against a locally selected BPP that asserts
 every USIM-side EF.IMSI / EF.AD / EF.SPN / EF.SMS / EF.SMSP /
 EF.MSISDN bound to a DF.GSM or DF.TELECOM target now exposes the
 canonical bytes through the ADF SELECT path -- including the
-production SFI READ BINARY (`00B0870009`) that originally returned
+captured-style SFI READ BINARY (`00B0870009`) that returned
 `9000` with an empty body.
 
 ### TS 31.102 Annex H "shared EFs" (DF.GSM <-> ADF.USIM mirror)
@@ -1044,7 +1041,7 @@ production SFI READ BINARY (`00B0870009`) that originally returned
 3GPP TS 31.102 Annex H Table H.1 lists the Elementary Files that
 must surface identical content irrespective of whether the modem
 is reading them under DF.GSM (legacy SIM context) or ADF.USIM
-(modern UICC context). Real-world operator BPPs lean on this
+(modern UICC context). BPP issuers can lean on this
 contract heavily: a typical TCA Profile Interoperability §3.5.5
 profile only ships the canonical bytes of EF.IMSI (`6F07`),
 EF.AD (`6FAD`), EF.LOCI (`6F7E`), EF.FPLMN (`6F7B`), EF.SPN
@@ -1075,13 +1072,13 @@ happen to coexist under both DFs (vendor-private EFs, repurposed
 slots) are left untouched because they are not in the shared-EF
 table.
 
-This is the fix that unblocks the production HIL trace where
+This is the fix for the captured-style HIL trace where
 `READ BINARY` against EF.IMSI under ADF.USIM (issued by the modem
 via SFI=0x07 selection mode) used to return `9000` with no body
 once the operator BPP overrode the lab default. Regression
 coverage lives in `tests/test_simcard_shared_ef_mirror.py`,
-including a slot that replays the SFI READ BINARY against the
-real `89880000000466311335` BPP fixture.
+including an optional slot that replays SFI READ BINARY against a
+locally selected BPP. The tracked suite contains no operator identity.
 
 ### TCA Profile Interoperability §3.5 / §9 template default fill-in
 
@@ -1147,7 +1144,7 @@ Regression coverage in
 `tests/test_simcard_saip_template_defaults.py` pins the registry
 shape, the fill-in invariants (issuer wins, `content_rqd=True`
 never auto-populated, SFIs always synced), and an end-to-end
-replay of the `89880000000466311335` cold-attach SFI `READ BINARY`
+replay of a cold-attach SFI `READ BINARY`
 sequence (`00B0830004` -> EF.AD `00000002`, `00B0870009` ->
 EF.IMSI from BPP, `00B0920001` -> EF.HPPLMN).
 
@@ -1389,7 +1386,7 @@ intercept without parsing `envelope_history` by hand:
 | --- | --- | --- | --- |
 | `D4` Call Control by USIM | TS 31.111 §7.3.1.1 | `last_cc_address` (BCD digits), `last_cc_address_ton_npi`, `last_cc_capability_params` (TLV `07`/`87`), `last_cc_subaddress` (`08`/`88`), `last_cc_location_information` (`13`/`93`) | `cc_envelopes_received` |
 | `D5` MO Short Message Control | TS 31.111 §7.3.2.1 / §7.3.2.2 | `last_mo_sms_destination_address` + TON/NPI (first Address TLV = RP-DA), `last_mo_sms_sc_address` + TON/NPI (second Address TLV = RP-OA), `last_mo_sms_location_information` | `mo_sms_envelopes_received` |
-| `D8` USSD Download | TS 31.111 §7.3.3 | `last_ussd_download_dcs`, `last_ussd_download_raw`, `last_ussd_download_text` (best-effort decoded via `_decode_text_string`) | `ussd_downloads_received` |
+| `D9` USSD Download | TS 31.111 §7.3.3 | `last_ussd_download_dcs`, `last_ussd_download_raw`, `last_ussd_download_text` (best-effort decoded via `_decode_text_string`) | `ussd_downloads_received` |
 
 The reply path is unchanged -- each envelope continues to return
 the canned `80 01 00` Result TLV ("Allowed, no modification")
@@ -1456,15 +1453,13 @@ envelope, and `_handle_event_download` ships the values into
 
 | Event code | Spec | Latches |
 | --- | --- | --- |
-| `0x03` Location Status | TS 102 223 §7.4.4 | `last_location_status` (0=normal, 1=limited, 2=no service) + `location_status_changes` events-received counter. |
-| `0x06` Card Reader Status | TS 102 223 §7.4.7 | `last_card_reader_status` (raw byte: bits 7..6 present/powered, bits 0..3 reader id) + `last_card_reader_id` (decoded id) + `card_reader_status_events`. |
-| `0x09` Data Available (overlay) | TS 102 223 §7.4.10 | When the envelope carries TLV `37` Channel Length, `last_data_available_channel_length`, optional `last_data_available_channel_status` (TLV `38`), and `data_available_events` are latched. The existing browser-termination-cause path on the same code is unaffected. |
-| `0x10` Frames Information Change | TS 102 223 §7.4.16 | `last_frames_information` is overwritten with the new TLV `49` blob and `frames_information_changes` increments on every event (including empty payloads, mirroring `display_parameters_changes`). |
+| `0x03` Location status | TS 102 223 §7.5.4 | `last_location_status` (0=normal, 1=limited, 2=no service) + `location_status_changes` events-received counter. |
+| `0x06` Card reader status | TS 102 223 §7.5.7 | `last_card_reader_status` (raw byte: bits 7..6 present/powered, bits 0..3 reader id) + `last_card_reader_id` (decoded id) + `card_reader_status_events`. |
+| `0x09` Data available | TS 102 223 §7.5.10 | `last_data_available_channel_length` from TLV `37` Channel Length, optional `last_data_available_channel_status` (TLV `38`), and the `data_available_events` counter. |
+| `0x10` Frames Information changed | TS 102 223 §7.5.17 | `last_frames_information` is overwritten with the new TLV `49` blob and `frames_information_changes` increments on every event (including empty payloads, mirroring `display_parameters_changes`). |
 
-The `0x09` overlay accepts envelopes that carry both
-`browser_termination_cause` and `channel_length`, so a vendor that
-overloads the same opcode for both purposes does not lose either
-side of the dispatch.
+Browser termination is event `0x08` (§7.5.9) and carries its cause
+in TLV `34` / `B4`; it does not share a code with Data available.
 
 ### User-input proactive TR latches (round 16)
 
@@ -1656,8 +1651,8 @@ without scraping `event_history`.
 | Event code | Behaviour |
 | --- | --- |
 | `0x04` User Activity | `state.toolkit.user_activity_count` increments monotonically. The event carries no payload of interest. |
-| `0x0D` Access Technology Change | `state.toolkit.last_access_technology` caches the new RAT byte (TS 102 223 §8.61: `0x00` GSM, `0x03` UTRAN, `0x08` E-UTRAN, `0x0A` NG-RAN). `access_technology_changes` increments only when the value actually changed. The COMPREHENSION-TLV tag `3F` / `BF` is read by a dedicated single-byte / single-length scanner because the BER walker would otherwise mis-parse it as a multi-byte tag (TS 101 220 §7.1.1.1). |
-| `0x0E` Display Parameters Change | `state.toolkit.last_display_parameters` caches the raw TLV `46` / `C6` payload; `display_parameters_changes` increments on every event so polling can derive a delta. |
+| `0x0B` Access Technology Change | `state.toolkit.last_access_technology` caches the new RAT byte (TS 102 223 §8.61: `0x00` GSM, `0x03` UTRAN, `0x08` E-UTRAN, `0x0A` NG-RAN). `access_technology_changes` increments only when the value actually changed. The COMPREHENSION-TLV tag `3F` / `BF` is read by a dedicated single-byte / single-length scanner because the BER walker would otherwise mis-parse it as a multi-byte tag (TS 101 220 §7.1.1.1). |
+| `0x0C` Display parameters changed | `state.toolkit.last_display_parameters` caches the raw TLV `46` / `C6` payload; `display_parameters_changes` increments on every event so polling can derive a delta. |
 
 ### Proactive terminal-response latches (round 11)
 
@@ -1700,18 +1695,16 @@ proactives:
 
 ### Event Download additions
 
-Round-8 extends `_handle_event_download` with three event codes
-from TS 102 223 §7.4.10 / §7.4.12:
+`_handle_event_download` dispatches on the event codes of
+TS 102 223 §8.25, extended by the values TS 31.111 §8.25 adds:
 
 | Event code | Latched into |
 | --- | --- |
-| `0x0A` SS event   | `state.toolkit.last_ss_event_data` (TLV `89` payload) |
-| `0x0B` USSD event | `state.toolkit.last_ussd_event_data` + `last_ussd_event_dcs` (TLV `8A` byte 0 = DCS, bytes 1.. = text) |
-| `0x0C` Local Connection | `state.toolkit.local_connection_active` -- True when TLV `40` byte 0 high nibble = `0x80` (established), False on `0x00` (terminated) |
-| `0x13` HCI Connectivity (round-9) | `state.toolkit.hci_connectivity_active` -- shares TLV `40` decoding with Local Connection: high nibble `0x80` marks the HCI gate as connected, `0x00` as disconnected |
-| `0x16` Contactless State Request (round-10) | `state.toolkit.contactless_active` -- TLV `40` high nibble `0x80` activates the contactless front-end, `0x00` deactivates it |
-| `0x18` IMS Registration (round-10) | `state.toolkit.ims_registered` from TLV `B9` byte 0 (`0x01` registered, `0x00` deregistered) and `state.toolkit.last_ims_event_data` from the optional registered URI (TLV `BA`) |
-| `0x19` IMS Incoming Data (round-10) | `state.toolkit.last_ims_event_data` -- IMS / SIP payload from TLV `BA` |
+| `0x0D` Local Connection (§7.5.14) | `state.toolkit.local_connection_active` -- True when TLV `40` byte 0 high nibble = `0x80` (established), False on `0x00` (terminated) |
+| `0x13` HCI Connectivity (§7.5.18) | `state.toolkit.hci_connectivity_active` -- shares TLV `40` decoding with Local Connection: high nibble `0x80` marks the HCI gate as connected, `0x00` as disconnected |
+| `0x16` Contactless state request (§7.5.19) | `state.toolkit.contactless_active` -- TLV `40` high nibble `0x80` activates the contactless front-end, `0x00` deactivates it |
+| `0x17` IMS Registration (TS 31.111 §7.5.21) | `state.toolkit.ims_registered` from TLV `B9` byte 0 (`0x01` registered, `0x00` deregistered) and `state.toolkit.last_ims_event_data` from the optional registered URI (TLV `BA`) |
+| `0x18` Incoming IMS Data (TS 31.111 §7.5.20) | `state.toolkit.last_ims_event_data` -- IMS / SIP payload from TLV `BA` |
 
 `last_event_code` is still the most recently observed event so
 existing telemetry that polls a single field keeps working.
@@ -1775,7 +1768,6 @@ The complementary core-side surface lives under `Tools/YggdraCore/`,
 which exposes an in-process AUSF / AAnF pair plus a FastAPI loopback
 launcher (`YGGDRASIM_5GCORE_MODE=stub`). See the operator-surfaces
 table on the [home page](../index.md) for the entry points.
-*(post-v1 staging — not part of this release.)*
 
 ## Identity files
 
@@ -1882,5 +1874,5 @@ python main/main.py \
 - 3GPP TS 31.111 §7.3.1 Call Control by USIM (envelope `D4`)
 - 3GPP TS 31.111 §7.3.2 MO Short Message Control (envelope `D5`)
 - 3GPP TS 102 223 §7.1.7 Timer Expiration (envelope `D7`)
-- 3GPP TS 31.111 §7.3.3 USSD Download (envelope `D8`)
+- 3GPP TS 31.111 §7.3.3 USSD Download (envelope `D9`; `D8` reserved for intra-UICC communication)
 - TCA Profile Interoperability §3.4.2 profileHeader.connectivityParameters

@@ -2,16 +2,17 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools==80.9.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "yggdrasim"
-version = "2.0.0"
+version = "2.1.0"
 description = "YggdraSIM secure-element, eUICC, OTA, and SAIP toolkit."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [
     { name = "Hampus Hellsberg" },
 ]
@@ -41,7 +42,6 @@ classifiers = [
     "Intended Audience :: Telecommunications Industry",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
@@ -61,6 +61,14 @@ classifiers = [
 # live under optional extras so Windows, macOS, and Raspberry Pi installs stay
 # lean. See guides/INSTALL_CLEAN.md and guides/INSTALL_FULL.md for the two
 # supported bundling paths.
+#
+# Two entries below are PEP 508 direct references (``... @ git+https``).
+# PyPI rejects uploads whose ``Requires-Dist`` carries a direct
+# reference, so ``pipx install yggdrasim`` cannot resolve from PyPI
+# while they live here; pipx installs use a path or git specifier
+# instead (see scripts/install/README.md). pip honours direct
+# references from a local build, so source, editable, and pipx-from-git
+# installs are unaffected.
 dependencies = [
     "pyscard",
     "cryptography",
@@ -90,9 +98,9 @@ dependencies = [
     # remain YggdraSIM-specific — see tests/test_scp03_pysim_parity.py
     # and tests/test_scp80_pysim_parity.py for the pinned divergences.
     # Upstream does not publish wheels to PyPI, so we install the git
-    # tree directly. The ``saip`` extra is preserved as a no-op alias
-    # for back-compat with onboarding scripts that still reference it.
-    "pySim @ git+https://github.com/osmocom/pysim.git",
+    # tree directly. The ``saip`` extra below adds the optional,
+    # hardened spreadsheet stack used by drop-in SAIP extensions.
+    "pySim @ git+https://github.com/osmocom/pysim.git@c50f4b4a0222a964710ce3124a66fe13c804be65",
 ]
 
 [project.optional-dependencies]
@@ -104,7 +112,7 @@ hil = [
 ]
 # Packaging-side tools used when building the bundled executable.
 build = [
-    "pyinstaller",
+    "pyinstaller==6.21.0",
 ]
 # Test-only dependencies. ``httpx`` is required by FastAPI's
 # ``TestClient`` (used by the YggdraCore stub-AUSF tests); pulling it
@@ -114,14 +122,16 @@ test = [
     "pytest",
     "httpx",
     "fastapi>=0.110,<1.0",
+    "ruff==0.15.15",
 ]
 # Legacy alias kept for backwards compatibility with earlier onboarding
 # scripts that call ``pip install -e '.[dev]'``.
 dev = [
-    "pyinstaller",
+    "pyinstaller==6.21.0",
     "pytest",
     "httpx",
     "fastapi>=0.110,<1.0",
+    "ruff==0.15.15",
 ]
 # Documentation-site tooling. Mirrors ``requirements-docs.txt`` so
 # ``pip install yggdrasim[docs]`` alone is sufficient for running
@@ -141,12 +151,21 @@ docs = [
 open5gs = [
     "pymongo>=4.5,<5.0",
 ]
-# ``saip`` is now a back-compat alias: pySim moved into the base
-# dependency block once SCP03 / SCP80 began routing their KDF and
-# cipher primitives through it. The extra is kept (empty modulo the
-# documentation hook) so onboarding scripts that still reference
-# ``pip install 'yggdrasim[saip]'`` keep working.
-saip = []
+# ``saip`` adds the spreadsheet parser/exporter dependency stack used by
+# optional SAIP workbook extensions. pySim itself lives in the base dependency
+# block because SCP03 / SCP80 also use it. Keeping workbook libraries in this
+# opt-in extra preserves a lean core install while making the documented
+# ``pip install 'yggdrasim[saip]'`` path complete.
+saip = [
+    "openpyxl>=3.1,<4",
+    "defusedxml>=0.7,<1",
+]
+# Model Context Protocol server, so an AI agent can drive the decode and
+# lint surfaces. Card-touching tools stay gated behind
+# ``YGGDRASIM_MCP_ALLOW_CARD``; see site-docs/how-to/run-the-mcp-server.md.
+mcp = [
+    "mcp>=1.2,<2",
+]
 # ``gui`` pulls the FastAPI + uvicorn + pywebview stack for the
 # desktop ``--gui`` flow. ``gui-server`` intentionally omits
 # pywebview so a headless lab server (``--web-server``) does not need
@@ -156,7 +175,16 @@ saip = []
 gui = [
     "fastapi>=0.110,<1.0",
     "uvicorn[standard]>=0.27,<1.0",
-    "pywebview>=5.0,<6.0",
+    # pywebview does not install a Linux web-engine backend by default.
+    # PyPI's Qt 6 arm64 runtime currently requires a newer glibc than
+    # Debian Bookworm provides, so x86_64 keeps the self-contained Qt
+    # extra while ARM uses Debian's PyQt5 bindings through a
+    # system-site-packages environment. qtpy is still installed
+    # from PyPI so pywebview can select that binding.
+    # macOS and Windows use pywebview's native Cocoa/WebView2 backends.
+    "pywebview[qt]>=5.0,<6.0; sys_platform == 'linux' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'armv7l'",
+    "pywebview>=5.0,<6.0; sys_platform != 'linux' or platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'armv7l'",
+    "qtpy>=2.4,<3; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'armv7l')",
     "websockets>=12.0,<14.0",
 ]
 gui-server = [
@@ -164,15 +192,14 @@ gui-server = [
     "uvicorn[standard]>=0.27,<1.0",
     "websockets>=12.0,<14.0",
 ]
-# ``full`` is the HIL-capable development profile: everything the
-# maintainer needs on a Linux box to run, build, and test the suite.
-# ``full`` now includes the SAIP surface so a single ``pip install
-# 'yggdrasim[full]'`` leaves nothing optional to chase afterwards.
+# ``full`` is the HIL-capable *runtime* profile. Build and test tools stay
+# in their own extras so a full production installation does not carry
+# PyInstaller or pytest. Developers use ``.[full,build,test]``.
 full = [
     "pyudev; sys_platform == 'linux'",
-    "pyinstaller",
-    "pytest",
-    "httpx",
+    # Full is a runtime superset of the clean SAIP-capable install.
+    "openpyxl>=3.1,<4",
+    "defusedxml>=0.7,<1",
     "fastapi>=0.110,<1.0",
     "uvicorn[standard]>=0.27,<1.0",
     "websockets>=12.0,<14.0",
@@ -192,6 +219,7 @@ yggdrasim-scp11-local-access = "yggdrasim_common.console_scripts:scp11_local_acc
 yggdrasim-scp11-eim-local = "yggdrasim_common.console_scripts:scp11_eim_local"
 yggdrasim-hil-bridge = "yggdrasim_common.console_scripts:hil_bridge"
 yggdrasim-hil-supervisor = "yggdrasim_common.console_scripts:hil_bridge_supervisor"
+yggdrasim-hil-reset = "yggdrasim_common.console_scripts:hil_bridge_reset"
 yggdrasim-card-bridge = "yggdrasim_common.console_scripts:card_bridge"
 yggdrasim-lab-agent = "yggdrasim_common.console_scripts:lab_agent"
 yggdrasim-profile-package = "yggdrasim_common.console_scripts:profile_package"
@@ -199,7 +227,25 @@ yggdrasim-suci-tool = "yggdrasim_common.console_scripts:suci_tool"
 yggdrasim-profile-autoload = "yggdrasim_common.console_scripts:profile_autoload"
 yggdrasim-apdu-fuzzer = "yggdrasim_common.console_scripts:apdu_fuzzer"
 yggdrasim-eum-diag = "yggdrasim_common.console_scripts:eum_diag"
+yggdrasim-apdu-dissect = "yggdrasim_common.console_scripts:apdu_dissect"
 yggdrasim-asn1 = "yggdrasim_common.console_scripts:asn1_tlv_decode"
+yggdrasim-mcp = "yggdrasim_common.console_scripts:mcp_server"
+yggdrasim-session-diff = "yggdrasim_common.console_scripts:session_diff"
+yggdrasim-yggdracore = "yggdrasim_common.console_scripts:yggdracore"
+yggdrasim-card-clone = "yggdrasim_common.console_scripts:card_clone"
+
+# Windowless desktop launcher. setuptools writes ``gui-scripts`` against
+# ``pythonw.exe`` on Windows, so a double-clicked shortcut opens the
+# Command Center without a console window behind it; on Linux and macOS
+# the generated script is identical to a console entry. It is a separate
+# name rather than a second declaration of ``yggdrasim-gui`` because both
+# tables generate ``yggdrasim-gui.exe`` and the loser is overwritten
+# silently. ``yggdrasim-gui`` stays a console script for terminal use
+# (``yggdrasim-gui --web-server --token-file ...``); pipx exposes both
+# tables as apps, so both land on PATH. scripts/install_shortcuts.py
+# prefers this name when it writes the native launchers.
+[project.gui-scripts]
+yggdrasim-desktop = "yggdrasim_common.console_scripts:gui"
 
 [project.urls]
 Homepage = "https://github.com/1oT/YggdraSIM"
@@ -218,17 +264,94 @@ include-package-data = true
 # lives in ``docs/RSPRO.asn``; ``Tools/HilBridge/RSPRO.asn`` is a mirror
 # that is ``cp``-refreshed from it as part of the release procedure.
 "Tools.HilBridge" = ["RSPRO.asn"]
-# The EUM diagnostics dissector is a Lua script that tshark loads at
-# runtime via ``-X lua_script:...``. Shipping it as package-data means
-# the wheel can resolve its location via ``importlib.resources`` even
-# when the source tree is not on disk.
-"Tools.EumDiag" = ["dissector.lua"]
-"yggdrasim_common.gui_server" = [
-    "static/*.css",
-    "static/*.html",
-    "static/*.js",
-    "static/vendor/xterm/*",
+# The APDU dissector is a Lua tree loaded by tshark at runtime via
+# ``-X lua_script:...``, or copied into Wireshark's plugin folder by
+# ``python -m Tools.ApduDissector install``. Shipping it as package
+# data lets an installed wheel resolve it without the source tree.
+"Tools.ApduDissector" = ["lua/*.lua", "lua/yggdrasim_apdu/*.lua"]
+"Tools.ProfilePackage" = [
+    "examples/saip_batch_data_template.yaml",
+    "profile/reference_test_profile.txt",
+    "saip_tool_config.json",
+    "saip_transcode_tui_config.json",
+    "transcode/example_test_profile.transcode.json",
 ]
+"SCP03" = [
+    "seeds/aid.txt",
+    "seeds/binds.json",
+    "seeds/fids.txt",
+    "seeds/keys.ini",
+]
+"SCP80" = ["ota_config.ini"]
+"SCP11.local_access" = [
+    "profile/metadata/default_profile_metadata.json",
+    "profile/test_profile.txt",
+]
+"SCP11.eim_local" = [
+    "eim_identity.json",
+    "eim_packages/default_eim_package.json",
+    "eim_packages/fake_eim_add_eim_package.json",
+    "eim_packages/fake_eim_peer_addition_info.json",
+    "eim_packages/first_test_add_eim_other_eim.json",
+    "eim_packages/fixtures/eim_to_esim/010_profile_download_trigger_request_first_download.json",
+    "eim_packages/fixtures/eim_to_esim/030_eim_acknowledgements_first_download.json",
+    "eim_packages/fixtures/esim_to_eim/020_provide_eim_package_result_first_download.json",
+    "eim_packages/hotfolder/110_first_test_profile_download_trigger_request.json",
+    "eim_packages/templates/template_add_eim.json",
+    "eim_packages/templates/template_add_initial_eim.json",
+    "eim_packages/templates/template_bound_profile_package.json",
+    "eim_packages/templates/template_eim_acknowledgements.json",
+    "eim_packages/templates/template_eim_package_request.json",
+    "eim_packages/templates/template_eim_package_result.json",
+    "eim_packages/templates/template_euicc_memory_reset.json",
+    "eim_packages/templates/template_euicc_package_request_ecos.json",
+    "eim_packages/templates/template_euicc_package_request_eim_configuration_data.json",
+    "eim_packages/templates/template_euicc_package_request_psmos.json",
+    "eim_packages/templates/template_euicc_package_result.json",
+    "eim_packages/templates/template_get_eim_package.json",
+    "eim_packages/templates/template_profile_download_trigger_request.json",
+    "eim_packages/templates/template_profile_download_trigger_result.json",
+    "eim_packages/templates/template_provide_eim_package_result.json",
+    "profile/metadata/default_profile_metadata.json",
+    "profile/test_profile.txt",
+]
+"SIMCARD" = [
+    "eim_identity_template.json",
+    "isdr_config_template.json",
+]
+# The launcher mark, byte-identical to site-docs/assets/images/
+# yggdrasil-mark.svg (guarded by tests/test_install_shortcuts.py).
+# scripts/install_shortcuts.py reads these from the installed package
+# when it writes native desktop launchers, so a pipx install carries
+# the icon without the source tree.
+"yggdrasim_common" = [
+    "assets/yggdrasim.svg",
+    "assets/yggdrasim-256.png",
+    "assets/yggdrasim-512.png",
+]
+"yggdrasim_common.gui_server" = [
+    "static/app.css",
+    "static/app.js",
+    "static/index.html",
+    "static/theme-init.js",
+    "static/vendor/xterm/NOTICE.md",
+    "static/vendor/xterm/addon-fit.js",
+    "static/vendor/xterm/xterm.css",
+    "static/vendor/xterm/xterm.js",
+]
+
+[tool.setuptools.exclude-package-data]
+# These mutable discovery caches can contain operator endpoints and
+# certificate metadata. Keep them out even when a local ignored copy is
+# present or setuptools is reusing stale egg-info.
+"SCP11" = ["es9_ca_lookup.json"]
+"SCP11.live" = ["es9_ca_lookup.json"]
+# The Wireshark capability probe is a diagnostic an engineer runs by hand
+# against a local tshark; the file's own header states it is not shipped.
+# The ``lua/*.lua`` include glob above would otherwise sweep it into the
+# wheel, where scripts/release/verify_wheel.py rejects it as a resource
+# outside scripts/release/bundle-data.json.
+"Tools.ApduDissector" = ["lua/probe_wireshark_env.lua"]
 
 [tool.black]
 # Canonical formatter target for the "style only" sweep flagged by audit
@@ -266,7 +389,7 @@ markers = [
 ]
 # Deterministic defaults for the pytest suite. Tests run in quiet mode
 # with short tracebacks so a broken run cannot flood the terminal, and
-# warnings are silenced because construct and cmd2 still emit
+# warnings are silenced only for pinned upstream modules that still emit
 # DeprecationWarnings on Python 3.12+ that the project cannot influence.
 # See site-docs/internals/testing-guide.md for the full testing policy
 # (narrow targets, 90 s wall-time cap, redirected logs).
@@ -275,16 +398,45 @@ addopts = "-q --tb=short --disable-warnings --no-header"
 filterwarnings = [
     "ignore::DeprecationWarning:construct",
     "ignore::DeprecationWarning:cmd2",
+    "ignore::DeprecationWarning:asn1tools",
+    "ignore::DeprecationWarning:pySim",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
+namespaces = true
 include = [
-    "main*",
-    "SCP03*",
-    "SCP80*",
-    "SCP11*",
-    "SIMCARD*",
-    "Tools*",
-    "yggdrasim_common*",
+    "main",
+    "SCP03",
+    "SCP03.core",
+    "SCP03.crypto",
+    "SCP03.interface",
+    "SCP03.logic",
+    "SCP03.transport",
+    "SCP80",
+    "SCP11",
+    "SCP11.eim_local",
+    "SCP11.live",
+    "SCP11.local_access",
+    "SCP11.relay",
+    "SCP11.shared",
+    "SCP11.test",
+    "SIMCARD",
+    "Tools",
+    "Tools.ApduDissector",
+    "Tools.ApduFuzz",
+    "Tools.Asn1TlvDecode",
+    "Tools.CardBridge",
+    "Tools.EumDiag",
+    "Tools.HilBridge",
+    "Tools.ProfilePackage",
+    "Tools.ProfilePackage.saip_pe_editors",
+    "Tools.SuciTool",
+    "Tools.YggdraCore",
+    "Tools.YggdraMCP",
+    "yggdrasim_common",
+    "yggdrasim_common.gui_server",
+    "yggdrasim_common.gui_server.actions",
+    "yggdrasim_common.gui_server.routes",
+    "yggdrasim_common.remote_lab",
 ]

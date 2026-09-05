@@ -1,4 +1,0 @@
-select usim/imsi
-read
-select mf/dir
-record all

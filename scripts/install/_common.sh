@@ -115,6 +115,21 @@ yg_validate_flavor_for_host() {
     esac
 }
 
+yg_validate_release_arch() {
+    # Fail before any package-manager or filesystem mutation when the release
+    # matrix does not publish a binary for this host.
+    local host_os="${1}"
+    local host_arch="${2}"
+    case "${host_os}:${host_arch}" in
+        linux:x86_64|linux:arm64|macos:arm64)
+            return 0
+            ;;
+        *)
+            yg_die "no pre-built release is published for ${host_os}/${host_arch}; use --mode source on a supported Python host"
+            ;;
+    esac
+}
+
 
 # ---------------------------------------------------------------------------
 # Package-manager bootstrapping.
@@ -137,6 +152,23 @@ yg_apt_install() {
         return 0
     fi
     yg_warn "apt-get not available; skipping package install (${packages})"
+}
+
+yg_install_remsim_client() {
+    if command -v osmo-remsim-client-st2 >/dev/null 2>&1; then
+        return 0
+    fi
+    # Osmocom repositories publish the SIMtrace2 client under this exact
+    # package name. Some distributions bundle it in the broader client
+    # package, so retain that as a compatibility fallback and verify the
+    # executable instead of assuming either package layout.
+    if ! yg_apt_install osmo-remsim-client-st2; then
+        yg_warn "osmo-remsim-client-st2 package unavailable; trying the distribution compatibility package"
+        yg_apt_install osmo-remsim-client || true
+    fi
+    if ! command -v osmo-remsim-client-st2 >/dev/null 2>&1; then
+        yg_die "required HIL executable 'osmo-remsim-client-st2' is still unavailable; configure the Osmocom package repository or install it manually, then re-run (or use --no-deps only when dependencies are managed separately; see guides/SIMTRACE2_CARDEM_GUIDE.md)"
+    fi
 }
 
 yg_brew_install() {
@@ -176,6 +208,83 @@ yg_download_release_asset() {
     curl --fail --location --max-redirs 5 --proto '=https' --tlsv1.2 --silent --show-error --output "${dest}" "${url}"
 }
 
+yg_sha256_file() {
+    local path="${1}"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "${path}" | awk '{print $1}'
+        return 0
+    fi
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "${path}" | awk '{print $1}'
+        return 0
+    fi
+    yg_warn "neither sha256sum nor shasum is available"
+    return 2
+}
+
+yg_verify_release_checksum() {
+    # $1 = SHA256SUMS path, $2 = release asset name, $3 = downloaded asset
+    local manifest="${1}"
+    local asset_name="${2}"
+    local asset_path="${3}"
+    local expected
+    expected="$(awk -v wanted="${asset_name}" '
+        NF >= 2 {
+            name = $2
+            sub(/^\\*/, "", name)
+            if (name == wanted) {
+                print $1
+                exit
+            }
+        }
+    ' "${manifest}")"
+    if [ "${#expected}" -ne 64 ]; then
+        yg_warn "SHA256SUMS has no valid entry for ${asset_name}"
+        return 2
+    fi
+    case "${expected}" in
+        *[!0-9A-Fa-f]*)
+            yg_warn "SHA256SUMS contains an invalid digest for ${asset_name}"
+            return 2
+            ;;
+    esac
+    local actual
+    actual="$(yg_sha256_file "${asset_path}")" || return $?
+    expected="$(printf '%s' "${expected}" | tr '[:upper:]' '[:lower:]')"
+    actual="$(printf '%s' "${actual}" | tr '[:upper:]' '[:lower:]')"
+    if [ "${actual}" != "${expected}" ]; then
+        yg_warn "checksum mismatch for ${asset_name}"
+        return 2
+    fi
+    yg_emit "verified SHA-256 for ${asset_name}"
+}
+
+yg_download_verified_release_asset() {
+    # $1 = release tag/latest, $2 = asset name, $3 = destination
+    local version="${1}"
+    local asset_name="${2}"
+    local destination="${3}"
+    local manifest_tmp
+    manifest_tmp="$(mktemp -t yggdrasim-SHA256SUMS.XXXXXX)"
+    local manifest_url
+    manifest_url="$(yg_resolve_release_url "${version}" "SHA256SUMS")"
+    if ! yg_download_release_asset "${manifest_url}" "${manifest_tmp}"; then
+        rm -f "${manifest_tmp}"
+        return 2
+    fi
+    local asset_url
+    asset_url="$(yg_resolve_release_url "${version}" "${asset_name}")"
+    if ! yg_download_release_asset "${asset_url}" "${destination}"; then
+        rm -f "${manifest_tmp}"
+        return 2
+    fi
+    if ! yg_verify_release_checksum "${manifest_tmp}" "${asset_name}" "${destination}"; then
+        rm -f "${manifest_tmp}" "${destination}"
+        return 2
+    fi
+    rm -f "${manifest_tmp}"
+}
+
 yg_install_executable() {
     # $1 = source path, $2 = target directory, $3 = target filename (without .exe)
     local source="${1}"
@@ -198,19 +307,37 @@ yg_install_executable() {
 # ---------------------------------------------------------------------------
 
 yg_source_install() {
-    # $1 = repo root, $2 = flavor, $3 = venv path ("" to skip venv creation), $4 = with GUI (0|1)
+    # $1 = repo root, $2 = flavor, $3 = venv path ("" to skip venv
+    # creation), $4 = with GUI (0|1), $5 = expose system site packages
+    # to the venv (0|1; required for Debian's ARM PyQt5 binding).
     local repo_root="${1}"
     local flavor="${2}"
     local venv_dir="${3}"
     local with_gui="${4:-0}"
+    local system_site_packages="${5:-0}"
     yg_need_cmd "${YGGDRASIM_PYTHON}"
     if [ -n "${venv_dir}" ]; then
         if [ ! -d "${venv_dir}" ]; then
             yg_emit "creating virtualenv at ${venv_dir}"
-            "${YGGDRASIM_PYTHON}" -m venv "${venv_dir}"
+            if [ "${system_site_packages}" = "1" ]; then
+                "${YGGDRASIM_PYTHON}" -m venv --system-site-packages "${venv_dir}"
+            else
+                "${YGGDRASIM_PYTHON}" -m venv "${venv_dir}"
+            fi
+        elif [ "${system_site_packages}" = "1" ]; then
+            if ! grep -Eiq \
+                '^include-system-site-packages[[:space:]]*=[[:space:]]*true$' \
+                "${venv_dir}/pyvenv.cfg"; then
+                yg_die "ARM GUI source installs require a system-site-packages virtualenv; choose a fresh --venv path or remove ${venv_dir}"
+            fi
         fi
         # shellcheck source=/dev/null
         . "${venv_dir}/bin/activate"
+    fi
+    if [ "${system_site_packages}" = "1" ]; then
+        if ! python -c "from PyQt5 import QtWebEngineWidgets" >/dev/null 2>&1; then
+            yg_die "ARM GUI source install cannot import Debian PyQt5 QtWebEngineWidgets"
+        fi
     fi
     (
         cd "${repo_root}"

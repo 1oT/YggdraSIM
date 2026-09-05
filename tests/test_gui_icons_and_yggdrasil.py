@@ -274,12 +274,15 @@ class YggdrasilNordPaletteContract(unittest.TestCase):
                 self.assertIn("var(--tree-" + kind + "-edge", body)
 
     def test_tree_icon_rules_keep_legacy_fallbacks(self) -> None:
-        # The fallback chain protects non-Nord themes — make sure
-        # the legacy hard-coded values still appear inside the
-        # var() chain. We pick the most recognisable byte values
-        # for each kind.
+        # The fallback chain protects non-Nord themes -- make sure each
+        # kind still resolves to something when --tree-* is absent.
+        #
+        # MF is the exception: it chains through --accent, which all 16
+        # themes define, so it takes the theme's accent rather than one
+        # fixed blue. Its inner "#6aa9ff" was unreachable and is gone.
+        # The other three fall back to their legacy hue directly.
         for kind, marker in (
-            ("mf", "#6aa9ff"),
+            ("mf", "var(--accent)"),
             ("adf", "#ffb85c"),
             ("df", "#b19cd9"),
             ("ef", "#78dcb4"),

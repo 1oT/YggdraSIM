@@ -24,6 +24,7 @@ import io
 import re 
 import datetime 
 import shlex
+import json
 import yaml 
 from typing import Dict ,Optional ,Any ,Tuple 
 from pathlib import Path
@@ -59,6 +60,7 @@ from SCP03 .logic .profile_snapshot_diff import combined_profile_unified_diff
 
 class ShellDispatcher :
     def __init__ (self ):
+        Config .initialize_workspace ()
         self .config =configparser .ConfigParser ()
         self .inventory =DeviceInventoryStore ()
         self .current_iccid =""
@@ -111,6 +113,18 @@ class ShellDispatcher :
         from SCP03 .interface .custom_binds import CommandBinder 
         binds_file =Config .BINDS_FILE 
         self .binder =CommandBinder (filepath =binds_file )
+
+    @staticmethod
+    def _redact_apdu_for_display (apdu_hex :str )->str :
+        """Hide credential-bearing APDU payloads from terminal traces."""
+        try :
+            apdu =HexUtils .to_bytes (str (apdu_hex or ""))
+        except (TypeError ,ValueError ):
+            return str (apdu_hex or "")
+        if len (apdu )>=2 and apdu [1 ]in {0x20 ,0x24 ,0x26 ,0x28 ,0x2C ,0x82 ,0xD8 ,0xE2 }:
+            header =apdu [:4 ].hex ().upper ()
+            return f"{header} [credential payload redacted]"
+        return apdu .hex ().upper ()
 
     def do_manage_binds (self ,arg_line :str =""):
         """Manage custom key-bindings via an interactive wizard."""
@@ -188,6 +202,7 @@ class ShellDispatcher :
                 if is_other :
                     display_cmd =str (cmd )
 
+                display_cmd =self ._redact_apdu_for_display (display_cmd )
                 print (f"{Config.Colors.YELLOW}[-->] {display_cmd}{Config.Colors.ENDC}")
 
             data ,sw1 ,sw2 =self .transport ._original_transmit (cmd ,silent =actual_silent )
@@ -318,9 +333,107 @@ class ShellDispatcher :
 
         if has_readline :
             try :
+                self ._scrub_sensitive_history ()
                 readline .write_history_file (self .hist_file )
+                try :
+                    os .chmod (self .hist_file ,0o600 )
+                except OSError :
+                    pass
             except Exception :
                 pass 
+
+    @staticmethod
+    def _is_sensitive_command_line (command_line :str )->bool :
+        line =str (command_line or "").strip ()
+        if len (line )==0 :
+            return False
+        command =line .split (None ,1 )[0 ].upper ()
+        if command in {
+        "DERIVE-OPC",
+        "EXTRADITE",
+        "INSTALL-EXTRADITION",
+        "INSTALL-FOR-LOAD",
+        "INSTALL-LOAD",
+        "INSTALL-SELECTABLE",
+        "MAKE-SELECTABLE",
+        "MANAGE-PIN",
+        "STORE-DATA",
+        }:
+            return True
+        try :
+            apdu =HexUtils .to_bytes (line )
+        except (TypeError ,ValueError ):
+            return False
+        return len (apdu )>=2 and apdu [1 ]in {
+        0x20 ,0x24 ,0x26 ,0x28 ,0x2C ,0x82 ,0xD8 ,0xE2
+        }
+
+    def _history_line_is_sensitive (self ,line :str )->bool :
+        if self ._is_sensitive_command_line (line ):
+            return True
+        binder =getattr (self ,"binder",None )
+        resolve =getattr (binder ,"resolve",None )
+        if callable (resolve ):
+            try :
+                return any (
+                self ._is_sensitive_command_line (resolved )
+                for resolved in resolve (line )
+                )
+            except Exception :
+                return False
+        return False
+
+    def _redact_command_line_for_display (self ,line :str )->str :
+        text =str (line or "").strip ()
+        if self ._history_line_is_sensitive (text )==False :
+            return text
+        try :
+            raw_apdu =HexUtils .to_bytes (text )
+        except (TypeError ,ValueError ):
+            raw_apdu =b""
+        if len (raw_apdu )>=2 :
+            return self ._redact_apdu_for_display (raw_apdu .hex ())
+        command_name =text .split (None ,1 )[0 ].upper ()if text else "COMMAND"
+        return f"{command_name} <redacted>"
+
+    def _discard_latest_sensitive_history (self ,line :str )->None :
+        if readline is None or self ._history_line_is_sensitive (line )==False :
+            return
+        remove =getattr (readline ,"remove_history_item",None )
+        get_length =getattr (readline ,"get_current_history_length",None )
+        get_item =getattr (readline ,"get_history_item",None )
+        if not callable (remove )or not callable (get_length )or not callable (get_item ):
+            return
+        try :
+            history_length =get_length ()
+            if history_length <=0 :
+                return
+            latest =get_item (history_length )
+            if str (latest or "").strip ()==str (line or "").strip ():
+                remove (history_length -1 )
+        except Exception :
+            pass
+
+    def _scrub_sensitive_history (self )->None :
+        if readline is None :
+            return
+        get_length =getattr (readline ,"get_current_history_length",None )
+        get_item =getattr (readline ,"get_history_item",None )
+        clear =getattr (readline ,"clear_history",None )
+        add =getattr (readline ,"add_history",None )
+        if not all (callable (fn )for fn in (get_length ,get_item ,clear ,add )):
+            return
+        try :
+            retained =[]
+            for index in range (1 ,get_length ()+1 ):
+                item =get_item (index )
+                if item is not None and self ._history_line_is_sensitive (str (item ))==False :
+                    retained .append (str (item ))
+            clear ()
+            for item in retained :
+                add (item )
+        except Exception :
+            pass
 
     def _completer (self ,text ,state ):
         line_buffer =readline .get_line_buffer ().lstrip ()
@@ -1676,7 +1789,7 @@ class ShellDispatcher :
         print (f"{Config.Colors.CYAN}[*] Generating eUICC report ({std})...{Config.Colors.ENDC}")
         try :
             report =self ._build_euicc_export_report (standard =std )
-            with open (out_path ,"w")as f :
+            with open (out_path ,"w",encoding ="utf-8")as f :
                 yaml .dump (report ,f ,default_flow_style =False ,allow_unicode =True ,sort_keys =False )
             print (f"{Config.Colors.GREEN}[+] Report written to {out_path}{Config.Colors.ENDC}")
         except Exception as e :
@@ -1814,38 +1927,56 @@ class ShellDispatcher :
 
     def _handle_validate (self ,arg :str =""):
         scope ="ALL"
-        metadata =None 
+        metadata =None
+        policy =None
         parts =shlex .split (arg .strip ())
-        if len (parts )>0 :
-            first_token =parts [0 ].strip ()
+        positional =[]
+        for token in parts :
+            if token .upper ().startswith ("POLICY="):
+                policy =self ._load_validate_policy (token .partition ("=")[2 ])
+            else :
+                positional .append (token )
+        if len (positional )>0 :
+            first_token =positional [0 ].strip ()
             first_upper =first_token .upper ()
             if first_upper in ("ALL","MF","USIM","ISIM"):
-                scope =first_upper 
-                if len (parts )>1 :
-                    metadata =self ._load_validate_metadata (parts [1 ])
+                scope =first_upper
+                if len (positional )>1 :
+                    metadata =self ._load_validate_metadata (positional [1 ])
             else :
                 metadata =self ._load_validate_metadata (first_token )
 
-        from SCP03 .logic .profile_validator import ProfileValidator 
+        from SCP03 .logic .profile_validator import ProfileValidator
 
-        validator =ProfileValidator (self .fs_ctrl ,profile_metadata =metadata )
+        validator =ProfileValidator (self .fs_ctrl ,profile_metadata =metadata ,policy =policy )
         validator .run (scope =scope )
 
-    def _load_validate_metadata (self ,metadata_path :str )->dict :
+    def _resolve_workspace_path (self ,candidate :str ,label :str )->Path :
+        """Resolve a caller-supplied path, refusing anything outside the workspace."""
         workspace_root =Path (Config .BASE_DIR ).resolve ().parent
-        candidate_path =Path (metadata_path ).expanduser ()
+        candidate_path =Path (candidate ).expanduser ()
         if candidate_path .is_absolute ()==False :
             candidate_path =workspace_root /candidate_path
         resolved_path =candidate_path .resolve ()
         try :
             resolved_path .relative_to (workspace_root )
         except ValueError as error :
-            raise ValueError (f"Metadata path is outside workspace root: {resolved_path}")from error
+            raise ValueError (f"{label} path is outside workspace root: {resolved_path}")from error
         if resolved_path .exists ()==False :
-            raise FileNotFoundError (f"Metadata path not found: {resolved_path}")
-        from SCP03 .logic .profile_validator import ProfileValidator 
+            raise FileNotFoundError (f"{label} path not found: {resolved_path}")
+        return resolved_path
+
+    def _load_validate_metadata (self ,metadata_path :str )->dict :
+        resolved_path =self ._resolve_workspace_path (metadata_path ,"Metadata")
+        from SCP03 .logic .profile_validator import ProfileValidator
         print (f"{Config.Colors.CYAN}[*] Using profile metadata: {resolved_path}{Config.Colors.ENDC}")
         return ProfileValidator .load_profile_metadata (str (resolved_path ))
+
+    def _load_validate_policy (self ,policy_path :str ):
+        resolved_path =self ._resolve_workspace_path (policy_path ,"Policy pack")
+        from SCP03 .logic .profile_validator import load_policy_pack
+        print (f"{Config.Colors.CYAN}[*] Using policy pack: {resolved_path}{Config.Colors.ENDC}")
+        return load_policy_pack (str (resolved_path ))
 
     def _handle_derive_opc (self ,arg :str ):
         """Derive OPc from Ki and OP (3GPP TS 35.206). Usage: DERIVE-OPC <Ki_hex> <OP_hex>."""
@@ -2051,21 +2182,34 @@ class ShellDispatcher :
                 captured =mystdout .getvalue ()
                 ansi_escape =re .compile (r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
                 clean =ansi_escape .sub ("",captured ).strip ()
-                results .append ({"command":line ,"output":clean })
+                sensitive =self ._history_line_is_sensitive (line )
+                report_output =clean
+                if sensitive :
+                    report_output ="[sensitive command output redacted]"
+                results .append (
+                {
+                "command":self ._redact_command_line_for_display (line ),
+                "output":report_output ,
+                }
+                )
                 print (captured ,end ="")
             else :
                 self ._exec_line (line )
         if yaml_out and results :
             try :
-                with open (yaml_out ,"w")as f :
+                with open (yaml_out ,"w",encoding ="utf-8")as f :
                     f .write ("# YggdraSIM CLI Report\n")
                     f .write (f"# Date: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n\n")
                     f .write ("steps:\n")
                     for step in results :
-                        f .write (f"  - command: \"{step['command']}\"\n")
+                        f .write (f"  - command: {json.dumps(step['command'])}\n")
                         f .write ("    output: |\n")
                         for ln in step ["output"].split ("\n"):
                             f .write (f"      {ln}\n")
+                try :
+                    os .chmod (yaml_out ,0o600 )
+                except OSError :
+                    pass
             except Exception as e :
                 print (f"{Config.Colors.FAIL}[!] Failed to write YAML: {e}{Config.Colors.ENDC}")
 
@@ -2116,7 +2260,7 @@ class ShellDispatcher :
         results =[]
 
         try :
-            with open (filename ,'r')as f :
+            with open (filename ,'r',encoding ="utf-8")as f :
                 lines =f .readlines ()
 
             for i ,line in enumerate (lines ):
@@ -2136,7 +2280,8 @@ class ShellDispatcher :
                 if is_comment :
                     continue 
 
-                print (f"\n{Config.Colors.YELLOW}[SCRIPT:{i+1}] > {line}{Config.Colors.ENDC}")
+                rendered_line =self ._redact_command_line_for_display (line )
+                print (f"\n{Config.Colors.YELLOW}[SCRIPT:{i+1}] > {rendered_line}{Config.Colors.ENDC}")
 
                 captured_output =""
                 is_yaml_present =False 
@@ -2165,7 +2310,16 @@ class ShellDispatcher :
                 if is_yaml_present :
                     ansi_escape =re .compile (r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
                     clean_text =ansi_escape .sub ('',captured_output ).strip ()
-                    results .append ({'command':line ,'output':clean_text })
+                    sensitive =self ._history_line_is_sensitive (line )
+                    report_output =clean_text
+                    if sensitive :
+                        report_output ="[sensitive command output redacted]"
+                    results .append (
+                    {
+                    'command':self ._redact_command_line_for_display (line ),
+                    'output':report_output ,
+                    }
+                    )
 
         except Exception as e :
             print (f"{Config.Colors.FAIL}[!] Script Error: {e}{Config.Colors.ENDC}")
@@ -2181,16 +2335,20 @@ class ShellDispatcher :
 
             if has_res :
                 try :
-                    with open (yaml_out ,'w')as f :
+                    with open (yaml_out ,'w',encoding ="utf-8")as f :
                         f .write ("# YggdraSIM Script Report\n")
                         f .write (f"# Date: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
                         f .write (f"# Script: {filename}\n\n")
                         f .write ("steps:\n")
                         for step in results :
-                            f .write (f"  - command: \"{step['command']}\"\n")
+                            f .write (f"  - command: {json.dumps(step['command'])}\n")
                             f .write ("    output: |\n")
                             for out_line in step ['output'].split ('\n'):
                                 f .write (f"      {out_line}\n")
+                    try :
+                        os .chmod (yaml_out ,0o600 )
+                    except OSError :
+                        pass
                     print (f"{Config.Colors.GREEN}[+] Report saved to {yaml_out}{Config.Colors.ENDC}")
                 except Exception as e :
                     print (f"{Config.Colors.FAIL}[!] Failed to write YAML: {e}{Config.Colors.ENDC}")
@@ -2619,15 +2777,26 @@ class ShellDispatcher :
 
     @staticmethod
     def _decode_iccid_bcd (data :bytes )->str :
-        hex_value =bytes (data ).hex ().upper ()
         digits =[]
-        for index in range (0 ,len (hex_value ),2 ):
-            pair =hex_value [index :index +2 ]
-            if len (pair )<2 :
-                continue 
-            digits .append (pair [1 ])
-            digits .append (pair [0 ])
-        return "".join (digits ).replace ("F","")
+        raw =bytes (data or b"")
+        for index ,byte in enumerate (raw ):
+            low =byte &0x0F
+            high =(byte >>4 )&0x0F
+            if low >9 :
+                raise ValueError (
+                f"Invalid ICCID BCD nibble {low:X} in byte {index + 1}."
+                )
+            digits .append (str (low ))
+            if high ==0x0F :
+                if index !=len (raw )-1 :
+                    raise ValueError ("ICCID filler nibble is only valid at the end.")
+                continue
+            if high >9 :
+                raise ValueError (
+                f"Invalid ICCID BCD nibble {high:X} in byte {index + 1}."
+                )
+            digits .append (str (high ))
+        return "".join (digits )
 
     @staticmethod
     def _is_successful_select_sw (sw1 :int )->bool :
@@ -2907,7 +3076,7 @@ class ShellDispatcher :
 
         if is_exists :
             try :
-                with open (Config .AID_FILE ,'r')as f :
+                with open (Config .AID_FILE ,'r',encoding ="utf-8")as f :
                     for line in f :
                         name ,aid ,role_name =self ._parse_aid_registry_line (line )
                         if len (name )==0 :
@@ -3061,7 +3230,7 @@ class ShellDispatcher :
                 del self .aid_rule_roles [name ]
         self .aid_lookup ={bytes .fromhex (v ):k for k ,v in self .aid_registry .items ()}
         try :
-            with open (Config .AID_FILE ,'w')as f :
+            with open (Config .AID_FILE ,'w',encoding ="utf-8")as f :
                 for n ,a in sorted (self .aid_registry .items ()):
                     f .write (f"{n}:{a}\n")
             print (f"{Config.Colors.GREEN}[+] AID alias '{name}' saved.{Config.Colors.ENDC}")
@@ -3398,6 +3567,7 @@ class ShellDispatcher :
                     continue 
 
                 resolved_commands =self .binder .resolve (line )
+                self ._discard_latest_sensitive_history (line )
 
                 for cmd in resolved_commands :
                     is_modified =False 
@@ -3405,7 +3575,8 @@ class ShellDispatcher :
                         is_modified =True 
 
                     if is_modified :
-                        print (f"{Config.Colors.CYAN}[*] Expanded Macro -> {cmd}{Config.Colors.ENDC}")
+                        rendered_cmd =self ._redact_command_line_for_display (cmd )
+                        print (f"{Config.Colors.CYAN}[*] Expanded Macro -> {rendered_cmd}{Config.Colors.ENDC}")
 
                     self ._exec_line (cmd )
 

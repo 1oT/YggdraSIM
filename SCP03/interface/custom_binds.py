@@ -43,7 +43,7 @@ class CommandBinder :
 
         if has_file :
             try :
-                with open (self .filepath ,'r')as f :
+                with open (self .filepath ,'r',encoding ="utf-8")as f :
                     self .binds =json .load (f )
             except Exception as e :
                 print (f"[-] Failed to load binds: {e}")
@@ -60,7 +60,7 @@ class CommandBinder :
 
     def _save (self ):
         try :
-            with open (self .filepath ,'w')as f :
+            with open (self .filepath ,'w',encoding ="utf-8")as f :
                 json .dump (self .binds ,f ,indent =4 )
         except Exception :
             pass 
@@ -144,11 +144,29 @@ class CommandBinder :
 def manage_binds_wizard (colors_ref ,binder ):
     """Run the interactive custom key-binding management wizard."""
     wiz =InteractiveWizard ("Manage Custom Binds",colors_ref ,"Add, remove, or list command macros.")
-    wiz .add_step ("action","Action (ADD, DEL, LIST) [Default: LIST]:",default ="LIST")
-    wiz .add_step ("trigger","Trigger word (for ADD/DEL) [Default: SKIP]:",default ="SKIP")
-    wiz .add_step ("sequence","Command sequence (for ADD) [Default: SKIP]:",default ="SKIP")
+    wiz .add_step (
+    "action","Action (ADD, DEL, LIST) [Default: LIST]:",
+    default ="LIST",choices =("ADD","DEL","LIST"),
+    )
+
+    def trigger_cond (values ):
+        return values .get ("action")in ("ADD","DEL")
+
+    def sequence_cond (values ):
+        return values .get ("action")=="ADD"
+
+    wiz .add_step (
+    "trigger","Trigger word (for ADD/DEL):",default ="",
+    condition =trigger_cond,is_mandatory =True,input_kind ="text",
+    )
+    wiz .add_step (
+    "sequence","Command sequence (for ADD):",default ="",
+    condition =sequence_cond,is_mandatory =True,input_kind ="text",
+    )
 
     res =wiz .run ()
+    if res is None :
+        return
 
     action =""
     has_action =False 

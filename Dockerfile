@@ -21,7 +21,7 @@
 #   skips the -dev packages and the compiler, producing a noticeably
 #   smaller final image that only carries the runtime shared libs and the
 #   installed site-packages.
-# * Source is copied AFTER ``pyproject.toml``/``requirements.txt`` so an
+# * Source is copied AFTER ``pyproject.toml``/``uv.lock`` so an
 #   unrelated source edit does not invalidate the dependency layer.
 
 ARG YGGDRASIM_FLAVOR=clean
@@ -40,11 +40,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /opt/YggdraSIM
 
-# Toolchain + pcsc headers needed by pyscard's C extension. ``libudev1`` is
-# pulled in for pyudev only; the runtime stage keeps a copy so ``full``
-# images can dlopen it at import time. ``git`` is required because the
-# pySim dependency is fetched as ``pip install 'pySim @ git+...'`` and pip
-# shells out to the system git binary to clone the upstream tree.
+# Toolchain + PC/SC headers needed by pyscard's C extension. udev packages
+# are installed only for the full flavor; a clean image must not inherit HIL
+# libraries merely because both flavors share this Dockerfile.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         build-essential \
@@ -53,43 +51,40 @@ RUN apt-get update \
         gcc \
         git \
         libpcsclite-dev \
-        libudev1 \
-        libudev-dev \
         pkg-config \
         swig \
+ && if [ "${YGGDRASIM_FLAVOR}" = "full" ]; then \
+        apt-get install -y --no-install-recommends libudev1 libudev-dev; \
+    fi \
  && rm -rf /var/lib/apt/lists/*
 
 # Dependency-first copy so edits to Python source do NOT invalidate the
 # layer that installs pip packages. That layer is the slowest one in the
 # whole build.
-COPY pyproject.toml requirements.txt ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 
-RUN python -m venv /opt/venv \
- && /opt/venv/bin/pip install --upgrade pip setuptools wheel
+RUN python -m venv /opt/venv
 
 ENV PATH="/opt/venv/bin:${PATH}"
 
-# Install declared dependencies into the venv WITHOUT the project source.
-# We re-install the project in editable mode in the next step after the
-# source is copied in; the dependency layer is the expensive one and this
-# ordering lets Docker cache it whenever only source changes. The SAIP
-# surface (pySim) is fetched from its GitHub mirror here rather than in
-# the editable install below so it lives in the dependency layer and
-# does not re-download on every source edit.
-RUN if [ "${YGGDRASIM_FLAVOR}" = "full" ]; then \
-        pip install -r requirements.txt pyudev \
-            'pySim @ git+https://github.com/osmocom/pysim.git'; \
+# Install the exact dependency graph from the hash-bearing ``uv.lock``
+# without the project source first, preserving Docker layer reuse.
+# ``full`` adds only runtime HIL/server dependencies; build and test tools
+# remain outside both production images.
+RUN /usr/local/bin/python -m pip install 'uv==0.5.9' \
+ && if [ "${YGGDRASIM_FLAVOR}" = "full" ]; then \
+        UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-install-project --extra full; \
     else \
-        pip install -r requirements.txt \
-            'pySim @ git+https://github.com/osmocom/pysim.git'; \
+        UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-install-project; \
     fi
 
 COPY . /opt/YggdraSIM
 
-RUN if [ "${YGGDRASIM_FLAVOR}" = "full" ]; then \
-        pip install --no-deps -e '.[full]'; \
+RUN python scripts/release/source_boundary.py \
+ && if [ "${YGGDRASIM_FLAVOR}" = "full" ]; then \
+        UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-editable --extra full; \
     else \
-        pip install --no-deps -e '.[saip]'; \
+        UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-editable; \
     fi
 
 # -----------------------------------------------------------------------------
@@ -112,15 +107,16 @@ RUN apt-get update \
         ca-certificates \
         gpg \
         libpcsclite1 \
-        libudev1 \
         pcsc-tools \
         pcscd \
+ && if [ "${YGGDRASIM_FLAVOR}" = "full" ]; then \
+        apt-get install -y --no-install-recommends libudev1; \
+    fi \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/YggdraSIM
 
 COPY --from=build /opt/venv /opt/venv
-COPY --from=build /opt/YggdraSIM /opt/YggdraSIM
 
 # Drop to a non-root uid inside the image. Host-side USB / pcscd access
 # usually needs ``--user root`` or a privileged mount anyway, but the
@@ -128,7 +124,7 @@ COPY --from=build /opt/YggdraSIM /opt/YggdraSIM
 # run as root. Operators who need raw pcscd access can override with
 # ``docker run --user 0`` at invocation time.
 RUN useradd --create-home --uid 1000 yggdrasim \
- && mkdir -p /opt/YggdraSIM-data \
+ && mkdir -p /opt/YggdraSIM /opt/YggdraSIM-data \
  && chown -R yggdrasim:yggdrasim /opt/YggdraSIM /opt/YggdraSIM-data
 
 USER yggdrasim

@@ -450,6 +450,10 @@ class ProfileHeaderVersionTests(unittest.TestCase):
         doc = self._make_doc_with_version(major=3, minor=2)
         self.assertNotIn("YRL-HDR-006", _codes(doc))
 
+    def test_hdr006_quiet_for_published_v20_version(self) -> None:
+        doc = self._make_doc_with_version(major=2, minor=0)
+        self.assertNotIn("YRL-HDR-006", _codes(doc))
+
     def test_hdr006_fires_on_unsupported_version(self) -> None:
         doc = self._make_doc_with_version(major=5, minor=7)
         self.assertIn("YRL-HDR-006", _codes(doc))
@@ -563,6 +567,26 @@ class PinKeyReferenceRangeTests(unittest.TestCase):
         doc = _make_doc(usim=_usim_pe(), akaParameter=_aka_pe(), pinCodes=_pin_pe(key_reference=0x81))
         self.assertNotIn("YRL-PIN-007", _codes(doc))
 
+    def test_pin007_quiet_for_global_adm_keys(self) -> None:
+        for key_reference in range(0x0A, 0x0F):
+            with self.subTest(key_reference=key_reference):
+                doc = _make_doc(
+                    usim=_usim_pe(),
+                    akaParameter=_aka_pe(),
+                    pinCodes=_pin_pe(key_reference=key_reference),
+                )
+                self.assertNotIn("YRL-PIN-007", _codes(doc))
+
+    def test_pin007_quiet_for_local_adm_keys(self) -> None:
+        for key_reference in range(0x8A, 0x8F):
+            with self.subTest(key_reference=key_reference):
+                doc = _make_doc(
+                    usim=_usim_pe(),
+                    akaParameter=_aka_pe(),
+                    pinCodes=_pin_pe(key_reference=key_reference),
+                )
+                self.assertNotIn("YRL-PIN-007", _codes(doc))
+
     def test_pin007_fires_on_out_of_range_global(self) -> None:
         doc = _make_doc(usim=_usim_pe(), akaParameter=_aka_pe(), pinCodes=_pin_pe(key_reference=0x09))
         self.assertIn("YRL-PIN-007", _codes(doc))
@@ -570,6 +594,16 @@ class PinKeyReferenceRangeTests(unittest.TestCase):
     def test_pin007_fires_on_out_of_range_local(self) -> None:
         doc = _make_doc(usim=_usim_pe(), akaParameter=_aka_pe(), pinCodes=_pin_pe(key_reference=0x90))
         self.assertIn("YRL-PIN-007", _codes(doc))
+
+    def test_pin007_fires_on_reserved_gaps_around_adm_ranges(self) -> None:
+        for key_reference in (0x09, 0x0F, 0x89, 0x8F):
+            with self.subTest(key_reference=key_reference):
+                doc = _make_doc(
+                    usim=_usim_pe(),
+                    akaParameter=_aka_pe(),
+                    pinCodes=_pin_pe(key_reference=key_reference),
+                )
+                self.assertIn("YRL-PIN-007", _codes(doc))
 
 
 def _aka_pe_with(

@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Breadcrumb (G-3) ------------------------------------------------------ */
 
 .cc-breadcrumb {
@@ -24,7 +25,7 @@
   color: var(--fg-dim);
   width: 22px;
   height: 22px;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
@@ -61,7 +62,7 @@
 
 .cc-breadcrumb-crumb {
   padding: 3px 8px;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--fg-dim);
   transition: background-color var(--transition-fast),
@@ -101,4 +102,3 @@
   font-size: 11px;
   padding: 0 4px;
 }
-

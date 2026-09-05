@@ -18,11 +18,11 @@
 }
 
 .saip-vars-row.is-overridden {
-  background: rgba(255, 200, 80, 0.05);
+  background: var(--warn-soft);
 }
 
 .saip-vars-row.is-overridden td:first-child {
-  border-left: 2px solid rgba(255, 200, 80, 0.5);
+  border-left: 2px solid color-mix(in oklab, var(--warn) 50%, transparent);
 }
 
 .saip-vars-kind {
@@ -34,8 +34,8 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   border: 1px solid var(--border);
-  background: var(--surface, rgba(255, 255, 255, 0.03));
-  color: var(--fg-muted, #888);
+  background: var(--surface);
+  color: var(--fg-muted);
 }
 
 .saip-vars-kind--iccid {
@@ -78,13 +78,13 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   border: 1px solid var(--border);
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-vars-state-chip.is-override {
-  background: rgba(255, 200, 80, 0.16);
-  color: #ffc850;
-  border-color: rgba(255, 200, 80, 0.5);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
 }
 
 .saip-vars-state-chip.is-defined {
@@ -94,9 +94,9 @@
 }
 
 .saip-vars-state-chip.is-used {
-  background: rgba(120, 220, 130, 0.12);
-  color: #78dc82;
-  border-color: rgba(120, 220, 130, 0.4);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 40%, transparent);
 }
 
 .saip-vars-actions-col {
@@ -123,7 +123,7 @@
 
 .saip-vars-hint {
   font-size: 10px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
@@ -152,18 +152,18 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   border: 1px solid var(--border);
-  background: var(--surface, rgba(255, 255, 255, 0.03));
+  background: var(--surface);
   color: var(--fg);
 }
 
 .saip-modal-stat-chip--mono {
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
   font-weight: 500;
   text-transform: lowercase;
 }
 
 .saip-modal-stat-chip--muted {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   background: transparent;
 }
 
@@ -192,7 +192,7 @@
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-cmp-table {
@@ -206,7 +206,7 @@
   font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   padding: 4px 6px;
   border-bottom: 1px solid var(--border);
 }
@@ -218,17 +218,17 @@
 }
 
 .saip-cmp-row--changed {
-  background: rgba(255, 200, 80, 0.06);
+  background: var(--warn-soft);
 }
 
 .saip-cmp-a {
   color: #ff9a6a;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
 }
 
 .saip-cmp-b {
   color: #78dc82;
-  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-family: var(--mono);
 }
 
 .saip-cmp-keys {
@@ -242,6 +242,5 @@
 
 .saip-cmp-keys li {
   font-size: 11px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
-

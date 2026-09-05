@@ -48,7 +48,6 @@ from yggdrasim_common.progress import progress_session
 from yggdrasim_common.terminal_output import status_print as print
 
 try:
-    from .asn1_registry import ASN1Registry
     from .crypto_engine import CryptoEngine
     from .eim_packages import (
         TYPE_EUICC_CONFIGURATION,
@@ -86,7 +85,6 @@ try:
         verify_certificate_against_ca_bundle,
     )
 except ImportError:
-    from asn1_registry import ASN1Registry
     from crypto_engine import CryptoEngine
     from eim_packages import (
         TYPE_EUICC_CONFIGURATION,
@@ -3053,11 +3051,28 @@ class SGP22Orchestrator:
             print("[*] Provider authenticateClient payload parse failed (invalid smdpCertificate), fallback to local signing.")
             return None
         self.state.provider_smdp_certificate = smdp_certificate_raw
-        return PayloadBuilder.build_prepare_download_remote(
-            smdp_signed2_der=smdp_signed2_raw,
-            smdp_signature2=smdp_signature2_raw,
-            cert=smdp_certificate_raw,
-        )
+        try:
+            return PayloadBuilder.build_prepare_download_remote(
+                smdp_signed2_der=smdp_signed2_raw,
+                smdp_signature2=smdp_signature2_raw,
+                cert=smdp_certificate_raw,
+            )
+        except Exception as error:
+            # smdpSigned2 is re-encoded through the ASN.1 spec, so a
+            # truncated or malformed field from the provider surfaces as an
+            # asn1tools error rather than a decode result. The invalid
+            # smdpCertificate case a few lines up already falls back to
+            # local signing; take the same route instead of unwinding the
+            # whole flow with an upstream exception type.
+            if self._local_fallback_enabled() is False:
+                raise RuntimeError(
+                    f"Provider authenticateClient payload build failed: {error}"
+                ) from error
+            print(
+                f"[*] Provider authenticateClient payload build failed ({error}), "
+                "fallback to local signing."
+            )
+            return None
 
     @staticmethod
     def _provider_certificate_payload_supported(certificate_bytes: bytes) -> bool:
@@ -4270,16 +4285,18 @@ class SGP22Orchestrator:
                 bootstrap_end = next_offset + (len(bpp_bytes) - len(root_value))
                 segments.append(bpp_bytes[:bootstrap_end])
             elif child_tag in [b"\xA0", b"\xA1", b"\xA2", b"\xA3"]:
-                if len(child_value) > 0:
-                    if use_section_framing:
-                        if child_tag == b"\xA0":
-                            segments.append(child_raw)
-                        else:
-                            segments.append(self._encode_tlv_header(child_tag, len(child_value)))
-                            segments.extend(self._extract_sequence_members(child_value))
+                if use_section_framing:
+                    # An empty container still ships its header, matching the
+                    # segmenters in SCP11/orchestrator.py and
+                    # SCP11/local_access/session.py byte for byte.
+                    if child_tag == b"\xA0":
+                        segments.append(child_raw)
                     else:
-                        members = self._extract_sequence_members(child_value)
-                        segments.extend(members)
+                        segments.append(self._encode_tlv_header(child_tag, len(child_value)))
+                        if len(child_value) > 0:
+                            segments.extend(self._extract_sequence_members(child_value))
+                elif len(child_value) > 0:
+                    segments.extend(self._extract_sequence_members(child_value))
             else:
                 raise ValueError(f"Unexpected Bound Profile Package child tag: {child_tag.hex().upper()}")
             child_offset = next_offset

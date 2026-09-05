@@ -11,9 +11,11 @@ pins the exact opt-in semantics and the one-shot announce banner.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import ModuleType
 from unittest import mock
 
 from yggdrasim_common import plugin_runtime
@@ -49,7 +51,8 @@ class _EnvScope:
 
 def _write_demo_plugin(target_dir: Path) -> Path:
     """Write a minimal plugin that exposes a ``demo`` capability."""
-    plugin_path = target_dir / "demo_plugin.py"
+    suffix = target_dir.name.replace("-", "_")
+    plugin_path = target_dir / f"demo_plugin_{suffix}.py"
     plugin_path.write_text(
         "class DemoProvider:\n"
         "    def extend_target(self, target):\n"
@@ -161,7 +164,7 @@ class PluginGateAnnounceBannerTests(unittest.TestCase):
     def test_announce_banner_fires_once_for_first_party_plugin(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             plugin_dir = Path(temp_dir)
-            _write_demo_plugin(plugin_dir)
+            plugin_path = _write_demo_plugin(plugin_dir)
             manager = plugin_runtime.PluginManager()
             banner_stream = []
 
@@ -179,10 +182,150 @@ class PluginGateAnnounceBannerTests(unittest.TestCase):
 
             announce_lines = [line for line in banner_stream if line.startswith("[plugins]")]
             self.assertEqual(len(announce_lines), 1)
-            self.assertIn("demo_plugin.py", announce_lines[0])
+            self.assertIn(plugin_path.name, announce_lines[0])
             self.assertIn(f"{_ALLOW}=1", announce_lines[0])
             self.assertIn(f"set {_DISALLOW}=1", announce_lines[0])
             self.assertIn("hard-lock plugin loading", announce_lines[0])
+
+
+class PluginCapabilityRegistrationTests(unittest.TestCase):
+    def test_same_provider_registration_is_idempotent(self) -> None:
+        manager = plugin_runtime.PluginManager()
+        provider = object()
+
+        manager.register_capability("Example.Capability", provider)
+        manager.register_capability("example.capability", provider)
+
+        self.assertIs(manager.get_capability("EXAMPLE.CAPABILITY"), provider)
+
+    def test_conflicting_provider_registration_is_rejected(self) -> None:
+        manager = plugin_runtime.PluginManager()
+        first_provider = object()
+        second_provider = object()
+
+        manager.register_capability("example.capability", first_provider)
+
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            manager.register_capability("EXAMPLE.CAPABILITY", second_provider)
+
+        self.assertIs(manager.get_capability("example.capability"), first_provider)
+
+    def test_none_provider_is_rejected(self) -> None:
+        manager = plugin_runtime.PluginManager()
+
+        with self.assertRaisesRegex(ValueError, "must not be None"):
+            manager.register_capability("example.capability", None)
+
+    def test_failed_plugin_registration_rolls_back_capabilities(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plugin_path = Path(temp_dir) / "broken_plugin.py"
+            plugin_path.write_text(
+                "def register_plugins(manager):\n"
+                "    manager.register_capability('partial', object())\n"
+                "    raise RuntimeError('registration failed')\n",
+                encoding="utf-8",
+            )
+            manager = plugin_runtime.PluginManager()
+
+            loaded = manager._load_plugin_module(
+                module_name="yggdrasim_plugin_broken_plugin",
+                source_path=str(plugin_path),
+            )
+
+        self.assertFalse(loaded)
+        self.assertNotIn("partial", manager._capabilities)
+
+
+class PluginDirectoryPackageTests(unittest.TestCase):
+    def test_existing_canonical_module_from_other_path_is_not_overwritten(self) -> None:
+        module_name = "plugins.audit_collision"
+        previous = sys.modules.get(module_name)
+        existing = ModuleType(module_name)
+        existing.__file__ = "/existing/private/plugin/__init__.py"
+        sys.modules[module_name] = existing
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                package_dir = Path(temp_dir) / "audit_collision"
+                package_dir.mkdir()
+                init_path = package_dir / "__init__.py"
+                init_path.write_text(
+                    "def register_plugins(manager):\n"
+                    "    manager.register_capability('partial', object())\n"
+                    "    raise RuntimeError('registration failed')\n",
+                    encoding="utf-8",
+                )
+                manager = plugin_runtime.PluginManager()
+
+                loaded = manager._load_plugin_module(
+                    module_name=module_name,
+                    source_path=str(init_path),
+                )
+
+            self.assertFalse(loaded)
+            self.assertIs(sys.modules[module_name], existing)
+            self.assertNotIn("partial", manager._capabilities)
+            self.assertIn("module name collision", manager._load_errors[module_name])
+        finally:
+            if previous is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = previous
+
+    def test_drop_in_package_supports_relative_imports_without_repo_on_path(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plugin_dir = Path(temp_dir)
+            package_dir = plugin_dir / "package_plugin"
+            package_dir.mkdir()
+            (package_dir / "provider.py").write_text(
+                "class Provider:\n    pass\n",
+                encoding="utf-8",
+            )
+            (package_dir / "__init__.py").write_text(
+                "from .provider import Provider\n"
+                "def register_plugins(manager):\n"
+                "    manager.register_capability('package.demo', Provider())\n",
+                encoding="utf-8",
+            )
+            saved_modules = {
+                name: module
+                for name, module in sys.modules.items()
+                if name == "plugins"
+                or name.startswith("plugins.")
+                or name == "yggdrasim_plugin_package_plugin"
+                or name.startswith("yggdrasim_plugin_package_plugin.")
+            }
+            for name in saved_modules:
+                sys.modules.pop(name, None)
+            manager = plugin_runtime.PluginManager()
+            try:
+                with (
+                    _EnvScope(**{_ALLOW: "1", _DISALLOW: None}),
+                    mock.patch.object(
+                        plugin_runtime,
+                        "ensure_runtime_dir",
+                        return_value=str(plugin_dir),
+                    ),
+                ):
+                    manager.ensure_loaded()
+
+                self.assertIn("package.demo", manager._capabilities)
+                loaded_package = sys.modules["plugins.package_plugin"]
+                self.assertIs(
+                    loaded_package,
+                    sys.modules["yggdrasim_plugin_package_plugin"],
+                )
+            finally:
+                for name in tuple(sys.modules):
+                    if (
+                        name == "plugins"
+                        or name.startswith("plugins.")
+                        or name == "yggdrasim_plugin_package_plugin"
+                        or name.startswith("yggdrasim_plugin_package_plugin.")
+                    ):
+                        sys.modules.pop(name, None)
+                sys.modules.update(saved_modules)
 
 
 if __name__ == "__main__":

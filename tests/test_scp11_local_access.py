@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+
+from tests.sgp26_support import require_sgp26_bundle
 from types import SimpleNamespace
 
 from asn1crypto import core, x509
@@ -510,12 +512,12 @@ class LocalAccessSessionTests(unittest.TestCase):
         session.collect_profile_metadata = lambda: []  # type: ignore[method-assign]
         session._sync_pending_notifications = lambda response=b"": None  # type: ignore[method-assign]
 
-        response = session.delete_profile("89460811111111111112")
+        response = session.delete_profile("89880811111111111111")
 
         expected_payload = session._build_profile_state_payload(
             session.TAG_DELETE_PROFILE,
             session.TAG_ICCID,
-            "98648011111111111121",
+            "98888011111111111111",
         )
         expected_apdu = bytes([0x80, 0xE2, 0x91, 0x00, len(expected_payload)]) + expected_payload
 
@@ -1308,8 +1310,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         )
 
     def test_real_sgp26_bundle_resolves_variant_o_nist_auth_and_pb(self):
-        project_root = Path(__file__).resolve().parent.parent
-        valid_root = project_root / "SCP11" / "SGP.26_test_Certs" / "Valid Test Cases"
+        valid_root = require_sgp26_bundle()
         store = LocalSgp26CertStore(str(valid_root), prefer_curve="NIST")
 
         auth_record = store.resolve_auth_record(["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"])
@@ -1325,6 +1326,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("Variant O/SM-DP+/SM_DPpb/CERT_S_SM_DPpb_VARO_SIG_NIST.der", pb_record.certificate_path)
 
     def test_open_session_uses_preloaded_bundle_when_certs_folder_has_no_override(self):
+        require_sgp26_bundle()
         with tempfile.TemporaryDirectory() as temp_dir:
             certs_dir = Path(temp_dir)
             cfg = LocalAccessConfig(
@@ -1343,6 +1345,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("Variant O/SM-DP+/SM_DPauth/CERT_S_SM_DPauth_VARO_SIG_NIST.der", session.state.selected_auth_certificate_path)
 
     def test_partial_manual_override_pair_falls_back_to_bundle(self):
+        require_sgp26_bundle()
         with tempfile.TemporaryDirectory() as temp_dir:
             certs_dir = Path(temp_dir)
             certs_dir.joinpath("CERT.DPauth.ECDSA.der").write_bytes(b"\x30\x00")
@@ -1390,19 +1393,22 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(session.state.profile_override_path, str(override_profile.resolve()))
 
     def test_resolve_profile_path_expands_user_home(self):
-        home_dir = Path.home()
-        with tempfile.NamedTemporaryFile(dir=home_dir, suffix=".bin", delete=False) as temp_file:
-            temp_file.write(b"\xAA")
-            temp_path = Path(temp_file.name)
-        try:
-            tilde_path = str(temp_path).replace(str(home_dir), "~", 1)
-            session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        with tempfile.TemporaryDirectory() as isolated_home:
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": isolated_home, "USERPROFILE": isolated_home},
+                clear=False,
+            ):
+                home_dir = Path(isolated_home)
+                temp_path = home_dir / "profile.bin"
+                temp_path.write_bytes(b"\xAA")
+                session = LocalIsdrSession(apdu_channel=FakeApduChannel())
 
-            resolved_path = session.resolve_profile_path(override_path=tilde_path)
+                resolved_path = session.resolve_profile_path(
+                    override_path="~/profile.bin"
+                )
 
-            self.assertEqual(resolved_path, str(temp_path.resolve()))
-        finally:
-            temp_path.unlink(missing_ok=True)
+                self.assertEqual(resolved_path, str(temp_path.resolve()))
 
     def test_multiple_default_profile_files_require_override(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1479,19 +1485,22 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(session.state.resolved_metadata_path, "")
 
     def test_resolve_metadata_path_expands_user_home(self):
-        home_dir = Path.home()
-        with tempfile.NamedTemporaryFile(dir=home_dir, suffix=".json", delete=False) as temp_file:
-            temp_file.write(b"{}")
-            temp_path = Path(temp_file.name)
-        try:
-            tilde_path = str(temp_path).replace(str(home_dir), "~", 1)
-            session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        with tempfile.TemporaryDirectory() as isolated_home:
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": isolated_home, "USERPROFILE": isolated_home},
+                clear=False,
+            ):
+                home_dir = Path(isolated_home)
+                temp_path = home_dir / "metadata.json"
+                temp_path.write_text("{}", encoding="utf-8")
+                session = LocalIsdrSession(apdu_channel=FakeApduChannel())
 
-            resolved_path = session.resolve_metadata_path(override_path=tilde_path)
+                resolved_path = session.resolve_metadata_path(
+                    override_path="~/metadata.json"
+                )
 
-            self.assertEqual(resolved_path, str(temp_path.resolve()))
-        finally:
-            temp_path.unlink(missing_ok=True)
+                self.assertEqual(resolved_path, str(temp_path.resolve()))
 
     def test_encode_metadata_asn1_projects_store_metadata_request(self):
         metadata_document = {
@@ -1546,10 +1555,15 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(decoded["iccid"], bytes.fromhex("89880811111111111112"))
         self.assertEqual(decoded["serviceProviderName"], "Hampus Test")
         self.assertEqual(decoded["profileName"], "Hampus test profile")
-        self.assertEqual(decoded["iconType"], 0)
-        self.assertEqual(decoded["icon"], b"")
+        # The fixture carries icon type "NONE". IconType has no member for
+        # that, and 0 is jpg, so both optional fields are left out rather
+        # than declaring a format for an icon that is not there.
+        self.assertNotIn("iconType", decoded)
+        self.assertNotIn("icon", decoded)
         self.assertEqual(decoded["profileClass"], 2)
-        self.assertEqual(decoded["profileOwner"]["mccMnc"], bytes.fromhex("99999F"))
+        # MCC=999 MNC=99 in 3GPP TS 24.008 10.5.1.3 BCD: the 0xF filler for
+        # the 2-digit MNC lands in the high nibble of octet 2, not at the tail.
+        self.assertEqual(decoded["profileOwner"]["mccMnc"], bytes.fromhex("99F999"))
         self.assertEqual(decoded["profileOwner"]["gid1"], bytes.fromhex("FFFFFFFFFFFFFFFF"))
         self.assertEqual(decoded["profileOwner"]["gid2"], bytes.fromhex("FFFFFFFFFFFFFFFF"))
         self.assertEqual(decoded["profilePolicyRules"], (b"\x00", 5))

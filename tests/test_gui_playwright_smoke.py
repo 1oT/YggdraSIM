@@ -6,7 +6,7 @@
 Spins up the real FastAPI app via uvicorn on a loopback port, then
 drives it with Playwright's sync API. The test asserts that the SPA
 boots, the token bootstrap works, the Command Center navigation renders,
-and the **SCP11 Local / Local SMDP+** subsystem reaches its reader-scoped
+and the **SCP11 Local / Local SM-DP+** subsystem reaches its reader-scoped
 dashboard or reader-session gate.
 
 Self-skipping policy — the test is deliberately CI-inert until a
@@ -35,11 +35,9 @@ from __future__ import annotations
 
 import os
 import socket
-import sys
 import threading
 import time
 from contextlib import closing
-from pathlib import Path
 
 import pytest
 
@@ -243,17 +241,17 @@ class TestCommandCenterSmoke:
 
         # 2. Command Center nav enumerates subsystems via /api/actions.
         #    Wait for at least one subsystem entry, then confirm the new
-        #    "SCP11 Local" subsystem shows up in the list.
+        #    Local SM-DP+ surface shows up in the list.
         page.wait_for_selector("#command-center-nav .subsystem-entry", timeout=10_000)
         nav_names = page.eval_on_selector_all(
             "#command-center-nav .subsystem-entry .cc-nav-name",
             "els => els.map(el => (el.textContent || '').trim())",
         )
-        assert "SCP11 Local" in nav_names, (
-            f"expected 'SCP11 Local' in subsystem nav; got {nav_names!r}"
+        assert "Local SM-DP+" in nav_names, (
+            f"expected 'Local SM-DP+' in subsystem nav; got {nav_names!r}"
         )
 
-        # 3. Click into SCP11 Local / Local SMDP+. In hardware-less smoke
+        # 3. Click into SCP11 Local / Local SM-DP+. In hardware-less smoke
         #    runs this lands on the reader-session gate; with a selected
         #    reader it lands on the flattened dashboard with two operation
         #    rails.
@@ -269,20 +267,20 @@ class TestCommandCenterSmoke:
             "Select a reader session" in local_smdp_text
             or "Local SM-DP+ Provisioning" in local_smdp_text
         ), (
-            "expected Local SMDP+ reader gate or operation rails; got "
+            "expected Local SM-DP+ reader gate or operation rails; got "
             f"{local_smdp_text[:500]!r}"
         )
         if "Local SM-DP+ Provisioning" in local_smdp_text:
             assert "Card & Session Operations" in local_smdp_text, (
-                "Local SMDP+ dashboard must expose both operation rails."
+                "Local SM-DP+ dashboard must expose both operation rails."
             )
 
         nav_names_after_smdp = page.eval_on_selector_all(
             "#command-center-nav .subsystem-entry .cc-nav-name",
             "els => els.map(el => (el.textContent || '').trim())",
         )
-        assert "Local SMDP+" in nav_names_after_smdp or "SCP11 Local" in nav_names_after_smdp, (
-            f"expected Local SMDP+ nav entry; got {nav_names_after_smdp!r}"
+        assert "Local SM-DP+" in nav_names_after_smdp, (
+            f"expected Local SM-DP+ nav entry; got {nav_names_after_smdp!r}"
         )
 
         # 4. Click over to the SCP03 subsystem and verify the workbench

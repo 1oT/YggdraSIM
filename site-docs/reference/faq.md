@@ -16,7 +16,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 Use the [Operator Surfaces](../operator-surfaces.md) table as the first
 filter, then the [Subsystems](../subsystems/index.md) overview for a picture
-view with links into the deep dives.
+view with links into the per-subsystem pages.
 
 ## Is `SCP03` a relay shell?
 

@@ -47,19 +47,14 @@ troubleshooting matrix.
 
 from __future__ import annotations
 
-import asyncio
-import errno
-import fcntl
 import logging
 import os
 import re
 import shlex
-import struct
 import sys
-import termios
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from yggdrasim_common.gui_server.terminal import (
     PtySession,
@@ -74,6 +69,7 @@ _LOGGER = logging.getLogger("yggdrasim.gui.host_shell")
 
 
 _ENV_FLAG_NAME = "YGGDRASIM_GUI_HOST_SHELL"
+_HIL_MODEM_ENV_FLAG_NAME = "YGGDRASIM_GUI_HIL_MODEM"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 _DEFAULT_SHELL_FALLBACK = "/bin/bash"
@@ -90,7 +86,7 @@ _SERIAL_PATH_RE = re.compile(
 
 _MAX_COMMAND_LENGTH = 512
 _HIL_MODEM_DEFAULT_DEVICE = "/dev/ttyUSB2"
-_HIL_MODEM_DEFAULT_COMMAND = f"sudo tio {_HIL_MODEM_DEFAULT_DEVICE}"
+_HIL_MODEM_DEFAULT_COMMAND = f"tio {_HIL_MODEM_DEFAULT_DEVICE}"
 _HIL_MODEM_TERMINAL_COMMANDS = frozenset({"tio", "minicom", "picocom", "screen"})
 _HIL_MODEM_PRIVILEGE_WRAPPERS = frozenset({"sudo", "doas"})
 _HIL_MODEM_SSH_FLAGS = frozenset({"-t", "-tt"})
@@ -123,6 +119,24 @@ def is_enabled() -> bool:
     if raw is None:
         return False
     return str(raw).strip().lower() in _TRUTHY
+
+
+def is_hil_modem_enabled() -> bool:
+    """Return whether the constrained modem PTY was explicitly enabled.
+
+    The capability is restricted to source/full Linux installations that
+    include the HIL bridge.  Possession of the GUI bearer token is not itself
+    permission to launch a host serial program.
+    """
+    from yggdrasim_common import flavor
+
+    raw = os.environ.get(_HIL_MODEM_ENV_FLAG_NAME)
+    opted_in = str(raw or "").strip().lower() in _TRUTHY
+    return (
+        opted_in
+        and flavor.is_hil_bridge_included()
+        and flavor.is_hil_bridge_supported_platform()
+    )
 
 
 def describe_capability() -> dict:
@@ -175,6 +189,23 @@ def describe_hil_modem_capability() -> dict:
             "scope": "hil-modem",
             "reason": "PTY bridge is not supported on this platform.",
         }
+    if not is_hil_modem_enabled():
+        return {
+            "supported": True,
+            "enabled": False,
+            "shell": None,
+            "scope": "hil-modem",
+            "reason": (
+                "HIL modem terminal is opt-in and available only in the full "
+                "Linux/source HIL capability. Set YGGDRASIM_GUI_HIL_MODEM=1 "
+                "and restart the GUI to enable it."
+            ),
+            "command_policy": "serial-terminal-only",
+            "allowed_commands": sorted(_HIL_MODEM_TERMINAL_COMMANDS),
+            "default_command": "",
+            "default_command_source": "",
+            "remote_target": "",
+        }
     command_payload = _hil_modem_default_command_payload()
     return {
         "supported": True,
@@ -221,7 +252,7 @@ def _remote_card_bridge_modem_command() -> Optional[dict[str, str]]:
     if len(ssh_command) == 0:
         return None
     ssh_command.insert(1, "-tt")
-    ssh_command.extend(["sudo", "tio", _HIL_MODEM_DEFAULT_DEVICE])
+    ssh_command.extend(["tio", _HIL_MODEM_DEFAULT_DEVICE])
     return {
         "command": shlex.join(ssh_command),
         "target": target,
@@ -426,8 +457,8 @@ def parse_host_command(command: Optional[str]) -> list[str]:
 
     The host-shell surface is already opt-in and shell-equivalent, but
     configured launches should still avoid implicit ``shell=True``
-    expansion. A command such as ``sudo tio /dev/ttyUSB2`` becomes
-    ``["sudo", "tio", "/dev/ttyUSB2"]`` and is passed directly to
+    expansion. A command such as ``tio /dev/ttyUSB2`` becomes
+    ``["tio", "/dev/ttyUSB2"]`` and is passed directly to
     ``execvpe``.
     """
     text = str(command or "").strip()
@@ -463,10 +494,10 @@ def _validate_hil_modem_terminal_command(argv: list[str]) -> None:
     command_index = 0
     executable = Path(argv[command_index]).name
     if executable in _HIL_MODEM_PRIVILEGE_WRAPPERS:
-        command_index = 1
-        if len(argv) <= command_index:
-            raise ValueError("HIL modem shell privilege wrapper is missing a command.")
-        executable = Path(argv[command_index]).name
+        raise ValueError(
+            "HIL modem shell does not run sudo/doas. Grant the GUI user "
+            "access to the serial device through the host device policy."
+        )
     if executable not in _HIL_MODEM_TERMINAL_COMMANDS:
         allowed = ", ".join(sorted(_HIL_MODEM_TERMINAL_COMMANDS))
         raise ValueError(
@@ -554,6 +585,11 @@ async def spawn_host_shell(spec: HostShellStartSpec) -> PtySession:
     """
     if not is_supported():
         raise RuntimeError("Host shell PTY bridge is not supported on this platform.")
+    if spec.hil_modem and not is_hil_modem_enabled():
+        raise RuntimeError(
+            "HIL modem terminal is disabled. Use a full Linux/source HIL "
+            "installation, set YGGDRASIM_GUI_HIL_MODEM=1, and restart the GUI."
+        )
     if not is_enabled() and not spec.hil_modem:
         raise RuntimeError(
             "Host shell is disabled. Set YGGDRASIM_GUI_HOST_SHELL=1 and "
@@ -632,6 +668,7 @@ __all__ = [
     "describe_hil_modem_capability",
     "enumerate_serial_devices",
     "is_enabled",
+    "is_hil_modem_enabled",
     "is_safe_device_path",
     "is_supported",
     "parse_hil_modem_command",

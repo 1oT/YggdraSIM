@@ -4,7 +4,7 @@
 """SAIP BPP consumer regression suite.
 
 Covers the four ProfileElement consumers added in the round closing
-out the round-trip from a SAIP-encoded operator BPP into a runtime
+out the round-trip from a SAIP-encoded BPP into a runtime
 ``SimCardState``:
 
 * ``pinCodes`` (SAIP §5.6.1)         -> ``SimProfileImage.pin_codes``
@@ -18,18 +18,15 @@ that lights up ``state.chv_references`` / ``state.gp_apps`` /
 ``state.scp03_keys`` / ``state.rfm_instances`` from the active
 profile's image.
 
-The tests deliberately use a real operator BPP (the user's
-``89880000000466311335_test`` profile) so we exercise the same byte
-streams that show up in HIL traces. The fixture is checked out at
-``Workspace/LocalSMDPP/profile/89880000000466311335_test.txt``; if
-it goes missing the suite skips rather than asserting against
-fabricated data.
+Primary regressions use synthetic state. Optional local integration
+coverage can use any operator-owned BPP selected through
+``YGGDRASIM_LOCAL_SAIP_BPP_FIXTURE``; local fixture names and identities
+are never embedded in the tracked suite.
 """
 
 from __future__ import annotations
 
 import os
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -45,6 +42,7 @@ from SIMCARD.naa import NaaLogic
 from SIMCARD.profile_import import _decode_hex_text_upp
 from SIMCARD.saip_profile import decode_profile_image
 from SIMCARD.etsi_fs import (
+    _hydrate_mno_scp03_keys,
     _hydrate_mno_scp80_keys,
 )
 from SIMCARD.scp03 import Scp03CardLogic
@@ -55,12 +53,18 @@ from SIMCARD.state import (
 )
 
 
-_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89880000000466311335_test.txt")
+_BPP_PATH = Path(
+    os.environ.get(
+        "YGGDRASIM_LOCAL_SAIP_BPP_FIXTURE",
+        "__optional_local_saip_bpp_fixture_not_configured__",
+    )
+)
+_SYNTHETIC_ICCID = "8901000000000000000"
 
 
 def _load_image_or_skip(test_case: unittest.TestCase):
     if _BPP_PATH.is_file() is False:
-        test_case.skipTest(f"operator BPP fixture missing at {_BPP_PATH}")
+        test_case.skipTest("optional local SAIP BPP fixture is not configured")
     upp = _decode_hex_text_upp(_BPP_PATH)
     return decode_profile_image(upp)
 
@@ -96,7 +100,7 @@ class SaipPinCodesConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8988000000000000000",
+                iccid=image.iccid or _SYNTHETIC_ICCID,
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -137,7 +141,8 @@ class SaipSecurityDomainConsumerTests(unittest.TestCase):
         # GP §11.1 ISD-style AID, lifecycle PERSONALIZED (0x0F).
         self.assertEqual(domain.instance_aid, "A000000151000000")
         self.assertEqual(domain.lifecycle_state, 0x0F)
-        # SCP03 baseline triplet KVN 0x01 must be complete (KIDs 1,2,3).
+        # UICC Configuration §4.3.2 reserves KVN 0x01..0x0F for
+        # SCP80; the fixture carries a complete KVN 0x01 triplet.
         triplet = {key.key_identifier: key for key in domain.keys if key.key_version == 0x01}
         self.assertEqual(set(triplet), {0x01, 0x02, 0x03})
         for key in triplet.values():
@@ -152,7 +157,7 @@ class SaipSecurityDomainConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8988000000000000000",
+                iccid=image.iccid or _SYNTHETIC_ICCID,
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -174,7 +179,7 @@ class SaipSecurityDomainConsumerTests(unittest.TestCase):
         ota_pair = {
             key.key_identifier: key
             for key in domain.keys
-            if key.key_version == 0x40 and key.key_identifier in (0x01, 0x02)
+            if key.key_version == 0x01 and key.key_identifier in (0x01, 0x02)
         }
         # Sanity: the BPP fixture is expected to ship the OTA pair.
         self.assertEqual(set(ota_pair), {0x01, 0x02})
@@ -184,7 +189,7 @@ class SaipSecurityDomainConsumerTests(unittest.TestCase):
         self.assertEqual(state.scp80_security.key_enc, ota_pair[0x01].key_data)
         self.assertEqual(state.scp80_security.key_mac, ota_pair[0x02].key_data)
 
-    def test_runtime_promotes_mno_sd_aid_and_loads_scp03_baseline(self) -> None:
+    def test_runtime_does_not_load_scp80_keys_as_scp03_baseline(self) -> None:
         image = _load_image_or_skip(self)
         state = build_default_state()
         forced_aid = "BPP-SD-PROBE"
@@ -193,7 +198,7 @@ class SaipSecurityDomainConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8988000000000000000",
+                iccid=image.iccid or _SYNTHETIC_ICCID,
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -204,17 +209,22 @@ class SaipSecurityDomainConsumerTests(unittest.TestCase):
         )
         state.active_profile_aid = forced_aid
 
+        default_kenc = bytes(state.scp03_keys.kenc)
+        default_kmac = bytes(state.scp03_keys.kmac)
+        default_dek = bytes(state.scp03_keys.dek)
+        default_kvn = state.scp03_keys.kvn
+
         rebuild_runtime_filesystem(state)
 
         domain = image.security_domains[0]
         self.assertEqual(state.mno_sd_aid, domain.instance_aid)
 
-        # SCP03 baseline triplet hits ``state.scp03_keys`` verbatim.
-        triplet = {key.key_identifier: key for key in domain.keys if key.key_version == 0x01}
-        self.assertEqual(state.scp03_keys.kenc, triplet[0x01].key_data)
-        self.assertEqual(state.scp03_keys.kmac, triplet[0x02].key_data)
-        self.assertEqual(state.scp03_keys.dek, triplet[0x03].key_data)
-        self.assertEqual(state.scp03_keys.kvn, 0x01)
+        # KVN 0x01 is SCP80, so it must not overwrite the simulator's
+        # independent SCP03 administration keyset.
+        self.assertEqual(state.scp03_keys.kenc, default_kenc)
+        self.assertEqual(state.scp03_keys.kmac, default_kmac)
+        self.assertEqual(state.scp03_keys.dek, default_dek)
+        self.assertEqual(state.scp03_keys.kvn, default_kvn)
 
         # GP §11.4 registry carries the SD instance with kind="sd".
         sd_entries = [entry for entry in state.gp_apps if entry.aid == domain.instance_aid]
@@ -264,7 +274,7 @@ class SaipRfmConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8988000000000000000",
+                iccid=image.iccid or _SYNTHETIC_ICCID,
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -354,7 +364,7 @@ class SaipGenericFileManagementConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8988000000000000000",
+                iccid=image.iccid or _SYNTHETIC_ICCID,
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -380,8 +390,8 @@ class SaipGenericFileManagementConsumerTests(unittest.TestCase):
 
 class Scp80KeysetHydrationUnitTests(unittest.TestCase):
     """Unit-level coverage for ``_hydrate_mno_scp80_keys`` independent
-    of any specific BPP. Confirms the GP Amendment B §B.4 / TS 102
-    225 §5.1 keyset selection rules.
+    of any specific BPP. Confirms the UICC Configuration §4.3.2 /
+    TS 102 225 §5.1 keyset selection rules.
     """
 
     @staticmethod
@@ -408,30 +418,30 @@ class Scp80KeysetHydrationUnitTests(unittest.TestCase):
         domain = SimProfileSecurityDomain(
             instance_aid="A000000151000000",
             keys=[
-                self._key(0x01, 0x01, bytes.fromhex("AA" * 16)),
-                self._key(0x01, 0x02, bytes.fromhex("BB" * 16)),
-                self._key(0x01, 0x03, bytes.fromhex("CC" * 16)),
+                self._key(0x30, 0x01, bytes.fromhex("AA" * 16)),
+                self._key(0x30, 0x02, bytes.fromhex("BB" * 16)),
+                self._key(0x30, 0x03, bytes.fromhex("CC" * 16)),
             ],
         )
         _hydrate_mno_scp80_keys(state, domain)
-        # SCP03 baseline at KVN 0x01 must NOT bleed into the SCP80 slot.
+        # SCP03 baseline at KVN 0x30 must NOT bleed into the SCP80 slot.
         self.assertEqual(state.scp80_security.key_enc, bytes.fromhex("00" * 8))
         self.assertEqual(state.scp80_security.key_mac, bytes.fromhex("00" * 8))
 
     def test_hydrator_picks_lowest_complete_ota_kvn(self) -> None:
         state = self._state_with_known_defaults()
-        # KVN 0x42 carries a complete pair; KVN 0x41 only has one half
-        # (incomplete) and KVN 0x44 has another complete pair. The
-        # selector must pick 0x42 because it is the lowest *complete*
+        # KVN 0x02 carries a complete pair; KVN 0x01 only has one half
+        # (incomplete) and KVN 0x04 has another complete pair. The
+        # selector must pick 0x02 because it is the lowest *complete*
         # candidate.
         domain = SimProfileSecurityDomain(
             instance_aid="A000000151000000",
             keys=[
-                self._key(0x41, 0x01, bytes.fromhex("11" * 16)),
-                self._key(0x42, 0x01, bytes.fromhex("22" * 16)),
-                self._key(0x42, 0x02, bytes.fromhex("33" * 16)),
-                self._key(0x44, 0x01, bytes.fromhex("44" * 16)),
-                self._key(0x44, 0x02, bytes.fromhex("55" * 16)),
+                self._key(0x01, 0x01, bytes.fromhex("11" * 16)),
+                self._key(0x02, 0x01, bytes.fromhex("22" * 16)),
+                self._key(0x02, 0x02, bytes.fromhex("33" * 16)),
+                self._key(0x04, 0x01, bytes.fromhex("44" * 16)),
+                self._key(0x04, 0x02, bytes.fromhex("55" * 16)),
             ],
         )
         _hydrate_mno_scp80_keys(state, domain)
@@ -440,21 +450,88 @@ class Scp80KeysetHydrationUnitTests(unittest.TestCase):
 
     def test_hydrator_skips_kvns_outside_the_ota_range(self) -> None:
         state = self._state_with_known_defaults()
-        # KVN 0x30 is reserved for the GP §11.1.2 "production" SCP03
-        # keyset; KVN 0x50 is outside the SCP80 range. Neither must
-        # be picked as an OTA candidate.
+        # KVN 0x30 is SCP03 and KVN 0x40 is SCP81. Neither may be
+        # picked as an SCP80 candidate.
         domain = SimProfileSecurityDomain(
             instance_aid="A000000151000000",
             keys=[
                 self._key(0x30, 0x01, bytes.fromhex("AA" * 16)),
                 self._key(0x30, 0x02, bytes.fromhex("BB" * 16)),
-                self._key(0x50, 0x01, bytes.fromhex("CC" * 16)),
-                self._key(0x50, 0x02, bytes.fromhex("DD" * 16)),
+                self._key(0x40, 0x01, bytes.fromhex("CC" * 16)),
+                self._key(0x40, 0x02, bytes.fromhex("DD" * 16)),
             ],
         )
         _hydrate_mno_scp80_keys(state, domain)
         self.assertEqual(state.scp80_security.key_enc, bytes.fromhex("00" * 8))
         self.assertEqual(state.scp80_security.key_mac, bytes.fromhex("00" * 8))
+
+
+class Scp03KeysetHydrationUnitTests(unittest.TestCase):
+    """Keep SCP03 selection inside its reserved KVN ``0x30..0x3F`` range."""
+
+    @staticmethod
+    def _key(kvn: int, kid: int, data: bytes) -> SimProfileSecurityDomainKey:
+        return SimProfileSecurityDomainKey(
+            usage_qualifier=0x00,
+            key_identifier=kid,
+            key_version=kvn,
+            key_type=0x88,
+            key_data=data,
+            mac_length=16,
+            counter=b"",
+            access=0x00,
+        )
+
+    def _state_with_known_defaults(self):
+        state = build_default_state()
+        state.scp03_keys.kenc = bytes.fromhex("A0" * 16)
+        state.scp03_keys.kmac = bytes.fromhex("B0" * 16)
+        state.scp03_keys.dek = bytes.fromhex("C0" * 16)
+        state.scp03_keys.kvn = 0x30
+        return state
+
+    def test_hydrator_picks_lowest_complete_scp03_kvn(self) -> None:
+        state = self._state_with_known_defaults()
+        domain = SimProfileSecurityDomain(
+            instance_aid="A000000151000000",
+            keys=[
+                self._key(0x30, 0x01, bytes.fromhex("11" * 16)),
+                self._key(0x31, 0x01, bytes.fromhex("21" * 16)),
+                self._key(0x31, 0x02, bytes.fromhex("22" * 16)),
+                self._key(0x31, 0x03, bytes.fromhex("23" * 16)),
+                self._key(0x32, 0x01, bytes.fromhex("31" * 16)),
+                self._key(0x32, 0x02, bytes.fromhex("32" * 16)),
+                self._key(0x32, 0x03, bytes.fromhex("33" * 16)),
+            ],
+        )
+
+        _hydrate_mno_scp03_keys(state, domain)
+
+        self.assertEqual(state.scp03_keys.kenc, bytes.fromhex("21" * 16))
+        self.assertEqual(state.scp03_keys.kmac, bytes.fromhex("22" * 16))
+        self.assertEqual(state.scp03_keys.dek, bytes.fromhex("23" * 16))
+        self.assertEqual(state.scp03_keys.kvn, 0x31)
+
+    def test_hydrator_ignores_complete_scp80_and_scp81_keysets(self) -> None:
+        state = self._state_with_known_defaults()
+        domain = SimProfileSecurityDomain(
+            instance_aid="A000000151000000",
+            keys=[
+                self._key(0x01, 0x01, bytes.fromhex("11" * 16)),
+                self._key(0x01, 0x02, bytes.fromhex("12" * 16)),
+                self._key(0x01, 0x03, bytes.fromhex("13" * 16)),
+                self._key(0x40, 0x01, bytes.fromhex("41" * 16)),
+                self._key(0x40, 0x02, bytes.fromhex("42" * 16)),
+                self._key(0x40, 0x03, bytes.fromhex("43" * 16)),
+            ],
+        )
+
+        _hydrate_mno_scp03_keys(state, domain)
+
+        self.assertEqual(state.scp03_keys.kenc, bytes.fromhex("A0" * 16))
+        self.assertEqual(state.scp03_keys.kmac, bytes.fromhex("B0" * 16))
+        self.assertEqual(state.scp03_keys.dek, bytes.fromhex("C0" * 16))
+        self.assertEqual(state.scp03_keys.kvn, 0x30)
 
 
 class BppPinLifecycleTests(unittest.TestCase):
@@ -486,7 +563,7 @@ class BppPinLifecycleTests(unittest.TestCase):
         self.state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=self.image.iccid or "8988000000000000000",
+                iccid=self.image.iccid or _SYNTHETIC_ICCID,
                 state="enabled",
                 profile_class="operational",
                 profile_name=self.image.profile_name,
@@ -659,7 +736,7 @@ class Scp03BppKeysWiringTests(unittest.TestCase):
         self.state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8988000000000000000",
+                iccid=image.iccid or _SYNTHETIC_ICCID,
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,

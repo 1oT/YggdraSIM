@@ -19,8 +19,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from SCP11.live.console import ProfileMetadataView, SCP11Console
 
 
@@ -103,8 +101,6 @@ class TestDeleteProfileAutoDisable:
         view = _make_profile_view(state="ENABLED")
         # The first call (auto-disable) returns False; subsequent calls
         # would still pretend success but the helper must abort.
-        original_execute = console._execute_profile_state_command
-
         def selective_execute(resolved, tag, label):
             console._executed.append((resolved, tag, label))
             if label == "DisableProfile":

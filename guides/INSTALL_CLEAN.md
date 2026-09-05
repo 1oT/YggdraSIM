@@ -146,6 +146,14 @@ sudo apt-get install --no-install-recommends \
     libpcsclite1 pcscd pcsc-tools gpg
 ```
 
+For the desktop GUI bundle, also install its Qt/X11 host libraries:
+
+```bash
+sudo apt-get install --no-install-recommends \
+    libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+    libxcb-keysyms1 libxcb-shape0 libxcb-icccm4
+```
+
 Check that your user is in the `pcscd` or equivalent group used by your
 distribution for reader access.
 
@@ -159,7 +167,7 @@ for the additional steps specific to Raspberry Pi hardware.
 The same onefile can be produced from a source checkout:
 
 ```bash
-python -m pip install -e '.[build,test,gui]'
+python -m pip install -e '.[saip,build,test,gui]'
 YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 ./dist/yggdrasim-clean --version
 ./dist/yggdrasim-gui-clean --version

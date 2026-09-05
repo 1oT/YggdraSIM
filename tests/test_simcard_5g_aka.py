@@ -39,7 +39,7 @@ from SIMCARD.aka_5g import (
     format_sn_name,
     kdf,
 )
-from SIMCARD.auth import build_milenage_autn, milenage_vectors
+from SIMCARD.auth import build_milenage_autn
 from SIMCARD.engine import SimulatedSimCardEngine
 from SIMCARD.etsi_fs import USIM_AID
 

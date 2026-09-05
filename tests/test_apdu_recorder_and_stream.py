@@ -209,17 +209,39 @@ class WrapConnectionTests(unittest.TestCase):
         out = wrapped.transmit([0x00, 0xA4, 0x04, 0x00])
         self.assertEqual(out, (b"\x01\x02", 0x61, 0x10))
 
-    def test_wrap_records_exchange_with_uppercase_hex(self) -> None:
+    def test_wrap_records_metadata_with_payload_redacted(self) -> None:
         fake = _FakeConnection(response=([0xDE, 0xAD], 0x90, 0x00))
         wrapped = self.mod.wrap_connection(fake, source="unit")
         wrapped.transmit([0x00, 0xA4, 0x04, 0x00, 0x07])
         snap = self.recorder.snapshot()
         self.assertEqual(len(snap), 1)
-        self.assertEqual(snap[0].apdu_hex, "00A4040007")
-        self.assertEqual(snap[0].data_hex, "DEAD")
+        self.assertEqual(snap[0].apdu_hex, "00A40400")
+        self.assertEqual(snap[0].data_hex, "")
+        self.assertEqual(snap[0].command_length, 5)
+        self.assertEqual(snap[0].response_length, 2)
+        self.assertTrue(snap[0].payload_redacted)
         self.assertEqual(snap[0].sw_hex, "9000")
         self.assertEqual(snap[0].source, "unit")
         self.assertGreater(snap[0].elapsed_ms, 0.0)
+
+    def test_raw_capture_is_explicit_scoped_and_not_in_aggregate(self) -> None:
+        self.recorder.enable_raw_capture(
+            "reader-a",
+            ttl_seconds=30,
+            consent="I_UNDERSTAND_RAW_APDU_SECRETS",
+        )
+        fake = _FakeConnection(response=([0xDE, 0xAD], 0x90, 0x00))
+        self.mod.wrap_connection(fake, source="reader-a").transmit(
+            [0x00, 0x20, 0x00, 0x01, 0x04, 0x31, 0x32, 0x33, 0x34]
+        )
+        scoped = self.recorder.snapshot(scope="reader-a")
+        aggregate = self.recorder.snapshot()
+        self.assertEqual(scoped[0].apdu_hex, "002000010431323334")
+        self.assertEqual(scoped[0].data_hex, "DEAD")
+        self.assertEqual(aggregate[0].apdu_hex, "00200001")
+        self.assertEqual(aggregate[0].data_hex, "")
+        self.recorder.disable_raw_capture("reader-a")
+        self.assertEqual(self.recorder.snapshot(scope="reader-a"), [])
 
     def test_wrap_is_idempotent_on_same_connection(self) -> None:
         fake = _FakeConnection()
@@ -356,7 +378,9 @@ class FrontendApduStreamContract(unittest.TestCase):
 
     def test_open_apdu_event_stream_is_defined(self) -> None:
         self.assertIn("function openApduEventStream(", self.js)
-        self.assertIn("/api/events/apdu?t=", self.js)
+        self.assertIn('"/api/events/apdu"', self.js)
+        self.assertIn('["yggdrasim", "bearer." + token]', self.js)
+        self.assertNotIn("/api/events/apdu?t=", self.js)
 
     def test_open_called_from_init(self) -> None:
         self.assertIn("openApduEventStream();", self.js)
@@ -420,7 +444,8 @@ class BackendRouteRegistration(unittest.TestCase):
         # Auth path mirrors the terminal route.
         self.assertIn("compare_tokens", rt)
         # Replays the buffer first so a fresh tab isn't blank.
-        self.assertIn("recorder.snapshot(limit=200)", rt)
+        self.assertIn("recorder.snapshot(", rt)
+        self.assertIn("scope=requested_scope or None", rt)
         self.assertIn("asyncio.wait_for(", rt)
         self.assertIn("_QUEUE_CAP = 256", rt)
         self.assertNotIn("asyncio.create_task(_pump_heartbeat", rt)

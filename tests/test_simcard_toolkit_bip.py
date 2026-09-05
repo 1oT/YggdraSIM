@@ -201,7 +201,7 @@ class TerminalResponsesUpdateOpenChannelBookkeeping(unittest.TestCase):
     def test_event_download_data_available_drives_open_channel_flag(self) -> None:
         # ENVELOPE: D6 ... 99 01 09 (DATA-AVAILABLE) + 38 02 81 00 + 37 01 04
         envelope_body = (
-            bytes.fromhex("99010A")
+            bytes.fromhex("990109")
             + bytes.fromhex("38028100")
             + bytes.fromhex("370104")
         )

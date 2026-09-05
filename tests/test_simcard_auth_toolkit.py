@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import os
 from pathlib import Path
+from unittest import mock
 
 from SIMCARD.auth import build_milenage_autn
 from SIMCARD.engine import SimulatedSimCardEngine
@@ -246,6 +248,12 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         self.assertGreater(response_sw2, 0)
 
     def test_location_status_triggers_bip_dns_bootstrap_and_tcp_follow_up(self) -> None:
+        network_opt_in = mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SIMCARD_ALLOW_LIVE_BIP": "1"},
+        )
+        network_opt_in.start()
+        self.addCleanup(network_opt_in.stop)
         self._drain_bootstrap()
 
         envelope_data, envelope_sw1, envelope_sw2 = self.engine.transmit(
@@ -264,7 +272,7 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         self.assertEqual(open_type, OPEN_CHANNEL_COMMAND)
         self.assertEqual(open_qualifier, 0x00)
         self.assertIn(bytes.fromhex("3C03010035"), open_command_data)
-        self.assertIn(bytes.fromhex("3E052108080808"), open_command_data)
+        self.assertIn(bytes.fromhex("3E0521C0000235"), open_command_data)
 
         _open_response_data, open_response_sw1, open_response_sw2 = self.engine.transmit(
             _terminal_response_apdu(open_command_data)
@@ -282,8 +290,8 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
 
         dns_query = _extract_channel_data(send_command_data)
         self.assertGreater(len(dns_query), 12)
-        self.assertIn(b"yggdrasim", dns_query)
-        self.assertIn(b"1ot", dns_query)
+        self.assertIn(b"bootstrap", dns_query)
+        self.assertIn(b"example", dns_query)
 
         send_response_apdu = _terminal_response_apdu(
             send_command_data,
@@ -340,7 +348,26 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         self.assertEqual(tcp_open_type, OPEN_CHANNEL_COMMAND)
         self.assertEqual(tcp_open_qualifier, 0x00)
         self.assertIn(bytes.fromhex("3C030201BB"), tcp_open_command_data)
-        self.assertIn(bytes.fromhex("3E0521C21D3604"), tcp_open_command_data)
+        self.assertIn(bytes.fromhex("3E0521C6336404"), tcp_open_command_data)
+
+    def test_location_status_does_not_queue_network_bip_by_default(self) -> None:
+        network_default = mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SIMCARD_ALLOW_LIVE_BIP": ""},
+        )
+        network_default.start()
+        self.addCleanup(network_default.stop)
+        self._drain_bootstrap()
+
+        data, sw1, sw2 = self.engine.transmit(
+            _envelope_apdu(_location_status_envelope())
+        )
+        self.assertEqual((data, sw1, sw2), (b"", 0x90, 0x00))
+        self.assertEqual(
+            self.engine.state.toolkit.bip_bootstrap_phase,
+            "offline_disabled",
+        )
+        self.assertEqual(self.engine.state.pending_fetch_queue, [])
 
     def test_verify_and_unblock_queries_use_stateful_retry_counters(self) -> None:
         self.engine.state.chv_references[0x01].enabled = True

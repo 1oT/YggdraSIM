@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ============================================================
  * FCP cache status banners
  *
@@ -29,9 +30,9 @@
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 500;
-  border-radius: var(--radius-pill, 999px);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
-  background: var(--bg-elev, rgba(255, 255, 255, 0.04));
+  background: var(--bg-elev);
   color: var(--fg-muted);
   max-width: 100%;
   line-height: 1.3;
@@ -59,21 +60,21 @@
 }
 
 .cc-stale-chip--refresh {
-  color: var(--accent, #4a90e2);
-  background: rgba(74, 144, 226, 0.10);
-  border-color: rgba(74, 144, 226, 0.30);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
 }
 
 .cc-stale-chip--recover {
-  color: var(--warn, #d9a441);
-  background: rgba(217, 164, 65, 0.12);
-  border-color: rgba(217, 164, 65, 0.35);
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: color-mix(in oklab, var(--warn) 35%, transparent);
 }
 
 .cc-stale-chip--stale {
-  color: var(--err, #d9534f);
-  background: rgba(217, 83, 79, 0.10);
-  border-color: rgba(217, 83, 79, 0.35);
+  color: var(--err);
+  background: var(--fail-soft);
+  border-color: color-mix(in oklab, var(--fail) 35%, transparent);
 }
 
 /* -- About · guide catalogue ------------------------------------------- */
@@ -144,7 +145,7 @@
 
 .about-guides-card:hover:not(:disabled) {
   border-color: var(--accent);
-  background: var(--accent-soft, rgba(99, 169, 255, 0.10));
+  background: var(--accent-soft);
   transform: translateY(-1px);
 }
 
@@ -201,7 +202,7 @@
   max-height: 92vh;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg, 8px);
+  border-radius: var(--radius-lg);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
@@ -239,6 +240,8 @@
 }
 
 .cc-doc-modal-btn {
+  min-width: 36px;
+  min-height: 36px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--fg);
@@ -254,10 +257,21 @@
   background: var(--bg-hover);
 }
 
+.cc-doc-modal-btn:focus-visible,
+.cc-doc-modal-body:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.cc-doc-modal-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .cc-doc-modal-btn.is-copied {
-  background: var(--ok, #22c55e);
+  background: var(--ok);
   color: var(--bg);
-  border-color: var(--ok, #22c55e);
+  border-color: var(--ok);
 }
 
 .cc-doc-modal-close {
@@ -272,6 +286,29 @@
   padding: 18px 22px;
   color: var(--fg);
   line-height: 1.55;
+}
+
+@media (max-width: 760px) {
+  .cc-doc-modal-card {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    margin: 8px;
+  }
+
+  .cc-doc-modal-header {
+    align-items: flex-start;
+    padding: 10px 12px;
+  }
+
+  .cc-doc-modal-body {
+    padding: 14px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-doc-modal-btn {
+    transition: none;
+  }
 }
 
 .cc-doc-modal-body h1.cc-doc-h1,
@@ -300,7 +337,7 @@
 }
 
 .cc-doc-modal-body code {
-  background: var(--code-bg, var(--bg-hover));
+  background: var(--code-bg);
   border-radius: 3px;
   padding: 1px 6px;
   font-family: var(--font-mono);
@@ -308,7 +345,7 @@
 }
 
 .cc-doc-modal-body pre.cc-doc-pre {
-  background: var(--code-bg, var(--bg-hover));
+  background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 12px 14px;
@@ -329,7 +366,7 @@
   margin: 10px 0;
   padding: 4px 12px;
   color: var(--fg-muted);
-  background: var(--accent-soft, rgba(99, 169, 255, 0.08));
+  background: var(--accent-soft);
 }
 
 .cc-doc-modal-body a {
@@ -357,7 +394,7 @@
 }
 
 .cc-doc-modal-body table.cc-doc-table thead tr {
-  background: var(--bg-elev, var(--bg-hover));
+  background: var(--bg-elev);
 }
 
 .cc-doc-modal-body table.cc-doc-table th,
@@ -387,11 +424,11 @@
 }
 
 .cc-doc-modal-body table.cc-doc-table tbody tr:nth-child(even) td {
-  background: var(--bg-elev, rgba(255, 255, 255, 0.02));
+  background: var(--bg-elev);
 }
 
 .cc-doc-modal-body table.cc-doc-table code {
-  background: var(--code-bg, var(--bg-hover));
+  background: var(--code-bg);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 12px;
@@ -405,6 +442,5 @@
 }
 
 .cc-doc-error {
-  color: var(--err, #d9534f);
+  color: var(--err);
 }
-

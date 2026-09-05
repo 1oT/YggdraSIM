@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import threading
 import time
 from dataclasses import dataclass
@@ -34,6 +35,10 @@ APDU_RELAY_CARD_RESET_PATH = "/card/reset"
 _APDU_RELAY_MAX_BODY_BYTES = 1 * 1024 * 1024
 
 DEFAULT_AUDIT_LOGGER_NAME = "yggdrasim.card_bridge.audit"
+
+
+class _OversizedRequestBodyError(ValueError):
+    """Raised when Content-Length exceeds the relay's request-body cap."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +141,13 @@ class _ApduRelayHttpServer(ThreadingHTTPServer):
         service: "HilBridgeApduRelayService",
     ) -> None:
         self.service = service
-        super().__init__(server_address, handler_class)
+        host, port = server_address
+        normalized_host = str(host or "").strip()
+        if normalized_host.startswith("[") and normalized_host.endswith("]"):
+            normalized_host = normalized_host[1:-1]
+        if ":" in normalized_host:
+            self.address_family = socket.AF_INET6
+        super().__init__((normalized_host, port), handler_class)
 
 
 class _ApduRelayHandler(BaseHTTPRequestHandler):
@@ -182,11 +193,24 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
         # is far too noisy for a smartcard relay.
         return
 
-    def _send_json_response(self, status: int, payload: dict[str, Any]) -> None:
+    def _send_json_response(
+        self,
+        status: int,
+        payload: dict[str, Any],
+        *,
+        close_connection: bool = False,
+    ) -> None:
         encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+        if close_connection is True:
+            # The rejected request body remains unread. HTTP/1.1
+            # keep-alive would otherwise interpret those bytes as the
+            # next request on this connection.
+            self.close_connection = True
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
+        if close_connection is True:
+            self.send_header("Connection", "close")
         self.end_headers()
         if len(encoded) > 0:
             self.wfile.write(encoded)
@@ -259,7 +283,7 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
         if content_length < 0:
             raise ValueError("Negative Content-Length header.")
         if content_length > _APDU_RELAY_MAX_BODY_BYTES:
-            raise ValueError(
+            raise _OversizedRequestBodyError(
                 f"Request body of {content_length} bytes exceeds the "
                 f"{_APDU_RELAY_MAX_BODY_BYTES}-byte cap."
             )
@@ -276,6 +300,13 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
         started_at = time.monotonic()
         try:
             request_json = self._read_request_json()
+        except _OversizedRequestBodyError as exc:
+            self._send_json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": str(exc)},
+                close_connection=True,
+            )
+            return
         except ValueError as exc:
             self._send_json_response(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
@@ -330,13 +361,24 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
     def _handle_card_reset_post(self) -> None:
         try:
             request_json = self._read_request_json()
+        except _OversizedRequestBodyError as exc:
+            self._send_json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": str(exc)},
+                close_connection=True,
+            )
+            return
         except ValueError as exc:
             self._send_json_response(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
 
         session_id = str(request_json.get("sessionId", "") or "").strip()
+        boundary = str(request_json.get("boundary", "") or "").strip()
         try:
-            payload = self.server.service.request_card_reset(session_id=session_id)
+            payload = self.server.service.request_card_reset(
+                session_id=session_id,
+                boundary=boundary,
+            )
         except Exception as exc:
             self._send_json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
             return
@@ -379,7 +421,11 @@ class HilBridgeApduRelayService:
         if self._server is not None:
             host = str(self._server.server_address[0])
             port = int(self._server.server_address[1])
-        return f"http://{host}:{port}"
+        normalized_host = str(host or "").strip()
+        if normalized_host.startswith("[") and normalized_host.endswith("]"):
+            normalized_host = normalized_host[1:-1]
+        url_host = f"[{normalized_host}]" if ":" in normalized_host else normalized_host
+        return f"http://{url_host}:{port}"
 
     @property
     def apdu_url(self) -> str:
@@ -485,10 +531,18 @@ class HilBridgeApduRelayService:
     def exchange_apdu(self, apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
         return self._exchange_callback(apdu, session_id=session_id)
 
-    def request_card_reset(self, *, session_id: str = "") -> dict[str, Any]:
+    def request_card_reset(self, *, session_id: str = "", boundary: str = "") -> dict[str, Any]:
         if self._card_reset_callback is None:
             raise RuntimeError("Card reset control is not enabled.")
-        return self._card_reset_callback(session_id=session_id)
+        normalized_boundary = str(boundary or "").strip()
+        if len(normalized_boundary) == 0:
+            # Keep the historical call shape for plain reset requests so
+            # backends that only take a session id stay callable.
+            return self._card_reset_callback(session_id=session_id)
+        return self._card_reset_callback(
+            session_id=session_id,
+            boundary=normalized_boundary,
+        )
 
     def record_apdu_audit(
         self,

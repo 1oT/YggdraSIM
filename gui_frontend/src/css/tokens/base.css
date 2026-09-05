@@ -35,6 +35,61 @@
   --transition-slow: 340ms cubic-bezier(0.25, 0.8, 0.4, 1);
 
   --ease-out-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /*
+   * Semantic compatibility layer.
+   *
+   * Older workbenches used several names for the same surface and status
+   * roles. Keep one canonical palette in each theme, then resolve those
+   * legacy names here. Custom-property references are evaluated where they
+   * are used, so theme overrides of --bg-elev / --fg / --fail continue to
+   * flow through these aliases without duplicating a palette in every file.
+   */
+  --bg-elev-1: var(--bg-elev);
+  --bg-elev1: var(--bg-elev);
+  --bg-elev2: var(--bg-elev-2);
+  --bg-elev3: color-mix(in oklab, var(--bg-elev-2) 82%, var(--fg) 18%);
+  --bg-secondary: var(--bg-elev);
+  --bg-card: var(--bg-elev);
+  --bg-deep: var(--bg);
+  --bg-input: var(--code-bg);
+  --input-bg: var(--code-bg);
+  --panel: var(--bg-elev);
+  --surface-raised: var(--bg-elev-2);
+  --surface-hi: var(--bg-hover);
+  --surface-hover: var(--bg-hover);
+  --surface-border: var(--border);
+  --bg-selected: var(--accent-soft);
+  --hover-bg: var(--bg-hover);
+  --border-soft: var(--border);
+  --border-subtle: var(--border);
+
+  --fg-muted: var(--fg-dim);
+  --fg-default: var(--fg);
+  --fg-subtle: var(--fg-dim);
+  --text-primary: var(--fg);
+  --text-secondary: var(--fg-dim);
+
+  --err: var(--fail);
+  --error: var(--fail);
+  --err-soft: var(--fail-soft);
+  --success: var(--ok);
+  --warning: var(--warn);
+  --danger: var(--fail);
+  --accent-danger: var(--fail);
+  --accent-warning: var(--warn);
+  --accent-contrast: var(--accent-fg);
+  --tone-error: var(--fail);
+  --tone-good: var(--ok);
+  --tone-warning: var(--warn);
+  --ok-bg: var(--ok-soft);
+  --warn-bg: var(--warn-soft);
+  --bg-danger-soft: var(--fail-soft);
+  --yellow: var(--warn);
+
+  --mono: var(--font-mono);
+  --focus-ring: var(--accent);
+  --focus-ring-soft: var(--accent-soft);
 }
 
 @keyframes ygg-pulse {
@@ -58,7 +113,7 @@
   *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
   }
 }
-

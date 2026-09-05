@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Bottom log dock (G-1) ------------------------------------------------- */
 
 .log-dock {
@@ -36,8 +37,8 @@
   top: 50%;
   width: 42px;
   height: 2px;
-  border-radius: var(--radius-pill, 999px);
-  background: var(--border-strong, rgba(216, 222, 233, 0.28));
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
   opacity: 0.72;
   transform: translate(-50%, -50%);
   transition: background-color var(--transition-fast),
@@ -79,6 +80,7 @@ body.log-dock-resizing * {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 .log-dock-tab {
@@ -110,6 +112,12 @@ body.log-dock-resizing * {
   background: var(--bg-elev);
 }
 
+.log-dock-tab:focus-visible,
+.log-dock-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 .log-dock-tab-label {
   font-weight: 600;
 }
@@ -123,7 +131,7 @@ body.log-dock-resizing * {
   height: 16px;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  border-radius: var(--radius-pill, 999px);
+  border-radius: var(--radius-pill);
   background: var(--bg);
   color: var(--fg-dim);
   border: 1px solid var(--border);
@@ -136,21 +144,21 @@ body.log-dock-resizing * {
 }
 
 .log-dock-tab[data-log-tab="errors"].has-items .log-dock-tab-count {
-  background: color-mix(in oklab, var(--fail, #ef4444) 30%, transparent);
-  border-color: color-mix(in oklab, var(--fail, #ef4444) 40%, transparent);
-  color: var(--fail, #ef4444);
+  background: color-mix(in oklab, var(--fail) 30%, transparent);
+  border-color: color-mix(in oklab, var(--fail) 40%, transparent);
+  color: var(--fail);
 }
 
 .log-dock-tab[data-log-tab="warnings"].has-items .log-dock-tab-count {
-  background: color-mix(in oklab, var(--warn, #f59e0b) 30%, transparent);
-  border-color: color-mix(in oklab, var(--warn, #f59e0b) 40%, transparent);
-  color: var(--warn, #f59e0b);
+  background: color-mix(in oklab, var(--warn) 30%, transparent);
+  border-color: color-mix(in oklab, var(--warn) 40%, transparent);
+  color: var(--warn);
 }
 
 .log-dock-tab[data-log-tab="validation"].has-items .log-dock-tab-count {
-  background: color-mix(in oklab, var(--accent, #3b82f6) 24%, transparent);
-  border-color: color-mix(in oklab, var(--accent, #3b82f6) 38%, transparent);
-  color: var(--accent, #3b82f6);
+  background: color-mix(in oklab, var(--accent) 24%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 38%, transparent);
+  color: var(--accent);
 }
 
 .log-dock-tab-dot {
@@ -161,11 +169,11 @@ body.log-dock-resizing * {
   flex: 0 0 auto;
 }
 
-.log-dock-tab-dot--info  { background: var(--accent, #3b82f6); }
-.log-dock-tab-dot--warn  { background: var(--warn, #f59e0b); }
-.log-dock-tab-dot--error { background: var(--fail, #ef4444); }
+.log-dock-tab-dot--info  { background: var(--accent); }
+.log-dock-tab-dot--warn  { background: var(--warn); }
+.log-dock-tab-dot--error { background: var(--fail); }
 .log-dock-tab-dot--apdu  { background: var(--fg-dim); }
-.log-dock-tab-dot--validation { background: var(--accent, #3b82f6); }
+.log-dock-tab-dot--validation { background: var(--accent); }
 
 .log-dock-spacer {
   flex: 1 1 auto;
@@ -187,6 +195,11 @@ body.log-dock-resizing * {
 .log-dock-action:hover {
   color: var(--fg);
   background: var(--bg-hover);
+}
+
+.log-dock-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .log-dock-toggle {
@@ -236,7 +249,7 @@ body.log-dock-resizing * {
 }
 
 .log-dock-rows--mono {
-  font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
+  font-family: var(--font-mono);
 }
 
 .log-dock-row {
@@ -261,16 +274,16 @@ body.log-dock-resizing * {
 }
 
 .log-dock-row:hover {
-  background: color-mix(in oklab, var(--bg), var(--accent, #3b82f6) 10%);
+  background: color-mix(in oklab, var(--bg), var(--accent) 10%);
 }
 
 .log-dock-row:focus-visible {
-  background: color-mix(in oklab, var(--bg), var(--accent, #3b82f6) 14%);
-  box-shadow: inset 0 0 0 1px var(--accent, #3b82f6);
+  background: color-mix(in oklab, var(--bg), var(--accent) 14%);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .log-dock-row.is-copied {
-  background: color-mix(in oklab, var(--bg), var(--ok, #22c55e) 22%);
+  background: color-mix(in oklab, var(--bg), var(--ok) 22%);
   transition: background-color 220ms ease;
 }
 
@@ -279,7 +292,7 @@ body.log-dock-resizing * {
 }
 
 .log-dock-row:nth-child(even):hover {
-  background: color-mix(in oklab, var(--bg), var(--accent, #3b82f6) 12%);
+  background: color-mix(in oklab, var(--bg), var(--accent) 12%);
 }
 
 .log-dock-row-copy {
@@ -292,9 +305,9 @@ body.log-dock-resizing * {
   line-height: 1.2;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  background: var(--bg-elev, #2b303b);
-  color: var(--fg, #eceff4);
-  border: 1px solid var(--border-strong, rgba(216, 222, 233, 0.22));
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   cursor: pointer;
   opacity: 0;
@@ -318,29 +331,29 @@ body.log-dock-resizing * {
 }
 
 .log-dock-row-copy:hover {
-  background: var(--accent, #3b82f6);
-  color: var(--bg, #1b1f27);
-  border-color: var(--accent, #3b82f6);
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
 }
 
 .log-dock-row.is-copied .log-dock-row-copy {
-  background: var(--ok, #22c55e);
-  color: var(--bg, #1b1f27);
-  border-color: var(--ok, #22c55e);
+  background: var(--ok);
+  color: var(--bg);
+  border-color: var(--ok);
 }
 
 .log-dock-action.is-copied {
-  background: var(--ok, #22c55e);
-  color: var(--bg, #1b1f27);
-  border-color: var(--ok, #22c55e);
+  background: var(--ok);
+  color: var(--bg);
+  border-color: var(--ok);
   transition: background-color 220ms ease, color 220ms ease;
 }
 
-.log-dock-row--info  { border-left-color: var(--accent, #3b82f6); }
-.log-dock-row--warn  { border-left-color: var(--warn, #f59e0b); }
-.log-dock-row--error { border-left-color: var(--fail, #ef4444); }
+.log-dock-row--info  { border-left-color: var(--accent); }
+.log-dock-row--warn  { border-left-color: var(--warn); }
+.log-dock-row--error { border-left-color: var(--fail); }
 .log-dock-row--apdu  { border-left-color: var(--fg-dim); }
-.log-dock-row--done  { border-left-color: var(--ok, #22c55e); }
+.log-dock-row--done  { border-left-color: var(--ok); }
 
 .log-dock-row-ts {
   color: var(--fg-dim);
@@ -372,11 +385,33 @@ body.log-dock-resizing * {
   color: var(--fg-dim);
   font-size: 11px;
   pointer-events: none;
-  font-style: italic;
   padding: 16px;
   text-align: center;
 }
 
 .log-dock-placeholder.is-hidden {
   display: none;
+}
+
+@media (hover: none) {
+  .log-dock-row-copy {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .log-dock-row-msg {
+    padding-right: 52px;
+  }
+}
+
+@media (max-width: 640px) {
+  .log-dock-row {
+    grid-template-columns: 62px 54px minmax(0, 1fr);
+    gap: 6px;
+    padding-inline: 8px;
+  }
+
+  .log-dock-tab {
+    padding-inline: 9px;
+  }
 }

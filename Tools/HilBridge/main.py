@@ -16,7 +16,14 @@ from yggdrasim_common.quit_control import QuitAllRequested
 
 from .pcsc import APDU_TIMEOUT_ENV, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
 from .protocol import GSMTAP_COMPAT_MODES, GSMTAP_COMPAT_NATIVE
-from .router import CARD_TRACE_ENV, BridgeConfig, HilBridgeServer, resolve_card_trace_enabled
+from .router import (
+    CARD_TRACE_ENV,
+    RELAY_SESSION_RESET_ENV,
+    BridgeConfig,
+    HilBridgeServer,
+    resolve_card_trace_enabled,
+    resolve_relay_session_reset_enabled,
+)
 
 
 def add_bridge_runtime_arguments(
@@ -135,6 +142,18 @@ def add_bridge_runtime_arguments(
             f"Can also be enabled with {CARD_TRACE_ENV}=1."
         ),
     )
+    parser.add_argument(
+        "--no-relay-session-reset",
+        action="store_true",
+        default=resolve_relay_session_reset_enabled() is False,
+        help=(
+            "Do not power-cycle the card when a relay session starts or "
+            "ends. By default the bridge clears the card at those "
+            "boundaries so an operator shell cannot leak secure-channel "
+            "or logical-channel state into the modem session. "
+            f"Can also be disabled with {RELAY_SESSION_RESET_ENV}=0."
+        ),
+    )
 
 
 def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
@@ -171,6 +190,9 @@ def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
             getattr(args, "gsmtap_capture_mirror_fifo_path", "") or ""
         ).strip(),
         card_trace_enabled=bool(getattr(args, "card_trace", False)),
+        relay_session_reset_enabled=not bool(
+            getattr(args, "no_relay_session_reset", False)
+        ),
     )
 
 

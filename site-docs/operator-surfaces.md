@@ -22,7 +22,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 | `Tools/CardBridge/` | a PC/SC reader is attached to another host | loopback HTTP APDU bridge, bearer-token auth, SSH tunnel topology, remote-card input for CLI, GUI, and HIL consumers | `python main/main.py --card-bridge` or `python -m Tools.CardBridge` |
 | `Tools/ApduFuzz/` | the task is opt-in, allow-listed eUICC APDU mutation fuzzing | mutation-based APDU fuzzer with hard-gated allow list | `python -m Tools.ApduFuzz` |
 | `Tools/EumDiag/` | the task is EUM / SM-DP+ traffic diagnostics or session-key injection | session-key staging plus Wireshark / tshark Lua dissector | `python -m Tools.EumDiag` |
-| `Tools/YggdraCore/` *(post-v1 staging)* | a 5G core stub is needed for AKA / AKMA round-trips (loopback or BYO-Open5GS) | AUSF / AAnF stubs, FastAPI loopback, Open5GS provisioning bridge | `YGGDRASIM_5GCORE_MODE=stub` (library / HTTP stub) |
+| `Tools/YggdraCore/` | a 5G core stub is needed for AKA / AKMA round-trips (loopback or BYO-Open5GS) | AUSF / AAnF stubs, FastAPI loopback, Open5GS provisioning bridge | `YGGDRASIM_5GCORE_MODE=stub` (library / HTTP stub) |
 | `SIMCARD/` | the task needs an in-process simulated UICC / eUICC instead of a physical reader | ETSI / GP / SCP03 / SCP80 / Toolkit / 5G AKA / AKMA / SUCI / `GET IDENTITY` | `--card-backend sim` on any launcher |
 | `yggdrasim_common/gui_server/` | a desktop or web-served GUI Command Center is wanted | typed action registry, reader strip, live APDU dock, Card Bridge panel, FastAPI / pywebview surfaces | `python main/main.py --gui` or `--web-server` |
 
@@ -59,7 +59,7 @@ python -m SCP80 --cmd "show; history; exit"
 - Use the GUI Command Center when you need reader state, action forms, live APDU rows, and remote-rig controls in one workbench.
 - Use `Tools/ApduFuzz` only on lab-only eUICCs after explicitly enabling the allow-list gate.
 - Use `Tools/EumDiag` when an EUM / SM-DP+ capture must be replayed or decoded with operator-side keys.
-- Use `Tools/YggdraCore` (or `YGGDRASIM_5GCORE_MODE=stub`) when 5G AKA / AKMA round-trips need a loopback core. (post-v1 staging — not part of this release.)
+- Use `Tools/YggdraCore` (or `YGGDRASIM_5GCORE_MODE=stub`) when 5G AKA / AKMA round-trips need a loopback core.
 - Use `--card-backend sim` to swap in the in-process simulator without touching shell command surfaces.
 - Use `--gui` or `--web-server` to bring up the Universal GUI Command Center on top of any backend.
 

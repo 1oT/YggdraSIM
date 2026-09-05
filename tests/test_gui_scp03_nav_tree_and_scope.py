@@ -18,7 +18,7 @@ verbatim:
          Filesystem (SCP03 ETSI Filesystem/NAA)
          Applications (SCP03 Global Platform)
          Over-the-Air (SCP80)
-       eSIM (SCP11) [Management / Local SMDP+ / Local eIM]
+       eSIM (SCP11) [Management / Local SM-DP+ / Local eIM]
        Tools [SAIP Tool / Offline Tools]
        Environment [Configuration]
      Here we separate the Filesystem from the Application section
@@ -101,7 +101,7 @@ def test_scp03_is_split_into_filesystem_and_applications() -> None:
 def test_scp11_family_grouped_under_esim() -> None:
     """The SCP11-adjacent surfaces sit under eSIM (SCP11)."""
     js = _read("app.js")
-    for expected_label in ('"Management"', '"Local SMDP+"', '"Local eIM"'):
+    for expected_label in ('"Management"', '"Local SM-DP+"', '"Local eIM"'):
         assert "label: " + expected_label in js, "missing eSIM leaf label " + expected_label
     assert re.search(r'leaf-esim-live[\s\S]{0,400}?subsystem: "eSIM Management"', js)
     assert re.search(r'leaf-esim-local-smdp[\s\S]{0,400}?subsystem: "SCP11 Local"', js)
@@ -246,9 +246,9 @@ def test_session_header_exposes_scope_chip() -> None:
     """Each SCP03 session header shows which scope is active."""
     js = _read("app.js")
     assert 'cc-chip-scope' in js
-    assert '"scope: filesystem"' in js
-    assert '"scope: applications"' in js
-    assert '"scope: all"' in js
+    assert '"Scope: File system"' in js
+    assert '"Scope: Applications"' in js
+    assert '"Scope: All tools"' in js
 
 
 # ----------------------------------------------------------------------

@@ -18,7 +18,6 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from yggdrasim_common.gui_server.actions import saip
 

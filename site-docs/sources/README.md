@@ -5,25 +5,18 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 # YggdraSIM
 
-YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. The SAIP decoding path and the SCP11 local / eIM flows pull in upstream `pySim`; install them in one shot with `pip install -e '.[saip]'` (the `[saip]` extra pins pySim directly from its GitHub mirror).
-
-> **Releases.** v1.0.1 was tagged on 2026-06-05 for SCP11 notification
-> recovery fixes on the v1 line. Check out the frozen v1.0.0 footprint
-> with `git checkout v1.0.0`. The `main` branch carries
-> in-flight v2 work — surfaces tagged `(post-v1 staging)`
-> below are part of that v2 line and are not covered by the v1.0.x
-> compatibility promise. See [`CHANGELOG.md`](CHANGELOG.md) for release
-> notes and the active backlog.
+YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. Upstream `pySim` is a commit-pinned core dependency; install `pip install -e '.[saip]'` when you are also hosting a spreadsheet import/export extension, which is a separately supplied plugin rather than part of this repository.
 
 ## Distribution at a glance
 
-YggdraSIM is offered in three shapes:
+YggdraSIM is offered in four shapes:
 
 | Flavor                           | Platforms                                              | Card Bridge / remote APDU | Direct SIMtrace2 HIL | Guide |
 |----------------------------------|--------------------------------------------------------|---------------------------|----------------------|-------|
 | **Clean executable**             | Windows / macOS / Linux x86_64 / Raspberry Pi (arm64)  | Yes                       | No                   | [`guides/INSTALL_CLEAN.md`](guides/INSTALL_CLEAN.md) |
 | **Full executable**              | Linux x86_64 / Raspberry Pi (arm64)                    | Yes                       | Yes                  | [`guides/INSTALL_FULL.md`](guides/INSTALL_FULL.md) |
 | **Source checkout (`pip install -e .`)** | Any OS, direct HIL opt-in on Linux             | Yes                       | Linux only           | [`guides/INSTALL_FROM_SOURCE.md`](guides/INSTALL_FROM_SOURCE.md) |
+| **pipx (`pipx install '.[gui,saip]'`)** | Any OS with Python 3.10+                        | Yes                       | Linux only           | [`scripts/install/README.md`](scripts/install/README.md) |
 
 The **clean** flavor is the default distribution. It ships Card Bridge and
 remote APDU streaming on Windows, macOS, Linux, and Raspberry Pi, but omits
@@ -75,14 +68,17 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `SCP11/local_access/` | Direct local `ISD-R` bring-up and one-shot `LOAD-PROFILE` | local SCP11 shell |
 | `SCP11/eim_local/` | eIM-local package generation, hotfolder queues, handover flows, and response tracking | eIM local shell |
 | `SIMCARD/` | In-process simulated UICC / eUICC: ETSI TS 102 221 file system, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit + BIP, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / GET IDENTITY | selected via `--card-backend sim` |
+| `Tools/ApduDissector/` | Wireshark / tshark dissector decoding GSMTAP SIM frames through the APDU header, BER-TLV, file-control templates and elementary-file contents | `yggdrasim-apdu-dissect` |
 | `Tools/HilBridge/` | SIMtrace2-based hardware-in-the-loop bridge: RSPRO relay, RemSIM lifecycle, GSMTAP mirror, remote-card input, offline pcap review, AT+CSIM/CRSM transcoding (`at_simlink`) | `yggdrasim-hil-bridge` (Linux) |
 | `Tools/ProfilePackage/` | SAIP shell, transcode UI, lint engine, JSON↔DER bridge | profile-package shell + TUI |
 | `Tools/SuciTool/` | SUCI helper tooling | helper shell |
 | `Tools/Asn1TlvDecode/` | BER/DER ASN.1, BER-TLV, and APDU decode helper | `yggdrasim-asn1` or `python main/main.py --asn1` |
 | `Tools/ApduFuzz/` | Safety-gated eUICC APDU mutation fuzzer (`--i-mean-it` + ICCID/IMSI allow-list) | `yggdrasim-apdu-fuzzer` |
-| `Tools/EumDiag/` | EUM / SM-DP+ "God-Mode": session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
-| `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
-| `Tools/CardBridge/` *(post-v1 staging)* | Loopback HTTP APDU bridge for streaming a PC/SC reader to another host over SSH | `python -m Tools.CardBridge` |
+| `Tools/CardClone/` | Read-only behaviour cloning: chart a real card's status-word dialect into a behaviour profile the simulator replays | `yggdrasim-card-clone` |
+| `Tools/EumDiag/` | EUM / SM-DP+ diagnostics: session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
+| `Tools/YggdraMCP/` | Model Context Protocol server: decode, lint, identifier, and card-transport tools plus batch access to the operator shells, behind read-only-by-default gates | `yggdrasim-mcp` (opt-in `[mcp]` extra) |
+| `Tools/YggdraCore/` | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
+| `Tools/CardBridge/` | Loopback HTTP APDU bridge for streaming a PC/SC reader to another host over SSH | `python -m Tools.CardBridge` |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center: FastAPI API + pywebview desktop window or headless lab server, live APDU dock, remote-rig controls | `--gui` / `--web-server` |
 | `plugins/` | Runtime-loaded optional private extensions discovered only after explicit opt-in | drop-in `register_plugins()` modules |
 | `pysim/` | **Optional** developer checkout of upstream pySim (gitignored). Only needed when working against an unreleased upstream branch; the released SAIP surface ships via the `[saip]` extra (`pip install 'yggdrasim[saip]'`). | optional external tree |
@@ -97,22 +93,34 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 - eIM-centric local package work, hotfolder campaigns, handover validation, and response tracking through `SCP11/eim_local`.
 - Hardware-in-the-loop SIMtrace2 bridge with RemSIM lifecycle, GSMTAP mirroring, brokered APDU side-channel access, remote-card input, and AT+CSIM / AT+CRSM transcoding for modem cold-boot rigs through `Tools/HilBridge`.
 - In-process simulated UICC / eUICC backend (`--card-backend sim`) with full ETSI TS 102 221 file system, ISD-R + ISD-P personalities, persistent EID-scoped store, GP / SCP03 / SCP80 secure messaging, and an ETSI TS 102 223 toolkit + BIP runtime.
-- 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 §C.3) on the simulated card, including TS 31.102 §7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation). *(SIMCARD layer shipped in v1.0.0.)*
-- In-process 5G-core stubs for end-to-end AKA + AKMA loops (`Tools/YggdraCore`: AUSF, AAnF, subscription store, optional FastAPI loopback) plus a BYO-Open5GS provisioning bridge for hosts that already run a real 5GC. *(post-v1 staging on `main`; documentation, CLI surface, and HTTP-loopback hardening not part of this release — see `CHANGELOG.md`.)*
+- 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 section C.3) on the simulated card, including TS 31.102 section 7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation). *(SIMCARD layer shipped in v1.0.0.)*
+- In-process 5G-core stubs for end-to-end AKA + AKMA loops (`Tools/YggdraCore`: AUSF, AAnF, subscription store, optional FastAPI loopback) plus a BYO-Open5GS provisioning bridge for hosts that already run a real 5GC.
 - SAIP / UPP profile inspection, linting, JSON↔DER transcode, and shell automation through `Tools/ProfilePackage`.
 - Visual side-by-side SAIP profile diffing (shell + Textual TUI) via
   `DIFF` / `DIFF-TUI` inside the profile-package shell.
 - Simulator-to-TUI auto-open pipeline via `yggdrasim-profile-autoload`
   and the `WATCH-SIMCARD` shell command.
+- Two-part simulated-card setup: a **behaviour profile** charted from a
+  real card with `yggdrasim-card-clone` (how the card answers) paired with
+  a **SAIP profile** (what data it holds). The probe is read-only and
+  refuses anything the risk classifier does not call read. Profiles are
+  JSON, switchable at runtime with `--activate` / `--deactivate`, and
+  `--deactivate-all` returns the simulator to its built-in personality.
 - Opt-in, safety-gated eUICC APDU mutation fuzzer via
   `yggdrasim-apdu-fuzzer` (`--i-mean-it` + ICCID/IMSI allow-list
   required).
-- EUM / SM-DP+ diagnostics "God-Mode": session-key injection and
+- EUM / SM-DP+ diagnostics: session-key injection and
   Wireshark/tshark Lua dissector for BF36 Bound Profile Packages via
   `yggdrasim-eum-diag`.
 - Optional Universal GUI Command Center (`--gui` desktop / `--web-server`
   remote-lab) with reader selection, action forms, Card Bridge controls,
   and a live APDU dock fed by a process-wide recorder.
+- Model Context Protocol server (`Tools/YggdraMCP`, `[mcp]` extra) giving an
+  AI agent 31 tools: spec/status-word/AID lookup, ASN.1 and APDU decode, SAIP
+  and metadata linting, session diffing, card transport control, and batch
+  access to all eight operator shells. Read-only by default; changing state, reaching
+  a card, and running unverified scripts are three separate opt-ins. Also
+  buildable as a standalone `yggdrasim-mcp` wheel.
 - Centralized mutable state in SQLite, with optional `gpg`-based encryption for sensitive payloads.
 
 ## Quick start
@@ -130,14 +138,14 @@ python -m pip install -r requirements.txt
 python -m pip install -e '.[saip]'
 ```
 
-The `[saip]` extra installs upstream pySim from its GitHub mirror
-(`pySim @ git+https://github.com/osmocom/pysim.git`). That gives you
-the SCP11-local flows, eIM-local flows, SAIP ASN.1 compile, the SAIP
-transcode TUI, and the profile-scaffold wizards without any manual
-clone step. A bare `pip install -e .` without the extra still works if
-you only need the flows that do not touch SAIP (core SIMCARD
-simulator, HIL bridge, SCP03, SCP80, SCP11 relay); `yggdrasim
---doctor` marks pySim as `WARN` in that case, which is expected.
+The base install resolves the commit-pinned upstream `pySim` dependency used
+by SAIP, SCP03/SCP80, and SCP11-local flows. The `[saip]` extra adds
+`openpyxl` and `defusedxml` for spreadsheet import/export extensions to
+build on. No shipped module imports them: the Excel-to-SAIP generator itself
+is a plugin supplied separately, and without one this extra adds no operator
+surface. Batch profile generation from `.csv`, `.json`, `.jsonl`, `.yaml`
+files needs no extra at all -- see
+[guides/TEMPLATE_AND_TOKENS.md](guides/TEMPLATE_AND_TOKENS.md).
 
 If you are working against an unreleased upstream pySim branch you can
 still drop a developer checkout at `<repo>/pysim` (`git clone
@@ -157,6 +165,7 @@ The editable install also provides installed commands:
 yggdrasim
 yggdrasim-cli
 yggdrasim-gui
+yggdrasim-desktop
 yggdrasim-web-server
 yggdrasim-scp03
 yggdrasim-scp80
@@ -167,22 +176,28 @@ yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
 yggdrasim-hil-bridge
 yggdrasim-hil-supervisor
+yggdrasim-hil-reset
+yggdrasim-card-bridge
+yggdrasim-lab-agent
 yggdrasim-profile-package
 yggdrasim-profile-autoload
 yggdrasim-apdu-fuzzer
 yggdrasim-eum-diag
 yggdrasim-suci-tool
 yggdrasim-asn1
+yggdrasim-session-diff
+yggdrasim-yggdracore
+yggdrasim-card-clone
 ```
 
 ### Docker and bundle packaging
 
 Container, PyInstaller, `.deb`, and `.exe` notes now live in:
 
-- `guides/BUILD_AND_PACKAGING.md` — flavor-aware build commands
-- `guides/INSTALL_CLEAN.md` — operator install for the clean bundle
-- `guides/INSTALL_FULL.md` — operator install for the HIL-capable bundle
-- `guides/INSTALL_FROM_SOURCE.md` — editable install and test-suite usage
+- `guides/BUILD_AND_PACKAGING.md` -- flavor-aware build commands
+- `guides/INSTALL_CLEAN.md` -- operator install for the clean bundle
+- `guides/INSTALL_FULL.md` -- operator install for the HIL-capable bundle
+- `guides/INSTALL_FROM_SOURCE.md` -- editable install and test-suite usage
 
 Quick container smoke path:
 
@@ -259,6 +274,9 @@ python -m SCP11.local_access
 python -m SCP11.eim_local
 python -m Tools.HilBridge.main
 python -m Tools.HilBridge.supervisor
+python -m Tools.CardBridge
+python -m Tools.YggdraCore.http_app
+python -m Tools.CardClone
 python -m Tools.ProfilePackage
 python -m Tools.SuciTool
 python -m Tools.Asn1TlvDecode
@@ -272,6 +290,7 @@ Installed command equivalents after editable install:
 yggdrasim
 yggdrasim-cli
 yggdrasim-gui
+yggdrasim-desktop
 yggdrasim-web-server
 yggdrasim-scp03
 yggdrasim-scp80
@@ -282,12 +301,18 @@ yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
 yggdrasim-hil-bridge
 yggdrasim-hil-supervisor
+yggdrasim-hil-reset
+yggdrasim-card-bridge
+yggdrasim-lab-agent
 yggdrasim-profile-package
 yggdrasim-profile-autoload
 yggdrasim-apdu-fuzzer
 yggdrasim-eum-diag
 yggdrasim-suci-tool
 yggdrasim-asn1
+yggdrasim-session-diff
+yggdrasim-yggdracore
+yggdrasim-card-clone
 ```
 
 For non-interactive automation, piping, and ready-to-run profile lifecycle
@@ -331,7 +356,11 @@ Optional encryption:
 
 Frozen executable runtime model:
 
-- source runs continue to use the repository tree directly
+- source/editable runs use the repository tree directly
+- installed wheels use the platform's per-user data directory (`%LOCALAPPDATA%\YggdraSIM`,
+  `~/Library/Application Support/YggdraSIM`, or
+  `$XDG_DATA_HOME/YggdraSIM`/`~/.local/share/YggdraSIM`) and never write
+  mutable state into `site-packages`
 - frozen builds spawn a writable runtime tree under `YggdraSIM-data` next to
   the executable when possible
 - if that location is not writable, the runtime tree falls back to
@@ -416,7 +445,9 @@ Use `Tools/HilBridge` when you need a physical-card-to-modem bridge with:
 
 - `RSPRO` / `osmo-remsim-client-st2` connectivity on `127.0.0.1:9997`
 - optional remote-card input through `Tools.CardBridge` and SSH
-- GSMTAP mirroring to Wireshark on UDP `4729`
+- GSMTAP mirroring to Wireshark on UDP `4729`, decoded in depth by
+  `Tools/ApduDissector` (loaded automatically for both the terminal
+  decode view and the Wireshark launch)
 - exclusive reader ownership with relay-backed YggdraSIM side access
 - manual HIL capture sessions started and stopped on demand
 - offline review of saved `.pcap` / `.pcapng` captures via
@@ -430,7 +461,7 @@ Session-key keybag JSONs are produced by:
 - `EXPORT-KEYBAG` in `SCP11.local_access` (after any BSP-building verb)
 - `python -m SCP11.local_access --dump-keybag <path>` non-interactively
 
-`python -m SCP11.live --dump-keybag` is a documented no-op stub — live
+`python -m SCP11.live --dump-keybag` is a documented no-op stub -- live
 SCP11c BSP keys are derived inside the eUICC and never reach the host.
 
 The local SIMtrace2/RemSIM HIL bridge is **only shipped in the full
@@ -442,10 +473,10 @@ manually.
 
 See:
 
-- `guides/HIL_BRIDGE_GUIDE.md` — operator flow
-- `guides/CARD_BRIDGE_GUIDE.md` — remote reader and remote-rig APDU streaming
-- `guides/INSTALL_FULL.md` — HIL-capable executable install
-- `guides/SIMTRACE2_CARDEM_GUIDE.md` — flashing / updating SIMtrace2 and `osmo-remsim-client-st2`
+- `guides/HIL_BRIDGE_GUIDE.md` -- operator flow
+- `guides/CARD_BRIDGE_GUIDE.md` -- remote reader and remote-rig APDU streaming
+- `guides/INSTALL_FULL.md` -- HIL-capable executable install
+- `guides/SIMTRACE2_CARDEM_GUIDE.md` -- flashing / updating SIMtrace2 and `osmo-remsim-client-st2`
 - `guides/systemd/yggdrasim-hil-supervisor.service.example`
 
 ### Local SMDPP
@@ -505,17 +536,17 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 
 `akaParameter` tooling (3GPP TS 35.206 / TS 35.231):
 
-- `LIST-AKA` — read-only summary of every `akaParameter` PE in the active
+- `LIST-AKA` -- read-only summary of every `akaParameter` PE in the active
   profile, including algorithm, Ki/OPc byte length, Keccak count,
   `authCounterMax`, and whether a 32-slot `sqnInit` seed is present.
 - `PROVISION-AKA <out.der | IN-PLACE> [ALGORITHM=..] [KI=..] [OPC=..]
-  [NUMBER-OF-KECCAK=..] [AUTH-COUNTER-MAX=..] [SQN-INIT=..]` — tag-granular
+  [NUMBER-OF-KECCAK=..] [AUTH-COUNTER-MAX=..] [SQN-INIT=..]` -- tag-granular
   provisioning. With only an output path it walks the interactive wizard.
   Passing any `NAME=VALUE` override switches to non-interactive mode so the
   command is safe to paste into scripts or tests. `IN-PLACE` rewrites the
   currently-selected DER.
 - `RANDOMIZE-AKA <out.der | IN-PLACE> [ALGORITHM=..] [INCLUDE-AUTH-COUNTER-MAX]
-  [INCLUDE-SQN-INIT]` — development helper that generates Ki / OPc / TOPc
+  [INCLUDE-SQN-INIT]` -- development helper that generates Ki / OPc / TOPc
   (and the TUAK-specific `numberOfKeccak`) via `secrets.token_bytes` and
   applies them to the first `akaParameter` PE. `authCounterMax` and `sqnInit`
   are skipped by default so replay-protection envelopes stay predictable.
@@ -556,6 +587,8 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `SCP11/eim_local/GUIDE.md` - detailed eIM operational guide
 - `SCP11/relay/README.md` - relay compatibility namespace note
 - `SCP11/shared/README.md` - shared SCP11 helper layer
+- `site-docs/how-to/run-the-mcp-server.md` - MCP server: tool inventory, the
+  access model, and the card-safety gates
 - `plugins/README.md` - runtime plugin contract and publication-ignore model
 - `scripts/install/README.md` - cross-platform one-liner installer flag reference
 
@@ -568,13 +601,14 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `SCP80/` - OTA CLI, builder, transport, decode helpers
 - `SCP11/` - relay, local, shared, and eIM-related flows
 - `SIMCARD/` - in-process simulated UICC / eUICC backend (file system, AKA, GP, SCP03 / SCP80, toolkit, 5G AKA / AKMA / SUCI, GET IDENTITY)
+- `Tools/ApduDissector/` - Wireshark / tshark APDU dissector, plugin installer, table codegen
 - `Tools/HilBridge/` - SIMtrace2 bridge, supervisor, RemSIM lifecycle, GSMTAP mirror, remote-card input, AT+CSIM/CRSM transcoder
 - `Tools/ProfilePackage/` - SAIP shell, linter, transcode UI
 - `Tools/SuciTool/` - SUCI helper shell
 - `Tools/ApduFuzz/` - eUICC APDU fuzzer
 - `Tools/EumDiag/` - EUM / SM-DP+ diagnostics + tshark Lua dissector
-- `Tools/YggdraCore/` - in-process AUSF / AAnF stubs, subscription store, BYO-Open5GS bridge *(post-v1 staging)*
-- `Tools/CardBridge/` - loopback HTTP APDU bridge for streaming a PC/SC reader to another host over SSH *(post-v1 staging)*
+- `Tools/YggdraCore/` - in-process AUSF / AAnF stubs, subscription store, BYO-Open5GS bridge
+- `Tools/CardBridge/` - loopback HTTP APDU bridge for streaming a PC/SC reader to another host over SSH
 - `plugins/` - runtime-loaded optional private extensions
 - `tests/` - first-party test suite
 - `state/` - shared SQLite inventory and crypto bootstrap config

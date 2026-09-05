@@ -26,14 +26,21 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Verify public Python source boundary
+        run: python scripts/release/source_boundary.py
 
       - name: Smoke build Docker image
         shell: bash
-        run: docker build -t yggdrasim-ci:local .
+        run: |
+          docker build -t yggdrasim-ci:clean .
+          docker build --build-arg YGGDRASIM_FLAVOR=full -t yggdrasim-ci:full .
 
       - name: Smoke test Docker image
         shell: bash
@@ -47,12 +54,16 @@ jobs:
         # smoke target without hardware. The non-root assertion confirms
         # the Dockerfile's ``USER yggdrasim`` layer is intact.
         run: |
-          docker run --rm yggdrasim-ci:local yggdrasim-scp11 --version
-          docker run --rm yggdrasim-ci:local sh -c 'id -u && test "$(id -u)" = "1000"'
+          docker run --rm yggdrasim-ci:clean yggdrasim-scp11 --version
+          docker run --rm yggdrasim-ci:clean sh -c 'id -u && test "$(id -u)" = "1000"'
+          docker run --rm yggdrasim-ci:clean python -c \
+            "import importlib.util; assert importlib.util.find_spec('pyudev') is None"
+          docker run --rm yggdrasim-ci:full python -c \
+            "import pyudev; assert pyudev.__name__ == 'pyudev'"
 
       - name: Log in to GHCR
         if: github.event_name == 'push'
-        uses: docker/login-action@v4
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
         with:
           registry: ${{ env.REGISTRY }}
           # GITHUB_TOKEN works when the package is linked to this repo and
@@ -66,7 +77,7 @@ jobs:
       - name: Extract Docker metadata
         if: github.event_name == 'push'
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -77,7 +88,12 @@ jobs:
 
       - name: Build and push Docker image
         if: github.event_name == 'push'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        env:
+          # The image, provenance, and SBOM are published to GHCR. The
+          # optional .dockerbuild Actions artifact is disabled because it is
+          # not consumed and unnecessarily spends the repository quota.
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           context: .
           file: ./Dockerfile
@@ -87,3 +103,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true

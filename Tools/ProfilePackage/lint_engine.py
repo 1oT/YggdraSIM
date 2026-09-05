@@ -799,7 +799,6 @@ class SaipProfileLinter:
                     n -= 9
             total += n
         if total % 10 != 0:
-            expected_remainder = (-total) % 10
             self._add(
                 code="YRL-ICC-004",
                 severity="WARN",
@@ -2003,7 +2002,7 @@ class SaipProfileLinter:
     # an unknown version pair will not parse against any shipped pySim
     # ASN.1 schema.
     _SAIP_VERSIONS_SUPPORTED: tuple[tuple[int, int], ...] = (
-        (2, 1), (2, 2), (2, 3),
+        (2, 0), (2, 1), (2, 2), (2, 3),
         (3, 0), (3, 1), (3, 2), (3, 3),
     )
 
@@ -2365,7 +2364,7 @@ class SaipProfileLinter:
             return
 
         # Walk the MF section first; fall back to any section that
-        # carries an ef-iccid. Profiles in the wild almost always put
+        # carries an ef-iccid. Deployed profiles almost always put
         # EF.ICCID under MF (TS 102 221 §13.2) but the linter stays
         # tolerant of loaders that hoist it elsewhere.
         ef_iccid_pairs: list[tuple[str, str]] = []
@@ -2685,7 +2684,9 @@ class SaipProfileLinter:
                 if value in seen:
                     duplicates.add(value)
                 seen.add(value)
-            if len(values) == 0:
+            # ProfileHeader is the top-level ``header`` CHOICE payload and
+            # does not carry the PEHeader/identification used by later PEs.
+            if len(values) == 0 and self._base_type_from_key(key_text) != "header":
                 self._add(
                     code="YRL-PID-001",
                     severity="WARN",
@@ -3222,7 +3223,6 @@ class SaipProfileLinter:
             )
             return
 
-        last_was_create = False
         has_path_op = False
         for op_idx, op in enumerate(real_ops):
             name = self._gfm_op_name(op)
@@ -3231,7 +3231,6 @@ class SaipProfileLinter:
 
             if name in _PATH_OPS:
                 has_path_op = True
-                last_was_create = name in _CREATE_OPS
 
             elif name in _WRITE_OPS:
                 if not has_path_op:
@@ -3252,8 +3251,6 @@ class SaipProfileLinter:
                         ),
                         evidence={"block": blk_idx, "op_index": op_idx, "op": name},
                     )
-                last_was_create = False
-
         # YRL-GFM-002: last op is createFCP/createFile with no write after.
         # Only emit when the block ends on a create without a subsequent fill.
         final_op_name = self._gfm_op_name(real_ops[-1]) if real_ops else ""
@@ -3614,57 +3611,149 @@ class SaipProfileLinter:
             return
 
         available_files = self._collect_file_name_markers(section_items)
+        # Service/file coherence depends on the value of EF.UST itself.  The
+        # template loader uses length-correct sentinel bytes while a typed UST
+        # token is unresolved; evaluating those sentinels as real service bits
+        # would manufacture false missing-file failures.  Route the finding
+        # through the actual placeholder path so ``_add`` records the check as
+        # template-excluded until the UST token is materialized.
+        ust_placeholder_paths = sorted(
+            (
+                path
+                for path in self._placeholder_paths
+                if path.lower().endswith(".ef-ust.fillfilecontent")
+            ),
+            key=lambda item: (len(item), item),
+        )
+        ust_finding_root = ust_placeholder_paths[0] if ust_placeholder_paths else "EF(UST)"
 
-        # 3GPP TS 31.102 §4.2.8 — service number → required EF/DF markers.
-        # Only services with a clearly mandated file pairing are listed.
+        # 3GPP TS 31.102 V18.4.0 §4.2.8 assigns the UST service
+        # numbers.  The per-file clauses cited below make the stronger,
+        # machine-checkable statement that the file *shall* be present when
+        # that service is available.  Keep this table deliberately
+        # conservative: service labels alone (for example service 22
+        # "Image") are not enough to infer a mandatory EF.
+        #
+        # Marker spelling follows the decoded SAIP ProfileElement members,
+        # which occasionally differs from the printed EF name.  In
+        # particular, EF.ACMmax is decoded as ``ef-acmax``.
         required_by_service = {
-            2:  ("ef-fdn",),
-            5:  ("ef-lnd",),
-            6:  ("ef-cmi",),
+            # Core USIM files: TS 31.102 §§4.2.5, 4.2.7, 4.2.9-4.2.14,
+            # 4.2.22, 4.2.24-4.2.40, and 4.2.44-4.2.54.
+            2: ("ef-fdn", "ef-est"),
+            3: ("ef-ext2",),
+            4: ("ef-sdn",),
+            5: ("ef-ext3",),
+            6: ("ef-bdn", "ef-cmi", "ef-est"),
+            7: ("ef-ext4",),
+            8: ("ef-oci", "ef-oct"),
+            9: ("ef-ici", "ef-ict"),
             10: ("ef-sms", "ef-smss"),
-            12: ("ef-smsp", "ef-hpplmn"),
-            15: ("ef-ext3",),
-            17: ("ef-bdn",),
-            18: ("ef-ext4",),
+            11: ("ef-smsr",),
+            12: ("ef-smsp",),
+            13: ("ef-acmax", "ef-acm", "ef-puct"),
+            14: ("ef-ccp2",),
+            15: ("ef-cbmi",),
+            16: ("ef-cbmir",),
+            17: ("ef-gid1",),
+            18: ("ef-gid2",),
             19: ("ef-spn",),
+            20: ("ef-plmnwact",),
             21: ("ef-msisdn",),
-            22: ("ef-img",),
-            23: ("ef-ext7",),
-            24: ("ef-spdi",),
-            44: ("ef-mwis",),
-            45: ("ef-cfis",),
-            25: ("ef-mmsn",),
-            26: ("ef-ext8",),
-            27: ("ef-mmsicp",),
-            28: ("ef-mmsup",),
-            38: ("ef-est",),
-            42: ("ef-psloci",),
-            43: ("ef-acc",),
-            45: ("ef-cbmir",),
-            46: ("ef-nia",),
-            47: ("ef-impu",),
-            48: ("ef-impi",),
-            49: ("ef-domain",),
-            50: ("ef-imsk",),
-            51: ("ef-ad",),
+            24: ("ef-emlpp",),
+            25: ("ef-aaem",),
+            # GSM-access files: §§4.4.3.1 and 4.4.3.2.
+            27: ("ef-kc", "ef-kcgprs"),
+            34: ("ef-est",),
+            35: ("ef-est", "ef-acl"),
+            36: ("ef-dck",),
+            37: ("ef-cnl",),
+            # GSM-access files: §§4.4.3.4 and 4.4.3.5.
+            39: ("ef-cpbcch",),
+            40: ("ef-invscan",),
+            42: ("ef-oplmnwact",),
+            43: ("ef-hplmnwact",),
+            44: ("ef-ext5",),
+            45: ("ef-pnn",),
+            46: ("ef-opl",),
+            47: ("ef-mbdn", "ef-mbi"),
+            48: ("ef-mwis",),
+            49: ("ef-cfis",),
+            51: ("ef-spdi",),
+            52: ("ef-mmsn", "ef-mmsicp", "ef-mmsup"),
+            53: ("ef-ext8",),
+            56: ("ef-nia",),
+            # EPS/IMS/NAS files: §§4.2.91, 4.2.92, and 4.2.94-4.2.96.
             85: ("ef-epsloci", "ef-epsnsc"),
-            95: ("ef-5gloci", "ef-5gnsc"),
+            95: ("ef-uicciari",),
+            96: ("ef-nasconfig",),
+            97: ("ef-pws",),
+            # 5GS mobility data is service 122, not service 95:
+            # §§4.4.11.2-4.4.11.5.
+            122: (
+                "ef-5gs3gpploci",
+                "ef-5gsn3gpploci",
+                "ef-5gs3gppnsc",
+                "ef-5gsn3gppnsc",
+            ),
         }
 
-        # Services where the *presence* of files implies the bit should be set.
-        # (informational — YRL-UST-002 INFO, not FAIL)
+        # Reverse-direction hints use the same standards-correct service
+        # numbers but intentionally omit shared EF.EST: its presence cannot
+        # identify which of services 2, 6, 34, or 35 should be available.
+        # YRL-UST-002 remains a warning because the normative clauses above
+        # establish service -> file, not the logical converse.
         suggested_by_presence = {
-            6:  ("ef-cmi",),
-            13: ("ef-acm", "ef-acmmax", "ef-puct"),
+            2: ("ef-fdn",),
+            3: ("ef-ext2",),
+            4: ("ef-sdn",),
+            5: ("ef-ext3",),
+            6: ("ef-bdn", "ef-cmi"),
+            7: ("ef-ext4",),
+            8: ("ef-oci", "ef-oct"),
+            9: ("ef-ici", "ef-ict"),
+            10: ("ef-sms", "ef-smss"),
+            11: ("ef-smsr",),
+            12: ("ef-smsp",),
+            13: ("ef-acmax", "ef-acm", "ef-puct"),
+            14: ("ef-ccp2",),
+            15: ("ef-cbmi",),
+            16: ("ef-cbmir",),
+            17: ("ef-gid1",),
+            18: ("ef-gid2",),
+            19: ("ef-spn",),
+            20: ("ef-plmnwact",),
             21: ("ef-msisdn",),
+            24: ("ef-emlpp",),
+            25: ("ef-aaem",),
+            27: ("ef-kc", "ef-kcgprs"),
+            35: ("ef-acl",),
+            36: ("ef-dck",),
+            37: ("ef-cnl",),
+            39: ("ef-cpbcch",),
             40: ("ef-invscan",),
-            44: ("ef-mwis",),
-            45: ("ef-cfis",),
-            47: ("ef-impu",),
-            48: ("ef-impi",),
-            49: ("ef-domain",),
+            42: ("ef-oplmnwact",),
+            43: ("ef-hplmnwact",),
+            44: ("ef-ext5",),
+            45: ("ef-pnn",),
+            46: ("ef-opl",),
+            47: ("ef-mbdn", "ef-mbi"),
+            48: ("ef-mwis",),
+            49: ("ef-cfis",),
+            51: ("ef-spdi",),
+            52: ("ef-mmsn", "ef-mmsicp", "ef-mmsup"),
+            53: ("ef-ext8",),
+            56: ("ef-nia",),
             85: ("ef-epsloci", "ef-epsnsc"),
-            95: ("ef-5gloci", "ef-5gnsc"),
+            95: ("ef-uicciari",),
+            96: ("ef-nasconfig",),
+            97: ("ef-pws",),
+            122: (
+                "ef-5gs3gpploci",
+                "ef-5gsn3gpploci",
+                "ef-5gs3gppnsc",
+                "ef-5gsn3gppnsc",
+            ),
         }
 
         for service_number, required_markers in required_by_service.items():
@@ -3680,9 +3769,9 @@ class SaipProfileLinter:
                 continue
             self._add(
                 code="YRL-UST-001",
-                severity="INFO",
+                severity="FAIL",
                 spec="3GPP TS 31.102",
-                path=f"EF(UST).service.{service_number}",
+                path=f"{ust_finding_root}.service.{service_number}",
                 message=f"Service {service_number} is enabled but related files are missing: {', '.join(missing_markers)}.",
                 recommendation="Include required files for enabled UST services or clear service bits.",
             )
@@ -3700,9 +3789,9 @@ class SaipProfileLinter:
             ust_hex = "".join(f"{item:02X}" for item in service_bits)
             self._add(
                 code="YRL-UST-002",
-                severity="INFO",
+                severity="WARN",
                 spec="3GPP TS 31.102",
-                path=f"EF(UST).service.{service_number}",
+                path=f"{ust_finding_root}.service.{service_number}",
                 message=(
                     f"Service {service_number} is not enabled in EF(UST) "
                     f"(UST={ust_hex}) but related files are present: "
@@ -4527,13 +4616,17 @@ class SaipProfileLinter:
                     evidence={"dfName": df_name_hex, "byte_length": byte_length},
                 )
 
-    # GP CPS v2.3 §11.1.8 valid key component type codes.
+    # GP Card Specification v2.3.1 §11.1.8 key-component type codes.
+    # Keep the historical compatibility values accepted by this linter while
+    # explicitly covering the standard types used by SAIP SD key sets:
+    # DES (0x80), TLS-PSK (0x85), and AES (0x88).
     _GP_VALID_KEY_TYPES: frozenset[int] = frozenset([
-        0x01, 0x02, 0x03,               # DES variants
-        0x80, 0x81, 0x82,               # AES / HMAC
-        0x88, 0x89, 0x8A, 0x8B,         # RSA public / private
-        0x8C, 0x8D, 0x8E,               # RSA private CRT factors
-        0xA1, 0xA2, 0xB0,               # ECC
+        0x01, 0x02, 0x03,
+        0x80, 0x81, 0x82,
+        0x85,
+        0x88, 0x89, 0x8A, 0x8B,
+        0x8C, 0x8D, 0x8E,
+        0xA1, 0xA2, 0xB0,
     ])
 
     def _check_sd_key_list(self, sections: dict[str, Any]) -> None:
@@ -4644,7 +4737,10 @@ class SaipProfileLinter:
                             f"keyType 0x{kt_hex} is not in the GP CPS §11.1.8 "
                             "registered key-component type registry."
                         ),
-                        recommendation="Use a GP-registered keyType (e.g. 0x80 for AES, 0x88/0x89 for RSA).",
+                        recommendation=(
+                            "Use a GP-registered keyType (e.g. 0x80 for DES, "
+                            "0x85 for TLS-PSK, or 0x88 for AES)."
+                        ),
                         evidence={"keyType": kt_hex},
                     )
 
@@ -5088,18 +5184,26 @@ class SaipProfileLinter:
             path_base = f"{section_key}.{label.lower()}Codes[{idx}]"
 
             # YRL-PIN-007: keyReference must lie in ETSI TS 102 221 §9.5
-            # Table 9.3. Global PINs use 0x01..0x08 (PIN1 / PIN2 / ADM keys);
-            # local / application-specific PINs use 0x81..0x88 (USIM PIN /
-            # USIM PIN2 / ...). The unblocking key for a local PIN sits at
-            # the matching 0x80-bit position (e.g. 0x81 unblocked by 0x81
-            # PUK via the unblockingPINReference cross-reference). Values
-            # outside these two windows cannot be referenced by the VERIFY
-            # PIN / CHANGE PIN / UNBLOCK PIN APDUs.
+            # Table 9.3. PIN/PUK references use the global 0x01..0x08 and
+            # application-local 0x81..0x88 windows. PIN entries additionally
+            # allow ADM1..ADM5 at 0x0A..0x0E and ADM6..ADM10 at 0x8A..0x8E.
+            # The unblocking key for a local PIN sits at the matching 0x80-bit
+            # position (e.g. 0x81 unblocked by PUK reference 0x81).
             key_ref = rec.get("keyReference")
             if isinstance(key_ref, int):
-                in_global_range = 0x01 <= key_ref <= 0x08
-                in_local_range = 0x81 <= key_ref <= 0x88
-                if not (in_global_range or in_local_range):
+                in_global_pin_puk_range = 0x01 <= key_ref <= 0x08
+                in_local_pin_puk_range = 0x81 <= key_ref <= 0x88
+                in_global_adm_range = not is_puk and 0x0A <= key_ref <= 0x0E
+                in_local_adm_range = not is_puk and 0x8A <= key_ref <= 0x8E
+                if not (
+                    in_global_pin_puk_range
+                    or in_local_pin_puk_range
+                    or in_global_adm_range
+                    or in_local_adm_range
+                ):
+                    valid_ranges = "global 0x01..0x08, local 0x81..0x88"
+                    if not is_puk:
+                        valid_ranges += ", global ADM 0x0A..0x0E, local ADM 0x8A..0x8E"
                     self._add(
                         code="YRL-PIN-007",
                         severity="FAIL",
@@ -5107,12 +5211,15 @@ class SaipProfileLinter:
                         path=f"{path_base}.keyReference",
                         message=(
                             f"{label} slot {idx}: keyReference=0x{key_ref:02X} "
-                            "is outside the valid PIN key-reference ranges "
-                            "(global 0x01..0x08, local 0x81..0x88)."
+                            f"is outside the valid {label} key-reference ranges "
+                            f"({valid_ranges})."
                         ),
                         recommendation=(
-                            "Use 0x01 for the global PIN1, 0x02..0x08 for ADM / PIN2, "
-                            "or 0x81..0x88 for application-local PINs (USIM PIN / PIN2)."
+                            "Use a PIN/PUK reference in 0x01..0x08 or 0x81..0x88; "
+                            "PIN entries may also use ADM1..ADM5 references 0x0A..0x0E "
+                            "or ADM6..ADM10 references 0x8A..0x8E."
+                            if not is_puk
+                            else "Use a PUK reference in 0x01..0x08 or 0x81..0x88."
                         ),
                         evidence={"keyReference": f"0x{key_ref:02X}"},
                     )
@@ -5350,7 +5457,7 @@ class SaipProfileLinter:
                         spec="TCA PP TS §4.4.1 / 3GPP TS 33.102 §6.3",
                         path=key_text,
                         message=(
-                            f"SSIM PE declared without an akaParameter or "
+                            "SSIM PE declared without an akaParameter or "
                             "SSIM-EAPTLSParameters PE."
                         ),
                         recommendation=(

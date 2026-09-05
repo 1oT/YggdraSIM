@@ -56,13 +56,22 @@ class OtaBuildPlan :
 
 
 class OtaPacketBuilder :
-    SMS_TPDU_PREFIX =bytes .fromhex ("4005811250F341F6222222222222222502")
-    SINGLE_SMS_TPDU_PREFIX =bytes .fromhex ("4005811250F341F62222222222222225027000")
+    # SMS-DELIVER through TP-SCTS (TS 23.040 §9.2.2.1). TP-UDL follows and
+    # is computed from the user data, so it is not part of the prefix.
+    SMS_TPDU_PREFIX =bytes .fromhex ("4005811250F341F622222222222222")
     TPDU_PID_OFFSET =6
     TPDU_DCS_OFFSET =7
-    ENVELOPE_PREFIX =bytes .fromhex ("0202828106028001")
-    CONCAT_UDH_PREFIX =bytes .fromhex ("050003")
-    SINGLE_UDH =b"\x00"
+    # ENVELOPE (SMS-PP DOWNLOAD), 3GPP TS 31.111 §7.1.1.2: device
+    # identities tag '02', source Network '83', destination UICC '81'
+    # (TS 102 223 §8.7), then the Service Centre address object.
+    ENVELOPE_PREFIX =bytes .fromhex ("0202838106028001")
+    # TS 23.048 table 7: the concatenated UDH carries both the concatenation
+    # control element and the Command Packet Identifier, so UDHL is '07' --
+    # IEIa '00' with its three octets, then IEIb CPI '70' with a null IED.
+    CONCAT_UDH_PREFIX =bytes .fromhex ("070003")
+    CONCAT_UDH_CPI =bytes .fromhex ("7000")
+    # TS 23.048 table 6: UDHL '02', IEIa CPI '70', IEIDL '00'.
+    SINGLE_UDH =bytes .fromhex ("027000")
     DEFAULT_TP_UD_MAX =140 
 
     def __init__ (self ,config :ConfigManager ):
@@ -144,11 +153,15 @@ class OtaPacketBuilder :
         payload_padded =payload +(b'\x00'*pcntr )
 
         ct_len =5 +1 +8 +len (payload_padded )
+        # TS 23.048 table 6: on SMS-PP the CPI is the UDH element IEIa='70',
+        # not a body octet, and the SM opens with CPL over two octets
+        # followed by a null CHI and a one-octet CHL. CHL counts from the SPI
+        # to the end of the RC/CC/DS (2+1+1+3+5+1+8 = 0x15); CPL counts from
+        # CHI to the end of the secured data. Both go into the CC.
         chl_byte =b'\x15'
         cpl_val =len (chl_byte )+len (param_data )+ct_len 
-        cpl_byte =bytes ([cpl_val ])
-        chi_byte =b'\x00'
-        header_blob =chi_byte +cpl_byte +chl_byte 
+        cpl_bytes =cpl_val .to_bytes (2 ,"big")
+        header_blob =cpl_bytes +chl_byte 
 
         mac_input =header_blob +param_data +cntr_bytes +pcntr_byte +payload_padded 
         cc =CryptoEngine .compute_cc (mac_mode ,kid_key ,mac_input )
@@ -161,8 +174,7 @@ class OtaPacketBuilder :
         cipher_mode ,
         mac_mode ,
         cntr_hex ,
-        chi_byte ,
-        cpl_byte ,
+        cpl_bytes ,
         chl_byte ,
         param_data ,
         cntr_bytes ,
@@ -178,12 +190,17 @@ class OtaPacketBuilder :
         return bytes (prefix )
 
     def _build_single_sms_tpdu (self ,block_0348 :bytes )->tuple :
-        sms_tpdu =self ._tpdu_prefix (self .SINGLE_SMS_TPDU_PREFIX )+block_0348 
-        tp_ud_length =1 +len (block_0348 )
-        return sms_tpdu ,tp_ud_length 
+        tp_ud =self .SINGLE_UDH +block_0348 
+        sms_tpdu =self ._tpdu_prefix (self .SMS_TPDU_PREFIX )+bytes ([len (tp_ud )])+tp_ud 
+        return sms_tpdu ,len (tp_ud )
 
     def _build_concat_sms_tpdu (self ,fragment :bytes ,concat_ref :int ,total :int ,sequence :int )->tuple :
-        tp_ud =self .CONCAT_UDH_PREFIX +bytes ([concat_ref ,total ,sequence ])+fragment 
+        tp_ud =(
+        self .CONCAT_UDH_PREFIX 
+        +bytes ([concat_ref ,total ,sequence ])
+        +self .CONCAT_UDH_CPI 
+        +fragment 
+        )
         sms_tpdu =self ._tpdu_prefix (self .SMS_TPDU_PREFIX )+bytes ([len (tp_ud )])+tp_ud 
         return sms_tpdu ,len (tp_ud )
 
@@ -225,17 +242,16 @@ class OtaPacketBuilder :
         cipher_mode =block_data [1 ]
         mac_mode =block_data [2 ]
         cntr_hex =block_data [3 ]
-        chi_byte =block_data [4 ]
-        cpl_byte =block_data [5 ]
-        chl_byte =block_data [6 ]
-        param_data =block_data [7 ]
-        cntr_bytes =block_data [8 ]
-        pcntr =block_data [9 ]
-        cc =block_data [10 ]
-        ct =block_data [11 ]
+        cpl_bytes =block_data [4 ]
+        chl_byte =block_data [5 ]
+        param_data =block_data [6 ]
+        cntr_bytes =block_data [7 ]
+        pcntr =block_data [8 ]
+        cc =block_data [9 ]
+        ct =block_data [10 ]
 
         tp_ud_max =self ._get_tp_ud_max ()
-        single_tp_ud_len =1 +len (block_0348 )
+        single_tp_ud_len =len (self .SINGLE_UDH )+len (block_0348 )
         apdus :List [OtaEnvelopeApdu ]=[]
         reader_apdus :List [str ]=[]
 
@@ -255,7 +271,7 @@ class OtaPacketBuilder :
             if self ._concat_enabled ()==False :
                 raise ValueError ("Payload exceeds single-SMS capacity and concatenation is disabled.")
 
-            concat_budget =tp_ud_max -6 
+            concat_budget =tp_ud_max -8 
             if concat_budget <=0 :
                 raise ValueError ("TP-UD ceiling too small for concatenated SMS.")
 
@@ -302,8 +318,7 @@ class OtaPacketBuilder :
         if verbose :
             self ._print_verbose (
             plan ,
-            chi_byte ,
-            cpl_byte ,
+            cpl_bytes ,
             chl_byte ,
             param_data ,
             cntr_bytes ,
@@ -319,7 +334,7 @@ class OtaPacketBuilder :
             raise ValueError ("Payload requires concatenated SMS. Use build_plan() to inspect all segments.")
         return plan .apdus [0 ].apdu_hex 
 
-    def _print_verbose (self ,plan :OtaBuildPlan ,chi ,cpl ,chl ,params ,cntr ,pcntr ,cc ,ct ):
+    def _print_verbose (self ,plan :OtaBuildPlan ,cpl ,chl ,params ,cntr ,pcntr ,cc ,ct ):
         print (f"\n{Colors.CYAN}[=== 03.48 BLOCK BREAKDOWN ===]{Colors.ENDC}")
         print (f"ALG:    {plan.cipher_mode} / {plan.mac_mode}")
         print (f"CNTR:   {plan.cntr_hex}")

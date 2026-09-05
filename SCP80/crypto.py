@@ -17,9 +17,6 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-from Crypto .Cipher import AES ,DES3 
-from Crypto .Hash import CMAC 
-
 # TS 102 225 §5.1 / §5.2 cipher and CC primitives are routed through
 # pySim.ota so the spec citations (DES/3DES2/3DES3/AES algorithms,
 # CMAC truncation rules) live in one upstream place. The §5.1 envelope
@@ -183,14 +180,15 @@ class CryptoEngine :
         cipher_mode = CryptoEngine.get_algo_type(f"{kic_b:02X}")
         mac_mode = CryptoEngine.get_algo_type(f"{kid_b:02X}")
         block_size = 16 if cipher_mode == "AES" else 8
-        chi_byte = b"\x00"
+        # TS 23.048 table 8: on SMS-PP the RPI is the UDH element IEIa='71',
+        # not a body octet, and the SM opens with RPL over two octets
+        # followed by a null RHI and a one-octet RHL.
         chl_byte = b"\x15"
         pcntr = CryptoEngine.compute_pcntr(len(body), block_size, 8)
         body_padded = body + b"\x00" * pcntr
         ct_len = 5 + 1 + 8 + len(body_padded)
         cpl_val = len(chl_byte) + len(param_data) + ct_len
-        cpl_byte = bytes([cpl_val])
-        header_blob = chi_byte + cpl_byte + chl_byte
+        header_blob = cpl_val.to_bytes(2, "big") + chl_byte
         mac_input = header_blob + param_data + cntr_bytes + bytes([pcntr]) + body_padded
         cc = CryptoEngine.compute_cc(mac_mode, k_mac, mac_input)
         enc_input = cntr_bytes + bytes([pcntr]) + cc + body_padded

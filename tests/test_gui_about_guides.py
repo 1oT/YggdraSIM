@@ -227,7 +227,12 @@ class AboutPanelJsWiring(unittest.TestCase):
         self.assertIn("wireDocViewer();", self.js)
 
     def test_escape_key_closes_modal(self) -> None:
-        self.assertIn('if (ev.key === "Escape" && modal.getAttribute("data-state") === "open")', self.js)
+        self.assertIn(
+            'if (modal.getAttribute("data-state") !== "open") return',
+            self.js,
+        )
+        self.assertIn('if (ev.key === "Escape")', self.js)
+        self.assertIn("closeGuideViewer();", self.js)
 
     def test_helpers_exposed_on_window_for_devtools(self) -> None:
         self.assertIn("window.YggdraSimGuides", self.js)

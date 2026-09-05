@@ -1533,8 +1533,11 @@ def encode_ef_puct(
         raise RoundtripEncoderError("EF.PUCT: eppu must fit in 12 bits")
     if not -7 <= exponent <= 7:
         raise RoundtripEncoderError("EF.PUCT: exponent must be in -7..+7")
-    sign_bit = 0x08 if exponent < 0 else 0x00
-    exp_nibble = (sign_bit | (abs(exponent) & 0x07)) & 0x0F
+    # TS 31.102 §4.2.18: b5 (the least-significant bit once the high
+    # nibble is represented as an integer) is the sign, and b6..b8
+    # hold the magnitude.
+    sign_bit = 0x01 if exponent < 0 else 0x00
+    exp_nibble = ((abs(exponent) & 0x07) << 1) | sign_bit
     byte3 = (eppu >> 4) & 0xFF
     byte4 = ((exp_nibble & 0x0F) << 4) | (eppu & 0x0F)
     data = currency_bytes + bytes([byte3, byte4])
@@ -4615,7 +4618,7 @@ def encode_application_provider_identifier_field(payload: dict[str, Any]) -> byt
 
     Preferred inputs (first non-empty wins):
     1. ``hex`` — verbatim passthrough (keeps bytes identical even for
-       non-canonical encodings found in the wild).
+       non-canonical encodings found in deployed packages).
     2. ``oid`` — dotted-decimal text; re-encoded per X.690 §8.19.
     """
 
@@ -5058,21 +5061,37 @@ def encode_identification_field(payload: dict[str, Any]) -> int:
     return decimal_value
 
 
-def encode_short_efid_field(payload: dict[str, Any]) -> int:
-    """Encode the short EF-ID field into its tag/length/value byte sequence."""
-    decimal_value = _require_int(payload, "decimal")
-    if not 0 <= decimal_value <= 0x1F:
+def encode_short_efid_field(payload: dict[str, Any]) -> bytes:
+    """Encode SAIP ``shortEFID`` as its zero-or-one-octet value."""
+
+    return _encode_tagged_hex_passthrough(
+        payload,
+        field_label="shortEFID",
+        min_length=0,
+        max_length=1,
+    )
+
+
+def encode_template_id_field(payload: dict[str, Any]) -> str:
+    """Validate and canonicalize a dotted ASN.1 OBJECT IDENTIFIER."""
+
+    candidate = payload.get("oid", payload.get("value"))
+    if not isinstance(candidate, str):
+        raise RoundtripEncoderError("templateID requires a dotted 'oid' string")
+    text = candidate.strip()
+    arcs = text.split(".")
+    if len(arcs) < 2 or any(not arc.isdigit() for arc in arcs):
+        raise RoundtripEncoderError("templateID must be a dotted numeric OID")
+    if any(len(arc) > 1 and arc.startswith("0") for arc in arcs):
+        raise RoundtripEncoderError("templateID OID arcs must use canonical decimal form")
+    numbers = [int(arc, 10) for arc in arcs]
+    if numbers[0] not in (0, 1, 2):
+        raise RoundtripEncoderError("templateID first OID arc must be 0, 1, or 2")
+    if numbers[0] < 2 and numbers[1] > 39:
         raise RoundtripEncoderError(
-            "shortEFID must fit in 5 bits (0..31)"
+            "templateID second OID arc must be 0..39 when the first arc is 0 or 1"
         )
-    return decimal_value
-
-
-def encode_template_id_field(payload: dict[str, Any]) -> int:
-    decimal_value = _require_int(payload, "decimal")
-    if decimal_value < 0:
-        raise RoundtripEncoderError("templateID must be >= 0")
-    return decimal_value
+    return ".".join(str(number) for number in numbers)
 
 
 # ---------------------------------------------------------------------------
@@ -5131,6 +5150,7 @@ _BYTES_DISPATCHER: dict[str, Any] = {
     "customFieldOctets": encode_custom_field_octets,
     "serialNumber": encode_serial_number_field,
     "notificationAddress": encode_notification_address_field,
+    "shortEFID": encode_short_efid_field,
     # Round-6 Sweep 4 — structured round-trip encoders paired with the
     # Round-4/Round-5 semantic decoders.
     "applicationProviderIdentifier": encode_application_provider_identifier_field,
@@ -5180,7 +5200,9 @@ _SCALAR_DISPATCHER: dict[str, Any] = {
     "major-version": encode_major_version_field,
     "minor-version": encode_minor_version_field,
     "identification": encode_identification_field,
-    "shortEFID": encode_short_efid_field,
+}
+
+_OID_DISPATCHER: dict[str, Any] = {
     "templateID": encode_template_id_field,
 }
 
@@ -5245,12 +5267,31 @@ def encode_decoded_roundtrip_scalar(
     return result
 
 
+def encode_decoded_roundtrip_oid(
+    field_name: str,
+    decoded_payload: dict[str, Any],
+) -> str | None:
+    """Return a canonical dotted OID for a registered OBJECT IDENTIFIER."""
+
+    normalized = str(field_name or "").strip()
+    encoder = _OID_DISPATCHER.get(normalized)
+    if encoder is None:
+        return None
+    result = encoder(dict(decoded_payload))
+    if not isinstance(result, str):
+        raise RoundtripEncoderError(
+            f"{normalized}: encoder returned non-string OID value"
+        )
+    return result
+
+
 def roundtrip_capable_fields() -> dict[str, str]:
     """Return a mapping of field name -> natural output kind.
 
     ``kind`` is one of:
     - ``"bytes"`` — field is stored as tagged-bytes OCTET STRING.
     - ``"scalar"`` — field is stored as an ASN.1 INTEGER.
+    - ``"oid"`` — field is stored as an ASN.1 OBJECT IDENTIFIER string.
     """
 
     kinds: dict[str, str] = {}
@@ -5260,4 +5301,6 @@ def roundtrip_capable_fields() -> dict[str, str]:
         kinds[field_name] = "bytes"
     for field_name in _SCALAR_DISPATCHER:
         kinds[field_name] = "scalar"
+    for field_name in _OID_DISPATCHER:
+        kinds[field_name] = "oid"
     return kinds

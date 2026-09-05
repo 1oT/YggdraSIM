@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* ----------------------------------------------------------------------- */
 /* Base layout                                                             */
 /* ----------------------------------------------------------------------- */
@@ -30,6 +31,40 @@ body {
   background-attachment: fixed;
 }
 
+/* Keep native controls, popup menus, and scrollbars aligned with the
+   selected palette. The default theme is Nord dark. */
+:root,
+html[data-theme="nord-dark"],
+html[data-theme="oneot-dark"],
+html[data-theme="ocean-dark"],
+html[data-theme="gruv-dark"],
+html[data-theme="solarized-dark"],
+html[data-theme="tokyo-night"],
+html[data-theme="catppuccin-mocha"],
+html[data-theme="dracula"],
+html[data-theme="github-dark"],
+html[data-theme="matrix"] {
+  color-scheme: dark;
+}
+
+html[data-theme="nord-light"],
+html[data-theme="oneot-light"],
+html[data-theme="ink-light"],
+html[data-theme="solarized-light"],
+html[data-theme="catppuccin-latte"],
+html[data-theme="github-light"] {
+  color-scheme: light;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 34%, transparent);
+  color: var(--fg);
+}
+
 code,
 pre {
   font-family: var(--font-mono);
@@ -54,9 +89,45 @@ code {
 
 button,
 select,
-input {
+input,
+textarea {
   font: inherit;
   color: inherit;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--fg-dim);
+  opacity: 1;
+}
+
+/* One predictable keyboard-focus treatment for native and custom controls.
+   Component rules may move the ring inward when an overflow container would
+   otherwise clip it, but should keep the same --focus-ring colour. */
+:where(
+  a[href],
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -83,10 +154,10 @@ select {
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
-  background-color: var(--bg-elev, #2b303b);
-  color: var(--fg, #eceff4);
-  border: 1px solid var(--border-strong, rgba(216, 222, 233, 0.22));
-  border-radius: var(--radius-sm, 6px);
+  background-color: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   padding: 6px 32px 6px 10px;
   background-image: linear-gradient(
       45deg,
@@ -109,13 +180,13 @@ select {
 }
 
 select:hover:not(:disabled) {
-  border-color: var(--accent, #88c0d0);
+  border-color: var(--accent);
 }
 
-select:focus {
+select:focus-visible {
   outline: none;
-  border-color: var(--accent, #88c0d0);
-  box-shadow: 0 0 0 3px var(--accent-soft, rgba(136, 192, 208, 0.2));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring-soft);
 }
 
 select:disabled {
@@ -128,17 +199,32 @@ select:disabled {
    honour background-color / color here; Safari partially honours them. */
 select option,
 select optgroup {
-  background-color: var(--bg-elev, #2b303b);
-  color: var(--fg, #eceff4);
+  background-color: var(--bg-elev);
+  color: var(--fg);
 }
 
 select option:checked,
 select option:hover {
-  background-color: var(--accent-soft, rgba(136, 192, 208, 0.2));
-  color: var(--fg, #eceff4);
+  background-color: var(--accent-soft);
+  color: var(--fg);
+}
+
+@media (forced-colors: active) {
+  :where(
+    a[href],
+    button,
+    input,
+    select,
+    textarea,
+    summary,
+    [role="button"],
+    [role="tab"],
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline-color: Highlight;
+  }
 }
 
 /* ``<datalist>`` popups inherit option styling where the engine allows
    it (Chromium). Firefox renders them natively — operators will still
    see readable colours from the list above. */
-

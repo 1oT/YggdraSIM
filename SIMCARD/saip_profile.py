@@ -11,7 +11,6 @@ from typing import Any
 
 from SIMCARD.etsi_fs import ISIM_AID, USIM_AID
 from SIMCARD.saip_pysim_specs import (
-    FcpAttributes,
     GfmEntry,
     apply_pysim_augmentations,
     apply_pysim_service_table_overlay_to_inspector,
@@ -217,7 +216,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-iccid": {"name": "EF.ICCID", "fid": "2FE2", "structure": "transparent", "sfi": 0x02},
     "ef-dir": {"name": "EF.DIR", "fid": "2F00", "structure": "linear-fixed", "sfi": 0x1E},
     "ef-pl": {"name": "EF.PL", "fid": "2F05", "structure": "transparent", "sfi": 0x05},
-    "ef-arr": {"name": "EF.ARR", "fid": "2F06", "structure": "linear-fixed", "sfi": 0x17},
+    "ef-arr": {"name": "EF.ARR", "fid": "2F06", "structure": "linear-fixed", "sfi": None},
     "ef-umpc": {"name": "EF.UMPC", "fid": "2F08", "structure": "transparent", "sfi": None},
     # ADF.USIM core (TS 31.102 §4.2).
     "ef-imsi": {"name": "EF.IMSI", "fid": "6F07", "structure": "transparent", "sfi": 0x07},
@@ -227,6 +226,12 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-ust": {"name": "EF.UST", "fid": "6F38", "structure": "transparent", "sfi": None},
     "ef-spn": {"name": "EF.SPN", "fid": "6F46", "structure": "transparent", "sfi": None},
     "ef-est": {"name": "EF.EST", "fid": "6F56", "structure": "transparent", "sfi": None},
+    # EF.ARR exists at three levels with different ids: 2F06 under MF
+    # (TS 102 221), 6F06 under ADF.USIM (§4.2.55) and under DF.TELECOM
+    # (§4.5.5). SAIP names the ADF.USIM one separately; the other two
+    # share the "ef-arr" member and only the MF id can be carried here.
+    "ef-arr-usim": {"name": "EF.ARR", "fid": "6F06", "structure": "linear-fixed", "sfi": 0x17},
+    "ef-ocst": {"name": "EF.OCST", "fid": "6F02", "structure": "transparent", "sfi": None},
     "ef-start-hfn": {"name": "EF.START-HFN", "fid": "6F5B", "structure": "transparent", "sfi": None},
     "ef-threshold": {"name": "EF.THRESHOLD", "fid": "6F5C", "structure": "transparent", "sfi": None},
     "ef-psloci": {"name": "EF.PSLOCI", "fid": "6F73", "structure": "transparent", "sfi": None},
@@ -237,7 +242,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-ecc": {"name": "EF.ECC", "fid": "6FB7", "structure": "linear-fixed", "sfi": None},
     "ef-netpar": {"name": "EF.NETPAR", "fid": "6FC4", "structure": "transparent", "sfi": None},
     "ef-epsloci": {"name": "EF.EPSLOCI", "fid": "6FE3", "structure": "transparent", "sfi": None},
-    "ef-epsnsc": {"name": "EF.EPSNSC", "fid": "6FE4", "structure": "transparent", "sfi": None},
+    "ef-epsnsc": {"name": "EF.EPSNSC", "fid": "6FE4", "structure": "linear-fixed", "sfi": None},
     # ADF.USIM optional (PE-OPT-USIM, TS 31.102 §4.2.x).
     "ef-li": {"name": "EF.LI", "fid": "6F05", "structure": "transparent", "sfi": None},
     "ef-acmax": {"name": "EF.ACMAX", "fid": "6F37", "structure": "transparent", "sfi": None},
@@ -262,7 +267,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-cbmir": {"name": "EF.CBMIR", "fid": "6F50", "structure": "transparent", "sfi": None},
     "ef-ext4": {"name": "EF.EXT4", "fid": "6F55", "structure": "linear-fixed", "sfi": None},
     "ef-acl": {"name": "EF.ACL", "fid": "6F57", "structure": "transparent", "sfi": None},
-    "ef-cmi": {"name": "EF.CMI", "fid": "6F58", "structure": "transparent", "sfi": None},
+    "ef-cmi": {"name": "EF.CMI", "fid": "6F58", "structure": "linear-fixed", "sfi": None},
     "ef-adn": {"name": "EF.ADN", "fid": "6F3A", "structure": "linear-fixed", "sfi": None},
     "ef-fdn": {"name": "EF.FDN", "fid": "6F3B", "structure": "linear-fixed", "sfi": None},
     "ef-ccp1": {"name": "EF.CCP1", "fid": "6F3D", "structure": "linear-fixed", "sfi": None},
@@ -275,12 +280,12 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-oci": {"name": "EF.OCI", "fid": "6F81", "structure": "cyclic", "sfi": None},
     "ef-ict": {"name": "EF.ICT", "fid": "6F82", "structure": "cyclic", "sfi": None},
     "ef-oct": {"name": "EF.OCT", "fid": "6F83", "structure": "cyclic", "sfi": None},
-    "ef-vgcs": {"name": "EF.VGCS", "fid": "6FB1", "structure": "linear-fixed", "sfi": None},
+    "ef-vgcs": {"name": "EF.VGCS", "fid": "6FB1", "structure": "transparent", "sfi": None},
     "ef-vgcss": {"name": "EF.VGCSS", "fid": "6FB2", "structure": "transparent", "sfi": None},
-    "ef-vbs": {"name": "EF.VBS", "fid": "6FB3", "structure": "linear-fixed", "sfi": None},
+    "ef-vbs": {"name": "EF.VBS", "fid": "6FB3", "structure": "transparent", "sfi": None},
     "ef-vbss": {"name": "EF.VBSS", "fid": "6FB4", "structure": "transparent", "sfi": None},
     "ef-emlpp": {"name": "EF.EMLPP", "fid": "6FB5", "structure": "transparent", "sfi": None},
-    "ef-aaem": {"name": "EF.AAEM", "fid": "6FB6", "structure": "linear-fixed", "sfi": None},
+    "ef-aaem": {"name": "EF.AAEM", "fid": "6FB6", "structure": "transparent", "sfi": None},
     "ef-hiddenkey": {"name": "EF.HIDDENKEY", "fid": "6FC3", "structure": "transparent", "sfi": None},
     "ef-pnn": {"name": "EF.PNN", "fid": "6FC5", "structure": "linear-fixed", "sfi": None},
     "ef-opl": {"name": "EF.OPL", "fid": "6FC6", "structure": "linear-fixed", "sfi": None},
@@ -292,11 +297,11 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-ext7": {"name": "EF.EXT7", "fid": "6FCC", "structure": "linear-fixed", "sfi": None},
     "ef-spdi": {"name": "EF.SPDI", "fid": "6FCD", "structure": "transparent", "sfi": None},
     "ef-nia": {"name": "EF.NIA", "fid": "6FD3", "structure": "linear-fixed", "sfi": None},
-    "ef-vgcsca": {"name": "EF.VGCSCA", "fid": "6FD4", "structure": "linear-fixed", "sfi": None},
-    "ef-vbsca": {"name": "EF.VBSCA", "fid": "6FD2", "structure": "linear-fixed", "sfi": None},
-    "ef-gbabp": {"name": "EF.GBABP", "fid": "6FD7", "structure": "transparent", "sfi": None},
-    "ef-msk": {"name": "EF.MSK", "fid": "6FD5", "structure": "transparent", "sfi": None},
-    "ef-muk": {"name": "EF.MUK", "fid": "6FD6", "structure": "transparent", "sfi": None},
+    "ef-vgcsca": {"name": "EF.VGCSCA", "fid": "6FD4", "structure": "transparent", "sfi": None},
+    "ef-vbsca": {"name": "EF.VBSCA", "fid": "6FD5", "structure": "transparent", "sfi": None},
+    "ef-gbabp": {"name": "EF.GBABP", "fid": "6FD6", "structure": "transparent", "sfi": None},
+    "ef-msk": {"name": "EF.MSK", "fid": "6FD7", "structure": "linear-fixed", "sfi": None},
+    "ef-muk": {"name": "EF.MUK", "fid": "6FD8", "structure": "linear-fixed", "sfi": None},
     "ef-ehplmn": {"name": "EF.EHPLMN", "fid": "6FD9", "structure": "transparent", "sfi": None},
     "ef-gbanl": {"name": "EF.GBANL", "fid": "6FDA", "structure": "linear-fixed", "sfi": None},
     "ef-ehplmnpi": {"name": "EF.EHPLMNPI", "fid": "6FDB", "structure": "transparent", "sfi": None},
@@ -305,10 +310,14 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-spni": {"name": "EF.SPNI", "fid": "6FDE", "structure": "transparent", "sfi": None},
     "ef-pws": {"name": "EF.PWS", "fid": "6FEC", "structure": "transparent", "sfi": None},
     "ef-nasconfig": {"name": "EF.NASCONFIG", "fid": "6FE8", "structure": "transparent", "sfi": None},
+    # The SAIP USIM and ISIM templates both carry ef-uicciari, at 6FE7
+    # and linear fixed in each, so one entry serves both.
+    "ef-uicciari": {"name": "EF.UICCIARI", "fid": "6FE7", "structure": "linear-fixed", "sfi": None},
+    "ef-tvconfig": {"name": "EF.TVCONFIG", "fid": "6FFB", "structure": "linear-fixed", "sfi": None},
     "ef-fdnuri": {"name": "EF.FDNURI", "fid": "6FED", "structure": "linear-fixed", "sfi": None},
     "ef-bdnuri": {"name": "EF.BDNURI", "fid": "6FEE", "structure": "linear-fixed", "sfi": None},
     "ef-sdnuri": {"name": "EF.SDNURI", "fid": "6FEF", "structure": "linear-fixed", "sfi": None},
-    "ef-ips": {"name": "EF.IPS", "fid": "6FF1", "structure": "transparent", "sfi": None},
+    "ef-ips": {"name": "EF.IPS", "fid": "6FF1", "structure": "cyclic", "sfi": None},
     "ef-epdgid": {"name": "EF.EPDGID", "fid": "6FF3", "structure": "transparent", "sfi": None},
     "ef-epdgselection": {
         "name": "EF.EPDGSELECTION",
@@ -338,8 +347,8 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-gas": {"name": "EF.GAS", "fid": "4F4C", "structure": "linear-fixed", "sfi": None},
     "ef-grp": {"name": "EF.GRP", "fid": "4F26", "structure": "linear-fixed", "sfi": None},
     "ef-psc": {"name": "EF.PSC", "fid": "4F22", "structure": "transparent", "sfi": None},
-    "ef-cc": {"name": "EF.CC", "fid": "4F23", "structure": "linear-fixed", "sfi": None},
-    "ef-puid": {"name": "EF.PUID", "fid": "4F24", "structure": "linear-fixed", "sfi": None},
+    "ef-cc": {"name": "EF.CC", "fid": "4F23", "structure": "transparent", "sfi": None},
+    "ef-puid": {"name": "EF.PUID", "fid": "4F24", "structure": "transparent", "sfi": None},
     "ef-pbc": {"name": "EF.PBC", "fid": "4F09", "structure": "linear-fixed", "sfi": None},
     # DF.GSM-ACCESS (TS 31.102 §4.4.4, DF 5F3B).
     "ef-kc": {"name": "EF.KC", "fid": "4F20", "structure": "transparent", "sfi": None},
@@ -429,7 +438,6 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-impu": {"name": "EF.IMPU", "fid": "6F04", "structure": "linear-fixed", "sfi": None},
     "ef-ist": {"name": "EF.IST", "fid": "6F07", "structure": "transparent", "sfi": None},
     "ef-pcscf": {"name": "EF.PCSCF", "fid": "6F09", "structure": "linear-fixed", "sfi": None},
-    "ef-uicciari": {"name": "EF.UICCIARI", "fid": "6FE7", "structure": "transparent", "sfi": None},
     # DF.EAP (TS 31.102 §4.4.x, DF 7F20).
     "ef-eapkeys": {"name": "EF.EAPKEYS", "fid": "4F01", "structure": "transparent", "sfi": None},
     "ef-eapstatus": {
@@ -475,9 +483,158 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "structure": "transparent",
         "sfi": None,
     },
+    "ef-5g-prose-u2uru": {
+        "name": "EF.5G-PROSE-U2URU",
+        "fid": "4F07",
+        "structure": "transparent",
+        "sfi": 0x07,
+    },
+    "ef-5g-prose-eu": {
+        "name": "EF.5G-PROSE-EU",
+        "fid": "4F08",
+        "structure": "transparent",
+        "sfi": 0x08,
+    },
     # DF.SNPN (TS 31.102 §4.4.12, DF 5FE0).
     "ef-pws-snpn": {
         "name": "EF.PWS-SNPN",
+        "fid": "4F01",
+        "structure": "transparent",
+        "sfi": None,
+    },
+    "ef-nid": {"name": "EF.NID", "fid": "4F02", "structure": "linear-fixed", "sfi": 0x02},
+    # The seven DFs below have no member in the SAIP ProfileElement
+    # ASN.1, so a profile package cannot carry their files: these entries
+    # serve the inspector and the simulated filesystem, and will never be
+    # matched by _consume_profile_element. Identifiers, structures and
+    # short identifiers are TS 31.102; DF identifiers are §4.3.
+    # DF.SoLSA (TS 31.102 §4.4.1, DF 5F70).
+    "ef-sai": {"name": "EF.SAI", "fid": "4F30", "structure": "transparent", "sfi": None},
+    "ef-sll": {"name": "EF.SLL", "fid": "4F31", "structure": "linear-fixed", "sfi": None},
+    # DF.MExE (TS 31.102 §4.4.4, DF 5F3C).
+    "ef-mexe-st": {"name": "EF.MEXE-ST", "fid": "4F40", "structure": "transparent", "sfi": None},
+    "ef-orpk": {"name": "EF.ORPK", "fid": "4F41", "structure": "linear-fixed", "sfi": None},
+    "ef-arpk": {"name": "EF.ARPK", "fid": "4F42", "structure": "linear-fixed", "sfi": None},
+    "ef-tprpk": {"name": "EF.TPRPK", "fid": "4F43", "structure": "linear-fixed", "sfi": None},
+    # DF.WLAN (TS 31.102 §4.4.5, DF 5F40).
+    "ef-pseudo": {"name": "EF.PSEUDO", "fid": "4F41", "structure": "transparent", "sfi": None},
+    "ef-uplmnwlan": {
+        "name": "EF.UPLMNWLAN",
+        "fid": "4F42",
+        "structure": "transparent",
+        "sfi": 0x02,
+    },
+    "ef-oplmnwlan": {
+        "name": "EF.OPLMNWLAN",
+        "fid": "4F43",
+        "structure": "transparent",
+        "sfi": 0x03,
+    },
+    "ef-uwsidl": {"name": "EF.UWSIDL", "fid": "4F44", "structure": "linear-fixed", "sfi": 0x04},
+    "ef-owsidl": {"name": "EF.OWSIDL", "fid": "4F45", "structure": "linear-fixed", "sfi": 0x05},
+    "ef-wri": {"name": "EF.WRI", "fid": "4F46", "structure": "transparent", "sfi": 0x06},
+    "ef-hwsidl": {"name": "EF.HWSIDL", "fid": "4F47", "structure": "linear-fixed", "sfi": 0x07},
+    "ef-wehplmnpi": {
+        "name": "EF.WEHPLMNPI",
+        "fid": "4F48",
+        "structure": "transparent",
+        "sfi": 0x08,
+    },
+    "ef-whpi": {"name": "EF.WHPI", "fid": "4F49", "structure": "transparent", "sfi": 0x09},
+    "ef-wlrplmn": {"name": "EF.WLRPLMN", "fid": "4F4A", "structure": "transparent", "sfi": 0x0A},
+    "ef-hplmndai": {"name": "EF.HPLMNDAI", "fid": "4F4B", "structure": "transparent", "sfi": 0x0B},
+    # DF.HNB (TS 31.102 §4.4.6, DF 5F50).
+    "ef-acsgl": {"name": "EF.ACSGL", "fid": "4F81", "structure": "linear-fixed", "sfi": 0x01},
+    "ef-csgt": {"name": "EF.CSGT", "fid": "4F82", "structure": "linear-fixed", "sfi": 0x02},
+    "ef-hnbn": {"name": "EF.HNBN", "fid": "4F83", "structure": "linear-fixed", "sfi": 0x03},
+    "ef-ocsgl": {"name": "EF.OCSGL", "fid": "4F84", "structure": "linear-fixed", "sfi": 0x04},
+    "ef-ocsgt": {"name": "EF.OCSGT", "fid": "4F85", "structure": "linear-fixed", "sfi": 0x05},
+    "ef-ohnbn": {"name": "EF.OHNBN", "fid": "4F86", "structure": "linear-fixed", "sfi": 0x06},
+    # DF.ProSe (TS 31.102 §4.4.8, DF 5F90).
+    "ef-prose-mon": {
+        "name": "EF.PROSE-MON",
+        "fid": "4F01",
+        "structure": "linear-fixed",
+        "sfi": 0x01,
+    },
+    "ef-prose-ann": {
+        "name": "EF.PROSE-ANN",
+        "fid": "4F02",
+        "structure": "linear-fixed",
+        "sfi": 0x02,
+    },
+    "ef-prosefunc": {
+        "name": "EF.PROSEFUNC",
+        "fid": "4F03",
+        "structure": "linear-fixed",
+        "sfi": 0x03,
+    },
+    "ef-prose-radio-com": {
+        "name": "EF.PROSE-RADIO-COM",
+        "fid": "4F04",
+        "structure": "transparent",
+        "sfi": 0x04,
+    },
+    "ef-prose-radio-mon": {
+        "name": "EF.PROSE-RADIO-MON",
+        "fid": "4F05",
+        "structure": "transparent",
+        "sfi": 0x05,
+    },
+    "ef-prose-radio-ann": {
+        "name": "EF.PROSE-RADIO-ANN",
+        "fid": "4F06",
+        "structure": "transparent",
+        "sfi": 0x06,
+    },
+    "ef-prose-policy": {
+        "name": "EF.PROSE-POLICY",
+        "fid": "4F07",
+        "structure": "linear-fixed",
+        "sfi": 0x07,
+    },
+    "ef-prose-plmn": {
+        "name": "EF.PROSE-PLMN",
+        "fid": "4F08",
+        "structure": "linear-fixed",
+        "sfi": 0x08,
+    },
+    "ef-prose-gc": {"name": "EF.PROSE-GC", "fid": "4F09", "structure": "transparent", "sfi": 0x09},
+    "ef-pst": {"name": "EF.PST", "fid": "4F10", "structure": "transparent", "sfi": 0x10},
+    "ef-prose-uirc": {
+        "name": "EF.PROSE-UIRC",
+        "fid": "4F11",
+        "structure": "transparent",
+        "sfi": 0x11,
+    },
+    "ef-prose-gm-discovery": {
+        "name": "EF.PROSE-GM-DISCOVERY",
+        "fid": "4F12",
+        "structure": "linear-fixed",
+        "sfi": 0x12,
+    },
+    "ef-prose-relay": {
+        "name": "EF.PROSE-RELAY",
+        "fid": "4F13",
+        "structure": "linear-fixed",
+        "sfi": 0x13,
+    },
+    "ef-prose-relay-discovery": {
+        "name": "EF.PROSE-RELAY-DISCOVERY",
+        "fid": "4F14",
+        "structure": "transparent",
+        "sfi": 0x14,
+    },
+    # DF.ACDC (TS 31.102 §4.4.9, DF 5FA0).
+    "ef-acdc-list": {
+        "name": "EF.ACDC-LIST",
+        "fid": "4F01",
+        "structure": "transparent",
+        "sfi": 0x01,
+    },
+    # DF.5MBS (TS 31.102 §4.4.14, DF 5FF1).
+    "ef-5mbsueconfig": {
+        "name": "EF.5MBSUECONFIG",
         "fid": "4F01",
         "structure": "transparent",
         "sfi": None,
@@ -493,32 +650,36 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     },
     "ef-xcapconfigdata": {
         "name": "EF.XCAPCONFIGDATA",
-        "fid": "6FF9",
+        "fid": "6FFC",
         "structure": "transparent",
         "sfi": None,
     },
+    # 6FFA is the ISIM WebRTC URI, and also the USIM PS-data-off service
+    # list below. Both are correct: SAIP puts WebRTCURI in the ISIM
+    # template against ISIM service 20, and TS 31.102 §4.2.110 puts the
+    # service list in ADF.USIM.
     "ef-webrtcuri": {
         "name": "EF.WEBRTCURI",
         "fid": "6FFA",
-        "structure": "transparent",
+        "structure": "linear-fixed",
         "sfi": None,
     },
     "ef-mudmidconfigdata": {
         "name": "EF.MUDMIDCONFIGDATA",
-        "fid": "6FFB",
+        "fid": "6FFE",
         "structure": "transparent",
         "sfi": None,
     },
     "ef-3gpppsdataoff": {
         "name": "EF.3GPPPSDATAOFF",
-        "fid": "6FFC",
+        "fid": "6FF9",
         "structure": "transparent",
         "sfi": None,
     },
     "ef-3gpppsdataoffservicelist": {
         "name": "EF.3GPPPSDATAOFFSERVICELIST",
-        "fid": "6FFD",
-        "structure": "transparent",
+        "fid": "6FFA",
+        "structure": "linear-fixed",
         "sfi": None,
     },
     # ADF.USIM MMS family (TS 51.011 §10.3.51-§10.3.55, TS 31.102 Annex H).
@@ -526,14 +687,14 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-ext8": {"name": "EF.EXT8", "fid": "6FCF", "structure": "linear-fixed", "sfi": None},
     "ef-mmsicp": {"name": "EF.MMSICP", "fid": "6FD0", "structure": "transparent", "sfi": None},
     "ef-mmsup": {"name": "EF.MMSUP", "fid": "6FD1", "structure": "linear-fixed", "sfi": None},
-    # NOTE: EF.MMSUCP (6FD2) collides with EF.VBSCA per legacy SAIP
-    # tooling. Leave the canonical FID empty so the node materialises at
-    # the right hierarchical path without stomping VBSCA on the same FID.
-    "ef-mmsucp": {"name": "EF.MMSUCP", "fid": "", "structure": "transparent", "sfi": None},
+    "ef-mmsucp": {"name": "EF.MMSUCP", "fid": "6FD2", "structure": "transparent", "sfi": None},
     # DF.TELECOM / DF.GRAPHICS (TS 31.102 §4.6.1, SAIP §3.4.4).
+    # EF.IIDF and EF.ICON are assigned ranges rather than single ids
+    # (4F40..4F7F and 4F80..4FBF), so neither carries a canonical FID.
+    # 4F01 in this DF is EF.LAUNCH-SCWS.
     "ef-img": {"name": "EF.IMG", "fid": "4F20", "structure": "linear-fixed", "sfi": None},
-    "ef-iidf": {"name": "EF.IIDF", "fid": "4F02", "structure": "transparent", "sfi": None},
-    "ef-icon": {"name": "EF.ICON", "fid": "4F01", "structure": "transparent", "sfi": None},
+    "ef-iidf": {"name": "EF.IIDF", "fid": "", "structure": "transparent", "sfi": None},
+    "ef-icon": {"name": "EF.ICON", "fid": "", "structure": "transparent", "sfi": None},
     "ef-launchpad": {
         "name": "EF.LAUNCHPAD",
         "fid": "",
@@ -542,63 +703,112 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     },
     "ef-launch-scws": {
         "name": "EF.LAUNCH-SCWS",
-        "fid": "",
+        "fid": "4F01",
         "structure": "transparent",
         "sfi": None,
     },
     "ef-ice-dn": {"name": "EF.ICE-DN", "fid": "6FE0", "structure": "linear-fixed", "sfi": None},
-    "ef-ice-ff": {"name": "EF.ICE-FF", "fid": "6FE2", "structure": "linear-fixed", "sfi": None},
+    "ef-ice-ff": {"name": "EF.ICE-FF", "fid": "6FE1", "structure": "linear-fixed", "sfi": None},
+    # BER-TLV in SAIP and §4.6.1.3; the id is unambiguous even though
+    # the structure has no representation here.
     "ef-ice-graphics": {
         "name": "EF.ICE-GRAPHICS",
-        "fid": "",
+        "fid": "4F21",
         "structure": "transparent",
         "sfi": None,
     },
     "ef-rma": {"name": "EF.RMA", "fid": "", "structure": "transparent", "sfi": None},
     "ef-sume": {"name": "EF.SUME", "fid": "6F54", "structure": "transparent", "sfi": None},
+    # EF.ARR is 6F06 at this level too (§4.5.5). SAIP names only the
+    # ADF.USIM one separately ("ef-arr-usim", Note 8); every other
+    # template reuses "ef-arr", so the DF.TELECOM one is disambiguated
+    # here and, like the reference-only DFs, never matches a decoded
+    # profile element.
+    "ef-arr-telecom": {"name": "EF.ARR", "fid": "6F06", "structure": "linear-fixed", "sfi": None},
+    "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "linear-fixed", "sfi": None},
     # DF.PHONEBOOK (TS 31.102 §4.4.2).
     "ef-aas": {"name": "EF.AAS", "fid": "4F4A", "structure": "linear-fixed", "sfi": None},
     "ef-puri": {"name": "EF.PURI", "fid": "4F4D", "structure": "linear-fixed", "sfi": None},
     "ef-uid": {"name": "EF.UID", "fid": "4F10", "structure": "linear-fixed", "sfi": None},
-    # DF.MULTIMEDIA / DF.MMSS / DF.MCS / DF.V2X (SAIP-specific, FIDs are
-    # vendor-dependent outside TS 31.102 Annex H). Materialise with a
-    # blank FID so the node anchors at the correct hierarchical slot.
-    "ef-mml": {"name": "EF.MML", "fid": "", "structure": "linear-fixed", "sfi": None},
-    "ef-mmdf": {"name": "EF.MMDF", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mlpl": {"name": "EF.MLPL", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mspl": {"name": "EF.MSPL", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mmssmode": {"name": "EF.MMSSMODE", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mst": {"name": "EF.MST", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-mcs-config": {"name": "EF.MCS-CONFIG", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-vst": {"name": "EF.VST", "fid": "", "structure": "transparent", "sfi": None},
+    # DF.MULTIMEDIA (TS 31.102 §4.6.3, DF 5F3B). Both files are BER-TLV,
+    # which the three structures here cannot express, so they keep the
+    # nearest representable value and are addressable by FID only.
+    "ef-mml": {"name": "EF.MML", "fid": "4F47", "structure": "linear-fixed", "sfi": None},
+    "ef-mmdf": {"name": "EF.MMDF", "fid": "4F48", "structure": "transparent", "sfi": None},
+    # DF.MMSS (SAIP §9, DF 5F3C). File contents are defined in C.S0074-A,
+    # not TS 31.102, so SAIP is the only source for these three.
+    "ef-mlpl": {"name": "EF.MLPL", "fid": "4F20", "structure": "transparent", "sfi": 0x01},
+    "ef-mspl": {"name": "EF.MSPL", "fid": "4F21", "structure": "transparent", "sfi": 0x02},
+    "ef-mmssmode": {"name": "EF.MMSSMODE", "fid": "4F22", "structure": "transparent", "sfi": 0x03},
+    # DF.MCS (TS 31.102 §4.6.4, DF 5F3D). EF.MCS-CONFIG is BER-TLV.
+    "ef-mst": {"name": "EF.MST", "fid": "4F01", "structure": "transparent", "sfi": 0x01},
+    "ef-mcs-config": {
+        "name": "EF.MCS-CONFIG",
+        "fid": "4F02",
+        "structure": "transparent",
+        "sfi": 0x02,
+    },
+    # DF.V2X (TS 31.102 §4.6.5, DF 5F3E). EF.V2X-CONFIG is BER-TLV. The
+    # two policy files declare "SFI: Optional", so they carry none.
+    "ef-vst": {"name": "EF.VST", "fid": "4F01", "structure": "transparent", "sfi": 0x01},
     "ef-v2x-config": {
         "name": "EF.V2X-CONFIG",
-        "fid": "",
+        "fid": "4F02",
         "structure": "transparent",
-        "sfi": None,
+        "sfi": 0x02,
     },
     "ef-v2xp-pc5": {
         "name": "EF.V2XP-PC5",
-        "fid": "",
+        "fid": "4F03",
         "structure": "transparent",
         "sfi": None,
     },
     "ef-v2xp-Uu": {
         "name": "EF.V2XP-UU",
-        "fid": "",
+        "fid": "4F04",
         "structure": "transparent",
         "sfi": None,
     },
-    "ef-psismsc": {"name": "EF.PSISMSC", "fid": "6FE5", "structure": "transparent", "sfi": None},
-    # OPT-USIM Rel-17/18 extras and misc EFs referenced by SAIP. Some
-    # (pnni/ncp-ip/ial/ipd/ufc) do not have a single authoritative FID in
-    # TS 31.102 so they carry a blank FID; others align with TS 31.102
-    # Annex H assignments.
+    # DF.A2X (TS 31.102 §4.6.6, DF 5F3F).
+    "ef-ast": {"name": "EF.AST", "fid": "4F01", "structure": "transparent", "sfi": 0x01},
+    "ef-a2x-config": {
+        "name": "EF.A2X-CONFIG",
+        "fid": "4F02",
+        "structure": "transparent",
+        "sfi": 0x02,
+    },
+    "ef-a2xp-pc5": {
+        "name": "EF.A2XP-PC5",
+        "fid": "4F03",
+        "structure": "transparent",
+        "sfi": 0x03,
+    },
+    "ef-a2x-ddaap-pc5": {
+        "name": "EF.A2X-DDAAP-PC5",
+        "fid": "4F04",
+        "structure": "transparent",
+        "sfi": 0x04,
+    },
+    "ef-a2x-dc2p-pc5": {
+        "name": "EF.A2X-DC2P-PC5",
+        "fid": "4F05",
+        "structure": "transparent",
+        "sfi": 0x05,
+    },
+    "ef-a2xp-Uu": {
+        "name": "EF.A2XP-UU",
+        "fid": "4F06",
+        "structure": "transparent",
+        "sfi": 0x06,
+    },
+    # ADF.USIM optional files: Rel-17/18 extras and misc EFs referenced by
+    # SAIP. These are USIM files despite following the DF blocks above, so
+    # the marker is repeated here rather than left to the reader.
     "ef-pnni": {"name": "EF.PNNI", "fid": "6FDF", "structure": "linear-fixed", "sfi": None},
-    "ef-ncp-ip": {"name": "EF.NCP-IP", "fid": "", "structure": "linear-fixed", "sfi": None},
-    "ef-ufc": {"name": "EF.UFC", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-ial": {"name": "EF.IAL", "fid": "", "structure": "transparent", "sfi": None},
-    "ef-ipd": {"name": "EF.IPD", "fid": "", "structure": "transparent", "sfi": None},
+    "ef-ncp-ip": {"name": "EF.NCP-IP", "fid": "6FE2", "structure": "linear-fixed", "sfi": None},
+    "ef-ufc": {"name": "EF.UFC", "fid": "6FE6", "structure": "transparent", "sfi": None},
+    "ef-ial": {"name": "EF.IAL", "fid": "6FF0", "structure": "linear-fixed", "sfi": None},
+    "ef-ipd": {"name": "EF.IPD", "fid": "6FF2", "structure": "linear-fixed", "sfi": None},
     "ef-epdgidem": {
         "name": "EF.EPDGIDEM",
         "fid": "6FF5",
@@ -765,10 +975,16 @@ apply_pysim_augmentations(_FILE_SPECS)
 
 
 def _install_pysim_aliases(specs: dict[str, dict[str, Any]]) -> None:
+    # An alias supplies a pySim spelling for a file the table does not
+    # already name. Where the spellings differ only in case, the SAIP key
+    # is the canonical one -- installing both would give a single file two
+    # entries that collapse to the same normalised GUI key.
+    folded = {key.casefold() for key in specs}
     for alias_pe_name, alias_spec in pysim_alias_specs_for(specs).items():
-        if alias_pe_name in specs:
+        if alias_pe_name in specs or alias_pe_name.casefold() in folded:
             continue
         specs[alias_pe_name] = alias_spec
+        folded.add(alias_pe_name.casefold())
 
 
 _install_pysim_aliases(_FILE_SPECS)
@@ -2075,35 +2291,40 @@ def _coerce_byte(value: Any) -> int:
 # Mirrors ``pySim.esim.saip.KeyType`` so the SD-key migration can map
 # pySim's resolved enum string back to the on-card byte without
 # importing the construct adapter at the use site.
+# GlobalPlatform Card Specification 2.3.1 table 11-16, which the SAIP
+# specification defers to for key types ("Only keyTypes defined in
+# [GP CS], Table 11-16, may be part of the list"). Keys are pySim's
+# KeyType enum spellings, which is what actually reaches the lookup;
+# _key_type_string_to_byte folds separators so a hyphenated spelling
+# resolves to the same byte.
 _GP_KEY_TYPE_STRING_TO_BYTE: dict[str, int] = {
-    "des-implicit": 0x80,
-    "reserved-1": 0x81,
-    "tls": 0x81,
-    "des-cbc": 0x82,
-    "des-ecb": 0x83,
-    "tdes-cbc": 0x84,
-    "tdes-cbc-2": 0x84,
+    "des": 0x80,
+    "des_implicit": 0x80,
+    "tls_psk": 0x85,
+    "tls": 0x85,
     "aes": 0x88,
-    "hmac-sha1": 0x90,
-    "hmac-sha-160": 0x91,
-    "rsa-public-e": 0xA0,
-    "rsa-public-n": 0xA1,
-    "rsa-private-n": 0xA2,
-    "rsa-private-d": 0xA3,
-    "rsa-crt-p": 0xA4,
-    "rsa-crt-q": 0xA5,
-    "rsa-crt-pq": 0xA6,
-    "rsa-crt-dp1": 0xA7,
-    "rsa-crt-dq1": 0xA8,
-    "ecc-public-key": 0xB0,
-    "ecc-private-key": 0xB1,
-    "ecc-field-parameter-a": 0xB2,
-    "ecc-field-parameter-b": 0xB3,
-    "ecc-field-parameter-g": 0xB4,
-    "ecc-field-parameter-n": 0xB5,
-    "ecc-field-parameter-k": 0xB6,
-    "ecc-key-parameter-reference": 0xF0,
-    "extended-format": 0xFF,
+    "hmac_sha1": 0x90,
+    "hmac_sha1_160": 0x91,
+    "rsa_public_exponent_e_cleartex": 0xA0,
+    "rsa_modulus_n_cleartext": 0xA1,
+    "rsa_modulus_n": 0xA2,
+    "rsa_private_exponent_d": 0xA3,
+    "rsa_chines_remainder_p": 0xA4,
+    "rsa_chines_remainder_q": 0xA5,
+    "rsa_chines_remainder_pq": 0xA6,
+    "rsa_chines_remainder_dpi": 0xA7,
+    "rsa_chines_remainder_dqi": 0xA8,
+    "ecc_public_key": 0xB0,
+    "ecc_private_key": 0xB1,
+    "ecc_field_parameter_p": 0xB2,
+    "ecc_field_parameter_a": 0xB3,
+    "ecc_field_parameter_b": 0xB4,
+    "ecc_field_parameter_g": 0xB5,
+    "ecc_field_parameter_n": 0xB6,
+    "ecc_field_parameter_k": 0xB7,
+    "ecc_key_parameters_reference": 0xF0,
+    "not_available": 0xFF,
+    "extended_format": 0xFF,
 }
 
 
@@ -2115,7 +2336,7 @@ def _key_type_string_to_byte(key_type: str) -> int:
     """
     if not key_type:
         return 0
-    key = str(key_type).strip().lower()
+    key = str(key_type).strip().lower().replace("-", "_")
     return _GP_KEY_TYPE_STRING_TO_BYTE.get(key, 0)
 
 
@@ -2474,17 +2695,22 @@ def _finalize_image(image: SimProfileImage) -> SimProfileImage | None:
             pass
 
     if len(image.iccid) > 0 and _node_by_path(image, ("MF", "EF.ICCID")) is None:
-        image.nodes.append(
-            SimProfileFsNode(
-                path=("MF", "EF.ICCID"),
-                name="EF.ICCID",
-                kind="ef",
-                fid="2FE2",
-                structure="transparent",
-                data=encode_iccid_ef(image.iccid),
-                sfi=0x02,
+        try:
+            encoded_iccid = encode_iccid_ef(image.iccid)
+        except ValueError:
+            encoded_iccid = b""
+        if encoded_iccid:
+            image.nodes.append(
+                SimProfileFsNode(
+                    path=("MF", "EF.ICCID"),
+                    name="EF.ICCID",
+                    kind="ef",
+                    fid="2FE2",
+                    structure="transparent",
+                    data=encoded_iccid,
+                    sfi=0x02,
+                )
             )
-        )
 
     if len(image.imsi) > 0 and _node_by_path(image, ("MF", "ADF.USIM")) is None:
         image.nodes.append(
@@ -2498,17 +2724,22 @@ def _finalize_image(image: SimProfileImage) -> SimProfileImage | None:
             )
         )
     if len(image.imsi) > 0 and _node_by_path(image, ("MF", "ADF.USIM", "EF.IMSI")) is None:
-        image.nodes.append(
-            SimProfileFsNode(
-                path=("MF", "ADF.USIM", "EF.IMSI"),
-                name="EF.IMSI",
-                kind="ef",
-                fid="6F07",
-                structure="transparent",
-                data=encode_imsi_ef(image.imsi),
-                sfi=0x07,
+        try:
+            encoded_imsi = encode_imsi_ef(image.imsi)
+        except ValueError:
+            encoded_imsi = b""
+        if encoded_imsi:
+            image.nodes.append(
+                SimProfileFsNode(
+                    path=("MF", "ADF.USIM", "EF.IMSI"),
+                    name="EF.IMSI",
+                    kind="ef",
+                    fid="6F07",
+                    structure="transparent",
+                    data=encoded_imsi,
+                    sfi=0x07,
+                )
             )
-        )
     if len(image.imsi) > 0 and _node_by_path(image, ("MF", "ADF.USIM", "EF.AD")) is None:
         image.nodes.append(
             SimProfileFsNode(

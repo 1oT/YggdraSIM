@@ -108,7 +108,7 @@
           "@": [
             "fillFileContent",
             {
-              "hex": "98648011111111111121",
+              "hex": "98888011111111111121",
               "label": "Master file (MF) tree / EF.ICCID (2FE2) [1] / Fill file content (SAIP)"
             }
           ]

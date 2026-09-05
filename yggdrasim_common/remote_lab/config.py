@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,7 @@ class StreamProxyConfig:
     bind_host: str = "127.0.0.1"
     external_port: int = 0
     public_host: str = ""
+    public_base_url: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,23 +105,79 @@ def _port(value: Any, field_name: str) -> int:
 
 
 def _binds_overlap(left: str, right: str) -> bool:
-    left_s = str(left or "").strip()
-    right_s = str(right or "").strip()
+    left_s = _normalize_bind_host(left)
+    right_s = _normalize_bind_host(right)
     if left_s == right_s:
         return True
     wildcards = {"", "0.0.0.0", "::", "[::]"}
     return left_s in wildcards or right_s in wildcards
 
 
+def _normalize_bind_host(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.startswith("[") and text.endswith("]"):
+        return text[1:-1].strip()
+    return text
+
+
+def _url_host(value: Any) -> str:
+    host = _normalize_bind_host(value)
+    if "%25" in host and ":" in host:
+        host = host.replace("%25", "%")
+    if ":" in host:
+        return f"[{host.replace('%', '%25')}]"
+    return host
+
+
+def _normalize_public_base_url(value: Any) -> str:
+    text = str(value or "").strip().rstrip("/")
+    if not text:
+        return ""
+    parsed = urlsplit(text)
+    if (
+        parsed.scheme.lower() not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(
+            "stream_proxy.public_base_url must be an http(s) URL without credentials, query, or fragment"
+        )
+    return urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc,
+            parsed.path.rstrip("/"),
+            "",
+            "",
+        )
+    ).rstrip("/")
+
+
 def _normalize_apdu_url(value: Any) -> str:
     text = str(value or "").strip()
     if len(text) == 0:
         return ""
-    if text.startswith(("http://", "https://")) is False:
-        raise ValueError("upstream URL must start with http:// or https://")
-    if text.rstrip("/").endswith("/apdu"):
-        return text.rstrip("/")
-    return text.rstrip("/") + "/apdu"
+    parsed = urlsplit(text)
+    if (
+        parsed.scheme.lower() not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(
+            "upstream URL must be http(s) without credentials, query, or fragment"
+        )
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/apdu"):
+        path += "/apdu"
+    return urlunsplit(
+        (parsed.scheme.lower(), parsed.netloc, path or "/apdu", "", "")
+    )
 
 
 def _upstream_url_from_config(raw: dict[str, Any], field_name: str) -> str:
@@ -129,7 +187,9 @@ def _upstream_url_from_config(raw: dict[str, Any], field_name: str) -> str:
     port = raw.get("port")
     scheme = str(raw.get("scheme") or "http").strip() or "http"
     if host and port:
-        return _normalize_apdu_url(f"{scheme}://{host}:{_port(port, field_name + '.port')}/apdu")
+        return _normalize_apdu_url(
+            f"{scheme}://{_url_host(host)}:{_port(port, field_name + '.port')}/apdu"
+        )
     return ""
 
 
@@ -159,7 +219,8 @@ def parse_config(payload: dict[str, Any]) -> RemoteLabAgentConfig:
     agent = AgentConfig(
         id=agent_id,
         name=str(agent_raw.get("name") or agent_id).strip(),
-        bind_host=str(agent_raw.get("bind_host") or "127.0.0.1").strip() or "127.0.0.1",
+        bind_host=_normalize_bind_host(agent_raw.get("bind_host") or "127.0.0.1")
+        or "127.0.0.1",
         control_port=_port(agent_raw.get("control_port") or 8700, "agent.control_port"),
         public_host=str(agent_raw.get("public_host") or "").strip(),
     )
@@ -181,41 +242,64 @@ def parse_config(payload: dict[str, Any]) -> RemoteLabAgentConfig:
         if not token_id:
             raise ValueError(f"security.access_tokens[{index}].id is required")
         if not token_hash.startswith("sha256:"):
-            raise ValueError(f"security.access_tokens[{index}].token_hash must start with sha256:")
+            raise ValueError(
+                f"security.access_tokens[{index}].token_hash must start with sha256:"
+            )
         if role not in ("user", "admin"):
-            raise ValueError(f"security.access_tokens[{index}].role must be user or admin")
-        access_tokens.append(AccessTokenConfig(id=token_id, token_hash=token_hash, role=role))
+            raise ValueError(
+                f"security.access_tokens[{index}].role must be user or admin"
+            )
+        access_tokens.append(
+            AccessTokenConfig(id=token_id, token_hash=token_hash, role=role)
+        )
     if len(access_tokens) == 0:
         raise ValueError("at least one security.access_tokens entry is required")
 
     rigs: list[RigConfig] = []
     rig_ids: set[str] = set()
-    relay_ports: set[tuple[str, int]] = set()
+    relay_ports: list[tuple[str, int]] = []
     for index, raw in enumerate(_as_list(payload.get("rigs"), "rigs")):
         item = _as_dict(raw, f"rigs[{index}]")
         rig_id = str(item.get("id") or "").strip()
         if len(rig_id) == 0:
             raise ValueError(f"rigs[{index}].id is required")
-        if rig_id in rig_ids:
+        normalized_rig_id = rig_id.casefold()
+        if normalized_rig_id in rig_ids:
             raise ValueError(f"duplicate rig id: {rig_id}")
-        rig_ids.add(rig_id)
+        rig_ids.add(normalized_rig_id)
 
         proxy_raw = _as_dict(item.get("stream_proxy"), f"rigs[{index}].stream_proxy")
-        external_port = _port(proxy_raw.get("external_port"), f"rigs[{index}].stream_proxy.external_port")
-        bind_host = str(proxy_raw.get("bind_host") or agent.bind_host).strip() or agent.bind_host
-        relay_key = (bind_host, external_port)
-        if relay_key in relay_ports:
-            raise ValueError(f"duplicate stream proxy bind/port: {bind_host}:{external_port}")
-        if external_port == agent.control_port and _binds_overlap(bind_host, agent.bind_host):
+        external_port = _port(
+            proxy_raw.get("external_port"),
+            f"rigs[{index}].stream_proxy.external_port",
+        )
+        bind_host = (
+            _normalize_bind_host(proxy_raw.get("bind_host") or agent.bind_host)
+            or agent.bind_host
+        )
+        if any(
+            existing_port == external_port
+            and _binds_overlap(existing_host, bind_host)
+            for existing_host, existing_port in relay_ports
+        ):
+            raise ValueError(
+                f"duplicate stream proxy bind/port (including overlap): {bind_host}:{external_port}"
+            )
+        if external_port == agent.control_port and _binds_overlap(
+            bind_host, agent.bind_host
+        ):
             raise ValueError(
                 "stream proxy bind/port conflicts with agent control port: "
                 f"{bind_host}:{external_port}"
             )
-        relay_ports.add(relay_key)
+        relay_ports.append((bind_host, external_port))
         stream_proxy = StreamProxyConfig(
             bind_host=bind_host,
             external_port=external_port,
             public_host=str(proxy_raw.get("public_host") or "").strip(),
+            public_base_url=_normalize_public_base_url(
+                proxy_raw.get("public_base_url")
+            ),
         )
 
         upstream_raw = _as_dict(item.get("upstream"), f"rigs[{index}].upstream")

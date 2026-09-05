@@ -25,6 +25,9 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from unittest import mock
+
+import pytest
 
 from yggdrasim_common.card_backend import (
     CARD_RELAY_TOKEN_ENV,
@@ -114,7 +117,12 @@ def _make_handler(
 class _StubBridge:
     def __init__(self, **handler_kwargs: Any) -> None:
         handler = _make_handler(**handler_kwargs)
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        try:
+            self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        except PermissionError as error:
+            raise unittest.SkipTest(
+                f"loopback sockets are unavailable in this environment: {error}"
+            ) from error
         self.thread = threading.Thread(
             target=self.server.serve_forever,
             kwargs={"poll_interval": 0.05},
@@ -207,6 +215,13 @@ class CardBridgeActionRegistrationTests(unittest.TestCase):
         }
         registered = {spec.id for spec in get_registry().all()}
         self.assertTrue(expected.issubset(registered))
+        for action_id in expected - {
+            "card_bridge.local_start",
+            "card_bridge.local_stop",
+            "card_bridge.remote_rig_tunnel_stop",
+        }:
+            input_names = {field.name for field in get_registry().get(action_id).inputs}
+            self.assertIn("ssh_path", input_names, msg=action_id)
 
 
 class CardBridgeStatusTests(unittest.TestCase):
@@ -253,6 +268,7 @@ class CardBridgeStatusTests(unittest.TestCase):
         self.assertEqual(payload["token_fingerprint"], _fingerprint("from-file-token"))
 
 
+@pytest.mark.usefixtures("require_loopback_socket")
 class CardBridgeProbeTests(unittest.TestCase):
     def test_probe_no_url_returns_helpful_reason(self) -> None:
         with _EnvSandbox():
@@ -381,12 +397,96 @@ class RemoteRigActionHelperTests(unittest.TestCase):
         with patch.object(cb.os, "name", "posix"):
             self.assertEqual(cb._detached_subprocess_kwargs(), {"start_new_session": True})
 
-    def test_detached_subprocess_kwargs_use_windows_process_group(self) -> None:
+    def test_detached_subprocess_kwargs_use_windows_process_group_without_console(
+        self,
+    ) -> None:
         from unittest.mock import patch
 
         with patch.object(cb.os, "name", "nt"):
             with patch.object(cb.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True):
-                self.assertEqual(cb._detached_subprocess_kwargs(), {"creationflags": 512})
+                with patch.object(
+                    cb,
+                    "hidden_window_subprocess_kwargs",
+                    return_value={"creationflags": 0x08000000},
+                ):
+                    self.assertEqual(
+                        cb._detached_subprocess_kwargs(),
+                        {"creationflags": 0x08000000 | 512},
+                    )
+
+    def test_detached_subprocess_kwargs_keep_windows_process_group_fallback(
+        self,
+    ) -> None:
+        from unittest.mock import patch
+
+        with patch.object(cb.os, "name", "nt"):
+            with patch.object(cb.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True):
+                with patch.object(
+                    cb,
+                    "hidden_window_subprocess_kwargs",
+                    return_value={},
+                ):
+                    self.assertEqual(
+                        cb._detached_subprocess_kwargs(),
+                        {"creationflags": 512},
+                    )
+
+    def test_remote_rig_state_updates_are_atomic_under_concurrency(self) -> None:
+        from pathlib import Path
+
+        failures: list[BaseException] = []
+        worker_count = 6
+        reader_count = 2
+        barrier = threading.Barrier(worker_count + reader_count + 1)
+
+        def _writer(worker_index: int) -> None:
+            try:
+                barrier.wait()
+                for sequence in range(20):
+                    cb._write_remote_rig_state({
+                        f"worker_{worker_index}": sequence,
+                    })
+            except BaseException as error:  # noqa: BLE001
+                failures.append(error)
+
+        def _reader() -> None:
+            try:
+                barrier.wait()
+                for _ in range(100):
+                    if cb._load_remote_rig_state().get("base") is not True:
+                        raise AssertionError("reader observed incomplete state")
+            except BaseException as error:  # noqa: BLE001
+                failures.append(error)
+
+        with _EnvSandbox():
+            cb._write_remote_rig_state({"base": True})
+            threads = [
+                threading.Thread(target=_writer, args=(index,))
+                for index in range(worker_count)
+            ]
+            threads.extend(
+                threading.Thread(target=_reader)
+                for _ in range(reader_count)
+            )
+            for thread in threads:
+                thread.start()
+            barrier.wait()
+            for thread in threads:
+                thread.join(timeout=10.0)
+
+            state = cb._load_remote_rig_state()
+            state_path = Path(cb._remote_rig_state_path())
+            disk_state = json.loads(state_path.read_text(encoding="utf-8"))
+            temporary_files = list(
+                state_path.parent.glob(f".{state_path.name}.*.tmp")
+            )
+
+        self.assertEqual(failures, [])
+        self.assertTrue(all(thread.is_alive() is False for thread in threads))
+        self.assertEqual(state, disk_state)
+        self.assertEqual(temporary_files, [])
+        for index in range(worker_count):
+            self.assertEqual(state.get(f"worker_{index}"), 19)
 
     def test_publish_local_card_relay_marker_configures_status_action(self) -> None:
         import tempfile
@@ -410,6 +510,29 @@ class RemoteRigActionHelperTests(unittest.TestCase):
         self.assertEqual(payload["token_source"], "marker")
         self.assertEqual(payload["token_fingerprint"], _fingerprint("local-relay-token"))
         self.assertNotIn("local-relay-token", json.dumps(payload))
+
+    def test_relay_marker_lifecycle_does_not_import_linux_hil_runtime(self) -> None:
+        import sys
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            token_path = Path(tempdir) / "bridge.token"
+            token_path.write_text("local-relay-token\n", encoding="utf-8")
+            with _EnvSandbox(), patch.dict(
+                sys.modules,
+                {"yggdrasim_common.hil_bridge_runtime": None},
+            ):
+                marker = cb._publish_local_card_relay_marker(
+                    port=8642,
+                    token_file=str(token_path),
+                    reader="Reader A",
+                    atr="3b00",
+                )
+                self.assertTrue(Path(marker["marker_path"]).is_file())
+                cb._clear_local_card_relay_marker()
+                self.assertFalse(Path(marker["marker_path"]).exists())
 
     def test_local_stop_clears_runtime_relay_marker(self) -> None:
         import tempfile
@@ -744,7 +867,7 @@ class RemoteRigActionHelperTests(unittest.TestCase):
             payload = cb._remote_hil_runtime_status(
                 ssh_target="pi@rpi-host",
                 remote_workdir="~/YggdraSIM",
-                remote_python="~/YggdraSIM/python/bin/python",
+                remote_python="~/YggdraSIM/.venv/bin/python",
             )
 
         self.assertTrue(payload["ok"], msg=str(payload))
@@ -809,6 +932,85 @@ class RemoteRigActionHelperTests(unittest.TestCase):
             "/usr/local/bin/osmo-remsim-client-st2",
         )
 
+    def test_remote_hil_preflight_accepts_full_frozen_runtime(self) -> None:
+        from unittest.mock import patch
+
+        preflight = {
+            "ok": True,
+            "runtime_kind": "frozen-full",
+            "runtime_executable": "/home/pi/.local/bin/yggdrasim",
+            "resolved_workdir": "/home/pi",
+            "systemctl_user": True,
+            "pyudev": False,
+            "lsusb": "/usr/bin/lsusb",
+            "supervisor_command": [
+                "/home/pi/.local/bin/yggdrasim",
+                "--yggdrasim-internal-entry",
+                "hil-supervisor",
+                "--",
+            ],
+            "note": "Remote HIL runtime ready (frozen-full).",
+        }
+        with patch.object(
+            cb,
+            "_run_ssh_command",
+            return_value={
+                "ok": True,
+                "returncode": 0,
+                "stdout": json.dumps(preflight),
+                "stderr": "",
+            },
+        ):
+            payload = cb._remote_hil_dependency_preflight(
+                ssh_target="pi@rpi-host",
+            )
+
+        self.assertTrue(payload["ok"], msg=str(payload))
+        self.assertEqual(payload["runtime_kind"], "frozen-full")
+        self.assertEqual(payload["resolved_remote_python"], "")
+        self.assertEqual(payload["supervisor_command"][-3:], [
+            "--yggdrasim-internal-entry",
+            "hil-supervisor",
+            "--",
+        ])
+
+    def test_remote_hil_preflight_reports_python_prerequisite_without_python(self) -> None:
+        from unittest.mock import patch
+
+        stdout = "\n".join(
+            [
+                "YGG_PREF_V1",
+                "ok=0",
+                "runtime_kind=frozen-full",
+                "runtime_executable=/home/pi/.local/bin/yggdrasim",
+                "resolved_workdir=/home/pi",
+                "systemctl_user=1",
+                "pyudev=1",
+                "lsusb=/usr/bin/lsusb",
+                "note=Python 3 is required for remote HIL dependency and readiness diagnostics.",
+            ]
+        )
+        with patch.object(
+            cb,
+            "_run_ssh_command",
+            return_value={
+                "ok": True,
+                "returncode": 0,
+                "stdout": stdout,
+                "stderr": "",
+            },
+        ):
+            payload = cb._remote_hil_dependency_preflight(
+                ssh_target="pi@rpi-host",
+            )
+
+        self.assertFalse(payload["ok"])
+        self.assertIn("Python 3", payload["note"])
+        self.assertEqual(
+            payload["supervisor_command"][0],
+            "/home/pi/.local/bin/yggdrasim",
+        )
+
     def test_ssh_tunnel_command_forwards_card_and_gui_ports(self) -> None:
         command = cb._build_ssh_tunnel_command(
             ssh_target="pi@rpi-host",
@@ -840,6 +1042,91 @@ class RemoteRigActionHelperTests(unittest.TestCase):
         self.assertNotIn("-L", command)
         self.assertNotIn("27854:127.0.0.1:27854", command)
 
+    def test_explicit_windows_openssh_path_is_one_argv_element(self) -> None:
+        from unittest.mock import patch
+
+        ssh_path = r"C:\Windows\System32\OpenSSH\ssh.exe"
+        identity_path = r"C:\Users\Lab User\.ssh\id_ed25519"
+        with patch.object(
+            cb.shutil,
+            "which",
+            return_value=ssh_path,
+        ) as which:
+            command = cb._ssh_base_command(
+                ssh_target="operator@lab-host",
+                identity_file=identity_path,
+                ssh_path=f'"{ssh_path}"',
+            )
+
+        self.assertEqual(command[0], ssh_path)
+        self.assertEqual(command[-1], "operator@lab-host")
+        self.assertEqual(command[command.index("-i") + 1], identity_path)
+        which.assert_called_once_with(ssh_path)
+
+    def test_windows_openssh_is_discovered_under_system_root(self) -> None:
+        from unittest.mock import call, patch
+
+        expected = r"C:\Windows\System32\OpenSSH\ssh.exe"
+        with patch.dict(
+            cb.os.environ,
+            {"SystemRoot": r"C:\Windows"},
+            clear=True,
+        ):
+            with patch.object(cb.os, "name", "nt"):
+                with patch.object(
+                    cb.shutil,
+                    "which",
+                    side_effect=[None, expected],
+                ) as which:
+                    resolved = cb._resolve_ssh_binary()
+
+        self.assertEqual(resolved, expected)
+        self.assertEqual(which.call_args_list, [call("ssh"), call(expected)])
+
+    def test_ssh_executable_rejects_control_characters_before_lookup(self) -> None:
+        from unittest.mock import patch
+
+        with patch.object(cb.shutil, "which") as which:
+            with self.assertRaisesRegex(ValueError, "control characters"):
+                cb._resolve_ssh_binary("ssh\n--unexpected")
+
+        which.assert_not_called()
+
+    def test_missing_ssh_client_returns_actionable_result(self) -> None:
+        from unittest.mock import patch
+
+        with patch.object(cb.shutil, "which", return_value=None):
+            with patch.object(cb.subprocess, "run") as run:
+                payload = cb._run_ssh_command(
+                    ssh_target="operator@lab-host",
+                    remote_command="true",
+                )
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["returncode"], 127)
+        self.assertIn("OpenSSH client", payload["stderr"])
+        self.assertIn("SSH executable", payload["stderr"])
+        run.assert_not_called()
+
+    def test_ssh_timeout_returns_structured_failure(self) -> None:
+        from unittest.mock import patch
+
+        with patch.object(cb.shutil, "which", return_value="/usr/bin/ssh"):
+            with patch.object(
+                cb.subprocess,
+                "run",
+                side_effect=cb.subprocess.TimeoutExpired(["ssh"], 3),
+            ):
+                payload = cb._run_ssh_command(
+                    ssh_target="operator@lab-host",
+                    remote_command="true",
+                    timeout_seconds=3,
+                )
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["returncode"], 124)
+        self.assertEqual(payload["stderr"], "SSH command timed out after 3 seconds.")
+
     def test_remote_hil_unit_contains_remote_card_flags(self) -> None:
         unit_text = cb._render_remote_hil_unit(
             remote_workdir="~/YggdraSIM",
@@ -863,6 +1150,78 @@ class RemoteRigActionHelperTests(unittest.TestCase):
             "--gsmtap-capture-path %h/YggdraSIM/state/hil_termshark/live_capture.pcap",
             unit_text,
         )
+
+    def test_remote_hil_unit_forwards_simtrace_reset_knobs(self) -> None:
+        unit_text = cb._render_remote_hil_unit(
+            remote_workdir="~/YggdraSIM",
+            remote_python="~/YggdraSIM/.venv/bin/python",
+            simtrace_reset="auto",
+            uhubctl_binary="~/bin/uhubctl",
+            uhubctl_location="1-1",
+            uhubctl_port="2",
+        )
+        self.assertIn("--simtrace-reset auto", unit_text)
+        self.assertIn("--uhubctl-binary %h/bin/uhubctl", unit_text)
+        self.assertIn("--uhubctl-location 1-1", unit_text)
+        self.assertIn("--uhubctl-port 2", unit_text)
+
+    def test_remote_hil_unit_omits_unset_simtrace_reset_knobs(self) -> None:
+        # Unset leaves the remote supervisor on its own default
+        # (usb-reset) and keeps the unit stable across reinstalls.
+        with mock.patch.dict("os.environ", {}, clear=True):
+            unit_text = cb._render_remote_hil_unit(
+                remote_workdir="~/YggdraSIM",
+                remote_python="~/YggdraSIM/.venv/bin/python",
+            )
+        self.assertNotIn("--simtrace-reset", unit_text)
+        self.assertNotIn("--uhubctl", unit_text)
+
+    def test_remote_hil_unit_rejects_an_unknown_reset_mode(self) -> None:
+        # A bogus mode must never render a unit the remote supervisor
+        # would refuse to start.
+        with mock.patch.dict("os.environ", {}, clear=True):
+            unit_text = cb._render_remote_hil_unit(
+                remote_workdir="~/YggdraSIM",
+                remote_python="~/YggdraSIM/.venv/bin/python",
+                simtrace_reset="power-cycle-please",
+            )
+        self.assertNotIn("--simtrace-reset", unit_text)
+
+    def test_remote_hil_unit_falls_back_to_the_local_environment(self) -> None:
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "YGGDRASIM_HIL_SIMTRACE_RESET": "port-power",
+                "YGGDRASIM_HIL_UHUBCTL_LOCATION": "2-1",
+            },
+            clear=True,
+        ):
+            unit_text = cb._render_remote_hil_unit(
+                remote_workdir="~/YggdraSIM",
+                remote_python="~/YggdraSIM/.venv/bin/python",
+            )
+        self.assertIn("--simtrace-reset port-power", unit_text)
+        self.assertIn("--uhubctl-location 2-1", unit_text)
+
+    def test_remote_hil_unit_accepts_frozen_supervisor_command(self) -> None:
+        unit_text = cb._render_remote_hil_unit(
+            remote_workdir="/home/pi",
+            remote_python="",
+            supervisor_command=[
+                "/home/pi/.local/bin/yggdrasim",
+                "--yggdrasim-internal-entry",
+                "hil-supervisor",
+                "--",
+            ],
+            remote_card_url="http://127.0.0.1:8642/apdu",
+        )
+
+        self.assertIn(
+            "ExecStart=/home/pi/.local/bin/yggdrasim "
+            "--yggdrasim-internal-entry hil-supervisor -- ",
+            unit_text,
+        )
+        self.assertNotIn(" -m Tools.HilBridge.supervisor", unit_text)
 
     def test_sync_token_uses_ssh_stdin_without_returning_raw_token(self) -> None:
         import tempfile
@@ -900,7 +1259,28 @@ class RemoteRigActionHelperTests(unittest.TestCase):
         command, kwargs = calls[0]
         self.assertEqual(command[-2], "pi@rpi-host")
         self.assertIn("cat >", command[-1])
+        self.assertIn("$HOME/.config/yggdrasim/card_bridge/8642.token", command[-1])
+        self.assertNotIn("\\\\", command[-1])
         self.assertEqual(kwargs["input"], "secret-token-value\n")
+
+    def test_frontend_profiles_and_actions_propagate_ssh_executable(self) -> None:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        source_html = (root / "gui_frontend" / "src" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        source_js = (
+            root / "gui_frontend" / "src" / "js" / "core.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('id="cb-rig-ssh-path"', source_html)
+        self.assertIn('"cb-rig-ssh-path"', source_js)
+        self.assertIn(
+            'ssh_path: cbRigPayloadValue(payload, "cb-rig-ssh-path")',
+            source_js,
+        )
+        self.assertGreaterEqual(source_js.count("ssh_path: cfg.ssh_path"), 8)
 
     def test_tunnel_start_reports_immediate_ssh_failure(self) -> None:
         from unittest.mock import patch
@@ -944,6 +1324,23 @@ class RemoteRigActionHelperTests(unittest.TestCase):
             },
         }
         with _EnvSandbox(), ExitStack() as stack:
+            stack.enter_context(
+                patch.object(
+                    cb,
+                    "_remote_hil_dependency_preflight",
+                    return_value={
+                        "ok": True,
+                        "resolved_workdir": "~/YggdraSIM",
+                        "resolved_remote_python": "~/YggdraSIM/.venv/bin/python",
+                        "supervisor_command": [
+                            "~/YggdraSIM/.venv/bin/python",
+                            "-m",
+                            "Tools.HilBridge.supervisor",
+                        ],
+                        "note": "preflight",
+                    },
+                )
+            )
             start_local = stack.enter_context(
                 patch.object(
                     cb,
@@ -1051,6 +1448,7 @@ class RemoteRigActionHelperTests(unittest.TestCase):
             payload = cb._dispatch_remote_rig_start(
                 ActionContext(),
                 ssh_target="pi@rpi-host",
+                ssh_path="/opt/openssh/bin/ssh",
                 reader_index=0,
                 local_card_port=8642,
                 remote_card_port=8642,
@@ -1063,6 +1461,8 @@ class RemoteRigActionHelperTests(unittest.TestCase):
         self.assertEqual(
             [step["name"] for step in payload["steps"]],
             [
+                "rpi_hil_preflight",
+                "rpi_remsim_binary",
                 "pc_bridge_start",
                 "pc_bridge_verify",
                 "pc_bridge_reset",
@@ -1070,17 +1470,25 @@ class RemoteRigActionHelperTests(unittest.TestCase):
                 "rpi_bridge_ping",
                 "token_sync",
                 "rpi_bridge_status",
-                "rpi_remsim_binary",
                 "rpi_hil_service",
                 "rpi_hil_ready",
             ],
         )
         self.assertFalse(tunnel.call_args.kwargs["forward_gui"])
+        self.assertEqual(
+            tunnel.call_args.kwargs["ssh_path"],
+            "/opt/openssh/bin/ssh",
+        )
         self.assertEqual(sync.call_args.kwargs["local_token_file"], "/tmp/bridge.token")
+        self.assertEqual(sync.call_args.kwargs["ssh_path"], "/opt/openssh/bin/ssh")
         self.assertEqual(install.call_args.kwargs["remote_workdir"], "~/YggdraSIM")
         self.assertEqual(
+            install.call_args.kwargs["ssh_path"],
+            "/opt/openssh/bin/ssh",
+        )
+        self.assertEqual(
             install.call_args.kwargs["remote_python"],
-            "~/YggdraSIM/python/bin/python",
+            "~/YggdraSIM/.venv/bin/python",
         )
         self.assertEqual(
             install.call_args.kwargs["remsim_binary"],
@@ -1104,6 +1512,7 @@ class RemoteRigActionHelperTests(unittest.TestCase):
         def _remote_service(*_args, **kwargs):
             calls.append("remote")
             self.assertEqual(kwargs["action"], "stop")
+            self.assertEqual(kwargs["ssh_path"], "/opt/openssh/bin/ssh")
             self.assertTrue(kwargs["confirm"])
             return {"ok": True, "note": "remote stopped"}
 
@@ -1119,9 +1528,10 @@ class RemoteRigActionHelperTests(unittest.TestCase):
             cb._write_remote_rig_state({
                 "ssh_target": "pi@rpi-host",
                 "identity_file": "/tmp/key",
+                "ssh_path": "/opt/openssh/bin/ssh",
                 "local_gui_port": 27854,
                 "remote_workdir": "~/YggdraSIM",
-                "remote_python": "~/YggdraSIM/python/bin/python",
+                "remote_python": "~/YggdraSIM/.venv/bin/python",
                 "remote_gsmtap_capture_path": "~/YggdraSIM/state/hil_termshark/live_capture.pcap",
             })
             stack.enter_context(patch.object(cb, "_dispatch_remote_service_control", side_effect=_remote_service))
@@ -1150,6 +1560,27 @@ class RemoteRigActionHelperTests(unittest.TestCase):
             "state": {"local_card_bridge_running": True},
         }
         with _EnvSandbox(), ExitStack() as stack:
+            stack.enter_context(
+                patch.object(
+                    cb,
+                    "_remote_hil_dependency_preflight",
+                    return_value={
+                        "ok": True,
+                        "resolved_workdir": "~/YggdraSIM",
+                        "resolved_remote_python": "~/YggdraSIM/.venv/bin/python",
+                    },
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    cb,
+                    "_remote_remsim_binary_status",
+                    return_value={
+                        "ok": True,
+                        "resolved_remsim_binary": "/usr/bin/osmo-remsim-client-st2",
+                    },
+                )
+            )
             stack.enter_context(
                 patch.object(
                     cb,
@@ -1217,6 +1648,17 @@ class RemoteRigActionHelperTests(unittest.TestCase):
             },
         }
         with _EnvSandbox(), ExitStack() as stack:
+            stack.enter_context(
+                patch.object(
+                    cb,
+                    "_remote_hil_dependency_preflight",
+                    return_value={
+                        "ok": True,
+                        "resolved_workdir": "~/YggdraSIM",
+                        "resolved_remote_python": "~/YggdraSIM/.venv/bin/python",
+                    },
+                )
+            )
             stack.enter_context(
                 patch.object(
                     cb,

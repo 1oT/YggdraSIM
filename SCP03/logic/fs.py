@@ -254,7 +254,7 @@ class FileSystemController :
 
         if os .path .exists (Config .FIDS_FILE ):
             try :
-                with open (Config .FIDS_FILE ,'r')as f :
+                with open (Config .FIDS_FILE ,'r',encoding ="utf-8")as f :
                     for line in f :
                         stripped =line .strip ()
                         if not stripped or stripped .startswith ('#'):continue 
@@ -304,7 +304,7 @@ class FileSystemController :
         roots =[]
         stack =[(-1 ,roots )]
         if not os .path .exists (Config .FIDS_FILE ):return roots 
-        with open (Config .FIDS_FILE ,'r')as f :
+        with open (Config .FIDS_FILE ,'r',encoding ="utf-8")as f :
             for line in f :
                 expanded =line .expandtabs (4 )
                 stripped =expanded .strip ()
@@ -613,7 +613,11 @@ class FileSystemController :
 
         label_text =""
         if isinstance (label_value ,(bytes ,bytearray ,memoryview )):
-            decoded_label =bytes (label_value ).decode ('ascii','ignore')
+            raw_label =bytes (label_value )
+            try :
+                decoded_label =raw_label .decode ('ascii')
+            except UnicodeDecodeError :
+                decoded_label =f"HEX:{raw_label.hex().upper()}"
             label_text =self ._normalize_ef_dir_label (decoded_label )
 
         aliases =self ._derive_ef_dir_aliases (aid_hex ,label_text )
@@ -1238,6 +1242,10 @@ class FileSystemController :
     resolve :bool =True ,
     restore_commands :Optional [List [str ]]=None ,
     ):
+        self .current_fcp ={
+        'template':'Unknown',
+        'raw':bytes (data or b"").hex ().upper (),
+        }
         try :
             parsed =TlvParser .parse (data )
 
@@ -1329,6 +1337,22 @@ class FileSystemController :
                                     )
                                 self .current_fcp ['rules']=rules 
 
+                if not sec :
+                    # TS 102 221 allows three security-attribute tags: '8B'
+                    # referenced to expanded format (decoded above), '8C'
+                    # compact, and 'AB' expanded. The latter two are not
+                    # decoded here, but report their presence so a blank
+                    # access-rule panel is not read as "no rules apply".
+                    for alt_tag ,alt_format in ((0x8C ,"compact"),(0xAB ,"expanded")):
+                        alt_value =fcp_body .get (alt_tag )
+                        if not alt_value :
+                            continue
+                        self .current_fcp ['security']=alt_value .hex ().upper ()
+                        self .current_fcp ['security_format']=alt_format
+                        self .current_fcp ['rules']=(
+                        f"Present in {alt_format} format (tag {alt_tag:02X}); not decoded."
+                        )
+                        break
 
             elif 0x6F in parsed :
                 fci_body =parsed [0x6F ]
@@ -1338,8 +1362,8 @@ class FileSystemController :
                 if 0x73 in fci_body :self .current_fcp ['sd_data']=fci_body [0x73 ].hex ().upper ()
             else :
                 self .current_fcp ={'template':'Unknown','raw':data .hex ().upper ()}
-        except Exception :
-            pass 
+        except Exception as error :
+            self .current_fcp ['parse_error']=str (error )
 
     def _resolve_arr_rules (
     self ,
@@ -2210,7 +2234,7 @@ class FileSystemController :
                 finally :
                     self ._report_scan_progress_cb =None 
             clean_data =self ._sanitize_yaml (report_data )
-            with open (filename ,'w')as outfile :yaml .dump (clean_data ,outfile ,default_flow_style =False ,sort_keys =False )
+            with open (filename ,'w',encoding ="utf-8")as outfile :yaml .dump (clean_data ,outfile ,default_flow_style =False ,sort_keys =False )
             print (f"{Config.Colors.GREEN}[+] Report saved to {filename}{Config.Colors.ENDC}")
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Report Generation Failed: {e}{Config.Colors.ENDC}")
         finally :self .tp .transmit ("00A40004023F00",silent =True );self .current_fid ="3F00"
@@ -2304,7 +2328,7 @@ class FileSystemController :
             struct =self .current_fcp .get ('structure','Unknown')
             content_file =file_path_base .with_suffix ('.txt')
 
-            with open (content_file ,'w')as f :
+            with open (content_file ,'w',encoding ="utf-8")as f :
                 f .write ("--- File Metadata ---\n")
                 f .write (f"FID: {fid}\n")
                 f .write (f"Type: {self.current_fcp.get('type')} ({struct})\n\n")
@@ -2526,15 +2550,47 @@ class FileSystemController :
 
         self .tp .transmit ("8076000000")
 
+    @staticmethod
+    def _build_case3_apdu (header_hex :str ,data_hex :str ,label :str )->str :
+        """Build a short or extended ISO/IEC 7816 case-3 command APDU."""
+        header =str (header_hex or "").strip ().replace (" ","").upper ()
+        if len (header )!=8 :
+            raise ValueError (f"{label} APDU header must be exactly four bytes.")
+        try :
+            bytes .fromhex (header )
+        except ValueError as error :
+            raise ValueError (f"{label} APDU header contains invalid hexadecimal data.")from error
+
+        data =str (data_hex or "").strip ().replace (" ","").replace (":","")
+        if data .lower ().startswith ("0x"):
+            data =data [2 :]
+        if len (data )==0 :
+            raise ValueError (f"{label} data cannot be empty.")
+        if len (data )%2 !=0 :
+            raise ValueError (f"{label} data must contain an even number of hex digits.")
+        try :
+            data_bytes =bytes .fromhex (data )
+        except ValueError as error :
+            raise ValueError (f"{label} data contains invalid hexadecimal data.")from error
+
+        data_len =len (data_bytes )
+        if data_len <=0xFF :
+            lc =f"{data_len:02X}"
+        elif data_len <=0xFFFF :
+            lc =f"00{data_len:04X}"
+        else :
+            raise ValueError (f"{label} data exceeds the 65535-byte APDU limit.")
+        return f"{header}{lc}{data_bytes.hex().upper()}"
+
     def search_record (self ,search_hex :str )->None :
         """TS 102 221: Search Record (00A2)."""
 
-        apdu =f"00A20104{len(search_hex)//2:02X}{search_hex}"
+        apdu =self ._build_case3_apdu ("00A20104",search_hex ,"SEARCH RECORD")
         self .tp .transmit (apdu )
 
     def create_file (self ,data_hex :str )->None :
         """TS 102 222: Create File (00E0)."""
-        apdu =f"00E00000{len(data_hex)//2:02X}{data_hex}"
+        apdu =self ._build_case3_apdu ("00E00000",data_hex ,"CREATE FILE")
         self .tp .transmit (apdu )
 
     def delete_file (self ,fid :str )->None :
@@ -2554,5 +2610,5 @@ class FileSystemController :
 
     def resize_file (self ,data_hex :str )->None :
         """TS 102 222: Resize File (80D4)."""
-        apdu =f"80D40000{len(data_hex)//2:02X}{data_hex}"
+        apdu =self ._build_case3_apdu ("80D40000",data_hex ,"RESIZE FILE")
         self .tp .transmit (apdu )

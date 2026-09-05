@@ -7,7 +7,6 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-
 <div class="oneot-only oneot-partner-strip" markdown="0">
   <span class="oneot-partner-strip__badge">Crafted at</span>
   <span class="oneot-wordmark" aria-label="1oT">
@@ -42,7 +41,6 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
     </div>
   </div>
 </div>
-
 
 YggdraSIM is a Python toolkit for secure-element research, eUICC analysis,
 SIM and eSIM management, OTA payload work, SCP11 relay and local flows, HIL
@@ -147,7 +145,7 @@ exercised without switching projects.
 | `Tools/ApduFuzz/` | Opt-in eUICC APDU mutation fuzzer (allow-listed, hard-gated) | [APDU Fuzzer](subsystems/apdu-fuzzer.md) |
 | `Tools/EumDiag/` | EUM / SM-DP+ session-key injection + Wireshark Lua dissector | [EUM Diagnostics](subsystems/eum-diagnostics.md) |
 | `Tools/SuciTool/` | SUCI key management shell | [SUCI Tool](subsystems/suci-tool.md) |
-| `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G core stubs (AUSF / AAnF) + BYO-Open5GS bridge | [Subsystems index](subsystems/index.md) |
+| `Tools/YggdraCore/` | In-process 5G core stubs (AUSF / AAnF) + BYO-Open5GS bridge | [Subsystems index](subsystems/index.md) |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center (`--gui` / `--web-server`) with live APDU dock and remote-rig controls | [Universal GUI Command Center](subsystems/gui-command-center.md) |
 
 ## What this site covers

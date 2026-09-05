@@ -33,7 +33,6 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
 
 
 _REFERENCE_PROFILE = Path("Tools/ProfilePackage/profile/reference_test_profile.txt")
@@ -367,9 +366,12 @@ class DecodedEditBundleWiringTests(unittest.TestCase):
             "async function saipClosePackage",
         ):
             start = self.app_js.index(symbol)
+            end = self.app_js.find("\n  async function ", start + len(symbol))
+            if end < 0:
+                end = len(self.app_js)
             self.assertIn(
                 "saipCancelPendingAutoApplies(pkg)",
-                self.app_js[start:start + 500],
+                self.app_js[start:end],
             )
 
     def test_file_detail_general_panel_labels_file_data(self) -> None:
@@ -559,7 +561,7 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
         # Two-tab world: "Decoded view" (typed editor + hex) and "JSON".
         # The legacy "PE-<Type> Editor" / "ASN.1 Value Notation" / "block
         # tree" labels were retired so YggdraSIM's surface text is its
-        # own and not a Comprion ePC echo.
+        # own and not copied from a third-party profile editor.
         self.assertIn("Typed PE layout and decoded-field editors", self.app_js)
         self.assertIn(
             "Flat JSON projection of the decoded PE document",
@@ -638,10 +640,14 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
         self.assertIn('strictText.textContent = "Strict"', self.app_js)
 
     def test_tokens_pane_placeholders_and_apply_hint(self) -> None:
-        # "Variable" was renamed to "Token" in the SAIP rebrand —
-        # so this checks the current token-editor copy.
+        # The pane distinguishes reusable token definitions from the
+        # variables bound into the active package.
         self.assertIn("8988201234567890123 (BCD) or raw hex", self.app_js)
-        self.assertIn("Register or update this token's value", self.app_js)
+        self.assertIn('bindTitle.textContent = "Set a variable"', self.app_js)
+        self.assertIn(
+            'apply.title = "Set this variable for the active session."',
+            self.app_js,
+        )
         self.assertIn('Reset all (" + overrideNames.length + ")', self.app_js)
 
     def test_variables_state_chips_are_capitalized(self) -> None:
@@ -661,7 +667,7 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
 
     def test_variable_modal_chrome(self) -> None:
         # "Variable editor" was renamed to "Token editor" so the surface
-        # text is YggdraSIM's own and not a Comprion ePC echo.
+        # text is YggdraSIM's own and not copied from a third-party editor.
         self.assertIn("Close token editor (same as Esc).", self.app_js)
         self.assertIn("overrideWord", self.app_js)
         self.assertIn("placeholderWord", self.app_js)

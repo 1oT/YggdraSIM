@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Sidebar nav pulse when the open subsystem has an in-flight action. */
 #command-center-nav .subsystem-entry.is-busy::after {
   content: "";
@@ -22,4 +23,3 @@
   0%, 100% { transform: translateY(-50%) scale(1);   opacity: 1; }
   50%      { transform: translateY(-50%) scale(1.4); opacity: 0.55; }
 }
-

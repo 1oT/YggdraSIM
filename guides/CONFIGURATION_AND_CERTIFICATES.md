@@ -37,7 +37,7 @@ read next.
 | your own SCP03 keyset / KVN / AID / ADM PIN                                   | [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-parameters)             |
 | OTA / SCP80 secrets keyed per ICCID                                           | [§ SCP80 OTA parameters](#scp80-ota-parameters)                                         |
 | SUCI Profile A / B home-network keys for the simulated USIM                   | [§ SUCI key files](#suci-key-files)                                                     |
-| K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber *(post-v1 staging)* | [§ YggdraCore subscription material](#yggdracore-subscription-material)                 |
+| K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber | [§ YggdraCore subscription material](#yggdracore-subscription-material)                 |
 | ShS-ENC / ShS-MAC / DEK from an EUM database for a failing PCAP               | [§ EUM session-key bundles](#eum-session-key-bundles)                                   |
 | an SCP03 / SCP11c session you want re-decoded from a saved pcap               | [§ HIL pcap keybags](#hil-pcap-keybags)                                                 |
 | an `ADD-EIM` / profile-download trigger JSON package                          | [§ eIM packages and hotfolder](#eim-packages-and-hotfolder)                             |
@@ -269,7 +269,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
 
 ```json
 {
-  "eid": "89049032123451234512345678901234",
+  "eid": "89049032123451234512345678901235",
   "atr_hex": "3B9F96801FC78031A073BE21136743200718000001A5",
   "default_dp_address": "rsp.example.com",
   "root_ci_pkid_hex": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
@@ -311,7 +311,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
 
 1. `eid` is the 32-hex-digit eUICC identifier (TS 23.003 §10). Choose a
    namespace your lab does not collide with. The shipped default
-   `89049032123451234512345678901234` uses the SGP.22 Annex A.2 test
+   `89049032123451234512345678901235` uses the SGP.22 Annex A.2 test
    EID prefix `89049032` and a valid Luhn check digit. Replace it before
    any production-adjacent run.
 2. `atr_hex` is replayed verbatim by the simulated reader. Match the
@@ -606,8 +606,6 @@ yggdrasim-suci-tool --cmd "USE keys/operator-alpha.key; STATUS; DUMP; EXIT"
 
 ## YggdraCore subscription material
 
-> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
-
 **Consumer.** The in-process AUSF / AAnF stubs under `Tools/YggdraCore/`.
 
 **Storage.** Process-local
@@ -819,13 +817,16 @@ gate is missing or when the card identifier is not in the allow-list.
 
 **Loading model.**
 
-1. Plugins load by default since the loader-default flip; opt out with
-   `YGGDRASIM_ALLOW_PLUGINS=0` or hard-lock with
-   `YGGDRASIM_DISALLOW_PLUGINS=1` (intended for attestation / CI /
-   air-gapped builds).
-2. Each plugin lives in its own subdirectory with a manifest. See
+1. Plugins are refused by default. Explicitly opt in with
+   `YGGDRASIM_ALLOW_PLUGINS=1`; `YGGDRASIM_DISALLOW_PLUGINS=1` is a
+   hard-lock that wins even when the allow flag is also set (intended for
+   attestation / CI / air-gapped builds).
+2. The loader accepts a single `.py` file directly under `plugins/` or a
+   package subdirectory containing `__init__.py`. Each loaded module must
+   expose `register_plugins(manager)`; no plugin manifest is currently
+   required. See
    [`site-docs/how-to/write-a-plugin.md`](../site-docs/how-to/write-a-plugin.md)
-   for the manifest schema and lifecycle.
+   for the loader contract and an example.
 3. Plugins are imported at launcher startup. Changing the env flag in
    a running process does **not** retroactively load or unload plugins.
 
@@ -922,7 +923,10 @@ The runtime root is the writable parent of `plugins/`, `state/`, and
    `~/.yggdrasim/env_overrides.json` so the override survives across
    runs without creating a chicken-and-egg with the resolver).
 2. Source checkouts: the repository root.
-3. Frozen builds: a sibling directory called `YggdraSIM-data` next to
+3. Installed wheels: the platform per-user data directory
+   (`%LOCALAPPDATA%\YggdraSIM`, `~/Library/Application Support/YggdraSIM`,
+   or `$XDG_DATA_HOME/YggdraSIM`/`~/.local/share/YggdraSIM`).
+4. Frozen builds: a sibling directory called `YggdraSIM-data` next to
    the executable, falling back to `~/YggdraSIM-data`.
 
 **Why override.**
@@ -966,7 +970,7 @@ non-test environment.
 6. **SUCI keys.** Author per home-network. Never reuse a Profile A / B
    key file across operators.
 7. **YggdraCore subscribers.** Provision through `upsert(...)` or the
-   BYO Open5GS bridge. Stub state is intentionally non-persistent. (post-v1 staging — not part of this release.)
+   BYO Open5GS bridge. Stub state is intentionally non-persistent.
 8. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
    chmod 0600, point `YGGDRASIM_EUM_SESSION_KEYS` at the file.
 9. **HIL keybags.** Drop next to the pcap; auto-discovery picks them
@@ -990,7 +994,7 @@ non-test environment.
 | Inventory crypto envelope           | [`yggdrasim_common/inventory_crypto.py`](../yggdrasim_common/inventory_crypto.py)           |
 | EUM session-key contract            | [`Tools/EumDiag/session_keys.py`](../Tools/EumDiag/session_keys.py)                         |
 | HIL keybag schema                   | [`Tools/HilBridge/scp_keybag_export.py`](../Tools/HilBridge/scp_keybag_export.py)           |
-| YggdraCore subscriber store *(post-v1 staging)* | [`Tools/YggdraCore/subscription_store.py`](../Tools/YggdraCore/subscription_store.py)       |
+| YggdraCore subscriber store | [`Tools/YggdraCore/subscription_store.py`](../Tools/YggdraCore/subscription_store.py)       |
 | Runtime root resolution             | [`yggdrasim_common/runtime_paths.py`](../yggdrasim_common/runtime_paths.py)                 |
 | AddEim identity sheet               | [`Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md`](../Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md) |
 | HSM seam (planned)                  | not part of this release                                          |

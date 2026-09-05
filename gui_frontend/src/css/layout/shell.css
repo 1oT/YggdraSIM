@@ -3,23 +3,27 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* Layout shell ----------------------------------------------------------- */
 
 .app-shell {
   display: grid;
-  grid-template-rows: 52px 1fr var(--log-dock-height, 180px) 28px;
-  grid-template-columns: 260px 1fr;
+  grid-template-rows: 52px minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   grid-template-areas:
     "topbar    topbar"
     "sidebar   main"
     "sidebar   logdock"
     "statusbar statusbar";
   height: 100vh;
-  min-width: 860px;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .app-shell[data-log-collapsed="true"] {
-  grid-template-rows: 52px 1fr 28px 28px;
+  grid-template-rows: 52px minmax(0, 1fr) 28px 28px;
 }
 
 /* SA-G8: collapsible Command Center sidebar. The 260px column folds
@@ -48,11 +52,11 @@
    bar must NOT also remove the operator's only handle to the
    sidebar. */
 .app-shell[data-topbar-collapsed="true"] {
-  grid-template-rows: 30px 1fr var(--log-dock-height, 180px) 28px;
+  grid-template-rows: 30px minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
 }
 
 .app-shell[data-topbar-collapsed="true"][data-log-collapsed="true"] {
-  grid-template-rows: 30px 1fr 28px 28px;
+  grid-template-rows: 30px minmax(0, 1fr) 28px 28px;
 }
 
 .app-shell[data-topbar-collapsed="true"] .topbar {
@@ -88,13 +92,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
   margin-left: auto;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   cursor: pointer;
   transition: background-color var(--transition-fast),
     color var(--transition-fast),
@@ -102,19 +107,19 @@
 }
 
 .app-close-button {
-  margin-left: 4px;
+  margin-left: 2px;
 }
 
 .topbar-collapse-toggle:hover,
 .app-close-button:hover {
-  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+  background: var(--surface-hover);
   color: var(--fg);
   border-color: var(--accent-soft);
 }
 
 .app-close-button:hover {
-  color: var(--error, #bf616a);
-  border-color: var(--error, #bf616a);
+  color: var(--error);
+  border-color: var(--error);
 }
 
 .topbar-collapse-toggle:focus-visible,
@@ -136,11 +141,12 @@
   justify-content: center;
   width: 28px;
   height: 28px;
+  flex: 0 0 auto;
   margin-right: 4px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   cursor: pointer;
   transition: background-color var(--transition-fast),
     color var(--transition-fast),
@@ -148,7 +154,7 @@
 }
 
 .sidebar-collapse-toggle:hover {
-  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+  background: var(--surface-hover);
   color: var(--fg);
   border-color: var(--accent-soft);
 }
@@ -176,6 +182,8 @@
   align-items: center;
   gap: 18px;
   padding: 0 20px;
+  min-width: 0;
+  min-height: 0;
   z-index: 3;
 }
 
@@ -195,6 +203,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 0 0 auto;
+  min-width: 0;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -356,7 +366,7 @@
 }
 
 .topbar-card-bridge[data-state="running"] {
-  border-color: rgba(163, 190, 140, 0.45);
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
   background: var(--ok-soft);
   color: var(--ok);
 }
@@ -367,7 +377,7 @@
 }
 
 .topbar-card-bridge[data-state="error"] {
-  border-color: rgba(191, 97, 106, 0.42);
+  border-color: color-mix(in oklab, var(--fail) 42%, transparent);
   background: var(--fail-soft);
   color: var(--fail);
 }
@@ -386,7 +396,7 @@
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
-  min-height: 30px;
+  min-height: 34px;
   padding: 3px 5px 3px 9px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -394,8 +404,8 @@
 }
 
 .topbar-backend-option {
-  min-height: 22px;
-  padding: 3px 8px;
+  min-height: 28px;
+  padding: 4px 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -474,5 +484,74 @@
   .topbar-control-label,
   .topbar-card-bridge-label {
     display: none;
+  }
+}
+
+/* Compact desktop windows should keep every high-value control reachable
+   instead of forcing an application-wide minimum width. The runtime-control
+   strip can scroll horizontally when the window is narrower than its
+   contents; the sidebar becomes an overlay at tablet widths so workbenches
+   retain a usable canvas. */
+@media (max-width: 900px) {
+  .topbar {
+    gap: 10px;
+    padding-inline: 10px;
+  }
+
+  .topbar-suite-health,
+  .badge-api {
+    display: none;
+  }
+
+  .status-cluster {
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding-block: 3px;
+    scrollbar-width: none;
+  }
+
+  .status-cluster::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell,
+  .app-shell[data-sidebar-collapsed="true"] {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: fixed;
+    z-index: 6;
+    inset: 52px auto 28px 0;
+    width: min(260px, 88vw);
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  .app-shell[data-topbar-collapsed="true"] .sidebar {
+    top: 30px;
+  }
+
+  .brand-name,
+  .topbar-card-bridge {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar {
+    gap: 6px;
+    padding-inline: 6px;
+  }
+
+  .brand-mark {
+    width: 28px;
+    height: 28px;
+  }
+
+  .topbar-readers {
+    min-width: 140px;
   }
 }

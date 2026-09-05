@@ -3,6 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
 /* -- Compact workbench (SCP80 / eIM / eSIM Management / HIL / …) ---------------
    Shared chrome for every subsystem that isn't SCP03 (workbench v2) or
    SAIP (package workbench). Mirrors the Filesystem/Applications visual
@@ -104,10 +105,10 @@
   min-height: 0;
   gap: 8px;
   padding: 8px;
-  border-color: var(--border-soft, var(--border));
-  border-radius: var(--radius-md, 8px);
+  border-color: var(--border-soft);
+  border-radius: var(--radius-md);
   box-shadow: none;
-  background: var(--surface, rgba(255, 255, 255, 0.02));
+  background: var(--surface);
 }
 
 .main--module-workbench .cc-workbench.cc-workbench--compact {
@@ -173,7 +174,7 @@
   background: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   font: inherit;
   font-size: 13px;
   outline: none;
@@ -197,8 +198,8 @@
 .cc-esim-module-tool {
   min-height: 29px;
   padding: 5px 9px;
-  border: 1px solid var(--border-soft, var(--border));
-  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   color: var(--fg);
   cursor: pointer;
@@ -209,7 +210,7 @@
 
 .cc-esim-module-tool:hover:not(:disabled) {
   background: var(--bg-hover);
-  border-color: var(--border-strong, var(--border));
+  border-color: var(--border-strong);
 }
 
 .cc-esim-module-tool:disabled {
@@ -236,7 +237,7 @@
   padding: 9px 12px 8px;
   gap: 10px;
   background: transparent;
-  border-bottom-color: var(--border-soft, var(--border));
+  border-bottom-color: var(--border-soft);
 }
 
 .main--module-workbench .cc-compact-title h2 {
@@ -270,7 +271,7 @@
   flex-wrap: wrap;
   gap: 2px;
   padding: 4px 6px 0;
-  background: color-mix(in oklab, var(--bg-elev-2, var(--bg-elev)), transparent 10%);
+  background: color-mix(in oklab, var(--bg-elev-2), transparent 10%);
   border-bottom: 1px solid var(--border);
 }
 
@@ -290,8 +291,8 @@
   cursor: pointer;
   border-radius: 6px 6px 0 0;
   margin-bottom: -1px;
-  transition: color var(--transition-fast, 120ms ease),
-              background var(--transition-fast, 120ms ease);
+  transition: color var(--transition-fast),
+              background var(--transition-fast);
   font-family: inherit;
 }
 
@@ -312,7 +313,7 @@
 }
 
 .cc-compact-tab-count {
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 500;
   color: var(--fg-dim);
@@ -339,7 +340,7 @@
   max-width: 760px;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius-md);
   background: var(--bg-elev);
 }
 
@@ -366,7 +367,7 @@
   color: var(--fg);
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   text-align: left;
   cursor: pointer;
 }
@@ -410,8 +411,8 @@
   color: var(--fg);
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -462,13 +463,13 @@
   color: var(--fg);
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   font: inherit;
   font-size: 11.5px;
   cursor: pointer;
-  transition: background-color var(--transition-fast, 120ms ease),
-    border-color var(--transition-fast, 120ms ease),
-    color var(--transition-fast, 120ms ease);
+  transition: background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .cc-hil-action-btn:hover {
@@ -489,10 +490,26 @@
 
 .cc-hil-action-icon {
   flex: 0 0 auto;
-  width: 14px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in oklab, currentColor, transparent 58%);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, currentColor, transparent 92%);
   color: currentColor;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.cc-hil-action-icon .cc-action-svg {
+  width: 12px;
+  height: 12px;
 }
 
 .cc-hil-action-label {
@@ -565,7 +582,7 @@
   max-width: 360px;
   padding: 3px 7px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   background: var(--bg);
   font-size: 11px;
 }
@@ -582,7 +599,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
 }
 
 .cc-hil-dissector-grid {
@@ -635,6 +652,9 @@
   align-items: center;
   gap: 5px;
   width: 100%;
+  box-sizing: border-box;
+  height: 26px;
+  min-height: 26px;
   padding: 5px 10px;
   color: var(--fg-dim);
   background: var(--bg);
@@ -664,7 +684,7 @@
 .cc-hil-context-caret {
   flex: 0 0 10px;
   color: var(--accent);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1;
 }
@@ -694,6 +714,9 @@
   align-items: center;
   gap: 8px;
   width: 100%;
+  box-sizing: border-box;
+  height: 26px;
+  min-height: 26px;
   padding: 5px 10px;
   border: none;
   border-left: 3px solid transparent;
@@ -727,7 +750,7 @@
 .cc-hil-packet-proto,
 .cc-hil-packet-badge {
   color: var(--fg-dim);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 10.5px;
   white-space: nowrap;
   overflow: hidden;
@@ -744,7 +767,7 @@
 .cc-hil-packet-badge {
   padding: 1px 5px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   background: var(--bg);
 }
 
@@ -784,7 +807,7 @@
   overflow: auto;
   color: var(--fg);
   background: var(--bg-elev);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.45;
   white-space: pre;
@@ -818,7 +841,7 @@
   color: var(--fg);
   background: color-mix(in oklab, var(--bg), var(--bg-elev) 28%);
   border-bottom: 1px solid color-mix(in oklab, var(--border), transparent 22%);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.35;
   cursor: pointer;
@@ -836,7 +859,7 @@
   padding: 8px 10px 10px 26px;
   color: var(--fg);
   background: var(--bg-elev);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.45;
   white-space: pre;
@@ -914,6 +937,28 @@
   background: var(--bg);
 }
 
+.cc-hil-modem-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg), var(--bg-elev) 42%);
+}
+
+.cc-hil-modem-actions .cc-hil-action-btn {
+  flex: 0 0 auto;
+}
+
+.cc-hil-modem-standard {
+  flex: 0 1 260px;
+  min-width: 180px;
+  max-width: 320px;
+  height: 30px;
+  font-size: 11.5px;
+}
+
 .cc-hil-modem-command {
   flex: 1 1 360px;
   min-width: 220px;
@@ -924,8 +969,8 @@
   color: var(--fg);
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
   font-size: 11.5px;
 }
 
@@ -984,7 +1029,7 @@
   min-height: 0;
   overflow: auto;
   padding: 4px 0;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 

@@ -15,7 +15,7 @@
 .saip-val-dock {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--surface-alt);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -47,14 +47,14 @@
 }
 
 .saip-val-dock-header:hover {
-  background: var(--surface, rgba(255, 255, 255, 0.04));
+  background: var(--surface);
 }
 
 .saip-val-dock-caret {
   width: 14px;
   text-align: center;
   font-size: 10px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   flex-shrink: 0;
 }
 
@@ -69,7 +69,7 @@
 }
 
 .saip-val-score.is-err {
-  color: #ff6680;
+  color: var(--fail);
 }
 
 .saip-val-dock-body {
@@ -98,7 +98,7 @@
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   margin-right: 4px;
 }
 
@@ -110,8 +110,8 @@
   padding: 3px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--surface, rgba(255, 255, 255, 0.03));
-  color: var(--fg-muted, #888);
+  background: var(--surface);
+  color: var(--fg-muted);
   cursor: pointer;
   transition: opacity 0.12s ease, background-color 0.12s ease;
   opacity: 0.4;
@@ -122,15 +122,15 @@
 }
 
 .saip-val-filter--fail.is-on {
-  background: rgba(255, 102, 128, 0.16);
-  color: #ff6680;
-  border-color: rgba(255, 102, 128, 0.5);
+  background: var(--fail-soft);
+  color: var(--fail);
+  border-color: color-mix(in oklab, var(--fail) 50%, transparent);
 }
 
 .saip-val-filter--warn.is-on {
-  background: rgba(255, 200, 80, 0.16);
-  color: #ffc850;
-  border-color: rgba(255, 200, 80, 0.5);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
 }
 
 .saip-val-filter--info.is-on {
@@ -140,9 +140,9 @@
 }
 
 .saip-val-filter--pass.is-on {
-  background: rgba(120, 220, 130, 0.16);
-  color: #78dc82;
-  border-color: rgba(120, 220, 130, 0.5);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 50%, transparent);
 }
 
 .saip-val-jump-col {
@@ -172,15 +172,15 @@
 }
 
 .saip-val-sev--fail {
-  background: rgba(255, 102, 128, 0.18);
-  color: #ff6680;
-  border-color: rgba(255, 102, 128, 0.5);
+  background: var(--fail-soft);
+  color: var(--fail);
+  border-color: color-mix(in oklab, var(--fail) 50%, transparent);
 }
 
 .saip-val-sev--warn {
-  background: rgba(255, 200, 80, 0.18);
-  color: #ffc850;
-  border-color: rgba(255, 200, 80, 0.5);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
 }
 
 .saip-val-sev--info {
@@ -190,14 +190,14 @@
 }
 
 .saip-val-sev--pass {
-  background: rgba(120, 220, 130, 0.18);
-  color: #78dc82;
-  border-color: rgba(120, 220, 130, 0.5);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 50%, transparent);
 }
 
 .saip-val-path {
   font-size: 10px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   word-break: break-all;
 }
 
@@ -210,11 +210,13 @@
   align-items: center;
   justify-content: center;
   margin-left: 4px;
-  padding: 0 3px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 5px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 3px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 11px;
   cursor: pointer;
   opacity: 0;
@@ -222,8 +224,15 @@
   vertical-align: middle;
 }
 
-.saip-val-code-cell:hover .saip-val-copy-btn {
+.saip-val-code-cell:hover .saip-val-copy-btn,
+.saip-val-code-cell:focus-within .saip-val-copy-btn {
   opacity: 1;
+}
+
+.saip-val-copy-btn:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .saip-val-msg-cell--expandable {
@@ -235,17 +244,17 @@
 }
 
 .saip-val-expand-caret {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   font-size: 10px;
   user-select: none;
 }
 
 .saip-val-row--expanded > td {
-  background: var(--bg-card, var(--bg-secondary));
+  background: var(--bg-card);
 }
 
 .saip-val-detail-row {
-  background: var(--bg-card, var(--bg-secondary));
+  background: var(--bg-card);
 }
 
 .saip-val-detail-row--hidden {
@@ -264,12 +273,12 @@
 }
 
 .saip-val-evidence {
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-val-rec-label {
   font-weight: 600;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
 }
 
 .saip-val-evidence code {
@@ -280,7 +289,7 @@
 .saip-val-clean {
   margin: 8px 0 0;
   font-size: 12px;
-  color: #78dc82;
+  color: var(--ok);
   font-style: italic;
 }
 
@@ -301,23 +310,23 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--surface-raised, #252830);
+  background: var(--surface-raised);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   padding: 5px 8px;
   text-align: left;
   font-size: 11px;
   font-weight: 600;
-  color: var(--fg, #cdd6f4);
+  color: var(--fg);
   letter-spacing: 0.04em;
 }
 
 .saip-val-domain-header:hover th {
-  background: var(--surface-hover, #2a2d3a);
+  background: var(--surface-hover);
 }
 
 .saip-val-domain-header:focus-visible th {
-  outline: 2px solid var(--accent, #89b4fa);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
@@ -325,13 +334,13 @@
   display: inline-block;
   width: 14px;
   font-size: 10px;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   margin-right: 4px;
   transition: transform 0.15s;
 }
 
 .saip-val-domain-label {
-  font-family: var(--mono, monospace);
+  font-family: var(--mono);
   font-size: 11px;
   margin-right: 8px;
 }
@@ -350,12 +359,12 @@
 }
 
 .saip-val-col-header th {
-  background: var(--surface, #1e2128);
+  background: var(--surface);
   text-align: left;
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-muted, #888);
+  color: var(--fg-muted);
   padding: 4px 8px;
   border-bottom: 1px solid var(--border);
 }

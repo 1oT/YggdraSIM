@@ -45,14 +45,17 @@ class Asn1TlvDecodeTests(unittest.TestCase):
         self.assertEqual(root["tag"], "BF22")
         self.assertEqual(root["items"][0]["tag"], "81")
 
-    def test_sgp32_bf51_uses_eim_package_name(self) -> None:
+    def test_sgp32_bf51_uses_euicc_package_name(self) -> None:
         decoded = decode_bytes(bytes.fromhex("BF5103800101"))
 
+        # BF51 is the eUICC package (EuiccPackageRequest/Result);
+        # the eIM packages are BF4E/BF4F/BF50. EIM_PACKAGE remains a
+        # backward-compatible alias.
         root = decoded["items"][0]
         self.assertEqual(root["tag"], "BF51")
-        self.assertEqual(root["name"], "EIM_PACKAGE")
-        self.assertIn("EIM_PACKAGE [BF51]", decoded["asn1Notation"])
-        self.assertIn("EUICC_PACKAGE", root["aliases"])
+        self.assertEqual(root["name"], "EUICC_PACKAGE")
+        self.assertIn("EUICC_PACKAGE [BF51]", decoded["asn1Notation"])
+        self.assertIn("EIM_PACKAGE", root["aliases"])
 
     def test_tag_list_value_is_split_into_tags(self) -> None:
         decoded = decode_bytes(bytes.fromhex("5C034F5A90"))
@@ -61,12 +64,12 @@ class Asn1TlvDecodeTests(unittest.TestCase):
         self.assertEqual([tag["tag"] for tag in tags], ["4F", "5A", "90"])
         self.assertEqual(tags[0]["name"], "AID")
 
-    def test_tag_list_recognizes_sgp32_eim_package_tag(self) -> None:
+    def test_tag_list_recognizes_sgp32_euicc_package_tag(self) -> None:
         decoded = decode_bytes(bytes.fromhex("5C02BF51"))
 
         tags = decoded["items"][0]["decoded"]["tags"]
         self.assertEqual(tags[0]["tag"], "BF51")
-        self.assertEqual(tags[0]["name"], "EIM_PACKAGE")
+        self.assertEqual(tags[0]["name"], "EUICC_PACKAGE")
 
     def test_builtin_registry_covers_sgp22_sgp32_allocated_tags_without_converted_docs(self) -> None:
         registry = TagRegistry.load(root=Path("/tmp/yggdrasim-no-such-spec-root"))
@@ -120,7 +123,7 @@ class Asn1TlvDecodeTests(unittest.TestCase):
             "BF4E": "TRANSFER_EIM_PACKAGE",
             "BF4F": "GET_EIM_PACKAGE",
             "BF50": "PROVIDE_EIM_PACKAGE_RESULT",
-            "BF51": "EIM_PACKAGE",
+            "BF51": "EUICC_PACKAGE",
             "BF52": "PACKAGE_DATA",
             "BF53": "EIM_ACKNOWLEDGEMENTS",
             "BF54": "PROFILE_DOWNLOAD_TRIGGER",
@@ -229,8 +232,8 @@ class Asn1TlvDecodeTests(unittest.TestCase):
         self.assertEqual(decoded["format"], "APDU")
         self.assertEqual(decoded["apdu"]["commandName"], "STORE_DATA")
         self.assertEqual(decoded["apdu"]["storeData"]["profileContext"], "SGP.02/SGP.22/SGP.32 profile-management STORE DATA")
-        self.assertEqual(decoded["apdu"]["dataTlv"][0]["name"], "EIM_PACKAGE")
-        self.assertIn("EIM_PACKAGE [BF51]", decoded["asn1Notation"])
+        self.assertEqual(decoded["apdu"]["dataTlv"][0]["name"], "EUICC_PACKAGE")
+        self.assertIn("EUICC_PACKAGE [BF51]", decoded["asn1Notation"])
 
     def test_sgp32_bf51_default_render_names_eim_package_fields(self) -> None:
         eim_configuration = _tlv("A8", b"".join(

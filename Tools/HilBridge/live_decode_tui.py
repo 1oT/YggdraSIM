@@ -18,6 +18,11 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from yggdrasim_common.frozen_dispatch import (
+    build_tk_file_picker_command,
+    hidden_window_subprocess_kwargs,
+)
+
 from Tools.HilBridge.live_decode_state import (
     ActiveTimerSnapshot,
     StatefulFrameAnnotation,
@@ -260,7 +265,7 @@ _SUMMARY_STK_MARKERS = (
     "SET UP EVENT LIST",
     "EVENT DOWNLOAD",
     "POLL INTERVAL",
-    "POLL OFF",
+    "POLLING OFF",
     "MORE TIME",
     "REFRESH",
     "PROVIDE LOCAL INFORMATION",
@@ -2599,6 +2604,8 @@ def _capture_picker_initial_directory(capture_path: str, last_open_directory: st
 
 
 def _capture_file_picker_supported() -> bool:
+    if sys.platform in {"darwin", "win32"}:
+        return True
     if len(str(os.environ.get("DISPLAY", "") or "").strip()) > 0:
         return True
     if len(str(os.environ.get("WAYLAND_DISPLAY", "") or "").strip()) > 0:
@@ -2624,6 +2631,7 @@ def _run_capture_picker_command(command: list[str]) -> str | None:
             capture_output=True,
             text=True,
             timeout=600,
+            **hidden_window_subprocess_kwargs(),
         )
     except Exception as exc:
         raise RuntimeError(f"Failed to launch desktop file picker: {exc}") from exc
@@ -2689,36 +2697,17 @@ def pick_capture_file_path(capture_path: str = "", last_open_directory: str = ""
         if selected_path is not None:
             return _normalize_selected_capture_path(selected_path)
         return None
-    python_executable = str(sys.executable or "").strip()
-    if len(python_executable) > 0:
-        tkinter_script = (
-            "import sys\n"
-            "import tkinter as tk\n"
-            "from tkinter import filedialog\n"
-            "root = tk.Tk()\n"
-            "root.withdraw()\n"
-            "path = filedialog.askopenfilename(\n"
-            "    title='Open capture file',\n"
-            "    initialdir=sys.argv[1],\n"
-            "    filetypes=[('Capture files', '*.pcap *.pcapng *.cap *.trace'), ('All files', '*')],\n"
-            ")\n"
-            "root.update()\n"
-            "root.destroy()\n"
-            "print(path)\n"
+    selected_path = _run_capture_picker_command(
+        build_tk_file_picker_command(
+            title="Open capture file",
+            initial_directory=initial_directory,
+            file_filter_label="Capture files",
+            file_filter_glob=capture_filter_glob,
         )
-        selected_path = _run_capture_picker_command(
-            [
-                python_executable,
-                "-c",
-                tkinter_script,
-                str(initial_directory),
-            ]
-        )
-        if selected_path is not None:
-            return _normalize_selected_capture_path(selected_path)
-    raise RuntimeError(
-        "No supported desktop file picker is available. Install zenity, qarma, yad, kdialog, or Tk support."
     )
+    if selected_path is not None:
+        return _normalize_selected_capture_path(selected_path)
+    return None
 
 
 def _default_saved_trace_name(capture_path: str, *, marker_suffix: str = "") -> str:

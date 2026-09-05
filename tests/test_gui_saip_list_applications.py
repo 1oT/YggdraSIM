@@ -38,8 +38,16 @@ from yggdrasim_common.gui_server.sessions import get_manager
 from yggdrasim_common.gui_server.actions.registry import get_registry
 
 
-_REFERENCE_PROFILE = pathlib.Path(
-    "Workspace/SAIP/profile/transcoded/1oT_test_profile.transcode.der"
+_REFERENCE_PROFILE = next(
+    (
+        candidate
+        for candidate in (
+            pathlib.Path("Workspace/SAIP/profile/transcoded/reference_test_profile.transcode.der"),
+            pathlib.Path("Workspace/SAIP/profile/transcoded/1oT_test_profile.transcode.der"),
+        )
+        if candidate.exists()
+    ),
+    pathlib.Path("Workspace/SAIP/profile/transcoded/reference_test_profile.transcode.der"),
 )
 
 

@@ -23,6 +23,24 @@ sudo apt-get install --no-install-recommends \
     gpg usbutils python3-venv
 ```
 
+For a desktop GUI source build, use Debian's ARM Qt bindings. The
+current PyPI Qt 6 arm64 runtime requires a newer glibc than Debian
+Bookworm provides, and the 32-bit ARM path likewise relies on the
+distribution binding:
+
+```bash
+sudo apt-get install --no-install-recommends \
+    python3-pyqt5 python3-pyqt5.qtwebengine python3-pyqt5.qtwebchannel \
+    libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+    libxcb-keysyms1 libxcb-shape0 libxcb-icccm4
+```
+
+The installer creates the ARM GUI virtual environment with
+`--system-site-packages` so this Debian PyQt5 binding remains visible.
+If you supply an existing `--venv`, it must have been created with the
+same option; the installer refuses an incompatible environment instead
+of producing a GUI without a usable backend.
+
 Optional (useful even on a headless Pi):
 
 ```bash
@@ -118,10 +136,16 @@ sudo apt-get install --no-install-recommends \
 git clone https://github.com/<your-org>/YggdraSIM.git
 cd YggdraSIM
 
+# Headless source install:
 python3 -m venv .venv
+# For a desktop GUI on either 64-bit or 32-bit ARM, include Debian's
+# PyQt5 packages from section 1 and use this instead:
+# python3 -m venv --system-site-packages .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[full]'
+# For a desktop GUI on either ARM variant:
+# python -m pip install -e '.[full,gui]'
 ```
 
 Verify:
@@ -147,7 +171,11 @@ scripts/install/install-raspberrypi.sh --flavor full --mode source
 
 The script bootstraps the apt prerequisites, downloads the matching
 release asset (or sets up a `.venv` for source mode), and points at
-the SIMtrace2 guide when the full flavor is selected.
+the SIMtrace2 guide when the full flavor is selected. A normal full
+install tries the exact `osmo-remsim-client-st2` package first, verifies
+that executable after any compatibility-package fallback, and stops
+with an actionable error if it is still unavailable. `--no-deps` is the
+explicit opt-out for a host whose dependencies are managed separately.
 
 ## 5. `osmo-remsim-client-st2` on the Pi
 
@@ -201,7 +229,8 @@ section 3. The Pi-specific differences are:
 The on-device build produces an arm64 binary you can copy to another Pi:
 
 ```bash
-# inside the cloned repo with .[build,gui] or .[full,gui] installed
+# inside the cloned repo with .[build,gui] or .[full,build,gui] installed
+# and a --system-site-packages venv that can see Debian's PyQt5
 YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 # or, with HIL:
 YGGDRASIM_FLAVOR=full python -m PyInstaller --noconfirm --clean yggdrasim_main.spec

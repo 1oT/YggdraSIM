@@ -34,21 +34,27 @@ Substitute the remote with your fork / mirror if applicable; the
 installer scripts honour the `YGGDRASIM_REPO` environment variable for
 exactly that case.
 
-### 1b. (Optional) Enable SAIP / SCP11-local flows
+### 1b. (Optional) Enable SAIP spreadsheet extensions
 
-The core simulator, HIL bridge, and SCP03 / SCP80 flows run **without**
-pySim. Only SAIP profile decoding (`yggdrasim-profile-package`, the
-SAIP transcode TUI) and the SCP11 local / eIM in-process SM-DP+ pull
-it in. The recommended path is the `[saip]` extra, which installs
-upstream pySim from its GitHub mirror:
+The base dependency set already installs the commit-pinned upstream `pySim`
+used by SAIP, SCP03/SCP80, and SCP11-local flows. Add the `[saip]` extra on
+workstations that host an Excel import/export extension; it installs the
+reviewed `openpyxl` and hardened XML parser dependency stack:
 
 ```bash
 python -m pip install -e '.[saip]'
 ```
 
-`yggdrasim --doctor` reports `pySim: OK` once the import probe
-succeeds and `WARN` otherwise; the warning is expected on lean
-installations and does not block the clean flows.
+The extra supplies dependencies only. The Excel-to-SAIP generator itself is
+a plugin supplied separately, so on a plain checkout this extra adds no new
+operator surface -- `Package > Open` still refuses workbooks and points at
+the plugin action. Driving many profiles from a `.csv`, `.json`, `.jsonl`,
+or `.yaml` record set needs no extra and no plugin; see
+`guides/TEMPLATE_AND_TOKENS.md`.
+
+`yggdrasim --doctor` reports `pySim: OK` once the core dependency import
+probe succeeds. Spreadsheet extensions publish their GUI actions only when
+their own dependency health checks pass.
 
 **Developer checkout (advanced).** If you want to iterate on an
 unreleased upstream branch, drop a checkout at `<repo>/pysim` and that
@@ -102,17 +108,20 @@ python -m pip install -e '.[build,test]'
 # HIL-capable on Linux (adds pyudev).
 python -m pip install -e '.[hil]'
 
-# HIL-capable Linux developer profile (pyudev + pyinstaller + pytest + pySim).
+# HIL-capable Linux runtime profile (pyudev + headless GUI server).
 python -m pip install -e '.[full]'
+
+# HIL-capable Linux developer/build profile.
+python -m pip install -e '.[full,build,test]'
 
 # Optional: Universal GUI Command Center.
 python -m pip install -e '.[gui]'        # desktop window via pywebview
 python -m pip install -e '.[gui-server]' # headless web server only
 
 # Common remote-lab profile: HIL/RemSIM/CardBridge code + desktop GUI.
-python -m pip install -e '.[full,gui]'
+python -m pip install -e '.[full,build,test,gui]'
 
-# Optional: YggdraCore BYO-Open5GS bridge (lazy pymongo). (post-v1 staging — not part of this release.)
+# Optional: YggdraCore BYO-Open5GS bridge (lazy pymongo).
 python -m pip install -e '.[open5gs]'
 
 # Optional: docs site tooling for `mkdocs build` / `mkdocs serve`.
@@ -121,8 +130,40 @@ python -m pip install -e '.[docs]'
 
 `pyudev` is listed with `sys_platform == 'linux'` so the extras stay
 installable on Windows / macOS — the package simply gets skipped. The
-extras can be combined: `pip install -e '.[full,gui,open5gs]'` is a
+extras can be combined: `pip install -e '.[full,build,test,gui,open5gs]'` is a
 common Linux-developer profile.
+
+## 3b. Or install with pipx
+
+`pipx` manages the virtualenv for you and puts every console entry point
+on `PATH`, which suits an operator who wants the commands without
+maintaining a checkout venv:
+
+```bash
+pipx install '.[gui,saip]'                                   # from this checkout
+pipx install --editable '.[gui,saip]'                        # tracks the checkout live
+```
+
+The editable form is worth knowing: a plain `pipx install` copies the
+project, so repository edits need `pipx install --force` to take effect,
+while `--editable` imports straight from the checkout. Editable also
+makes `runtime_root()` resolve to the checkout, so plugins, profiles and
+state match a source run.
+
+`pipx install yggdrasim` by name does not resolve from PyPI. Two base
+dependencies are PEP 508 direct references (the pinned `asn1tools` fork
+and Osmocom `pySim`), and PyPI rejects a `Requires-Dist` containing one.
+A path or git specifier is what lets pip honour them.
+
+A pipx install always reports the `source` flavor, since the clean/full
+split is stamped at bundle build time. The extras are the equivalent
+knob: `[hil]` or `[full]` for a HIL-capable install, omit them
+otherwise. Set `YGGDRASIM_FLAVOR=clean` to make the HIL guard refuse
+explicitly.
+
+After installing, `python scripts/install_shortcuts.py` writes a native
+desktop launcher pointed at the `yggdrasim-desktop` entry point. See
+`scripts/install/README.md`.
 
 The Python extras do not install SIMtrace2 firmware, `pcscd`,
 `osmo-remsim-client-st2`, SSH tunnels, or remote HIL services. Use
@@ -198,7 +239,7 @@ python -m pip install -e '.[build,test,gui]'
 YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 
 # Full + desktop GUI (Linux only)
-python -m pip install -e '.[full,gui]'
+python -m pip install -e '.[full,build,test,gui]'
 YGGDRASIM_FLAVOR=full python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 ```
 

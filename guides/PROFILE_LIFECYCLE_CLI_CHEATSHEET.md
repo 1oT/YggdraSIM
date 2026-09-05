@@ -155,7 +155,7 @@ RECORD <n|ALL|start-end> [path]
 UPDATE BINARY <hex>
 UPDATE RECORD <n> <hex>
 FS-ADMIN
-VALIDATE [ALL|MF|USIM|ISIM] [profileDump.yaml|profileDump.json]
+VALIDATE [ALL|MF|USIM|ISIM] [profileDump.yaml|profileDump.json] [POLICY=pack.yaml]
 EXPORT-EUICC [outputPath.yaml]
 EXPORT-KEYBAG [outputPath.keys.json] [label]
 ARR [path]

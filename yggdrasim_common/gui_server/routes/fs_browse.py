@@ -191,6 +191,85 @@ _SHORTCUT_SPECS: tuple[_ShortcutSpec, ...] = (
 )
 
 
+#: Directories the picker may list, or ``None`` for the whole filesystem.
+#: Configured once at app construction; unset means unrestricted, which is
+#: the right default for a desktop session bound to loopback on the
+#: operator's own machine.
+_ALLOWED_ROOTS: tuple[Path, ...] | None = None
+
+#: Operator override, ``os.pathsep``-separated. Widens a web-server
+#: deployment that legitimately browses a lab mount, or tightens a desktop
+#: one. Applies in both modes.
+FS_ROOTS_ENV = "YGGDRASIM_GUI_FS_ROOTS"
+
+
+def _env_roots() -> tuple[Path, ...]:
+    raw = str(os.environ.get(FS_ROOTS_ENV, "") or "").strip()
+    if len(raw) == 0:
+        return ()
+    roots: list[Path] = []
+    for chunk in raw.split(os.pathsep):
+        text = chunk.strip()
+        if len(text) == 0:
+            continue
+        try:
+            roots.append(Path(os.path.expanduser(text)).resolve())
+        except OSError:
+            continue
+    return tuple(roots)
+
+
+def default_browse_roots() -> tuple[Path, ...]:
+    """The shortcut destinations, which are the paths the picker offers."""
+
+    roots: list[Path] = []
+    for spec in _SHORTCUT_SPECS:
+        try:
+            resolved = spec.resolver()
+        except Exception:  # noqa: BLE001 - a missing shortcut is not fatal
+            resolved = None
+        if resolved is not None:
+            roots.append(Path(resolved))
+    return tuple(dict.fromkeys(roots))
+
+
+def configure_browse_roots(roots: "tuple[Path, ...] | None") -> None:
+    """Constrain listing to *roots*, or pass None to allow the filesystem.
+
+    An explicit ``YGGDRASIM_GUI_FS_ROOTS`` always wins, so an operator can
+    correct either default without editing code.
+    """
+    global _ALLOWED_ROOTS
+    override = _env_roots()
+    if len(override) > 0:
+        _ALLOWED_ROOTS = override
+        return
+    _ALLOWED_ROOTS = roots
+
+
+def browse_roots() -> "tuple[Path, ...] | None":
+    """Return the active constraint, for tests and diagnostics."""
+
+    return _ALLOWED_ROOTS
+
+
+def _within_allowed_roots(target: Path) -> bool:
+    """Whether an already-resolved *target* may be listed.
+
+    ``target`` arrives resolved, so a symlink pointing out of a root is
+    compared by its real location rather than by the link path.
+    """
+    if _ALLOWED_ROOTS is None:
+        return True
+    for root in _ALLOWED_ROOTS:
+        try:
+            if target == root or root in target.parents:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _build_shortcuts() -> list[FsShortcut]:
     rows: list[FsShortcut] = []
     for spec in _SHORTCUT_SPECS:
@@ -302,7 +381,7 @@ def _entry_payload(entry: os.DirEntry) -> FsEntry:
             err = err or str(error)
     return FsEntry(
         name=name,
-        path=str(Path(entry.path)),
+        path=entry.path,
         kind=kind,
         size=size,
         mtime=mtime,
@@ -356,6 +435,19 @@ def browse(
             entries=[],
             shortcuts=_build_shortcuts(),
             error=f"could not resolve path: {error}",
+            drives=_windows_drives(),
+            separator=os.sep,
+        )
+
+    if not _within_allowed_roots(target):
+        # Enumeration is a disclosure even without file contents, and in
+        # web-server mode the caller need not be the host's owner.
+        return FsBrowseResponse(
+            path=str(target),
+            parent=None,
+            entries=[],
+            shortcuts=_build_shortcuts(),
+            error="path is outside the directories this server may browse",
             drives=_windows_drives(),
             separator=os.sep,
         )

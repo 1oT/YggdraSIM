@@ -51,11 +51,13 @@ PROFILE_CLASS_MAP = {
     "OPERATIONAL": 2,
 }
 
+# SGP.22 IconType ::= INTEGER {jpg(0), png(1)}. The field is OPTIONAL and
+# only meaningful alongside an icon, so "no icon" omits it rather than
+# claiming a format.
 ICON_TYPE_MAP = {
-    "NONE": 0,
-    "JPEG": 1,
-    "JPG": 1,
-    "PNG": 2,
+    "JPEG": 0,
+    "JPG": 0,
+    "PNG": 1,
 }
 
 # NotificationEvent bit order per ASN.1: (0)=install, (1)=localEnable, (2)=localDisable,
@@ -209,13 +211,13 @@ def build_store_metadata_request_payload(document: dict[str, Any]) -> dict[str, 
         raise ValueError(
             f"icon exceeds OCTET STRING SIZE(0..{ICON_MAX_OCTETS}): {len(icon_bytes)}"
         )
+    if icon_type is None and len(icon_bytes) > 0:
+        raise ValueError("icon.type is required when icon.data_hex is present.")
 
     payload = {
         "iccid": _encode_iccid(profile.get("iccid")),
         "serviceProviderName": service_provider_name,
         "profileName": profile_name,
-        "iconType": icon_type,
-        "icon": icon_bytes,
         "profileClass": _encode_profile_class(profile.get("profile_class")),
         "notificationConfigurationInfo": notification_configuration,
         "profileOwner": owner,
@@ -224,6 +226,9 @@ def build_store_metadata_request_payload(document: dict[str, Any]) -> dict[str, 
             PROFILE_POLICY_RULE_ORDER,
         ),
     }
+    if icon_type is not None:
+        payload["iconType"] = icon_type
+        payload["icon"] = icon_bytes
     return payload
 
 
@@ -255,7 +260,9 @@ def build_update_metadata_request_payload(document: dict[str, Any]) -> dict[str,
         payload["profileName"] = profile_name
 
     if "type" in icon:
-        payload["iconType"] = _encode_icon_type(icon.get("type"))
+        update_icon_type = _encode_icon_type(icon.get("type"))
+        if update_icon_type is not None:
+            payload["iconType"] = update_icon_type
 
     if "data_hex" in icon:
         icon_bytes = _encode_octet_string(icon.get("data_hex"))
@@ -334,14 +341,18 @@ def _encode_profile_class(value: Any) -> int:
     raise ValueError(f"Unsupported profile class: {value}")
 
 
-def _encode_icon_type(value: Any) -> int:
+def _encode_icon_type(value: Any) -> int | None:
+    """Return the IconType integer, or None when no icon type is given."""
+
     if value is None:
-        return ICON_TYPE_MAP["NONE"]
+        return None
     if isinstance(value, int):
         return value
     normalized = _string_value(value).upper()
-    if len(normalized) == 0:
-        return ICON_TYPE_MAP["NONE"]
+    # "NONE" is what the metadata documents carry for a profile with no
+    # icon. IconType has no such member, so it omits the field.
+    if len(normalized) == 0 or normalized == "NONE":
+        return None
     if normalized in ICON_TYPE_MAP:
         return ICON_TYPE_MAP[normalized]
     raise ValueError(f"Unsupported icon type: {value}")
@@ -359,18 +370,36 @@ def _encode_iccid(value: Any) -> bytes:
 
 
 def _encode_mcc_mnc(mcc: Any, mnc: Any) -> bytes:
+    """Encode MCC + MNC into the SGP.22 ``OperatorId.mccMnc`` octet string.
+
+    ``mccMnc`` follows 3GPP TS 24.008 10.5.1.3 (BCD, nibble-swapped, with a
+    0xF filler for a 2-digit MNC in the high nibble of the second octet):
+
+        octet 1: MCC digit 2 | MCC digit 1
+        octet 2: MNC digit 3 (0xF if 2-digit MNC) | MCC digit 3
+        octet 3: MNC digit 2 | MNC digit 1
+
+    A previous version concatenated the digits and F-padded the tail
+    (001/01 -> 00101F), which is not the TS 24.008 layout: a spec-compliant
+    eUICC or LPA would read the wrong PLMN back out.
+    """
     mcc_text = _normalize_compact_string(mcc)
     mnc_text = _normalize_compact_string(mnc)
     if len(mcc_text) == 0 and len(mnc_text) == 0:
         return b""
     if len(mcc_text) == 0 or len(mnc_text) == 0:
         raise ValueError("Metadata operator.mcc and operator.mnc must either both be set or both be empty.")
-    combined = mcc_text + mnc_text
-    if _is_hex_string(combined) is False:
-        raise ValueError("Metadata operator.mcc/operator.mnc must be hexadecimal-compatible digits.")
-    if len(combined) % 2 != 0:
-        combined = combined + "F"
-    return bytes.fromhex(combined)
+    if len(mcc_text) != 3 or mcc_text.isdigit() is False:
+        raise ValueError("Metadata operator.mcc must be exactly 3 decimal digits.")
+    if len(mnc_text) not in (2, 3) or mnc_text.isdigit() is False:
+        raise ValueError("Metadata operator.mnc must be 2 or 3 decimal digits.")
+    mcc_digits = [int(character) for character in mcc_text]
+    mnc_digits = [int(character) for character in mnc_text]
+    mnc_digit_3 = mnc_digits[2] if len(mnc_digits) == 3 else 0xF
+    octet_1 = (mcc_digits[1] << 4) | mcc_digits[0]
+    octet_2 = (mnc_digit_3 << 4) | mcc_digits[2]
+    octet_3 = (mnc_digits[1] << 4) | mnc_digits[0]
+    return bytes((octet_1, octet_2, octet_3))
 
 
 def _encode_octet_string(value: Any) -> bytes:

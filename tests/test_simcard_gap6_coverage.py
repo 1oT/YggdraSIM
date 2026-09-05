@@ -270,8 +270,8 @@ class ProvideLocalInformationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
-            iccid="8949000000000000001",
+            eid="89049032123451234512345678901235",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",
@@ -394,8 +394,8 @@ class EventDownloadGapTests(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimCardState(
             atr=b"",
-            eid="89049032123451234512345678901234",
-            iccid="8949000000000000001",
+            eid="89049032123451234512345678901235",
+            iccid="8988000000000000001",
             imsi="999990000000001",
             default_dp_address="",
             root_ci_pkid=b"",
@@ -414,28 +414,28 @@ class EventDownloadGapTests(unittest.TestCase):
         return bytes((0xD6, len(body))) + body
 
     def test_idle_screen_available_event_latches_state(self) -> None:
-        envelope = self._envelope(tlv("99", bytes((0x07,))))
+        envelope = self._envelope(tlv("99", bytes((0x05,))))
         _data, sw1, sw2 = self.toolkit.handle_envelope(envelope, self._fallback)
         self.assertEqual(sw1 & 0xF0, 0x90)
         self.assertTrue(self.state.toolkit.idle_screen_available)
-        self.assertEqual(self.state.toolkit.last_event_code, 0x07)
+        self.assertEqual(self.state.toolkit.last_event_code, 0x05)
 
     def test_browser_termination_event_latches_cause(self) -> None:
         envelope = self._envelope(
-            tlv("99", bytes((0x09,))),
+            tlv("99", bytes((0x08,))),
             tlv("B4", bytes((0x01,))),
         )
         self.toolkit.handle_envelope(envelope, self._fallback)
-        self.assertEqual(self.state.toolkit.last_event_code, 0x09)
+        self.assertEqual(self.state.toolkit.last_event_code, 0x08)
         self.assertEqual(self.state.toolkit.last_browser_termination_cause, 0x01)
 
     def test_network_rejection_event_latches_cause_blob(self) -> None:
         envelope = self._envelope(
-            tlv("99", bytes((0x0F,))),
+            tlv("99", bytes((0x12,))),
             tlv("CA", bytes.fromhex("020003")),
         )
         self.toolkit.handle_envelope(envelope, self._fallback)
-        self.assertEqual(self.state.toolkit.last_event_code, 0x0F)
+        self.assertEqual(self.state.toolkit.last_event_code, 0x12)
         self.assertEqual(
             self.state.toolkit.last_network_rejection_cause,
             bytes.fromhex("020003"),
@@ -443,14 +443,14 @@ class EventDownloadGapTests(unittest.TestCase):
 
     def test_event_history_records_each_received_event(self) -> None:
         self.toolkit.handle_envelope(
-            self._envelope(tlv("99", bytes((0x07,)))),
+            self._envelope(tlv("99", bytes((0x05,)))),
             self._fallback,
         )
         self.toolkit.handle_envelope(
-            self._envelope(tlv("99", bytes((0x09,)))),
+            self._envelope(tlv("99", bytes((0x08,)))),
             self._fallback,
         )
-        self.assertEqual(self.state.toolkit.event_history, [0x07, 0x09])
+        self.assertEqual(self.state.toolkit.event_history, [0x05, 0x08])
 
 
 if __name__ == "__main__":

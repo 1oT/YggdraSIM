@@ -8,7 +8,6 @@ from __future__ import annotations
 import sys
 
 from SCP11.live import pysim_support as _impl
-from SCP11.live.pysim_support import *  # noqa: F401,F403
 
 
 sys.modules[__name__] = _impl

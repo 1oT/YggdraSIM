@@ -11,9 +11,9 @@ Two gates are covered:
    ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS``.
 
 2. ``create_introspection_context`` — used by read-only TOFU chain
-   reads. Default: allowed so operators can pop a new card / new eIM
-   FQDN in and have the auto-learn path bootstrap trust. Hard-lock
-   via ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION``.
+   reads. Default: refused. Opt-in via
+   ``YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION`` and hard-lock via
+   ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION``.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from SCP11.shared import tls_helpers
 ENV_ALLOW = tls_helpers.INSECURE_TLS_ENV
 ENV_REQUIRE = tls_helpers.REQUIRE_PINNED_TLS_ENV
 ENV_REQUIRE_INTROSPECTION = tls_helpers.REQUIRE_PINNED_INTROSPECTION_TLS_ENV
+ENV_ALLOW_INTROSPECTION = tls_helpers.ALLOW_TLS_INTROSPECTION_ENV
 
 
 class _EnvScope:
@@ -91,15 +92,33 @@ class InsecureContextGateTests(unittest.TestCase):
 
 
 class IntrospectionContextGateTests(unittest.TestCase):
-    def test_default_allows_tofu_chain_reads(self) -> None:
-        with _EnvScope(**{ENV_REQUIRE_INTROSPECTION: None}):
-            context = tls_helpers.create_introspection_context("pytest/introspection_default")
+    def test_default_refuses_tofu_chain_reads(self) -> None:
+        with _EnvScope(**{
+            ENV_ALLOW_INTROSPECTION: None,
+            ENV_REQUIRE_INTROSPECTION: None,
+        }):
+            with self.assertRaises(RuntimeError):
+                tls_helpers.create_introspection_context(
+                    "pytest/introspection_default"
+                )
+
+    def test_opt_in_allows_tofu_chain_reads(self) -> None:
+        with _EnvScope(**{
+            ENV_ALLOW_INTROSPECTION: "1",
+            ENV_REQUIRE_INTROSPECTION: None,
+        }):
+            context = tls_helpers.create_introspection_context(
+                "pytest/introspection_opt_in"
+            )
         self.assertIsInstance(context, ssl.SSLContext)
         self.assertEqual(context.verify_mode, ssl.CERT_NONE)
         self.assertEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
 
     def test_hard_lock_refuses_tofu_chain_reads(self) -> None:
-        with _EnvScope(**{ENV_REQUIRE_INTROSPECTION: "1"}):
+        with _EnvScope(**{
+            ENV_ALLOW_INTROSPECTION: "1",
+            ENV_REQUIRE_INTROSPECTION: "1",
+        }):
             with self.assertRaises(RuntimeError) as caught:
                 tls_helpers.create_introspection_context("pytest/introspection_hard_lock")
             self.assertIn("YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION", str(caught.exception))
@@ -108,6 +127,7 @@ class IntrospectionContextGateTests(unittest.TestCase):
         with _EnvScope(**{
             ENV_ALLOW: None,
             ENV_REQUIRE: "1",
+            ENV_ALLOW_INTROSPECTION: "1",
             ENV_REQUIRE_INTROSPECTION: None,
         }):
             context = tls_helpers.create_introspection_context("pytest/introspection_independent")
@@ -116,12 +136,21 @@ class IntrospectionContextGateTests(unittest.TestCase):
                 tls_helpers.create_insecure_context("pytest/insecure_still_refused")
 
     def test_introspection_tls_allowed_helper_matches_env(self) -> None:
-        with _EnvScope(**{ENV_REQUIRE_INTROSPECTION: None}):
-            self.assertTrue(tls_helpers.introspection_tls_allowed())
-        with _EnvScope(**{ENV_REQUIRE_INTROSPECTION: "1"}):
+        with _EnvScope(**{
+            ENV_ALLOW_INTROSPECTION: None,
+            ENV_REQUIRE_INTROSPECTION: None,
+        }):
             self.assertFalse(tls_helpers.introspection_tls_allowed())
-        with _EnvScope(**{ENV_REQUIRE_INTROSPECTION: "false"}):
+        with _EnvScope(**{
+            ENV_ALLOW_INTROSPECTION: "1",
+            ENV_REQUIRE_INTROSPECTION: None,
+        }):
             self.assertTrue(tls_helpers.introspection_tls_allowed())
+        with _EnvScope(**{
+            ENV_ALLOW_INTROSPECTION: "1",
+            ENV_REQUIRE_INTROSPECTION: "1",
+        }):
+            self.assertFalse(tls_helpers.introspection_tls_allowed())
 
 
 if __name__ == "__main__":

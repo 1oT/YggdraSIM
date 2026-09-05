@@ -73,7 +73,9 @@ def _classify_block(label: str) -> str:
 
 def _fingerprint(der: bytes) -> dict[str, str]:
     return {
-        "sha1": hashlib.sha1(der).hexdigest().upper(),
+        # SHA-1 remains a display-only certificate fingerprint for legacy
+        # tooling compatibility; it is never used as a trust decision.
+        "sha1": hashlib.sha1(der, usedforsecurity=False).hexdigest().upper(),
         "sha256": hashlib.sha256(der).hexdigest().upper(),
     }
 

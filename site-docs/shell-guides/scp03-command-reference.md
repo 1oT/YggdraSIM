@@ -92,7 +92,7 @@ SCP11 README pages.
 - `GOLD-PROFILE`: show persisted gold path and metadata
 - `CLEAR-GOLD-PROFILE`: clear the persisted gold path
 - `PROFILE-DIFF [gold.yaml] [STANDARD] [AUTH=Y|N]`: capture live FS and eUICC data and diff it against gold
-- `VALIDATE [ALL|MF|USIM|ISIM] [ProfileDump.yaml|ProfileDump.json]`: validate active profile filesystem structure
+- `VALIDATE [ALL|MF|USIM|ISIM] [ProfileDump.yaml|ProfileDump.json] [POLICY=pack.yaml]`: validate active profile filesystem structure; `POLICY=` swaps the built-in expectations for an operator policy pack
 - `SELECT <Path/FID>`: select a DF or EF
 - `READ [Path]`: read binary data from the selected EF
 - `RECORD <N/ALL/Start-End> [Path]`: read one or more records

@@ -349,6 +349,7 @@ class HeaderFieldTests(unittest.TestCase):
 # YRL-UST-001 / YRL-UST-002 — UST service-to-file coherence
 # ---------------------------------------------------------------------------
 
+
 def _fill_file_hex(fid_hex: str, content_hex: str) -> dict:
     return {
         "file": {
@@ -367,10 +368,25 @@ def _fill_file_hex(fid_hex: str, content_hex: str) -> dict:
     }
 
 
+def _ust_hex_with_services(*service_numbers: int, octets: int = 16) -> str:
+    value = bytearray(octets)
+    for service_number in service_numbers:
+        byte_index = (service_number - 1) // 8
+        bit_index = (service_number - 1) % 8
+        if byte_index >= len(value):
+            raise ValueError(f"service {service_number} does not fit in {octets} octets")
+        value[byte_index] |= 1 << bit_index
+    return value.hex().upper()
+
+
+def _add_usim_ef(doc: dict, marker: str, fid_hex: str = "6FFF") -> None:
+    doc["sections"]["usim"]["choices"].append({marker: _fill_file_hex(fid_hex, "FF")})
+
+
 class UstCoherenceTests(unittest.TestCase):
     """YRL-UST-001 / YRL-UST-002: UST service bit vs related EF presence."""
 
-    # A UST value with service 10 (FDN, bit 9) set, byte 1 bit 1 = 0x02
+    # A UST value with service 10 (SMS, bit 9) set, byte 1 bit 1 = 0x02
     # Bit numbering: service N is (byte (N-1)//8), bit (N-1)%8.
     # Service 10 → byte 1, bit 1 → 0x02.  UST: 00 02 00 00 00 00 00 ...
     _UST_SVC10_SET = "00" + "02" + "00" * 14  # 16 bytes, svc 10 set
@@ -379,10 +395,122 @@ class UstCoherenceTests(unittest.TestCase):
     _UST_ALL_ZERO = "00" * 16
 
     def test_ust001_service_bit_set_but_ef_missing(self) -> None:
-        # Service 10 (FDN) set in UST but no ef-fdn section present
+        # TS 31.102 §§4.2.25 and 4.2.28 require EF.SMS and EF.SMSS for
+        # service 10; neither file is present.
         doc = _doc_with_usim(ust_hex=self._UST_SVC10_SET)
         codes = _codes(doc)
         self.assertIn("YRL-UST-001", codes)
+
+    def test_ust001_service_5_requires_ext3_not_lnd(self) -> None:
+        # TS 31.102 §4.2.31 binds service 5 to EF.EXT3.  EF.LND is not
+        # that service's required file.
+        doc = _doc_with_usim(ust_hex=_ust_hex_with_services(5))
+        _add_usim_ef(doc, "ef-lnd")
+
+        findings = [
+            finding
+            for finding in _lint(doc)
+            if finding.code == "YRL-UST-001" and finding.path.endswith(".service.5")
+        ]
+
+        self.assertEqual(len(findings), 1)
+        self.assertIn("ef-ext3", findings[0].message)
+        self.assertNotIn("ef-lnd", findings[0].message)
+
+    def test_ust001_service_5_accepts_decoded_ext3_marker(self) -> None:
+        doc = _doc_with_usim(ust_hex=_ust_hex_with_services(5))
+        _add_usim_ef(doc, "ef-ext3", "6F4C")
+
+        findings = [
+            finding
+            for finding in _lint(doc)
+            if finding.code == "YRL-UST-001" and finding.path.endswith(".service.5")
+        ]
+
+        self.assertEqual(findings, [])
+
+    def test_ust001_service_13_uses_decoded_acmax_marker(self) -> None:
+        # The standard calls the file EF.ACMmax (§4.2.7), while the decoded
+        # SAIP ProfileElement member is named ef-acmax.
+        doc = _doc_with_usim(ust_hex=_ust_hex_with_services(13))
+        _add_usim_ef(doc, "ef-acmax", "6F37")
+        _add_usim_ef(doc, "ef-acm", "6F39")
+        _add_usim_ef(doc, "ef-puct", "6F41")
+
+        findings = [
+            finding
+            for finding in _lint(doc)
+            if finding.code == "YRL-UST-001" and finding.path.endswith(".service.13")
+        ]
+
+        self.assertEqual(findings, [])
+
+    def test_ust001_service_45_requires_pnn_not_old_duplicate_targets(self) -> None:
+        # TS 31.102 §4.2.58 binds service 45 only to EF.PNN.  EF.CBMIR and
+        # EF.CFIS belong to services 16 and 49 respectively.
+        doc = _doc_with_usim(ust_hex=_ust_hex_with_services(45))
+        _add_usim_ef(doc, "ef-cbmir", "6F50")
+        _add_usim_ef(doc, "ef-cfis", "6FCB")
+
+        missing = [
+            finding
+            for finding in _lint(doc)
+            if finding.code == "YRL-UST-001" and finding.path.endswith(".service.45")
+        ]
+        self.assertEqual(len(missing), 1)
+        self.assertIn("ef-pnn", missing[0].message)
+
+        _add_usim_ef(doc, "ef-pnn", "6FC5")
+        resolved = [
+            finding
+            for finding in _lint(doc)
+            if finding.code == "YRL-UST-001" and finding.path.endswith(".service.45")
+        ]
+        self.assertEqual(resolved, [])
+
+    def test_ust001_service_95_requires_uicciari_not_5gs_files(self) -> None:
+        # TS 31.102 §4.2.95 binds service 95 to EF.UICCIARI.
+        doc = _doc_with_usim(ust_hex=_ust_hex_with_services(95))
+        _add_usim_ef(doc, "ef-5gloci")
+        _add_usim_ef(doc, "ef-5gnsc")
+
+        missing = [
+            finding
+            for finding in _lint(doc)
+            if finding.code == "YRL-UST-001" and finding.path.endswith(".service.95")
+        ]
+        self.assertEqual(len(missing), 1)
+        self.assertIn("ef-uicciari", missing[0].message)
+
+        _add_usim_ef(doc, "ef-uicciari", "6FE7")
+
+        findings = [
+            finding
+            for finding in _lint(doc)
+            if finding.code == "YRL-UST-001" and finding.path.endswith(".service.95")
+        ]
+
+        self.assertEqual(findings, [])
+
+    def test_ust001_service_122_requires_all_four_5gs_mobility_files(self) -> None:
+        # TS 31.102 §§4.4.11.2-4.4.11.5 assign the four 5GS mobility
+        # files to service 122.
+        doc = _doc_with_usim(ust_hex=_ust_hex_with_services(122))
+        for marker in (
+            "ef-5gs3gpploci",
+            "ef-5gsn3gpploci",
+            "ef-5gs3gppnsc",
+            "ef-5gsn3gppnsc",
+        ):
+            _add_usim_ef(doc, marker)
+
+        findings = [
+            finding
+            for finding in _lint(doc)
+            if finding.code == "YRL-UST-001" and finding.path.endswith(".service.122")
+        ]
+
+        self.assertEqual(findings, [])
 
     def test_ust002_ef_present_but_service_bit_not_set(self) -> None:
         # ef-msisdn present but UST service 21 not set
@@ -395,8 +523,48 @@ class UstCoherenceTests(unittest.TestCase):
         codes = _codes(base)
         self.assertIn("YRL-UST-002", codes)
 
+    def test_ust002_presence_hints_use_corrected_service_numbers(self) -> None:
+        cases = (
+            ("ef-ext3", "6F4C", 5),
+            ("ef-ext5", "6F4E", 44),
+            ("ef-mwis", "6FCA", 48),
+            ("ef-uicciari", "6FE7", 95),
+            ("ef-5gs3gpploci", "4F01", 122),
+        )
+        for marker, fid_hex, expected_service in cases:
+            with self.subTest(marker=marker):
+                doc = _doc_with_usim(ust_hex=self._UST_ALL_ZERO)
+                _add_usim_ef(doc, marker, fid_hex)
+                matching = [
+                    finding
+                    for finding in _lint(doc)
+                    if finding.code == "YRL-UST-002"
+                    and finding.path.endswith(f".service.{expected_service}")
+                ]
+                self.assertEqual(len(matching), 1)
+                self.assertIn(marker, matching[0].message)
+
     def test_ust001_not_triggered_when_service_disabled(self) -> None:
         # UST all zero — no services set, no UST-001 should fire
         doc = _doc_with_usim(ust_hex=self._UST_ALL_ZERO)
         codes = _codes(doc)
         self.assertNotIn("YRL-UST-001", codes)
+
+    def test_ust_coherence_is_deferred_while_ust_token_is_unresolved(self) -> None:
+        doc = _doc_with_usim(ust_hex="FF" * 16)
+        report = SaipProfileLinter(strict=True).lint_decoded_document(
+            doc,
+            profile_label="parameterized-template",
+            placeholder_paths=frozenset({"usim.ef-ust.fillFileContent"}),
+        )
+        coherence = [finding for finding in report.findings if finding.code.startswith("YRL-UST-")]
+
+        self.assertTrue(coherence)
+        self.assertTrue(all(finding.code.endswith("/TEMPLATE") for finding in coherence))
+        self.assertTrue(all(finding.severity == "INFO" for finding in coherence))
+        self.assertTrue(
+            all(
+                finding.path.startswith("usim.ef-ust.fillFileContent.service.")
+                for finding in coherence
+            )
+        )

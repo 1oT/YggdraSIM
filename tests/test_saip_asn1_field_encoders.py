@@ -61,7 +61,6 @@ from Tools.ProfilePackage.saip_asn1_encode import (
     encode_puk_key_reference,
     encode_restrict_parameter_field,
     encode_rotation_constants,
-    encode_sd_perso_data_field,
     encode_serial_number_field,
     encode_short_efid_field,
     encode_tar_value,
@@ -269,12 +268,12 @@ class IntReturnEncoderTests(unittest.TestCase):
             encode_identification_field({"decimal": -1})
 
     def test_short_efid_field_valid(self) -> None:
-        result = encode_short_efid_field({"decimal": 10})
-        self.assertIsInstance(result, int)
+        result = encode_short_efid_field({"hex": "38"})
+        self.assertEqual(result, b"\x38")
 
     def test_template_id_field_valid(self) -> None:
-        result = encode_template_id_field({"decimal": 1})
-        self.assertIsInstance(result, int)
+        result = encode_template_id_field({"oid": "2.23.143.1.2.4"})
+        self.assertEqual(result, "2.23.143.1.2.4")
 
 
 # ---------------------------------------------------------------------------

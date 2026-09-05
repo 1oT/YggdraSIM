@@ -27,6 +27,9 @@ except Exception:
     decode_notifications_response = None
 
 
+# Fallback for tags seen outside a structure _display_name recognises.
+# Context-class tags mean whatever encloses them says they mean, so the
+# structure is named alongside where a tag is reused.
 _TAG_NAMES: dict[str, str] = {
     "02": "INTEGER",
     "03": "BIT STRING",
@@ -42,14 +45,14 @@ _TAG_NAMES: dict[str, str] = {
     "4F": "AID",
     "5A": "eidValue",
     "5C": "tagList",
-    "5F37": "signature",
+    "5F37": "eimSignature / EuiccSign",
     "80": "eimId",
     "81": "counterValue",
     "82": "eimTransactionId",
-    "83": "seqNumber",
+    "83": "counterValue (EimConfigurationData)",
     "84": "associationToken",
-    "A7": "psmo",
-    "A8": "eCO",
+    "A7": "configureImmediateEnable (Psmo)",
+    "A8": "setFallbackAttribute (Psmo) / addEim (Eco)",
     "E3": "ProfileInfo",
     "90": "profileNickname",
     "91": "serviceProviderName",
@@ -57,12 +60,12 @@ _TAG_NAMES: dict[str, str] = {
     "93": "iconType",
     "95": "profileClass",
     "99": "profilePolicyRules",
-    "BF2D": "GetProfilesInfo",
+    "BF2D": "ProfileInfoList",
     "BF36": "BoundProfilePackage",
     "BF3C": "EuiccConfiguredData",
     "BF50": "ProvideEimPackageResult",
     "BF51": "EuiccPackageRequest/Result",
-    "BF52": "PackageData",
+    "BF52": "IpaEuiccDataResponse",
     "BF53": "EimAcknowledgements",
     "BF54": "ProfileDownloadTrigger",
     "BF55": "EimConfigurationData",
@@ -277,7 +280,7 @@ def _format_package_data_decode(
 ) -> list[str]:
     tag_start, tag_end, value_start, value_end, _ = root
     tag_hex = data[tag_start:tag_end].hex().upper()
-    lines = [f"{indent}{tag_hex} PackageData len={value_end - value_start}"]
+    lines = [f"{indent}{tag_hex} IpaEuiccDataResponse len={value_end - value_start}"]
     root_children = _iter_tlv_headers(data, value_start, value_end)
     if len(root_children) == 0:
         lines.append(f"{indent}  <empty>")
@@ -290,7 +293,7 @@ def _format_package_data_decode(
             _append_compact_tlv_item(lines, data, child, indent=indent + "  ")
             continue
 
-        lines.append(f"{indent}  A0 packageDataResponse len={child_value_end - child_value_start}")
+        lines.append(f"{indent}  A0 ipaEuiccData len={child_value_end - child_value_start}")
         items = _collect_package_data_items(data, child_value_start, child_value_end)
         _append_ipa_notifications_section(lines, items, indent=indent + "    ")
         _append_ipa_configured_data_section(lines, items, indent=indent + "    ")

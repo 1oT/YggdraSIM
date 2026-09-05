@@ -1,0 +1,9 @@
+# Tracked paths that legitimately match a .gitignore rule on the public
+# branch. The list is deliberately empty: no key material, certificate or
+# operator artefact is tracked any more, so every ignore-rule match on a
+# tracked path is now the signature of a force-add.
+#
+# The pre-push hook blocks any tracked path matching an ignore rule that
+# is absent from this file. Adding a line here is a deliberate,
+# reviewable act, and should stay a last resort -- prefer keeping the
+# material untracked and letting the operator supply it locally.

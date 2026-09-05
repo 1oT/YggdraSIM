@@ -3,6 +3,8 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
+
+
 /* -- Command Center: TLV tree -------------------------------------------- */
 
 .cc-tlv-meta {
@@ -48,7 +50,7 @@
 }
 
 .cc-tlv-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-hover);
 }
 
 .cc-tlv-label {
@@ -125,7 +127,7 @@
 .cc-tlv-value {
   color: var(--fg);
   word-break: break-all;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-alt);
   padding: 1px 6px;
   border-radius: 3px;
 }

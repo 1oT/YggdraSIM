@@ -115,13 +115,19 @@ class StkState:
 
 
 class StkController:
+    MAX_PROACTIVE_COMMANDS = 64
+
     TERMINAL_PROFILE = bytes.fromhex("8010000015FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00")
 
     DEVICE_IDENTITIES_TERMINAL_TO_UICC = bytes.fromhex("02028281")
     DEVICE_IDENTITIES_UICC_TO_TERMINAL = bytes.fromhex("82028182")
-    SMS_PP_PREFIX = bytes.fromhex("0202828106028001")
+    # ENVELOPE (SMS-PP DOWNLOAD) carries a message that arrived from the
+    # network, so 3GPP TS 31.111 §7.1.1.2 sets the source to Network
+    # ('83'), unlike the terminal-sourced envelopes above.
+    SMS_PP_PREFIX = bytes.fromhex("0202838106028001")
 
-    # Event List values per ETSI TS 102 223 §8.25 (table "Event list").
+    # Event List values per ETSI TS 102 223 §8.25. '1A' is Void in every
+    # release of that clause, so nothing is named onto it.
     # Keep the dict literal sparse so future additions are deliberate;
     # missing event codes still fall through to "0xNN" via _stk_event_name.
     EVENT_NAME_MAP = {
@@ -151,14 +157,13 @@ class StkController:
         "IMS-REGISTRATION": 0x17,
         "IMS-INCOMING-DATA": 0x18,
         "PROFILE-CONTAINER": 0x19,
-        "USAT-APPLICATION": 0x1A,
-        "DATA-CONNECTION-STATUS-CHANGE": 0x1B,
+        "SECURED-PROFILE-CONTAINER": 0x1B,
+        "POLL-INTERVAL-NEGOTIATION": 0x1C,
     }
 
-    # Proactive command codes per ETSI TS 102 223 §6.6 (Type of Command).
-    # Includes the SET UP MENU (0x25) which the simulator emits during
-    # bootstrap, and the broader 0x10..0x16 / 0x20..0x28 / 0x45..0x73
-    # ranges so traces are no longer rendered as "UNKNOWN 0x..".
+    # Type of Command values, ETSI TS 102 223 table 9.4. '81' is not a
+    # command: it is the "end of the proactive UICC session" value that
+    # table allows for Next Action Indicator coding only.
     PROACTIVE_NAME_MAP = {
         0x01: "REFRESH",
         0x02: "MORE TIME",
@@ -195,13 +200,16 @@ class StkController:
         0x45: "SERVICE SEARCH",
         0x46: "GET SERVICE INFORMATION",
         0x47: "DECLARE SERVICE",
-        0x60: "SET FRAMES",
-        0x61: "GET FRAMES STATUS",
-        0x70: "RETRIEVE MULTIMEDIA MESSAGE",
-        0x71: "SUBMIT MULTIMEDIA MESSAGE",
-        0x72: "DISPLAY MULTIMEDIA MESSAGE",
-        0x73: "ACTIVATE",
-        0x81: "ESTABLISH NETWORK ACCESS",
+        0x50: "SET FRAMES",
+        0x51: "GET FRAMES STATUS",
+        0x60: "RETRIEVE MULTIMEDIA MESSAGE",
+        0x61: "SUBMIT MULTIMEDIA MESSAGE",
+        0x62: "DISPLAY MULTIMEDIA MESSAGE",
+        0x70: "ACTIVATE",
+        0x71: "CONTACTLESS STATE CHANGED",
+        0x72: "COMMAND CONTAINER",
+        0x73: "ENCAPSULATED SESSION CONTROL",
+        0x79: "LSI COMMAND",
     }
 
     def __init__(self, transport, debug: bool = False) -> None:
@@ -237,9 +245,13 @@ class StkController:
         tag_start = offset
         offset += 1
         if data[tag_start] & 0x1F == 0x1F:
+            first_high_tag_octet = True
             while offset < len(data):
                 current = data[offset]
                 offset += 1
+                if first_high_tag_octet and (current & 0x7F) == 0:
+                    raise ValueError("Invalid high-tag-number TLV encoding.")
+                first_high_tag_octet = False
                 if (current & 0x80) == 0:
                     break
             else:
@@ -253,10 +265,14 @@ class StkController:
             octet_count = length_byte & 0x7F
             if octet_count == 0 or octet_count > 2 or offset + octet_count > len(data):
                 raise ValueError("Invalid TLV length.")
+            if data[offset] == 0x00:
+                raise ValueError("Non-minimal TLV length.")
             length_value = 0
             for _ in range(octet_count):
                 length_value = (length_value << 8) | data[offset]
                 offset += 1
+            if length_value < 0x80:
+                raise ValueError("Non-minimal TLV length.")
         else:
             length_value = length_byte
         value_end = offset + length_value
@@ -305,7 +321,13 @@ class StkController:
             return
         print(f"[STK] {title}< {payload.hex().upper()} {sw1:02X}{sw2:02X}")
 
-    def _raw_transmit(self, apdu: bytes, log_name: str) -> tuple[bytes, int, int]:
+    def _raw_transmit(
+        self,
+        apdu: bytes,
+        log_name: str,
+        *,
+        _allow_le_retry: bool = True,
+    ) -> tuple[bytes, int, int]:
         connection = self._ensure_connection()
         tx_apdu = bytes(apdu)
         self._print_apdu_debug("tx", tx_apdu, log_name=log_name)
@@ -316,20 +338,56 @@ class StkController:
         payload = bytes(data)
         self._print_apdu_debug("rx", payload, sw1, sw2, log_name=log_name)
 
-        if sw1 == 0x6C and len(tx_apdu) >= 4:
-            corrected = tx_apdu[:-1] + bytes([sw2])
-            return self._raw_transmit(corrected, f"{log_name} [LE RETRY]")
+        if sw1 == 0x6C:
+            if _allow_le_retry is False:
+                raise RuntimeError(
+                    f"{log_name} returned repeated wrong-length status 6C{sw2:02X}."
+                )
+            from SCP03.transport.card import CardTransporter
+
+            corrected = bytes(
+                CardTransporter._correct_apdu_le(list(tx_apdu), sw2)
+            )
+            return self._raw_transmit(
+                corrected,
+                f"{log_name} [LE RETRY]",
+                _allow_le_retry=False,
+            )
 
         if sw1 in (0x61, 0x9F):
             accumulated = bytearray(payload)
-            get_response_cla = tx_apdu[0] & 0x03 if len(tx_apdu) > 0 else 0x00
+            from SCP03.transport.card import CardTransporter
+
+            get_response_cla = (
+                CardTransporter._get_response_cla(tx_apdu[0])
+                if len(tx_apdu) > 0
+                else 0x00
+            )
+            followups = 0
             while sw1 in (0x61, 0x9F):
+                followups += 1
+                if followups > 64:
+                    raise RuntimeError(
+                        f"{log_name} returned too many GET RESPONSE continuations."
+                    )
                 get_response = bytes([get_response_cla, 0xC0, 0x00, 0x00, sw2])
                 self._print_apdu_debug("tx", get_response, log_name=f"{log_name} [GET RESPONSE]")
                 try:
                     chunk, sw1, sw2 = connection.transmit(list(get_response))
                 except Exception as error:
                     raise RuntimeError(f"{log_name} GET RESPONSE failed: {error}") from error
+                if sw1 == 0x6C:
+                    corrected_get_response = bytes(
+                        CardTransporter._correct_apdu_le(list(get_response), sw2)
+                    )
+                    try:
+                        chunk, sw1, sw2 = connection.transmit(
+                            list(corrected_get_response)
+                        )
+                    except Exception as error:
+                        raise RuntimeError(
+                            f"{log_name} corrected GET RESPONSE failed: {error}"
+                        ) from error
                 chunk_bytes = bytes(chunk)
                 self._print_apdu_debug(
                     "rx",
@@ -400,6 +458,8 @@ class StkController:
             0x02: "TCP CLIENT REMOTE",
             0x03: "TCP SERVER",
             0x04: "UDP LOCAL",
+            0x05: "TCP CLIENT LOCAL",
+            0x06: "DIRECT CHANNEL",
         }.get(int(protocol_type) & 0xFF, f"0x{int(protocol_type) & 0xFF:02X}")
 
     @staticmethod
@@ -409,16 +469,20 @@ class StkController:
         while offset < len(value_bytes):
             label_len = value_bytes[offset]
             offset += 1
+            if label_len == 0:
+                raise ValueError("Network Access Name contains an empty label.")
             label_end = offset + label_len
             if label_end > len(value_bytes):
-                break
+                raise ValueError(
+                    "Network Access Name label exceeds the available value bytes."
+                )
             label = value_bytes[offset:label_end]
             try:
-                parts.append(label.decode("ascii", "ignore"))
-            except Exception:
-                parts.append(label.hex().upper())
+                parts.append(label.decode("ascii"))
+            except UnicodeDecodeError as error:
+                raise ValueError("Network Access Name label is not ASCII.") from error
             offset = label_end
-        return ".".join(part for part in parts if len(part) > 0)
+        return ".".join(parts)
 
     @staticmethod
     def _decode_other_address(value_bytes: bytes) -> str:
@@ -520,9 +584,16 @@ class StkController:
         if len(cleaned) == 0:
             return b""
         try:
-            return bytes.fromhex(cleaned)
+            encoded = bytes.fromhex(cleaned)
         except ValueError as error:
             raise ValueError("Extra TLV hex is invalid.") from error
+        offset = 0
+        try:
+            while offset < len(encoded):
+                _tag, _value, _raw, offset = self._read_tlv(encoded, offset)
+        except ValueError as error:
+            raise ValueError(f"Extra TLV data is malformed: {error}") from error
+        return encoded
 
     def resolve_event_code(self, event_token: str) -> int:
         """Resolve an event-name token (e.g. 'MT-CALL') to its ETSI TS 102 223 §8.25 event-code byte."""
@@ -624,7 +695,13 @@ class StkController:
         return self._exchange_with_proactive_chain(apdu, "STK SMS-PP DOWNLOAD")
 
     def _drain_proactive_chain(self, log_name: str, sw1: int, sw2: int) -> tuple[int, int]:
+        command_count = 0
         while sw1 == 0x91 and sw2 > 0:
+            command_count += 1
+            if command_count > self.MAX_PROACTIVE_COMMANDS:
+                raise RuntimeError(
+                    f"{log_name} exceeded {self.MAX_PROACTIVE_COMMANDS} proactive commands."
+                )
             fetch_apdu = bytes([0x80, 0x12, 0x00, 0x00, sw2])
             fetch_data, fetch_sw1, fetch_sw2 = self._raw_transmit(fetch_apdu, f"{log_name} [FETCH]")
             if self._is_success(fetch_sw1, fetch_sw2) is False:
@@ -818,10 +895,20 @@ class StkController:
     ) -> tuple[Optional[int], int, dict[str, Any]]:
         fields: dict[str, Any] = {}
         try:
-            root_tag, root_value, _, _ = self._read_tlv(fetch_data, 0)
-        except Exception:
+            root_tag, root_value, _, next_root_offset = self._read_tlv(fetch_data, 0)
+        except ValueError as error:
+            fields["parse_error"] = str(error)
             return None, 0, fields
         if root_tag != b"\xD0":
+            fields["parse_error"] = (
+                f"Expected proactive-command tag D0, received {root_tag.hex().upper()}."
+            )
+            return None, 0, fields
+        if next_root_offset != len(fetch_data):
+            fields["parse_error"] = (
+                f"Proactive command contains {len(fetch_data) - next_root_offset} "
+                "trailing byte(s)."
+            )
             return None, 0, fields
         command_type = None
         qualifier = 0
@@ -829,7 +916,8 @@ class StkController:
         while offset < len(root_value):
             try:
                 tag_bytes, value_bytes, raw_tlv, next_offset = self._read_tlv(root_value, offset)
-            except Exception:
+            except ValueError as error:
+                fields["parse_error"] = f"Inner TLV at offset {offset}: {error}"
                 return command_type, qualifier, fields
             if tag_bytes in (b"\x01", b"\x81") and len(value_bytes) == 3:
                 command_type = value_bytes[1]
@@ -860,7 +948,11 @@ class StkController:
                 fields["buffer_size"] = int.from_bytes(value_bytes, "big", signed=False)
                 fields["buffer_size_tlv"] = raw_tlv
             elif tag_bytes == b"\x47":
-                fields["network_access_name"] = self._decode_network_access_name(value_bytes)
+                try:
+                    fields["network_access_name"] = self._decode_network_access_name(value_bytes)
+                except ValueError as error:
+                    fields["network_access_name_raw"] = value_bytes.hex().upper()
+                    fields["parse_error"] = str(error)
             elif tag_bytes == b"\x3C" and len(value_bytes) == 3:
                 fields["transport_protocol_type"] = value_bytes[0]
                 fields["transport_port"] = int.from_bytes(value_bytes[1:], "big", signed=False)

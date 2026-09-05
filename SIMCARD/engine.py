@@ -29,16 +29,21 @@ from SIMCARD.profile_store import (
     profile_store_has_entries,
     sync_profiles_to_store,
 )
+from SIMCARD.behaviour_profile import (
+    resolve_behaviour_profile,
+    install_behaviour_profile,
+)
 from SIMCARD.quirks import ApduResult, QuirkRegistry, load_quirk_registry
 from SIMCARD.scp03 import Scp03CardLogic
 from SIMCARD.scp80 import Scp80Logic
 from SIMCARD.sgp import SgpLogic
 from SIMCARD.toolkit import ToolkitLogic
-from SIMCARD.utils import parse_apdu
+from SIMCARD.utils import ApduLengthError, parse_apdu
 from yggdrasim_common.card_backend import (
     get_sim_eim_identity_path,
     get_sim_euicc_store_root,
     get_sim_isdr_config_path,
+    get_sim_behaviour_profile_path,
     get_sim_profile_store_path,
     get_sim_quirks_path,
 )
@@ -132,6 +137,7 @@ class SimulatedSimCardEngine:
         sim_eim_identity_path: str = "",
         euicc_store_root: str = "",
         profile_store_path: str = "",
+        behaviour_profile_path: str = "",
     ) -> None:
         self.state = build_default_state()
         self._seed_euicc_store_after_init = False
@@ -161,6 +167,18 @@ class SimulatedSimCardEngine:
             str(sim_eim_identity_path or "").strip() or get_sim_eim_identity_path()
         )
         self.quirks: QuirkRegistry = load_quirk_registry(selected_quirks_path)
+        # A behaviour profile is JSON, so it loads without the
+        # ALLOW_QUIRKS code-execution opt-in. It is installed after the
+        # Python quirks file so a hand-written hook still wins on any
+        # APDU it claims.
+        selected_behaviour_profile_path = (
+            str(behaviour_profile_path or "").strip() or get_sim_behaviour_profile_path()
+        )
+        loaded_profile = resolve_behaviour_profile(selected_behaviour_profile_path)
+        # Installed unconditionally so a profile activated later reaches
+        # this engine too, including through an already-open connection.
+        install_behaviour_profile(self.quirks, loaded_profile)
+        self.behaviour_profile = loaded_profile
         self.quirks.apply_state_hooks(self.state)
         rebuild_runtime_filesystem(self.state)
         self.fs = EtsiFileSystem(self.state)
@@ -310,6 +328,7 @@ class SimulatedSimCardEngine:
 
     def reset(self) -> None:
         """Soft-reset the card: clears all sub-module state, queues, and SCP03 session."""
+        self.state.reset_counter += 1
         self.fs.reset()
         self.naa.reset()
         self.auth.reset()
@@ -332,7 +351,7 @@ class SimulatedSimCardEngine:
         routes to the appropriate command handler in ``_dispatch``.
         """
         command = bytes(apdu or b"")
-        self.state.apdu_history.append(command.hex().upper())
+        self.state.apdu_count += 1
 
         for hook in self.quirks.before_apdu_hooks:
             overridden = hook(command, self.state)
@@ -357,6 +376,12 @@ class SimulatedSimCardEngine:
             else:
                 parsed = parse_apdu(command)
                 result = self._dispatch(parsed)
+        except ApduLengthError as length_error:
+            # ISO/IEC 7816-4 §5.6 table 6: an Lc/Le that disagrees with the
+            # bytes present is "wrong length", not the 6F00 no-precise-
+            # diagnosis catch-all a real card reserves for an internal fault.
+            self._record_fault(command, length_error)
+            result = (b"", 0x67, 0x00)
         except Exception as exc:
             self._record_fault(command, exc)
             result = (b"", 0x6F, 0x00)

@@ -110,7 +110,7 @@ SERVICES_LIST_LABELS: dict[str, str] = {
 }
 
 
-# Header section keys observed in the wild — pySim's encoder uses
+# Header section keys observed in deployed packages — pySim's encoder uses
 # ``"header"`` post-decoding, but legacy / vendor packages sometimes
 # write ``"profileHeader"``. Both are accepted for lookup.
 _HEADER_SECTION_KEYS: tuple[str, ...] = ("header", "profileHeader")

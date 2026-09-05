@@ -8,7 +8,7 @@ Subprocess wrapper around tshark + the EUM-BPP Lua dissector.
 The runner keeps the command construction + environment shaping out
 of the CLI layer so it can be unit-tested without actually invoking
 tshark. Each public function returns a plain argv list or a
-``subprocess.CompletedProcess`` — no global state.
+``subprocess.CompletedProcess`` -- no global state.
 """
 
 from __future__ import annotations
@@ -24,7 +24,9 @@ from .session_keys import SESSION_KEYS_ENV_VAR
 
 
 DEFAULT_TSHARK_BINARY: str = "tshark"
-DEFAULT_DISSECTOR_FILENAME: str = "dissector.lua"
+#: Kept as the name of the file this tool now loads, not the retired
+#: ``dissector.lua``; see locate_dissector.
+DEFAULT_DISSECTOR_FILENAME: str = "yggdrasim_apdu.lua"
 
 
 @dataclass(frozen=True)
@@ -43,15 +45,23 @@ class TsharkInvocation:
 
 
 def locate_dissector(module_dir: Path | None = None) -> Path:
-    """Resolve the bundled ``dissector.lua`` path.
+    """Resolve the Lua dissector this tool hands to tshark.
 
-    The default location is next to this module. Tests override
-    ``module_dir`` to point at a tmpdir copy when they want to
-    assert against a known good checksum.
+    Formerly a ``dissector.lua`` sitting next to this module. That file
+    byte-scanned for the ``BF36`` tag and rendered its value as one
+    opaque blob, loaded the session keys without ever applying them, and
+    crashed on an odd-length ICCID. It has been retired in favour of
+    ``Tools/ApduDissector``, which decodes the BoundProfilePackage as a
+    tree and honours the same ``YGGDRASIM_EUM_SESSION_KEYS`` variable.
+
+    ``module_dir`` is forwarded rather than resolved here. Resolving it
+    against this module's own name would return a ``dissector.lua`` that
+    no longer exists anywhere, so the two branches would disagree on
+    which file they mean.
     """
-    if module_dir is not None:
-        return (Path(module_dir) / DEFAULT_DISSECTOR_FILENAME).resolve()
-    return (Path(__file__).parent / DEFAULT_DISSECTOR_FILENAME).resolve()
+    from Tools.ApduDissector.tshark_runner import locate_dissector as locate_apdu
+
+    return locate_apdu(module_dir)
 
 
 def build_tshark_invocation(
@@ -106,7 +116,7 @@ def run_tshark(
 ) -> subprocess.CompletedProcess[bytes]:
     """Execute the invocation and return the ``CompletedProcess``.
 
-    The call deliberately does NOT raise on non-zero exit — tshark
+    The call deliberately does NOT raise on non-zero exit -- tshark
     uses non-zero for benign cases (e.g. no matching packets) so the
     caller is responsible for interpreting the return code.
     """

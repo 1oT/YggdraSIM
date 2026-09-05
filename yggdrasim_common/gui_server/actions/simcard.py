@@ -273,10 +273,10 @@ def _dispatch_tuak_derive_topc(
         raise ValueError(f"derive_topc failed: {error}") from error
 
     return {
-        "top_hex": top_bytes.hex().upper(),
         "key_length_bits": len(key_bytes) * 8,
         "number_of_keccak": rounds,
         "topc_hex": topc.hex().upper(),
+        "secret_outputs_redacted": ["key", "top"],
     }
 
 
@@ -374,9 +374,9 @@ TUAK_DERIVE_TOPC_SPEC = ActionSpec(
     ),
     inputs=(
         ActionField(name="top", label="TOP (64 hex)", kind="hex", required=True,
-                    help="32-byte operator constant."),
+                    help="32-byte operator constant.", secret=True),
         ActionField(name="key", label="K (32 or 64 hex)", kind="hex", required=True,
-                    help="Subscriber key — 128 or 256 bit."),
+                    help="Subscriber key — 128 or 256 bit.", secret=True),
         ActionField(name="number_of_keccak", label="Keccak rounds", kind="int",
                     required=False, default=1, min_value=1, max_value=16,
                     help="TS 35.231 NR_KECCAK — typically 1."),

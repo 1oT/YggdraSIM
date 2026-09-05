@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SGP.32 eIM response decoders: EUICCInfo1, GetRAT, GetCerts, and eIM configuration TLV parsers."""
 from typing import Any, Dict, List, Optional
 
@@ -11,18 +10,24 @@ from SCP03.logic.euicc_info2 import parse_tlv_simple
 from SCP03.logic.euicc_info2 import quote_text
 
 
+# SGP.22 NotificationEvent. The local operations are spelled with
+# "Local" in the ASN.1, and bits 4 to 7 carry the RPM operations.
 NOTIFICATION_EVENT_FLAGS: dict[int, str] = {
     0: "notificationInstall",
-    1: "notificationEnable",
-    2: "notificationDisable",
-    3: "notificationDelete",
+    1: "notificationLocalEnable",
+    2: "notificationLocalDisable",
+    3: "notificationLocalDelete",
+    4: "notificationRpmEnable",
+    5: "notificationRpmDisable",
+    6: "notificationRpmDelete",
+    7: "loadRpmPackageResult",
 }
 
+# SGP.22 PprIds defines three bits. Bit 3 is not allocated.
 PPR_FLAGS: dict[int, str] = {
     0: "pprUpdateControl",
     1: "ppr1-disable-not-allowed",
     2: "ppr2-delete-not-allowed",
-    3: "ppr3-delete-after-disable",
 }
 
 RAT_FLAG_NAMES: dict[int, str] = {
@@ -37,6 +42,8 @@ EIM_SUPPORTED_PROTOCOL_FLAGS: dict[int, str] = {
     4: "eimProprietary",
 }
 
+# SGP.32 GetCertsResponse. The ASN.1 spells 127 "undfinedError"; the
+# spelling here is corrected, the value is the one the spec assigns.
 GET_CERTS_ERROR_NAMES: dict[int, str] = {
     1: "invalidCiPKId",
     127: "undefinedError",
@@ -45,6 +52,8 @@ GET_CERTS_ERROR_NAMES: dict[int, str] = {
 NOTIFICATIONS_ERROR_NAMES: dict[int, str] = {
     127: "undefinedError",
 }
+
+_MAX_TLV_WALK_DEPTH = 32
 
 
 def decode_euicc_info1_summary(response: bytes) -> Dict[str, Any]:
@@ -128,30 +137,39 @@ def decode_rat_rules(response: bytes) -> List[Dict[str, Any]]:
     rules: List[Dict[str, Any]] = []
     seen_fingerprints: set[str] = set()
 
-    def walk(node_bytes: bytes) -> None:
+    def looks_like_rule(nodes: List[tuple[int, bytes, bool]]) -> bool:
+        immediate = {tag: value for tag, value, _constructed in nodes}
+        ppr_ids = immediate.get(0x80)
+        if ppr_ids is None or not any(tag in immediate for tag in (0xA1, 0x82)):
+            return False
+        try:
+            decode_named_bit_string(ppr_ids, PPR_FLAGS)
+            flags = immediate.get(0x82)
+            if flags is not None:
+                decode_named_bit_string(flags, RAT_FLAG_NAMES)
+        except ValueError:
+            return False
+        return True
+
+    def walk(node_bytes: bytes, depth: int = 0) -> None:
         """Depth-first walk of RAT rule permission TLVs; appends decoded dicts to the outer list."""
+        if depth > _MAX_TLV_WALK_DEPTH:
+            raise ValueError(
+                f"RAT rule TLV nesting exceeds {_MAX_TLV_WALK_DEPTH} levels."
+            )
         nodes = parse_tlv_nodes(node_bytes)
         if len(nodes) == 0:
             return
 
-        immediate_tags = {tag for tag, _value, _constructed in nodes}
-        if 0x80 in immediate_tags and any(tag in immediate_tags for tag in (0xA1, 0x82)):
+        if looks_like_rule(nodes):
             fingerprint = node_bytes.hex().upper()
             if fingerprint not in seen_fingerprints:
                 seen_fingerprints.add(fingerprint)
                 rules.append(decode_rat_rule(node_bytes))
 
-        for tag, value, constructed in nodes:
-            if tag == 0x30:
-                child_nodes = parse_tlv_nodes(value)
-                child_tags = {child_tag for child_tag, _child_value, _child_constructed in child_nodes}
-                if 0x80 in child_tags and any(child_tag in child_tags for child_tag in (0xA1, 0x82)):
-                    fingerprint = value.hex().upper()
-                    if fingerprint not in seen_fingerprints:
-                        seen_fingerprints.add(fingerprint)
-                        rules.append(decode_rat_rule(value))
+        for _tag, value, constructed in nodes:
             if constructed:
-                walk(value)
+                walk(value, depth + 1)
 
     walk(root_value)
     return rules
@@ -200,27 +218,27 @@ def decode_eim_configuration_entries(response: bytes) -> List[Dict[str, Any]]:
     if root_value is None:
         return []
 
+    # GetEimConfigurationDataResponse ::= [85] SEQUENCE {
+    #   eimConfigurationDataList [0] SEQUENCE OF EimConfigurationData
+    # }
+    # Decode that shape directly. A heuristic recursive walk used to descend
+    # into A5/A6 certificate choices and could mistake DER internals for
+    # another eIM entry; it also dropped a valid minimal entry containing only
+    # its mandatory eimId.
+    root_nodes = parse_tlv_nodes(root_value)
+    list_nodes = [value for tag, value, _constructed in root_nodes if tag == 0xA0]
+    if not list_nodes:
+        return []
+
     entries: List[Dict[str, Any]] = []
-    seen_fingerprints: set[str] = set()
-
-    def walk(node_bytes: bytes) -> None:
-        """Depth-first walk of eIM config sub-TLVs; appends decoded fields to the outer dict."""
-        nodes = parse_tlv_nodes(node_bytes)
-        if len(nodes) == 0:
-            return
-
-        immediate_tags = {tag for tag, _value, _constructed in nodes}
-        if 0x80 in immediate_tags and any(tag in immediate_tags for tag in (0x81, 0x82, 0x83, 0x84, 0x87, 0x88, 0x89, 0xA5, 0xA6)):
-            fingerprint = node_bytes.hex().upper()
-            if fingerprint not in seen_fingerprints:
-                seen_fingerprints.add(fingerprint)
-                entries.append(decode_eim_configuration_entry(node_bytes))
-
-        for _tag, value, constructed in nodes:
-            if constructed:
-                walk(value)
-
-    walk(root_value)
+    for list_value in list_nodes:
+        for tag, value, constructed in parse_tlv_nodes(list_value):
+            if tag != 0x30 or not constructed:
+                continue
+            entry_map = parse_tlv_simple(value)
+            if first_bytes(entry_map.get(0x80)) is None:
+                continue
+            entries.append(decode_eim_configuration_entry(value))
     return entries
 
 
@@ -335,12 +353,18 @@ def decode_text_or_hex(value: bytes) -> str:
 def decode_bcd_digits(value: bytes) -> str:
     """Decode BCD-encoded bytes to a digit string (3GPP TS 24.008 §10.5.1.3)."""
     digits: List[str] = []
-    for byte_value in value:
+    for index, byte_value in enumerate(value):
         low = byte_value & 0x0F
         high = (byte_value >> 4) & 0x0F
-        if low > 9 and low != 0x0F:
+        # TBCD filler is permitted only in the high nibble of the final
+        # octet. Accepting a low-nibble F used to append the literal string
+        # "15", producing a plausible but incorrect ICCID/MCC-MNC.
+        if low > 9:
             return value.hex().upper()
-        if high > 9 and high != 0x0F:
+        if high == 0x0F:
+            if index != len(value) - 1:
+                return value.hex().upper()
+        elif high > 9:
             return value.hex().upper()
         digits.append(str(low))
         if high != 0x0F:
@@ -365,6 +389,14 @@ def decode_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> List[str
         return []
     unused_bits = value[0]
     payload = value[1:]
+    if unused_bits > 7:
+        raise ValueError("BIT STRING unused-bit count must be in range 0..7.")
+    if len(payload) == 0:
+        if unused_bits != 0:
+            raise ValueError("Empty BIT STRING payload must have zero unused bits.")
+        return []
+    if unused_bits and payload[-1] & ((1 << unused_bits) - 1):
+        raise ValueError("BIT STRING contains non-zero padding bits.")
     labels: List[str] = []
     bit_index = 0
     for byte_index, byte_value in enumerate(payload):
@@ -401,12 +433,24 @@ def collect_nested_tag_values(data: bytes, wanted_tag: int) -> List[bytes]:
     """Recursively collect all values of *tag* found anywhere within *container_bytes*."""
     values: List[bytes] = []
 
-    def walk(node_bytes: bytes) -> None:
+    def walk(node_bytes: bytes, depth: int = 0) -> None:
+        if depth > _MAX_TLV_WALK_DEPTH:
+            raise ValueError(
+                f"TLV nesting exceeds {_MAX_TLV_WALK_DEPTH} levels."
+            )
         for tag, value, constructed in parse_tlv_nodes(node_bytes):
             if tag == wanted_tag:
                 values.append(value)
+                # Certificate/public-key containers are opaque at this layer.
+                # Recursing into their DER payload can reinterpret arbitrary
+                # certificate bytes as sibling TLVs.
+                continue
+            if tag in (0xA5, 0xA6):
+                # These SGP.32 choices carry opaque certificate/public-key
+                # encodings even though their context tag is constructed.
+                continue
             if constructed:
-                walk(value)
+                walk(value, depth + 1)
 
     walk(data)
     return values

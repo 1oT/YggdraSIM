@@ -8,29 +8,337 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 All notable changes to YggdraSIM are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 honours [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for
-the public API surface — the launcher, the documented CLI shells, the
+the public API surface -- the launcher, the documented CLI shells, the
 SCP03 / SCP11 / SCP80 / SIMCARD module entry points, and the
 `yggdrasim_common` helpers consumed by external integrators.
 
 Internal helpers (modules under leading-underscore names, undocumented
-SAIP wrappers, and any path explicitly marked post-v1 staging in this
-file) may change without notice between minor releases.
+SAIP wrappers) may change without notice between minor releases.
 
 ## [Unreleased]
 
 ### Added
 
+- `yggdrasim-desktop` is a `[project.gui-scripts]` entry point for the
+  Command Center. setuptools backs a gui-script with `pythonw` on
+  Windows, so a shortcut opens the GUI without a console window behind
+  it. `yggdrasim-gui` stays a console script for terminal use such as
+  `yggdrasim-gui --web-server --token-file <path>`.
+
+- `scripts/install_shortcuts.py` writes a native launcher per host: a
+  `Terminal=false` desktop entry on Linux, a `WScript.Shell` shortcut in
+  the Windows Start Menu, and an `osacompile` applet in `~/Applications`
+  on macOS. It resolves the launcher to an absolute path at install
+  time, because desktop sessions and Explorer do not inherit the shell
+  `PATH`. `--dry-run`, `--force`, `--uninstall`, `--target`,
+  `--install-dir`, and `--no-icon` are supported.
+
+- The launchers carry the YggdraSIM mark, shipped as `yggdrasim_common`
+  package data so a pipx install has it without the source tree. The
+  Windows `.ico` is written from the packaged PNG at install time, which
+  needs no image library on the host.
+
+- `pipx install '.[gui,saip]'` is documented in
+  `scripts/install/README.md`, including why the bare package name does
+  not resolve from PyPI: two base dependencies are PEP 508 direct
+  references, which PyPI rejects in `Requires-Dist`.
+
+### Fixed
+
+- The Command Center's Stop control now ends a running action. The
+  route set the run's cancel event, but `_stream_console` never accepted
+  it, so every `scp11_live` streaming action was uncancellable and an
+  eIM poll cadence ran until the process exited. The flag now travels to
+  the console through `yggdrasim_common/cancellation.py`, and cadence
+  waits are interruptible.
+
+- Closing the desktop window ends the process instead of waiting on a
+  stream that never finishes. A graceful uvicorn stop drains open
+  connections, which a poll WebSocket will supply indefinitely; teardown
+  now cancels in-flight runs, forces the server down, and bounds the
+  cleanup that stops external services.
+
+- A windowless launcher can start the process with no standard streams,
+  where the missing-`[gui]`-extra diagnostic raised `AttributeError` on
+  `None` and the shortcut appeared to do nothing.
+
+- `euicc_config_live` actions have their own eSIM Management tab rather
+  than falling into the SGP.22 bucket, whose label describes none of
+  them.
+
+- The Wireshark capability probe no longer enters the wheel or the
+  source distribution. The `lua/*.lua` globs swept it in against the
+  statement in its own header, and `verify_wheel.py` rejects it as a
+  resource outside the release allowlist, so no wheel could verify.
+
+- `uv.lock` records the current version, `Tools.ApduDissector` is in the
+  reviewed-package manifest, and the SGP.26 suites skip on a checkout
+  without the GSMA bundle rather than failing on a missing fixture.
+
+### Changed
+
+- No SGP.26 certificate, key, or reference bundle is tracked. The tree
+  is gitignored and an operator supplies it locally;
+  `SCP11/TEST_MATERIAL_NOTICE.md` records where it goes and how the
+  suites behave without it.
+
+## [2.1.0] -- 2026-08-18
+
+### Added
+
+- `Tools/ApduDissector/` is a Wireshark and tshark dissector for the
+  GSMTAP SIM frames the HIL bridge mirrors on UDP `4729`. It decodes the
+  ISO/IEC 7816-4 header with its class-byte breakdown and case
+  classification, status words including the `61XX` / `6CXX` / `63CX`
+  families whose SW2 carries a count, BER-TLV and COMPREHENSION-TLV,
+  ETSI TS 102 221 clause 11.1.1.3 file-control templates, the contents
+  of EF.ICCID / EF.IMSI / EF.UST / EF.AD, and ISO/IEC 7816-3 ATR frames.
+  Each command also carries the risk class from
+  `yggdrasim_common/apdu_risk.py`, so `yapdu.risk == 3` lists every
+  irreversible command in a capture.
+
+  Measured against TShark 4.2.2, this fixes three defects in the stock
+  decode: a `GET RESPONSE` carrying an FCP template was reported as a
+  malformed packet, a `STORE DATA` to the ISD-R rendered as a bare `e2`
+  with its payload untouched, and ATR frames were mis-parsed as APDUs
+  down to an invented status word.
+
+  Available as `yggdrasim-apdu-dissect` (`decode`, `sidecar`,
+  `install`, `uninstall`, `path`, `probe`), and loaded automatically by
+  the HIL-bridge terminal decode view, offline pcap review, and the
+  Wireshark launch under HIL start mode `[2]`. Set
+  `YGGDRASIM_APDU_DISSECTOR=0` to opt out. A bare `tshark` or a
+  desktop-launched Wireshark does not load it until
+  `yggdrasim-apdu-dissect install` copies the Lua tree into the personal
+  plugin folder, after which both read it at startup with no flags.
+
+- `scripts/generate_apdu_dissector_tables.py` generates the dissector's
+  Lua lookup tables from the Python modules that already own them, so an
+  instruction name or status word cannot mean one thing in the toolkit
+  and another in a packet trace. `tests/test_apdu_dissector_tables.py`
+  fails when the committed Lua drifts.
+
+- `yggdrasim_common/stk_tables.py` holds the ETSI TS 102 223 Table 9.4
+  and clause 8.25 tables, which previously existed only as literals
+  inside `tests/test_stk_spec_tables.py`.
+
+- `yggdrasim_common/apdu_tables.py` records the ISO 7816-4 case each
+  instruction normally uses, used as a confidence signal when splitting
+  a concatenated command/response frame.
+
+- `yggdrasim-apdu-dissect sidecar` recovers SCP03 / SCP11c plaintext
+  from a capture into a sidecar file the dissector reads, using the
+  same replay engine the terminal decode view uses. Wireshark's Lua
+  binding has no AES, no CMAC and no hash, so a Lua dissector cannot
+  decrypt regardless of what keys it is given. Recovered plaintext is
+  re-decoded in full, so a ciphered ES10b STORE DATA renders as an
+  ES10b tree. Sidecars are bound to their capture by the on-wire
+  ciphered command rather than by frame number, so one built from a
+  different capture contributes nothing instead of misattributing.
+
+- `ScpReplayEngine.try_unwrap_bytes` returns the recovered plaintext
+  bytes alongside the lines `try_unwrap` already rendered.
+
+### Changed
+
+- `Tools/EumDiag/dissector.lua` is retired. `yggdrasim-eum-diag` now
+  hands its captures to `Tools/ApduDissector`, which decodes the BF36
+  BoundProfilePackage as a tree rather than dumping it as one blob, and
+  still honours `YGGDRASIM_EUM_SESSION_KEYS`. The retired file
+  byte-scanned for the tag with no TLV awareness, so it matched inside
+  unrelated values; loaded the session keys and never applied them; set
+  the protocol column on every packet in the capture whether or not it
+  had touched it; and built a TvbRange from half the digit count of an
+  ICCID, which breaks on any real 19-digit one.
+
+- The HIL-bridge decode view names proactive command `0x04` `POLLING
+  OFF`, matching ETSI TS 102 223 Table 9.4. It previously read `POLL
+  OFF`. The TUI summary marker changed with it.
+
+- `scripts/check_repo_hygiene.py` now scans `.lua` files.
+
+### Security
+
+- The GUI file picker (`/api/fs/browse`) no longer enumerates arbitrary
+  directories in `--web-server` mode. That endpoint is authenticated and
+  returns metadata only, never file contents, but a web-server session
+  binds `0.0.0.0` by default and its token holder need not own the host,
+  so directory enumeration was a disclosure. Listing is now limited to the
+  roots the picker already offers (home, working dir, workspace,
+  Documents, Downloads, Desktop). `--gui` is unchanged: it is loopback
+  bound on the operator's own machine. `YGGDRASIM_GUI_FS_ROOTS` overrides
+  either default. Paths are checked after resolution, so `..` traversal
+  and symlinks are judged by their real target.
+
+### Added
+
+- Model Context Protocol server (`Tools/YggdraMCP`, opt-in `[mcp]` extra,
+  console script `yggdrasim-mcp`). 26 tools covering spec / status-word /
+  AID lookup, ASN.1 and APDU decode, SAIP and eIM linting, SAIP and
+  session diffing, card transport control, and batch
+  execution in all eight operator shells (`profile_package`, `scp80`,
+  `scp11_eim`, `suci_tool`, `scp03`, `scp11_live`, `scp11_relay`,
+  `scp11_local_access`) across 360 classified verbs. Four reference
+  resources and three canned workflows.
+  Private extensions register through the `mcp_extensions` plugin
+  capability.
+- MCP access model. The server is read-only by default;
+  `YGGDRASIM_MCP_ACCESS=write` permits state changes,
+  `YGGDRASIM_MCP_ALLOW_CARD` permits reaching a card, and
+  `YGGDRASIM_MCP_ALLOW_SCRIPT_FILES` permits verbs whose payload the gate
+  cannot classify (`RUN`, `SCRIPT`, `RAW`). The three are independent.
+  Shell verbs are allow-listed per shell, and every shell's classification
+  is checked against that shell's own command table on each test run.
+- MCP card transport control: `card_backend_status`,
+  `card_backend_select`, `card_session_open`, `card_session_transmit`, and
+  `card_session_close`. Sessions hold one connection open, so a
+  select-then-read or secure-channel sequence survives across calls, which
+  the stateless `pcsc_transmit` cannot do. Bounded to 4 concurrent
+  sessions with a 10-minute idle reap.
+- Standalone `yggdrasim-mcp` distribution generated by
+  `scripts/release/build_mcp_standalone.py`. Publishes a single
+  `yggdrasim_mcp` package that installs alongside `yggdrasim`, declares no
+  Git dependencies, and vendors the card transport chain so it can drive a
+  card locally or through a relay without the rest of the tree.
+- HIL bridge: the supervisor now reboots the SIMtrace2 board before
+  every session, replacing the trip to the rig to press the physical
+  reset button. The cardem firmware resets its own microcontroller when
+  USB drops below `CONFIGURED`, so `Tools/HilBridge/device_reset.py`
+  forces that from the host -- `USBDEVFS_RESET` on the usbfs node by
+  default, or a `uhubctl` VBUS cycle that also power-cycles the SIM.
+  Selected with `--simtrace-reset` / `YGGDRASIM_HIL_SIMTRACE_RESET`
+  (`usb-reset`, `port-power`, `auto`, `off`); the USB snapshot is
+  re-read afterwards so `osmo-remsim-client-st2` is pinned to the
+  board's new USB address. A new `yggdrasim-hil-reset` console script
+  performs the same reset on demand, and the supervisor state file
+  reports the result under `simtraceReset`.
+- HIL bridge: relay sessions now power-cycle the physical card at their
+  boundaries. Operator shells transact under a relay session id, and the
+  bridge cold-resets the card (`SCARD_UNPOWER_CARD`) when that id first
+  appears, when another shell replaces it, and when the shell
+  disconnects -- so a selected AID, an open logical channel, or an
+  established SCP03 / SCP11 secure channel can no longer leak into the
+  modem session. Because a power-cycle invalidates every view of the
+  card, the bankd side is dropped too and `osmo-remsim-client-st2`
+  re-handshakes against the post-power-up ATR. Disable with
+  `YGGDRASIM_HIL_RELAY_SESSION_RESET=0` or `--no-relay-session-reset`.
+  The remote-rig systemd unit also gained the SIMtrace2 reset knobs, and
+  `PcscCardChannel.disconnect()` now pins `SCARD_UNPOWER_CARD` instead
+  of inheriting whatever disposition was last set.
 - Post-v1 Tools tier staging (not part of this release):
   in-process `Tools/YggdraCore/` stubs (subscription store, AUSF
   stub, AAnF stub, FastAPI loopback, BYO Open5GS bridge);
   local-loopback `Tools/CardBridge/` HTTP card-relay daemon. The HTTP / CLI surface
   hardening, BYO-Open5GS resilience checks, and the public docs
-  pass for these modules are still pending — they are not part of
+  pass for these modules are still pending -- they are not part of
   the v1.0.0 promise.
 
-## [1.0.1] — 2026-06-05
+### Removed
+
+- `.gitlab-ci.yml`. The GitLab remote is an internal mirror, not a build
+  surface: releases are produced by the GitHub workflows under
+  `.github/workflows/`, so a second pipeline definition duplicated that
+  work and ran on every internal push. The file stays recoverable from
+  history if GitLab CI is wanted again.
+
+- The tracked GSMA SGP.26 reference certificates, the SM-DP+ test keys and
+  `SCP03/script.txt`. Certificates and private keys are operator-supplied
+  material even when the values are reference ones; the guides document
+  where to place them. See `guides/REMOTES_AND_PUBLICATION.md`.
+
+## [1.0.1] -- 2026-06-05
 
 ### Fixed
+
+- A conformance sweep of `Tools/ApduDissector/` against the governing
+  specifications corrected a set of defects that produced confidently
+  wrong output rather than missing output. These change what an operator
+  reads off a capture they have already collected, so they are listed
+  individually:
+
+  - The life-cycle status integer was inverted against ISO/IEC 7816-4
+    Table 13. `'05'` and `'07'` were reported as deactivated when they
+    are activated, and `'0C'` to `'0F'` -- the **termination state** --
+    were reported as operational, so a permanently dead file or ADF
+    rendered as healthy. The GlobalPlatform registry codings were also
+    consulted ahead of the ISO table for an FCP `'8A'`, which made every
+    ordinary UICC file report "LOADED" or "INSTALLED".
+  - Warning status words were counted as success. `63 CX` is a *failed*
+    verification, so `yapdu.sw_success` reported "Succeeded: True"
+    beside the text "Verification failed", and a filter for failures
+    missed every consumed retry and every blocked PIN. Status words are
+    now classified into the four categories of ISO/IEC 7816-4
+    clause 5.1.3 and published as `yapdu.sw.category`.
+  - ETSI TS 102 223 clause 8.7 device identities had the UICC and the
+    terminal swapped, reversing the reported direction of every
+    proactive command and every terminal response; the channel block was
+    read from `'10'` rather than `'21'`, so channels 1--7 were named as
+    card readers. Source and destination are now rendered, which they
+    previously were not at all.
+  - The clause 8.52 bearer table was numbered from `'00'` instead of
+    `'01'`, shifting every entry -- including `'03'`, the default packet
+    bearer this repository's own toolkit emits, which read as "local
+    link technology independent".
+  - The clause 8.12 general result table was shifted by two from `'04'`
+    up, so a REFRESH that merely could not draw an icon was reported as
+    an inactive NAA.
+  - Clause 8.59 transport levels had local and remote swapped, reporting
+    a channel terminating on the handset as one to the network.
+  - Case-4 commands were split one byte short. The case hint was scored
+    as a single string comparison, so an instruction hinted `3S` beat
+    its true `4S` reading by 20 points -- at confidence 100 and with no
+    ambiguity flag -- and the trailing Le rendered as a one-byte
+    response body. Every ES10b `STORE DATA` is case 4. Scoring now
+    models the two properties a case actually asserts, and confidence
+    derives from the margin over the runner-up rather than from evidence
+    every candidate shares.
+  - Secure messaging was detected from bit 3 alone, which missed
+    ISO/IEC 7816-4 Table 3 type `'10'` (CLA `'08'` and `'88'`) and
+    invented an eight-byte C-MAC on the further interindustry classes
+    `'44'` and `'4C'`, where that bit is part of the channel number.
+  - `61 00` and `6C 00` reported zero bytes rather than 256; `92 40`, a
+    memory problem, was reported as a normal ending after 64 retries;
+    and `9E XX`, a SIM data download error, had no description at all.
+  - A proprietary or reserved class byte had a logical channel, a
+    secure-messaging level and a chaining flag decoded out of bits
+    ISO/IEC 7816-4 clause 5.4.1 assigns no meaning to, stating three
+    facts per command that the specification does not.
+  - COMPREHENSION-TLV tags `'1C'`, `'1D'` and `'1E'` were each named as
+    their neighbour and `'32'` was named as `'3F'`; the tag table now
+    covers the full ETSI TS 101 220 clause 7.2 allocation.
+  - The BoundProfilePackage sections were numbered from `'A0'` as the
+    initialiseSecureChannelRequest. GSMA SGP.22 clause 2.5.2 puts the
+    request in `BF23` and gives `'A0'` to `'A3'` to the four sequences,
+    so every name was shifted by one and `secondSequenceOf87` was
+    missing entirely.
+  - A secure-messaged SELECT had its ciphertext read as an AID, a file
+    identifier or a path, and the result was committed to the
+    cross-frame state -- so every following read in that channel was
+    attributed to a file identifier made of ciphertext, while still
+    reporting its context as available.
+  - `Tools/ApduDissector/sidecar.py` split a wrapped exchange as case 3
+    unconditionally. A GlobalPlatform `INSTALL` is sent case 4, so the
+    recorded command was one byte short of the frame and a valid sidecar
+    was refused with "does not match", which is both false and the most
+    misleading thing the tool can report. It also hardcoded the card
+    session index and the selected AID, making every keybag session that
+    matches on either unreachable; both are now tracked from the
+    capture.
+  - A sidecar entry with no `command_hex` bypassed the check that binds
+    a sidecar to its capture, making the guarantee opt-in. It now fails
+    closed.
+
+- The dissector also closes gaps the sweep found where the decode simply
+  stopped early: ENVELOPE bodies (`D1`--`DE`) are unwrapped, so Event
+  download exposes its event code, channel status and pending byte
+  count; the Result cause byte names which of the thirteen BIP failures
+  occurred; Channel status reports whether the link came up and whether
+  it dropped; the OPEN CHANNEL port is bound to the channel the terminal
+  allocates, so DNS inside a BIP session resolves; chained `STORE DATA`
+  is reassembled; and DGI-format `STORE DATA`, the INSTALL extradition,
+  registry-update and personalisation layouts, and SCP01/02/03/11
+  INITIALIZE UPDATE responses are decoded per their own structures
+  rather than a shared guess.
 
 - SCP11 live and relay notification sync now encode
   `seqNumber >= 0x80` as positive ASN.1 INTEGER values before
@@ -46,7 +354,7 @@ file) may change without notice between minor releases.
   logical-channel recovery, and STK-mode bootstrap for recoverable
   `6E00` / `6985` style failures after profile-state changes.
 
-## [1.0.0] — 2026-04-29
+## [1.0.0] -- 2026-04-29
 
 First SemVer-tagged release. Cut at git tag `v1.0.0`. Pinned commit
 exposes a frozen v1 footprint; the v2 staging continues on `main`.
@@ -54,11 +362,11 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
 ### Added
 
 - Default eUICC identity is now the reserved SGP.22 Annex A.2 test EID
-  `89049032123451234512345678901234`, with prefix `89049032` and a valid
+  `89049032123451234512345678901235`, with prefix `89049032` and a valid
   Luhn check digit.
 - SIMCARD 5G core: TS 33.501 Annex A AKA helpers (`SIMCARD/aka_5g.py`),
-  TS 33.535 AKMA (`SIMCARD/akma.py`), TS 33.501 §C.3 SUCI Profile A & B
-  with EF.SUCI_Calc_Info codec (`SIMCARD/suci.py`), TS 31.102 §7.1.2.4
+  TS 33.535 AKMA (`SIMCARD/akma.py`), TS 33.501 section C.3 SUCI Profile A & B
+  with EF.SUCI_Calc_Info codec (`SIMCARD/suci.py`), TS 31.102 section 7.1.2.4
   `GET IDENTITY` handler (`SIMCARD/identity.py`).
   transport (`SIMCARD/ipa_tls.py`); SAIP pySIM specs bridge
   (`SIMCARD/saip_pysim_specs.py`); SGP.32 package surfaces
@@ -109,6 +417,7 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
   values; pushing them to a shared remote was a foot-gun. The
   `reports/.gitkeep` placeholder documents the intended layout.
 
-[Unreleased]: https://example.invalid/yggdrasim/compare/v1.0.1...HEAD
+[Unreleased]: https://example.invalid/yggdrasim/compare/v2.1.0...HEAD
+[2.1.0]: https://example.invalid/yggdrasim/releases/tag/v2.1.0
 [1.0.1]: https://example.invalid/yggdrasim/releases/tag/v1.0.1
 [1.0.0]: https://example.invalid/yggdrasim/releases/tag/v1.0.0
