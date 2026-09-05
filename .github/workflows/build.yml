@@ -79,10 +79,21 @@ jobs:
           test "$(git cat-file -t "refs/tags/${TAG}")" = "tag"
           TAG_OBJECT_SHA="$(git rev-parse "refs/tags/${TAG}^{tag}")"
           test "$(git rev-list -n 1 "refs/tags/${TAG}")" = "${GITHUB_SHA}"
+          # A production tag is cut on main or on a release/<major>.<minor>.x
+          # branch (guides/REMOTES_AND_PUBLICATION.md); a tag on any other
+          # commit is refused before a single platform builds.
           git show-ref --verify --quiet refs/remotes/origin/main
-          git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main
+          LINE=""
+          for ref in $(git for-each-ref --format='%(refname)' \
+              refs/remotes/origin/main 'refs/remotes/origin/release/*'); do
+            if git merge-base --is-ancestor "${GITHUB_SHA}" "${ref}"; then
+              LINE="${ref#refs/remotes/origin/}"
+              break
+            fi
+          done
+          test -n "${LINE}"
           printf 'tag_object_sha=%s\n' "${TAG_OBJECT_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "validated annotated ${TAG} on the origin/main history"
+          echo "validated annotated ${TAG} on the ${LINE} history"
 
   dependency-policy:
     name: Dependency lock and package boundary
@@ -481,6 +492,8 @@ jobs:
     name: Windows x86_64 clean
     needs: release-ref-policy
     runs-on: windows-latest
+    outputs:
+      signed: ${{ steps.codesign.outputs.signed }}
 
     steps:
       - name: Checkout code
@@ -534,20 +547,31 @@ jobs:
           YGGDRASIM_FLAVOR: clean
         run: uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 
-      - name: Require Authenticode credentials for tagged releases
+      # A repository without code-signing secrets publishes unsigned
+      # binaries and the release notes say so (publish-release). A partial
+      # pair is a misconfiguration and fails the build.
+      - name: Resolve Authenticode credentials for the tagged release
+        id: codesign
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
           SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:SIGNING_PFX_BASE64) -or
-              [string]::IsNullOrWhiteSpace($env:SIGNING_PASSWORD)) {
-            throw 'Tagged releases require WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PASSWORD.'
+          $havePfx = -not [string]::IsNullOrWhiteSpace($env:SIGNING_PFX_BASE64)
+          $havePassword = -not [string]::IsNullOrWhiteSpace($env:SIGNING_PASSWORD)
+          if ($havePfx -ne $havePassword) {
+            throw 'WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PASSWORD must be set together.'
+          }
+          if ($havePfx) {
+            "signed=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host 'No WINDOWS_CODESIGN_* secrets: the Windows binaries ship unsigned and the release notes say so.'
+            "signed=false" >> $env:GITHUB_OUTPUT
           }
 
       - name: Authenticode-sign Windows release binaries
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && steps.codesign.outputs.signed == 'true'
         shell: pwsh
         env:
           SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
@@ -614,6 +638,8 @@ jobs:
           - arch: arm64
             runner: macos-14
     runs-on: ${{ matrix.runner }}
+    outputs:
+      signed: ${{ steps.codesign.outputs.signed }}
 
     steps:
       - name: Checkout code
@@ -668,7 +694,11 @@ jobs:
           YGGDRASIM_FLAVOR: clean
         run: uv run python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 
-      - name: Require signing and notarization credentials for tagged releases
+      # A repository without signing and notarization secrets publishes
+      # unsigned binaries and the release notes say so (publish-release).
+      # A partial set is a misconfiguration and fails the build.
+      - name: Resolve signing and notarization credentials for the tagged release
+        id: codesign
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
@@ -680,16 +710,29 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
         run: |
           set -eu
+          present=""
+          missing=""
           for name in CERT_P12_BASE64 CERT_PASSWORD CODESIGN_IDENTITY \
             APPLE_ID APPLE_ID_PASSWORD APPLE_TEAM_ID; do
-            test -n "$(printenv "${name}")" || {
-              echo "Tagged releases require ${name}." >&2
-              exit 2
-            }
+            if [ -n "$(printenv "${name}")" ]; then
+              present="${present} ${name}"
+            else
+              missing="${missing} ${name}"
+            fi
           done
+          if [ -n "${present}" ] && [ -n "${missing}" ]; then
+            echo "The MACOS_CODESIGN_* / MACOS_NOTARY_* secrets must be set together; missing:${missing}" >&2
+            exit 2
+          fi
+          if [ -n "${present}" ]; then
+            echo "signed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "No MACOS_CODESIGN_* / MACOS_NOTARY_* secrets: the macOS binaries ship unsigned and unnotarized, and the release notes say so."
+            echo "signed=false" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Sign and notarize macOS release binaries
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && steps.codesign.outputs.signed == 'true'
         shell: bash
         env:
           CERT_P12_BASE64: ${{ secrets.MACOS_CODESIGN_CERT_P12_BASE64 }}
@@ -1040,3 +1083,31 @@ jobs:
             ${PRERELEASE_FLAG} \
             release-assets/*
           verify_remote_tag
+
+      # ``--notes-from-tag`` carries the release note the tag was annotated
+      # with. When a platform shipped unsigned, the note gains a section
+      # saying so, so the warning a first launch produces is explained on
+      # the page the binary came from.
+      - name: Record unsigned platform binaries in the release notes
+        if: needs.build-windows-clean.outputs.signed != 'true' || needs.build-macos-clean.outputs.signed != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          WINDOWS_SIGNED: ${{ needs.build-windows-clean.outputs.signed }}
+          MACOS_SIGNED: ${{ needs.build-macos-clean.outputs.signed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+          NOTES="${RUNNER_TEMP}/release-notes.md"
+          gh release view "${TAG}" --json body --jq '.body' > "${NOTES}"
+          {
+            printf '\n## Code signing\n\n'
+            if [ "${WINDOWS_SIGNED}" != "true" ]; then
+              printf -- '- The Windows binaries are not Authenticode-signed: this repository holds no WINDOWS_CODESIGN_PFX_BASE64 / WINDOWS_CODESIGN_PASSWORD secrets. Microsoft Defender SmartScreen warns on the first launch.\n'
+            fi
+            if [ "${MACOS_SIGNED}" != "true" ]; then
+              printf -- '- The macOS binaries are not signed or notarized: this repository holds no MACOS_CODESIGN_* / MACOS_NOTARY_* secrets. Gatekeeper refuses them until the quarantine attribute is removed (`xattr -d com.apple.quarantine <binary>`) or they are opened once through the Finder context menu.\n'
+            fi
+          } >> "${NOTES}"
+          gh release edit "${TAG}" --notes-file "${NOTES}"

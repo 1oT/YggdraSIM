@@ -169,12 +169,18 @@ Windows x86_64 clean, Debian package) and the `publish-release` job. The
   reuses the annotated tag message as the public release notes.
 
 The annotated `v*` path remains the only production publication path. It uses
-canonical installer-facing asset names, requires Windows signing and macOS
-signing/notarization, and fails closed if any required build, signing,
-checksum, provenance, or publication gate does not pass.
+canonical installer-facing asset names and fails closed if any required
+build, checksum, provenance, or publication gate does not pass. Windows
+Authenticode signing and macOS signing plus notarization run when the
+repository holds the `WINDOWS_CODESIGN_*` and `MACOS_CODESIGN_*` /
+`MACOS_NOTARY_*` secrets. A repository without them publishes unsigned
+binaries and the release notes gain a *Code signing* section that says so;
+a partial set of secrets fails the build, because it is a misconfiguration
+rather than a decision.
 Before any platform build or signing step, CI also requires the tag to match
 `v<project.version>`, verifies that it is annotated, and confirms that its
-exact commit is reachable from `origin/main`.
+exact commit is reachable from `origin/main` or from an `origin/release/*`
+branch.
 
 ### Annotated-tag-message contract
 
@@ -198,9 +204,10 @@ The release page's body comes from the **annotated** tag message via
     git push origin vX.Y.Z
     ```
 
-- [ ] confirm the tagged commit is already reachable from `origin/main`;
-      the release policy gate rejects production tags made from arbitrary
-      commits or unmerged branches before any signing job starts
+- [ ] confirm the tagged commit is already reachable from `origin/main` or
+      from a `release/<major>.<minor>.x` branch; the release policy gate
+      rejects production tags made from arbitrary commits or unmerged
+      branches before any platform build starts
 - [ ] watch the workflow at `https://github.com/<repo>/actions`. The
       `publish-release` job only runs on `refs/tags/v*`; failures in
       `docs-strict`, `pytest-suite`, or any build leg short-circuit the
