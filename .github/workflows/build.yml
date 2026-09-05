@@ -63,6 +63,8 @@ jobs:
       - name: Fail closed for production tags
         id: release-tag
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "${GITHUB_REF}" in
@@ -76,6 +78,14 @@ jobs:
             "import tomllib; from pathlib import Path; print(tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])")"
           TAG="${GITHUB_REF#refs/tags/}"
           test "${TAG}" = "v${VERSION}"
+          # actions/checkout re-points refs/tags/<tag> at the commit it was
+          # given (actions/checkout issue 290), so an annotated tag looks
+          # lightweight in the checkout and `cat-file -t` answers "commit".
+          # Fetch the tag object back before judging it, with the header
+          # checkout itself uses, so a private repository passes too.
+          AUTH="$(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)"
+          git -c "http.${GITHUB_SERVER_URL}/.extraheader=AUTHORIZATION: basic ${AUTH}" \
+            fetch --force --no-tags origin "+refs/tags/${TAG}:refs/tags/${TAG}"
           test "$(git cat-file -t "refs/tags/${TAG}")" = "tag"
           TAG_OBJECT_SHA="$(git rev-parse "refs/tags/${TAG}^{tag}")"
           test "$(git rev-list -n 1 "refs/tags/${TAG}")" = "${GITHUB_SHA}"
