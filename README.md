@@ -555,9 +555,7 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 
 - `site-docs/` - canonical mkdocs source tree. `mkdocs serve -f mkdocs.yml`
   renders it locally; `site/` and `site-oneot/` are generated mirrors and
-  should not be edited by hand. The published manual at
-  <https://yggdrasim.1ot.com/> is the `mkdocs.oneot.yml` build, deployed by
-  `.github/workflows/deploy-docs.yml` on every push to `main`. For one concatenated Markdown file of the
+  should not be edited by hand. For one concatenated Markdown file of the
   entire nav (offline reading or PDF export), run
   `python3 site-docs/_tools/build_combined.py` → root `YggdraSIM.md`
   (gitignored); see `site-docs/_tools/README.md`.

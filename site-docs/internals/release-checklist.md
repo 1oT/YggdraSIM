@@ -97,11 +97,6 @@ Do not mass-run. Redirect noisy runs to a log file and inspect with `rg`.
       `python site-docs/_tools/mirror_source_docs.py`
 - [ ] nav entries that reference new pages exist and resolve
 - [ ] nav entries for removed pages are removed
-- [ ] `python -m mkdocs build --strict -f mkdocs.oneot.yml` succeeds as well:
-      that is the variant `.github/workflows/deploy-docs.yml` publishes to
-      yggdrasim.1ot.com on every push to `main` (GitHub Pages in workflow
-      mode; the custom domain is a repository setting, and no branch holds
-      the built site)
 
 ## Manual unsigned test draft
 

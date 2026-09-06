@@ -7,9 +7,7 @@
 # (site-docs/) and navigation as mkdocs.yml, but swaps the Nord palette for
 # the 1oT brand system (mint/emerald primary, Manrope display, Inter body,
 # navy footer, white header) and writes to a separate output directory so
-# both variants can be previewed side-by-side. This is the variant
-# .github/workflows/deploy-docs.yml publishes to yggdrasim.1ot.com on
-# every push to main.
+# both variants can be previewed side-by-side.
 #
 # Serve locally:
 #     python -m mkdocs serve -f mkdocs.oneot.yml -a 127.0.0.1:8010
@@ -20,7 +18,7 @@
 site_name: YggdraSIM — A 1oT OSS initiative
 site_description: Secure-element, eUICC, OTA, SCP11, HIL bridge, and SAIP toolkit documentation.
 site_author: Hampus Hellsberg
-site_url: https://yggdrasim.1ot.com/
+site_url: https://1ot.github.io/YggdraSIM/oneot/
 repo_url: https://github.com/1oT/YggdraSIM
 repo_name: 1oT/YggdraSIM
 edit_uri: edit/main/site-docs/
