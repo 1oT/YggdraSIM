@@ -440,3 +440,21 @@ include = [
     "yggdrasim_common.gui_server.routes",
     "yggdrasim_common.remote_lab",
 ]
+
+[tool.uv]
+# pySim lists smpp.twisted3 in install_requires although only its
+# pySim-smpp2sim.py script and contrib/smpp-ota-tool.py use it, and every
+# release of that library pins Twisted~=23.10.0, which carries
+# CVE-2026-42304, CVE-2024-41810 and CVE-2024-41671. Nothing in YggdraSIM
+# or in the pySim modules it imports reaches smpp.twisted; the SMPP PDU
+# codec the local-access session uses is the separate smpp.pdu package,
+# which stays. The marker below can never be true, so the resolver drops
+# the requirement and Twisted leaves uv.lock, the synced environments and
+# the bundles. A pip install from the sdist ignores this section and keeps
+# pySim's declaration. tests/test_dependency_overrides.py pins the effect
+# and retires the override once pySim stops declaring the dependency;
+# upstream_patches/osmocom-pysim-smpp-twisted-optional/ carries the
+# proposed upstream change.
+override-dependencies = [
+    "smpp-twisted3 ; python_version < '0'",
+]

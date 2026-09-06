@@ -68,6 +68,13 @@ Notes:
 - `[gui]` is a strict superset of `[gui-server]`; you only need
   `[gui-server]` on headless servers where `pywebview` would just fail
   to import a desktop toolkit.
+- `uv.lock` carries one resolver override (`[tool.uv]` in
+  `pyproject.toml`): pySim's `smpp.twisted3` requirement is dropped,
+  because only pySim's SMPP bridge script uses it and it pins a Twisted
+  with open advisories. `uv sync`, the CI environments and the bundles
+  therefore carry no Twisted; the `smpp.pdu` codec the local-access
+  session uses stays. A `pip install` from the sdist does not read the
+  override and follows pySim's declaration.
 - Linux ARM desktop source builds (`arm64` and `armv7l`) must install Debian's `python3-pyqt5`,
   `python3-pyqt5.qtwebengine`, and `python3-pyqt5.qtwebchannel` packages
   and create their build venv with `--system-site-packages`. This avoids
