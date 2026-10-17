@@ -1,29 +1,28 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Deterministic APDU mutation strategies.
 
 Each mutator is a pure function ``(bytes, random.Random) -> bytes``
 that produces a single mutated command APDU from a known-good
 original. Determinism (via the supplied ``Random`` instance) is a
-contract — crashes must be reproducible from a seed, otherwise
+contract -- crashes must be reproducible from a seed, otherwise
 vulnerability research is impossible.
 
 Supported strategies (ETSI TS 102 221 §10.1 APDU framing):
 
-* :func:`mutate_bit_flip`       — flip one or more random bits in the
+* :func:`mutate_bit_flip`       -- flip one or more random bits in the
   payload portion of the APDU (never touches the CLA/INS header so
   the card still tries to parse the command).
-* :func:`mutate_length_mangle`  — corrupt the Lc / Le fields so the
+* :func:`mutate_length_mangle`  -- corrupt the Lc / Le fields so the
   command declares a length that does not match the actual payload.
 * :func:`mutate_tag_shuffle`    -- substitutes one random byte inside
   the data field. Byte-level, not TLV-aware; the TLV-aware strategies
   are the ``tlv_*`` family below.
-* :func:`mutate_padding_bloat`  — appends N bytes of junk past the
+* :func:`mutate_padding_bloat`  -- appends N bytes of junk past the
   declared Lc to test if the card strictly enforces length checks.
-* :func:`mutate_zero_lc`        — sets Lc to 0x00 while keeping the
+* :func:`mutate_zero_lc`        -- sets Lc to 0x00 while keeping the
   original payload (classic length-confusion surface).
 
 The five above work on the APDU envelope. The strategies below parse
@@ -45,7 +44,7 @@ encoding.
   as an over-claiming long-form one.
 
 All mutators respect the short APDU envelope (5-byte header). Extended
-APDU mutation support is deferred — the simulator session recordings
+APDU mutation support is deferred -- the simulator session recordings
 we target use short APDUs exclusively.
 """
 

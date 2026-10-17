@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """PE-CDMAParameter structured edit helpers.
 
 PE-CDMAParameter (TCA SAIP §6.6.6 / 3GPP2 C.S0023 §3.4) groups the
@@ -11,7 +10,7 @@ This module gives the GUI / TUI a spec-aware mutator surface for each
 field so they can move off the raw-JSON-tree fallback.
 
 ASN.1 reference: ``PE-CDMAParameter`` in
-``pySim/esim/asn1/saip/PE_Definitions-3.3.1.asn`` (TCA SAIP §A.2)::
+``pySim/esim/asn1/saip/PE_Definitions-3.3.1.asn`` (TCA SAIP v3.4.1 §8.4.3)::
 
     PE-CDMAParameter ::= SEQUENCE {
       cdma-header PEHeader,
@@ -117,7 +116,7 @@ def set_cdma_field(
     if len(cleaned) == 0:
         if mandatory:
             raise ValueError(
-                f"{field_text} is mandatory (TCA SAIP §A.2); cannot clear.",
+                f"{field_text} is mandatory (TCA SAIP v3.4.1 §8.4.3); cannot clear.",
             )
         pe_value.pop(field_text, None)
         return f"{field_text} cleared."
@@ -128,7 +127,7 @@ def set_cdma_field(
         else:
             constraint = f"{min_b}..{max_b} bytes"
         raise ValueError(
-            f"{field_text} must be {constraint} per TCA SAIP §A.2 / 3GPP2 S0016; "
+            f"{field_text} must be {constraint} per TCA SAIP v3.4.1 §8.4.3 / 3GPP2 S0016; "
             f"got {len(raw)} bytes.",
         )
     pe_value[field_text] = raw
@@ -143,7 +142,7 @@ def set_ssd_split(
 ) -> str:
     """Set ``ssd`` from the SSD-A / SSD-B 8-byte halves.
 
-    Either half may be cleared by passing an empty string — the
+    Either half may be cleared by passing an empty string -- the
     matching half is preserved (and the field is dropped only when
     both halves end up empty).
     """

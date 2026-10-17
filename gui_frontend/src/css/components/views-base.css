@@ -217,6 +217,50 @@ dd {
   filter: grayscale(0.3);
 }
 
+/* The four modifiers below are the only sanctioned variants of `.btn`.
+ * Each was previously defined in one view's scope (or not at all), so
+ * the same class rendered as a plain button elsewhere. */
+.btn-small {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.btn-secondary {
+  background: var(--bg-elev);
+  border-color: var(--border);
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-dim);
+}
+
+.btn-ghost:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+  border-color: var(--border);
+  transform: none;
+}
+
+.btn-danger {
+  background: var(--fail-soft);
+  border-color: color-mix(in oklab, var(--fail) 42%, var(--border));
+  color: var(--fail);
+}
+
+.btn-danger:hover {
+  background: color-mix(in oklab, var(--fail) 24%, var(--bg-elev));
+  border-color: var(--fail);
+  color: var(--fail);
+}
+
 .inline-actions {
   display: flex;
   gap: 8px;

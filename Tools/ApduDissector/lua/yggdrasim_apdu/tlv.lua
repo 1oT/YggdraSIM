@@ -251,11 +251,17 @@ end
 --
 -- ``options.mode`` is "ber" (default) or "comprehension".
 -- ``options.resolver`` may name a tag; it wins over the generic table.
+-- It may return a second value, the name of the structure the tag opens,
+-- which is handed back to it for that tag's children as *parent_type*.
+-- That is what lets one tag mean two things: 'BF22' is EUICCInfo2 at the
+-- top of an ES10b response and serviceSpecificDataStoredInEuicc inside a
+-- ProfileInfo, and only the enclosing structure separates them. A
+-- resolver that returns one value is unaffected.
 --
 -- The return value is ``{nodes, errors}``. Parsing stops at the first
 -- structural problem and records it rather than raising, so a caller can
 -- render what was understood and flag the rest.
-function M.parse(tvb, offset, length, options, budget, depth, parent)
+function M.parse(tvb, offset, length, options, budget, depth, parent, parent_type)
     local settings = options or {}
     local level = depth or 0
     local nodes = {}
@@ -354,8 +360,12 @@ function M.parse(tvb, offset, length, options, budget, depth, parent)
         end
 
         local name = ""
+        local opened_type = nil
         if settings.resolver ~= nil then
-            name = settings.resolver(base_tag, tag, level, parent) or ""
+            name, opened_type = settings.resolver(
+                base_tag, tag, level, parent, parent_type
+            )
+            name = name or ""
         end
         if name == "" and settings.mode ~= "comprehension" then
             -- The BER table is meaningless for a COMPREHENSION-TLV tag:
@@ -387,12 +397,16 @@ function M.parse(tvb, offset, length, options, budget, depth, parent)
             -- '83' is a file identifier in an FCP and a key reference
             -- inside the 'C6' PIN status template.
             parent = parent,
+            -- The ASN.1 type this tag sits inside, and the one it opens
+            -- for its own children.
+            parent_type = parent_type,
+            opened_type = opened_type,
         }
 
         if constructed and value_length > 0 then
             local children, child_errors = M.parse(
                 tvb, value_offset, value_length, settings, budget, level + 1,
-                base_tag
+                base_tag, opened_type
             )
             node.children = children
             for index = 1, #child_errors do

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP03/logic/euicc_info2.py utility decoders.
 
 Covers: parse_tlv_simple, unwrap_euicc_info2_payload,
@@ -164,12 +163,12 @@ class DecodeNamedBitStringTests(unittest.TestCase):
         self.assertEqual(decode_named_bit_string(b"", _SAMPLE_BITS), [])
 
     def test_no_bits_set(self) -> None:
-        # unused_bits=0, payload byte 0x00 — no bits set
+        # unused_bits=0, payload byte 0x00 -- no bits set
         result = decode_named_bit_string(bytes([0x00, 0x00]), _SAMPLE_BITS)
         self.assertEqual(result, [])
 
     def test_first_bit_set(self) -> None:
-        # unused_bits=0, payload byte 0x80 — bit 0 set
+        # unused_bits=0, payload byte 0x80 -- bit 0 set
         result = decode_named_bit_string(bytes([0x00, 0x80]), _SAMPLE_BITS)
         self.assertIn("alpha", result)
 

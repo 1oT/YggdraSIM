@@ -188,11 +188,12 @@
   display: flex;
 }
 
+/* No `backdrop-filter`: without GPU compositing every scroll frame of a
+ * long guide would re-blur the whole window behind the card. */
 .cc-doc-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: var(--scrim);
 }
 
 .cc-doc-modal-card {
@@ -203,7 +204,7 @@
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -379,7 +380,7 @@
   margin: 16px 0;
 }
 
-/* GitHub-flavoured tables in the doc / README modal — operators were
+/* GitHub-flavoured tables in the doc / README modal -- operators were
  * seeing raw pipe / dash glyphs because the renderer fell through to
  * paragraph mode. The renderer now emits real <table>s; the styling
  * keeps them visually consistent with the doc body (zebra striping,
@@ -443,4 +444,24 @@
 
 .cc-doc-error {
   color: var(--err);
+}
+
+/* Mermaid diagrams. Until a diagram renders -- and after a failed render
+   -- the placeholder holds the source <pre>, which carries its own rule
+   above; once the SVG lands the container styles the figure instead.
+   Diagram colour arrives as Mermaid theme variables read from the design
+   tokens, so nothing here sets a palette. */
+.cc-doc-modal-body .cc-doc-mermaid[data-mermaid-state="rendered"] {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin: 12px 0;
+  overflow: auto;
+  text-align: center;
+}
+
+.cc-doc-modal-body .cc-doc-mermaid[data-mermaid-state="rendered"] svg {
+  max-width: 100%;
+  height: auto;
 }

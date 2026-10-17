@@ -103,7 +103,7 @@ class UacAicTests(unittest.TestCase):
 class Opl5gTests(unittest.TestCase):
     def test_identity_roundtrip(self) -> None:
         raw = (
-            bytes.fromhex("62F220")
+            bytes.fromhex("00F120")
             + (1).to_bytes(3, "big")
             + (256).to_bytes(3, "big")
             + bytes([10])
@@ -115,7 +115,7 @@ class Opl5gTests(unittest.TestCase):
         encoded = encode_decoded_roundtrip_ef_content(
             "ef-opl5g",
             {
-                "plmnHex": "62F220",
+                "plmnHex": "00F120",
                 "tacStart": 0,
                 "tacEnd": 0xFFFFFF,
                 "pnnRecordId": 7,
@@ -123,7 +123,7 @@ class Opl5gTests(unittest.TestCase):
             target_length=10,
         )
         expected = (
-            bytes.fromhex("62F220")
+            bytes.fromhex("00F120")
             + bytes.fromhex("000000")
             + bytes.fromhex("FFFFFF")
             + bytes([7])
@@ -148,7 +148,7 @@ class SuciCalc5gAliasTests(unittest.TestCase):
 
 
 class Opaque5gEfTests(unittest.TestCase):
-    """5G-specific EFs — originally opaque passthrough, some are now
+    """5G-specific EFs -- originally opaque passthrough, some are now
     length-strict semantic decoders (5GSxLOCI / 5GSEDRX / 5GNSWO)."""
 
     # 5GS LOCI layout: 13B 5G-GUTI + 3B TAI-PLMN + 3B TAC + 1B status.
@@ -271,7 +271,7 @@ class PhaseIndicatorTests(unittest.TestCase):
 
 class PlmnSelTests(unittest.TestCase):
     def test_identity_roundtrip(self) -> None:
-        raw = bytes.fromhex("62F22024008062F230")
+        raw = bytes.fromhex("00F12024008000F130")
         encoded = _decode_and_roundtrip(
             ef_key="ef-plmnsel", fid="6F30", raw=raw
         )
@@ -355,7 +355,7 @@ class DispatcherRegistrationTests(unittest.TestCase):
     """All 40+ new EF tokens are registered in the content dispatcher."""
 
     EXPECTED_KEYS = (
-        # Pass A — 5G.
+        # Pass A -- 5G.
         "ef-5gs3gpploci",
         "ef-5gsn3gpploci",
         "ef-5gs3gppnsc",
@@ -366,7 +366,7 @@ class DispatcherRegistrationTests(unittest.TestCase):
         "ef-opl5g",
         "ef-routing-indicator",
         "ef-ursp",
-        # Pass B — Phonebook.
+        # Pass B -- Phonebook.
         "ef-pbr",
         "ef-iap",
         "ef-anr",
@@ -383,7 +383,7 @@ class DispatcherRegistrationTests(unittest.TestCase):
         "ef-psc",
         "ef-cc",
         "ef-puid",
-        # Pass C — 5G extras + legacy 3GPP.
+        # Pass C -- 5G extras + legacy 3GPP.
         "ef-tn3gppsnn",
         "ef-5gsedrx",
         "ef-5gnswo-conf",
@@ -395,7 +395,7 @@ class DispatcherRegistrationTests(unittest.TestCase):
         "ef-bdnuri",
         "ef-sdnuri",
         "ef-lnduri",
-        # Pass D — ISIM / multimedia.
+        # Pass D -- ISIM / multimedia.
         "ef-pcscf-urn",
         "ef-muddomain",
         "ef-psismsc",

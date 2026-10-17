@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``Tools.ProfilePackage.saip_diff_canonical``.
 
 Pure-function module: no I/O, no pySim, no card transport. The tests
@@ -44,7 +43,7 @@ class CanonicaliseGfmTests(unittest.TestCase):
         self.assertEqual(canonicalize_generic_file_management([]), {})
 
     def test_simple_select_then_create(self) -> None:
-        # MF / DF.Telecom / EF.MSISDN — single SELECT chain, single FCP.
+        # MF / DF.Telecom / EF.MSISDN -- single SELECT chain, single FCP.
         gfm = [
             _block(
                 _tuple("filePath", _bytes("3F007F10")),
@@ -92,7 +91,7 @@ class CanonicaliseGfmTests(unittest.TestCase):
 
     def test_genuine_content_change_survives(self) -> None:
         # Same EF, same path, different content. Canonical maps must
-        # differ — otherwise the diff engine would lose the real delta.
+        # differ -- otherwise the diff engine would lose the real delta.
         gfm_a = [
             _block(
                 _tuple("filePath", _bytes("3F00")),
@@ -219,7 +218,7 @@ class StripPeHeaderIdentificationTests(unittest.TestCase):
 
     def test_strips_identification_from_capital_h_header_blocks(self) -> None:
         # SAIP PE-PIN / PE-PUK / SecurityDomain encoders use the
-        # ``<short>-Header`` (capital H) spelling — see
+        # ``<short>-Header`` (capital H) spelling -- see
         # ``saip_pe_editors/_base.py``. The strip must match both
         # casings or it leaves the noisiest section types untouched.
         document = {

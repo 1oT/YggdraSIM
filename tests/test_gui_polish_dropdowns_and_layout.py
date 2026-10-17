@@ -34,7 +34,7 @@ def _read(name: str) -> str:
 
 
 # ----------------------------------------------------------------------
-# 1. Sidebar dedupe — legacy flat Inspect + Advanced groups are gone.
+# 1. Sidebar dedupe -- legacy flat Inspect + Advanced groups are gone.
 # ----------------------------------------------------------------------
 
 
@@ -66,23 +66,37 @@ def test_meta_group_retains_overview_and_about() -> None:
     assert 'data-view="card_bridge" class="subsystem-entry"' not in html
 
 
-def test_remote_bridge_lives_under_advanced_before_environment() -> None:
-    """Remote Bridge belongs in Advanced, and Advanced renders before Environment."""
+def test_both_streaming_surfaces_share_one_nav_group() -> None:
+    """Remote Lab and Remote Bridge are two directions of one thing.
+
+    They used to sit apart under Advanced, which is why an operator
+    looking to stream a card to a remote host reasonably went hunting in
+    the HIL panel instead.
+    """
     js = _read("app.js")
+    streaming_pos = js.index('id: "group-apdu-streaming"')
     advanced_pos = js.index('id: "group-advanced"')
     environment_pos = js.index('id: "group-env"')
-    advanced_block = js[advanced_pos:environment_pos]
+    streaming_block = js[streaming_pos:advanced_pos]
 
-    assert advanced_pos < environment_pos
-    assert 'id: "leaf-adv-card-bridge"' in advanced_block
-    assert 'label: "Remote Bridge"' in advanced_block
-    assert 'inspectView: "card_bridge"' in advanced_block
-    assert 'card_bridge: "Advanced · Remote Bridge"' in js
+    assert streaming_pos < advanced_pos < environment_pos
+    assert 'label: "APDU Streaming"' in streaming_block
+    assert 'id: "leaf-adv-remote-lab"' in streaming_block
+    assert 'id: "leaf-adv-card-bridge"' in streaming_block
+    assert 'inspectView: "remote_lab"' in streaming_block
+    assert 'inspectView: "card_bridge"' in streaming_block
+    assert 'card_bridge: "APDU Streaming · Remote Bridge"' in js
+    assert 'remote_lab: "APDU Streaming · Remote Lab"' in js
+
+    # Neither leaf may be left behind in Advanced.
+    advanced_block = js[advanced_pos:environment_pos]
+    assert 'id: "leaf-adv-card-bridge"' not in advanced_block
+    assert 'id: "leaf-adv-remote-lab"' not in advanced_block
 
 
 def test_duplicated_flat_nav_entries_are_gone() -> None:
     """Registry browser / Env flags / Raw shell must no longer appear as
-    flat sidebar ``<li data-view=…>`` entries; they live inside the
+    flat sidebar ``<li data-view=...>`` entries; they live inside the
     nested tree now.
     """
     html = _read("index.html")
@@ -109,7 +123,7 @@ def test_backend_and_reader_probe_are_topbar_controls_not_modules() -> None:
 
 
 # ----------------------------------------------------------------------
-# 2. Reader-pill context fix — scope is preserved across pill clicks.
+# 2. Reader-pill context fix -- scope is preserved across pill clicks.
 # ----------------------------------------------------------------------
 
 
@@ -119,7 +133,7 @@ def test_open_command_subsystem_preserves_scope_on_same_subsystem() -> None:
 
     Before the fix the reader-bar auto-route passed only the subsystem
     name, which hard-reset the workbench to "all" scope every time the
-    operator clicked a different reader pill — the exact "session
+    operator clicked a different reader pill -- the exact "session
     context aware split doesn't work properly" symptom.
     """
     js = _read("app.js")
@@ -133,18 +147,19 @@ def test_reader_bar_activate_skips_redundant_workbench_rebuild() -> None:
     """``readerBarActivate`` must not route SCP03 through a second special
     workbench selector when the operator clicks a reader pill.
 
-    SCP03 is now part of the same reader-scoped subsystem table as OTA and
-    eSIM. The only SCP03-specific logic left here is the optional auto-open
-    scan when a card is present and no SCP03 session exists yet.
+    SCP03 is part of the same reader-scoped subsystem table as OTA and eSIM,
+    and a pill click carries no SCP03-specific logic at all: it re-renders
+    the reader-scoped surface the operator is on, or the reader-scoped
+    inspect view, and never routes the Overview to SCP03 or opens a scan.
     """
     js = _read("app.js")
     block = js.split("function readerBarActivate(readerName)", 1)[1]
     block = block.split("function readerBarSyncToScp03Tab", 1)[0]
-    # The only explicit SCP03 route is from the Overview view.
     assert "commandState.activeSubsystem === null" in block
-    assert 'openCommandSubsystem("SCP03")' in block
-    assert 'commandState.activeSubsystem === "SCP03"' in block
-    assert "readerBarProbeHasCard(readerName)" in block
+    assert "ccIsReaderScopedInspectView(currentInspectView)" in block
+    assert 'openCommandSubsystem("SCP03")' not in block
+    assert 'commandState.activeSubsystem === "SCP03"' not in block
+    assert "readerBarProbeHasCard(readerName)" not in block
     assert 'inScp03' not in block
 
 
@@ -164,7 +179,7 @@ def test_default_leaf_id_respects_scope() -> None:
 
 
 # ----------------------------------------------------------------------
-# 3. Compact workbench — SCP80 / eIM / eSIM etc. use the new layout.
+# 3. Compact workbench -- SCP80 / eIM / eSIM etc. use the new layout.
 # ----------------------------------------------------------------------
 
 
@@ -176,7 +191,7 @@ def test_render_command_subsystem_falls_through_to_compact_workbench() -> None:
     block = block.split("\n  }\n", 1)[0]
     assert "renderCompactWorkbench(container, subsystem, actions, leaf)" in block
     # The old full-width grid render path must no longer exist in this
-    # function — grep for the loop signature.
+    # function -- grep for the loop signature.
     assert "actions.forEach(function (action) {\n      var card = buildActionCard" not in block
 
 
@@ -197,7 +212,7 @@ def test_compact_workbench_filter_threshold() -> None:
     """A search input appears only for subsystems with >= 8 actions.
 
     Small subsystems (SUCI, SIMCARD, HIL) stay clean; eSIM Live and
-    Local eIM — which each hold dozens of entries — get a filter.
+    Local eIM -- which each hold dozens of entries -- get a filter.
     """
     js = _read("app.js")
     block = js.split("function renderCompactWorkbench(container, subsystem, actions, leaf)", 1)[1]
@@ -801,7 +816,10 @@ def test_hil_web_context_refresh_contract() -> None:
     assert "context_after_frame: contextAfterFrame" in refresh_block
     assert "contextTree: []" in js
     assert "hilContextTreeRenderKey" in js
-    assert "packetScrollRestoring" in js
+    # The list still tells its own scroll writes from the user's; it now does
+    # so by the position it wrote rather than by a timer that expired before
+    # the event arrived (tests/test_gui_hil_packet_scroll.py).
+    assert "function hilConsumePacketProgrammaticScroll" in js
     assert "function hilStorePacketScroll" in js
     assert "position: sticky" not in context_title_block
     assert "cursor: pointer" in context_title_block
@@ -972,7 +990,7 @@ def test_idle_api_badge_does_not_animate_forever() -> None:
 
 
 # ----------------------------------------------------------------------
-# 4. <select> theming — options no longer render "white text on white".
+# 4. <select> theming -- options no longer render "white text on white".
 # ----------------------------------------------------------------------
 
 
@@ -998,7 +1016,7 @@ def test_select_has_explicit_theme_aware_background() -> None:
 
 
 def test_select_option_and_optgroup_forced_theme_colours() -> None:
-    """Options + optgroups use the same theme tokens — not OS defaults."""
+    """Options + optgroups use the same theme tokens -- not OS defaults."""
     css = _read("app.css")
     assert re.search(
         r"select option,\s*\n\s*select optgroup\s*\{",
@@ -1021,7 +1039,7 @@ def test_select_has_custom_chevron_no_native_appearance() -> None:
 
 
 def test_theme_picker_options_no_longer_hard_coded_light() -> None:
-    """Theme picker options used to be ``#0d1926`` on ``#ffffff`` — that
+    """Theme picker options used to be ``#0d1926`` on ``#ffffff`` -- that
     looked broken on every dark theme. They must now follow the
     active theme tokens so the popup tracks the page palette.
     """
@@ -1038,7 +1056,7 @@ def test_theme_picker_options_no_longer_hard_coded_light() -> None:
 def test_scp03_apdu_preset_select_uses_theme_token() -> None:
     """``.scp03-apdu-preset-select`` previously read ``var(--surface)``
     which is undefined on most themes and fell back to the transparent
-    default — showing OS-native white. It now uses ``--bg-elev``.
+    default -- showing OS-native white. It now uses ``--bg-elev``.
     """
     css = _read("app.css")
     block_match = re.search(
@@ -1065,16 +1083,20 @@ def test_enable_file_path_drop_defined_and_exposed() -> None:
 
 
 def test_drop_extraction_honours_file_path_uri_and_plain_text() -> None:
-    """``extractPathFromDrop`` checks every transport the operator may
+    """``extractPathsFromDrop`` checks every transport the operator may
     produce from a native file manager → ``File.path`` → ``file://``
-    URI list → plain text fallback."""
+    URI list → plain text fallback, keeping every entry a drop carries;
+    ``extractPathFromDrop`` hands a single-path caller the first."""
     js = _read("app.js")
-    block = js.split("function extractPathFromDrop(event)", 1)[1]
+    block = js.split("function extractPathsFromDrop(event)", 1)[1]
     block = block.split("\n  }\n", 1)[0]
     assert "dt.files" in block
     assert 'getData("text/uri-list")' in block
     assert 'file://' in block
     assert 'getData("text/plain")' in block
+    single = js.split("function extractPathFromDrop(event)", 1)[1]
+    single = single.split("\n  }\n", 1)[0]
+    assert "extractPathsFromDrop(event)" in single
 
 
 def test_build_field_wires_drop_for_path_kinds() -> None:
@@ -1096,8 +1118,8 @@ def test_attach_path_picker_wires_drop_for_saip_tool() -> None:
 
 def test_document_drop_guard_prevents_navigation_outside_targets() -> None:
     """Stray file drops outside ``.cc-path-drop-target`` must be swallowed
-    so pywebview doesn't navigate the webview to ``file://…``. This
-    guard is critical — without it a misaimed drop blows up the SPA.
+    so pywebview doesn't navigate the webview to ``file://...``. This
+    guard is critical -- without it a misaimed drop blows up the SPA.
     SAIP owns a workbench-wide drop surface, so the guard must let that
     managed target handle file drops too.
     """
@@ -1117,13 +1139,15 @@ def test_saip_workbench_drop_uses_shared_path_extractor() -> None:
 
     The exported helper matters because the global drop guard and path
     input handlers use the same pywebview / URI-list / plain-text
-    semantics. SAIP then falls back to upload when no filesystem path is
-    exposed by the WebEngine.
+    semantics. When no transport exposes a filesystem path, SAIP asks the
+    desktop process where the native drop came from and uploads only the
+    files it cannot place.
     """
     js = _read("app.js")
     block = js.split("function wireSaipWorkbenchDrop(wb)", 1)[1]
     block = block.split("function renderSaipWorkbench(container, actions)", 1)[0]
-    assert "window.YggdraSimExtractPathFromDrop" in block
+    assert "window.YggdraSimExtractPathsFromDrop" in block
+    assert "resolveDroppedFilePaths(files)" in block
     assert "saipOpenPackageByDroppedFile" in block
 
 
@@ -1162,7 +1186,7 @@ def test_saip_active_slot_renderer_resolves_cached_slots() -> None:
 
 
 def test_drop_hover_visual_state_styled() -> None:
-    """Hover cue must be visible during drag — accent outline + label."""
+    """Hover cue must be visible during drag -- accent outline + label."""
     css = _read("app.css")
     assert ".cc-path-drop-target" in css
     assert ".cc-path-drop-target.cc-path-drop-hover" in css
@@ -1291,8 +1315,10 @@ def test_remote_bridge_running_state_surfaces_globally() -> None:
     assert 'id="topbar-hil-bridge-value">stopped</span>' in html
     assert 'id="topbar-card-bridge"' in html
     assert re.search(r'<button\s+type="button"\s+class="topbar-card-bridge"\s+id="topbar-card-bridge"', html)
-    assert 'title="Remote Bridge status"' in html
-    assert '<span class="topbar-card-bridge-label">Remote bridge</span>' in html
+    # One pill, two modules that can own what it reports, so it is named
+    # for the thing rather than for one of its owners.
+    assert 'title="Remote APDU streaming status; opens whichever remote module is in use"' in html
+    assert '<span class="topbar-card-bridge-label">Remote</span>' in html
     assert 'id="topbar-card-bridge-value">stopped</span>' in html
 
     css = _read("app.css")
@@ -1306,12 +1332,24 @@ def test_remote_bridge_running_state_surfaces_globally() -> None:
     js = _read("app.js")
     assert "function cbSetGlobalBridgeStatus(state, label)" in js
     assert "function cbSyncCommandCenterBridgeIndicators()" in js
-    assert 'pill.title = "Remote Bridge status: " + nextLabel' in js
+    assert 'pill.title = "Remote APDU streaming: " + nextLabel' in js
     assert '"leaf-adv-card-bridge"' in js
     assert '"cc-nav-card-bridge-state"' in js
     assert 'leaf.inspectView === "card_bridge"' in js
     assert 'loadCardBridgeStatus();' in js
-    assert 'cbSetGlobalBridgeStatus("running", "running")' in js
+
+    # Both pollers feed one resolver. Writing the badge from each of them
+    # made a running rig and a merely configured relay take turns, once
+    # per poll, which is what the blinking was.
+    assert "function cbResolveGlobalBridgeStatus()" in js
+    assert "function cbRefreshGlobalBridgeStatus()" in js
+    assert "cbState.lastRigBridgeRunning = !!state.local_card_bridge_running;" in js
+    assert "cbState.globalRendered === true" in js
+
+    # The pill goes where the work is rather than to a fixed module.
+    assert "function ccActiveRemoteView()" in js
+    assert 'return commandState.lastRemoteView || "remote_lab";' in js
+    assert "ccOpenInspectView(view, ccRemoteLeafId(view));" in js
 
 
 def test_hil_trace_running_state_surfaces_in_command_center_list() -> None:
@@ -1345,7 +1383,7 @@ def test_card_bridge_launch_success_flashes_note_green() -> None:
     assert "options && options.flashOk" in js
     start_block = js.split("async function cbRigStartAll(button)", 1)[1]
     start_block = start_block.split("async function cbRigStopTunnel", 1)[0]
-    assert '"starting rig…"' in start_block
+    assert '"starting rig..."' in start_block
     assert "{ flashOk: true }" in start_block
     assert "cbRigRenderStatus(data, { flashOk: data.ok !== false });" in js
 
@@ -1362,9 +1400,45 @@ def test_hil_toolbar_can_launch_saved_remote_bridge_rig() -> None:
 
     block = js.split("function renderHilWorkbench(container, actions, leaf)", 1)[1]
     block = block.split("function hilToolbarButton", 1)[0]
-    assert 'state.cardBridgeLaunchInFlight ? "..." : "⇄"' in block
-    assert 'state.cardBridgeLaunchInFlight ? "Starting bridge" : "Remote Bridge"' in block
-    assert "hilLaunchCardBridgeRig(actions, container, leaf);" in block
+    assert 'streamIcon = "⇄";' in block
+    assert 'streamLabel = "Start APDU Stream";' in block
+    # The label names the action, not one host: the rig is chosen when the
+    # button is pressed, so a name baked into the label could only report
+    # whatever the Remote Bridge panel was last pointed at.
+    assert '"Starting stream"' in block
+    assert "streamChooserOpen" in block
+    assert "Stream to " not in block
+
+    # One seat, both directions: while the stream is up the same button
+    # stops it, so the toolbar never carries a control that does nothing.
+    assert 'streamLabel = "Stop APDU Stream";' in block
+    assert 'streamIcon = "stop";' in block
+    assert '"Stopping stream"' in block
+    assert "hilStopCardBridgeRig(actions, container, leaf);" in block
+    assert "function hilRemoteBridgeIsRunning()" in js
+    assert "function hilStopCardBridgeRig(actions, container, leaf)" in js
+    assert "cbRigStopAllFromSavedSettings()" in js
+    assert "cbState.lastRemoteBridgeRunning" in js
+
+    # Pressing it opens an inline chooser of saved rigs, and picking one
+    # streams to that rig and brings the session up behind it.
+    chooser = js.split("function hilAppendStreamChooser(wb, actions, container, leaf)", 1)[1]
+    chooser = chooser.split("function hilToolbarButton", 1)[0]
+    assert "cbRigHostState.devices" in chooser
+    assert "hilStreamToHost(device, actions, container, leaf)" in chooser
+    # Inline chrome, not a floating surface: it reuses the toolbar styles.
+    assert 'row.className = "cc-hil-toolbar"' in chooser
+
+    stream = js.split("function hilStreamToHost(device, actions, container, leaf)", 1)[1]
+    stream = stream.split("function hilToolbarButton", 1)[0]
+    assert "cbRigApplyHost(device)" in stream
+    assert "hilLaunchCardBridgeRig(actions, container, leaf)" in stream
+    # The HIL bridge runs on the rig, and the rig start already brought it
+    # up there. Starting one here looks for a SIMtrace2 on this machine
+    # and times out, so what follows the bridge is the decoder, not a
+    # second supervisor.
+    assert "hilFollowLiveCapture(actions, container, leaf)" in stream
+    assert "hilStartLiveSession" not in stream
 
     launch_block = js.split("function hilLaunchCardBridgeRig(actions, container, leaf)", 1)[1]
     launch_block = launch_block.split("function renderHilDissectorTab", 1)[0]
@@ -1390,3 +1464,203 @@ def test_topbar_bridge_pills_toggle_start_stop_actions() -> None:
     assert 'reader_index: ""' in js
     assert "options.saveSettings !== false" in js
     assert "cbRigInputsFromSavedSettings()" in js
+
+
+def test_the_device_pill_reports_the_unit_not_only_its_card() -> None:
+    """A card can be free while the bench it sits on runs someone else's rig.
+
+    The pill is what an operator reads first, so it says the host is busy
+    while the rig's own state still decides what is allowed.
+    """
+    js = _read("app.js")
+    assert 'var hostBusy = !!(hostInfo && String(hostInfo.hil_rig || "none") === "running");' in js
+    assert 'var displayState = (hostBusy && state === "available") ? "host-busy" : state;' in js
+    assert 'badge.textContent = displayState === "host-busy" ? "host busy" : displayState;' in js
+
+    # The refusal is advisory: the rig state, not the display state, gates
+    # Connect, so a free card on a busy bench can still be taken.
+    block = js.split("function remoteLabBuildCard(device)", 1)[1]
+    block = block.split("function remoteLabSessionForDevice", 1)[0]
+    assert 'connect.disabled = remoteLabState.connectInFlight === id' in block
+    assert '|| state === "ssh-only"' in block
+    assert 'displayState === "busy"' not in block
+
+    css = _read("app.css")
+    assert ".remote-lab-status--host-busy" in css
+    assert ".remote-lab-status--ssh-only" in css
+
+
+def test_a_reused_context_header_has_its_label_refreshed_in_place() -> None:
+    """The frame count changes while the section key does not.
+
+    Keying the header on its rendered text would fix the stale count by
+    destroying and rebuilding the node on every poll -- the churn the
+    keyed reconcile exists to avoid. The reconciler already calls an
+    update callback on a reused node, so the label is refreshed there.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "gui_frontend" / "src" / "js" / "command-center.js").read_text(
+        encoding="utf-8"
+    )
+
+    key_fn = source.split("function hilPacketItemKey(item)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    header_branch = key_fn.split('item.kind === "header"', 1)[1].split("}", 1)[0]
+    assert "display" not in header_branch, (
+        "the header key must not carry the label, or every count change "
+        "destroys and rebuilds the node"
+    )
+
+    entry_fn = source.split("function hilPacketDesiredEntry(item)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert "entry.update" in entry_fn
+    assert "cc-hil-context-label" in entry_fn
+    assert "textContent" in entry_fn
+
+
+def test_the_packet_list_resyncs_when_a_restart_truncates_the_capture() -> None:
+    """A restarted rig writes a fresh capture numbered from frame 1.
+
+    The delta cursor the workbench sends is the highest frame it already
+    holds, so after a restart it sits past the end of the new capture and
+    every poll matches nothing. Without a resync the list stops updating
+    and reports no error at all -- it just looks like a quiet card.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "gui_frontend" / "src" / "js" / "command-center.js").read_text(
+        encoding="utf-8"
+    )
+    apply_block = source.split("function hilApplySnapshot(data)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+
+    # The previous size has to be read before it is overwritten, or the
+    # comparison can only ever compare a value against itself.
+    assert "var previousCaptureSize = Number(state.captureSize || 0);" in apply_block
+    assert apply_block.index("var previousCaptureSize") < apply_block.index(
+        "state.captureSize = Number(data.capture_size"
+    )
+
+    assert "captureRestarted" in apply_block
+    assert "incomingCaptureSize < previousCaptureSize" in apply_block
+
+    # A resync has to drop the accumulated rows AND stop the merge, or the
+    # stale frames survive and keep the cursor past the end.
+    resync_lines = []
+    for line in apply_block.split("if (captureRestarted) {", 1)[1].splitlines():
+        if line.strip() == "}":
+            break
+        resync_lines.append(line)
+    resync = "\n".join(resync_lines)
+    for cleared in ("incremental = false", "state.rows = []", "state.annotations = {}"):
+        assert cleared in resync, cleared
+
+    # And it must say so rather than resyncing silently.
+    assert "capture restarted" in apply_block
+
+
+def test_the_dissector_panes_can_be_resized() -> None:
+    """Both splits in the HIL dissector carry a drag handle.
+
+    The context/frame columns and the decoded/bytes rows were fixed by the
+    grid, so a long decode tree could not be given more room without
+    losing the byte view, and a wide context tree could not be widened at
+    all.
+    """
+    js = _read("app.js")
+
+    # Both handles exist, and they are separators rather than decoration.
+    assert "function hilPaneDivider(orientation, label)" in js
+    assert 'divider.setAttribute("role", "separator")' in js
+    assert 'aria-orientation' in js
+    # Focusable, because a separator only a pointer can move is unusable
+    # without one.
+    assert "divider.tabIndex = 0" in js
+
+    grid_block = js.split("function renderHilDissectorTab", 1)[1].split(
+        "function hilBuildPacketListPane", 1
+    )[0]
+    assert 'hilPaneDivider("col"' in grid_block
+    assert "gridTemplateColumns" in grid_block
+
+    detail_block = js.split("function hilFillDetailPane(detailPane)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert 'hilPaneDivider("row"' in detail_block
+    assert "decoded.style.flex" in detail_block
+
+    drag = js.split("function hilInstallPaneDrag(divider, options)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    # Pointer capture, so a drag survives leaving the handle and ends with
+    # the gesture even when released outside the window.
+    assert "setPointerCapture" in drag
+    assert "releasePointerCapture" in drag
+    assert "pointercancel" in drag
+    # And arrow keys move it.
+    assert "ArrowLeft" in drag and "ArrowUp" in drag
+
+    # A pane can never be dragged away entirely.
+    assert "HIL_PANE_MIN_PX" in js
+    for block in (grid_block, detail_block):
+        assert "HIL_PANE_MIN_PX" in block
+
+
+def test_the_pane_sizes_are_remembered_but_never_required() -> None:
+    """A remembered size is a per-viewer convenience, so it must fail soft."""
+    js = _read("app.js")
+    sizes = js.split("function hilReadPaneSizes()", 1)[1].split(
+        "function hilPaneDivider", 1
+    )[0]
+    assert "localStorage" in sizes
+    # Private windows and cleared site data both throw on access, and a
+    # dissector that will not render because of a stored pane width would
+    # be a poor trade.
+    assert sizes.count("catch") >= 2
+
+
+def test_the_dividers_take_their_colour_from_tokens() -> None:
+    """Twenty themes, so a literal here would look native in at most one."""
+    css = _read("app.css")
+    block = css.split(".cc-hil-pane-divider {", 1)[1].split("\n.cc-hil-pane {", 1)[0]
+    assert "var(--border)" in block
+    assert "var(--accent)" in block
+    # No floating surfaces: the handles sit in the grid and in the
+    # column's flow, per the design contract.
+    assert "position: fixed" not in block
+    assert "resize:" not in block
+
+
+def test_the_statusbar_names_the_card_it_is_watching() -> None:
+    """EF.ICCID and EF.IMSI fly past once per session and scroll away.
+
+    TS 102 221 v18.4 clause 13.2 and TS 31.102 v19.5 clause 4.2.2 are
+    read during bring-up, thousands of frames before an operator looks at
+    the trace, so the two identifiers that say which card this is were
+    only findable by scrolling back to the top of the capture.
+    """
+    js = _read("app.js")
+    identity = js.split("function hilCardIdentity()", 1)[1].split(
+        "function hilRenderStatusbar", 1
+    )[0]
+    assert "card_session_iccid" in identity
+    assert "card_session_imsi" in identity
+    # Newest frame first: a card swap replaces the identifiers, and the
+    # chip has to name the card on the wire, not the one that left.
+    assert "rows.length - 1" in identity
+    assert "index -= 1" in identity
+
+    statusbar = js.split("function hilRenderStatusbar(status)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert 'hilStatusChip("iccid"' in statusbar
+    assert 'hilStatusChip("imsi"' in statusbar
+    # An unread identifier renders no chip rather than an empty one.
+    assert "if (identity.iccid)" in statusbar
+    assert "if (identity.imsi)" in statusbar

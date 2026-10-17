@@ -1,37 +1,36 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 local_access Command Center actions.
 
 Wraps :class:`SCP11.local_access.session.LocalIsdrSession` for the GUI so
 the same reads and mutations that ``python -m SCP11.local_access``
 performs from the REPL can be fired as typed Command Center actions.
-Mirrors the pattern used by ``scp11_live`` — each dispatcher opens a
+Mirrors the pattern used by ``scp11_live`` -- each dispatcher opens a
 fresh PC/SC channel, runs one ISD-R command, and disconnects in
 ``finally``. No long-lived LocalIsdrSession is cached in process; state
 is rebuilt per call.
 
 Read-only surface:
 
-* ``scp11_local.get_eid``              — 5A tag via ISD-R SELECT + ECASD.
-* ``scp11_local.list_profiles``        — ProfilesInfo (BF2D) decoded.
-* ``scp11_local.get_euicc_info2``      — EUICCInfo2 (BF22) detail lines.
-* ``scp11_local.get_configured_data``  — EuiccConfiguredData (BF3C)
+* ``scp11_local.get_eid``              -- 5A tag via ISD-R SELECT + ECASD.
+* ``scp11_local.list_profiles``        -- ProfilesInfo (BF2D) decoded.
+* ``scp11_local.get_euicc_info2``      -- EUICCInfo2 (BF22) detail lines.
+* ``scp11_local.get_configured_data``  -- EuiccConfiguredData (BF3C)
   with default SM-DP+ / SM-DS / allowed CI PKIDs.
-* ``scp11_local.list_notifications``   — pending notification queue
+* ``scp11_local.list_notifications``   -- pending notification queue
   (BF2B) raw hex, for parity with the ES10b variant.
-* ``scp11_local.get_certs_inventory``  — local SM-DP+ DPauth / DPpb
+* ``scp11_local.get_certs_inventory``  -- local SM-DP+ DPauth / DPpb
   certificate bundle already scanned by ``LocalSgp26CertStore``.
-* ``scp11_local.discover``             — composite snapshot call that
+* ``scp11_local.discover``             -- composite snapshot call that
   runs the same probe the REPL ``DISCOVER`` command performs.
 
 Write / mutation actions mirror the REPL exactly:
 
 * ``scp11_local.enable_profile`` / ``scp11_local.disable_profile``
-* ``scp11_local.delete_profile``            — requires ``confirm=true``.
+* ``scp11_local.delete_profile``            -- requires ``confirm=true``.
 * ``scp11_local.store_metadata`` / ``scp11_local.update_metadata``
-* ``scp11_local.store_metadata_custom``     — targeted custom tag.
+* ``scp11_local.store_metadata_custom``     -- targeted custom tag.
 
 Each mutation opens a fresh PC/SC channel via ``_build_session``, runs
 exactly one card command through the local ISD-R, and closes the
@@ -83,14 +82,23 @@ def _reader_input_field() -> ActionField:
 
 
 def _resolve_reader_index(reader_name: str) -> int:
-    """Map a reader name back to a zero-based PC/SC index."""
+    """Map a reader name back to a zero-based PC/SC index.
+
+    A registered remote reader has no PC/SC ordinal and resolves first, to
+    ``REMOTE_READER_INDEX``; ``_build_session`` then opens the relay channel
+    for that name instead of a PC/SC one.
+    """
+    from yggdrasim_common.remote_readers import REMOTE_READER_INDEX, is_remote_reader
+
     cleaned = str(reader_name or "").strip()
+    if is_remote_reader(cleaned):
+        return REMOTE_READER_INDEX
     if len(cleaned) == 0:
         return 0
     try:
         from smartcard.System import readers as list_pcsc_readers
     except ImportError as error:
-        raise RuntimeError("pyscard is not installed — cannot pick reader by name.") from error
+        raise RuntimeError("pyscard is not installed -- cannot pick reader by name.") from error
     for idx, reader in enumerate(list_pcsc_readers()):
         if str(reader) == cleaned:
             return idx
@@ -104,14 +112,18 @@ def _reader_label(reader_name: str) -> str:
     return cleaned
 
 
-def _build_session(reader_index: int) -> tuple[Any, Any]:
-    """Return ``(session, channel)`` — caller closes both in ``finally``."""
-    from SCP11.live.transport import PcscApduChannel
+def _build_session(reader_index: int, reader_name: str = "") -> tuple[Any, Any]:
+    """Return ``(session, channel)`` -- caller closes both in ``finally``."""
+    from SCP11.live.transport import PcscApduChannel, RemoteApduChannel
     from SCP11.local_access.config import LocalAccessConfig
     from SCP11.local_access.session import LocalIsdrSession
+    from yggdrasim_common.remote_readers import REMOTE_READER_INDEX
 
     cfg = LocalAccessConfig(READER_INDEX=int(reader_index))
-    channel = PcscApduChannel(reader_index=int(reader_index))
+    if int(reader_index) == REMOTE_READER_INDEX:
+        channel = RemoteApduChannel(str(reader_name or ""), quiet_apdu_logging=True)
+    else:
+        channel = PcscApduChannel(reader_index=int(reader_index), quiet_apdu_logging=True)
     session = LocalIsdrSession(cfg=cfg, apdu_channel=channel)
     return session, channel
 
@@ -124,7 +136,7 @@ def _close_channel(channel: Any) -> None:
         return
     try:
         connection.disconnect()
-    except Exception:  # noqa: BLE001 — teardown path, never surface
+    except Exception:  # noqa: BLE001 -- teardown path, never surface
         pass
 
 
@@ -171,7 +183,7 @@ def _dispatch_get_eid(
 ) -> dict[str, Any]:
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     eid_text = ""
     note_parts: list[str] = []
@@ -212,7 +224,7 @@ def _dispatch_list_profiles(
 ) -> dict[str, Any]:
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     rows: list[dict[str, Any]] = []
     note_parts: list[str] = []
@@ -220,7 +232,7 @@ def _dispatch_list_profiles(
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
             # We unroll collect_profile_metadata() here so we can keep the
-            # raw BF2D00 response for the GUI hex viewer — the helper
+            # raw BF2D00 response for the GUI hex viewer -- the helper
             # discards it and only returns the decoded views.
             session.reset_state()
             session.select_isdr()
@@ -258,7 +270,7 @@ def _dispatch_get_euicc_info2(
 ) -> dict[str, Any]:
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     raw_hex = ""
     lines: list[dict[str, str]] = []
@@ -322,7 +334,7 @@ def _dispatch_get_configured_data(
 ) -> dict[str, Any]:
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     raw_hex = ""
     decoded: dict[str, Any] = {}
@@ -373,7 +385,7 @@ def _dispatch_list_notifications(
 ) -> dict[str, Any]:
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     raw_hex = ""
     note_parts: list[str] = []
@@ -560,7 +572,7 @@ def _dispatch_discover(
 ) -> dict[str, Any]:
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     snapshot: dict[str, Any] = {}
     note_parts: list[str] = []
@@ -596,7 +608,7 @@ def _dispatch_discover(
         "decode_errors": decode_errors,
         "snapshot": scrubbed,
         "note": "; ".join(note_parts) if note_parts else (
-            f"discovery complete — EID={eid_value or '-'} · {profile_count} profile(s)"
+            f"discovery complete -- EID={eid_value or '-'} · {profile_count} profile(s)"
         ),
         "trace": _strip_ansi(trace_sink.getvalue()),
     }
@@ -702,7 +714,7 @@ GET_CERTS_INVENTORY_SPEC = ActionSpec(
     title="Local SM-DP+ cert inventory",
     description=(
         "Scan the local SM-DP+ DPauth / DPpb certificate bundles shipped "
-        "with the SGP.26 reference tree. Pure filesystem read — does not "
+        "with the SGP.26 reference tree. Pure filesystem read -- does not "
         "touch the card. Shows the currently selected certificate per "
         "role and lists alternative candidates."
     ),
@@ -817,11 +829,11 @@ def _run_profile_state_mutation(
     if len(identifier_s) == 0:
         raise ValueError("identifier is required (iccid digits, AID hex, or alias).")
     if confirm_required and confirmed is False:
-        raise ValueError(f"confirm must be true — {label} is destructive.")
+        raise ValueError(f"confirm must be true -- {label} is destructive.")
 
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     response_hex = ""
     note_parts: list[str] = []
@@ -835,17 +847,23 @@ def _run_profile_state_mutation(
     finally:
         _close_channel(channel)
 
+    # The session records the ES10c commands it actually sent; a delete of
+    # an enabled profile reports DisableProfile first.
+    steps = [str(step) for step in (getattr(session, "last_profile_state_steps", ()) or ())]
+    completed_note = f"{label} completed ({len(response_hex) // 2} bytes)."
+    if len(steps) > 1:
+        completed_note += f" Sent {' then '.join(steps)}."
+
     return {
         "reader_index": reader_index,
         "reader_name": _reader_label(reader_name),
         "action": action,
         "identifier": identifier_s,
+        "steps": steps,
         "response_hex": response_hex,
         "response_length": len(response_hex) // 2,
         "ok": len(note_parts) == 0,
-        "note": "; ".join(note_parts) if note_parts else (
-            f"{label} completed ({len(response_hex) // 2} bytes)."
-        ),
+        "note": "; ".join(note_parts) if note_parts else completed_note,
         "trace": _strip_ansi(trace_sink.getvalue()),
     }
 
@@ -904,7 +922,7 @@ def _dispatch_store_metadata(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     path_s = str(metadata_path or "").strip()
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     response_hex = ""
     note_parts: list[str] = []
@@ -940,7 +958,7 @@ def _dispatch_update_metadata(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     path_s = str(metadata_path or "").strip()
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     response_hex = ""
     note_parts: list[str] = []
@@ -980,7 +998,7 @@ def _dispatch_store_metadata_custom(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     path_s = str(metadata_path or "").strip()
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     response_hex = ""
     note_parts: list[str] = []
@@ -1026,7 +1044,7 @@ def _dispatch_status(
 ) -> dict[str, Any]:
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     note_parts: list[str] = []
     state_snapshot: dict[str, Any] = {}
@@ -1075,7 +1093,7 @@ def _dispatch_load_profile(
     path_s = str(profile_path or "").strip()
     if len(path_s) == 0:
         raise ValueError("profile_path is required for the one-shot load cycle.")
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     response_hex = ""
     note_parts: list[str] = []
@@ -1090,17 +1108,44 @@ def _dispatch_load_profile(
     finally:
         _close_channel(channel)
 
+    auto_enable = _auto_enable_summary(session)
+    if len(note_parts) == 0:
+        note = f"LoadProfile chain completed ({len(response_hex) // 2} bytes)"
+        target_text = f"{auto_enable['target_kind']} {auto_enable['target']}".strip()
+        if auto_enable["status"] == "enabled":
+            note += f"; EnableProfile enabled {target_text}."
+        elif auto_enable["status"] == "failed":
+            note += f"; EnableProfile failed for {target_text}: {auto_enable['detail']}"
+        elif auto_enable["status"] == "skipped":
+            note += f"; EnableProfile skipped: {auto_enable['detail']}"
+        else:
+            note += "."
+    else:
+        note = "; ".join(note_parts)
+
     return {
         "reader_index": reader_index,
         "reader_name": _reader_label(reader_name),
         "profile_path": path_s,
         "response_hex": response_hex,
         "response_length": len(response_hex) // 2,
-        "ok": len(note_parts) == 0,
-        "note": "; ".join(note_parts) if note_parts else (
-            f"LoadProfile chain completed ({len(response_hex) // 2} bytes)."
-        ),
+        "auto_enable": auto_enable,
+        "ok": len(note_parts) == 0 and auto_enable["status"] != "failed",
+        "note": note,
         "trace": _strip_ansi(trace_sink.getvalue()),
+    }
+
+
+def _auto_enable_summary(session: Any) -> dict[str, Any]:
+    """Outcome of the EnableProfile that follows a successful load, read from the session state."""
+    state = getattr(session, "state", None)
+    response = bytes(getattr(state, "auto_enable_response", b"") or b"")
+    return {
+        "status": str(getattr(state, "auto_enable_status", "") or ""),
+        "target_kind": str(getattr(state, "auto_enable_target_kind", "") or ""),
+        "target": str(getattr(state, "auto_enable_target", "") or ""),
+        "detail": str(getattr(state, "auto_enable_detail", "") or ""),
+        "response_hex": response.hex().upper(),
     }
 
 
@@ -1113,7 +1158,7 @@ def _dispatch_store_metadata_custom_all(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     path_s = str(metadata_path or "").strip()
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     results: list[tuple[str, bytes]] = []
     note_parts: list[str] = []
@@ -1150,7 +1195,7 @@ def _dispatch_explain_last(
 ) -> dict[str, Any]:
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     note_parts: list[str] = []
     lines: list[dict[str, str]] = []
@@ -1201,7 +1246,7 @@ def _dispatch_export_keybag(
     reader_index = _resolve_reader_index(reader_name)
     path_s = str(output_path or "").strip()
     label_s = str(label or "").strip()
-    session, channel = _build_session(reader_index)
+    session, channel = _build_session(reader_index, reader_name)
     trace_sink = io.StringIO()
     note_parts: list[str] = []
     keybag_path = ""
@@ -1217,7 +1262,7 @@ def _dispatch_export_keybag(
             bsp_rmac = str(getattr(st, "last_bsp_s_rmac_hex", "") or "").strip()
             if len(bsp_enc) == 0 and len(bsp_mac) == 0:
                 raise ValueError(
-                    "no BSP keys in session state — run LOAD-PROFILE first to derive SCP11c keys."
+                    "no BSP keys in session state -- run LOAD-PROFILE first to derive SCP11c keys."
                 )
             keybag: dict[str, Any] = {
                 "label": label_s if len(label_s) > 0 else "scp11-local",
@@ -1229,8 +1274,13 @@ def _dispatch_export_keybag(
                 },
             }
             import json as _json
-            with open(path_s, "w", encoding="utf-8") as fh:
-                _json.dump(keybag, fh, indent=2)
+            from yggdrasim_common.secure_files import atomic_write_bytes
+            # Live BSP session keys: written 0600 through the symlink-safe
+            # atomic writer rather than a bare open() at the ambient umask.
+            atomic_write_bytes(
+                path_s,
+                (_json.dumps(keybag, indent=2) + "\n").encode("utf-8"),
+            )
             keybag_path = path_s
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
@@ -1289,12 +1339,12 @@ def _dispatch_record_stop(
     try:
         out_path, summary = recorder.stop()
         recording = False
-        note = f"Recording stopped — {summary.get('apdu_count', 0)} APDU(s) in {out_path}"
+        note = f"Recording stopped -- {summary.get('apdu_count', 0)} APDU(s) in {out_path}"
     except Exception as error:  # noqa: BLE001
         out_path = ""
         summary = {}
         recording = recorder.is_active()
-        note = f"Stop failed ({error}) — recording may still be active."
+        note = f"Stop failed ({error}) -- recording may still be active."
 
     return {
         "reader_name": _reader_label(reader_name),
@@ -1332,7 +1382,7 @@ def _dispatch_metadata_lint(
         "report": scrubbed,
         "ok": len(note_parts) == 0 and len(scrubbed.get("errors", [])) == 0,
         "note": "; ".join(note_parts) if note_parts else (
-            f"lint complete — {len(scrubbed.get('errors', []))} error(s)."
+            f"lint complete -- {len(scrubbed.get('errors', []))} error(s)."
         ),
         "trace": _strip_ansi(trace_sink.getvalue()),
     }
@@ -1358,7 +1408,7 @@ ENABLE_PROFILE_SPEC = ActionSpec(
             label="ICCID / AID / alias",
             kind="string",
             required=True,
-            placeholder="89014104… or A0000005591010FFFFFFFF8900001100",
+            placeholder="89014104... or A0000005591010FFFFFFFF8900001100",
             help="Target profile identifier.",
         ),
     ),
@@ -1398,8 +1448,9 @@ DELETE_PROFILE_SPEC = ActionSpec(
     subsystem="SCP11 Local",
     title="Delete profile",
     description=(
-        "Run DeleteProfile against the local ISD-R. Destructive — "
-        "requires explicit confirm=true."
+        "Run DeleteProfile against the local ISD-R. An enabled target is "
+        "disabled first (SGP.22 v3.1 section 5.7.18 rejects a delete while "
+        "the profile is enabled). Destructive -- requires explicit confirm=true."
     ),
     inputs=(
         _reader_input_field(),
@@ -1538,7 +1589,8 @@ LOAD_PROFILE_SPEC = ActionSpec(
     description=(
         "Run the full one-shot profile delivery chain: reset state, "
         "read the BPP, open SCP11 session, prepare download, load the "
-        "profile bytes, and close the session. Equivalent to the REPL "
+        "profile bytes, close the session, then enable the installed "
+        "profile (AUTO_ENABLE_AFTER_LOAD). Equivalent to the REPL "
         "LOAD-PROFILE command."
     ),
     inputs=(

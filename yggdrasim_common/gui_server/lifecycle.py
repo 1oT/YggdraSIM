@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """GUI lifecycle cleanup for sessions and GUI-owned external services."""
 
 from __future__ import annotations
@@ -51,6 +50,31 @@ def register_gui_subprocess(label: str, process: Any) -> None:
             label=str(label or "gui subprocess").strip() or "gui subprocess",
             process=process,
         )
+
+
+def unregister_gui_subprocess(pid: Any) -> None:
+    """Forget a subprocess the GUI has stopped and reap it if it exited.
+
+    Without this the registry grew one entry per start/stop cycle and the
+    strong reference kept every killed child out of ``subprocess``'s own
+    reaping until shutdown.
+    """
+    try:
+        pid_i = int(pid or 0)
+    except (TypeError, ValueError):
+        return
+    if pid_i <= 0:
+        return
+    with _LOCK:
+        entry = _GUI_SUBPROCESSES.pop(pid_i, None)
+    if entry is None:
+        return
+    poll = getattr(entry.process, "poll", None)
+    if callable(poll):
+        try:
+            poll()
+        except Exception:  # noqa: BLE001 - reaping is best-effort
+            pass
 
 
 def register_gui_service(service_name: str) -> None:
@@ -121,6 +145,29 @@ def _stop_card_bridge_runtime_state() -> list[dict[str, Any]]:
         return []
 
     results: list[dict[str, Any]] = []
+
+    # The rig first. Its supervisor holds the operator's card lease and
+    # drives a REMSIM client, and both outlive this process: closing the
+    # GUI takes away the Card Bridge the rig streams from, so leaving the
+    # rig running leaves it holding a lease on a card that is gone, and
+    # the next session collides with it. Nothing on the rig cleans that up
+    # by itself, and nothing in the GUI could reach it afterwards.
+    ssh_target = str(state.get("ssh_target") or "").strip()
+    service_name = str(state.get("service_name") or "").strip()
+    if len(ssh_target) > 0:
+        results.append(_run_card_bridge_stop_action(
+            "rpi_hil_service_stop",
+            lambda: card_bridge._dispatch_remote_service_control(
+                ActionContext(),
+                ssh_target=ssh_target,
+                identity_file=state.get("identity_file"),
+                ssh_path=state.get("ssh_path"),
+                service_name=service_name or None,
+                action="stop",
+                confirm=True,
+            ),
+        ))
+
     tunnel_pid = _coerce_pid(state.get("ssh_tunnel_pid"))
     if tunnel_pid > 0:
         results.append(_run_card_bridge_stop_action(
@@ -129,11 +176,14 @@ def _stop_card_bridge_runtime_state() -> list[dict[str, Any]]:
         ))
 
     local_pid = _coerce_pid(state.get("local_card_bridge_pid"))
+    # Presence is not ownership: the marker merges, so these keys outlive
+    # the bridge they described and made shutdown stop whatever was
+    # listening on that port next.
     has_local_bridge_state = (
         local_pid > 0
-        or "local_card_bridge_port" in state
-        or "local_card_bridge_log" in state
-        or "local_card_bridge_command" in state
+        or _coerce_pid(state.get("local_card_bridge_port")) > 0
+        or bool(str(state.get("local_card_bridge_log") or "").strip())
+        or bool(state.get("local_card_bridge_command"))
     )
     if has_local_bridge_state:
         results.append(_run_card_bridge_stop_action(

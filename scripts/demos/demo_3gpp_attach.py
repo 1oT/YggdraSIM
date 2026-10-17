@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""YggdraSIM — 3GPP cold-attach + USIM-AKA live demo.
+"""YggdraSIM -- 3GPP cold-attach + USIM-AKA live demo.
 
 Walks an empty modem through a fresh attach against the in-process
 simulator: ATR  →  SELECT MF  →  SELECT ADF.USIM  →  GET CHALLENGE
@@ -30,10 +30,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from SIMCARD.auth import milenage_vectors
-from SIMCARD.engine import SimulatedSimCardEngine
-from SIMCARD.etsi_fs import USIM_AID
-from yggdrasim_common.nord_palette import NORD
+# These imports resolve against the path inserted above, so they
+# cannot be hoisted to the top of the module.
+from SIMCARD.auth import milenage_vectors  # noqa: E402
+from SIMCARD.engine import SimulatedSimCardEngine  # noqa: E402
+from SIMCARD.etsi_fs import USIM_AID  # noqa: E402
+from yggdrasim_common.nord_palette import NORD  # noqa: E402
 
 
 COLOUR = sys.stdout.isatty() and os.environ.get("NO_COLOR", "") == ""
@@ -143,12 +145,12 @@ def parse_authenticate_response(data: bytes) -> tuple[bytes, bytes, bytes, bytes
 
 
 def main() -> int:
-    banner("YggdraSIM 3GPP cold-attach + USIM-AKA — live demo")
-    print(f"  {C_DIM}A virtual UICC, a fake modem, deterministic Milenage —")
+    banner("YggdraSIM 3GPP cold-attach + USIM-AKA -- live demo")
+    print(f"  {C_DIM}A virtual UICC, a fake modem, deterministic Milenage --")
     print(f"  watching a clean attach plus AUTS resync, end-to-end.{C_RESET}")
     pause(1.0)
 
-    banner("Step 1 — Cold-boot the simulated UICC")
+    banner("Step 1 -- Cold-boot the simulated UICC")
     workdir = Path(tempfile.mkdtemp(prefix="yggdrasim_attach_demo_"))
     euicc_root = workdir / "euicc"
     euicc_root.mkdir(parents=True, exist_ok=True)
@@ -170,10 +172,10 @@ def main() -> int:
     step(f"IMSI  = {imsi}")
     pause(0.8)
 
-    banner("Step 2 — Plant a known Milenage vector on the active USIM profile")
+    banner("Step 2 -- Plant a known Milenage vector on the active USIM profile")
     active_profile = engine.auth._active_profile()
     if active_profile is None:
-        print(f"  {C_RED}No active profile bound to the simulator runtime — aborting.{C_RESET}")
+        print(f"  {C_RED}No active profile bound to the simulator runtime -- aborting.{C_RESET}")
         return 1
     auth_config = active_profile.auth_config
     auth_config.algorithm = "milenage"
@@ -189,7 +191,7 @@ def main() -> int:
     hexline("SQN ", auth_config.sqn)
     pause(0.8)
 
-    banner("Step 3 — Modem-side: SELECT MF, then SELECT ADF.USIM")
+    banner("Step 3 -- Modem-side: SELECT MF, then SELECT ADF.USIM")
     transmit(engine, bytes.fromhex("00A40004023F00"), "SELECT MF (3F00)")
     pause(0.4)
 
@@ -202,7 +204,7 @@ def main() -> int:
          "subsequent INS=88 AUTHENTICATE will run inside the USIM context")
     pause(0.6)
 
-    banner("Step 4 — Modem fires GET CHALLENGE then computes/serves AUTN")
+    banner("Step 4 -- Modem fires GET CHALLENGE then computes/serves AUTN")
     challenge_apdu = bytes.fromhex("00840000") + bytes.fromhex("10")
     rand_response, sw1, sw2 = transmit(engine, challenge_apdu, "GET CHALLENGE Le=16")
     step(f"Card-side RAND (16 B) = {rand_response.hex().upper()}",
@@ -228,13 +230,13 @@ def main() -> int:
     hexline("AUTN ", autn)
     pause(0.8)
 
-    banner("Step 5 — AUTHENTICATE (USIM AKA, P2=0x81) — the canonical attach")
+    banner("Step 5 -- AUTHENTICATE (USIM AKA, P2=0x81) -- the canonical attach")
     body = b"\x10" + rand + b"\x10" + autn
     auth_apdu = bytes((0x00, 0x88, 0x00, 0x81, len(body))) + body + bytes((0x00,))
     data, sw1, sw2 = transmit(engine, auth_apdu, "AUTHENTICATE (USIM, MAC-A check + RES)")
     if (sw1, sw2) != (0x90, 0x00):
         step(f"Card rejected the challenge ({sw1:02X}{sw2:02X}). Demo aborted.",
-             "expected 9000 — please re-run.", colour=C_RED)
+             "expected 9000 -- please re-run.", colour=C_RED)
         return 1
 
     parsed = parse_authenticate_response(data)
@@ -250,7 +252,7 @@ def main() -> int:
     hexline("Kc   ", kc)
     pause(0.8)
 
-    banner("Step 6 — AUTS resync: replay an old SQN, watch the card protect itself")
+    banner("Step 6 -- AUTS resync: replay an old SQN, watch the card protect itself")
     stale_sqn = (SQN_INT - 0x10).to_bytes(6, "big")
     stale_vectors = milenage_vectors(
         bytes.fromhex(KI_HEX), bytes.fromhex(OPC_HEX), rand, stale_sqn, amf,
@@ -265,7 +267,7 @@ def main() -> int:
     data, sw1, sw2 = transmit(engine, auth_apdu, "AUTHENTICATE (stale SQN)")
     if data.startswith(b"\xDC"):
         auts = data[2:]
-        step("Card returned 0xDC || L || AUTS — sync failure (TS 33.102 §6.3.5)",
+        step("Card returned 0xDC || L || AUTS -- sync failure (TS 33.102 §6.3.5)",
              "the network must run AUTS through the AuC to recover SQN_MS")
         hexline("AUTS ", auts)
     else:
@@ -273,7 +275,7 @@ def main() -> int:
              "expected DC ... AUTS for the resync path", colour=C_YELLOW)
     pause(0.6)
 
-    banner("Done — what just happened")
+    banner("Done -- what just happened")
     print(f"  {C_GREEN}✓{C_RESET} Cold reset → ATR served, MF + ADF.USIM bound on logical channel 0.")
     print(f"  {C_GREEN}✓{C_RESET} GET CHALLENGE refreshed the card's RAND buffer.")
     print(f"  {C_GREEN}✓{C_RESET} AUTHENTICATE matched the network-supplied MAC-A.")

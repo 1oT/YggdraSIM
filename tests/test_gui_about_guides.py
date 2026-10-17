@@ -104,7 +104,7 @@ class GuidesRouteCatalog(unittest.TestCase):
         self.assertTrue(arch.is_file())
 
     def test_list_guides_returns_entries(self) -> None:
-        # Drive the FastAPI handler directly — avoids spinning up
+        # Drive the FastAPI handler directly -- avoids spinning up
         # TestClient just for a simple JSON response.
         resp = self.module.list_guides()
         self.assertGreater(len(resp.guides), 0)
@@ -244,7 +244,7 @@ class AboutPanelJsWiring(unittest.TestCase):
 
 
 class MarkdownConverterSmoke(unittest.TestCase):
-    """Exercise the tiny markdown converter via duktape — JS-only logic."""
+    """Exercise the tiny markdown converter via duktape -- JS-only logic."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -332,6 +332,104 @@ class AboutPanelCssContracts(unittest.TestCase):
         self.assertIn("border-collapse: collapse;", self.css)
         self.assertIn(
             ".cc-doc-modal-body table.cc-doc-table tbody tr:nth-child(even) td",
+            self.css,
+        )
+
+
+# ----------------------------------------------------------------------
+# Frontend: mermaid diagrams
+# ----------------------------------------------------------------------
+
+
+class MermaidDiagramWiring(unittest.TestCase):
+    """``mermaid`` fences render to SVG instead of staying code blocks.
+
+    ARCHITECTURE.md is the only catalogue entry carrying diagrams
+    (twelve flowcharts); before this wiring the viewer showed their
+    source. The contract is structural, matching the rest of this
+    module: the bundle has to keep the placeholder, the on-demand
+    load, the lazy observer and the token-driven palette.
+    """
+
+    def setUp(self) -> None:
+        self.js = _APP_JS.read_text(encoding="utf-8")
+        self.css = _APP_CSS.read_text(encoding="utf-8")
+
+    def test_vendored_bundle_is_shipped(self) -> None:
+        vendored = (
+            _REPO
+            / "yggdrasim_common"
+            / "gui_server"
+            / "static"
+            / "vendor"
+            / "mermaid"
+            / "mermaid.min.js"
+        )
+        self.assertTrue(vendored.is_file(), "vendored mermaid build missing")
+        self.assertGreater(vendored.stat().st_size, 1_000_000)
+        source = (
+            _REPO / "gui_frontend" / "src" / "vendor" / "mermaid" / "NOTICE.md"
+        )
+        self.assertTrue(source.is_file(), "vendor NOTICE.md missing")
+
+    def test_mermaid_fence_emits_a_placeholder(self) -> None:
+        # The index -- not the diagram text -- travels in the attribute,
+        # so arrows and quotes never have to survive escaping.
+        self.assertIn('if (fenceLang === "mermaid") {', self.js)
+        self.assertIn('<div class="cc-doc-mermaid" data-mermaid-index="', self.js)
+        self.assertIn("docMermaidSources.push(fenceBody)", self.js)
+
+    def test_placeholder_keeps_the_source_as_fallback(self) -> None:
+        # A failed render, or a bundle that never loads, leaves the
+        # original <pre> in place rather than an empty frame.
+        self.assertIn("+ fencePre", self.js)
+        self.assertIn('host.setAttribute("data-mermaid-state", "failed")', self.js)
+
+    def test_bundle_loads_on_demand_not_from_the_app_bundle(self) -> None:
+        self.assertIn(
+            'var MERMAID_SRC = "/static/vendor/mermaid/mermaid.min.js"', self.js
+        )
+        self.assertIn("function loadMermaid()", self.js)
+        # Two ways the 3.5 MB build could become an eager load, both of
+        # which cost every view that never opens a guide. index.html
+        # carries the xterm <script> tags; .js_order decides what the
+        # concatenated bundle contains, and omitting a file from it fails
+        # silently, so the absence has to be pinned here.
+        index = _INDEX_HTML.read_text(encoding="utf-8")
+        self.assertNotIn("vendor/mermaid", index)
+        js_order = (
+            _REPO / "gui_frontend" / "src" / "js" / ".js_order"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("mermaid", js_order)
+
+    def test_hydration_binds_the_sources_it_was_called_for(self) -> None:
+        # renderMarkdownToHtml reassigns docMermaidSources on every call,
+        # so a hydration reading the live array could resolve a
+        # placeholder index against a different document's diagrams.
+        self.assertIn("var sources = docMermaidSources;", self.js)
+        self.assertIn("var source = sources[index];", self.js)
+
+    def test_diagrams_render_lazily(self) -> None:
+        self.assertIn("window.IntersectionObserver", self.js)
+        self.assertIn("function hydrateMermaidDiagrams(", self.js)
+        self.assertIn("observer.unobserve(entry.target)", self.js)
+
+    def test_rendered_svg_is_cached(self) -> None:
+        self.assertIn("mermaidState.cache[cacheKey]", self.js)
+
+    def test_palette_comes_from_the_design_tokens(self) -> None:
+        # Mermaid's own palette is fixed; the diagram has to follow the
+        # active theme like every other surface, so the theme variables
+        # are read from the tokens at render time.
+        self.assertIn("function mermaidThemeVariables()", self.js)
+        for token in ("--fg", "--bg-elev", "--bg-elev-2", "--border", "--fg-dim"):
+            self.assertIn('tok("%s")' % token, self.js)
+        self.assertIn('theme: "base"', self.js)
+        self.assertIn('securityLevel: "strict"', self.js)
+
+    def test_container_is_styled_without_a_palette(self) -> None:
+        self.assertIn(
+            '.cc-doc-modal-body .cc-doc-mermaid[data-mermaid-state="rendered"]',
             self.css,
         )
 

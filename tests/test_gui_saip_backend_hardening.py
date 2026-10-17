@@ -116,6 +116,34 @@ def test_uploaded_package_retains_private_backing_for_revert_and_save(
             assert old_backing.exists() is False
 
 
+def test_save_refuses_the_browser_upload_label(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened = saip._dispatch_open_package_upload(
+        ctx=None,
+        filename="uploaded.der",
+        content_base64=base64.b64encode(_minimal_der()).decode("ascii"),
+    )
+    sid = opened["session_id"]
+    try:
+        assert opened["source_path"] == "upload:uploaded.der"
+        # The label used to resolve against the working directory and
+        # leave an ``upload:uploaded.der`` file there.
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ValueError, match=r"upload label, not a file location"):
+            saip._dispatch_save_package(
+                ctx=None,
+                session_id=sid,
+                output_path=opened["source_path"],
+                format="der",
+                overwrite=True,
+            )
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        get_manager().close(sid)
+
+
 def test_close_requires_explicit_discard_and_rejects_other_session_kinds() -> None:
     opened = saip._dispatch_create_package(ctx=None)
     sid = opened["session_id"]

@@ -40,6 +40,13 @@ from __future__ import annotations
 from typing import Any
 from collections.abc import Iterable
 
+from cryptography import x509 as crypto_x509
+from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.hazmat.primitives import serialization
+
+from SCP11.shared.ber_tlv import retag_sequence
+from SCP11.shared.iccid import encode_ef_iccid
+
 __all__ = [
     "PsmoBuildError",
     "build_psmo",
@@ -75,12 +82,14 @@ def _tlv(tag: bytes | str, value: bytes) -> bytes:
 
 
 def _der_integer(value: int) -> bytes:
-    """Minimal-length two's-complement INTEGER body."""
+    """Minimal-length two's-complement INTEGER contents octets."""
     number = int(value)
-    if number == 0:
-        return b"\x00"
-    width = (number.bit_length() + 8) // 8
-    return number.to_bytes(width, "big", signed=True)
+    width = 1
+    while True:
+        try:
+            return number.to_bytes(width, "big", signed=True)
+        except OverflowError:
+            width += 1
 
 
 def _utf8(text: str) -> bytes:
@@ -88,22 +97,15 @@ def _utf8(text: str) -> bytes:
 
 
 def encode_iccid_bcd(digits: str) -> bytes:
-    """Pack ICCID digits low-nibble-first per ETSI TS 102 221 §13.2.
+    """Pack an ICCID as the ten EF_ICCID octets (ETSI TS 102 221 v18.4 section 13.2).
 
-    An odd digit count is padded with the 0xF filler in the high nibble,
-    which is what ``decode_bcd_digits`` on the card side strips back off.
+    ``Iccid`` is ``[APPLICATION 26] OCTET STRING (SIZE(10))`` in SGP.22 v3.1, so
+    a shorter ICCID is padded with 'F' nibbles up to the fixed size.
     """
-    cleaned = "".join(character for character in str(digits or "") if character.isdigit())
-    if len(cleaned) == 0:
-        raise PsmoBuildError("ICCID must contain at least one digit.")
-    if len(cleaned) > 20:
-        raise PsmoBuildError("ICCID cannot exceed 20 digits.")
-    packed = bytearray()
-    for index in range(0, len(cleaned), 2):
-        low = int(cleaned[index])
-        high = int(cleaned[index + 1]) if index + 1 < len(cleaned) else 0x0F
-        packed.append((high << 4) | low)
-    return bytes(packed)
+    try:
+        return encode_ef_iccid(digits)
+    except ValueError as error:
+        raise PsmoBuildError(str(error)) from error
 
 
 def _base128(value: int) -> bytes:
@@ -143,21 +145,50 @@ def _encode_oid(dotted: str) -> bytes:
     return bytes(body)
 
 
+def _encode_key_material_choice(hex_value: str, field_name: str) -> bytes:
+    """Encode the eimPublicKeyData / trustedPublicKeyDataTls CHOICE contents.
+
+    Both CHOICEs offer an untagged SubjectPublicKeyInfo and an untagged
+    Certificate (SGP.32 v1.3 EimConfigurationData), so automatic tagging carries
+    the key as ``A0`` and the certificate as ``A1``, each replacing the DER
+    SEQUENCE tag of the material the operator supplied.
+    """
+    try:
+        der = bytes.fromhex(hex_value)
+    except ValueError as error:
+        raise PsmoBuildError(f"{field_name} is not valid hex.") from error
+    try:
+        crypto_x509.load_der_x509_certificate(der)
+    except ValueError:
+        is_certificate = False
+    else:
+        is_certificate = True
+    if is_certificate is False:
+        try:
+            serialization.load_der_public_key(der)
+        except (ValueError, TypeError, UnsupportedAlgorithm) as error:
+            raise PsmoBuildError(
+                f"{field_name} is neither a DER Certificate nor a DER SubjectPublicKeyInfo."
+            ) from error
+    try:
+        return retag_sequence(b"\xA1" if is_certificate else b"\xA0", der)
+    except ValueError as error:
+        raise PsmoBuildError(f"{field_name}: {error}") from error
+
+
 def _profile_reference(spec: dict[str, Any]) -> bytes:
-    """Encode the iccid(5A) / isdpAid(4F) selector shared by several PSMOs."""
+    """Encode the ``iccid [APPLICATION 26]`` selector shared by several PSMOs.
+
+    SGP.32 v1.3 Psmo enable, disable, delete and setFallbackAttribute carry an
+    ICCID only; an ISD-P AID is not a PSMO selector.
+    """
     aid = str(spec.get("aid") or "").strip()
     iccid = str(spec.get("iccid") or "").strip()
     if len(aid) > 0:
-        try:
-            aid_bytes = bytes.fromhex(aid)
-        except ValueError as error:
-            raise PsmoBuildError(f"ISD-P AID {aid!r} is not valid hex.") from error
-        if len(aid_bytes) == 0:
-            raise PsmoBuildError("ISD-P AID cannot be empty.")
-        return _tlv("4F", aid_bytes)
+        raise PsmoBuildError("PSMOs select a Profile by ICCID only; 'aid' is not an SGP.32 selector.")
     if len(iccid) > 0:
         return _tlv("5A", encode_iccid_bcd(iccid))
-    raise PsmoBuildError("A profile reference needs either 'iccid' or 'aid'.")
+    raise PsmoBuildError("A profile reference needs 'iccid'.")
 
 
 # --- PSMO builders -------------------------------------------------------
@@ -166,8 +197,13 @@ def _profile_reference(spec: dict[str, Any]) -> bytes:
 def _psmo_enable(spec: dict[str, Any]) -> bytes:
     body = _profile_reference(spec)
     if bool(spec.get("rollback", False)) is True:
-        # rollbackFlag [1] NULL -- primitive under AUTOMATIC TAGS.
-        body += _tlv("81", b"")
+        # enable ::= SEQUENCE { iccid [APPLICATION 26] Iccid, rollbackFlag NULL
+        # OPTIONAL }. SGP32Definitions is AUTOMATIC TAGS, but X.680 §12.3
+        # withholds automatic tagging from a component list that already tags a
+        # component -- and iccid does, which is why it goes out as '5A' rather
+        # than the '80' an auto-tagged [0] would give. rollbackFlag is untagged
+        # in that same list, so it keeps the universal NULL tag '05'.
+        body += _tlv("05", b"")
     return _tlv("A3", body)
 
 
@@ -233,12 +269,18 @@ PSMO_OPERATIONS: dict[str, Any] = {
 
 # --- eIM configuration rows and eCO builders -----------------------------
 
-# Named-bit-string positions for eIM supported protocols, SGP.32 §2.11.2.
+# EimSupportedProtocol ::= BIT STRING { eimRetrieveHttps(0), eimRetrieveCoaps(1),
+# eimInjectHttps(2), eimInjectCoaps(3), eimProprietary(4) } (SGP.32 §2.11.1).
+# Retrieval takes bits 0 and 1, injection bits 2 and 3 -- the two transports do
+# not alternate. Bits 1 and 2 were transposed here, so a row asking for CoAPS
+# retrieval encoded HTTPS injection, which is what the decoders in
+# ``SCP03/logic/sgp32_decode.py`` and ``Tools/Asn1TlvDecode`` then read back.
 SUPPORTED_PROTOCOL_BITS: dict[str, int] = {
     "https_over_tcp_retrieval": 0,
-    "https_over_tcp_injection": 1,
-    "coap_dtls_over_udp_retrieval": 2,
+    "coap_dtls_over_udp_retrieval": 1,
+    "https_over_tcp_injection": 2,
     "coap_dtls_over_udp_injection": 3,
+    "proprietary": 4,
 }
 
 
@@ -286,16 +328,10 @@ def _eim_configuration_row(spec: dict[str, Any]) -> bytes:
         row += _tlv("89", b"")
     public_key = str(spec.get("eim_public_key_data") or "").strip()
     if len(public_key) > 0:
-        try:
-            row += _tlv("A5", bytes.fromhex(public_key))
-        except ValueError as error:
-            raise PsmoBuildError("eim_public_key_data is not valid hex.") from error
+        row += _tlv("A5", _encode_key_material_choice(public_key, "eim_public_key_data"))
     tls_key = str(spec.get("trusted_tls_public_key_data") or "").strip()
     if len(tls_key) > 0:
-        try:
-            row += _tlv("A6", bytes.fromhex(tls_key))
-        except ValueError as error:
-            raise PsmoBuildError("trusted_tls_public_key_data is not valid hex.") from error
+        row += _tlv("A6", _encode_key_material_choice(tls_key, "trusted_tls_public_key_data"))
     return row
 
 

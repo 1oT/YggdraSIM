@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Persistent preferences for ``DIFF-TUI``.
 
 Stored in the same config file as the transcode TUI
@@ -86,14 +85,14 @@ def load_theme_pref(workspace_root: Path) -> str | None:
 def load_diff_tui_layout(workspace_root: Path) -> dict[str, Any]:
     """Return the ``diff_tui`` sub-dict from the shared config file.
 
-    Output keys (all optional — caller falls back to defaults):
+    Output keys (all optional -- caller falls back to defaults):
 
-    * ``decoded_visible`` (bool) — whether the decoded pane was open.
-    * ``decoded_height`` (int)   — clamped to the supported range.
-    * ``show_values``    (bool) — whether the tree shows leaf values.
-    * ``diffs_only``     (bool) — whether the tree was pruned to the
+    * ``decoded_visible`` (bool) -- whether the decoded pane was open.
+    * ``decoded_height`` (int)   -- clamped to the supported range.
+    * ``show_values``    (bool) -- whether the tree shows leaf values.
+    * ``diffs_only``     (bool) -- whether the tree was pruned to the
       diff-bearing breadcrumb only (full structure hidden).
-    * ``decoded_show_hex_diff`` (bool) — whether the decoded pane
+    * ``decoded_show_hex_diff`` (bool) -- whether the decoded pane
       shows the byte-level hex diff overlay (``True``) or the plain
       decoded view (``False``, default).
     """

@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for the SAIP UX dispatchers (file listing, PE info, reorder).
 
-* ``saip.list_files`` — extended with ``sort_by`` / ``descending``
-* ``saip.pe_info`` — contextual PE-type info pane
-* ``saip.reorder_pes`` — move a PE within the sequence (header / end
+* ``saip.list_files`` -- extended with ``sort_by`` / ``descending``
+* ``saip.pe_info`` -- contextual PE-type info pane
+* ``saip.reorder_pes`` -- move a PE within the sequence (header / end
   anchors are protected)
 """
 
@@ -155,7 +154,7 @@ class PeInfoTests(unittest.TestCase):
         self.assertIn("ICCID", result["summary"])
 
     def test_pe_info_unknown_type_falls_back(self) -> None:
-        # Last PE is the end sentinel — exercise the fallback for
+        # Last PE is the end sentinel -- exercise the fallback for
         # registered known types.
         handle = self._manager.claim(self._sid)
         last = len(handle["pes"].pe_list) - 1

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM-local shell: operator REPL for the local eIM simulator exposing package delivery and audit commands."""
 import argparse
 import atexit
@@ -10,8 +9,10 @@ import shlex
 import shutil
 import sys
 import textwrap
-from typing import Any, Callable, Optional
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator, Optional
 
+from yggdrasim_common.command_log import LOG_FLAG_HELP, run_with_command_log
 from yggdrasim_common.plugin_runtime import ensure_plugins_loaded, extend_target_with_plugins
 from yggdrasim_common.process_debug import (
     add_debug_argument,
@@ -22,7 +23,7 @@ from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.session_recording import ShellSessionRecorder
 from yggdrasim_common.structured_output import dump_structured_payload
-from yggdrasim_common.nord_palette import NORD
+from yggdrasim_common.cli_theme import ThemedColorsMeta as _ThemedColorsMeta
 from SCP11.shared.discovery_snapshot import (
     render_card_overview_snapshot,
     render_consolidated_discovery_snapshot,
@@ -57,18 +58,18 @@ from SCP11.shared.gsma_error_codes import (
 )
 
 
-class ShellStyle:
-    """eIM-local shell colour roles, sourced from the Nord palette."""
+class ShellStyle(metaclass=_ThemedColorsMeta):
+    """eIM-local shell colour roles, read from the active theme."""
 
-    HEADER = NORD.HEADER
-    BLUE = NORD.BLUE
-    CYAN = NORD.CYAN
-    GREEN = NORD.GREEN
-    RED = NORD.RED
-    WARNING = NORD.WARNING
-    WHITE = NORD.WHITE
-    BOLD = NORD.BOLD
-    END = NORD.RESET
+    _ROLE_MAP = {
+        "HEADER": "HEADER",
+        "BLUE": "BLUE",
+        "CYAN": "CYAN",
+        "GREEN": "GREEN",
+        "RED": "RED",
+        "WARNING": "WARNING",
+        "WHITE": "WHITE",
+    }
 
 
 class EimLocalStartupError(RuntimeError):
@@ -117,8 +118,6 @@ class EimLocalShell:
             "ISDR-GET-EIM-CONFIG": self._cmd_isdr_get_eim_config,
             "ISDR-DELETE-EIM": self._cmd_isdr_delete_eim,
             "IPAD-DISCOVER": self._cmd_ipad_discover,
-            "IPAD-LIVE": self._cmd_ipad_live,
-            "IPAD-TEST": self._cmd_ipad_test,
             "HANDOVER-SET": self._cmd_handover_set,
             "HANDOVER-STATUS": self._cmd_handover_status,
             "EIM-PACKAGE": self._cmd_eim_package,
@@ -181,7 +180,7 @@ class EimLocalShell:
             },
             "PATHS": {
                 "usage": "PATHS",
-                "summary": "Show Direct Auth, IPAd, and localized bridge endpoints.",
+                "summary": "Show the localized path families and their endpoints.",
                 "examples": ["PATHS"],
             },
             "RECORD": {
@@ -229,16 +228,6 @@ class EimLocalShell:
             "ISDR-GET-EIM-CONFIG": {"usage": "ISDR-GET-EIM-CONFIG", "summary": "Decode/report live BF55 eIM rows from the card.", "examples": ["ISDR-GET-EIM-CONFIG"]},
             "ISDR-DELETE-EIM": {"usage": "ISDR-DELETE-EIM <eimId>", "summary": "Delete target eIM and print decoded post-state.", "examples": ["ISDR-DELETE-EIM 2.25.311782205282738360923618091971140414400"]},
             "IPAD-DISCOVER": {"usage": "IPAD-DISCOVER [packagePath]", "summary": "Run IPAd discovery and optional package selection.", "examples": ["IPAD-DISCOVER"]},
-            "IPAD-LIVE": {
-                "usage": "IPAD-LIVE [matchingId] [--debug]",
-                "summary": "Run localized IPAd relay through the SCP11 live orchestrator and local bridge.",
-                "examples": ["IPAD-LIVE", "IPAD-LIVE EIM-FIRST-TEST", "IPAD-LIVE --debug"],
-            },
-            "IPAD-TEST": {
-                "usage": "IPAD-TEST [matchingId] [--debug]",
-                "summary": "Run localized IPAd relay through the SCP11 test orchestrator and local bridge.",
-                "examples": ["IPAD-TEST", "IPAD-TEST EIM-FIRST-TEST", "IPAD-TEST --debug"],
-            },
             "HANDOVER-SET": {"usage": "HANDOVER-SET <transactionIdHex> [matchingId]", "summary": "Manually seed handover context.", "examples": ["HANDOVER-SET 01020304AABBCCDD MID-1"]},
             "HANDOVER-STATUS": {"usage": "HANDOVER-STATUS [--json|--yaml]", "summary": "Print the current handover context.", "examples": ["HANDOVER-STATUS", "HANDOVER-STATUS --yaml"]},
             "EIM-PACKAGE": {"usage": "EIM-PACKAGE [packagePath]", "summary": "Show active package or set package override.", "examples": ["EIM-PACKAGE", "EIM-PACKAGE default_eim_package.json"]},
@@ -273,6 +262,9 @@ class EimLocalShell:
         }
         self._plugin_path_sections: list[dict[str, Any]] = []
         self._plugin_localized_help_rows: list[tuple[str, str]] = []
+        # Commands that read --debug themselves: the dispatcher leaves the
+        # flag in their argument instead of switching the transport trace on.
+        self._internal_debug_commands: set[str] = set()
         extend_target_with_plugins(self)
 
     def _setup_readline(self) -> None:
@@ -704,11 +696,8 @@ class EimLocalShell:
         if len(private_key_path) > 0:
             print(f"    cert_key  : {private_key_path}")
 
-    # Bridge / orchestrator lifecycle is installed by a trusted local
-    # extension. When no extension attaches, every IPAD /
-    # PATHS-bridge-section code path that tries to reach a bridge must
-    # fail loudly, so we keep tiny stubs here that either raise or return
-    # neutral placeholders.
+    # An extension that runs a bridge beside this shell replaces
+    # ``_stop_poll_bridge`` and ``_bridge_status_payload`` on the instance.
 
     def _stop_poll_bridge(self) -> None:
         return
@@ -723,35 +712,8 @@ class EimLocalShell:
         close_session()
 
     def _bridge_status_payload(self) -> dict[str, Any]:
-        # Fallback stub — a local extension overrides this with the real
-        # bridge status through ``extend_target``. Absent extension means
-        # STATUS / PATHS print ``-`` / ``no``.
+        # Empty means no bridge: STATUS and PATHS leave the bridge rows out.
         return {}
-
-    def _ensure_poll_bridge(self, reset_runtime: bool = True) -> Any:
-        raise RuntimeError(
-            "Localized relay bridge is provided by a trusted local command "
-            "extension and is not available in this build."
-        )
-
-    def _close_network_runtime(self, orchestrator: Any) -> None:
-        if orchestrator is None:
-            return
-        close_open_channel = getattr(orchestrator, "_close_stk_open_channel", None)
-        if callable(close_open_channel):
-            try:
-                close_open_channel()
-            except Exception:
-                pass
-
-    def _configure_localized_bridge_profile_provider(self, profile_provider: Any) -> Any:
-        return profile_provider
-
-    def _load_network_orchestrator(self, profile_name: str) -> Any:
-        raise RuntimeError(
-            "Networked orchestrator with localized bridge is provided by the "
-            "trusted local command extension and is not available in this build."
-        )
 
     def _cmd_paths(self, _: str = "") -> None:
         identity = self.session.identity_summary()
@@ -771,11 +733,6 @@ class EimLocalShell:
         print("1. Direct Auth")
         print("   flow      : Local SCP11 authenticate -> card command -> close session")
         print("   purpose   : Direct ISD-R validation without eIM / SM-DP+ transport")
-        print("2. Localized IPAd Relay")
-        print("   live cmd  : IPAD-LIVE [matchingId] [--debug]")
-        print("   test cmd  : IPAD-TEST [matchingId] [--debug]")
-        print("   route     : SIM <-> IPAd <-> eIM/SM-DP+")
-        print("   transport : Host-side HTTPS client is pinned to the localized bridge")
         for section in self._plugin_path_sections:
             title = str(section.get("title", "")).strip()
             if len(title) > 0:
@@ -783,6 +740,8 @@ class EimLocalShell:
             for line in section.get("lines", []):
                 print(str(line))
         print("")
+        if len(bridge_status) == 0:
+            return
         print("--- Bridge Endpoints ---")
         print(f"bridge started : {'yes' if bridge_status.get('started') else 'no'}")
         print(f"dns endpoint   : {dns_endpoint}")
@@ -984,6 +943,7 @@ class EimLocalShell:
         print(f"\n{ShellStyle.BOLD}{ShellStyle.HEADER}Local eIM Command Groups{ShellStyle.END}")
         print("  Use HELP <command> for full usage, examples, and alias information.")
         print("  Add --debug to card-facing commands for full raw APDU hex tracing.")
+        print(f"  {LOG_FLAG_HELP}")
         print("  Use --yaml when you want structured output without defaulting to JSON.")
         print("  Use RECORD START/STOP to capture replayable commands plus APDU trace to file.")
         print("  Canonical command names are listed here; legacy aliases still resolve.\n")
@@ -1008,8 +968,6 @@ class EimLocalShell:
         localized_rows = [
             self._help_row("PATHS", "PATHS"),
             self._help_row("IPAD-DISCOVER [package]", "IPAD-DISCOVER"),
-            self._help_row("IPAD-LIVE [matchingId] [--debug]", "IPAD-LIVE"),
-            self._help_row("IPAD-TEST [matchingId] [--debug]", "IPAD-TEST"),
         ]
         localized_rows.extend(list(self._plugin_localized_help_rows))
         localized_rows.extend(
@@ -1091,16 +1049,17 @@ class EimLocalShell:
         print(f"Hotfolder override  : {eim_state.hotfolder_override_path or '-'}")
         print(f"Pending operations  : {len(self.session.pending_operations())}")
         bridge_status = self._bridge_status_payload()
-        dns_endpoint = (
-            f"{bridge_status.get('bind_host', '-')}:{bridge_status.get('dns_port', '-')}"
-        )
-        print(f"Bridge started      : {'yes' if bridge_status.get('started') else 'no'}")
-        print(
-            "Bridge endpoints    : "
-            f"dns={dns_endpoint} "
-            f"eim={bridge_status.get('eim_base_url', '-')} "
-            f"smdp={bridge_status.get('smdp_base_url', '-')}"
-        )
+        if len(bridge_status) > 0:
+            dns_endpoint = (
+                f"{bridge_status.get('bind_host', '-')}:{bridge_status.get('dns_port', '-')}"
+            )
+            print(f"Bridge started      : {'yes' if bridge_status.get('started') else 'no'}")
+            print(
+                "Bridge endpoints    : "
+                f"dns={dns_endpoint} "
+                f"eim={bridge_status.get('eim_base_url', '-')} "
+                f"smdp={bridge_status.get('smdp_base_url', '-')}"
+            )
         runtime_state = self.session.runtime_state_summary()
         identity = self.session.identity_summary()
         print(f"eIM identity file  : {identity.get('identity_file', '-')}")
@@ -1138,7 +1097,7 @@ class EimLocalShell:
         )
 
     def _cmd_scan(self, _: str = "") -> None:
-        """Quick card overview — header data only.
+        """Quick card overview -- header data only.
 
         Mirrors the ``SCAN`` (and ``INFO`` alias) behaviour of eSIM Live /
         Test / Local SMDP+: EID, eCASD issuer, default SM-DP+, root SM-DS,
@@ -1181,7 +1140,7 @@ class EimLocalShell:
     def _safe_collect_profile_metadata(self) -> list[Any]:
         """Read profile metadata for ENABLE / DISABLE / DELETE auto-routing.
 
-        Returns an empty list if the card read or the decoder fails — the
+        Returns an empty list if the card read or the decoder fails -- the
         shared helpers fall back to the raw identifier in that case so
         the operator still gets a clean error from the card if their
         identifier is bogus.
@@ -1365,29 +1324,12 @@ class EimLocalShell:
         self._print_post_eim_configuration_snapshot()
 
     def _cmd_ipad_discover(self, argument: str = "") -> None:
-        # Always safe — pure ASN.1 GetEimPackage exchange; no bridge needed.
+        # Always safe -- pure ASN.1 GetEimPackage exchange; no bridge needed.
         sequence = self.session.ipad_discover(package_path=argument.strip())
         for title, response in sequence:
             print(f"\n[IPAd] {title}")
             print(f"    | Bytes: {len(response)}")
             print(f"    | HEX  : {self._hex_preview(response, 120)}")
-
-    # IPAD-LIVE / IPAD-TEST are installed by a trusted local extension.
-    # When the extension is absent the command table still has neutral
-    # fallback stubs that surface a clear error, keeping the shell
-    # runnable without exposing bridge internals.
-
-    def _cmd_ipad_live(self, argument: str = "") -> None:
-        raise RuntimeError(
-            "IPAD-LIVE requires a trusted local command extension. Enable "
-            "local plugins with YGGDRASIM_ALLOW_PLUGINS=1."
-        )
-
-    def _cmd_ipad_test(self, argument: str = "") -> None:
-        raise RuntimeError(
-            "IPAD-TEST requires a trusted local command extension. Enable "
-            "local plugins with YGGDRASIM_ALLOW_PLUGINS=1."
-        )
 
     def _cmd_hotfolder_campaign(self, argument: str = "") -> None:
         parts, output_mode = self._parse_output_mode_argument(argument)
@@ -2244,13 +2186,6 @@ class EimLocalShell:
         return commands
 
     @staticmethod
-    def _commands_with_internal_debug_flags() -> set[str]:
-        return {
-            "IPAD-LIVE",
-            "IPAD-TEST",
-        }
-
-    @staticmethod
     def _strip_debug_flag_from_argument(argument: str) -> tuple[str, bool]:
         tokens = shlex.split(argument or "")
         filtered_tokens: list[str] = []
@@ -2365,6 +2300,31 @@ class EimLocalShell:
         print(f"    apdus    : {summary.get('apdu_count', 0)}")
 
     def _execute_command_line(self, raw_line: str, *, source: str = "interactive") -> bool:
+        return run_with_command_log(
+            raw_line,
+            lambda line: self._dispatch_command_line(line, source=source),
+            shell="Local eIM",
+            refused=True,
+            debug=self._command_log_debug,
+        )
+
+    @contextmanager
+    def _command_log_debug(self) -> Iterator[None]:
+        """Debug output for a ``--log`` command.
+
+        Raw APDU logging is the switch ``--debug`` flips; ``_global_debug`` is
+        what the IPAd runner reads, captured when the shell started.
+        """
+        previous_transport = self._set_transport_debug(True)
+        previous_global = bool(getattr(self, "_global_debug", False))
+        self._global_debug = True
+        try:
+            yield
+        finally:
+            self._global_debug = previous_global
+            self._restore_transport_debug(previous_transport)
+
+    def _dispatch_command_line(self, raw_line: str, *, source: str = "interactive") -> bool:
         parts = str(raw_line or "").strip().split(maxsplit=1)
         if len(parts) == 0:
             return True
@@ -2375,7 +2335,7 @@ class EimLocalShell:
         canonical_command = self._canonical_command(command)
         debug = False
         previous_debug = None
-        if canonical_command not in self._commands_with_internal_debug_flags():
+        if canonical_command not in self._internal_debug_commands:
             argument, debug = self._strip_debug_flag_from_argument(argument)
             if debug:
                 previous_debug = self._set_transport_debug(True)

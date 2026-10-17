@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Simulated SIM persistent state: profile FS nodes, auth config, PIN/PUK entries, and SD key records serialised to JSON."""
 from __future__ import annotations
 
@@ -79,8 +78,8 @@ def _default_stk_imei_bcd() -> bytes:
 def _default_stk_location_information() -> bytes:
     """ETSI TS 102 223 §8.19 / 3GPP TS 24.008 §10.5.1.3 GSM Location.
 
-    7 bytes: 3-byte packed-BCD PLMN (MCC=001 / MNC=01, the 3GPP TS
-    23.003 §2.2 test PLMN) + 2-byte LAC (0x0001) + 2-byte Cell ID
+    7 bytes: 3-byte packed-BCD PLMN (MCC=001 / MNC=01, the default test
+    USIM PLMN of 3GPP TS 31.124 v18.7 §27.22.2A) + 2-byte LAC (0x0001) + 2-byte Cell ID
     (0x0001).
     """
     return bytes.fromhex("00F110000100 01".replace(" ", ""))
@@ -364,6 +363,12 @@ class SimProfileEntry:
     # element when present, or set explicitly via tooling/tests. Empty
     # bytes mean "parametersNotAvailable".
     connectivity_params_http: bytes = b""
+    # SGP.22 v3.1 §5.5.3 notificationConfigurationInfo as (NotificationEvent bit, address)
+    # pairs; one event bit may appear with several addresses. None means the Profile came
+    # without Profile Metadata (seeded or imported), and one Notification goes to
+    # notification_address; an empty list means metadata without the object, so no
+    # Notification is generated.
+    notification_configuration: list[tuple[int, str]] | None = None
 
 
 @dataclass
@@ -468,6 +473,9 @@ class SimSgpSession:
     euicc_otpk: bytes = b""
     euicc_ot_private_key: Any = None
     smdp_certificate: bytes = b""
+    # otherCertsInChain of AuthenticateServer; CERT.DPpb.SIG shares its issuer with
+    # CERT.DPauth.SIG (SGP.22 v3.1 §5.7.5), so PrepareDownload verifies against this chain.
+    smdp_other_certificates: list[bytes] = field(default_factory=list)
     session_open: bool = False
     prepare_download_done: bool = False
     pending_bpp_segments: list[bytes] = field(default_factory=list)
@@ -505,7 +513,10 @@ class SimEuiccInfoConfig:
     ts102241_version: bytes = bytes.fromhex("030300")
     globalplatform_version: bytes = bytes.fromhex("020300")
     uicc_capability_bits: list[int] = field(default_factory=lambda: [1, 2, 4, 13, 16, 17])
-    rsp_capability_bits: list[int] = field(default_factory=lambda: [0, 2, 3])
+    # SGP.22 v3.1 EuiccRspCapability (p.220): additionalProfile(0), testProfileSupport(3).
+    # rpmSupport(2) stays off while ES10b.LoadRPMPackage is not implemented, since an SM-DP+
+    # adds rpmConfiguration to the Profile Metadata for an eUICC that declares it (p.294).
+    rsp_capability_bits: list[int] = field(default_factory=lambda: [0, 3])
     euicc_category: int = 2
     forbidden_profile_policy_bits: list[int] = field(default_factory=lambda: [1, 2])
     pp_version: bytes = bytes.fromhex("030000")
@@ -591,7 +602,7 @@ class SimToolkitState:
     # test) can query "what did the terminal last report".
     #   date_time_timezone: TS 102 223 §8.39 raw 7-byte bcd payload.
     #   imeisv: §8.66 raw 16-digit BCD identifier.
-    #   battery_state: §8.108 single byte (0=very low ... 4=full).
+    #   battery_state: TS 102 223 v18.3 §8.76 single byte (0=very low ... 4=full).
     #   access_technology: §8.61 single byte (0=GSM, 3=UTRAN, 8=E-UTRAN, 11=NG-RAN).
     date_time_timezone: bytes = b""
     imeisv: bytes = b""
@@ -622,7 +633,7 @@ class SimToolkitState:
     bip_bootstrap_phase: str = ""
     bip_bootstrap_dns_query: bytes = b""
     bip_bootstrap_resolved_address: str = ""
-    # ETSI TS 102 223 §8.7 / §8.56 — channel identifier reported by
+    # ETSI TS 102 223 §8.7 / §8.56 -- channel identifier reported by
     # the terminal in the OPEN CHANNEL TR channel-status TLV
     # (``38 02 [byte1] [byte2]``, channel id = byte1 & 0x07). Stored
     # so the SEND DATA / RECEIVE DATA / CLOSE CHANNEL builders can
@@ -990,7 +1001,9 @@ class SimGpAppEntry:
     - 0x03 INSTALLED       (Application only)
     - 0x07 SELECTABLE      (Application; for SDs this is "PERSONALIZED")
     - 0x0F PERSONALIZED    (Application)
-    - 0x83 LOCKED          (Application; SD has its own LOCKED 0x7F)
+    - 0x83 LOCKED          (Application and Security Domain: b8 set with
+                            b2 b1 = 1 1, GPC v2.3.1 tables 11-4 and 11-5;
+                            0x7F is the card's CARD_LOCKED, table 11-6)
     """
 
     aid: str = ""
@@ -1017,6 +1030,24 @@ class SimGpInstallContext:
     load_buffer: bytes = b""
     expected_block: int = 0
     last_block_seen: bool = False
+
+
+@dataclass
+class SimGbaKeyMaterial:
+    """GBA_U key material one application holds (TS 31.102 v19.5 §7.1.1.4 / §7.1.1.5).
+
+    ``ks`` (CK || IK) and ``rand`` come from the last Bootstrapping Mode run;
+    a new run replaces both and leaves the NAF keys alone. ``naf_keys`` maps a
+    NAF_ID (hex) to its Ks_int_NAF and B-TID, at most one pair per NAF_ID,
+    oldest evicted past ``MAX_HISTORY_ENTRIES``. ``naf_record_order`` lists
+    EF_GBANL record numbers, the most recently derived first: the overwrite
+    order §7.1.1.5 gives when no record is free.
+    """
+
+    ks: bytes = b""
+    rand: bytes = b""
+    naf_keys: dict[str, tuple[bytes, bytes]] = field(default_factory=dict)
+    naf_record_order: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -1066,10 +1097,18 @@ class SimCardState:
     # signature-validated X.509 CRL in DER form. Server certificates are
     # checked against current entries during authenticated RSP flows.
     loaded_crls: list[bytes] = field(default_factory=list)
+    # eSIM CA RootCA certificates (DER) whose public keys verify RSP Server certificate chains
+    # (SGP.22 v3.1 §5.7.13, §4.5.2.2); a test persona supplies them. The built-in test CI from
+    # the Workspace is used as well.
+    ci_certificates: list[bytes] = field(default_factory=list)
     # SGP.32 §2.11.1 monotonic association-token allocator. Starts at 0 and
     # increments to produce the next association token; it MUST NOT be
     # resettable by eUICC Memory Reset, hence its own counter.
     association_token_counter: int = 0
+    # Off by default. When set, the simulator follows the specification where it otherwise
+    # keeps a convenience behaviour, e.g. ES10b.AddInitialEim refuses once an eIM is associated
+    # and rejects an associationToken other than -1 (SGP.32 v1.2 §5.9.4).
+    conformance_strict: bool = False
     # SGP.32 §5.9.17 ConfigureImmediateProfileEnabling persistence. The
     # eUICC retains ``immediate_enable_flag`` plus the default SM-DP+
     # OID and address used by the IPA for direct-trigger downloads.
@@ -1148,17 +1187,8 @@ class SimCardState:
     # so that capability discovery completes without additional
     # operator personalisation.
     card_data_objects: dict[int, bytes] = field(default_factory=dict)
-    # 3GPP TS 31.102 §7.1.2.2 / §7.1.2.3 GBA bookkeeping.
-    # ``gba_ks`` holds the bootstrap key (CK||IK = 32 bytes) cached
-    # from the most recent successful AUTHENTICATE P2=0x84.
-    # ``gba_b_tid`` is the bootstrap transaction identifier the
-    # simulator returned to the modem; the network typically uses
-    # this string to locate the corresponding Ks. ``gba_key_lifetime``
-    # is the §7.1.2.2 key lifetime in seconds (0 = unset / not
-    # bootstrapped). Each successful NAF derivation is appended to
-    # ``gba_naf_records`` keyed by NAF_Id||IMPI for offline
-    # introspection.
-    gba_ks: bytes = b""
-    gba_b_tid: str = ""
-    gba_key_lifetime: int = 0
-    gba_naf_records: dict[str, bytes] = field(default_factory=dict)
+    # GBA_U key material per application name ("ADF.USIM", "ADF.ISIM"):
+    # TS 31.102 v19.5 §7.1.1.4 and TS 31.103 v19 §7.1.1.2 each have the
+    # application store its own. The B-TID and key lifetime are not kept
+    # here; the ME writes them to EF_GBABP after the BSF answers.
+    gba_key_material: dict[str, SimGbaKeyMaterial] = field(default_factory=dict)

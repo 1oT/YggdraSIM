@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """PE-GenericFileManagement single-DF-context helpers.
 
 Design contract (YggdraSIM): one PE-GFM owns exactly one DF context.
@@ -22,15 +21,15 @@ The canonical YggdraSIM shape is::
             ("filePath",  <DF path bytes, '' = MF root>),
             ("createFCP", <FCP dict for child #1>),
             ("createFCP", <FCP dict for child #2>),
-            …
+            ...
         ]
     ]
 
 Imported / legacy GFMs that mix multiple ``filePath`` selects are
-normalised on first access — the *first* select wins as the DF
+normalised on first access -- the *first* select wins as the DF
 context, anything after it that doesn't share the same path is moved
-out into a sibling transaction (mirroring TCA SAIP §A.2 transaction
-boundaries) and surfaced as a warning so the operator can decide
+out into a sibling transaction (mirroring the fileManagementCMD
+boundaries of TCA SAIP v3.4.1 §8.3.5) and surfaced as a warning so the operator can decide
 whether to split the PE.
 """
 
@@ -284,7 +283,7 @@ def reorder_files(
     src_pos = file_positions[from_index]
     item = transaction.pop(src_pos)
     # Recompute target position because the pop may have shifted
-    # indices — rebuild the file_positions list around the modified
+    # indices -- rebuild the file_positions list around the modified
     # transaction and insert at the recomputed slot.
     file_positions_after = [
         idx for idx, entry in enumerate(transaction)

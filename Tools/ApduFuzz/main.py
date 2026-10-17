@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 CLI entry point for the APDU mutation fuzzer.
 
@@ -13,9 +12,9 @@ immediately with a non-zero code.
 
 Transport selection:
 
-* ``--transport pcsc`` — use the first PC/SC reader that matches
+* ``--transport pcsc`` -- use the first PC/SC reader that matches
   ``--reader`` (substring match). Requires :mod:`pyscard`.
-* ``--transport null`` — in-process smoke test harness. Always
+* ``--transport null`` -- in-process smoke test harness. Always
   returns the fake probe ``("fake", "fake")`` and replies ``9000`` to
   every APDU. Useful for CI.
 * ``--transport sim`` -- the in-process simulated eUICC. No hardware and

@@ -127,7 +127,7 @@ Setup, end-to-end:
 
 3. **On the rig**, start the HIL bridge with the remote-card flags.
    The local `--reader-index` / `--reader-name` flags are ignored in
-   this mode — the card lives at the other end of the tunnel:
+   this mode -- the card lives at the other end of the tunnel:
 
    ```bash
    yggdrasim-hil-bridge \
@@ -145,7 +145,7 @@ Setup, end-to-end:
    paths.
 
 GSMTAP capture, the bridge's own HTTP `/apdu` relay, the supervisor,
-and every YggdraSIM consumer keep working unchanged — they all sit
+and every YggdraSIM consumer keep working unchanged -- they all sit
 upstream of the card-source decision and don't observe the swap.
 The rig-side relay exposes `apduUrl`, `statusUrl`, and `cardResetUrl`;
 YggdraSIM tools on the rig discover that relay through the runtime
@@ -395,8 +395,8 @@ keeps two independent gates:
 Practical consequences:
 
 - Sim mode with the SIMtrace2 cable still attached behaves exactly
-  like reader mode from the modem's point of view — REMSIM stays
-  alive so the modem keeps getting answers from the bridge — except
+  like reader mode from the modem's point of view -- REMSIM stays
+  alive so the modem keeps getting answers from the bridge -- except
   the bridge serves APDUs from the simulator instead of the PC/SC
   reader.
 - Sim mode without SIMtrace2 attached still serves the YggdraSIM-side
@@ -428,6 +428,24 @@ Default generated client command:
 ```bash
 osmo-remsim-client-st2 -i 127.0.0.1 -p 9997 -c 0 -n 0
 ```
+
+### 5.1 ATR seeding on a remote card
+
+With a remote card the supervisor reads the relay's `statusUrl` before it
+spawns the client and appends `-a <ATR>`, so the emulated card answers with
+the operator's real ATR from its first activation.
+
+Without the seed the client presents its own `3B00` placeholder until bankd
+sends a `setAtrReq`, and the bridge only sends one when the modem reports a
+slot-status edge. A modem that was already powered when the bridge came up
+produces no such edge, latches `3B00`, and reports `+CPIN: NOT INSERTED`
+indefinitely. `AT+CFUN=0` / `AT+CFUN=1` is radio-only and does not clear it;
+a full `AT+CFUN=1,1` re-activates the SIM interface and does.
+
+The seed is skipped, leaving the previous behaviour, when the bridge runs a
+local reader, when `--remsim-arg=-a` already carries an ATR, or when the
+relay is unreachable or reports no ATR whose TS is `'3B'` or `'3F'`
+(ETSI TS 102 221 V18.4.0 Annex D). The last two cases log a warning.
 
 If USB auto-selection fails on your host, pass explicit selector arguments through the supervisor.
 
@@ -491,7 +509,7 @@ to press a button defeats the point of a remote rig.
 The supervisor therefore reboots the board itself before every session,
 without any firmware modification. Osmocom's cardem firmware already
 resets its own microcontroller when USB drops below the `CONFIGURED`
-state — see `firmware/apps/cardem/main.c` upstream:
+state -- see `firmware/apps/cardem/main.c` upstream:
 
 ```c
 if (USBD_GetState() < USBD_STATE_CONFIGURED) {
@@ -588,13 +606,28 @@ reader and keeps its state across a SIMtrace2 reset exactly as it does
 when you press the reset button: selected AID, open logical channels,
 an established SCP03 / SCP11 secure channel, PIN verification status.
 
-Two mechanisms clear it, both power-cycling the card with
+Three mechanisms clear it, all power-cycling the card with
 `SCardReconnect(..., SCARD_UNPOWER_CARD)` and re-reading the ATR:
 
 **Modem sessions.** When `osmo-remsim-client-st2` attaches -- or
 re-attaches after the board reset -- the bridge power-cycles the card
 and pushes the fresh ATR to the modem with `setAtrReq`. So every modem
 session starts from a card that just came up.
+
+**Modem resets.** The modem resets the emulated UICC, not the card: the
+cardem firmware answers RST with the ATR it was given and reports the
+edge to `osmo-remsim-client-st2`, which forwards it to the bridge as
+`clientSlotStatusInd`. The bridge acts on that the way osmo-remsim's
+bankd does -- a RST rising edge or a VCC drop power-cycles the card in
+the reader before the modem's first post-reset command is served -- and
+pushes the ATR to the board again when it changed (the board has already
+answered that activation with the previous one; the new ATR serves the
+next reset). This is what makes an eUICC profile switch land: the ISD-R
+issues REFRESH in "UICC Reset" mode (SGP.02 v4.2 clause 3.2, step 7),
+the terminal resets the UICC without a TERMINAL RESPONSE (ETSI TS 102 223
+V18.3.0 clause 6.4.7), and the switch takes effect on that reset. A
+bridge that stopped at the board left the eUICC serving the profile the
+switch had just disabled, while the modem re-read it as the new one.
 
 **Relay sessions.** Operator shells (SCP03, SCP80, SCP11) drive the same
 card through the APDU relay, potentially while a modem session is live.
@@ -613,8 +646,11 @@ is the mechanism working, not a fault.
 Watch it in the bridge log:
 
 ```text
-Card power-cycled (relay session start (ygg-4213-9f2ab117)); reader … ATR 3B9F…
-Reset card for modem session; reader … ATR 3B9F… reset={'mode': 'pcsc-reconnect-unpower'}
+Card power-cycled (relay session start (ygg-4213-9f2ab117)); reader ... ATR 3B9F...
+Reset card for modem session; reader ... ATR 3B9F... reset={'mode': 'pcsc-reconnect-unpower'}
+Card issued REFRESH (uicc-reset): the terminal resets the UICC instead of answering with TERMINAL RESPONSE; the card is power-cycled when the remsim client reports that reset
+Modem slot status: RST active, VCC present, CLK unreported, card unreported
+Modem reset the UICC (RST asserted, after REFRESH (uicc-reset)); card power-cycled, reader ... ATR 3B9F... reset={'mode': 'pcsc-reconnect-unpower'}
 ```
 
 Set `YGGDRASIM_HIL_RELAY_SESSION_RESET=0` (or pass
@@ -894,6 +930,137 @@ session that failed. If neither appears, the card was never cleared.
 Note that `port-power` does not help here either unless the PC/SC
 reader shares the switched hub port with the board -- the card is behind
 the reader, not the SIMtrace2.
+
+### The modem re-initialises after a REFRESH but still sees the old profile
+
+An eUICC applies a profile switch at the next reset. The ISD-R issues
+REFRESH in "UICC Reset" mode, the terminal resets the UICC without a
+TERMINAL RESPONSE (ETSI TS 102 223 V18.3.0 clause 6.4.7), and the newly
+enabled profile is what answers after the ATR. On the rig that reset
+hits the SIMtrace2, which replays the ATR it holds; the card in the
+reader is reset only because the bridge follows the
+`clientSlotStatusInd` the remsim client forwards (see
+[5.2](#52-card-session-hygiene)). A switch that landed logs three lines:
+
+```text
+Card issued REFRESH (uicc-reset): the terminal resets the UICC instead of answering with TERMINAL RESPONSE; the card is power-cycled when the remsim client reports that reset
+Modem slot status: RST active, VCC present, CLK unreported, card unreported
+Modem reset the UICC (RST asserted, after REFRESH (uicc-reset)); card power-cycled, reader ... ATR ... reset={'mode': 'pcsc-reconnect-unpower'}
+```
+
+If the first line appears and the third never does, the reset stopped at
+the board and the modem is re-reading a card that was never reset. The
+bridge says so on the modem's next command once the 10 s grace has
+passed:
+
+```text
+REFRESH (uicc-reset) was served more than 10 s ago and the remsim client reported no UICC reset since; ...
+```
+
+Check the client. `osmo-remsim-client-st2` has to forward the modem's
+RST and VCC edges as `clientSlotStatusInd` (osmo-remsim 1.2.0 does, and
+logs `Tx clientSlotStatusInd(reset_act=1, ...)` when it happens); a
+client that only prints `STATUS: flags=...` never tells the bridge.
+Until that is in place, `yggdrasim-hil-reset` after the REFRESH forces a
+re-attach, and the modem-session handshake power-cycles the card.
+
+Rebooting the board on every REFRESH is not the fix. The board holds
+only the ATR, never the profile; the file system the modem reads is the
+card's, and the card is what has to be reset.
+
+### The modem terminal
+
+The HIL panel's modem terminal is always available on a build that
+carries the HIL bridge. It needs no flag and no restart: what keeps it
+safe is the command policy rather than a gate in front of it. It opens
+no login shell and accepts only a known serial terminal (`tio`,
+`minicom`, `picocom`, `screen`) against an explicit device path.
+
+`sudo` and `doas` are allowed in front of that terminal, because a
+serial device is often root-owned and a udev rule is not always yours to
+write. They are allowed as a plain prefix only:
+
+```text
+sudo tio /dev/ttyUSB2          accepted
+sudo -n tio /dev/ttyUSB2       accepted
+sudo -s                        refused
+sudo -i                        refused
+sudo bash                      refused
+sudo tio                       refused, no device path
+```
+
+Every option but `-n` is refused rather than reasoned about, so the word
+after the wrapper is always the command that runs. Expect a password
+prompt in the terminal unless that user has passwordless sudo for it.
+
+Granting the device instead avoids the prompt entirely, and is the
+better answer where you can write the rule: add the operator's group to
+the device node the way the SIMtrace2 rule does.
+
+### The modem terminal attaches to a port that answers nothing
+
+A distribution that ships ModemManager claims a cellular modem's AT ports
+the moment it enumerates, and it keeps them. The port still opens, so a
+terminal attaches and simply sits there: ModemManager is consuming the
+replies. Nothing in the terminal says so.
+
+Check who holds it, naming the AT port for your modem:
+
+```bash
+sudo fuser -v /dev/ttyUSB2
+systemctl is-active ModemManager
+```
+
+A rig modem is driven by hand, so hand the device back rather than
+disabling the service for every other device on the host:
+
+```bash
+sudo tee /etc/udev/rules.d/62-modem-manual-control.rules >/dev/null <<'RULE'
+SUBSYSTEM=="usb", ATTR{idVendor}=="<vid>", ATTR{idProduct}=="<pid>", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="<vid>", ATTRS{idProduct}=="<pid>", ENV{ID_MM_DEVICE_IGNORE}="1"
+RULE
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=usb --subsystem-match=tty --attr-match=idVendor=<vid>
+sudo systemctl restart ModemManager
+```
+
+`fuser` should then report nobody, and `AT` should answer `OK`. Removing
+the rule file and restarting ModemManager puts it back.
+
+### The rig is up but the modem reports no SIM
+
+`+CME ERROR: 10` for `AT+CPIN?` while the bridge reports its bankd side
+attached is the expected state, not a fault. The card is presented to the
+modem at activation, and a modem that was already powered when the rig
+came up has nothing to re-read on its own.
+
+Cycle the radio and the card appears:
+
+```bash
+printf 'AT+CFUN=0;+CFUN=1\r' | socat -T6 - /dev/ttyUSB2,b115200,raw,echo=0
+```
+
+That re-initialises the SIM interface in place and the card is readable
+in a few seconds. `AT+CFUN=1,1` also works and is the wrong tool: it
+reboots the modem, so the USB device disappears for about twenty seconds
+and takes the AT port with it.
+
+`yggdrasim-hil-supervisor` is not what sends this. The Remote Bridge rig
+start issues it as its last step, once the path that feeds the modem is
+up, because a refresh before that has nothing to find.
+
+Afterwards `AT+CPIN?` reports `READY`, and `AT+CCID` reads the ICCID of
+the card the rig is streaming, which is the quickest way to confirm the
+modem is on the card you think it is.
+
+Use `socat`, not `stty`. A USB serial modem rejects part of the raw mode
+`stty` asks for and the whole command fails with it.
+
+If the card never appears, check the card lease rather than the modem:
+a rig whose reset is refused with `409 The card is leased by another
+consumer` never re-presents the card, and the modem has nothing new to
+read. `GET /lease` on the operator's Card Bridge names the holder, and a
+holder of `""` means the lease was orphaned and should be force-released.
 
 ### YggdraSIM falls back to direct PC/SC
 

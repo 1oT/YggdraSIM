@@ -1,23 +1,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 CLI entry point for ``yggdrasim-eum-diag``.
 
 Sub-commands:
 
-* ``inject-keys`` — build a session-key repository JSON from
+* ``inject-keys`` -- build a session-key repository JSON from
   ``--iccid / --shs-enc / --shs-mac / --dek`` arguments (optionally
   read from ``--bundle-file``) and invoke tshark with the bundled
   Lua dissector. Use this when an EUM operator has a PCAP from the
   network capture and the keys pulled from their server database.
 
-* ``store-keys`` — same as ``inject-keys`` but skips the tshark
+* ``store-keys`` -- same as ``inject-keys`` but skips the tshark
   invocation. Useful for batch builds that feed multiple PCAPs off
   the same key set.
 
-* ``decode-bpp`` — offline decode of a Bound Profile Package byte
+* ``decode-bpp`` -- offline decode of a Bound Profile Package byte
   string via pySim's SAIP ASN.1 machinery. Falls back to a clear
   error message when pySim is not importable.
 

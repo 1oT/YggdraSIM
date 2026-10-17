@@ -1,17 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP03 Command Center actions.
 
 Registers two actions:
 
-* ``scp03.scan`` — connects to the first (or nominated) PC/SC reader,
+* ``scp03.scan`` -- connects to the first (or nominated) PC/SC reader,
   runs the live file-system scan, and returns a structured tree plus a
   ``session_id`` the GUI can reuse for follow-up calls. The underlying
   ``CardTransporter`` is parked in the session manager; it stays open
   until the GUI closes it or the idle reaper fires.
-* ``scp03.read_selected`` — given a ``session_id`` from the scan and a
+* ``scp03.read_selected`` -- given a ``session_id`` from the scan and a
   file path (``MF/ADF_USIM/EF_IMSI`` or a scan-cache index like ``"12"``),
   selects that file, returns the parsed FCP, and reads the full body:
   READ BINARY for transparent files (with ContentDecoder) or every
@@ -41,7 +40,7 @@ _LOGGER = logging.getLogger("yggdrasim.gui.actions.scp03")
 # ----------------------------------------------------------------------
 
 
-# Well-known prefix for error strings that the GUI treats specially —
+# Well-known prefix for error strings that the GUI treats specially --
 # mainly "there is no card in the reader, don't launch the expensive
 # recover-session loop, just tell the operator". We piggy-back on the
 # existing ``ok=false`` error channel because the ActionRegistry route
@@ -76,8 +75,22 @@ def _is_no_card_error(error: BaseException) -> bool:
 
 
 def _resolve_reader_binding(reader_name: str) -> tuple[int, str]:
-    """Map an optional reader name to ``(reader_index, canonical_name)``."""
+    """Map an optional reader name to ``(reader_index, canonical_name)``.
+
+    A registered remote reader resolves before the PC/SC enumeration is
+    consulted: it has no ordinal there, and every scan, open and rescan
+    re-resolves the name, so the lookup has to answer the same way each
+    time for the session to stay bound.
+    """
+    from yggdrasim_common.remote_readers import (
+        REMOTE_READER_INDEX,
+        lookup_remote_reader,
+    )
+
     cleaned = str(reader_name or "").strip()
+    remote_binding = lookup_remote_reader(cleaned)
+    if remote_binding is not None:
+        return REMOTE_READER_INDEX, remote_binding.name
     if len(cleaned) == 0:
         try:
             from smartcard.System import readers as list_pcsc_readers
@@ -85,7 +98,7 @@ def _resolve_reader_binding(reader_name: str) -> tuple[int, str]:
             return 0, ""
         try:
             reader_list = list(list_pcsc_readers() or [])
-        except Exception:  # noqa: BLE001 — scan/open will surface PC/SC faults.
+        except Exception:  # noqa: BLE001 -- scan/open will surface PC/SC faults.
             return 0, ""
         if len(reader_list) == 0:
             return 0, ""
@@ -93,7 +106,7 @@ def _resolve_reader_binding(reader_name: str) -> tuple[int, str]:
     try:
         from smartcard.System import readers as list_pcsc_readers
     except ImportError as error:
-        raise RuntimeError("pyscard is not installed — cannot pick reader by name.") from error
+        raise RuntimeError("pyscard is not installed -- cannot pick reader by name.") from error
     for idx, reader in enumerate(list_pcsc_readers() or []):
         if str(reader) == cleaned:
             return idx, str(reader)
@@ -106,12 +119,14 @@ def _resolve_reader_index(reader_name: str) -> int:
     return reader_index
 
 
-def _open_card_transporter(reader_index: int) -> Any:
-    """Construct a ``CardTransporter`` using the chosen reader index.
+def _open_card_transporter(reader_index: int, reader_name: str = "") -> Any:
+    """Construct a ``CardTransporter`` using the chosen reader binding.
 
     ``CardTransporter.connect()`` hardcodes index 0 today; we side-step
     that by opening the raw PC/SC connection ourselves (respecting
     ``YGGDRASIM_CARD_*`` backend flags), then handing it to the transporter.
+    *reader_name* carries the binding for a remote reader, which has no
+    PC/SC ordinal for *reader_index* to express.
     """
     from yggdrasim_common import card_backend
     from SCP03.transport.card import CardTransporter
@@ -119,7 +134,10 @@ def _open_card_transporter(reader_index: int) -> Any:
     # CardTransporter.__init__ eagerly calls connect(); we monkey-patch
     # our already-chosen connection in so its hardcoded index-0 doesn't
     # steal the wrong reader. This is the minimal surgical approach.
-    connection = card_backend.create_card_connection(reader_index=reader_index)
+    connection = card_backend.create_card_connection(
+        reader_index=reader_index,
+        reader_name=reader_name,
+    )
     transporter = CardTransporter.__new__(CardTransporter)
     from SCP03.crypto.session import Scp03Session
 
@@ -133,7 +151,7 @@ def _open_card_transporter(reader_index: int) -> Any:
 def _close_transporter(transporter: Any) -> None:
     try:
         transporter.disconnect()
-    except Exception:  # noqa: BLE001 — best-effort cleanup
+    except Exception:  # noqa: BLE001 -- best-effort cleanup
         try:
             if getattr(transporter, "connection", None) is not None:
                 transporter.connection.disconnect()
@@ -239,14 +257,15 @@ def _restore_fs_root_best_effort(session_or_transporter: Any) -> dict[str, Any]:
     Dispatchers that route through sgp22 land the card on ISD-R
     (``A000000559...``) or another application. If the next thing the
     operator does is a file-tree click, the FS controller's internal
-    ``current_fid`` disagrees with the card's real DF — the path-walk
+    ``current_fid`` disagrees with the card's real DF -- the path-walk
     still works thanks to ``_normalise_fs_path``, but the in-memory FS
     state is stale and UI breadcrumbs drift.
 
-    This helper selects MF via raw APDU (``00A40004023F00`` — SELECT by
-    FID 3F00, P2 = first-or-only occurrence) and resets the FS
-    controller's bookkeeping. Errors are swallowed because this is a
-    post-op cleanup — the caller's response has already been assembled
+    This helper selects MF via raw APDU (``00A40004023F00`` -- SELECT by
+    FID 3F00, P2 = first-or-only occurrence, falling back to the
+    select-by-path-from-MF form when the card is parked inside an ADF)
+    and resets the FS controller's bookkeeping. Errors are swallowed because this is a
+    post-op cleanup -- the caller's response has already been assembled
     and the MF-restore is a best-effort nicety, not a correctness gate.
 
     Accepts either a ``session`` object (we pull ``handle["transporter"]``
@@ -267,7 +286,28 @@ def _restore_fs_root_best_effort(session_or_transporter: Any) -> dict[str, Any]:
         return result
 
     try:
+        # TS 102 221 §11.1.1: P1=00 resolves the file ID against the current
+        # DF, so once the card sits inside an ADF (ADF.USIM, ISD-R, ...) the
+        # MF identifier is not visible from there and the card answers 6A82.
+        # P1=08 ("select by path from MF") is context independent and is what
+        # actually gets us home; the by-FID form is tried first because some
+        # legacy cards only implement that one.
         _data, sw1, sw2 = transporter.transmit("00A40004023F00", silent=True)
+        if not (sw1 == 0x90 or sw1 == 0x61):
+            # P1=00 resolves the file ID against the current DF, so a card
+            # parked inside an ADF may not see MF from there (TS 102 221
+            # §11.1.1). Selecting by path from MF is context independent.
+            _data, sw1, sw2 = transporter.transmit("00A40804023F00", silent=True)
+        if not (sw1 == 0x90 or sw1 == 0x61):
+            # Some cards refuse every by-FID SELECT with 6A86 once an
+            # application (ECASD / ISD-R) has been selected on the basic
+            # logical channel, and no SELECT form clears it -- only a card
+            # reset does. Without this the card stays unreadable for the rest
+            # of the session and every file click falls into the caller's
+            # reset-and-rescan recovery path.
+            result["reset"] = True
+            transporter.reset()
+            _data, sw1, sw2 = transporter.transmit("00A40004023F00", silent=True)
         result["sw"] = f"{sw1:02X}{sw2:02X}"
         result["ok"] = sw1 == 0x90 or sw1 == 0x61
         result["fid"] = "3F00"
@@ -303,10 +343,10 @@ def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
     # used to see a raw traceback ("NoCardException: Unable to connect"),
     # fall into recover-session + rescan, fail that too, and chew a whole
     # extra second per file click. A well-known RuntimeError is raised instead,
-    # whose message the route converts into ``{ok:false, error:...}`` —
+    # whose message the route converts into ``{ok:false, error:...}`` --
     # the frontend pattern-matches ``no_card:`` and skips recovery.
     try:
-        transporter = _open_card_transporter(reader_index)
+        transporter = _open_card_transporter(reader_index, resolved_reader_name)
     except Exception as error:  # noqa: BLE001
         if _is_no_card_error(error):
             raise RuntimeError(
@@ -315,11 +355,31 @@ def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
             ) from error
         raise
 
+    # A reader that resolved through the remote-reader registry is served by a
+    # Remote Lab link. Tag the session with that identity so the sessions
+    # sweep, the release route and the GUI can tell it belongs to the link --
+    # the link, not this session, owns the relay.
+    from yggdrasim_common.remote_readers import REMOTE_READER_INDEX, lookup_remote_reader
+
+    metadata_extra: dict[str, Any] | None = None
+    remote_lab_block: dict[str, Any] | None = None
+    if reader_index == REMOTE_READER_INDEX:
+        binding = lookup_remote_reader(resolved_reader_name)
+        if binding is not None:
+            metadata_extra = binding.session_metadata()
+            remote_lab_block = {
+                "device_id": binding.device_id,
+                "rig_id": binding.rig_id,
+                "agent": binding.agent,
+                "remote_session_id": binding.remote_session_id,
+                "expires_at": binding.expires_at,
+            }
     try:
-        return _scan_transporter_to_session(
+        result = _scan_transporter_to_session(
             transporter,
             reader_index=reader_index,
             reader_label=reader_label,
+            metadata_extra=metadata_extra,
         )
     except Exception as error:  # noqa: BLE001
         if _is_no_card_error(error):
@@ -328,6 +388,10 @@ def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
                 f"{reader_label!r}"
             ) from error
         raise
+    if remote_lab_block is not None:
+        result["remote_lab"] = remote_lab_block
+    return result
+
 
 
 def _strip_ansi(text: str) -> str:
@@ -353,17 +417,17 @@ def _normalise_fs_path(path: str) -> str:
 
     Normalising bare, non-hex, non-indexed paths to ``MF/<name>`` routes
     the request through ``FileSystemController.select()``'s path-walk
-    branch, which explicitly pre-selects MF before walking segments —
+    branch, which explicitly pre-selects MF before walking segments --
     so GUI clicks always land on the right file in one shot.
 
     We deliberately do **not** touch:
       * Paths that already contain ``/`` (caller is explicit about
         the absolute path; select() pre-selects MF on its own).
       * Paths starting with ``MF`` (already anchored).
-      * Bare hex FIDs (``3F00``, ``2F00``, ``2FE2``) — these are
+      * Bare hex FIDs (``3F00``, ``2F00``, ``2FE2``) -- these are
         fine for card-internal relative selection.
-      * Pure numeric indices — those resolve via ``scan_cache``.
-      * AIDs (long hex strings) — SELECT-by-AID already walks
+      * Pure numeric indices -- those resolve via ``scan_cache``.
+      * AIDs (long hex strings) -- SELECT-by-AID already walks
         from MF on the card side.
     """
     cleaned = str(path or "").strip()
@@ -374,7 +438,7 @@ def _normalise_fs_path(path: str) -> str:
     upper = cleaned.upper()
     if upper == "MF" or upper.startswith("MF"):
         return cleaned
-    # Hex-only identifiers (FIDs + AIDs) — leave alone. The card
+    # Hex-only identifiers (FIDs + AIDs) -- leave alone. The card
     # resolves hex FIDs relative to the current DF, and AIDs are
     # looked up globally via SELECT-by-AID.
     is_hex = all(c in "0123456789ABCDEFabcdef" for c in cleaned)
@@ -409,7 +473,7 @@ def _dispatch_read_selected(
         # The session may have been reaped (idle timeout) or the GUI is
         # running with a stale sessionId from localStorage. Surface a
         # well-known ``session_gone:`` marker so the frontend can
-        # short-circuit recovery — there's nothing to recover to.
+        # short-circuit recovery -- there's nothing to recover to.
         raise RuntimeError(
             f"{SESSION_GONE_ERROR_PREFIX} session {session_id_s!r} not found "
             f"(may have been reaped; re-scan to open a new one)"
@@ -442,7 +506,7 @@ def _dispatch_read_selected(
     if "/" in walked_path or walked_path.upper() == "MF":
         _restore_fs_root_best_effort(session)
 
-    # SELECT — capture the (noisy) CLI print so we can bubble the trace
+    # SELECT -- capture the (noisy) CLI print so we can bubble the trace
     # back to the UI without polluting the server log. Any PC/SC layer
     # failure (card removed mid-session, reader unplugged) gets tagged
     # with the ``no_card:`` prefix so the frontend skips the expensive
@@ -728,7 +792,7 @@ def _dispatch_select_only(
     # re-anchor the card to MF before any MF-rooted SELECT so drift
     # from a prior ISD-R / ECASD / SELECT-by-AID action can't poison
     # the path walk. Only triggers when the path is already
-    # slash-rooted — bare FIDs stay card-state-aware on purpose.
+    # slash-rooted -- bare FIDs stay card-state-aware on purpose.
     if "/" in walked_path:
         _restore_fs_root_best_effort(session)
 
@@ -887,14 +951,14 @@ def _dispatch_atr(
     the ATR is read so the returned bytes reflect the card's actual
     answer-to-reset (not a cached value from initial connect that may
     be stale after prior APDU traffic). Pass ``reset=False`` to skip
-    the reset and return the cached ATR — useful when the caller only
+    the reset and return the cached ATR -- useful when the caller only
     wants the parsed view without perturbing card state.
 
     The returned ``lines`` list strips the redundant ``ATR: <hex>``
     header that ``transporter.describe_atr()`` emits (to match the CLI
     screen dump). Since the GUI already surfaces the hex in a dedicated
     KV row (``atr_hex``), the duplicate line would only add visual
-    noise — and led to the "GUI shows ATR twice" parity complaint.
+    noise -- and led to the "GUI shows ATR twice" parity complaint.
     """
     session, transporter, sid = _get_scp03_session(session_id)
 
@@ -951,7 +1015,7 @@ def _dispatch_ensure_fs_root(
     ribbon tab after running an eUICC / ISD-R operation (which leaves
     the card sitting on the ISD-R AID). Without this, the next bare
     file-tree click would hit the wrong DF until ``_normalise_fs_path``
-    promoted it to ``MF/...`` — functionally correct but the internal
+    promoted it to ``MF/...`` -- functionally correct but the internal
     ``fs_controller.current_fid`` bookkeeping stayed wrong.
 
     Safe to call at any time; idempotent; swallows errors.
@@ -974,7 +1038,7 @@ def _dispatch_reset(ctx: ActionContext, *, session_id: Any = None) -> dict[str, 
     ok = bool(transporter.reset())
     try:
         transporter.reset_session_state()
-    except Exception:  # noqa: BLE001 — best-effort cleanup
+    except Exception:  # noqa: BLE001 -- best-effort cleanup
         pass
     after = transporter.get_atr_bytes() or b""
     return {
@@ -997,7 +1061,7 @@ def _dispatch_recover_session(
     ``00A40004023F00`` before every slash-rooted read), some loaders
     park the card in a state where the next SELECT-by-FID still
     returns 6A82 until the card is power-cycled. The scan tree is
-    also stale — the in-memory copy the GUI rendered no longer
+    also stale -- the in-memory copy the GUI rendered no longer
     matches the card's actual DF, and the ``FileSystemController``'s
     ``current_fcp`` / ``current_fid`` are pointing at something the
     card hasn't been told about for minutes.
@@ -1007,14 +1071,14 @@ def _dispatch_recover_session(
     can fire the instant a read fails (or pre-emptively, when the
     user hops back to the Files view after an eUICC side trip). The
     session handle stays the same so the existing ``session_id``
-    remains valid across the recovery — only the underlying state
+    remains valid across the recovery -- only the underlying state
     is refreshed.
 
-    Sequence (all best-effort — we want recovery to keep progressing
+    Sequence (all best-effort -- we want recovery to keep progressing
     even if individual steps hiccup):
 
-      1. ``transporter.reset()`` — cold ATR via PC/SC.
-      2. ``transporter.reset_session_state()`` — drop any SCP03
+      1. ``transporter.reset()`` -- cold ATR via PC/SC.
+      2. ``transporter.reset_session_state()`` -- drop any SCP03
          secure-channel bookkeeping (keys, MAC chain, counters).
       3. Re-instantiate ``FileSystemController`` on the existing
          transporter and call ``scan_tree(return_tree=True)`` to walk
@@ -1049,7 +1113,7 @@ def _dispatch_recover_session(
     # failure in ``reset_error`` so the frontend can distinguish
     # "recovery tried but card is gone" from "recovery succeeded but
     # rescan is still empty". Bubble a well-known ``no_card:`` marker
-    # if that's what we hit — the UI uses that to silence retry loops.
+    # if that's what we hit -- the UI uses that to silence retry loops.
     before_atr = ""
     try:
         before_atr = (transporter.get_atr_bytes() or b"").hex().upper()
@@ -1078,7 +1142,7 @@ def _dispatch_recover_session(
     scan_error: str | None = None
     stdout_sink = io.StringIO()
     structured: dict[str, Any] | None = None
-    # Skip the rescan when we already know the card is gone — saves ~1
+    # Skip the rescan when we already know the card is gone -- saves ~1
     # s of wasted SELECTs that will all fail with the same PC/SC error,
     # and keeps the log dock readable.
     if no_card:
@@ -1183,31 +1247,51 @@ def _probe_iccid(transporter: Any) -> str:
 
 
 def _probe_eid_and_standard(transporter: Any) -> tuple[str, str]:
-    """Select ECASD + GET DATA 5A to capture the EID; infer profile standard."""
+    """Report the EID (when readable) and which RSP applications the card has.
+
+    The EID read and the standard classification are independent probes. A
+    card can carry ISD-R -- making it an eUICC by definition -- while still
+    refusing ``GET DATA 5A`` on ECASD with 6A88, because SGP.22 §5.7.20
+    serves the EID over ES10c on a logical channel rather than from the
+    basic channel. Deciding the standard from whether the EID came back
+    therefore reports a working eUICC as a legacy card; presence of the
+    applications is what the classification is allowed to depend on.
+    """
     ecasd_aid = "A0000005591010FFFFFFFF8900000200"
     isdr_aid = "A0000005591010FFFFFFFF8900000100"
+    eid_hex = ""
+    ecasd_present = False
+    isdr_present = False
+
     try:
         _data, sw1, _sw2 = transporter.transmit(
             f"00A4040010{ecasd_aid}", silent=True
         )
-        if sw1 not in (0x90, 0x61):
-            return "", "Legacy UICC"
-        data, sw1, _sw2 = transporter.transmit("80CA5A00", silent=True)
-        if sw1 != 0x90 or not data:
-            return "", "Legacy UICC"
-        eid_bytes = bytes(data)
-        # The EID tag 5A may come wrapped in its TLV envelope; peel it.
-        if len(eid_bytes) >= 2 and eid_bytes[0] == 0x5A:
-            length = eid_bytes[1]
-            eid_bytes = eid_bytes[2 : 2 + length]
-        eid_hex = eid_bytes.hex().upper()
+        ecasd_present = sw1 in (0x90, 0x61)
+
+        if ecasd_present:
+            data, sw1, _sw2 = transporter.transmit("80CA5A00", silent=True)
+            if sw1 == 0x90 and data:
+                eid_bytes = bytes(data)
+                # The EID tag 5A may come wrapped in its TLV envelope; peel it.
+                if len(eid_bytes) >= 2 and eid_bytes[0] == 0x5A:
+                    length = eid_bytes[1]
+                    eid_bytes = eid_bytes[2 : 2 + length]
+                eid_hex = eid_bytes.hex().upper()
+
         _data, sw1, _sw2 = transporter.transmit(
             f"00A4040010{isdr_aid}", silent=True
         )
-        standard = "eUICC" if sw1 in (0x90, 0x61) else "UICC + ECASD"
-        return eid_hex, standard
+        isdr_present = sw1 in (0x90, 0x61)
     except Exception:  # noqa: BLE001
-        return "", "Legacy UICC"
+        # Keep whatever the probes established before the transport failed.
+        pass
+
+    if isdr_present:
+        return eid_hex, "eUICC"
+    if ecasd_present:
+        return eid_hex, "UICC + ECASD"
+    return eid_hex, "Legacy UICC"
 
 
 ATR_SPEC = ActionSpec(
@@ -1914,7 +1998,7 @@ def _dispatch_send_apdu(
 
     Operator power tool. Does **not** go through ``fs_controller.select``
     so the card's current DF / AID is left exactly where the APDU put
-    it — the whole point of this action is to let engineers drive the
+    it -- the whole point of this action is to let engineers drive the
     card directly. The next FS-tree click will pre-restore MF via
     ``_dispatch_read_selected``, so the operator can mix raw APDU
     surgery with file-tree navigation without hunting for a separate
@@ -1958,7 +2042,7 @@ def _dispatch_send_apdu(
             include_wire_trace=include_wire_trace_flag,
         )
 
-    # Initial transmit — capture any stdout the transporter emits so
+    # Initial transmit -- capture any stdout the transporter emits so
     # the secure-channel wrapper's own debug prints don't leak into
     # the server log. We don't surface that trace; the GUI's APDU
     # panel has its own pre/post view of the wire.
@@ -2020,7 +2104,7 @@ def _dispatch_send_apdu(
                 "response_length": len(chunk_bytes),
                 "sw": f"{sw1:02X}{sw2:02X}",
             })
-            # Only retry 6Cxx once — a second short-read is a card bug.
+            # Only retry 6Cxx once -- a second short-read is a card bug.
             retry_6c_flag = False
             continue
         break
@@ -2090,7 +2174,7 @@ SEND_APDU_SPEC = ActionSpec(
         "Transmit an arbitrary hex APDU on the active session. Auto-"
         "follows ``61xx`` / ``9Fxx`` with GET RESPONSE and retries ``6Cxx`` with "
         "the card-suggested Le (including extended cases 2E/3E/4E). "
-        "Does NOT restore MF afterwards — the "
+        "Does NOT restore MF afterwards -- the "
         "card's DF / AID is left exactly where your APDU put it."
     ),
     inputs=(
@@ -2564,7 +2648,7 @@ get_registry().register(DUMP_FS_SPEC)
 
 
 # ======================================================================
-# C-2 — auth + GP registry + profile telemetry
+# C-2 -- auth + GP registry + profile telemetry
 # ======================================================================
 #
 # Every C-2 dispatcher reuses the existing scp03 session (same transporter
@@ -2599,7 +2683,7 @@ def _get_or_make_gp_ctrl(session: Any, *, refresh: bool = False) -> Any:
 
     keys = _load_workspace_gp_keys()
     transporter = session.handle["transporter"]
-    # Silence any stderr banners the GP manager wants to push on boot —
+    # Silence any stderr banners the GP manager wants to push on boot --
     # ``pending_demo_keys_warning`` is surfaced via the response instead.
     gp = GlobalPlatformManager(transporter, keys)
     session.handle["gp"] = gp
@@ -2649,7 +2733,7 @@ def _apply_auth_key_overrides(
 
     All values are hex strings; empty / whitespace-only inputs mean
     "leave the underlying key untouched". Malformed hex raises
-    ``ValueError`` — the GP manager would otherwise crash downstream
+    ``ValueError`` -- the GP manager would otherwise crash downstream
     with a cryptography stack trace that's painful to decode at the
     action layer.
     """
@@ -2778,7 +2862,7 @@ def _dispatch_auth(
         "active_protocol": gp.get_active_protocol_name(),
         "sec_level": status.get("sec_level"),
         # Which override fields actually took effect (never includes the
-        # key bytes themselves — just the names, so the GUI can show a
+        # key bytes themselves -- just the names, so the GUI can show a
         # "used custom keys" chip without leaking material into the log).
         "overrides_applied": sorted(applied_overrides),
         "trace": trace,
@@ -2840,7 +2924,7 @@ def _dispatch_auth_status(
 ) -> dict[str, Any]:
     """Report the current secure-session state without touching the card.
 
-    The GUI polls this when a tab is restored from ``localStorage`` — the
+    The GUI polls this when a tab is restored from ``localStorage`` -- the
     saved ``sessionId`` may still resolve to a live SCP session on the
     backend, in which case the operator shouldn't have to re-authenticate
     just because they reloaded the page. Purely observational; no APDUs
@@ -2854,7 +2938,7 @@ def _dispatch_auth_status(
     if gp is not None:
         try:
             target_aid_hex = bytes(getattr(gp, "target_aid", b"") or b"").hex().upper()
-        except Exception:  # noqa: BLE001 — best-effort, not a hard error
+        except Exception:  # noqa: BLE001 -- best-effort, not a hard error
             target_aid_hex = ""
         try:
             active_protocol = active_protocol or gp.get_active_protocol_name()
@@ -2875,7 +2959,7 @@ def _dispatch_logout(ctx: ActionContext, *, session_id: Any = None) -> dict[str,
     was_active = False
     try:
         was_active = bool(transporter.logout())
-    except Exception:  # noqa: BLE001 — surface failure but never raise
+    except Exception:  # noqa: BLE001 -- surface failure but never raise
         was_active = False
     return {
         "session_id": sid,
@@ -2961,7 +3045,7 @@ def _dispatch_get_data(
     p1: Any = None,
     p2: Any = None,
 ) -> dict[str, Any]:
-    """GET DATA (80CA P1 P2 00) — returns raw hex plus a TLV decode when parseable."""
+    """GET DATA (80CA P1 P2 00) -- returns raw hex plus a TLV decode when parseable."""
     session, _transporter, sid = _get_scp03_session(session_id)
     gp = _get_or_make_gp_ctrl(session)
 
@@ -3064,7 +3148,7 @@ def _dispatch_profile_scan(ctx: ActionContext, *, session_id: Any = None) -> dic
 def _dispatch_list_aids(ctx: ActionContext) -> dict[str, Any]:
     """Read the AID registry file and return a sorted list of aliases.
 
-    This action does NOT require a session — it reflects workspace state
+    This action does NOT require a session -- it reflects workspace state
     only (``Workspace/SCP03/aid.txt``). Available even when no reader is
     attached.
     """
@@ -3221,7 +3305,7 @@ AUTH_STATUS_SPEC = ActionSpec(
     inputs=(_SESSION_FIELD,),
     output_kind="json",
     dispatcher=_dispatch_auth_status,
-    # Passive observational probe — inspects the cached transporter /
+    # Passive observational probe -- inspects the cached transporter /
     # GP state for the given session but never opens a new PC/SC
     # handle and never sends an APDU. We deliberately report
     # ``requires_card=False`` so the GUI can poll auth state after a
@@ -3264,8 +3348,8 @@ KEYS_SPEC = ActionSpec(
 REGISTRY_APPS_SPEC = ActionSpec(
     id="scp03.registry_apps",
     subsystem="SCP03",
-    title="GP registry — applications",
-    description="GET STATUS P1=40 — list installed applications and their LCS.",
+    title="GP registry -- applications",
+    description="GET STATUS P1=40 -- list installed applications and their LCS.",
     inputs=(_SESSION_FIELD,),
     output_kind="json",
     dispatcher=_dispatch_registry_apps,
@@ -3277,8 +3361,8 @@ REGISTRY_APPS_SPEC = ActionSpec(
 REGISTRY_PKGS_SPEC = ActionSpec(
     id="scp03.registry_pkgs",
     subsystem="SCP03",
-    title="GP registry — packages",
-    description="GET STATUS P1=20 — list loaded executable load files.",
+    title="GP registry -- packages",
+    description="GET STATUS P1=20 -- list loaded executable load files.",
     inputs=(_SESSION_FIELD,),
     output_kind="json",
     dispatcher=_dispatch_registry_pkgs,
@@ -3290,8 +3374,8 @@ REGISTRY_PKGS_SPEC = ActionSpec(
 REGISTRY_SD_SPEC = ActionSpec(
     id="scp03.registry_sd",
     subsystem="SCP03",
-    title="GP registry — security domains",
-    description="GET STATUS P1=80 — list security domains.",
+    title="GP registry -- security domains",
+    description="GET STATUS P1=80 -- list security domains.",
     inputs=(_SESSION_FIELD,),
     output_kind="json",
     dispatcher=_dispatch_registry_sd,
@@ -3395,11 +3479,11 @@ get_registry().register(LIST_AIDS_SPEC)
 
 
 # ======================================================================
-# C-3 — mutation + validation + exports
+# C-3 -- mutation + validation + exports
 # ======================================================================
 #
 # These dispatchers all live behind explicit ``confirm`` gates in the
-# frontend — the backend still executes whatever the caller asks.
+# frontend -- the backend still executes whatever the caller asks.
 # Authentication is the card's responsibility: any mutation that
 # requires secure messaging returns 69 82 / 69 85 unless the session is
 # already authenticated via ``scp03.auth_scp03`` / ``scp03.auth_scp02``.
@@ -3410,7 +3494,7 @@ def _require_auth_session(transporter: Any) -> None:
     session = getattr(transporter, "session", None)
     if session is None or bool(getattr(session, "is_authenticated", False)) is False:
         raise ValueError(
-            "no authenticated secure session — run scp03.auth_scp03 / auth_scp02 first"
+            "no authenticated secure session -- run scp03.auth_scp03 / auth_scp02 first"
         )
 
 
@@ -3421,7 +3505,7 @@ def _dispatch_set_status(
     target_aid: Any = None,
     state_byte: Any = None,
 ) -> dict[str, Any]:
-    """GP SET STATUS — change an application's lifecycle state."""
+    """GP SET STATUS -- change an application's lifecycle state."""
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
 
@@ -3447,12 +3531,22 @@ def _dispatch_set_status(
     }
 
 
+# GPC v2.3.1 §11.1.1 Tables 11-4 / 11-5 (Application and Security Domain
+# life cycle): b8 set means LOCKED; an SD locking another entity only uses b8
+# (§11.10.2.2), so '80' is the lock request and '00' the unlock. 7F / FF are
+# the card states of Table 11-6, reachable with status type '80' only.
 _SET_STATUS_STATE_NAMES = {
+    0x00: "UNLOCK (back to previous state)",
+    0x01: "OP_READY (card)",
     0x03: "INSTALLED",
     0x07: "SELECTABLE",
     0x0F: "PERSONALIZED",
+    0x7F: "CARD_LOCKED (card)",
     0x80: "LOCKED",
-    0x83: "TERMINATED",
+    0x83: "LOCKED (INSTALLED)",
+    0x87: "LOCKED (SELECTABLE)",
+    0x8F: "LOCKED (PERSONALIZED)",
+    0xFF: "TERMINATED (card)",
 }
 
 
@@ -3464,7 +3558,7 @@ def _dispatch_lock(
     confirm: Any = None,
 ) -> dict[str, Any]:
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — locking an application is irreversible on some cards.")
+        raise ValueError("confirm must be true -- locking an application is irreversible on some cards.")
     return _dispatch_set_status(
         ctx,
         session_id=session_id,
@@ -3494,7 +3588,7 @@ def _dispatch_delete(
     target_aid: Any = None,
     recursive: bool = True,
 ) -> dict[str, Any]:
-    """GP DELETE — remove an application / package (optionally recursive)."""
+    """GP DELETE -- remove an application / package (optionally recursive)."""
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
 
@@ -3526,9 +3620,9 @@ def _dispatch_store_data(
     p2: Any = None,
     confirm: Any = None,
 ) -> dict[str, Any]:
-    """GP STORE DATA — hand-crafted or auto-chunked payload."""
+    """GP STORE DATA -- hand-crafted or auto-chunked payload."""
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — STORE DATA writes arbitrary data to the card.")
+        raise ValueError("confirm must be true -- STORE DATA writes arbitrary data to the card.")
     hex_text = str(data or "").strip().upper().replace(" ", "")
     if len(hex_text) == 0:
         raise ValueError("data is required (hex string).")
@@ -3577,7 +3671,7 @@ def _dispatch_update_binary(
     caller overrides ``offset`` (P1||P2).
     """
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — UPDATE BINARY overwrites file content on the card.")
+        raise ValueError("confirm must be true -- UPDATE BINARY overwrites file content on the card.")
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
     fs_controller = session.handle["fs"]
@@ -3705,7 +3799,7 @@ def _dispatch_update_record(
 ) -> dict[str, Any]:
     """UPDATE RECORD (00DC REC 04 LC) on the current or named EF."""
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — UPDATE RECORD overwrites record content on the card.")
+        raise ValueError("confirm must be true -- UPDATE RECORD overwrites record content on the card.")
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
     fs_controller = session.handle["fs"]
@@ -3796,7 +3890,7 @@ def _dispatch_validate(
     with contextlib.redirect_stdout(sink):
         try:
             validator.run(scope=scope_val)
-        except Exception as error:  # noqa: BLE001 — validator is best-effort
+        except Exception as error:  # noqa: BLE001 -- validator is best-effort
             return {
                 "session_id": sid,
                 "scope": scope_val,
@@ -4075,9 +4169,11 @@ SET_STATUS_SPEC = ActionSpec(
     subsystem="SCP03",
     title="Set status",
     description=(
-        "GP SET STATUS — change the lifecycle byte of an application. "
-        "State bytes: 03=INSTALLED, 07=SELECTABLE, 0F=PERSONALIZED, "
-        "80=LOCKED, 83=TERMINATED. Requires an authenticated session."
+        "GP SET STATUS -- change the lifecycle byte of an application. "
+        "State bytes (GPC v2.3.1 Tables 11-4/11-5): 03=INSTALLED, 07=SELECTABLE, "
+        "0F=PERSONALIZED, b8 set (80/83/87/8F)=LOCKED, 00=unlock; card states "
+        "7F=CARD_LOCKED, FF=TERMINATED apply to the ISD only. Requires an "
+        "authenticated session."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -4103,7 +4199,7 @@ LOCK_SPEC = ActionSpec(
     id="scp03.lock",
     subsystem="SCP03",
     title="Lock (LCS=80)",
-    description="Shortcut for SET STATUS → LOCKED on the given AID. Irreversible on some cards — requires confirm.",
+    description="Shortcut for SET STATUS → LOCKED on the given AID. Irreversible on some cards -- requires confirm.",
     inputs=(
         _SESSION_FIELD,
         _REQUIRED_TARGET_AID_FIELD,
@@ -4143,7 +4239,7 @@ DELETE_SPEC = ActionSpec(
     subsystem="SCP03",
     title="Delete application / package",
     description=(
-        "GP DELETE — destroys the referenced instance (and child "
+        "GP DELETE -- destroys the referenced instance (and child "
         "objects when recursive). Irreversible on real cards."
     ),
     inputs=(
@@ -4171,7 +4267,7 @@ STORE_DATA_SPEC = ActionSpec(
     title="STORE DATA",
     description=(
         "GP STORE DATA (80E2). Leave P1/P2 blank to auto-chunk a large "
-        "payload with GP block-index sequencing. Requires confirm — writes "
+        "payload with GP block-index sequencing. Requires confirm -- writes "
         "arbitrary data to the card."
     ),
     inputs=(
@@ -4222,7 +4318,7 @@ UPDATE_BINARY_SPEC = ActionSpec(
     title="UPDATE BINARY",
     description=(
         "UPDATE BINARY (00D6) on the current or named transparent EF. "
-        "Optionally SELECTs the target path first. Requires confirm — "
+        "Optionally SELECTs the target path first. Requires confirm -- "
         "overwrites file content on the card."
     ),
     inputs=(
@@ -4275,7 +4371,7 @@ UPDATE_RECORD_SPEC = ActionSpec(
     title="UPDATE RECORD",
     description=(
         "UPDATE RECORD (00DC REC 04 Lc Data) on the current or named "
-        "linear-fixed / cyclic EF. Requires confirm — overwrites record content on the card."
+        "linear-fixed / cyclic EF. Requires confirm -- overwrites record content on the card."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -4321,12 +4417,12 @@ UPDATE_RECORD_SPEC = ActionSpec(
 
 
 # ---------------------------------------------------------------------------
-# Service-table staging — preview-only "what-if" encoder for bitmap EFs.
+# Service-table staging -- preview-only "what-if" encoder for bitmap EFs.
 #
 # Operators wanted a staging area where they can mock-toggle service flags on
 # UST / IST / generic service-table EFs and *see* the resulting hex string
-# before committing it to the card. This is pure local math — no card I/O,
-# no auth gate — so the action is registered without ``requires_card`` /
+# before committing it to the card. This is pure local math -- no card I/O,
+# no auth gate -- so the action is registered without ``requires_card`` /
 # ``requires_auth`` and routes straight to the encoder helper.
 # ---------------------------------------------------------------------------
 
@@ -4341,7 +4437,7 @@ def _dispatch_stage_service_table(
 ) -> dict[str, Any]:
     """Compose a service-table EF body from a list of active service numbers.
 
-    Pure offline encoder — used by the GUI staging panel to preview the
+    Pure offline encoder -- used by the GUI staging panel to preview the
     bytes that would be written by an UPDATE BINARY before the operator
     actually pushes them to the card. Returns the new hex *and* the
     decoded checklist preview so the panel can render the round-trip
@@ -4416,7 +4512,7 @@ def _dispatch_stage_service_table(
     else:
         decoded = ContentDecoder.decode_service_table_bits(new_hex)
 
-    # Byte-level diff helper — the GUI surfaces it as a chip strip so
+    # Byte-level diff helper -- the GUI surfaces it as a chip strip so
     # the operator can quickly spot which byte indices changed.
     diff_bytes: list[dict[str, Any]] = []
     if cur_text:
@@ -4448,7 +4544,7 @@ STAGE_SERVICE_TABLE_SPEC = ActionSpec(
     description=(
         "Preview-only encoder for bitmap service-table EFs (EF.UST, "
         "EF.IST, generic). Computes the EF body that would result "
-        "from a list of active service numbers — does not touch the "
+        "from a list of active service numbers -- does not touch the "
         "card. Use it to compose UPDATE BINARY payloads without "
         "doing the bit-math by hand."
     ),
@@ -4494,7 +4590,7 @@ STAGE_SERVICE_TABLE_SPEC = ActionSpec(
     ),
     output_kind="json",
     dispatcher=_dispatch_stage_service_table,
-    # Pure local math — no card session needed and no auth gate to
+    # Pure local math -- no card session needed and no auth gate to
     # cross. Tagged ``staging`` so the GUI can group it under the
     # mock-edit affordances rather than the live mutation list.
     requires_card=False,
@@ -4508,7 +4604,7 @@ VALIDATE_SPEC = ActionSpec(
     subsystem="SCP03",
     title="Validate profile",
     description=(
-        "Run ProfileValidator over the live card — asserts mandatory "
+        "Run ProfileValidator over the live card -- asserts mandatory "
         "EFs, TLV structure, and ADF consistency for the chosen scope."
     ),
     inputs=(
@@ -4612,7 +4708,7 @@ EXPORT_KEYBAG_SPEC = ActionSpec(
     dispatcher=_dispatch_export_keybag,
     requires_card=True,
     # Keybag export reads the derived SCP03 session keys off the live
-    # ``Scp03Session`` — pointless to call unless the session exists.
+    # ``Scp03Session`` -- pointless to call unless the session exists.
     requires_auth=True,
     tags=("export", "keybag", "hil"),
 )
@@ -4633,14 +4729,14 @@ get_registry().register(EXPORT_KEYBAG_SPEC)
 
 
 # ======================================================================
-# C-4 — eUICC telemetry + lifecycle, crypto helpers, gold-profile diff
+# C-4 -- eUICC telemetry + lifecycle, crypto helpers, gold-profile diff
 # ======================================================================
 #
 # These dispatchers cover the read-only ES10 retrievals that the shell
 # exposes via GET-EID / GET-CERTS / GET-CONFIG / GET-SGP32-ALL, plus the
 # profile lifecycle trio (enable/disable/delete) that currently lives
 # behind the MANAGE-PROFILE shell wizard. The crypto pair
-# (``derive_opc`` / ``run_auth_test_vector``) is pure offline Milenage —
+# (``derive_opc`` / ``run_auth_test_vector``) is pure offline Milenage --
 # no card session required.
 #
 # The gold-profile set mirrors SET-GOLD-PROFILE / GOLD-PROFILE /
@@ -4659,7 +4755,7 @@ def _run_sgp22_quietly(sgp22: Any, fn_name: str, *args: Any, **kwargs: Any) -> t
 
 
 def _resolve_profile_identifier(raw: Any) -> str:
-    """Accept AID-hex or ICCID digits — mirrors shell `_resolve_mixed_aid` intent."""
+    """Accept AID-hex or ICCID digits -- mirrors shell `_resolve_mixed_aid` intent."""
     text = str(raw or "").strip().upper().replace(" ", "").replace(":", "")
     if len(text) == 0:
         raise ValueError("identifier is required (AID hex or ICCID).")
@@ -4673,7 +4769,7 @@ def _resolve_profile_identifier(raw: Any) -> str:
 
 # ---------------------------------------------------------------- eUICC
 def _dispatch_get_eid(ctx: ActionContext, *, session_id: Any = None) -> dict[str, Any]:
-    """ES10c.GetEID — compact EID read.
+    """ES10c.GetEID -- compact EID read.
 
     Returns the raw SW + extracted EID + a structured ``lines`` array
     (the same compact-print output the CLI emits, ANSI-stripped and
@@ -4687,14 +4783,11 @@ def _dispatch_get_eid(ctx: ActionContext, *, session_id: Any = None) -> dict[str
     try:
         _result, trace = _run_sgp22_quietly(sgp22, "get_eid")
         # Re-derive the EID from the same response so the caller gets a
-        # structured field instead of only the captured stdout.
+        # structured field instead of only the captured stdout; an answer
+        # without an EID leaves it empty and the printer output names what
+        # the card returned.
         data, sw1, sw2 = sgp22._retrieve_eid_response()
-        eid_hex = ""
-        if sw1 == 0x90 and data:
-            try:
-                eid_hex = sgp22._extract_eid_hex(bytes(data))
-            except Exception:  # noqa: BLE001
-                eid_hex = bytes(data).hex().upper()
+        eid_hex = sgp22._extract_eid_hex(bytes(data or b"")) if sw1 == 0x90 else ""
         return {
             "session_id": sid,
             "sw": f"{sw1:02X}{sw2:02X}",
@@ -4740,7 +4833,7 @@ def _build_get_certs_gui_decoded(data_bytes: bytes, sgp22: Any) -> dict[str, Any
 
 
 def _dispatch_get_euicc_certs(ctx: ActionContext, *, session_id: Any = None) -> dict[str, Any]:
-    """ES10b.GetCerts — ECASD cert chain."""
+    """ES10b.GetCerts -- ECASD cert chain."""
     session, _transporter, sid = _get_scp03_session(session_id)
     gp = _get_or_make_gp_ctrl(session)
     sgp22 = gp.sgp22
@@ -4904,16 +4997,16 @@ def _sgp32_run_section(
     printer, since the three printer variants in ``sgp22`` take
     slightly different inputs:
 
-    * ``"response"`` — printer wants the raw response ``bytes`` and
+    * ``"response"`` -- printer wants the raw response ``bytes`` and
       parses internally (``_print_rat_compact_response``,
       ``_print_eim_configuration_compact``,
       ``_print_get_certs_compact_response``).
-    * ``"parsed"`` — printer wants a pre-parsed TLV dict
+    * ``"parsed"`` -- printer wants a pre-parsed TLV dict
       (``_print_notifications_list_compact``).
 
     Returns a section dict shaped for the GUI: status + hex + parsed
     text lines + raw per-section trace. Failures are swallowed and
-    bubbled up via ``status="error"`` / ``note`` — the bulk sweep must
+    bubbled up via ``status="error"`` / ``note`` -- the bulk sweep must
     keep running even if one section fails so the operator still sees
     the rest.
     """
@@ -4944,7 +5037,7 @@ def _sgp32_run_section(
             return section
 
         # 2. Run the compact-printer for this section with stdout
-        #    redirected — captures a human-readable view we can show
+        #    redirected -- captures a human-readable view we can show
         #    as parsed KV / section rows in the GUI.
         if printer_name is not None:
             printer = getattr(sgp22, printer_name, None)
@@ -4985,7 +5078,7 @@ def _sgp32_run_section(
 def _dispatch_get_sgp32_all_data(
     ctx: ActionContext, *, session_id: Any = None
 ) -> dict[str, Any]:
-    """SGP.32 bulk telemetry one-shot — scan + RAT + notifications + eIM cfg + certs.
+    """SGP.32 bulk telemetry one-shot -- scan + RAT + notifications + eIM cfg + certs.
 
     Returns a **structured** payload (``sections`` array) so the GUI can
     render each retrieval as its own labelled block instead of dumping
@@ -5016,7 +5109,7 @@ def _build_sgp32_bulk_report(
     original section-building logic byte-compatible with the GUI.
     """
     # Step 1: the scan portion (run_sgp22_scan) is emitted inline by
-    # sgp22 and has no single "compact printer" equivalent — capture its
+    # sgp22 and has no single "compact printer" equivalent -- capture its
     # stdout as a dedicated section so the GUI can show it as structured
     # lines instead of a raw dump. We still keep the raw text in
     # ``overall_sink`` so the fallback ``trace`` field remains complete.
@@ -5054,7 +5147,7 @@ def _build_sgp32_bulk_report(
     plan = (
         {
             "key": "rat",
-            "title": "GetRAT — Rules Authorisation Table",
+            "title": "GetRAT -- Rules Authorisation Table",
             "es10_tag": "BF4300",
             "printer_name": "_print_rat_compact_response",
             "parser_mode": "response",
@@ -5075,7 +5168,7 @@ def _build_sgp32_bulk_report(
         },
         {
             "key": "certs",
-            "title": "GetCerts — eUICC certificate inventory",
+            "title": "GetCerts -- eUICC certificate inventory",
             "es10_tag": "BF5600",
             "printer_name": "_print_get_certs_compact_response",
             "parser_mode": "response",
@@ -5177,7 +5270,7 @@ def _dispatch_delete_profile(
     target: Any = None,
     confirm: Any = None,
 ) -> dict[str, Any]:
-    """ES10c.DeleteProfile — irrevocable, so ``confirm`` must match target."""
+    """ES10c.DeleteProfile -- irrevocable, so ``confirm`` must match target."""
     identifier = _resolve_profile_identifier(target)
     confirm_text = str(confirm or "").strip().upper().replace(" ", "").replace(":", "")
     if confirm_text != identifier:
@@ -5213,14 +5306,11 @@ def _dispatch_derive_opc(
         raise ValueError(f"OPc derivation rejected input: {error}") from error
     except RuntimeError as error:
         raise ValueError(str(error)) from error
-    return {
-        "opc": opc,
-        "secret_outputs_redacted": ["ki", "op"],
-    }
+    return {"opc": opc}
 
 
 def _dispatch_run_auth_test_vector(ctx: ActionContext) -> dict[str, Any]:
-    """Run the 3GPP TS 35.207 Milenage offline vector — no card required."""
+    """Run the 3GPP TS 35.207 Milenage offline vector -- no card required."""
     from SCP03.logic.security import (
         AUTH_TEST_VECTOR,
         SecurityController,
@@ -5278,7 +5368,7 @@ def _read_gold_profile_state() -> dict[str, Any]:
     try:
         inv = DeviceInventoryStore()
         state = inv.get_module_state(Scp03Config.MODULE_STATE_NAME) or {}
-    except Exception as error:  # noqa: BLE001 — surface but don't crash
+    except Exception as error:  # noqa: BLE001 -- surface but don't crash
         return {
             "path": "",
             "standard": "SGP.32",
@@ -5454,7 +5544,7 @@ GET_EID_SPEC = ActionSpec(
     id="scp03.get_eid",
     subsystem="SCP03",
     title="Get EID",
-    description="ES10c.GetEID — compact EID read from ISD-R.",
+    description="ES10c.GetEID -- compact EID read from ISD-R.",
     inputs=(_SESSION_FIELD,),
     output_kind="json",
     dispatcher=_dispatch_get_eid,
@@ -5467,7 +5557,7 @@ GET_EUICC_CERTS_SPEC = ActionSpec(
     id="scp03.get_euicc_certs",
     subsystem="SCP03",
     title="GetCerts (eUICC)",
-    description="ES10b.GetCerts — ECASD / eUICC certificate chain retrieval.",
+    description="ES10b.GetCerts -- ECASD / eUICC certificate chain retrieval.",
     inputs=(_SESSION_FIELD,),
     output_kind="json",
     dispatcher=_dispatch_get_euicc_certs,
@@ -5510,7 +5600,7 @@ ENABLE_PROFILE_SPEC = ActionSpec(
     id="scp03.enable_profile",
     subsystem="SCP03",
     title="Enable profile",
-    description="ES10c.EnableProfile — make the selected profile active.",
+    description="ES10c.EnableProfile -- make the selected profile active.",
     inputs=(
         _SESSION_FIELD,
         ActionField(
@@ -5519,7 +5609,7 @@ ENABLE_PROFILE_SPEC = ActionSpec(
             kind="string",
             required=True,
             placeholder="A0000005591010FFFFFFFF8900050200  or  89XXXXXXXXXXXXXXXXXF",
-            help="AID hex or ICCID digits — the shell accepts either.",
+            help="AID hex or ICCID digits -- the shell accepts either.",
         ),
     ),
     output_kind="json",
@@ -5533,7 +5623,7 @@ DISABLE_PROFILE_SPEC = ActionSpec(
     id="scp03.disable_profile",
     subsystem="SCP03",
     title="Disable profile",
-    description="ES10c.DisableProfile — deactivate the selected profile.",
+    description="ES10c.DisableProfile -- deactivate the selected profile.",
     inputs=(
         _SESSION_FIELD,
         ActionField(
@@ -5557,7 +5647,7 @@ DELETE_PROFILE_SPEC = ActionSpec(
     subsystem="SCP03",
     title="Delete profile",
     description=(
-        "ES10c.DeleteProfile — irreversible. The ``confirm`` field must "
+        "ES10c.DeleteProfile -- irreversible. The ``confirm`` field must "
         "match the target exactly before the dispatcher will proceed."
     ),
     inputs=(
@@ -5590,7 +5680,7 @@ DERIVE_OPC_SPEC = ActionSpec(
     subsystem="SCP03",
     title="Derive OPc (Milenage)",
     description=(
-        "Derive OPc from Ki and OP per 3GPP TS 35.206 — OPc = AES128(Ki, OP) "
+        "Derive OPc from Ki and OP per 3GPP TS 35.206 -- OPc = AES128(Ki, OP) "
         "XOR OP. No card required."
     ),
     inputs=(
@@ -5653,7 +5743,7 @@ SET_GOLD_PROFILE_SPEC = ActionSpec(
             kind="path",
             required=True,
             placeholder="/path/to/gold_profile.yaml",
-            help="YAML produced by REPORT (shell) — contains euicc_report section. Double-click to browse.",
+            help="YAML produced by REPORT (shell) -- contains euicc_report section. Double-click to browse.",
         ),
         ActionField(
             name="standard",
@@ -5712,7 +5802,7 @@ PROFILE_DIFF_SPEC = ActionSpec(
     title="Profile diff (eUICC)",
     description=(
         "Diff the live card's eUICC report against a gold YAML. "
-        "Scope is eUICC-only — file-system + MNO-SD phases will land in "
+        "Scope is eUICC-only -- file-system + MNO-SD phases will land in "
         "a follow-up."
     ),
     inputs=(
@@ -5758,7 +5848,7 @@ get_registry().register(PROFILE_DIFF_SPEC)
 
 
 # ======================================================================
-# C-4 Tier-3 — Admin / configuration (show_config / set_aid_alias /
+# C-4 Tier-3 -- Admin / configuration (show_config / set_aid_alias /
 # set_defaults). These mirror the shell's SHOW-CONFIG, SET-AID-ALIAS, and
 # SET-DEFAULTS commands, but work without a full ``Scp03Shell`` instance
 # by talking directly to the SQLite inventory and the aid.txt registry.
@@ -5795,7 +5885,7 @@ def _mask_secret_value(key_name: str, value: str, *, mask: bool) -> str:
 def _dispatch_show_config(
     ctx: ActionContext,
     *,
-    mask_secrets: Any = True,
+    mask_secrets: Any = False,
 ) -> dict[str, Any]:
     """Read the persisted SCP03 state (inventory + AID registry) and return it."""
     from SCP03.config import Config as Scp03Config
@@ -5836,7 +5926,7 @@ def _dispatch_show_config(
         for slot_name, slot_value in sorted(keys.items())
     }
 
-    # aid.txt registry (fresh read — same path the shell uses).
+    # aid.txt registry (fresh read -- same path the shell uses).
     aid_path = str(Scp03Config.AID_FILE)
     aid_entries: list[dict[str, str]] = []
     aid_error: str | None = None
@@ -5971,7 +6061,7 @@ def _dispatch_set_defaults(
 ) -> dict[str, Any]:
     """Reset the persisted SCP03 KEYS back to the shipped demo defaults.
 
-    Requires the operator to pass ``confirm="RESET"`` — this is a
+    Requires the operator to pass ``confirm="RESET"`` -- this is a
     destructive settings change that invalidates live secure sessions.
     """
     from SCP03.config import Config as Scp03Config
@@ -6035,7 +6125,7 @@ def _dispatch_set_defaults(
                     session_reset()
             if was_authenticated:
                 invalidated += 1
-    except Exception:  # noqa: BLE001 — best-effort
+    except Exception:  # noqa: BLE001 -- best-effort
         pass
 
     return {
@@ -6052,7 +6142,7 @@ SHOW_CONFIG_SPEC = ActionSpec(
     subsystem="SCP03",
     title="Show config",
     description=(
-        "Inspect the persisted SCP03 state: KEYS (masked by default), "
+        "Inspect the persisted SCP03 state: KEYS (in full unless masked), "
         "GOLD_PROFILE, and the AID registry file. No card required."
     ),
     inputs=(
@@ -6061,8 +6151,8 @@ SHOW_CONFIG_SPEC = ActionSpec(
             label="Mask key material",
             kind="bool",
             required=False,
-            default=True,
-            help="Redact secret key slots (scp03_k* / scp02_* / adm) before returning.",
+            default=False,
+            help="Off by default; hides the key slots (scp03_k* / scp02_* / adm) behind their length.",
         ),
     ),
     output_kind="json",
@@ -6129,7 +6219,7 @@ SET_DEFAULTS_SPEC = ActionSpec(
             kind="string",
             required=True,
             placeholder="type RESET to proceed",
-            help="Destructive — wipes current KEYS from inventory.",
+            help="Destructive -- wipes current KEYS from inventory.",
         ),
     ),
     output_kind="json",
@@ -6145,7 +6235,7 @@ get_registry().register(SET_DEFAULTS_SPEC)
 
 
 # ======================================================================
-# C-5 — Mutation depth: PUT KEY / INSTALL / FS-ADMIN / MANAGE-PIN /
+# C-5 -- Mutation depth: PUT KEY / INSTALL / FS-ADMIN / MANAGE-PIN /
 # MANAGE-CHANNEL / RUN-AUTH (live). All of these talk to the active SCP03
 # session, mutate card state, and are gated behind ``_require_auth_session``
 # unless the operation explicitly does not need a secure channel
@@ -6192,7 +6282,7 @@ def _classify_sw(sw1: int, sw2: int) -> tuple[bool, str]:
     if sw1 == 0x61:
         return True, f"OK (61{sw2:02X} more bytes available)"
     if sw1 == 0x63 and (sw2 & 0xF0) == 0xC0:
-        return False, f"PIN failed — {sw2 & 0x0F} attempt(s) remaining"
+        return False, f"PIN failed -- {sw2 & 0x0F} attempt(s) remaining"
     if sw1 == 0x69 and sw2 == 0x82:
         return False, "Security status not satisfied"
     if sw1 == 0x69 and sw2 == 0x83:
@@ -6232,14 +6322,14 @@ def _dispatch_put_key(
     algorithm: Any = "AES",
     confirm: Any = None,
 ) -> dict[str, Any]:
-    """GP PUT KEY (GPCS 11.8) — install or replace a keyset on the active SD."""
+    """GP PUT KEY (GPCS 11.8) -- install or replace a keyset on the active SD."""
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
 
     confirm_text = str(confirm or "").strip().upper()
     if confirm_text != "PUT-KEY":
         raise ValueError(
-            "confirm=\"PUT-KEY\" is required — overwriting keys can brick the card."
+            "confirm=\"PUT-KEY\" is required -- overwriting keys can brick the card."
         )
 
     new_kvn_int = _parse_hex_byte(new_kvn, label="new_kvn")
@@ -6281,7 +6371,7 @@ def _dispatch_put_key(
         n_bytes = len(hex_val) // 2
         if n_bytes not in allowed_lengths:
             raise ValueError(
-                f"{label} length {n_bytes} bytes invalid for {algo_norm} — "
+                f"{label} length {n_bytes} bytes invalid for {algo_norm} -- "
                 f"expected {expected_lengths}."
             )
 
@@ -6393,6 +6483,136 @@ def _dispatch_install_cap(
     }
 
 
+def _dispatch_build_install_script(
+    ctx: ActionContext,
+    *,
+    cap_path: Any = None,
+    privileges: Any = "00",
+    install_params: Any = "C900",
+    adf_aids: Any = "",
+    uicc_toolkit: Any = True,
+    target_app_aid: Any = None,
+    target_module_aid: Any = None,
+    transport: Any = "ota",
+    ota_cipher: Any = "AES",
+    output_path: Any = None,
+    overwrite: Any = False,
+) -> dict[str, Any]:
+    """Plan the CAP install sequence as a script file, without a card.
+
+    SCP03 shell wizard 8 uses the same builder, so both surfaces write the
+    same file: ``#`` comments and one APDU per line, each LOAD block sized
+    for one SCP80 SMS (``ota``) or for the ISO path (``iso``).
+    """
+    from SCP03.core import install_script
+    from SCP03.core.cap import CapFileParser
+
+    path_text = str(cap_path or "").strip()
+    if len(path_text) == 0:
+        raise ValueError("cap_path is required.")
+    if not os.path.isfile(path_text):
+        raise ValueError(f"CAP file not found: {path_text}")
+
+    transport_text = str(transport or "ota").strip().lower()
+    if transport_text not in ("ota", "iso"):
+        raise ValueError("transport must be 'ota' or 'iso'.")
+    is_ota = transport_text == "ota"
+    cipher_mode = "AES"
+    if is_ota:
+        cipher_mode = install_script.normalize_cipher_mode(ota_cipher or "AES")
+
+    priv_hex = _normalize_hex(privileges or "00", label="privileges")
+    params_hex = _normalize_hex(install_params or "C900", label="install_params")
+
+    # ETSI TS 102 226 V19.0.0 clause 8.2.1.3.2.2.2: a listed ADF AID becomes a
+    # tag 81 entry beside the shared UICC file system entry, wrapped in an EA
+    # object with the tag 80 toolkit parameters unless the switch is off.
+    aids = install_script.parse_aid_list(adf_aids)
+    uicc_params_hex = ""
+    if len(aids) > 0:
+        toolkit_bool = bool(uicc_toolkit)
+        if isinstance(uicc_toolkit, str):
+            toolkit_bool = uicc_toolkit.strip().lower() in ("1", "true", "yes", "y", "on")
+        uicc_params = install_script.build_uicc_system_parameters(aids, toolkit=toolkit_bool)
+        params_hex = install_script.add_uicc_system_parameters(
+            bytes.fromhex(params_hex), uicc_params
+        ).hex().upper()
+        uicc_params_hex = uicc_params.hex().upper()
+
+    try:
+        parsed = CapFileParser.parse_with_metadata(path_text)
+    except Exception as error:  # noqa: BLE001 -- any parse failure is one message
+        raise ValueError(f"CAP parse error: {error}") from error
+
+    applet_hex = _normalize_hex(target_app_aid or "", label="target_app_aid", allow_empty=True)
+    if len(applet_hex) == 0:
+        if len(parsed.applet_aids) == 0:
+            raise ValueError("The CAP declares no applet AID; set target_app_aid.")
+        applet_hex = bytes(parsed.applet_aids[0]).hex().upper()
+    module_hex = _normalize_hex(
+        target_module_aid or "", label="target_module_aid", allow_empty=True
+    )
+    if len(module_hex) == 0:
+        module_hex = applet_hex
+
+    try:
+        plan = install_script.plan_install_sequence(
+            parsed,
+            applet_aid_hex=applet_hex,
+            module_aid_hex=module_hex,
+            privileges_hex=priv_hex,
+            install_params_hex=params_hex,
+            ota=is_ota,
+            cipher_mode=cipher_mode,
+        )
+    except ValueError as error:
+        raise ValueError(f"chunk plan error: {error}") from error
+    lines = install_script.render_install_script(plan, path_text)
+    script_text = "\n".join(lines) + "\n"
+
+    out_text = os.path.expanduser(str(output_path or "").strip())
+    overwrite_bool = bool(overwrite)
+    if isinstance(overwrite, str):
+        overwrite_bool = overwrite.strip().lower() in ("1", "true", "yes", "y")
+    written = False
+    note = "not written: no script file given."
+    if len(out_text) > 0:
+        problem = install_script.script_path_error(out_text)
+        if problem is not None:
+            raise ValueError(problem)
+        if os.path.exists(out_text) and not overwrite_bool:
+            note = f"{out_text} exists and was kept; tick Overwrite to replace it."
+        else:
+            try:
+                install_script.write_install_script(out_text, lines)
+            except OSError as error:
+                raise ValueError(f"could not write {out_text}: {error}") from error
+            written = True
+            note = f"script written to {out_text}"
+
+    return {
+        "ok": True,
+        "cap_path": path_text,
+        "package_aid": plan.package_aid,
+        "applet_aid": plan.applet_aid,
+        "module_aid": plan.module_aid,
+        "privileges": plan.privileges,
+        "install_params": plan.install_params,
+        "adf_aids": [aid.hex().upper() for aid in aids],
+        "uicc_system_parameters": uicc_params_hex,
+        "transport": transport_text,
+        "cipher_mode": plan.cipher_mode,
+        "chunk_size": plan.chunk_size,
+        "block_count": len(plan.load_apdus),
+        "apdus": list(plan.apdus),
+        "script": script_text,
+        "script_path": out_text,
+        "written": written,
+        "note": note,
+        "run_hint": plan.run_hint,
+    }
+
+
 def _dispatch_install_app(
     ctx: ActionContext,
     *,
@@ -6493,7 +6713,7 @@ def _dispatch_install_extradition(
     sd_aid: Any = None,
     token: Any = "",
 ) -> dict[str, Any]:
-    """GP INSTALL [for extradition] (P1=10) — re-bind an instance to a target SD."""
+    """GP INSTALL [for extradition] (P1=10) -- re-bind an instance to a target SD."""
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
 
@@ -6526,7 +6746,7 @@ def _dispatch_install_personalization(
     session_id: Any = None,
     aid: Any = None,
 ) -> dict[str, Any]:
-    """GP INSTALL [for personalization] (P1=20) — open perso channel for STORE DATA."""
+    """GP INSTALL [for personalization] (P1=20) -- open perso channel for STORE DATA."""
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
 
@@ -6551,7 +6771,7 @@ def _dispatch_install_registry_update(
     privileges: Any = "00",
     params: Any = "",
 ) -> dict[str, Any]:
-    """GP INSTALL [for registry update] (P1=40) — change privileges / params."""
+    """GP INSTALL [for registry update] (P1=40) -- change privileges / params."""
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
 
@@ -6601,13 +6821,27 @@ def _select_path_chain(transporter: Any, parent_path_hex: str) -> list[dict[str,
     return trace_rows
 
 
-# ETSI TS 102 222 §6 — file type selector enum shared by the FCP builder
+# ETSI TS 102 222 §6 -- file type selector enum shared by the FCP builder
 # below and the ``scp03.fs_build_fcp`` GUI wizard. Values are the labels
 # the GUI drop-down exposes and the strings the wizard step emits.
 _FS_TYPE_DF = "DF_ADF"
 _FS_TYPE_TRANSPARENT_EF = "TRANSPARENT_EF"
 _FS_TYPE_LINEAR_FIXED_EF = "LINEAR_FIXED_EF"
-_FS_FILE_TYPES = (_FS_TYPE_DF, _FS_TYPE_TRANSPARENT_EF, _FS_TYPE_LINEAR_FIXED_EF)
+_FS_TYPE_CYCLIC_EF = "CYCLIC_EF"
+_FS_TYPE_BER_TLV_EF = "BER_TLV_EF"
+_FS_FILE_TYPES = (
+    _FS_TYPE_DF,
+    _FS_TYPE_TRANSPARENT_EF,
+    _FS_TYPE_LINEAR_FIXED_EF,
+    _FS_TYPE_CYCLIC_EF,
+    _FS_TYPE_BER_TLV_EF,
+)
+# TS 102 221 v18.4 §11.1.1.4.3 Table 11.5 file descriptor byte, shareable
+# working EF: b3-b1 carries the structure, b6-b4 the file type.
+_FS_RECORD_DESCRIPTOR_BYTES = {
+    _FS_TYPE_LINEAR_FIXED_EF: 0x42,
+    _FS_TYPE_CYCLIC_EF: 0x46,
+}
 
 
 def _validate_encoded_tlv(
@@ -6696,6 +6930,42 @@ def _positive_u16_hex(value: str, *, label: str) -> tuple[int, str]:
     return parsed, f"{parsed:04X}"
 
 
+# TS 102 221 v18.4 §11.1.1.4.1 and §11.1.1.4.6.7 both give the file size and the
+# maximum file size as "length X, X >= 2", so a value wider than two bytes is
+# allowed. Four bytes covers any card in the field and keeps the encoding short.
+_MAX_FILE_SIZE_BYTES = 4
+
+
+def _file_size_hex(value: str, *, label: str, allow_zero: bool = False) -> tuple[int, str]:
+    """Parse a file-size value and return its shortest legal encoding.
+
+    The value field is at least two bytes and grows with the value, most
+    significant byte first (§11.1.1.4.1).
+    """
+    cleaned = _normalize_hex(value, label=label)
+    parsed = int(cleaned, 16)
+    ceiling = (1 << (8 * _MAX_FILE_SIZE_BYTES)) - 1
+    if parsed > ceiling:
+        raise ValueError(
+            f"{label} must encode a value of at most {_MAX_FILE_SIZE_BYTES} bytes."
+        )
+    if parsed == 0 and not allow_zero:
+        raise ValueError(f"{label} must encode a value in range 1..{ceiling}.")
+    width = max(2, (max(parsed, 1).bit_length() + 7) // 8)
+    return parsed, f"{parsed:0{width * 2}X}"
+
+
+def _resize_u16_hex(value: str, *, label: str, allow_zero: bool) -> tuple[int, str]:
+    """Parse a RESIZE FILE size, admitting zero only when the caller confirmed it.
+
+    ETSI TS 102 222 v17.1 §6.10.2.1: a transparent EF resized to '00' keeps its
+    structural information but loses all content, and the MF or a DF/ADF may be
+    resized to '00' only while it holds no file. Emptying a file is not
+    recoverable, so it needs the explicit confirmation rather than a bare zero.
+    """
+    return _file_size_hex(value, label=label, allow_zero=allow_zero)
+
+
 def _build_fcp_template_fields(
     *,
     file_type: str,
@@ -6707,18 +6977,20 @@ def _build_fcp_template_fields(
     sfi_hex: str = "",
     rec_len_hex: str = "",
     num_rec_hex: str = "",
+    file_details_hex: str = "",
+    max_file_size_hex: str = "",
     prop_a5_hex: str = "",
 ) -> dict[str, Any]:
     """Build an ETSI TS 102 222 FCP template from structured fields.
 
-    Port of ``SCP03.interface.shell_wizards._build_fcp_template`` — the
+    Port of ``SCP03.interface.shell_wizards._build_fcp_template`` -- the
     CLI wizard operators have been using since v1. The GUI needs the same
     byte-for-byte FCP wire so the CLI and GUI drive identical CREATE FILE
     APDUs, and to keep a single source of truth for TS 102 222 layout.
 
     ``breakdown`` is a per-tag annotation list used by the wizard preview
     panel to render an operator-readable summary of what will hit the
-    card — every CREATE FILE request is destructive, so a review step
+    card -- every CREATE FILE request is destructive, so a review step
     before firing ``00E0`` is non-negotiable.
 
     Parameters are strings because the GUI dispatcher forwards raw form
@@ -6733,13 +7005,13 @@ def _build_fcp_template_fields(
             "fid":          "<4 hex>",        # inner FID (tag 83 payload)
             "parent_path":  "<hex>",          # everything before the FID
             "file_size":    <int bytes>,
-            "rec_len":      <int bytes, 0 when not linear>,
-            "num_rec":      <int, 0 when not linear>,
+            "rec_len":      <int bytes, 0 when not record structured>,
+            "num_rec":      <int, 0 when not record structured>,
             "file_type":    "DF_ADF" | ...,
             "breakdown":    [ {tag, hex, description}, ... ],
         }
 
-    Raises ``ValueError`` on any invalid input — the dispatcher layer
+    Raises ``ValueError`` on any invalid input -- the dispatcher layer
     propagates that to the API error channel unchanged.
     """
     ft = str(file_type or "").strip().upper()
@@ -6756,9 +7028,9 @@ def _build_fcp_template_fields(
     fid = path[-4:]
     parent = path[:-4]
 
-    # Tag 83 — File identifier (always 2 bytes).
+    # Tag 83 -- File identifier (always 2 bytes).
     tag_83 = f"8302{fid}"
-    # Tag 8A — Life Cycle Status Integer = 0x05 (operational activated).
+    # Tag 8A -- Life Cycle Status Integer = 0x05 (operational activated).
     # CLI wizard hard-codes this; we match the wire exactly. Operators
     # who need another LCS can use raw-FCP mode via fs_create_file.
     tag_8a = "8A0105"
@@ -6783,10 +7055,11 @@ def _build_fcp_template_fields(
     num_rec_int = 0
 
     if ft == _FS_TYPE_DF:
-        # File descriptor for DF: 78 21 (DF, not shareable, structure=none).
+        # File descriptor 78 21: TS 102 221 v18.4 Table 11.5 -- shareable (b7),
+        # DF or ADF (b6-b4 = 111), no structure information, coding byte 21.
         tag_82 = "82027821"
 
-        file_size_int, size_text = _positive_u16_hex(
+        file_size_int, size_text = _file_size_hex(
             file_size_hex,
             label="file_size_hex",
         )
@@ -6807,7 +7080,7 @@ def _build_fcp_template_fields(
             raise ValueError(
                 "c6_hex (PIN Status Template DO) is required for DF/ADF.")
         _validate_encoded_tlv(c6, label="c6_hex", allowed_tags=(0xC6,))
-        # Caller hands us the complete C6 TLV — the CLI wizard does the
+        # Caller hands us the complete C6 TLV -- the CLI wizard does the
         # same so we don't have to second-guess the inner layout.
         tag_c6 = c6
 
@@ -6815,13 +7088,27 @@ def _build_fcp_template_fields(
         # Transparent EF descriptor: 41 21.
         tag_82 = "82024121"
 
-        file_size_int, size_text = _positive_u16_hex(
+        file_size_int, size_text = _file_size_hex(
             file_size_hex,
             label="file_size_hex",
         )
         tag_80_81 = f"80{len(size_text) // 2:02X}{size_text}"
 
-    elif ft == _FS_TYPE_LINEAR_FIXED_EF:
+    elif ft == _FS_TYPE_BER_TLV_EF:
+        # TS 102 221 v18.4 Table 11.5: b6-b1 = '111001' is the BER-TLV
+        # structure; '79' adds the shareable bit. No record length applies.
+        tag_82 = "82027921"
+
+        # TS 102 222 v17.1 §6.3.2.2.2 Table 4 and page 14: for a BER-TLV EF
+        # tag '80' reserves body bytes including the administrative overhead
+        # needed to store the TLV objects.
+        file_size_int, size_text = _file_size_hex(
+            file_size_hex,
+            label="file_size_hex",
+        )
+        tag_80_81 = f"80{len(size_text) // 2:02X}{size_text}"
+
+    elif ft in _FS_RECORD_DESCRIPTOR_BYTES:
         rec_len_int, rec_len_text = _positive_u16_hex(
             rec_len_hex,
             label="rec_len_hex",
@@ -6830,10 +7117,13 @@ def _build_fcp_template_fields(
         num_rec_int = int(num_rec_clean, 16)
         if num_rec_int <= 0 or num_rec_int > 0xFF:
             raise ValueError("num_rec_hex must encode a value in range 1..255.")
-        # Descriptor byte + coding byte + 2-byte record length + 1-byte
-        # record count. The old 82-04 form omitted the record count and
-        # could not create a conformant linear-fixed EF.
-        tag_82 = f"82054221{rec_len_text}{num_rec_int:02X}"
+        # TS 102 222 v17.1 §6.3.2.2.2 Table 4: the CREATE FILE descriptor is
+        # '02' or '04' bytes -- descriptor byte, coding byte '21' and the
+        # two-byte record length. The record count is not part of it; the
+        # card derives it from tag '80' (record length x number of records).
+        # Note 1 makes the record length mandatory for linear fixed and
+        # cyclic files, and applicable to no other structure.
+        tag_82 = f"8204{_FS_RECORD_DESCRIPTOR_BYTES[ft]:02X}21{rec_len_text}"
 
         file_size_int = rec_len_int * num_rec_int
         if file_size_int > 0xFFFF:
@@ -6844,25 +7134,92 @@ def _build_fcp_template_fields(
         size_text = f"{file_size_int:04X}"
         tag_80_81 = f"80{len(size_text) // 2:02X}{size_text}"
 
-    # Short File Identifier (tag 88) — EF only. Matches the CLI which
-    # emits 88 00 when the user skips the SFI step (SFI = none).
-    if ft in (_FS_TYPE_TRANSPARENT_EF, _FS_TYPE_LINEAR_FIXED_EF):
+    # Short File Identifier (tag 88) -- EF only. TS 102 222 v17.1 §6.3.2.2.2:
+    # tag absent = the EF takes the low five bits of its FID as SFI; present
+    # and empty = SFI not supported; one byte = SFI in b8-b4, b3-b1 = 000
+    # (TS 102 221 v18.4 §11.1.1.4.8). ``sfi_hex`` is the SFI number 01-1E,
+    # 00 disables the SFI and an empty value leaves the tag out.
+    sfi_number = 0
+    if ft != _FS_TYPE_DF:
         sfi = _normalize_hex(sfi_hex, label="sfi_hex", allow_empty=True)
         if len(sfi) == 0:
-            tag_88 = "8800"
+            tag_88 = ""
         elif len(sfi) != 2:
             raise ValueError("sfi_hex must be exactly 1 byte (2 hex chars).")
         else:
-            tag_88 = f"8801{sfi}"
+            sfi_number = int(sfi, 16)
+            if sfi_number == 0:
+                tag_88 = "8800"
+            elif sfi_number > 0x1E:
+                raise ValueError("sfi_hex must be an SFI in range 01..1E, or 00 for none.")
+            else:
+                tag_88 = f"8801{sfi_number << 3:02X}"
 
-    # Tag A5 — Proprietary Info (optional inner bytes; we wrap them).
+    # Tag A5 -- Proprietary Info. TS 102 222 v17.1 §6.3.2.2.2 Table 4a: a
+    # BER-TLV structured EF must carry tag '84' File Details (note 3) and may
+    # carry tag '86' Maximum File Size (note 2); both live inside this one
+    # template, ahead of whatever private objects the caller adds.
+    a5_content = ""
+    file_details_number = 0
+    max_file_size_int = 0
+    if ft == _FS_TYPE_BER_TLV_EF:
+        details = _normalize_hex(
+            file_details_hex,
+            label="file_details_hex",
+            allow_empty=True,
+        )
+        if len(details) == 0:
+            # TS 102 221 v18.4 §11.1.1.4.6.5: b1 = "DER coding only is
+            # supported"; the object is mandatory, so default it rather than
+            # emitting an A5 without it.
+            details = "01"
+        if len(details) != 2:
+            raise ValueError("file_details_hex must be exactly 1 byte (2 hex chars).")
+        file_details_number = int(details, 16)
+        a5_content += f"8401{details}"
+
+        max_size = _normalize_hex(
+            max_file_size_hex,
+            label="max_file_size_hex",
+            allow_empty=True,
+        )
+        if len(max_size) > 0:
+            max_file_size_int, max_size_text = _file_size_hex(
+                max_size,
+                label="max_file_size_hex",
+            )
+            if max_file_size_int < file_size_int:
+                raise ValueError(
+                    "max_file_size_hex must not be below the reserved file "
+                    "size in tag 80."
+                )
+            a5_content += f"86{len(max_size_text) // 2:02X}{max_size_text}"
+    elif len(str(file_details_hex or "").strip()) > 0 or len(
+        str(max_file_size_hex or "").strip()
+    ) > 0:
+        # Table 4a notes 2 and 3 scope both objects to BER-TLV EFs only.
+        raise ValueError(
+            "file_details_hex / max_file_size_hex apply to "
+            f"{_FS_TYPE_BER_TLV_EF} only."
+        )
+
     prop = _normalize_hex(prop_a5_hex, label="prop_a5_hex", allow_empty=True)
-    if len(prop) > 0:
-        tag_a5 = f"A5{_encode_ber_length(len(prop) // 2)}{prop}"
+    a5_content += prop
+    if len(a5_content) > 0:
+        tag_a5 = f"A5{_encode_ber_length(len(a5_content) // 2)}{a5_content}"
 
-    # Preserve the CLI wizard's concatenation order precisely — even
-    # though card parsers MUST be tag-order-agnostic, matching the CLI
-    # wire keeps test vectors comparable and avoids surprises.
+    # TS 102 222 v17.1 §6.3.2.2.1 Table 3 / §6.3.2.2.2 Table 4: exactly one
+    # security attribute TLV is mandatory for every file. Checked after the
+    # structural fields so a malformed field is reported first.
+    if len(sec) == 0:
+        raise ValueError(
+            "sec_attr_hex is required: TS 102 222 CREATE FILE needs one "
+            "security attribute TLV (tag 8C, AB or 8B)."
+        )
+
+    # TS 102 222 v17.1 §6.2: mandatory TLVs follow the order of Tables 3 / 4
+    # (82 83 [84] 8A security 80/81 [88] [C6] [A5]), which the CLI wizard
+    # emits as well.
     fcp_content = (
         tag_82
         + tag_83
@@ -6913,16 +7270,18 @@ def _build_fcp_template_fields(
         })
     if tag_80_81:
         hdr = tag_80_81[:2]
-        descr = (
-            "Total file / DF memory size" if hdr == "81"
-            else "Transparent EF body size"
-        )
+        descr = "Total file / DF memory size"
+        if hdr == "80":
+            descr = "EF body size (reserved file size)"
         breakdown.append({"tag": hdr, "hex": tag_80_81, "description": descr})
     if tag_88:
+        sfi_text = "not supported by the EF"
+        if sfi_number > 0:
+            sfi_text = f"{sfi_number:02X} coded in b8-b4"
         breakdown.append({
             "tag": "88",
             "hex": tag_88,
-            "description": "Short File Identifier",
+            "description": f"Short File Identifier = {sfi_text}",
         })
     if tag_c6:
         breakdown.append({
@@ -6930,6 +7289,18 @@ def _build_fcp_template_fields(
             "hex": tag_c6,
             "description": "PIN Status Template DO",
         })
+    if ft == _FS_TYPE_BER_TLV_EF:
+        breakdown.append({
+            "tag": "A5/84",
+            "hex": f"8401{file_details_number:02X}",
+            "description": "File Details (b1 = DER coding only)",
+        })
+        if max_file_size_int > 0:
+            breakdown.append({
+                "tag": "A5/86",
+                "hex": f"86{len(max_size_text) // 2:02X}{max_size_text}",
+                "description": f"Maximum file size = {max_file_size_int} bytes",
+            })
     if tag_a5:
         breakdown.append({
             "tag": "A5",
@@ -6961,6 +7332,8 @@ def _dispatch_fs_build_fcp(
     sfi_hex: Any = None,
     rec_len_hex: Any = None,
     num_rec_hex: Any = None,
+    file_details_hex: Any = None,
+    max_file_size_hex: Any = None,
     prop_a5_hex: Any = None,
 ) -> dict[str, Any]:
     """Build an ETSI TS 102 222 FCP template offline (no card transmit).
@@ -6979,6 +7352,8 @@ def _dispatch_fs_build_fcp(
         sfi_hex=str(sfi_hex or ""),
         rec_len_hex=str(rec_len_hex or ""),
         num_rec_hex=str(num_rec_hex or ""),
+        file_details_hex=str(file_details_hex or ""),
+        max_file_size_hex=str(max_file_size_hex or ""),
         prop_a5_hex=str(prop_a5_hex or ""),
     )
 
@@ -7028,13 +7403,13 @@ def _dispatch_fs_delete_file(
     parent_path: Any = None,
     confirm: Any = None,
 ) -> dict[str, Any]:
-    """ETSI TS 102 222 DELETE FILE (00E4) — destroys EF/DF identified by FID."""
+    """ETSI TS 102 222 DELETE FILE (00E4) -- destroys EF/DF identified by FID."""
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
 
     confirm_text = str(confirm or "").strip().upper()
     if confirm_text != "DELETE":
-        raise ValueError("confirm=\"DELETE\" is required — DELETE FILE is irreversible.")
+        raise ValueError("confirm=\"DELETE\" is required -- DELETE FILE is irreversible.")
 
     fid_hex = _normalize_hex(fid, label="fid")
     if len(fid_hex) != 4:
@@ -7066,9 +7441,19 @@ def _dispatch_fs_resize(
     target_fid: Any = None,
     new_file_size: Any = None,
     new_total_size: Any = None,
+    filling_pattern_hex: Any = None,
+    repeat_pattern_hex: Any = None,
+    max_file_size_hex: Any = None,
     parent_path: Any = None,
+    confirm_empty: Any = None,
 ) -> dict[str, Any]:
-    """ETSI TS 102 222 RESIZE FILE (80D4) with FCP tag-83 + tag-80 / tag-81."""
+    """ETSI TS 102 222 RESIZE FILE (80D4).
+
+    The data field follows §6.10.2.1 Table 17: tag '83' names the file, then
+    exactly one size object -- tag '80' for an EF, tag '81' for the MF or a
+    DF/ADF -- and an optional tag 'A5' proprietary template holding the
+    Table 18 objects.
+    """
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
 
@@ -7079,30 +7464,84 @@ def _dispatch_fs_resize(
     tag_83 = f"8302{fid_hex}"
     tag_80 = ""
     tag_81 = ""
+    # §6.10.2.1 allows a size of '00', which empties a transparent EF or an
+    # already empty MF/DF/ADF. That is not recoverable, so it is gated.
+    allow_zero = str(confirm_empty or "").strip().upper() == "EMPTY"
+    empty_requested = False
 
     if new_file_size is not None and len(str(new_file_size).strip()) > 0:
-        _size_int, size_text = _positive_u16_hex(
+        size_int, size_text = _resize_u16_hex(
             new_file_size,
             label="new_file_size",
+            allow_zero=allow_zero,
         )
+        empty_requested = empty_requested or size_int == 0
         tag_80 = f"8002{size_text}"
 
     if new_total_size is not None and len(str(new_total_size).strip()) > 0:
-        _size_int, size_text = _positive_u16_hex(
+        size_int, size_text = _resize_u16_hex(
             new_total_size,
             label="new_total_size",
+            allow_zero=allow_zero,
         )
+        empty_requested = empty_requested or size_int == 0
         tag_81 = f"8102{size_text}"
 
     if len(tag_80) == 0 and len(tag_81) == 0:
         raise ValueError("at least one of new_file_size (tag 80) or new_total_size (tag 81) is required.")
+    if len(tag_80) > 0 and len(tag_81) > 0:
+        # §6.10.2.1: tag '80' "shall only be provided if an EF is resized",
+        # tag '81' only "if the MF or a DF/ADF is resized" -- a single file is
+        # never both.
+        raise ValueError(
+            "new_file_size (tag 80) resizes an EF and new_total_size (tag 81) "
+            "the MF or a DF/ADF; pass one, not both."
+        )
+
+    # Table 18: the proprietary template initialises the newly allocated space
+    # (tag 'C1' or tag 'C2', never both) and carries the new maximum file size
+    # of a BER-TLV structured EF (tag '86').
+    a5_content = ""
+    patterns = (
+        ("C1", "filling_pattern_hex", filling_pattern_hex),
+        ("C2", "repeat_pattern_hex", repeat_pattern_hex),
+    )
+    supplied_patterns: list[str] = []
+    for pattern_tag, pattern_label, pattern_value in patterns:
+        pattern = _normalize_hex(pattern_value, label=pattern_label, allow_empty=True)
+        if len(pattern) == 0:
+            continue
+        supplied_patterns.append(pattern_label)
+        a5_content += f"{pattern_tag}{_encode_ber_length(len(pattern) // 2)}{pattern}"
+
+    if len(supplied_patterns) > 1:
+        raise ValueError(
+            "filling_pattern_hex (tag C1) and repeat_pattern_hex (tag C2) "
+            "cannot both be present in one RESIZE."
+        )
+
+    max_size_hex = _normalize_hex(
+        max_file_size_hex,
+        label="max_file_size_hex",
+        allow_empty=True,
+    )
+    if len(max_size_hex) > 0:
+        _max_int, max_size_text = _file_size_hex(
+            max_size_hex,
+            label="max_file_size_hex",
+        )
+        a5_content += f"86{len(max_size_text) // 2:02X}{max_size_text}"
+
+    tag_a5 = ""
+    if len(a5_content) > 0:
+        tag_a5 = f"A5{_encode_ber_length(len(a5_content) // 2)}{a5_content}"
 
     select_trace: list[dict[str, Any]] = []
     if parent_path is not None and len(str(parent_path).strip()) > 0:
         parent_hex = _normalize_hex(parent_path, label="parent_path")
         select_trace = _select_path_chain(transporter, parent_hex)
 
-    fcp_content = tag_83 + tag_80 + tag_81
+    fcp_content = tag_83 + tag_80 + tag_81 + tag_a5
     fcp_hex = f"62{_encode_ber_length(len(fcp_content) // 2)}{fcp_content}"
     apdu = _encode_case3_apdu("80D40000", fcp_hex)
     data, sw1, sw2 = transporter.transmit(apdu, silent=True)
@@ -7117,6 +7556,8 @@ def _dispatch_fs_resize(
         "target_fid": fid_hex,
         "tag_80": tag_80,
         "tag_81": tag_81,
+        "tag_a5": tag_a5,
+        "empties_file": empty_requested,
         "parent_select_trace": select_trace,
         "response_hex": (data or b"").hex().upper(),
     }
@@ -7149,7 +7590,7 @@ def _dispatch_fs_lifecycle(
         confirm_text = str(confirm or "").strip().upper()
         if confirm_text != "TERMINATE":
             raise ValueError(
-                "confirm=\"TERMINATE\" is required — TERMINATE-DF / TERMINATE-EF is irreversible."
+                "confirm=\"TERMINATE\" is required -- TERMINATE-DF / TERMINATE-EF is irreversible."
             )
 
     fid_hex = ""
@@ -7183,9 +7624,11 @@ def _dispatch_fs_search_record(
     target: Any = None,
     search_hex: Any = None,
 ) -> dict[str, Any]:
-    """ETSI TS 102 221 SEARCH RECORD (00A2) — find record matching needle."""
+    """ETSI TS 102 221 SEARCH RECORD (00A2) -- find record matching needle."""
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
+
+    from SCP03.logic.fs import FileSystemController
 
     needle = _normalize_hex(search_hex, label="search_hex")
     select_trace: list[dict[str, Any]] = []
@@ -7194,9 +7637,13 @@ def _dispatch_fs_search_record(
         target_hex = _normalize_hex(target, label="target")
         select_trace = _select_path_chain(transporter, target_hex)
 
-    apdu = _encode_case3_apdu("00A20104", needle)
+    # TS 102 221 v18.4 §11.1.7.2: with an empty Le the card returns no record
+    # numbers, so the command is built as case 4 exactly as the shell builds it.
+    fs_controller = FileSystemController(transporter)
+    apdu = fs_controller._build_case4_apdu("00A20104", needle, "SEARCH RECORD")
     data, sw1, sw2 = transporter.transmit(apdu, silent=True)
     ok, label = _classify_sw(sw1, sw2)
+    body = bytes(data or b"")
     return {
         "session_id": sid,
         "ok": ok,
@@ -7206,7 +7653,8 @@ def _dispatch_fs_search_record(
         "search_hex": needle,
         "target": target_hex,
         "select_trace": select_trace,
-        "response_hex": (data or b"").hex().upper(),
+        "response_hex": body.hex().upper(),
+        "record_numbers": list(body),
     }
 
 
@@ -7216,23 +7664,40 @@ def _dispatch_fs_suspend_uicc(
     session_id: Any = None,
     confirm: Any = None,
 ) -> dict[str, Any]:
-    """ETSI TS 102 221 SUSPEND UICC (8076)."""
+    """SUSPEND UICC, P1 '00' (TS 102 221 v18.4 §11.1.22.2.3).
+
+    The command carries the proposed minimum and maximum suspension
+    duration (2 + 2 bytes) and Le '0A'; the card answers with the negotiated
+    maximum duration and the 8-byte resume token that SUSPEND UICC P1 '01'
+    needs later. The shell's FileSystemController builds the APDU so both
+    surfaces send the same bytes.
+    """
     session, transporter, sid = _get_scp03_session(session_id)
     _require_auth_session(transporter)
 
     confirm_text = str(confirm or "").strip().upper()
     if confirm_text != "SUSPEND":
-        raise ValueError("confirm=\"SUSPEND\" is required — UICC will go to low-power state.")
+        raise ValueError("confirm=\"SUSPEND\" is required -- UICC will go to low-power state.")
 
-    _data, sw1, sw2 = transporter.transmit("8076000000", silent=True)
+    from SCP03.logic.fs import FileSystemController
+
+    fs_controller = FileSystemController(transporter)
+    (payload, sw1, sw2), trace = _run_gp_quietly(fs_controller, "suspend_uicc")
     ok, label = _classify_sw(sw1, sw2)
-    return {
+    result: dict[str, Any] = {
         "session_id": sid,
         "ok": ok,
         "status": label,
         "sw": f"{sw1:02X}{sw2:02X}",
-        "apdu": "8076000000",
+        "apdu": "8076000004000102010A",
+        "response_hex": bytes(payload or b"").hex().upper(),
+        "trace": trace,
     }
+    body = bytes(payload or b"")
+    if ok and len(body) >= 10:
+        result["negotiated_duration"] = body[0:2].hex().upper()
+        result["resume_token"] = body[2:10].hex().upper()
+    return result
 
 
 # --- C-5: MANAGE-PIN --------------------------------------------------
@@ -7268,14 +7733,14 @@ def _dispatch_manage_pin(
     puk: Any = None,
     confirm: Any = None,
 ) -> dict[str, Any]:
-    """VERIFY / CHANGE / DISABLE / ENABLE / UNBLOCK PIN — single dispatcher."""
+    """VERIFY / CHANGE / DISABLE / ENABLE / UNBLOCK PIN -- single dispatcher."""
     session, transporter, sid = _get_scp03_session(session_id)
 
     op_norm = str(op or "").strip().upper()
     if op_norm not in ("VERIFY", "CHANGE", "DISABLE", "ENABLE", "UNBLOCK"):
         raise ValueError(f"unsupported op={op_norm!r}; expected VERIFY/CHANGE/DISABLE/ENABLE/UNBLOCK.")
     if op_norm in ("DISABLE", "UNBLOCK") and bool(confirm) is False:
-        raise ValueError(f"confirm must be true — {op_norm} can block the PIN.")
+        raise ValueError(f"confirm must be true -- {op_norm} can block the PIN.")
 
     ref_byte = _parse_hex_byte(pin_ref or "01", label="pin_ref")
 
@@ -7338,7 +7803,7 @@ def _dispatch_manage_channel(
     op: Any = None,
     channel: Any = None,
 ) -> dict[str, Any]:
-    """GP MANAGE CHANNEL (0070) — open or close a logical channel."""
+    """GP MANAGE CHANNEL (0070) -- open or close a logical channel."""
     session, transporter, sid = _get_scp03_session(session_id)
 
     op_norm = str(op or "").strip().upper()
@@ -7499,7 +7964,6 @@ def _dispatch_run_auth_live(
     context: Any = "USIM",
     rand: Any = None,
     autn: Any = None,
-    reveal_sensitive: Any = False,
 ) -> dict[str, Any]:
     """Live AUTHENTICATE (0088) on USIM/ISIM/GSM with RAND (+ AUTN for UMTS)."""
     session, transporter, sid = _get_scp03_session(session_id)
@@ -7533,26 +7997,6 @@ def _dispatch_run_auth_live(
     ok = sw_ok and response_valid
     if sw_ok and not response_valid:
         label = "Malformed AUTHENTICATE response"
-    reveal_flag = (
-        bool(reveal_sensitive)
-        if not isinstance(reveal_sensitive, str)
-        else reveal_sensitive.strip().lower() in ("1", "true", "yes", "on")
-    )
-    if response_valid and not reveal_flag:
-        redacted_fields = [
-            field_name
-            for field_name in ("ck", "ik", "kc")
-            if field_name in parsed
-        ]
-        for field_name in redacted_fields:
-            parsed.pop(field_name, None)
-        if redacted_fields:
-            parsed["derived_keys_redacted"] = True
-            parsed["redacted_fields"] = [field_name.upper() for field_name in redacted_fields]
-            parsed.pop("raw_hex", None)
-            parsed["raw_response_redacted"] = True
-    elif response_valid:
-        parsed["derived_keys_revealed"] = True
     return {
         "session_id": sid,
         "ok": ok,
@@ -7563,7 +8007,6 @@ def _dispatch_run_auth_live(
         "rand": rand_hex,
         "autn": autn_hex or None,
         "response": parsed,
-        "reveal_sensitive":reveal_flag,
     }
 
 
@@ -7575,7 +8018,7 @@ PUT_KEY_SPEC = ActionSpec(
     subsystem="SCP03",
     title="PUT KEY",
     description=(
-        "GP PUT KEY (GPCS 11.8) — install or replace a keyset on the active "
+        "GP PUT KEY (GPCS 11.8) -- install or replace a keyset on the active "
         "Security Domain. Wrong KVN/KID overwrites the wrong keyset and can "
         "permanently brick the card. Requires confirm=\"PUT-KEY\"."
     ),
@@ -7647,6 +8090,56 @@ INSTALL_CAP_SPEC = ActionSpec(
 )
 
 
+BUILD_INSTALL_SCRIPT_SPEC = ActionSpec(
+    id="scp03.build_install_script",
+    subsystem="SCP03",
+    title="Install script",
+    description=(
+        "INSTALL [for load] + LOAD + INSTALL [for install] for a CAP/IJC as "
+        "a script file, without a card: # comments and one APDU per line, "
+        "each LOAD block sized for one SCP80 SMS (OTA) or for the ISO path. "
+        "SCP03 shell wizard 8 writes the same file."
+    ),
+    inputs=(
+        ActionField(name="cap_path", label="CAP file path", kind="path", required=True,
+                    help="Absolute path to the .cap / .ijc file."),
+        ActionField(name="privileges", label="Privileges (hex)", kind="hex",
+                    default="00", help="GP privileges byte(s) for the new applet."),
+        ActionField(name="install_params", label="Install params (hex)", kind="hex",
+                    default="C900",
+                    help="GP install parameters TLV (default C900 = empty)."),
+        ActionField(name="adf_aids", label="ADF AIDs granted file access (hex, comma separated)",
+                    kind="string", required=False,
+                    placeholder="A0000000871002FFFFFFFF8988000001",
+                    help="ETSI TS 102 226 Tag EA/81: full access to the shared UICC file "
+                         "system and each listed ADF. Blank = no UICC access parameters."),
+        ActionField(name="uicc_toolkit", label="Add UICC toolkit parameters (Tag 80)",
+                    kind="bool", default=True,
+                    help="Priority 01, no timers, menus or channels; added with the ADF AIDs."),
+        ActionField(name="target_app_aid", label="Override applet AID (hex)", kind="hex",
+                    required=False, help="Blank = the first applet AID in the CAP."),
+        ActionField(name="target_module_aid", label="Override module AID (hex)", kind="hex",
+                    required=False, help="Blank = same as the applet AID."),
+        ActionField(name="transport", label="Format", kind="enum",
+                    choices=["ota", "iso"], default="ota",
+                    help="ota: SCP80 compact remote format, one SMS per LOAD block, "
+                         "no Le. iso: Le 00 and 240-octet LOAD blocks."),
+        ActionField(name="ota_cipher", label="OTA keyset cipher", kind="enum",
+                    choices=["AES", "3DES"], default="AES",
+                    help="Sizes each LOAD block to one SMS for the KIc/KID cipher."),
+        ActionField(name="output_path", label="Script file", kind="save_path",
+                    required=False,
+                    placeholder="<cap stem>_install.txt beside the CAP",
+                    help="Blank = show only. Double-click to browse."),
+        ActionField(name="overwrite", label="Overwrite existing file", kind="bool",
+                    default=False),
+    ),
+    output_kind="json",
+    dispatcher=_dispatch_build_install_script,
+    requires_card=False,
+    tags=("install", "ota", "script"),
+)
+
 INSTALL_APP_SPEC = ActionSpec(
     id="scp03.install_app",
     subsystem="SCP03",
@@ -7677,7 +8170,7 @@ INSTALL_MAKE_SELECTABLE_SPEC = ActionSpec(
     id="scp03.install_make_selectable",
     subsystem="SCP03",
     title="Install [for make selectable]",
-    description="GP INSTALL [for make selectable] (P1=08) — unlock instance for SELECT.",
+    description="GP INSTALL [for make selectable] (P1=08) -- unlock instance for SELECT.",
     inputs=(
         _SESSION_FIELD,
         ActionField(name="aid", label="AID", kind="hex", required=True),
@@ -7697,7 +8190,7 @@ INSTALL_EXTRADITION_SPEC = ActionSpec(
     id="scp03.install_extradition",
     subsystem="SCP03",
     title="Install [for extradition]",
-    description="GP INSTALL [for extradition] (P1=10) — re-bind instance to a target SD.",
+    description="GP INSTALL [for extradition] (P1=10) -- re-bind instance to a target SD.",
     inputs=(
         _SESSION_FIELD,
         ActionField(name="aid", label="Instance AID", kind="hex", required=True),
@@ -7717,7 +8210,7 @@ INSTALL_PERSONALIZATION_SPEC = ActionSpec(
     subsystem="SCP03",
     title="Install [for personalization]",
     description=(
-        "GP INSTALL [for personalization] (P1=20) — open personalization "
+        "GP INSTALL [for personalization] (P1=20) -- open personalization "
         "channel for follow-up STORE DATA traffic."
     ),
     inputs=(
@@ -7736,7 +8229,7 @@ INSTALL_REGISTRY_UPDATE_SPEC = ActionSpec(
     id="scp03.install_registry_update",
     subsystem="SCP03",
     title="Install [for registry update]",
-    description="GP INSTALL [for registry update] (P1=40) — change privileges / params.",
+    description="GP INSTALL [for registry update] (P1=40) -- change privileges / params.",
     inputs=(
         _SESSION_FIELD,
         ActionField(name="aid", label="AID", kind="hex", required=True),
@@ -7754,49 +8247,65 @@ INSTALL_REGISTRY_UPDATE_SPEC = ActionSpec(
 FS_BUILD_FCP_SPEC = ActionSpec(
     id="scp03.fs_build_fcp",
     subsystem="SCP03",
-    title="FS — build FCP template (preview)",
+    title="FS -- build FCP template (preview)",
     description=(
         "Offline builder for ETSI TS 102 222 FCP templates. Accepts the "
         "same structured fields the CLI wizard asks for "
         "(``_build_fcp_template``) and returns the composed hex + a "
-        "per-tag breakdown. No card transmit — used by the GUI CREATE "
+        "per-tag breakdown. No card transmit -- used by the GUI CREATE "
         "FILE wizard to render a preview before the destructive 00E0 "
         "APDU is fired."
     ),
     inputs=(
         ActionField(name="file_type", label="File type", kind="enum",
                     required=True,
-                    choices=("DF_ADF", "TRANSPARENT_EF", "LINEAR_FIXED_EF")),
+                    choices=("DF_ADF", "TRANSPARENT_EF", "LINEAR_FIXED_EF",
+                             "CYCLIC_EF", "BER_TLV_EF")),
         ActionField(name="full_path", label="Full hex path", kind="hex",
                     required=True, placeholder="3F007F105F01",
                     help="Last 2 bytes = new FID; preceding bytes = parent "
                          "path (walked by SELECT before CREATE)."),
         ActionField(name="sec_attr_hex", label="Security attribute TLV",
-                    kind="hex", required=False,
-                    help="Fully-encoded tag 8C / 8B / AB TLV. "
-                         "Typically required by the SD — see ETSI TS 102 221 §9.2."),
+                    kind="hex", required=True,
+                    help="Fully-encoded tag 8C / 8B / AB TLV. Mandatory for "
+                         "every CREATE FILE (ETSI TS 102 222 §6.3.2.2, "
+                         "Tables 3 and 4); coding per ETSI TS 102 221 §9.2."),
         ActionField(name="file_size_hex", label="File size (hex bytes)",
                     kind="hex", required=False,
                     help="DF: memory quota (tag 81). "
                          "Transparent EF: body size (tag 80). "
-                         "Linear EF: computed as rec_len × num_rec."),
+                         "BER-TLV EF: reserved file size (tag 80). "
+                         "Linear / cyclic EF: computed as rec_len × num_rec."),
         ActionField(name="aid_hex", label="ADF AID (tag 84)", kind="hex",
                     required=False,
                     help="DF/ADF only. Leave empty for a plain DF."),
         ActionField(name="c6_hex", label="PIN Status Template DO (tag C6)",
                     kind="hex", required=False,
-                    help="DF/ADF only. REQUIRED for DF/ADF — hand the "
+                    help="DF/ADF only. REQUIRED for DF/ADF -- hand the "
                          "entire TLV (C6 <len> <value>)."),
         ActionField(name="sfi_hex", label="Short File Identifier (hex)",
                     kind="hex", required=False,
-                    help="EF only, exactly 1 byte. "
-                         "Empty → emit 88 00 (no SFI)."),
+                    help="EF only. SFI number 01-1E (encoded in b8-b4 per "
+                         "TS 102 222 §6.3.2.2.2); 00 = SFI not supported "
+                         "(88 00); empty = tag omitted, the EF uses the low "
+                         "five bits of its FID."),
         ActionField(name="rec_len_hex", label="Record length (hex)",
                     kind="hex", required=False,
-                    help="Linear Fixed EF only. Bytes per record."),
+                    help="Linear Fixed / Cyclic EF only. Bytes per record "
+                         "(ETSI TS 102 222 §6.3.2.2.2 Table 4 note 1)."),
         ActionField(name="num_rec_hex", label="Number of records (hex)",
                     kind="hex", required=False,
-                    help="Linear Fixed EF only."),
+                    help="Linear Fixed / Cyclic EF only."),
+        ActionField(name="file_details_hex", label="File details (A5 tag 84)",
+                    kind="hex", required=False, placeholder="01",
+                    help="BER-TLV EF only, one byte, mandatory inside the A5 "
+                         "template (ETSI TS 102 222 §6.3.2.2.2 Table 4a "
+                         "note 3). 01 = DER coding only; defaults to 01."),
+        ActionField(name="max_file_size_hex",
+                    label="Maximum file size (A5 tag 86)",
+                    kind="hex", required=False, placeholder="0800",
+                    help="BER-TLV EF only, optional (Table 4a note 2). Upper "
+                         "bound the file body may never exceed."),
         ActionField(name="prop_a5_hex", label="Proprietary info (tag A5)",
                     kind="hex", required=False,
                     help="Optional A5 inner bytes (without outer tag/length)."),
@@ -7811,11 +8320,11 @@ FS_BUILD_FCP_SPEC = ActionSpec(
 FS_CREATE_FILE_SPEC = ActionSpec(
     id="scp03.fs_create_file",
     subsystem="SCP03",
-    title="FS — CREATE FILE",
+    title="FS -- CREATE FILE",
     description=(
         "ETSI TS 102 222 CREATE FILE (00E0). Pass a complete FCP template "
         "(starting with tag 62) and an optional parent path to walk first. "
-        "The GUI wizard composes the FCP via ``scp03.fs_build_fcp`` — raw "
+        "The GUI wizard composes the FCP via ``scp03.fs_build_fcp`` -- raw "
         "mode here stays available for scripting / pasted templates."
     ),
     inputs=(
@@ -7839,7 +8348,7 @@ FS_CREATE_FILE_SPEC = ActionSpec(
 FS_DELETE_FILE_SPEC = ActionSpec(
     id="scp03.fs_delete_file",
     subsystem="SCP03",
-    title="FS — DELETE FILE",
+    title="FS -- DELETE FILE",
     description="ETSI TS 102 222 DELETE FILE (00E4). Requires confirm=\"DELETE\".",
     inputs=(
         _SESSION_FIELD,
@@ -7861,20 +8370,42 @@ FS_DELETE_FILE_SPEC = ActionSpec(
 FS_RESIZE_SPEC = ActionSpec(
     id="scp03.fs_resize",
     subsystem="SCP03",
-    title="FS — RESIZE FILE",
-    description="ETSI TS 102 222 RESIZE FILE (80D4) — change EF size in place.",
+    title="FS -- RESIZE FILE",
+    description=(
+        "ETSI TS 102 222 RESIZE FILE (80D4) -- change a file size in place. "
+        "Tag 80 resizes an EF, tag 81 the MF or a DF/ADF, and the optional "
+        "A5 template carries the §6.10.2.1 Table 18 objects."
+    ),
     inputs=(
         _SESSION_FIELD,
         ActionField(name="target_fid", label="Target FID (4 hex)", kind="hex", required=True,
                     placeholder="6F07"),
         ActionField(name="new_file_size", label="New file size (hex)", kind="hex",
                     required=False, placeholder="0040",
-                    help="Tag 80 — new body size in bytes (0001..FFFF)."),
+                    help="Tag 80 -- new body size in bytes (0001..FFFF)."),
         ActionField(name="new_total_size", label="New total size (hex)", kind="hex",
                     required=False, placeholder="0080",
-                    help="Tag 81 — new total size in bytes (0001..FFFF)."),
+                    help="Tag 81 -- new total size of the MF or a DF/ADF in "
+                         "bytes (0001..FFFF). Exclusive with tag 80."),
+        ActionField(name="filling_pattern_hex", label="Filling pattern (A5 tag C1)",
+                    kind="hex", required=False, placeholder="FF",
+                    help="Initialises the newly allocated space (ETSI "
+                         "TS 102 222 §6.10.2.1 Table 18). Exclusive with C2."),
+        ActionField(name="repeat_pattern_hex", label="Repeat pattern (A5 tag C2)",
+                    kind="hex", required=False, placeholder="00FF",
+                    help="Repeated over the newly allocated space. Exclusive "
+                         "with C1; neither applies to a BER-TLV EF."),
+        ActionField(name="max_file_size_hex",
+                    label="New maximum file size (A5 tag 86)",
+                    kind="hex", required=False, placeholder="0800",
+                    help="BER-TLV structured EFs only (Table 18 note 2)."),
         ActionField(name="parent_path", label="Parent path (hex, optional)", kind="hex",
                     required=False),
+        ActionField(name="confirm_empty", label='Type EMPTY to allow size 0000',
+                    kind="string", required=False, placeholder="",
+                    help="ETSI TS 102 222 §6.10.2.1 allows a new size of '00', "
+                         "which removes all content of a transparent EF. The "
+                         "confirmation is required for that value only."),
     ),
     output_kind="json",
     dispatcher=_dispatch_fs_resize,
@@ -7887,7 +8418,7 @@ FS_RESIZE_SPEC = ActionSpec(
 FS_LIFECYCLE_SPEC = ActionSpec(
     id="scp03.fs_lifecycle",
     subsystem="SCP03",
-    title="FS — lifecycle (activate / deactivate / terminate)",
+    title="FS -- lifecycle (activate / deactivate / terminate)",
     description=(
         "ETSI TS 102 221 / 222 lifecycle commands: ACTIVATE (0044), "
         "DEACTIVATE (0004), TERMINATE-DF (00E6), TERMINATE-EF (00E8). "
@@ -7913,8 +8444,8 @@ FS_LIFECYCLE_SPEC = ActionSpec(
 FS_SEARCH_RECORD_SPEC = ActionSpec(
     id="scp03.fs_search_record",
     subsystem="SCP03",
-    title="FS — SEARCH RECORD",
-    description="ETSI TS 102 221 SEARCH RECORD (00A2) — find record matching a hex needle.",
+    title="FS -- SEARCH RECORD",
+    description="ETSI TS 102 221 SEARCH RECORD (00A2) -- find record matching a hex needle.",
     inputs=(
         _SESSION_FIELD,
         ActionField(name="target", label="Target EF path (hex, optional)", kind="hex",
@@ -7933,7 +8464,7 @@ FS_SEARCH_RECORD_SPEC = ActionSpec(
 FS_SUSPEND_UICC_SPEC = ActionSpec(
     id="scp03.fs_suspend_uicc",
     subsystem="SCP03",
-    title="FS — SUSPEND UICC",
+    title="FS -- SUSPEND UICC",
     description="ETSI TS 102 221 SUSPEND UICC (8076). Requires confirm=\"SUSPEND\".",
     inputs=(
         _SESSION_FIELD,
@@ -7955,14 +8486,14 @@ MANAGE_PIN_SPEC = ActionSpec(
     description=(
         "PIN lifecycle: VERIFY (0020) / CHANGE (0024) / DISABLE (0026) / "
         "ENABLE (0028) / UNBLOCK (002C). PINs are ASCII-padded with 0xFF. "
-        "DISABLE and UNBLOCK require confirm — they can block the PIN."
+        "DISABLE and UNBLOCK require confirm -- they can block the PIN."
     ),
     inputs=(
         _SESSION_FIELD,
         ActionField(name="op", label="Operation", kind="enum", required=True,
                     choices=("VERIFY", "CHANGE", "DISABLE", "ENABLE", "UNBLOCK")),
         ActionField(name="pin_ref", label="PIN reference (hex)", kind="hex",
-                    default="01", help="01 = PIN1, 81 = PIN2, 0A = ADM1, …"),
+                    default="01", help="01 = PIN1, 81 = PIN2, 0A = ADM1, ..."),
         ActionField(name="pin", label="PIN (ASCII)", kind="string", required=False,
                     placeholder="1234", secret=True),
         ActionField(name="new_pin", label="New PIN (ASCII)", kind="string", required=False,
@@ -7990,7 +8521,7 @@ MANAGE_CHANNEL_SPEC = ActionSpec(
     subsystem="SCP03",
     title="MANAGE CHANNEL",
     description=(
-        "GP MANAGE CHANNEL (0070) — open a new logical channel (P1=00, "
+        "GP MANAGE CHANNEL (0070) -- open a new logical channel (P1=00, "
         "Le=01) or close an existing one (P1=80, P2=channel 01..13 hex)."
     ),
     inputs=(
@@ -8023,17 +8554,6 @@ RUN_AUTH_LIVE_SPEC = ActionSpec(
         ActionField(name="rand", label="RAND (32 hex)", kind="hex", required=True),
         ActionField(name="autn", label="AUTN (32 hex, for USIM/ISIM)", kind="hex",
                     required=False),
-        ActionField(
-            name="reveal_sensitive",
-            label="Reveal derived CK / IK / Kc",
-            kind="bool",
-            required=False,
-            default=False,
-            help=(
-                "Off by default. Enabling this exposes usable derived "
-                "authentication keys in the browser result."
-            ),
-        ),
     ),
     output_kind="json",
     dispatcher=_dispatch_run_auth_live,
@@ -8044,6 +8564,7 @@ RUN_AUTH_LIVE_SPEC = ActionSpec(
 
 get_registry().register(PUT_KEY_SPEC)
 get_registry().register(INSTALL_CAP_SPEC)
+get_registry().register(BUILD_INSTALL_SCRIPT_SPEC)
 get_registry().register(INSTALL_APP_SPEC)
 get_registry().register(INSTALL_MAKE_SELECTABLE_SPEC)
 get_registry().register(INSTALL_EXTRADITION_SPEC)
@@ -8062,20 +8583,20 @@ get_registry().register(RUN_AUTH_LIVE_SPEC)
 
 
 # =====================================================================
-# C-7 — Quality of life + adjacent functionality
+# C-7 -- Quality of life + adjacent functionality
 # =====================================================================
 #
-# * scp03.run_script   — feed a semicolon- or newline-separated command
+# * scp03.run_script   -- feed a semicolon- or newline-separated command
 #                        list to the SCP03 engine in-process and return
 #                        captured stdout. Mirrors ``SCP03 --cmd`` and the
 #                        ``[S] Run SCP03 with a prepared script`` launcher
 #                        entry, but without spawning a subprocess.
-# * scp03.fs_report    — call ``FileSystemController.generate_report`` on
+# * scp03.fs_report    -- call ``FileSystemController.generate_report`` on
 #                        the active session and save a YAML report to a
 #                        caller-chosen filename. Returns captured stdout
 #                        plus the absolute path of the written report.
-# * scp03.guide_list   — enumerate the ShellGuides topics.
-# * scp03.guide_show   — capture the printed text for a single topic
+# * scp03.guide_list   -- enumerate the ShellGuides topics.
+# * scp03.guide_show   -- capture the printed text for a single topic
 #                        (no interactive ``[Press Enter]`` loop).
 # ---------------------------------------------------------------------
 
@@ -8153,7 +8674,7 @@ def _dispatch_run_script(
                 entry_cmd("; ".join(commands), yaml_out=yaml_path)
     except SystemExit:
         pass
-    except Exception as error:  # noqa: BLE001 — surface engine failure
+    except Exception as error:  # noqa: BLE001 -- surface engine failure
         err = f"{type(error).__name__}: {error}"
 
     raw = _strip_ansi(sink.getvalue())

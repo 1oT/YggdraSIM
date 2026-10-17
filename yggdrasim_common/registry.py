@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Plugin registry: maps capability tokens to provider callables and enforces single-registration invariants."""
 # -----------------------------------------------------------------------------
 # YggdraSIM code registry: locate entry points, classes, and callables without
@@ -32,7 +31,7 @@ SUBSYSTEMS: dict[str, str] = {
     "SCP80": "OTA SMS-SC / CAT-TP style scripting and smart decoding.",
     "SCP11": "Thin facade; live SGP.22 types re-exported from SCP11.live.",
     "SCP11.live": "eSIM management relay: orchestrator, PC/SC or relay APDU, ES9+, STK/proactive handling.",
-    "SCP11.relay": "Compatibility SCP11 entry point built on direct PC/SC.",
+    "SCP11.relay": "Compatibility namespace aliasing SCP11.live; opens the eSIM management relay.",
     "SCP11.local_access": "Local ISD-R / metadata codec / certificate helpers for on-card flows.",
     "SCP11.eim_local": "eIM-local package authoring, hotfolders, handover, and direct-card tooling.",
     "SCP11.shared": "Cross-flavour crypto, transport helpers, ASN.1 registry, GSMA error codes.",
@@ -44,7 +43,7 @@ SUBSYSTEMS: dict[str, str] = {
     "pysim": "Optional on-disk pySim checkout (upstream osmocom, gitignored). Clone https://gitlab.com/osmocom/pysim.git when the SAIP ASN.1 compile / SCP11-local flows are needed; prefer Tools.ProfilePackage for SAIP glue.",
 }
 
-# Runnable packages (python -m … after editable install, or from repo root).
+# Runnable packages (python -m ... after editable install, or from repo root).
 CLI_MODULES: list[str] = [
     "SCP03",
     "SCP80",

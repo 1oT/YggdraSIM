@@ -29,12 +29,21 @@ runtime from their upstream sources:
   (when the HIL bridge is in use). These tools are provided by their
   respective upstream projects and are not redistributed here.
 
-Vendored schema notice:
-The only third-party material redistributed inside this tree is the RSPRO
-ASN.1 schema at `docs/RSPRO.asn` (mirrored into `Tools/HilBridge/RSPRO.asn`
-for wheel packaging). It is included because it is required at runtime by
-the HIL bridge decoder and is too small to justify a separate installation
-step.
+Vendored material notice:
+Three third-party items are redistributed inside this tree, each because the
+runtime needs it locally and a separate installation step is not workable:
+- the RSPRO ASN.1 schema at `docs/RSPRO.asn` (mirrored into
+  `Tools/HilBridge/RSPRO.asn` for wheel packaging), required at runtime by
+  the HIL bridge decoder and too small to justify its own install step
+- `xterm.js` and `xterm-addon-fit` (MIT) under
+  `gui_frontend/src/vendor/xterm/`, which back the GUI terminal panel
+- `mermaid` (MIT) under `gui_frontend/src/vendor/mermaid/`, which renders
+  the diagrams in the GUI guide viewer
+
+The two browser libraries are vendored rather than loaded from a CDN because
+the GUI ships a `script-src 'self'` Content-Security-Policy and has to run
+fully offline. Each vendor directory carries a `NOTICE.md` with the upstream
+project, the pinned version, the license, and the update procedure.
 
 Acknowledgements:
 With a big-hearted thank you to the Osmocom community, the `pySim`

@@ -33,7 +33,7 @@ The following modules support direct command automation:
 | --- | --- | --- | --- | --- |
 | `python -m SCP03` | Yes | Yes | Yes | Supports `--out` YAML export with `--cmd` or `--stdin`. |
 | `python -m SCP80` | Yes | Yes | Yes | Uses the same OTA shell commands as the interactive prompt. |
-| `python -m SCP11.relay` | Yes | Yes | Yes | Relay shell using the default relay certificate set. |
+| `python -m SCP11.relay` | Yes | Yes | Yes | Compatibility alias of the `SCP11.live` shell. |
 | `python -m SCP11.live` | Yes | Yes | Yes | eSIM management relay shell. |
 | `python -m SCP11.local_access` | Yes | Yes | Yes | Local SMDPP shell against ISD-R. |
 | `python -m SCP11.eim_local` | Yes | Yes | Yes | Local eIM shell and localized flows. |
@@ -96,10 +96,10 @@ echo 5C06BF51BF449F2A | yggdrasim-asn1
 ## Wrapper HIL offline flags
 
 Two extra wrapper flags short-circuit straight into the HIL decoded-APDU
-TUI in offline review mode — no bridge, no supervisor, no `tshark -i`:
+TUI in offline review mode -- no bridge, no supervisor, no `tshark -i`:
 
-- `--open-pcap <path>` — open a saved `.pcap` / `.pcapng` in the TUI
-- `--keybag <path>` — optional keybag JSON for SCP03 / SCP11c unwrap
+- `--open-pcap <path>` -- open a saved `.pcap` / `.pcapng` in the TUI
+- `--keybag <path>` -- optional keybag JSON for SCP03 / SCP11c unwrap
 
 Sidecar keybags named `<pcap>.keys.json` / `<stem>.keys.json` are
 auto-discovered when `--keybag` is omitted. A full write-up lives in
@@ -114,12 +114,12 @@ the menu. Source installs additionally expose `yggdrasim-gui` and
 (`pip install -e '.[gui]'` for desktop; `'.[gui-server]'` for the
 headless web server).
 
-- `--gui` — desktop window via `pywebview`
-- `--web-server` — headless FastAPI/uvicorn HTTP server with the SPA
-- `--host <addr>` / `--port <num>` — override the loopback bind for `--web-server`
-- `--token-file <path>` — bearer token expected on every request (`--web-server` only)
-- `--tls-cert <path>` / `--tls-key <path>` — bring your own TLS material
-- `--tls-self-signed` — generate or reuse a self-signed pair under `state/gui_tls/`
+- `--gui` -- desktop window via `pywebview`
+- `--web-server` -- headless FastAPI/uvicorn HTTP server with the SPA
+- `--host <addr>` / `--port <num>` -- override the loopback bind for `--web-server`
+- `--token-file <path>` -- bearer token expected on every request (`--web-server` only)
+- `--tls-cert <path>` / `--tls-key <path>` -- bring your own TLS material
+- `--tls-self-signed` -- generate or reuse a self-signed pair under `state/gui_tls/`
 
 Examples:
 
@@ -269,7 +269,7 @@ GET-IOT
 EOF
 ```
 
-Session-key export (for HIL offline pcap unwrap — see below):
+Session-key export (for HIL offline pcap unwrap -- see below):
 
 ```bash
 python -m SCP03 --cmd \
@@ -332,7 +332,7 @@ EXIT
 EOF
 ```
 
-Session-key export (for HIL offline pcap unwrap — see below):
+Session-key export (for HIL offline pcap unwrap -- see below):
 
 ```bash
 python -m SCP11.local_access --cmd "LOAD-PROFILE" \
@@ -483,7 +483,7 @@ pick `[3] Open saved .pcap (offline review, no bridge)`.
 
 If `--keybag` is omitted, sidecar JSONs named `<pcap>.keys.json` or
 `<stem>.keys.json` next to the capture are auto-discovered. A missing
-keybag is non-fatal — ciphered APDUs stay wrapped.
+keybag is non-fatal -- ciphered APDUs stay wrapped.
 
 Keybag JSONs (`yggdrasim-hil-keybag/v1`) are produced by the same
 shells that build the secure channel:
@@ -492,7 +492,7 @@ shells that build the secure channel:
 | --- | --- |
 | `python -m SCP03` | `--cmd "SCP03-SD; EXPORT-KEYBAG path.keys.json label; EXIT"` |
 | `python -m SCP11.local_access` | `--dump-keybag path.keys.json` (standalone or combined with `--cmd` / `--stdin`) |
-| `python -m SCP11.live` | **no-op stub** — live SCP11c BSP keys are derived inside the eUICC and never reach the host. The flag prints a clear message and exits with code `2`. |
+| `python -m SCP11.live` | **no-op stub** -- live SCP11c BSP keys are derived inside the eUICC and never reach the host. The flag prints a clear message and exits with code `2`. |
 
 See the HIL Bridge guide (`HIL_BRIDGE_GUIDE.md` §11 "Offline pcap
 replay and session-key unwrap") for the keybag schema, replay engine

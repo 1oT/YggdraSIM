@@ -105,6 +105,10 @@ Shell control:
 - `EXIT`
 - `QA`
 
+Tab completion covers every command and alias, the `--json` / `--yaml` /
+`--debug` flags, the `RECORD` verbs, file paths, and the profile identifiers
+of the last decoded profile list.
+
 ## Common workflows
 
 ### Discovery
@@ -151,6 +155,19 @@ LOAD-PROFILE
 7. profile or BPP resolution
 8. payload load
 9. `CancelSession`
+10. `EnableProfile` for the installed profile
+
+The tenth step answers the SGP.22 v3.1 section 3.1.3 step 8 question ("enable
+the profile after installation?") without asking: once the Profile
+Installation Result reports `successResult`, the shell selects `ISD-R` again
+and sends `EnableProfile` for the ICCID the result carries (the ISD-P AID when
+the notification metadata has no ICCID). The eUICC disables the previously
+enabled profile itself and refuses with `disallowedByPolicy` when that profile
+carries PPR1; no explicit `DisableProfile` is sent first, so a refusal leaves
+the old profile in place. A refused or failed enable is reported after the
+load banner and does not turn the successful install into a failed load.
+`AUTO_ENABLE_AFTER_LOAD = False` in `LocalAccessConfig` restores the
+download-only behaviour; the Local eIM shell keeps it off.
 
 ### Metadata upload
 
@@ -188,11 +205,14 @@ Accepted identifiers:
 
 Current behavior:
 
+- `LOAD-PROFILE` enables the profile it installed (`AUTO_ENABLE_AFTER_LOAD`,
+  on by default), so no `ENABLE-PROFILE` follows a local load
 - `ENABLE-PROFILE` auto-disables the currently enabled profile before enabling
   the target
 - `DISABLE-PROFILE` no-ops cleanly when the target is already disabled
-- `DELETE-PROFILE` is allowed directly even when the target is currently
-  enabled
+- `DELETE-PROFILE` disables an enabled target first (SGP.22 v3.1 section
+  5.7.18 has the eUICC reject a delete while the profile is enabled), then
+  deletes it; a refused disable aborts the delete
 
 ## Certificate model
 

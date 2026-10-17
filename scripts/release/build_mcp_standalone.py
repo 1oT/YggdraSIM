@@ -58,6 +58,10 @@ VENDORED = {
     "yggdrasim_common/card_backend.py": "_vendor/card_backend.py",
     "yggdrasim_common/card_bridge_auth.py": "_vendor/card_bridge_auth.py",
     "yggdrasim_common/remote_lab/security.py": "_vendor/remote_lab_security.py",
+    # The remote-reader binding table card_backend imports as a sibling
+    # (``from .remote_readers import``) and the server reads for a remote
+    # binding. Standard library only.
+    "yggdrasim_common/remote_readers.py": "_vendor/remote_readers.py",
 }
 DATA_FILES = {"SCP03/seeds/aid.txt": "data/aid.txt"}
 
@@ -91,6 +95,15 @@ SERVER_REWRITES = (
     (
         "        from yggdrasim_common.card_backend import _request_card_relay_json",
         f"        from {PACKAGE}._vendor.card_backend import _request_card_relay_json",
+    ),
+    (
+        "            from yggdrasim_common.card_backend import create_card_connection",
+        f"            from {PACKAGE}._vendor.card_backend import create_card_connection",
+    ),
+    # Three sites, two indentations; the unindented form reaches them all.
+    (
+        "from yggdrasim_common.remote_readers import",
+        f"from {PACKAGE}._vendor.remote_readers import",
     ),
     # ``REPO_ROOT`` anchors two things in the full install: the packaged AID
     # registry, and the root the file tools resolve against. Split

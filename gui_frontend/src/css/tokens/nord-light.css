@@ -6,35 +6,35 @@
 
 /* -- Theme: Nord Light --------------------------------------------------- */
 html[data-theme="nord-light"] {
-  --bg: #eceff4;
+  --bg: #e5e9f0;
   --bg-elev: #ffffff;
-  --bg-elev-2: #e5e9f0;
+  --bg-elev-2: #d8dee9;
   --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(46, 52, 64, 0.05);
-  --border: rgba(76, 86, 106, 0.18);
-  --border-strong: rgba(76, 86, 106, 0.32);
+  --border: rgba(76, 86, 106, 0.28);
+  --border-strong: rgba(76, 86, 106, 0.48);
   --fg: #2e3440;
   --fg-dim: #4c566a;
-  --accent: #496b96;
+  --accent: #44648d;
   --accent-strong: #34547c;
   --accent-soft: rgba(94, 129, 172, 0.12);
   --accent-fg: #ffffff;
   --accent-glow: rgba(94, 129, 172, 0.35);
-  --gradient-accent: linear-gradient(135deg, #496b96 0%, #3f5f87 60%, #34547c 100%);
-  --gradient-brand: linear-gradient(135deg, #496b96 0%, #765a76 100%);
-  --ok: #52763f;
+  --gradient-accent: linear-gradient(135deg, #44648d 0%, #3f5f87 60%, #34547c 100%);
+  --gradient-brand: linear-gradient(135deg, #44648d 0%, #765a76 100%);
+  --ok: #4a6b38;
   --ok-soft: rgba(124, 160, 99, 0.16);
   --warn: #985343;
   --warn-soft: rgba(208, 135, 112, 0.18);
   --fail: #9b3f48;
   --fail-soft: rgba(191, 97, 106, 0.18);
-  --code-bg: #eceff4;
+  --code-bg: #e5e9f0;
   --kbd-bg: rgba(236, 239, 244, 0.96);
-  --shadow-card: 0 10px 26px rgba(46, 52, 64, 0.08);
-  --shadow-card-hover: 0 20px 44px rgba(46, 52, 64, 0.14);
+  --shadow-card: 0 1px 2px rgba(46, 52, 64, 0.06), 0 8px 22px -6px rgba(46, 52, 64, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(46, 52, 64, 0.08), 0 16px 34px -8px rgba(46, 52, 64, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.78);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
 
   /* Yggdrasil weave (Nord-Light). Same semantics as nord-dark, hues
    * shifted darker so they still read against the pale Polar-Night
@@ -47,19 +47,6 @@ html[data-theme="nord-light"] {
   --ygg-bark:  #6f5e4a;
   --ygg-ember: #b46748;
   --ygg-mist:  #7d8da3;
-
-  --tree-mf-fg:    var(--ygg-frost);
-  --tree-mf-bg:    rgba(94, 129, 172, 0.12);
-  --tree-mf-edge:  rgba(94, 129, 172, 0.55);
-  --tree-adf-fg:   var(--ygg-amber);
-  --tree-adf-bg:   rgba(185, 134, 63, 0.13);
-  --tree-adf-edge: rgba(185, 134, 63, 0.55);
-  --tree-df-fg:    var(--ygg-runic);
-  --tree-df-bg:    rgba(126, 111, 160, 0.13);
-  --tree-df-edge:  rgba(126, 111, 160, 0.55);
-  --tree-ef-fg:    var(--ygg-leaf);
-  --tree-ef-bg:    rgba(111, 141, 87, 0.12);
-  --tree-ef-edge:  rgba(111, 141, 87, 0.50);
 
   --theme-tint:
     radial-gradient(circle at top left,     rgba(136, 192, 208, 0.22), transparent 36%),

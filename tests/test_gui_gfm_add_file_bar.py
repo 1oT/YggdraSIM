@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Static wiring checks for the PE-GenericFileManagement add-file bar.
 
 The bar implements the *Add file element* affordance for TCA SAIP
@@ -69,7 +68,7 @@ class GfmAddFileBarJsTests(unittest.TestCase):
 
     def test_packages_inputs_under_inputs_key(self) -> None:
         # Backend dispatcher expects ``{inputs: {...}}`` per ActionRegistry
-        # convention — guard against accidental flattening.
+        # convention -- guard against accidental flattening.
         idx = self.text.find("/api/actions/saip.gfm_add_file_element/run")
         self.assertGreater(idx, 0)
         # Look in a 600-char window around the call for the wrapping.
@@ -81,13 +80,19 @@ class GfmAddFileBarJsTests(unittest.TestCase):
         self.assertIn("/^[0-9A-F]{4}$/.test(fid)", self.text)
 
     def test_uses_existing_apifetch(self) -> None:
-        # Don't hand-roll fetch — go through apiFetch so error
-        # handling stays consistent across the app.
+        # Don't hand-roll fetch -- go through apiFetch so error
+        # handling stays consistent across the app. A session mutation
+        # goes through saipMutationFetch, the apiFetch wrapper that lets
+        # a save wait for an apply still in flight.
         idx = self.text.find("function saipGfmBuildAddFileBar(")
         self.assertGreater(idx, 0)
         end = self.text.find("function saipEditorRenderGfmCard(", idx)
         body = self.text[idx:end]
-        self.assertIn("apiFetch(", body)
+        self.assertIn("saipMutationFetch(", body)
+        self.assertNotIn("fetch(\"/api", body)
+        wrapper = self.text.find("function saipMutationFetch(")
+        self.assertGreater(wrapper, 0)
+        self.assertIn("apiFetch(", self.text[wrapper: wrapper + 400])
 
 
 class GfmAddFileBarCssTests(unittest.TestCase):

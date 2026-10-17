@@ -3,9 +3,29 @@
 
 from __future__ import annotations
 
+import json
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[1]
+
+# A token-definition manager comes from an extension, so its input shape
+# is mirrored here; the frontend keys the manager protocol on it.
+_MANAGER_TAG = "saip-ribbon-tokens-form"
+_MANAGER_INPUT_NAMES = (
+    "configuration_id",
+    "save_as_configuration_id",
+    "registry_json",
+    "expected_digest",
+    "delete_configuration",
+    "reset_defaults",
+    "reload_current",
+    "list_configurations",
+)
 
 
 def _source_and_served_bodies() -> tuple[str, str]:
@@ -34,7 +54,7 @@ def _assert_conditional_baseline_launcher(body: str) -> None:
     assert "icon: _ccResolveIcon(action.id)" in body
     assert 'encodeURIComponent(action.id) + "/run"' in body
     assert "concrete_export_allowed === false" in body
-    assert "AUTHORING ONLY — DER/HEX export blocked" in body
+    assert "AUTHORING ONLY -- DER/HEX export blocked" in body
 
 
 def test_canonical_source_has_plugin_conditional_launcher() -> None:
@@ -80,7 +100,10 @@ def test_save_as_enforces_template_and_concrete_format_contract() -> None:
     assert "DER profile (*.der)" in source_block
     assert "ASN.1 profile (*.asn;*.asn1)" in source_block
     assert "JSON profile (*.json)" in source_block
-    assert ".varder is only available for templates" in source_block
+    assert (
+        ".varder is only available for sessions opened from a placeholder template."
+        in source_block
+    )
     assert "DER/HEX are concrete-profile formats" in source_block
     assert "Tagged JSON partial draft (*.json)" in source_block
 
@@ -103,7 +126,7 @@ def test_token_form_contribution_is_conditional_and_synced() -> None:
             '\n    // -- Lint commands',
         )
         assert token_ribbon.count('saip-ribbon-tokens-form') == 1
-        assert token_ribbon.index('label: "Token editor"') < token_ribbon.index(
+        assert token_ribbon.index('label: "Variables"') < token_ribbon.index(
             'saip-ribbon-tokens-form'
         )
         assert 'saipCatalogueActionsByTag("saip-ribbon-tokens-form").forEach' in (
@@ -135,7 +158,8 @@ def test_token_registry_form_is_large_and_refreshes_after_save_or_reset() -> Non
             "  function ccEnhanceActionForm(action, form)",
             "\n  function ccEnhanceAsn1TlvDecodeForm(form)",
         )
-        assert 'actionTags.indexOf("saip-ribbon-tokens-form")' in form_enhancement
+        assert "if (ccIsSaipTokenConfigurationManager(action)) {" in form_enhancement
+        assert 'actionTags.indexOf("saip-ribbon-tokens-form")' not in form_enhancement
         assert 'form.querySelector(\'[name="registry_json"]\')' in form_enhancement
         assert "registryInput.rows = Math.max" in form_enhancement
         assert ", 18)" in form_enhancement
@@ -180,15 +204,20 @@ def test_named_token_configuration_selectors_are_live_and_synced() -> None:
 
     required_fragments = (
         '"saip-ribbon-tokens-form"',
+        "CC_SAIP_TOKEN_CONFIGURATION_MANAGER_INPUTS",
+        "ccActionHasInput(action, fieldName)",
         'ccActionHasInput(action, "token_configuration_id")',
         'select.dataset.saipTokenConfigurationRole = role',
-        '"Loading token configurations…"',
+        '"Loading token configurations..."',
         '"No token configurations available"',
         "Array.isArray(data.token_configurations)",
         "select.dataset.preferredConfiguration",
         'data-saip-token-configuration-role="manager"',
         'data-saip-token-configuration-role="generator"',
-        "ccFindCatalogueActionByTag(",
+        "ccFindCatalogueActionByTag(\n"
+        "      CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG,\n"
+        "      ccIsSaipTokenConfigurationManager\n"
+        "    )",
         "encodeURIComponent(managerAction.id)",
         "body: JSON.stringify({ inputs: { list_configurations: true } })",
         'form.elements.namedItem("token_configuration_id")',
@@ -205,9 +234,8 @@ def test_named_token_configuration_selectors_are_live_and_synced() -> None:
     )
     for fragment in required_fragments:
         assert fragment in source_helpers
-    assert "plugin.saip_profile_generator.configure_token_definitions" not in (
-        source_helpers
-    )
+    # The protocol keys on the tag and the inputs, never on a provider's id.
+    assert re.search(r"plugin\.[a-z0-9_]+\.", source_helpers) is None
 
     for body in (command_source, served):
         popout = _between(
@@ -229,6 +257,7 @@ def test_named_token_configuration_selectors_are_live_and_synced() -> None:
             "  function ccApplyTokenRegistryActionResult(action, form, data)",
             "\n  function ccEnhanceAsn1TlvDecodeForm(form)",
         )
+        assert "!ccIsSaipTokenConfigurationManager(action) || !data" in result_apply
         assert "ccApplyTokenConfigurationCatalogue(data)" in result_apply
         assert 'form.elements.namedItem("save_as_configuration_id")' in result_apply
         assert '"delete_configuration"' in result_apply
@@ -251,6 +280,105 @@ def test_named_token_configuration_selectors_are_live_and_synced() -> None:
     catalogue_call = manager_block.index("await ccFetchTokenConfigurationCatalogue()")
     reload_call = manager_block.index("await ccReloadTokenConfigurationManager(")
     assert catalogue_call < reload_call
+
+
+def _manager_lookup_block(body: str) -> str:
+    """The catalogue lookup and the tag / input predicates; no DOM use."""
+    return "\n".join(
+        (
+            _between(
+                body,
+                "  function ccFindCatalogueActionByTag(",
+                "\n  function ccProfileTargetCacheKey(",
+            ),
+            _between(
+                body,
+                "  var CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG =",
+                "\n  function ccReplaceTokenConfigurationInput(",
+            ),
+        )
+    )
+
+
+def test_manager_protocol_needs_registry_inputs_not_only_the_ribbon_tag() -> None:
+    """The built-in universal test-value editor shares the ribbon tag.
+
+    The Tokens ribbon lists every action carrying the tag, so the editor
+    carries it too. It must never be put through the manager protocol
+    (catalogue listing, registry select, reload), and the catalogue lookup
+    the generator relies on must skip it even when it sorts first.
+    """
+    from yggdrasim_common.gui_server.actions.registry import (
+        ensure_builtin_actions_loaded,
+    )
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the JavaScript predicate contract.")
+    editor = ensure_builtin_actions_loaded().get("saip.universal_tokens").to_schema()
+    assert _MANAGER_TAG in editor["tags"]
+    manager = {
+        "id": "plugin.example.token_manager",
+        "title": "Token definitions",
+        "tags": ["saip", _MANAGER_TAG],
+        "inputs": [{"name": name} for name in _MANAGER_INPUT_NAMES],
+    }
+    generator = {
+        "id": "plugin.example.package_generator",
+        "title": "Inspect workbook",
+        "tags": ["saip", "saip-ribbon-package-form"],
+        "inputs": [{"name": "workbook_path"}, {"name": "token_configuration_id"}],
+    }
+    command_source = _command_center_source()
+    _saip_source, served = _source_and_served_bodies()
+    for body in (command_source, served):
+        harness = "\n".join(
+            (
+                "var editor = " + json.dumps(editor) + ";",
+                "var manager = " + json.dumps(manager) + ";",
+                "var generator = " + json.dumps(generator) + ";",
+                "var commandState = { catalogue: { subsystems: {",
+                "  SAIP: [editor, generator, manager] } } };",
+                _manager_lookup_block(body),
+                "var withoutManager = { catalogue: { subsystems: {",
+                "  SAIP: [editor, generator] } } };",
+                "var full = commandState;",
+                "var found = ccFindCatalogueActionByTag(",
+                "  CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG,",
+                "  ccIsSaipTokenConfigurationManager);",
+                "commandState = withoutManager;",
+                "var foundWithout = ccFindCatalogueActionByTag(",
+                "  CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG,",
+                "  ccIsSaipTokenConfigurationManager);",
+                "commandState = full;",
+                "process.stdout.write(JSON.stringify({",
+                "  editor_is_manager: ccIsSaipTokenConfigurationManager(editor),",
+                "  editor_is_generator: ccIsSaipTokenConfigurationGenerator(editor),",
+                "  manager_is_manager: ccIsSaipTokenConfigurationManager(manager),",
+                "  generator_is_generator: ccIsSaipTokenConfigurationGenerator(generator),",
+                "  tag_alone_first: ccFindCatalogueActionByTag(",
+                "    CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG).id,",
+                "  accepted: found ? found.id : null,",
+                "  accepted_without_manager: foundWithout ? foundWithout.id : null,",
+                "}));",
+            )
+        )
+        completed = subprocess.run(
+            [node, "-e", harness],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert completed.returncode == 0, completed.stderr
+        verdict = json.loads(completed.stdout)
+        assert verdict["editor_is_manager"] is False
+        assert verdict["editor_is_generator"] is False
+        assert verdict["manager_is_manager"] is True
+        assert verdict["generator_is_generator"] is True
+        assert verdict["tag_alone_first"] == editor["id"]
+        assert verdict["accepted"] == manager["id"]
+        assert verdict["accepted_without_manager"] is None
 
 
 def test_form_contribution_activates_returned_saip_session() -> None:

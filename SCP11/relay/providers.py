@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""SCP11-relay profile providers: remote ES9+ and local-file delivery."""
+"""SCP11-relay profile providers: alias of the eSIM management relay module ``SCP11.live.providers``."""
+from __future__ import annotations
 
-from SCP11 import providers as _impl
-from SCP11.shared.compat_exports import reexport_public
+import sys
 
+from SCP11.live import providers as _impl
 
-__all__ = reexport_public(_impl, globals())
+sys.modules[__name__] = _impl

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""SCP11-relay orchestrator: sequences ES2+ / ES9+ / ES8+ calls over direct PC/SC."""
-try:
-    from ..orchestrator import SGP22Orchestrator
-except ImportError:
-    from SCP11.orchestrator import SGP22Orchestrator
+"""SCP11-relay orchestrator: alias of the eSIM management relay module ``SCP11.live.orchestrator``."""
+from __future__ import annotations
 
-__all__ = ["SGP22Orchestrator"]
+import sys
+
+from SCP11.live import orchestrator as _impl
+
+sys.modules[__name__] = _impl

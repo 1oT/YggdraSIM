@@ -74,7 +74,7 @@ def test_inline_typed_encoders_enforce_exact_slot_widths() -> None:
     assert encode_inline_placeholder_value(iccid_ef, "8947000000000000001") == bytes.fromhex(
         "987400000000000000F1"
     )
-    assert len(encode_inline_placeholder_value(imsi, "240011234567890")) == 8
+    assert len(encode_inline_placeholder_value(imsi, "001011234567890")) == 8
     assert encode_inline_placeholder_value(pin, "1234") == b"1234"
     with pytest.raises(SaipVariableMaterializationError, match="exactly 4 bytes"):
         encode_inline_placeholder_value(pin, "12345")

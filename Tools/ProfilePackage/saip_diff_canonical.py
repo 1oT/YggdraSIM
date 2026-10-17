@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Context-aware re-keying of SAIP profile sections for diff.
 
 Two profiles built by different tools, or the same tool at different
@@ -16,7 +15,7 @@ This module re-keys ``genericFileManagement`` from a list-of-blocks
 into a dict keyed by the resolved file-system path of each EF /
 DF / MF (``3F00/7F20/6F07`` for EF.IMSI under DF.GSM, etc.). The
 per-key value is the ordered command sub-list (``createFCP``,
-``fillFileContent``, ``fillFileOffset``, …) that targets that file.
+``fillFileContent``, ``fillFileOffset``, ...) that targets that file.
 ``filePath`` SELECTs are absorbed into the keys and never appear as
 commands, so two profiles that contain the same EFs in different
 list-index positions produce byte-identical canonical maps and the
@@ -110,7 +109,7 @@ def _iter_gfm_commands(
     SAIP allows multiple ``pe-genericFileManagement`` PEs at the top
     level, each carrying its own ``fileManagementCMD`` list. Diff
     cosmetics do not care which PE block holds the command, only which
-    file it targets — so we flatten across blocks before re-keying.
+    file it targets -- so we flatten across blocks before re-keying.
     """
     cmds: list[tuple[str, Any]] = []
     for block in generic_file_management:

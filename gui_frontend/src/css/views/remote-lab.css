@@ -148,6 +148,23 @@
   background: var(--warn-soft);
 }
 
+/* The bench is running a rig; this card is still free to take. Warn
+   rather than fail: it reports a neighbour's activity, not a fault. */
+.remote-lab-status--host-busy {
+  --remote-lab-status-color: var(--warn);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
+  background: var(--warn-soft);
+}
+
+/* Recorded for SSH alone: a kind of host, not a broken one. */
+.remote-lab-status--ssh-only {
+  --remote-lab-status-color: var(--fg-dim);
+  color: var(--fg-dim);
+  border-color: var(--border);
+  background: var(--bg-elev-2);
+}
+
 .remote-lab-status--error,
 .remote-lab-status--offline {
   --remote-lab-status-color: var(--fail);
@@ -197,4 +214,76 @@
   .remote-lab-card-head {
     align-items: flex-start;
   }
+}
+
+/* An open editor takes the whole row: eight fields in a 280px card column
+   stack into a scroll, and the grid has the width to spare. */
+.remote-lab-card--editing {
+  grid-column: 1 / -1;
+}
+
+/* -- Inline device editor ------------------------------------------------
+   Opens inside the card that owns it rather than as a floating surface, the
+   same way the import panel sits inside the toolbar it belongs to. */
+.remote-lab-edit-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+}
+
+.remote-lab-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 14px;
+}
+
+.remote-lab-edit-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.remote-lab-edit-field label {
+  margin-bottom: 4px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.remote-lab-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  color: var(--fg);
+  caret-color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.remote-lab-edit-input:hover {
+  border-color: var(--accent);
+}
+
+.remote-lab-edit-input:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
+.remote-lab-edit-error {
+  margin: 10px 0 0;
+  color: var(--fail);
+  font-size: 12px;
+}
+
+.remote-lab-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }

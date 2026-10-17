@@ -22,9 +22,14 @@ from SCP03.transport.card import CardTransporter
 def _cap_component(tag: int, payload: bytes) -> bytes:
     return bytes([tag]) + len(payload).to_bytes(2, "big") + payload
 
+# JCVM 3.1 §6.4 header_component_compact, everything ahead of AID_length:
+# magic 'DECAFFED', CAP format minor then major ('02' '02'), flags, and the
+# package_info minor and major version.
+HEADER_PREFIX = bytes.fromhex("DECAFFED") + b"\x02\x02\x00\x00\x01"
+
 
 def _header_component(package_aid: bytes = bytes.fromhex("A000000151")) -> bytes:
-    payload = (b"\x00" * 9) + bytes([len(package_aid)]) + package_aid
+    payload = HEADER_PREFIX + bytes([len(package_aid)]) + package_aid
     return _cap_component(0x01, payload)
 
 
@@ -49,7 +54,7 @@ def test_cap_parser_rejects_trailing_load_file_data() -> None:
 def test_cap_parser_rejects_truncated_package_aid() -> None:
     malformed_header = _cap_component(
         0x01,
-        (b"\x00" * 9) + b"\x10" + bytes.fromhex("A000000151"),
+        HEADER_PREFIX + b"\x10" + bytes.fromhex("A000000151"),
     )
     with tempfile.TemporaryDirectory() as temp_dir:
         ijc_path = Path(temp_dir) / "truncated.ijc"
@@ -106,7 +111,8 @@ def test_gp_registry_pagination_reuses_get_next_occurrence_p2() -> None:
 
     result = manager.get_registry_data("apps")
 
-    assert [apdu[6:8] for apdu in manager.tp.calls] == ["00", "01", "01"]
+    # GPC v2.3.1 Table 11-34: P2 02 = first occurrences in TLV format, 03 = next.
+    assert [apdu[6:8] for apdu in manager.tp.calls] == ["02", "03", "03"]
     assert result["pages"] == 3
     assert result["truncated"] is False
 
@@ -338,23 +344,18 @@ def test_security_pin_encoder_never_truncates_or_sends_empty_ascii() -> None:
     assert controller._normalize_pin_ref("A") == 0x0A
 
 
-def test_cli_auth_output_requires_explicit_derived_key_reveal(capsys) -> None:
+def test_cli_auth_output_prints_res_ck_and_ik(capsys) -> None:
     controller = SecurityController(None)
     response = bytes.fromhex(
         "DB04A1A2A3A410" + ("11" * 16) + "10" + ("22" * 16)
     )
 
     controller._parse_auth_response(response)
-    redacted = capsys.readouterr().out
-    assert "A1A2A3A4" in redacted
-    assert "11" * 16 not in redacted
-    assert "22" * 16 not in redacted
-    assert "redacted" in redacted
-
-    controller._parse_auth_response(response, reveal_sensitive=True)
-    revealed = capsys.readouterr().out
-    assert "11" * 16 in revealed
-    assert "22" * 16 in revealed
+    printed = capsys.readouterr().out
+    assert "A1A2A3A4" in printed
+    assert "11" * 16 in printed
+    assert "22" * 16 in printed
+    assert "redacted" not in printed
 
 
 def test_stk_tlv_reader_rejects_nonminimal_lengths() -> None:
@@ -432,12 +433,25 @@ def test_shell_redacts_pin_and_put_key_apdu_payloads() -> None:
     assert ShellDispatcher._redact_apdu_for_display(
         "80D8000004DEADBEEF"
     ) == "80D80000 [credential payload redacted]"
+    assert ShellDispatcher._is_credential_command_line("MANAGE-PIN 0A 1234") is True
+
+
+def test_shell_prints_store_data_payloads_but_keeps_them_out_of_history() -> None:
+    # SGP.22 v3.1 §5.7.2 carries the ES10x command payload in STORE DATA, so
+    # the operator has to be able to read it in a trace or a script echo. The
+    # readline history file still must not keep a personalisation body sent
+    # through the same instruction.
     assert ShellDispatcher._redact_apdu_for_display(
         "80E2000004DEADBEEF"
-    ) == "80E20000 [credential payload redacted]"
-    assert ShellDispatcher._is_sensitive_command_line(
-        "80E2000004DEADBEEF"
-    ) is True
+    ) == "80E2000004DEADBEEF"
+    assert ShellDispatcher._is_credential_command_line("80E2000004DEADBEEF") is False
+    assert ShellDispatcher._is_sensitive_command_line("80E2000004DEADBEEF") is True
+    assert ShellDispatcher._is_sensitive_command_line("STORE-DATA AABB") is True
+
+    shell = ShellDispatcher.__new__(ShellDispatcher)
+    shell.binder = None
+    assert shell._redact_command_line_for_display("81E29100BF2B00") == "81E29100BF2B00"
+    assert shell._history_line_is_sensitive("81E29100BF2B00") is True
 
 
 def test_shell_recognizes_sensitive_macro_expansions() -> None:

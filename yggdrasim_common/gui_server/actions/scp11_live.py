@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 eSIM management Command Center actions.
 
 Registers every SCP11/live/console command as a Command Center action so
@@ -27,13 +26,13 @@ further down so the sidebar groups render predictably):
   ``store_metadata``). Every one gates on the same ``confirm`` checkbox
   the config writes use.
 * **Streaming flows** (``discover``, ``eim_authenticate``,
-  ``eim_download``, ``eim_poll``, ``download_profile``, ``flow``,
+  ``eim_download``, ``download_profile``, ``flow``,
   ``verify_scp11``). Async-generator dispatchers tee the console /
   orchestrator stdout into the WS action stream.
 
 All card-touching actions accept an optional ``reader`` name that the
 action layer normalises back into a ``reader_index`` before the channel
-is opened. The destructive ``confirm`` field is a per-call form input —
+is opened. The destructive ``confirm`` field is a per-call form input --
 it is intentionally **not** wired to an environment flag, so it never
 shows up in the GUI env config surface.
 """
@@ -57,6 +56,16 @@ from yggdrasim_common.cancellation import attach_cancel_event
 
 _LOGGER = logging.getLogger("yggdrasim.gui.actions.scp11_live")
 
+# ProfileInfoListRequest naming every ProfileInfo member this action renders.
+# SGP.22 v3.1 §5.7.15: 'BF2D00' returns only the default set, which excludes
+# profile policy rules '99' and the SGP.32 members '9F26' / '9F67' / '9F7B',
+# so the fallback columns are unanswerable without a '5C' tag list. The list
+# names exactly what this action returns; icon '94' alone would add up to
+# 1024 bytes per Profile that nothing here displays.
+_PROFILE_INFO_TAGGED_REQUEST = bytes.fromhex(
+    "BF2D115C0F5A4F9F7090919295999F269F679F7B"
+)
+
 
 def _provider_module(submodule: str) -> Any:
     """Import a module from the single eSIM management relay provider."""
@@ -69,24 +78,38 @@ def _provider_module(submodule: str) -> Any:
 
 
 def _resolve_reader_index(reader_name: str) -> int:
-    """Map a reader name back to a ``reader_index`` (0 if empty)."""
+    """Map a reader name back to a ``reader_index`` (0 if empty).
+
+    A registered remote reader resolves first, to ``REMOTE_READER_INDEX``;
+    ``_build_apdu_channel`` opens the relay channel for that name.
+    """
+    from yggdrasim_common.remote_readers import REMOTE_READER_INDEX, is_remote_reader
+
     cleaned = str(reader_name or "").strip()
+    if is_remote_reader(cleaned):
+        return REMOTE_READER_INDEX
     if len(cleaned) == 0:
         return 0
     try:
         from smartcard.System import readers as list_pcsc_readers
     except ImportError as error:
-        raise RuntimeError("pyscard is not installed — cannot pick reader by name.") from error
+        raise RuntimeError("pyscard is not installed -- cannot pick reader by name.") from error
     for idx, reader in enumerate(list_pcsc_readers()):
         if str(reader) == cleaned:
             return idx
     raise RuntimeError(f"reader not found: {cleaned!r}")
 
 
-def _build_apdu_channel(reader_index: int) -> Any:
-    """Open a PC/SC APDU channel bound to the chosen reader."""
-    PcscApduChannel = getattr(_provider_module("transport"), "PcscApduChannel")
-    return PcscApduChannel(reader_index=reader_index)
+def _build_apdu_channel(reader_index: int, reader_name: str = "") -> Any:
+    """Open the APDU channel for the chosen reader: PC/SC, or the relay for a remote one."""
+    from yggdrasim_common.remote_readers import REMOTE_READER_INDEX
+
+    transport = _provider_module("transport")
+    if int(reader_index) == REMOTE_READER_INDEX:
+        RemoteApduChannel = getattr(transport, "RemoteApduChannel")
+        return RemoteApduChannel(str(reader_name or ""), quiet_apdu_logging=True)
+    PcscApduChannel = getattr(transport, "PcscApduChannel")
+    return PcscApduChannel(reader_index=reader_index, quiet_apdu_logging=True)
 
 
 def _close_apdu_channel(channel: Any) -> None:
@@ -98,11 +121,11 @@ def _close_apdu_channel(channel: Any) -> None:
         return
     try:
         connection.disconnect()
-    except Exception:  # noqa: BLE001 — cleanup path
+    except Exception:  # noqa: BLE001 -- cleanup path
         pass
 
 
-def _make_orchestrator(reader_index: int) -> tuple[Any, Any, Any]:
+def _make_orchestrator(reader_index: int, reader_name: str = "") -> tuple[Any, Any, Any]:
     """Instantiate ``SGP22Orchestrator`` with a per-call APDU channel.
 
     Returns ``(orchestrator, channel, cfg)``; the caller must close the
@@ -114,8 +137,8 @@ def _make_orchestrator(reader_index: int) -> tuple[Any, Any, Any]:
     SGP22Orchestrator = getattr(_provider_module("orchestrator"), "SGP22Orchestrator")
 
     base_cfg = SGPConfig()
-    cfg = replace(base_cfg, READER_INDEX=int(reader_index))
-    channel = _build_apdu_channel(int(reader_index))
+    cfg = replace(base_cfg, READER_INDEX=int(reader_index), READER_NAME=str(reader_name or ""))
+    channel = _build_apdu_channel(int(reader_index), reader_name)
     orchestrator = SGP22Orchestrator(cfg=cfg, apdu_channel=channel)
     return orchestrator, channel, cfg
 
@@ -157,7 +180,7 @@ def _dispatch_get_eid(
     """Return the EID read via the ECASD applet."""
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    orchestrator, channel, _cfg = _make_orchestrator(reader_index)
+    orchestrator, channel, _cfg = _make_orchestrator(reader_index, reader_name)
     trace_sink = io.StringIO()
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
@@ -193,6 +216,25 @@ def _dispatch_get_eid(
 # ----------------------------------------------------------------------
 
 
+def _profile_info_entries(parsed: dict[int, Any]) -> list[Any]:
+    """Pull the ``E3`` ProfileInfo blocks out of a parsed BF2D response.
+
+    ``ProfileInfoListResponse`` nests them two levels down --
+    ``BF2D`` → ``profileInfoListOk`` (``A0``) → ``E3`` -- so a flat lookup for
+    ``E3`` on the parse root finds nothing. Both outer layers are treated as
+    optional so a caller holding an already-unwrapped fragment still works.
+    """
+    node: Any = parsed
+    for tag in (0xBF2D, 0xA0):
+        if not isinstance(node, dict):
+            return []
+        if tag in node:
+            node = _tlv_first(node, tag)
+    if not isinstance(node, dict):
+        return []
+    return _tlv_as_list(node.get(0xE3))
+
+
 def _decode_profile_entry(entry: Any) -> dict[str, Any]:
     """Decode one ``E3`` ProfileInfo block into a dict row.
 
@@ -206,7 +248,7 @@ def _decode_profile_entry(entry: Any) -> dict[str, Any]:
     elif isinstance(entry, (bytes, bytearray)):
         try:
             parsed = _tlv_parse(bytes(entry))
-        except Exception:  # noqa: BLE001 — report a raw row
+        except Exception:  # noqa: BLE001 -- report a raw row
             return {
                 "iccid": "",
                 "state": "",
@@ -268,7 +310,23 @@ def _decode_profile_entry(entry: Any) -> dict[str, Any]:
         "profile_class_code": class_int,
         "nickname": nickname,
         "aid": aid_hex,
+        "fallback_attribute": _decode_optional_boolean(_tlv_first(parsed, 0x9F26)),
+        "fallback_allowed": _decode_optional_boolean(_tlv_first(parsed, 0x9F67)),
+        "ecall_indication": _decode_optional_boolean(_tlv_first(parsed, 0x9F7B)),
     }
+
+
+def _decode_optional_boolean(value: Any) -> Optional[bool]:
+    """Read a DER BOOLEAN that the eUICC omits when it holds its DEFAULT.
+
+    SGP.32 §2.11.1.1 gives ``fallbackAttribute`` DEFAULT FALSE, so an absent
+    tag means FALSE -- but only in a response to a tag list that named it.
+    ``None`` therefore means "the eUICC said nothing", which the caller
+    resolves against whether the tag list was honoured.
+    """
+    if isinstance(value, (bytes, bytearray)) and len(value) > 0:
+        return bytes(value)[0] != 0x00
+    return None
 
 
 def _swap_nibbles(value: str) -> str:
@@ -298,28 +356,44 @@ def _dispatch_list_profiles(
     """Fetch ``ProfilesInfo`` (``BF2D``) and return a decoded table."""
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    orchestrator, channel, _cfg = _make_orchestrator(reader_index)
+    orchestrator, channel, _cfg = _make_orchestrator(reader_index, reader_name)
 
     rows: list[dict[str, Any]] = []
     raw_hex = ""
     sw_info = "9000"
     note_parts: list[str] = []
+    tag_list_honoured = True
     trace_sink = io.StringIO()
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
             orchestrator._phase_connect()
-            raw = orchestrator._send_es10b_store_data(
-                bytes.fromhex("BF2D00"),
-                "GUI: GetProfilesInfo",
-            )
+            try:
+                raw = orchestrator._send_es10b_store_data(
+                    _PROFILE_INFO_TAGGED_REQUEST,
+                    "GUI: GetProfilesInfo [TAGGED]",
+                )
+            except Exception as tag_error:  # noqa: BLE001 -- eUICC MAY refuse the tag list
+                tag_list_honoured = False
+                note_parts.append(f"tag list refused ({tag_error}); default set only")
+                raw = orchestrator._send_es10b_store_data(
+                    bytes.fromhex("BF2D00"),
+                    "GUI: GetProfilesInfo",
+                )
         raw_hex = raw.hex().upper()
-        parsed = _tlv_parse(raw)
-        entries = _tlv_as_list(parsed.get(0xE3))
+        entries = _profile_info_entries(_tlv_parse(raw))
         for entry in entries:
-            rows.append(_decode_profile_entry(entry))
+            row = _decode_profile_entry(entry)
+            if tag_list_honoured:
+                # SGP.32 §2.11.1.1: fallbackAttribute is DEFAULT FALSE and the
+                # other two are treated as FALSE when absent -- but an absence
+                # only carries that meaning once the tag was asked for.
+                for key in ("fallback_attribute", "fallback_allowed", "ecall_indication"):
+                    if row[key] is None:
+                        row[key] = False
+            rows.append(row)
         if len(rows) == 0:
             note_parts.append("no E3 profile records in response")
-    except Exception as error:  # noqa: BLE001 — surface transport/TLV failures
+    except Exception as error:  # noqa: BLE001 -- surface transport/TLV failures
         sw_info = "error"
         note_parts.append(f"{type(error).__name__}: {error}")
     finally:
@@ -330,6 +404,7 @@ def _dispatch_list_profiles(
         "reader_name": reader_name or "(default)",
         "count": len(rows),
         "rows": rows,
+        "tag_list_honoured": tag_list_honoured,
         "raw_hex": raw_hex,
         "sw": sw_info,
         "note": "; ".join(note_parts) if note_parts else "ok",
@@ -350,7 +425,7 @@ def _dispatch_get_smdp(
     """Fetch ``EuiccConfiguredData`` (``BF3C``) and return the addresses."""
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    orchestrator, channel, _cfg = _make_orchestrator(reader_index)
+    orchestrator, channel, _cfg = _make_orchestrator(reader_index, reader_name)
     trace_sink = io.StringIO()
     raw_hex = ""
     lines: list[dict[str, str]] = []
@@ -416,7 +491,7 @@ def _dispatch_list_notifications(
     """Fetch pending notifications (``BF28``) and return a table."""
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    orchestrator, channel, _cfg = _make_orchestrator(reader_index)
+    orchestrator, channel, _cfg = _make_orchestrator(reader_index, reader_name)
     trace_sink = io.StringIO()
     rows: list[dict[str, Any]] = []
     raw_hex = ""
@@ -546,7 +621,7 @@ def _dispatch_get_euicc_info2(
     """Fetch ``EUICCInfo2`` (``BF22``) and return the raw hex + decoded summary."""
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
-    orchestrator, channel, _cfg = _make_orchestrator(reader_index)
+    orchestrator, channel, _cfg = _make_orchestrator(reader_index, reader_name)
     trace_sink = io.StringIO()
     raw_hex = ""
     lines: list[dict[str, str]] = []
@@ -804,7 +879,7 @@ class _FakeClient:
         self.orchestrator = orchestrator
 
 
-def _build_console(reader_index: int) -> tuple[Any, Any]:
+def _build_console(reader_index: int, reader_name: str = "") -> tuple[Any, Any]:
     """Instantiate a headless ``SCP11Console`` bound to a fresh channel.
 
     Returns ``(console, channel)``; caller must close the channel. The
@@ -818,8 +893,8 @@ def _build_console(reader_index: int) -> tuple[Any, Any]:
     SGP22Orchestrator = getattr(_provider_module("orchestrator"), "SGP22Orchestrator")
 
     base_cfg = SGPConfig()
-    cfg = replace(base_cfg, READER_INDEX=int(reader_index))
-    channel = _build_apdu_channel(int(reader_index))
+    cfg = replace(base_cfg, READER_INDEX=int(reader_index), READER_NAME=str(reader_name or ""))
+    channel = _build_apdu_channel(int(reader_index), reader_name)
     profile_provider = build_profile_provider(cfg)
     orchestrator = SGP22Orchestrator(
         cfg=cfg,
@@ -831,7 +906,9 @@ def _build_console(reader_index: int) -> tuple[Any, Any]:
         apdu_channel=channel,
         orchestrator=orchestrator,
         profile_provider=profile_provider,
-        build_apdu_channel=lambda active_cfg: _build_apdu_channel(active_cfg.READER_INDEX),
+        build_apdu_channel=lambda active_cfg: _build_apdu_channel(
+            active_cfg.READER_INDEX, getattr(active_cfg, "READER_NAME", "")
+        ),
         build_profile_provider=build_profile_provider,
     )
     console = SCP11Console(fake)
@@ -846,7 +923,7 @@ def _capture_stdout(
     """Run ``callable_(*args, **kwargs)`` with stdout+stderr captured.
 
     Returns ``(result, trace_text)`` with ANSI stripped. Exceptions
-    propagate — the caller decides how to surface them in the response.
+    propagate -- the caller decides how to surface them in the response.
     """
     sink = io.StringIO()
     with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
@@ -860,13 +937,14 @@ def _run_console_handler(
     argument: str = "",
     *,
     connect_first: bool = True,
+    reader_name: str = "",
 ) -> tuple[Any, str, str]:
     """Construct a per-call console, invoke ``handler_name``, tear down.
 
     Returns ``(result, trace, reader_label)``. ``reader_label`` is a
     display-ready string ("(default)" when no reader was picked).
     """
-    console, channel = _build_console(int(reader_index))
+    console, channel = _build_console(int(reader_index), reader_name)
     try:
         if connect_first:
             try:
@@ -887,6 +965,7 @@ def _run_console_callable(
     work: Callable[[Any], Any],
     *,
     connect_first: bool = True,
+    reader_name: str = "",
 ) -> tuple[Any, str]:
     """Run ``work(console)`` inside a captured-stdout context.
 
@@ -894,7 +973,7 @@ def _run_console_callable(
     to invoke several helpers or inspect state post-call) without
     forcing everyone through ``_run_console_handler``.
     """
-    console, channel = _build_console(int(reader_index))
+    console, channel = _build_console(int(reader_index), reader_name)
     try:
         if connect_first:
             try:
@@ -967,6 +1046,7 @@ async def _stream_console(
     start_message: Optional[str] = None,
     done_message: str = "complete.",
     cancel_event: Optional[threading.Event] = None,
+    reader_name: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     """Async-generator tee: run a console command in a background thread
     and yield every captured stdout line as a stream event.
@@ -977,10 +1057,11 @@ async def _stream_console(
 
     ``cancel_event`` is the run's stop flag. It is published on the
     console with :func:`yggdrasim_common.cancellation.attach_cancel_event`
-    so a command that loops -- an eIM poll cadence, a STATUS watchdog --
-    can end at its next checkpoint. Commands that never check the flag
+    so a command that loops -- an eIM poll cadence, say -- can end at its
+    next checkpoint. Commands that never check the flag
     keep running in their daemon worker; the stream still closes, so the
-    GUI stops waiting on a run the operator has already abandoned.
+    GUI stops waiting on a run the operator has already abandoned, and
+    whatever such a command reports once the loop has closed is dropped.
     """
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -989,13 +1070,21 @@ async def _stream_console(
         event: dict[str, Any] = {"level": level, "message": message}
         if len(extra) > 0:
             event.update(extra)
-        loop.call_soon_threadsafe(queue.put_nowait, event)
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, event)
+        except RuntimeError:
+            # The loop has closed: the stream ended before the command did
+            # (a stopped run whose command ignores the flag) and nothing
+            # reads the queue. Drop the event, as apdu_recorder does for a
+            # closed subscriber loop, rather than end the worker on a
+            # traceback.
+            return
 
     def _worker() -> None:
         console: Any = None
         channel: Any = None
         try:
-            console, channel = _build_console(int(reader_index))
+            console, channel = _build_console(int(reader_index), reader_name)
         except Exception as error:
             _post("error", f"reader bind failed: {type(error).__name__}: {error}")
             _post("done", done_message, ok=False)
@@ -1148,7 +1237,7 @@ def _reader_input_field() -> ActionField:
 
 
 # ----------------------------------------------------------------------
-# Tranche 1 — read-only expansion (direct orchestrator / console reads)
+# Tranche 1 -- read-only expansion (direct orchestrator / console reads)
 # ----------------------------------------------------------------------
 
 
@@ -1156,13 +1245,14 @@ def _orchestrator_store_data(
     reader_index: int,
     payload_hex: str,
     log_name: str,
+    reader_name: str = "",
 ) -> tuple[bytes, str]:
     """Run a single ES10b GET with a captured-stdout trace.
 
     Returns ``(response_bytes, trace_text)``. Raises on transport errors
     (same as the orchestrator primitive).
     """
-    orchestrator, channel, _cfg = _make_orchestrator(int(reader_index))
+    orchestrator, channel, _cfg = _make_orchestrator(int(reader_index), reader_name)
     trace_sink = io.StringIO()
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
@@ -1196,7 +1286,8 @@ def _dispatch_get_euicc_info1(
     note_parts: list[str] = []
     try:
         raw, trace = _orchestrator_store_data(
-            reader_index, "BF2000", "GUI: GetEuiccInfo1"
+            reader_index, "BF2000", "GUI: GetEuiccInfo1",
+            reader_name=reader_name,
         )
         raw_hex = raw.hex().upper()
         trace_parts.append(trace)
@@ -1231,7 +1322,8 @@ def _dispatch_get_rat(
     note_parts: list[str] = []
     try:
         raw, trace = _orchestrator_store_data(
-            reader_index, "BF4300", "GUI: GetRAT"
+            reader_index, "BF4300", "GUI: GetRAT",
+            reader_name=reader_name,
         )
         raw_hex = raw.hex().upper()
         if len(raw) > 0:
@@ -1265,7 +1357,8 @@ def _dispatch_get_certs(
     note_parts: list[str] = []
     try:
         raw, trace = _orchestrator_store_data(
-            reader_index, "BF5600", "GUI: GetCerts"
+            reader_index, "BF5600", "GUI: GetCerts",
+            reader_name=reader_name,
         )
         raw_hex = raw.hex().upper()
         if len(raw) > 0:
@@ -1299,7 +1392,8 @@ def _dispatch_get_eim_config(
     note_parts: list[str] = []
     try:
         raw, trace = _orchestrator_store_data(
-            reader_index, "BF5500", "GUI: GetEimConfigurationData"
+            reader_index, "BF5500", "GUI: GetEimConfigurationData",
+            reader_name=reader_name,
         )
         raw_hex = raw.hex().upper()
         if len(raw) > 0:
@@ -1322,8 +1416,8 @@ def _dispatch_get_eim_config(
 def _dispatch_aids(ctx: ActionContext) -> dict[str, Any]:
     """Return the local AID alias registry (no card required)."""
     try:
-        from SCP11.config import SCP03Config
-    except ImportError:  # pragma: no cover — defensive
+        from SCP03.config import Config as SCP03Config
+    except ImportError:  # pragma: no cover -- defensive
         SCP03Config = None  # type: ignore[assignment]
 
     path = ""
@@ -1374,7 +1468,7 @@ def _dispatch_status(
     lines: list[dict[str, str]] = []
     note_parts: list[str] = []
 
-    orchestrator, channel, _cfg = _make_orchestrator(reader_index)
+    orchestrator, channel, _cfg = _make_orchestrator(reader_index, reader_name)
     trace_sink = io.StringIO()
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
@@ -1467,7 +1561,7 @@ def _dispatch_scan(
     result: dict[str, Any] = {}
     trace = ""
     try:
-        result, trace = _run_console_callable(reader_index, _work, connect_first=False)
+        result, trace = _run_console_callable(reader_index, _work, connect_first=False, reader_name=reader_name)
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
 
@@ -1519,7 +1613,7 @@ def _dispatch_read_metadata(
     rows: list[dict[str, Any]] = []
     trace = ""
     try:
-        rows, trace = _run_console_callable(reader_index, _work)
+        rows, trace = _run_console_callable(reader_index, _work, reader_name=reader_name)
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
 
@@ -1564,7 +1658,7 @@ def _dispatch_get_metadata(
     view: Optional[dict[str, Any]] = None
     trace = ""
     try:
-        view, trace = _run_console_callable(reader_index, _work)
+        view, trace = _run_console_callable(reader_index, _work, reader_name=reader_name)
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
 
@@ -1622,7 +1716,7 @@ def _dispatch_get_pol(
     data: dict[str, Any] = {"found": False}
     trace = ""
     try:
-        data, trace = _run_console_callable(reader_index, _work)
+        data, trace = _run_console_callable(reader_index, _work, reader_name=reader_name)
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
 
@@ -1682,7 +1776,7 @@ def _dispatch_get_all_data(
         }
 
     try:
-        result, trace = _run_console_callable(reader_index, _work, connect_first=True)
+        result, trace = _run_console_callable(reader_index, _work, connect_first=True, reader_name=reader_name)
         report = str(result.get("report", "") if isinstance(result, dict) else "")
         snapshot = dict(result.get("snapshot", {}) if isinstance(result, dict) else {})
         if isinstance(result, dict):
@@ -1706,7 +1800,7 @@ def _dispatch_get_es9(ctx: ActionContext) -> dict[str, Any]:
     SGPConfig = None  # type: ignore[assignment]
     try:
         SGPConfig = getattr(_provider_module("config"), "SGPConfig")
-    except Exception:  # pragma: no cover — config module missing / bad
+    except Exception:  # pragma: no cover -- config module missing / bad
         SGPConfig = None  # type: ignore[assignment]
 
     cfg = SGPConfig() if SGPConfig is not None else None
@@ -1760,7 +1854,7 @@ def _dispatch_es9_cert_info(ctx: ActionContext) -> dict[str, Any]:
 
 
 # ----------------------------------------------------------------------
-# Tranche 2 — config writes (require confirm checkbox)
+# Tranche 2 -- config writes (require confirm checkbox)
 # ----------------------------------------------------------------------
 
 
@@ -1784,7 +1878,7 @@ def _dispatch_set_smdp(
         return str(console.current_smdp_address or "")
 
     try:
-        applied, trace = _run_console_callable(reader_index, _work, connect_first=False)
+        applied, trace = _run_console_callable(reader_index, _work, connect_first=False, reader_name=reader_name)
     except Exception as error:  # noqa: BLE001
         return {
             "reader_index": reader_index,
@@ -1938,7 +2032,7 @@ def _dispatch_set_es9_ca(
 
 
 # ----------------------------------------------------------------------
-# Tranche 3 — card mutations (require confirm checkbox)
+# Tranche 3 -- card mutations (require confirm checkbox)
 # ----------------------------------------------------------------------
 
 
@@ -1946,15 +2040,16 @@ def _run_guarded_console_handler(
     reader_index: int,
     handler_name: str,
     argument: str,
+    reader_name: str = "",
 ) -> dict[str, Any]:
     """Shared skeleton for destructive console handlers.
 
-    Always returns a dict-shape result ``{ok, note, trace}`` — the
+    Always returns a dict-shape result ``{ok, note, trace}`` -- the
     dispatchers add their own extra fields on top.
     """
     try:
         _, trace, _ = _run_console_handler(
-            reader_index, handler_name, argument=argument
+            reader_index, handler_name, argument=argument, reader_name=reader_name
         )
     except Exception as error:  # noqa: BLE001
         return {
@@ -1987,7 +2082,8 @@ def _dispatch_enable_profile(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     result = _run_guarded_console_handler(
-        reader_index, "_cmd_enable_profile", identifier
+        reader_index, "_cmd_enable_profile", identifier,
+        reader_name=reader_name,
     )
     result.update({
         "reader_index": reader_index,
@@ -2011,7 +2107,8 @@ def _dispatch_disable_profile(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     result = _run_guarded_console_handler(
-        reader_index, "_cmd_disable_profile", identifier
+        reader_index, "_cmd_disable_profile", identifier,
+        reader_name=reader_name,
     )
     result.update({
         "reader_index": reader_index,
@@ -2035,7 +2132,8 @@ def _dispatch_delete_profile(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     result = _run_guarded_console_handler(
-        reader_index, "_cmd_delete_profile", identifier
+        reader_index, "_cmd_delete_profile", identifier,
+        reader_name=reader_name,
     )
     result.update({
         "reader_index": reader_index,
@@ -2055,7 +2153,8 @@ def _dispatch_reset_card(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     result = _run_guarded_console_handler(
-        reader_index, "_cmd_reset", ""
+        reader_index, "_cmd_reset", "",
+        reader_name=reader_name,
     )
     result.update({
         "reader_index": reader_index,
@@ -2081,7 +2180,8 @@ def _dispatch_remove_notification(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     result = _run_guarded_console_handler(
-        reader_index, "_cmd_remove_notification", str(seq_int)
+        reader_index, "_cmd_remove_notification", str(seq_int),
+        reader_name=reader_name,
     )
     result.update({
         "reader_index": reader_index,
@@ -2105,7 +2205,7 @@ def _dispatch_clear_notifications(
         return int(console._clear_notifications_internal(quiet=False) or 0)
 
     try:
-        count, trace = _run_console_callable(reader_index, _work)
+        count, trace = _run_console_callable(reader_index, _work, reader_name=reader_name)
     except Exception as error:  # noqa: BLE001
         return {
             "reader_index": reader_index,
@@ -2150,7 +2250,8 @@ def _dispatch_set_pol(
     reader_index = _resolve_reader_index(reader_name)
     argument = f"{identifier} {payload_hex}"
     result = _run_guarded_console_handler(
-        reader_index, "_cmd_set_pol", argument
+        reader_index, "_cmd_set_pol", argument,
+        reader_name=reader_name,
     )
     result.update({
         "reader_index": reader_index,
@@ -2185,7 +2286,8 @@ def _dispatch_store_metadata(
     reader_index = _resolve_reader_index(reader_name)
     argument = f"{identifier} {payload_hex}"
     result = _run_guarded_console_handler(
-        reader_index, "_cmd_store_metadata", argument
+        reader_index, "_cmd_store_metadata", argument,
+        reader_name=reader_name,
     )
     result.update({
         "reader_index": reader_index,
@@ -2197,7 +2299,7 @@ def _dispatch_store_metadata(
 
 
 # ----------------------------------------------------------------------
-# Tranche 4 — streaming flows (async-generator dispatchers)
+# Tranche 4 -- streaming flows (async-generator dispatchers)
 # ----------------------------------------------------------------------
 
 
@@ -2217,6 +2319,7 @@ async def _dispatch_stream_discover(
         start_message=f"DISCOVER: reader={_reader_label(reader_name)}",
         done_message="DISCOVER complete.",
         cancel_event=_cancel_event_from(ctx),
+        reader_name=reader_name,
     ):
         yield event
 
@@ -2242,6 +2345,7 @@ async def _dispatch_stream_eim_authenticate(
         ),
         done_message="EIM-AUTHENTICATE complete.",
         cancel_event=_cancel_event_from(ctx),
+        reader_name=reader_name,
     ):
         yield event
 
@@ -2250,43 +2354,29 @@ async def _dispatch_stream_eim_download(
     ctx: ActionContext,
     *,
     reader: Any = None,
+    entries: Any = None,
 ) -> AsyncIterator[dict[str, Any]]:
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
+    # The form takes bare 1-based entry numbers; the console selector spells
+    # them "--1,2", so accept either shape and normalise here.
+    selection = str(entries or "").replace(" ", "").strip("-")
+    argument = ""
+    if len(selection) > 0:
+        argument = "--" + selection
     async for event in _stream_console(
         reader_index,
         "_cmd_eim_download",
-        argument="",
+        argument=argument,
         connect_first=False,
         command_name="DOWNLOAD",
-        start_message=f"EIM-DOWNLOAD: reader={_reader_label(reader_name)}",
+        start_message=(
+            f"EIM-DOWNLOAD: reader={_reader_label(reader_name)}"
+            + (f" entries={selection}" if selection else "")
+        ),
         done_message="EIM-DOWNLOAD complete.",
         cancel_event=_cancel_event_from(ctx),
-    ):
-        yield event
-
-
-async def _dispatch_stream_eim_poll(
-    ctx: ActionContext,
-    *,
-    reader: Any = None,
-    arguments: Any = None,
-) -> AsyncIterator[dict[str, Any]]:
-    reader_name = str(reader or "")
-    reader_index = _resolve_reader_index(reader_name)
-    argv = str(arguments or "").strip()
-    async for event in _stream_console(
-        reader_index,
-        "_cmd_eim_poll",
-        argument=argv,
-        connect_first=False,
-        command_name="POLL",
-        start_message=(
-            f"EIM-POLL: reader={_reader_label(reader_name)}"
-            + (f" args={argv}" if argv else "")
-        ),
-        done_message="EIM-POLL complete.",
-        cancel_event=_cancel_event_from(ctx),
+        reader_name=reader_name,
     ):
         yield event
 
@@ -2318,6 +2408,7 @@ async def _dispatch_stream_download_profile_live(
         start_message=f"DOWNLOAD-AC: reader={_reader_label(reader_name)}",
         done_message="DOWNLOAD-AC complete.",
         cancel_event=_cancel_event_from(ctx),
+        reader_name=reader_name,
     ):
         yield event
 
@@ -2348,6 +2439,7 @@ async def _dispatch_stream_flow(
         ),
         done_message="FLOW complete.",
         cancel_event=_cancel_event_from(ctx),
+        reader_name=reader_name,
     ):
         yield event
 
@@ -2373,6 +2465,7 @@ async def _dispatch_stream_verify_scp11(
         ),
         done_message="VERIFY-SCP11 complete.",
         cancel_event=_cancel_event_from(ctx),
+        reader_name=reader_name,
     ):
         yield event
 
@@ -2531,7 +2624,7 @@ EUICC_INFO1_SPEC = ActionSpec(
     subsystem="eSIM Management",
     title="EUICCInfo1 (live)",
     description=(
-        "Fetch EUICCInfo1 (BF2000) from the card — decoded SVN, "
+        "Fetch EUICCInfo1 (BF2000) from the card -- decoded SVN, "
         "CI PK verification entries, and CI PK signing entries."
     ),
     inputs=(_reader_input_field(),),
@@ -2548,7 +2641,7 @@ GET_RAT_SPEC = ActionSpec(
     subsystem="eSIM Management",
     title="Rules Authorisation Table",
     description=(
-        "Fetch the RulesAuthorisationTable (BF4300) — decoded PPR IDs, "
+        "Fetch the RulesAuthorisationTable (BF4300) -- decoded PPR IDs, "
         "PPR flags, and allowed operator entries."
     ),
     inputs=(_reader_input_field(),),
@@ -2565,7 +2658,7 @@ GET_CERTS_SPEC = ActionSpec(
     subsystem="eSIM Management",
     title="GetCerts",
     description=(
-        "Fetch the GetCerts (BF5600) map — decoded EUM and eUICC "
+        "Fetch the GetCerts (BF5600) map -- decoded EUM and eUICC "
         "certificate presence and byte counts."
     ),
     inputs=(_reader_input_field(),),
@@ -2582,7 +2675,7 @@ GET_EIM_CONFIG_SPEC = ActionSpec(
     subsystem="eSIM Management",
     title="GetEimConfigurationData",
     description=(
-        "Fetch GetEimConfigurationData (BF5500) — decoded eIM entries "
+        "Fetch GetEimConfigurationData (BF5500) -- decoded eIM entries "
         "with FQDN, OID, type, counter, and protocol fields."
     ),
     inputs=(_reader_input_field(),),
@@ -2600,7 +2693,7 @@ AIDS_SPEC = ActionSpec(
     title="AID alias registry",
     description=(
         "Return the local AID alias table used by ENABLE/DISABLE/DELETE "
-        "target resolution. Reads the on-disk aid.txt — no card needed."
+        "target resolution. Reads the on-disk aid.txt -- no card needed."
     ),
     inputs=(),
     output_kind="table",
@@ -2701,7 +2794,7 @@ GET_POL_SPEC = ActionSpec(
     title="Get Profile Policy Rules",
     description=(
         "Return the PPR hex and decoded rule names for a single "
-        "profile — mirrors the shell GET-POL output."
+        "profile -- mirrors the shell GET-POL output."
     ),
     inputs=(
         _reader_input_field(),
@@ -2809,7 +2902,7 @@ SET_SMDP_SPEC = ActionSpec(
             kind="string",
             required=True,
             placeholder="smdp.example.com",
-            help="FQDN only — no scheme; the shell normalises the value.",
+            help="FQDN only -- no scheme; the shell normalises the value.",
         ),
         _confirm_field(),
     ),
@@ -2994,7 +3087,7 @@ DELETE_PROFILE_SPEC = ActionSpec(
     subsystem="eSIM Management",
     title="Delete profile",
     description=(
-        "Delete the selected profile from the eUICC. Irreversible — "
+        "Delete the selected profile from the eUICC. Irreversible -- "
         "double-check the target before confirming."
     ),
     inputs=(
@@ -3092,7 +3185,7 @@ SET_POL_SPEC = ActionSpec(
     title="Set Profile Policy Rules",
     description=(
         "Request a PPR update for a profile. Currently routed through "
-        "the guarded-provisioning placeholder in the shell — surfaces "
+        "the guarded-provisioning placeholder in the shell -- surfaces "
         "the request without issuing an APDU. Gated by the confirm "
         "checkbox."
     ),
@@ -3127,7 +3220,7 @@ STORE_METADATA_SPEC = ActionSpec(
     title="Store profile metadata",
     description=(
         "Request a metadata update for a profile. Routed through the "
-        "guarded-provisioning placeholder in the shell — surfaces the "
+        "guarded-provisioning placeholder in the shell -- surfaces the "
         "request without issuing an APDU."
     ),
     inputs=(
@@ -3220,40 +3313,24 @@ EIM_DOWNLOAD_SPEC = ActionSpec(
     ),
     inputs=(
         _reader_input_field(),
+        ActionField(
+            name="entries",
+            label="eIM entries",
+            kind="string",
+            required=False,
+            default="",
+            placeholder="1,2",
+            help=(
+                "Poll only these eIM configuration entries, counting from 1 "
+                "in BF55 order. Blank polls every configured entry."
+            ),
+        ),
     ),
     output_kind="log_stream",
     dispatcher=_dispatch_stream_eim_download,
     requires_card=True,
     streams=True,
     tags=("scp11", "stream", "eim-download", "destructive"),
-)
-
-
-EIM_POLL_SPEC = ActionSpec(
-    id="scp11_live.eim_poll",
-    subsystem="eSIM Management",
-    title="eIM poll",
-    description=(
-        "Invoke the plugin-provided eIM poll loop. Argument string is "
-        "forwarded verbatim to the shell command — consult HELP EXPERT "
-        "in the live console for the exact options."
-    ),
-    inputs=(
-        _reader_input_field(),
-        ActionField(
-            name="arguments",
-            label="Arguments (optional)",
-            kind="string",
-            required=False,
-            default="",
-            placeholder="e.g. --attempts 3",
-        ),
-    ),
-    output_kind="log_stream",
-    dispatcher=_dispatch_stream_eim_poll,
-    requires_card=True,
-    streams=True,
-    tags=("scp11", "stream", "eim-poll"),
 )
 
 
@@ -3346,7 +3423,6 @@ VERIFY_SCP11_SPEC = ActionSpec(
 get_registry().register(DISCOVER_SPEC)
 get_registry().register(EIM_AUTHENTICATE_SPEC)
 get_registry().register(EIM_DOWNLOAD_SPEC)
-get_registry().register(EIM_POLL_SPEC)
 get_registry().register(DOWNLOAD_PROFILE_LIVE_SPEC)
 get_registry().register(FLOW_SPEC)
 get_registry().register(VERIFY_SCP11_SPEC)

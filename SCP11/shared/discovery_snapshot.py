@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 discovery snapshot: serialises ES10b.GetEUICCInfo / GetProfilesInfo responses for offline inspection."""
 from __future__ import annotations
 
 from typing import Any
+from SCP11.shared.certificate_view import format_certificate_rows, get_certs_rows
 from yggdrasim_common.euicc_issuer import format_ecasd_issuer_display
 
 try:
@@ -234,8 +234,11 @@ def _print_get_certs_compact(response: bytes) -> None:
         return
     eum = decoded.get("eumCertificate", b"")
     euicc = decoded.get("euiccCertificate", b"")
-    print(f"    | EUM Certificate     : {'Present' if isinstance(eum, bytes) and len(eum) > 0 else 'Absent'}")
-    print(f"    | eUICC Certificate   : {'Present' if isinstance(euicc, bytes) and len(euicc) > 0 else 'Absent'}")
+    for label, value in (("EUM Certificate", eum), ("eUICC Certificate", euicc)):
+        if not isinstance(value, bytes) or len(value) == 0:
+            print(f"    | {label:<20}: Absent")
+    for line in format_certificate_rows(get_certs_rows(eum, euicc), min_label_width=20):
+        print(line)
     if isinstance(eum, bytes) and len(eum) > 0:
         print(f"    | EUM Cert Bytes      : {len(eum)}")
         print(f"    | EUM Cert DER Hex    : {eum.hex().upper()}")
@@ -284,12 +287,12 @@ def render_consolidated_discovery_snapshot(
 #
 # This is the lightweight counterpart to ``render_consolidated_discovery_snapshot``.
 # It produces the header-card style output that eSIM Live's ``_print_start_snapshot``
-# emits — EID, issuer, default SM-DP+ / SM-DS, queued-notification count,
-# eIM entries, and the profile table — but without the full ES10 dump
+# emits -- EID, issuer, default SM-DP+ / SM-DS, queued-notification count,
+# eIM entries, and the profile table -- but without the full ES10 dump
 # (``GetRAT`` / ``RetrieveNotificationsList`` / ``GetCerts`` are skipped).
 # Accepts the same snapshot shape used by ``render_consolidated_discovery_snapshot``
 # so the local-access and eim-local sessions can call this with a
-# truncated dict (no ``rat`` / ``notifications`` / ``certs`` fields needed —
+# truncated dict (no ``rat`` / ``notifications`` / ``certs`` fields needed --
 # the renderer treats those as cheap derived values).
 def render_card_overview_snapshot(
     snapshot: dict[str, Any],
@@ -356,7 +359,7 @@ def render_card_overview_snapshot(
             if len(fqdn) > 0:
                 print(f"    FQDN : {accent_color}{fqdn}{end_color}")
             if len(eim_id) > 0:
-                print(f"    OID  : {accent_color}{eim_id}{end_color}")
+                print(f"    eimId: {accent_color}{eim_id}{end_color}")
             if len(eim_id_type) > 0:
                 print(f"    Type : {accent_color}{eim_id_type}{end_color}")
 

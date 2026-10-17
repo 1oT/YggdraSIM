@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SIM Toolkit (STK) sub-shell: issue proactive commands and handle envelope APDUs interactively."""
 from __future__ import annotations
 
 import shlex
-from typing import Callable
+from contextlib import contextmanager
+from typing import Callable, Iterator
 
+from yggdrasim_common.command_log import run_with_command_log
 from yggdrasim_common.quit_control import quit_all
 
 from SCP03.config import Config
@@ -15,8 +16,17 @@ from SCP03.logic.stk import StkController
 
 
 class StkShell:
-    def __init__(self, transport, debug: bool = False) -> None:
-        self.controller = StkController(transport, debug=debug)
+    def __init__(
+        self,
+        transport,
+        debug: bool = False,
+        controller: StkController | None = None,
+    ) -> None:
+        # SCP03 STK mode hands in the controller its transport drains through,
+        # so the verbs act on the session the main shell keeps.
+        self.controller = controller if controller is not None else StkController(
+            transport, debug=debug
+        )
         self._exit_requested = False
         self._commands: dict[str, Callable[[str], bool]] = {
             "HELP": self._cmd_help,
@@ -67,6 +77,7 @@ class StkShell:
         print("  STATE                   - Show current STK/virtual-channel state.")
         print("  HISTORY                 - Show recent proactive commands, triggers, and flow events.")
         print("  DEBUG / VERBOSE         - Toggle raw STK APDU logging.")
+        print("  <command> --log <file>  - Run one command with debug logging and append its output to <file>.")
         print("  EXIT / BACK / Q         - Return to the SCP03 shell.")
         print("  QA                      - Exit YggdraSIM entirely.")
         print("")
@@ -260,6 +271,26 @@ class StkShell:
         self._run_init()
 
     def _exec_line(self, raw_line: str) -> bool:
+        """Run one STK command line; one carrying ``--log <file>`` runs under a command log."""
+        return run_with_command_log(
+            raw_line,
+            self._exec_command_line,
+            shell="STK",
+            refused=False,
+            debug=self._command_log_debug,
+        )
+
+    @contextmanager
+    def _command_log_debug(self) -> Iterator[None]:
+        """The controller's debug logging for a ``--log`` command, the switch DEBUG toggles."""
+        previous = bool(self.controller.debug)
+        self.controller.set_debug(True)
+        try:
+            yield
+        finally:
+            self.controller.set_debug(previous)
+
+    def _exec_command_line(self, raw_line: str) -> bool:
         stripped = str(raw_line or "").strip()
         if len(stripped) == 0:
             return True
@@ -283,6 +314,23 @@ class StkShell:
             print(f"{Config.Colors.FAIL}[-] {detail}{Config.Colors.ENDC}")
             return False
 
+    def run_embedded(self, cmd_line: str) -> bool:
+        """Run a semicolon batch of STK verbs inside the SCP03 shell (STK mode).
+
+        The bootstrap has run already and the session belongs to the main
+        shell: no banner, no automatic INIT, and EXIT has nothing to leave.
+        Returns False when any verb failed.
+        """
+        succeeded = True
+        for command_text in str(cmd_line or "").split(";"):
+            if len(command_text.strip()) == 0:
+                continue
+            if command_text.strip().split(None, 1)[0].upper() in ("EXIT", "BACK", "Q"):
+                continue
+            if self._exec_line(command_text) is False:
+                succeeded = False
+        return succeeded
+
     def run_commands(self, cmd_line: str) -> None:
         """Execute a sequence of STK shell commands from a list of strings."""
         commands = [chunk.strip() for chunk in str(cmd_line or "").split(";") if len(chunk.strip()) > 0]
@@ -301,14 +349,19 @@ class StkShell:
         if had_error:
             raise SystemExit(1)
 
-    def run(self) -> None:
-        """Start the interactive STK shell REPL and block until the user exits."""
+    def run(self, bootstrap: bool = True) -> None:
+        """Start the interactive STK shell REPL and block until the user exits.
+
+        ``bootstrap`` False opens it on a session SCP03 STK mode has already
+        brought up, without resetting the card again.
+        """
         self._print_banner()
-        try:
-            self._run_init()
-        except Exception as error:
-            detail = str(error).strip() or error.__class__.__name__
-            print(f"{Config.Colors.FAIL}[-] Initial STK bootstrap failed: {detail}{Config.Colors.ENDC}")
+        if bootstrap:
+            try:
+                self._run_init()
+            except Exception as error:
+                detail = str(error).strip() or error.__class__.__name__
+                print(f"{Config.Colors.FAIL}[-] Initial STK bootstrap failed: {detail}{Config.Colors.ENDC}")
         while True:
             try:
                 line = input(self._prompt()).strip()

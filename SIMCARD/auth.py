@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """UICC authentication logic: Milenage KAT vectors, 5G AKA, and AuthLogic adapter (ETSI TS 135 206 / 3GPP TS 33.501)."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass
@@ -17,7 +17,13 @@ from SIMCARD.aka_5g import (
     derive_k_seaf,
     derive_res_star,
 )
-from SIMCARD.state import SimCardState, SimProfileAuthConfig
+from SIMCARD.state import (
+    MAX_HISTORY_ENTRIES,
+    SimCardState,
+    SimFileNode,
+    SimGbaKeyMaterial,
+    SimProfileAuthConfig,
+)
 from SIMCARD.tuak import (
     TuakVectors,
     derive_topc,
@@ -26,8 +32,51 @@ from SIMCARD.tuak import (
     tuak_runtime_enabled,
     tuak_vectors,
 )
+from SIMCARD.utils import decode_impi_ef, read_tlv, tlv
 
 _SQN_MAX = (1 << 48) - 1
+
+# AUTHENTICATE with the even INS '88': P2 is '80' | context. TS 31.102 v19.5
+# Table 7.1.2-1 (USIM): GSM '80', 3G/EPS/5G '81', VGCS/VBS '82', GBA '84'.
+# TS 31.103 v19 §7.1.2 Table 1 (ISIM): '80' reserved, IMS AKA '81', HTTP
+# Digest '82', GBA '84'. MBMS ('85') and Local Key Establishment ('86') are
+# odd-INS ('89') contexts and RFU here.
+P2_GSM_CONTEXT = 0x80
+P2_AKA_CONTEXT = 0x81
+P2_VGCS_OR_HTTP_DIGEST_CONTEXT = 0x82
+P2_GBA_CONTEXT = 0x84
+
+# TS 31.102 v19.5 §7.1.2.3 / §7.1.2.4, TS 31.103 v19 §7.1.2.3 / §7.1.2.4.
+GBA_BOOTSTRAPPING_MODE_TAG = 0xDD
+GBA_NAF_DERIVATION_MODE_TAG = 0xDE
+GBA_SUCCESS_TAG = 0xDB
+AKA_SYNCHRONISATION_FAILURE_TAG = 0xDC
+
+# TS 33.220 v19.1 Annex B.3: P0 of Ks_ext_NAF and of Ks_int_NAF.
+GBA_ME_KEY_LABEL = b"gba-me"
+GBA_U_KEY_LABEL = b"gba-u"
+
+ISIM_EF_IMPI_FID = "6F02"
+
+
+@dataclass(frozen=True)
+class GbaApplicationFiles:
+    """Where one application keeps its GBA service bit and files."""
+
+    service_table_fid: str
+    service_number: int
+    gbabp_fid: str
+    gbanl_fid: str
+
+
+# USIM: service n°68 in EF_UST '6F38' (TS 31.102 v19.5 §4.2.8, §7.1.1.4),
+# EF_GBABP '6FD6' (§4.2.79), EF_GBANL '6FDA' (§4.2.83). ISIM: service n°2
+# in EF_IST '6F07' (TS 31.103 v19 §4.2.7, §7.1.1.2), EF_GBABP '6FD5'
+# (§4.2.9), EF_GBANL '6FD7' (§4.2.10).
+GBA_APPLICATION_FILES: dict[str, GbaApplicationFiles] = {
+    "ADF.USIM": GbaApplicationFiles("6F38", 68, "6FD6", "6FDA"),
+    "ADF.ISIM": GbaApplicationFiles("6F07", 2, "6FD5", "6FD7"),
+}
 
 
 @dataclass(frozen=True)
@@ -78,7 +127,7 @@ def derive_opc(ki: bytes, op: bytes) -> bytes:
 
 
 def milenage_vectors(ki: bytes, opc: bytes, rand: bytes, sqn: bytes, amf: bytes) -> MilenageVectors:
-    """Run the full Milenage f1–f5* function set (3GPP TS 33.102 Annex B).
+    """Run the full Milenage f1-f5* function set (3GPP TS 33.102 Annex B).
 
     Returns all six MAC-A, MAC-S, RES, CK, IK, AK, AK* vectors plus the
     GSM-compatibility SRES and Kc conversions (Annex B.3/B.4).
@@ -205,42 +254,25 @@ class AuthLogic:
         return challenge, 0x90, 0x00
 
     def internal_authenticate(self, p2: int, payload: bytes) -> tuple[bytes, int, int]:
-        """Dispatch INTERNAL AUTHENTICATE / AUTHENTICATE by algorithm (ETSI TS 102 221 §11.1.2).
+        """AUTHENTICATE with the even INS '88', dispatched by its P2 context.
 
-        P2 selects the algorithm context: 0x80 GSM, 0x81 USIM AKA,
-        0x82 IMS AKA, 0x88 VGCS, 0x89 GBA.
+        The context coding belongs to the selected application (the P2
+        constants above). With no USIM or ISIM selected the USIM table
+        applies, so the GSM context stays reachable as before.
         """
         normalized_p2 = int(p2) & 0xFF
-        if normalized_p2 == 0x80:
+        application = self._selected_application_name()
+        if normalized_p2 == P2_VGCS_OR_HTTP_DIGEST_CONTEXT:
+            # VGCS/VBS (USIM) and HTTP Digest (ISIM) are not implemented:
+            # TS 31.102 v19.5 §7.3.1 '98 64' security context not supported.
+            return b"", 0x98, 0x64
+        if normalized_p2 == P2_GBA_CONTEXT:
+            return self._run_gba(application, payload)
+        if normalized_p2 == P2_AKA_CONTEXT:
+            # 3G/EPS/5G on the USIM, IMS AKA on the ISIM.
+            return self._run_usim_authentication(payload)
+        if normalized_p2 == P2_GSM_CONTEXT and application != "ADF.ISIM":
             return self._run_gsm_algorithm(payload)
-        if normalized_p2 == 0x81:
-            return self._run_usim_authentication(payload)
-        if normalized_p2 == 0x82:
-            # 3GPP TS 31.103 §7.1 IMS AKA. The ISIM application
-            # implements AKA against the same Milenage parameters
-            # as the USIM, but the AUTHENTICATE command is issued
-            # under the ISIM context. The simulator routes this
-            # through the regular UMTS AKA path because the
-            # cryptographic chain is identical; only the calling
-            # AID context differs at the dispatcher level.
-            #
-            # On a paired card the IMS AKA result is accepted by
-            # the IMS (S-CSCF) authentication challenge in
-            # SIP REGISTER, and the derived CK/IK are forwarded
-            # to the IMS Authentication Server (AS).
-            return self._run_usim_authentication(payload)
-        if normalized_p2 == 0x84:
-            # 3GPP TS 31.102 §7.1.2.1.2 GBA Bootstrap (P2=0x84). The
-            # algorithm chain is identical to UMTS AKA; the only
-            # difference is that on success the card caches Ks =
-            # CK||IK and the freshness RAND for a later P2=0x85
-            # NAF derivation.
-            return self._run_gba_bootstrap(payload)
-        if normalized_p2 == 0x85:
-            # 3GPP TS 31.102 §7.1.2.1.3 GBA Security Context Mode
-            # (P2=0x85). Inputs: NAF_Id and IMPI. Output: Ks_NAF
-            # derived per TS 33.220 §B.0.
-            return self._run_gba_naf_derivation(payload)
         return b"", 0x6A, 0x86
 
     def derive_5g_vector(
@@ -383,8 +415,12 @@ class AuthLogic:
         return vectors.sres + vectors.kc, 0x90, 0x00
 
     def _run_usim_authentication(self, payload: bytes) -> tuple[bytes, int, int]:
-        if self._selected_application_name() not in ("ADF.USIM", "ADF.ISIM"):
+        application = self._selected_application_name()
+        if application not in ("ADF.USIM", "ADF.ISIM"):
             return b"", 0x69, 0x85
+        # TS 31.102 v19.5 §7.1.2.1 case 1 ends with Kc; the ISIM's IMS AKA
+        # answer (TS 31.103 v19 §7.1.2.1) stops at IK.
+        with_kc = application == "ADF.USIM"
         config = self._active_auth_config()
         if config is None:
             return b"", 0x69, 0x85
@@ -399,7 +435,7 @@ class AuthLogic:
         if algorithm == "tuak":
             if tuak_runtime_enabled() is False:
                 return b"", 0x69, 0x85
-            return self._run_usim_authentication_tuak(config, rand, autn, amf, mac_a)
+            return self._run_usim_authentication_tuak(config, rand, autn, amf, mac_a, with_kc=with_kc)
 
         try:
             key, operator_variant = self._resolve_auth_keys(config)
@@ -435,9 +471,9 @@ class AuthLogic:
             + vectors.ck
             + b"\x10"
             + vectors.ik
-            + b"\x08"
-            + vectors.kc
         )
+        if with_kc:
+            response += b"\x08" + vectors.kc
         return response, 0x90, 0x00
 
     def _run_usim_authentication_tuak(
@@ -447,6 +483,8 @@ class AuthLogic:
         autn: bytes,
         amf: bytes,
         mac_a: bytes,
+        *,
+        with_kc: bool = True,
     ) -> tuple[bytes, int, int]:
         try:
             key, operator_variant = self._resolve_auth_keys(config)
@@ -492,7 +530,6 @@ class AuthLogic:
         config.sqn = self._bump_and_clamp_sqn(current_sqn, network_sqn_value)
         self._persist_active_profile()
         # Build the TUAK response vector using the cached f2345 outputs.
-        kc = _xor_bytes(_xor_bytes(_ck[:8], _ck[8:16]), _xor_bytes(_ik[:8], _ik[8:16]))
         response = (
             b"\xDB"
             + bytes((len(_res) & 0xFF,))
@@ -501,9 +538,10 @@ class AuthLogic:
             + _ck
             + b"\x10"
             + _ik
-            + b"\x08"
-            + kc
         )
+        if with_kc:
+            kc = _xor_bytes(_xor_bytes(_ck[:8], _ck[8:16]), _xor_bytes(_ik[:8], _ik[8:16]))
+            response += b"\x08" + kc
         return response, 0x90, 0x00
 
     def _milenage_vectors_for_current_state(self, config: SimProfileAuthConfig, rand: bytes) -> MilenageVectors:
@@ -596,18 +634,43 @@ class AuthLogic:
         clamped = min(bumped, _SQN_MAX)
         return clamped.to_bytes(6, "big")
 
-    def _selected_application_name(self) -> str:
+    def _selected_application_node(self) -> SimFileNode | None:
         node_id = str(self.state.current_node_id or "").strip()
         while len(node_id) > 0:
             node = self.state.nodes.get(node_id)
             if node is None:
-                return ""
-            name = str(getattr(node, "name", "") or "").strip().upper()
+                return None
             kind = str(getattr(node, "kind", "") or "").strip().lower()
             if kind == "adf":
-                return name
+                return node
             node_id = str(getattr(node, "parent_id", "") or "").strip()
-        return ""
+        return None
+
+    def _selected_application_name(self) -> str:
+        node = self._selected_application_node()
+        if node is None:
+            return ""
+        return str(getattr(node, "name", "") or "").strip().upper()
+
+    def _application_ef(self, application: SimFileNode, fid: str) -> SimFileNode | None:
+        """The EF with *fid* directly under *application*.
+
+        Found by file ID: a profile-loaded tree names its nodes its own way.
+        """
+        for child_id in list(application.children):
+            child = self.state.nodes.get(child_id)
+            if child is not None and child.kind == "ef" and str(child.fid or "").upper() == fid:
+                return child
+        return None
+
+    def _application_service_available(self, application: SimFileNode, files: GbaApplicationFiles) -> bool:
+        table = self._application_ef(application, files.service_table_fid)
+        if table is None:
+            return False
+        # One bit per service, service n°1 in b1 of byte 1 (TS 31.102 v19.5 §4.2.8).
+        index, bit = divmod(files.service_number - 1, 8)
+        data = bytes(table.data or b"")
+        return index < len(data) and bool(data[index] & (1 << bit))
 
     @staticmethod
     def _parse_usim_auth_payload(payload: bytes) -> tuple[bytes, bytes] | None:
@@ -618,39 +681,66 @@ class AuthLogic:
             return None
         return normalized[1:17], normalized[18:34]
 
-    def _run_gba_bootstrap(self, payload: bytes) -> tuple[bytes, int, int]:
-        """3GPP TS 31.102 §7.1.2.1.2 / TS 33.220 §4.5 GBA Bootstrap.
-
-        Reuses the regular UMTS AKA path so SQN tracking, AUTS sync
-        recovery and MAC validation behave identically to a P2=0x81
-        run. On success the card caches Ks = CK||IK plus the
-        freshness RAND so a follow-on P2=0x85 NAF derivation can
-        compute Ks_(ext)NAF without needing the network to replay
-        the bootstrap input.
-        """
-        if self._selected_application_name() not in ("ADF.USIM", "ADF.ISIM"):
+    def _run_gba(self, application: str, payload: bytes) -> tuple[bytes, int, int]:
+        """GBA context: the first data byte picks Bootstrapping ('DD') or NAF Derivation ('DE') Mode."""
+        files = GBA_APPLICATION_FILES.get(application)
+        node = self._selected_application_node()
+        if files is None or node is None:
             return b"", 0x69, 0x85
+        if self._application_service_available(node, files) is False:
+            # TS 31.102 v19.5 §7.1.1.4 / TS 31.103 v19 §7.1.1.2: GBA only while
+            # the service is available.
+            return b"", 0x98, 0x64
+        data = bytes(payload or b"")
+        if len(data) == 0:
+            return b"", 0x67, 0x00
+        if data[0] == GBA_BOOTSTRAPPING_MODE_TAG:
+            return self._run_gba_bootstrap(application, node, files, data[1:])
+        if data[0] == GBA_NAF_DERIVATION_MODE_TAG:
+            return self._run_gba_naf_derivation(application, node, files, data[1:])
+        # '6A 80' is not among the AUTHENTICATE status words of TS 31.102 v19.5
+        # §7.3.2: a mode the card does not know is a context it does not support.
+        return b"", 0x98, 0x64
+
+    def _run_gba_bootstrap(
+        self,
+        application: str,
+        node: SimFileNode,
+        files: GbaApplicationFiles,
+        body: bytes,
+    ) -> tuple[bytes, int, int]:
+        """GBA_U Bootstrapping Mode (TS 31.102 v19.5 §7.1.1.4, TS 31.103 v19 §7.1.1.2).
+
+        AUTN* carries MAC* = MAC xor Trunc(SHA-256(IK)), Trunc taking the
+        first 64 bits (TS 33.220 v19.1 §5.3.2 step 4, §3.4). This card
+        supports SHA-256, and such a card has no SHA-1 fallback (NOTE 2b). On
+        success it keeps Ks = CK || IK with RAND, writes RAND to EF_GBABP and
+        answers RES with its least significant bit flipped.
+        """
+        fields = _parse_length_prefixed_fields(body, 2)
+        if fields is None or len(fields[0]) != 16 or len(fields[1]) != 16:
+            return b"", 0x67, 0x00
+        rand, autn_star = fields
+        gbabp = self._application_ef(node, files.gbabp_fid)
+        if gbabp is None or len(gbabp.data) < len(_ef_gbabp_after_bootstrap(rand, 0)):
+            # No room for RAND: TS 31.102 v19.5 §7.3.1 '98 66'.
+            return b"", 0x98, 0x66
         config = self._active_auth_config()
         if config is None:
             return b"", 0x69, 0x85
         algorithm = str(config.algorithm or "").strip().lower()
         if algorithm not in ("milenage", "aka-milenage"):
-            # TS 33.220 only mandates Milenage for GBA. TUAK is
-            # allowed but not yet wired to the GBA cache; keep the
-            # rejection explicit so a future test enables it.
+            # GBA is implemented over Milenage only; a TUAK profile is refused.
             return b"", 0x69, 0x85
-        parsed = self._parse_usim_auth_payload(payload)
-        if parsed is None:
-            return b"", 0x67, 0x00
-        rand, autn = parsed
-        amf, mac_a = autn[6:8], autn[8:16]
         try:
             key, operator_variant = self._resolve_milenage_keys(config)
         except ValueError:
             return b"", 0x69, 0x85
+        amf, mac_star = autn_star[6:8], autn_star[8:16]
+        # AK and IK depend on K, OPc and RAND only.
         initial_vectors = milenage_vectors(key, operator_variant, rand, b"\x00" * 6, amf)
-        concealed_sqn = autn[:6]
-        recovered_sqn = _xor_bytes(concealed_sqn, initial_vectors.ak)
+        mac_a = _xor_bytes(mac_star, hashlib.sha256(initial_vectors.ik).digest()[:8])
+        recovered_sqn = _xor_bytes(autn_star[:6], initial_vectors.ak)
         vectors = milenage_vectors(key, operator_variant, rand, recovered_sqn, amf)
         if hmac.compare_digest(vectors.mac_a, mac_a) is False:
             return b"", 0x98, 0x62
@@ -659,64 +749,84 @@ class AuthLogic:
         network_sqn_value = int.from_bytes(recovered_sqn, "big")
         if network_sqn_value < current_sqn:
             auts = build_milenage_auts(key, operator_variant, rand, stored_sqn_bytes)
-            return b"\xDC\x0E" + auts, 0x90, 0x00
+            return bytes((AKA_SYNCHRONISATION_FAILURE_TAG, len(auts))) + auts, 0x90, 0x00
         config.sqn = self._bump_and_clamp_sqn(current_sqn, network_sqn_value)
         self._persist_active_profile()
-        # Cache the bootstrap context. The simulator picks a B-TID
-        # of the form ``<rand-hex>@bsf.simulator`` so a downstream
-        # NAF lookup can reproduce the value without the BSF having
-        # actually replied -- real deployments take the B-TID from
-        # the BSF over Ub. ``gba_key_lifetime`` is the spec-default
-        # 86400 s window per TS 33.220 §4.4.6.
-        self.state.gba_ks = vectors.ck + vectors.ik
-        self.state.gba_b_tid = f"{rand.hex()}@bsf.simulator"
-        self.state.gba_key_lifetime = 86400
-        self.state.last_challenge_bytes = rand
-        response = (
-            b"\xDB\x08"
-            + vectors.res
-            + b"\x10"
-            + vectors.ck
-            + b"\x10"
-            + vectors.ik
-        )
-        return response, 0x90, 0x00
+        material = self.state.gba_key_material.setdefault(application, SimGbaKeyMaterial())
+        material.ks = vectors.ck + vectors.ik
+        material.rand = rand
+        self._write_transparent(gbabp, _ef_gbabp_after_bootstrap(rand, len(gbabp.data)))
+        res = _flip_last_bit(vectors.res)
+        return bytes((GBA_SUCCESS_TAG, len(res))) + res, 0x90, 0x00
 
-    def _run_gba_naf_derivation(self, payload: bytes) -> tuple[bytes, int, int]:
-        """3GPP TS 31.102 §7.1.2.1.3 / TS 33.220 §B.0 NAF derivation.
+    def _run_gba_naf_derivation(
+        self,
+        application: str,
+        node: SimFileNode,
+        files: GbaApplicationFiles,
+        body: bytes,
+    ) -> tuple[bytes, int, int]:
+        """GBA_U NAF Derivation Mode (TS 31.102 v19.5 §7.1.1.5, TS 31.103 v19 §7.1.1.3).
 
-        Input layout: ``L_NAF || NAF_Id || L_IMPI || IMPI``. The
-        function rejects the request with ``69 85`` when no Ks is
-        cached (no prior bootstrap) and ``67 00`` when the input
-        TLV layout is malformed. Successful runs derive Ks_(ext)NAF
-        per TS 33.220 §B.0 using HMAC-SHA-256 with the static
-        ``"gba-me"`` salt and return ``DB 20 || Ks_NAF`` so a
-        modem-side ME library can splice it into the standard AKA
-        response framing.
+        The USIM takes NAF_ID and IMPI, the ISIM NAF_ID alone and IMPI from
+        its EF_IMPI. Ks_ext_NAF goes back to the ME; Ks_int_NAF stays on the
+        card with the B-TID, and EF_GBANL records the NAF_ID / B-TID pair.
         """
-        if self._selected_application_name() not in ("ADF.USIM", "ADF.ISIM"):
-            return b"", 0x69, 0x85
-        if len(self.state.gba_ks) != 32:
-            return b"", 0x69, 0x85
-        normalized = bytes(payload or b"")
-        if len(normalized) < 2:
+        with_impi = application != "ADF.ISIM"
+        fields = _parse_length_prefixed_fields(body, 2 if with_impi else 1)
+        if fields is None or any(len(value) == 0 for value in fields):
             return b"", 0x67, 0x00
-        naf_length = int(normalized[0])
-        if naf_length == 0 or naf_length + 2 > len(normalized):
-            return b"", 0x67, 0x00
-        naf_id = normalized[1 : 1 + naf_length]
-        impi_offset = 1 + naf_length
-        impi_length = int(normalized[impi_offset])
-        if impi_length == 0 or impi_offset + 1 + impi_length > len(normalized):
-            return b"", 0x67, 0x00
-        impi = normalized[impi_offset + 1 : impi_offset + 1 + impi_length]
-        rand = bytes(self.state.last_challenge_bytes or b"")
-        if len(rand) != 16:
+        naf_id = fields[0]
+        if with_impi:
+            impi = fields[1]
+        else:
+            impi_ef = self._application_ef(node, ISIM_EF_IMPI_FID)
+            if impi_ef is None:
+                return b"", 0x69, 0x85
+            try:
+                impi = decode_impi_ef(impi_ef.data).encode("utf-8")
+            except ValueError:
+                return b"", 0x69, 0x85
+        material = self.state.gba_key_material.get(application)
+        if material is None or len(material.ks) == 0:
+            # No bootstrapped key material: '69 85'.
             return b"", 0x69, 0x85
-        ks_naf = _gba_kdf(self.state.gba_ks, rand, impi, naf_id)
-        record_key = (naf_id + b"|" + impi).hex()
-        self.state.gba_naf_records[record_key] = ks_naf
-        return b"\xDB\x20" + ks_naf, 0x90, 0x00
+        gbabp = self._application_ef(node, files.gbabp_fid)
+        b_tid = _ef_gbabp_b_tid(b"" if gbabp is None else gbabp.data, material.rand)
+        record = tlv("80", naf_id) + tlv("81", b_tid)
+        gbanl = self._application_ef(node, files.gbanl_fid)
+        if gbanl is None or gbanl.structure != "linear-fixed":
+            return b"", 0x98, 0x66
+        record_number = _gbanl_target_record(gbanl.records, naf_id, material.naf_record_order)
+        if record_number == 0 or len(record) > len(gbanl.records[record_number - 1]):
+            # EF_GBANL cannot take the pair: TS 31.102 v19.5 §7.3.1 '98 66'.
+            return b"", 0x98, 0x66
+        ks_ext_naf = _gba_kdf(material.ks, GBA_ME_KEY_LABEL, material.rand, impi, naf_id)
+        ks_int_naf = _gba_kdf(material.ks, GBA_U_KEY_LABEL, material.rand, impi, naf_id)
+        self._write_record(gbanl, record_number, record)
+        naf_key = naf_id.hex().upper()
+        material.naf_keys.pop(naf_key, None)
+        material.naf_keys[naf_key] = (ks_int_naf, b_tid)
+        while len(material.naf_keys) > MAX_HISTORY_ENTRIES:
+            material.naf_keys.pop(next(iter(material.naf_keys)))
+        order = [record_number] + [number for number in material.naf_record_order if number != record_number]
+        material.naf_record_order = order[: len(gbanl.records)]
+        return bytes((GBA_SUCCESS_TAG, len(ks_ext_naf))) + ks_ext_naf, 0x90, 0x00
+
+    def _write_transparent(self, node: SimFileNode, data: bytes) -> None:
+        writer = getattr(self.fs, "write_ef_transparent_node", None)
+        if writer is None:
+            node.data = bytes(data)
+            return
+        writer(node, data)
+
+    def _write_record(self, node: SimFileNode, record_number: int, record: bytes) -> None:
+        writer = getattr(self.fs, "write_ef_record_node", None)
+        if writer is None:
+            length = len(node.records[record_number - 1])
+            node.records[record_number - 1] = bytes(record) + b"\xFF" * (length - len(record))
+            return
+        writer(node, record_number, record)
 
 
 def _aes_ecb_encrypt(key: bytes, block: bytes) -> bytes:
@@ -745,28 +855,113 @@ def _xor_bytes(left: bytes, right: bytes) -> bytes:
     return bytes(left_part ^ right_part for left_part, right_part in zip(left_bytes, right_bytes))
 
 
-def _gba_kdf(ks: bytes, rand: bytes, impi: bytes, naf_id: bytes) -> bytes:
-    """3GPP TS 33.220 §B.0 GBA key derivation (Ks_(ext)NAF).
+def _gba_kdf(ks: bytes, label: bytes, rand: bytes, impi: bytes, naf_id: bytes) -> bytes:
+    """NAF key derivation of TS 33.220 v19.1 Annex B.2.0 / B.3.
 
-    Builds the standard FC=0x01 input string for the generic 3GPP
-    KDF and runs HMAC-SHA-256 keyed with Ks. The FC value 0x01 is
-    the "GBA Bootstrapping" specifier; the static prefix
-    ``"gba-me"`` (six ASCII bytes) appears as P0 per Annex B.0 and
-    fixes the derivation to the ME variant of the NAF key.
+    HMAC-SHA-256 keyed with Ks over S = FC || P0 || L0 || ... || P3 || L3,
+    FC 0x01, P0 *label* ("gba-me" for Ks_ext_NAF, "gba-u" for Ks_int_NAF),
+    P1 RAND, P2 IMPI, P3 NAF_ID, each L a two-byte length.
     """
-    import hashlib
+    message = b"\x01"
+    for parameter in (label, rand, impi, naf_id):
+        value = bytes(parameter or b"")
+        message += value + len(value).to_bytes(2, "big")
+    return hmac.new(bytes(ks or b""), message, hashlib.sha256).digest()
 
-    p0 = b"gba-me"
-    p1 = bytes(rand or b"")
-    p2 = bytes(impi or b"")
-    p3 = bytes(naf_id or b"")
-    payload = b""
-    payload += b"\x01"
-    payload += p0 + len(p0).to_bytes(2, "big")
-    payload += p1 + len(p1).to_bytes(2, "big")
-    payload += p2 + len(p2).to_bytes(2, "big")
-    payload += p3 + len(p3).to_bytes(2, "big")
-    return hmac.new(bytes(ks or b""), payload, hashlib.sha256).digest()
+
+def _parse_length_prefixed_fields(data: bytes, count: int) -> list[bytes] | None:
+    """*count* fields, each a length byte and its value, filling *data* exactly.
+
+    The GBA command data after its mode tag (TS 31.102 v19.5 §7.1.2.3 /
+    §7.1.2.4, TS 31.103 v19 §7.1.2.3 / §7.1.2.4); None for any other shape.
+    """
+    raw = bytes(data or b"")
+    fields: list[bytes] = []
+    offset = 0
+    for _ in range(count):
+        if offset >= len(raw):
+            return None
+        end = offset + 1 + raw[offset]
+        if end > len(raw):
+            return None
+        fields.append(raw[offset + 1 : end])
+        offset = end
+    if offset != len(raw):
+        return None
+    return fields
+
+
+def _flip_last_bit(value: bytes) -> bytes:
+    """*value* with its least significant bit inverted (TS 33.220 v19.1 §5.3.2 step 4)."""
+    raw = bytes(value or b"")
+    if len(raw) == 0:
+        return raw
+    return raw[:-1] + bytes((raw[-1] ^ 0x01,))
+
+
+def _ef_gbabp_after_bootstrap(rand: bytes, file_size: int) -> bytes:
+    """EF_GBABP once the card has bootstrapped (TS 31.102 v19.5 §4.2.79, §7.1.1.4).
+
+    The RAND field is the card's to write; the B-TID and key lifetime fields
+    stay empty for the ME, then 'FF' up to *file_size*.
+    """
+    content = bytes((len(rand),)) + bytes(rand) + b"\x00\x00"
+    return content + b"\xFF" * max(0, int(file_size) - len(content))
+
+
+def _ef_gbabp_b_tid(data: bytes, rand: bytes) -> bytes:
+    """The B-TID EF_GBABP holds for the bootstrap that produced *rand* (TS 31.102 v19.5 §4.2.79).
+
+    Empty when the file holds another RAND or none, or a field runs past it.
+    """
+    raw = bytes(data or b"")
+    if len(raw) == 0:
+        return b""
+    rand_end = 1 + raw[0]
+    if rand_end >= len(raw) or raw[1:rand_end] != bytes(rand or b""):
+        return b""
+    b_tid_end = rand_end + 1 + raw[rand_end]
+    if b_tid_end > len(raw):
+        return b""
+    return raw[rand_end + 1 : b_tid_end]
+
+
+def _gbanl_record_naf_id(record: bytes) -> bytes | None:
+    """The NAF_ID of an EF_GBANL record ('80' TLV first, TS 31.102 v19.5 §4.2.83); None when unreadable."""
+    try:
+        tag, value, _raw_tlv, _next_offset = read_tlv(bytes(record or b""))
+    except ValueError:
+        return None
+    if tag != b"\x80":
+        return None
+    return value
+
+
+def _gbanl_target_record(records: list[bytes], naf_id: bytes, order: list[int]) -> int:
+    """The EF_GBANL record a NAF_ID goes to (TS 31.102 v19.5 §7.1.1.5).
+
+    The record already holding it, else the first free ('FF') one, else the
+    one derived least recently; a record the card has not written since it
+    started counts as older than any it has. 0 when the file has no records.
+    """
+    free = 0
+    for number, record in enumerate(records, start=1):
+        raw = bytes(record or b"")
+        if len(raw) == 0 or raw[0] == 0xFF:
+            if free == 0:
+                free = number
+            continue
+        if _gbanl_record_naf_id(raw) == bytes(naf_id):
+            return number
+    if free != 0:
+        return free
+    known = [number for number in order if 1 <= number <= len(records)]
+    for number in range(1, len(records) + 1):
+        if number not in known:
+            return number
+    if len(known) > 0:
+        return known[-1]
+    return 0
 
 
 def _tuak_kc(vectors: TuakVectors) -> bytes:

@@ -70,6 +70,9 @@ def test_panel_helpers_defined() -> None:
         "function ccPanelRestoreFocus(",
         "function ccPanelRemove(",
         "function ccPanelCloseLast(",
+        "function ccElementRendered(",
+        "function ccEscapeOwnedElsewhere(",
+        "function ccPanelForEscape(",
         "function ccPanelEscapeBootstrap(",
         "function ccInlinePanel(",
         "function ccPanelScrollIntoView(",
@@ -96,15 +99,50 @@ def test_floating_window_machinery_is_gone() -> None:
         assert symbol not in js, symbol
 
 
-def test_escape_closes_the_last_panel_and_defers_to_modals() -> None:
+def test_escape_closes_the_focused_panel_and_defers_to_open_surfaces() -> None:
     js = _read("app.js")
-    start = js.index("function ccPanelEscapeBootstrap(")
-    window = js[start : js.index("function ccInlinePanel(", start)]
+    window = _function_source(js, "function ccPanelEscapeBootstrap(")
     assert 'ev.key !== "Escape"' in window
-    # A true modal owns Escape while it is open.
-    assert '[role="dialog"][aria-modal="true"]' in window
-    assert "if (modalOpen) return;" in window
-    assert "ccPanelCloseLast()" in window
+    # A dialog, a menu or a revealed chrome panel owns Escape while it is up.
+    assert "if (ccEscapeOwnedElsewhere(ev.target)) return;" in window
+    assert "ccPanelCloseLast(ev.target)" in window
+    owners = js[js.index("var CC_ESCAPE_OWNER_SELECTOR") : js.index("function ccElementRendered(")]
+    for selector in (
+        '[role="dialog"]',
+        '[role="menu"]',
+        ".cc-max-backdrop",
+        '#app[data-sidebar-revealed="true"] #module-navigation',
+        '#app[data-topbar-revealed="true"] .topbar',
+    ):
+        assert selector in owners, selector
+
+
+def test_escape_owner_must_be_rendered_not_merely_mounted() -> None:
+    """The guide viewer stays mounted behind ``data-state="hidden"`` with
+    ``aria-modal="true"`` on it; counting it as open blocked Escape for
+    every panel on the page."""
+    html = _read("index.html")
+    tag = re.search(r'<div\s+class="cc-doc-modal"[^>]*>', html)
+    assert tag is not None
+    assert 'data-state="hidden"' in tag.group(0)
+    assert 'aria-modal="true"' in tag.group(0)
+    js = _read("app.js")
+    rendered = _function_source(js, "function ccElementRendered(")
+    assert "if (!el || !el.isConnected || el.hidden) return false;" in rendered
+    assert 'el.getAttribute("aria-hidden") === "true"' in rendered
+    assert "el.getClientRects().length === 0" in rendered
+    owned = _function_source(js, "function ccEscapeOwnedElsewhere(")
+    assert "ccElementRendered" in owned
+    assert "CC_ESCAPE_OWNER_SELECTOR" in owned
+
+
+def test_escape_prefers_the_panel_holding_focus() -> None:
+    js = _read("app.js")
+    window = _function_source(js, "function ccPanelForEscape(")
+    assert 'target.closest(".cc-panel-stack > .cc-panel")' in window
+    assert "panels[panels.length - 1]" in window
+    build = js[js.index("function ccInlinePanel(") : js.index("function ccPanelFocusHeading(")]
+    assert 'closeBtn.title = "Close panel (Esc)"' in build
 
 
 def test_escape_handler_bootstraps_at_init() -> None:

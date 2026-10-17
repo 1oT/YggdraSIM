@@ -3,7 +3,8 @@
 
 """Generate the CLI matrix page from pyproject.toml and the registry.
 
-Reads the ``[project.scripts]`` table from ``pyproject.toml`` and the
+Reads the ``[project.scripts]`` and ``[project.gui-scripts]`` tables from
+``pyproject.toml`` and the
 ``CLI_MODULES`` and ``SUBSYSTEMS`` maps in
 ``yggdrasim_common/registry.py`` so the authored CLI reference page stays
 aligned with the actual entry points that ship in a release.
@@ -43,14 +44,28 @@ MATRIX_END = "<!-- cli-matrix:end -->"
 MODULE_TO_COMMAND_PREFIX = "yggdrasim_common.console_scripts:"
 
 # Manual overrides for commands whose console-script symbol does not obviously
-# map to a registry CLI_MODULES entry. Keep these minimal; add new rows here
-# whenever a release introduces a new command.
+# map to a registry CLI_MODULES entry. Most runnable modules live here rather
+# than in CLI_MODULES because that list is the allow-list the GUI terminal
+# spawns from (yggdrasim_common/gui_server/terminal.py); a module belongs
+# there only when the GUI may run it, so documenting one is not a reason to
+# add it. Add a row here whenever a release introduces a new command.
 MANUAL_COMMAND_MODULE_OVERRIDES: dict[str, str] = {
     "yggdrasim-card-bridge": "Tools.CardBridge",
     "yggdrasim-profile-package": "Tools.ProfilePackage",
     "yggdrasim-suci-tool": "Tools.SuciTool",
     "yggdrasim-hil-bridge": "Tools.HilBridge.main",
     "yggdrasim-hil-supervisor": "Tools.HilBridge.supervisor",
+    "yggdrasim-hil-reset": "Tools.HilBridge.device_reset",
+    "yggdrasim-lab-agent": "yggdrasim_common.remote_lab.agent",
+    "yggdrasim-apdu-fuzzer": "Tools.ApduFuzz",
+    "yggdrasim-eum-diag": "Tools.EumDiag",
+    "yggdrasim-apdu-dissect": "Tools.ApduDissector",
+    "yggdrasim-asn1": "Tools.Asn1TlvDecode",
+    "yggdrasim-card-clone": "Tools.CardClone",
+    "yggdrasim-yggdracore": "Tools.YggdraCore.http_app",
+    "yggdrasim-mcp": "Tools.YggdraMCP.server",
+    "yggdrasim-profile-autoload": "Tools.ProfilePackage.simcard_watch",
+    "yggdrasim-session-diff": "yggdrasim_common.session_diff",
 }
 
 # Subsystems that are not in the registry get a local description table so
@@ -59,6 +74,47 @@ LOCAL_SUBSYSTEM_DESCRIPTIONS: dict[str, str] = {
     "Tools.CardBridge": "Loopback PC/SC-to-HTTP APDU bridge for SSH-forwarded remote-card workflows.",
     "Tools.HilBridge.main": "SIMtrace2-backed HIL bridge (direct).",
     "Tools.HilBridge.supervisor": "HIL supervisor that manages the bridge and remsim-client lifecycle.",
+    "Tools.HilBridge.device_reset": "Remote equivalent of the SIMtrace2 reset button.",
+    "yggdrasim_common.remote_lab.agent": "Remote Lab agent: rig inventory, exclusive sessions, one session relay per rig.",
+    "Tools.ApduFuzz": "Opt-in, allow-listed APDU mutation fuzzer for eUICC research.",
+    "Tools.EumDiag": "EUM / SM-DP+ diagnostics: session-key staging and the BF36 BPP Lua dissector.",
+    "Tools.ApduDissector": "Bundled GSMTAP SIM dissector: decode a capture with tshark, install the Lua, print its path.",
+    "Tools.Asn1TlvDecode": "ASN.1 / BER-TLV decoder; renders pasted hex as JSON and value notation.",
+    "Tools.CardClone": "Chart a card's behaviour into a profile the simulator replays; read-only probe.",
+    "Tools.YggdraCore.http_app": "YggdraCore stub AUSF over loopback HTTP; bearer-authenticated.",
+    "Tools.YggdraMCP.server": "Domain MCP server: APDU, TLV, spec, identifier and PC/SC tools; needs the mcp extra.",
+    "Tools.ProfilePackage.simcard_watch": "Polling watcher that auto-opens fresh SIMCARD profiles in the SAIP tooling.",
+    "yggdrasim_common.session_diff": "Diffs the APDU traces of two shell session recordings.",
+}
+
+# Commands that are not `python -m <module>` at all: the launcher family runs
+# a script with a flag, and the Remote Lab client has no module entry. Each
+# row is (module form, description).
+LOCAL_COMMAND_ROWS: dict[str, tuple[str, str]] = {
+    "yggdrasim": (
+        "`python main/main.py`",
+        "Launcher menu: subsystem dispatch, Card Bridge menu, guides, env-flag editor.",
+    ),
+    "yggdrasim-cli": (
+        "`python main/main.py`",
+        "Alias of `yggdrasim`; the same launcher menu.",
+    ),
+    "yggdrasim-gui": (
+        "`python main/main.py --gui`",
+        "Desktop GUI: the loopback server plus a pywebview window.",
+    ),
+    "yggdrasim-desktop": (
+        "`python main/main.py --gui`",
+        "The same desktop GUI under `[project.gui-scripts]`, so Windows starts it without a console.",
+    ),
+    "yggdrasim-web-server": (
+        "`python main/main.py --web-server`",
+        "The GUI server headless, no webview; a browser connects to it.",
+    ),
+    "yggdrasim-lab": (
+        "_(installed command only)_",
+        "Operator-side Remote Lab client: list rigs, reserve, release, heartbeat.",
+    ),
 }
 
 
@@ -108,7 +164,9 @@ def match_module_for_command(command_name: str, command_target: str, cli_modules
 
 
 def build_rows(pyproject: dict, registry) -> list[tuple[str, str, str]]:
-    scripts = pyproject.get("project", {}).get("scripts", {}) or {}
+    project = pyproject.get("project", {}) or {}
+    scripts = dict(project.get("scripts", {}) or {})
+    scripts.update(project.get("gui-scripts", {}) or {})
     rows: list[tuple[str, str, str]] = []
     for script_name in sorted(scripts.keys()):
         target = scripts[script_name]
@@ -125,6 +183,13 @@ def build_rows(pyproject: dict, registry) -> list[tuple[str, str, str]]:
         module_form = ""
         if len(module) > 0:
             module_form = f"`python -m {module}`"
+        local_row = LOCAL_COMMAND_ROWS.get(script_name)
+        if local_row is not None:
+            local_form, local_description = local_row
+            if len(module_form) == 0:
+                module_form = local_form
+            if len(description) == 0:
+                description = local_description
         rows.append((f"`{script_name}`", module_form, description))
     return rows
 

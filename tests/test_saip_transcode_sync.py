@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for Tools/ProfilePackage/saip_transcode_sync.py pure-Python utilities.
 
 Covers: location_to_offset, offset_to_location, key_for_byte_offset,

@@ -32,20 +32,19 @@ Use this file as the entry point for choosing the correct `SCP11` module.
 
 ### Relay implementation layout
 
-The operator entrypoints intentionally retain separate workflow
-orchestrators, while protocol parsing and compatibility aliases have one
-owner:
+One workflow orchestrator and one console back every relay namespace, and
+the protocol parsers and shared helpers each have a single owner:
 
 | Tree | Status | Notes |
 | --- | --- | --- |
-| `SCP11/orchestrator.py` and `SCP11/console.py` | **legacy relay workflow owner** | Backs the historical `SCP11.relay` automation contract. |
-| `SCP11/live/orchestrator.py` and `SCP11/live/console.py` | **live workflow owner** | Backs the current LPAd / IPAd shell and its physical-card recovery behavior. |
+| `SCP11/live/orchestrator.py` and `SCP11/live/console.py` | **workflow owner** | Backs the LPAd / IPAd shell, its physical-card recovery behavior, and the `SCP11.relay` / `SCP11.test` automation contracts. |
 | `SCP11/eim_packages.py` and `SCP11/shared/ber_tlv.py` | **protocol parser owner** | All live, relay, and test namespaces use these parser symbols. |
-| `SCP11/test/*.py` | **compatibility shims** | Alias the live implementation for older imports. This namespace is not a separate operator entrypoint. |
+| `SCP11/transport.py`, `SCP11/pysim_support.py`, `SCP11/crypto_engine.py`, `SCP11/asn1_registry.py`, `SCP11/payload_builder.py` | **shared helper owner** | The `SCP11.live.*` and `SCP11.shared.*` spellings of these modules are aliases of the same objects. |
+| `SCP11/relay/*.py` and `SCP11/test/*.py` | **compatibility shims** | Alias the live implementation for older imports. Neither namespace is a separate operator entrypoint. |
 
-Do not copy parser or BER framing logic into either orchestrator. Workflow
-logic moves into `SCP11/shared/` only after both owners demonstrate the same
-contract through shared tests.
+Do not copy parser or BER framing logic into the orchestrator. Workflow
+logic moves into `SCP11/shared/` once more than one shell needs it and
+shared tests cover the contract.
 
 Remote relay mode uses platform TLS trust by default. `ES9_CA_BUNDLE_PATH`
 is empty unless the operator explicitly pins a CA bundle with `SET-ES9-CA`.

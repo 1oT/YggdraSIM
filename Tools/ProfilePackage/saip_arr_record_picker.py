@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """EF.ARR access-rule picker projection.
 
-ETSI TS 102 221 §9.4 / ISO 7816-4 §5.3.3 specify that file security
+ETSI TS 102 221 §9.2.7 (Table 9.0c) specifies that file security
 attributes can be referenced through a 3-byte tuple ``(EF.ARR FID,
-record number)``. The FCP editor uses this module to enumerate the
+record number)``; SAIP V3.4.1 §8.3 also allows a 1-byte record-only form. The FCP editor uses this module to enumerate the
 records of a target EF.ARR section so the operator can pick a record
 by index without having to manually parse the BER-TLV access rules.
 
@@ -21,27 +20,27 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .saip_asn1_decode import (
+    ARR_SCOPE_DF,
+    ARR_SCOPE_EF,
+    arr_access_mode_flags,
+)
+
 
 _HEX_RE = re.compile(r"^[0-9A-Fa-f]+$")
 
 
-# Mode-byte tags that ETSI TS 102 221 §9.5 / ISO 7816-4 §5.3.3 use to
-# label which APDU clusters an access rule applies to. The dispatcher
-# in ``saip_asn1_decode._decode_arr_access_modes`` already produces
-# these names; they are duplicated here as a stable enumeration so
-# upstream callers can render named badges without importing the
-# private helper.
-ACCESS_MODE_TOKENS: tuple[str, ...] = (
-    "READ",
-    "UPDATE",
-    "DEACTIVATE",
-    "ACTIVATE",
-    "TERMINATE",
-    "INCREASE",
-    "RESIZE",
-    "DELETE",
-    "DELETE_FILE",
-    "MANAGE_SECURITY",
+# Mode-byte names that ETSI TS 102 221 §9.2.2 (AM byte per ISO/IEC 7816-4) uses to label
+# which APDU clusters an access rule applies to. Both file kinds are listed:
+# the low three bits read as READ / UPDATE / APPEND for an EF and as DELETE
+# FILE (child) / CREATE FILE (EF) / CREATE FILE (DF) for MF, a DF or an ADF.
+# Derived from the decoder's own tables so the two cannot drift apart.
+ACCESS_MODE_TOKENS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        name
+        for scope in (ARR_SCOPE_EF, ARR_SCOPE_DF)
+        for _bit, name in arr_access_mode_flags(scope)
+    )
 )
 
 
@@ -74,7 +73,7 @@ def _normalise_record_index(value: Any) -> int:
             raise ValueError(f"record_index is not an integer: {value!r}") from err
     if idx < 1 or idx > 254:
         raise ValueError(
-            f"record_index {idx} out of range — TS 102 221 §9.4 caps "
+            f"record_index {idx} out of range -- TS 102 221 §8.2.2.2 caps "
             "linear-fixed records at 1..254.",
         )
     return idx
@@ -91,7 +90,13 @@ def encode_arr_reference(file_id: Any, record_index: Any) -> str:
 
 
 def decode_arr_reference(hex_value: Any) -> dict[str, Any]:
-    """Inverse of ``encode_arr_reference`` for 3-byte references."""
+    """Inverse of ``encode_arr_reference``, also reading the 1-byte form.
+
+    SAIP V3.4.1 §8.3 ``securityAttributesReferenced`` is either EF.ARR
+    file ID + record number (3 bytes) or the record number alone, with the
+    EF.ARR implied by the file's position: '2F06' for ADFs, the MF and
+    files directly under the MF, '6F06' elsewhere.
+    """
     text = _strip(hex_value)
     if len(text) == 0:
         raise ValueError("securityAttributesReferenced hex is empty.")
@@ -107,13 +112,16 @@ def decode_arr_reference(hex_value: Any) -> dict[str, Any]:
             "hex": text.upper(),
         }
     if len(text) == 2:
-        # Short form (TS 102 221 §11.1.1 8B tag): SFI in upper 5 bits,
-        # record number in lower 3 bits.
-        byte = int(text, 16)
+        record = int(text, 16)
+        if record < 1 or record > 254:
+            raise ValueError(
+                f"securityAttributesReferenced record number {record} out of "
+                "range -- TS 102 221 §8.2.2.2 caps linear-fixed records at 1..254.",
+            )
         return {
             "kind": "short",
-            "short_efid": (byte >> 3) & 0x1F,
-            "record_index": byte & 0x07,
+            "file_id": None,
+            "record_index": record,
             "hex": text.upper(),
         }
     raise ValueError(
@@ -136,7 +144,7 @@ def _records_from_show_file_payload(records_payload: Any) -> list[dict[str, Any]
             out.append(
                 {
                     "record_index": int(record_index),
-                    "summary": "(empty record — FF padding)",
+                    "summary": "(empty record -- FF padding)",
                     "rule_count": 0,
                     "rules": [],
                     "raw_hex": str(entry.get("raw_hex") or "").upper(),
@@ -160,7 +168,7 @@ def _records_from_show_file_payload(records_payload: Any) -> list[dict[str, Any]
 
 
 def project_records(records_payload: Any) -> list[dict[str, Any]]:
-    """Public entry point — same as ``_records_from_show_file_payload``.
+    """Public entry point -- same as ``_records_from_show_file_payload``.
 
     Kept stable for direct callers that hand in the ``records`` field
     from a ``saip.show_file`` response without going through the

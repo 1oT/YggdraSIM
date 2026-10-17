@@ -5,10 +5,10 @@
 
 
 /* ----------------------------------------------------------------------- */
-/* Workbench shell — unified module layout contract                        */
+/* Workbench shell -- unified module layout contract                        */
 /* ----------------------------------------------------------------------- */
 /*
- * Every subsystem view (Shell, Host shell, SCP11 live, SAIP, SCP80, …)
+ * Every subsystem view (Shell, Host shell, SCP11 live, SAIP, SCP80, ...)
  * renders against the same skeleton:
  *
  *   .cc-wb-shell                             // outer flex column
@@ -18,7 +18,7 @@
  *     .cc-wb-status-strip                    // horizontal chip row (state)
  *       span.cc-chip+
  *     .ribbon (existing G-2 ribbon)          // grouped action toolbar
- *       .ribbon-group [.ribbon-group-label .ribbon-btn …]
+ *       .ribbon-group [.ribbon-group-label .ribbon-btn ...]
  *     .cc-wb-frame                           // main content card
  *       (tree + detail, terminal canvas, table, etc.)
  *     .cc-wb-extras                          // auxiliary cards on demand

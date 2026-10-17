@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Reusable SAIP profile-element header form.
 
@@ -9,7 +8,7 @@ Every SAIP PE carries the two-field ``ProfileHeader`` (``mandated``,
 ``identification``) under a ``*-header`` / ``*-Header`` member. This
 module exposes the form widget that the per-PE editors mount at the top
 of their layout. Mirrors the screenshot's "Header" group with three
-inputs (Name, Identification, Mandated) — the Name is read-only because
+inputs (Name, Identification, Mandated) -- the Name is read-only because
 SAIP does not expose a renamable instance label, the JSON section key
 is what the operator edits.
 """

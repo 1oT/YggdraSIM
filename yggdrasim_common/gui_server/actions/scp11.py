@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 eSIM management Command Center actions.
 
 Registers:
 
-* ``scp11.download_profile`` — form-driven wrapper around the existing
+* ``scp11.download_profile`` -- form-driven wrapper around the existing
   ``/api/flows/download-profile`` WebSocket from Milestone B-3. The
   action declares its input schema here so the GUI can render a proper
   form; the actual streaming dispatch still runs on the established WS

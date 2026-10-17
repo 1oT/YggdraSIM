@@ -35,7 +35,7 @@
   background: var(--surface);
   color: var(--fg);
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   margin: 0;
   white-space: pre;
@@ -63,4 +63,75 @@
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.5;
+}
+
+/* Template placeholders inside a hex dump: the literal is shown as one
+   cell, and the legend maps each literal to its variable and stored value. */
+.saip-inline-placeholder-legend {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  font-size: 11px;
+}
+
+.saip-inline-placeholder-legend-title {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 9px;
+  color: var(--fg-muted);
+}
+
+.saip-inline-placeholder-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.saip-inline-placeholder-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  font-size: 11px;
+}
+
+.saip-inline-placeholder-meta {
+  color: var(--fg-muted);
+}
+
+.saip-inline-placeholder-note {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.saip-profile-header-input.is-placeholder {
+  color: var(--accent);
+  border-style: dashed;
+}
+
+/* The JSON tab holds one card: the body becomes a flex column so the
+   projection takes the detail pane's remaining height and scrolls inside
+   it instead of ending in a short box. */
+.saip-detail-body--json {
+  display: flex;
+  flex-direction: column;
+}
+
+.saip-detail-body--json .saip-pe-json-card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.saip-pe-json-card .saip-pe-json-text {
+  flex: 1 1 auto;
+  resize: none;
 }

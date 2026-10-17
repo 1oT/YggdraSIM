@@ -7,7 +7,7 @@
    ``_MAX_CACHE_FILES`` newest entries and a total-byte budget. Without it
    the cache grew unbounded across a long-running session.
 2. ``SaipTool._load_config`` now quarantines a corrupt ``saip_tool.json``
-   to a timestamped sidecar instead of silently discarding it — we want
+   to a timestamped sidecar instead of silently discarding it -- we want
    the hand-edit preserved so the operator can recover from a typo.
 
 Neither test needs ``pySim`` or a live card; both operate purely on disk.

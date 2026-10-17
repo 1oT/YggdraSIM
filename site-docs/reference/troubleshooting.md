@@ -46,7 +46,7 @@ non-trivial, the row links to the page that explains it in full.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `/ping` works but `/apdu` returns `401` | bearer token missing on the consumer side | copy the token file with mode `0600` and pass `--remote-card-token-file`; see [Remote APDU Streaming](../how-to/remote-apdu-streaming.md) |
+| `/ping` works but `/apdu` returns `401` | bearer token missing on the consumer side | copy the token file with mode `0600` and pass `--remote-card-token-file`; see [Card Bridge over SSH](../how-to/remote-apdu-streaming.md) |
 | `429 Too many authentication failures` | repeated bad tokens from the same peer | wait for the lockout window, then retry with the correct token |
 | `Connection refused` from the HIL rig | SSH forward is missing or bound on the wrong host | confirm `ssh -L` or `ssh -R` is still running and that the rig can reach `http://127.0.0.1:8642/ping` |
 | APDUs hang during long eUICC work | tunnel latency or timeout too low | raise `--apdu-timeout-ms` on the HIL bridge or supervisor |
@@ -150,5 +150,5 @@ On first successful load the manager prints a one-line stderr banner naming each
 - [Glossary](glossary.md)
 - [Runtime Root](runtime-root.md)
 - [State Schema](state-schema.md)
-- [Remote APDU Streaming](../how-to/remote-apdu-streaming.md)
+- [Card Bridge over SSH](../how-to/remote-apdu-streaming.md)
 - [Install RemSIM / APDU Streaming](../how-to/install-remsim-apdu-streaming.md)

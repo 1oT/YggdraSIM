@@ -5,7 +5,7 @@
 
 The SCP03 file-system module used to render FCP fields and decoded
 record bodies by ``JSON.stringify``-ing object values into a <pre>
-block — a "terminal JSON" look. This was replaced by a type-aware
+block -- a "terminal JSON" look. This was replaced by a type-aware
 pretty-value renderer (``renderPrettyValue``) that lays out objects
 as definition lists, arrays as chip rows, primitives as type chips,
 and hex-looking strings as byte-grouped pills. A toolbar on every
@@ -192,7 +192,7 @@ class DecodedToolbarJsContract(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------- #
-# CSS contracts — make sure the new layout is actually styled
+# CSS contracts -- make sure the new layout is actually styled
 # ---------------------------------------------------------------------- #
 
 

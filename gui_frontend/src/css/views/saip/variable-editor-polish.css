@@ -28,8 +28,9 @@
 .saip-vars-kind {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -39,15 +40,15 @@
 }
 
 .saip-vars-kind--iccid {
-  background: rgba(120, 220, 130, 0.12);
-  color: #78dc82;
-  border-color: rgba(120, 220, 130, 0.4);
+  background: var(--surface-alt);
+  color: var(--fg-muted);
+  border-color: var(--border-strong);
 }
 
 .saip-vars-kind--imsi {
-  background: rgba(120, 180, 240, 0.12);
-  color: #78b4f0;
-  border-color: rgba(120, 180, 240, 0.4);
+  background: var(--surface-alt);
+  color: var(--fg-muted);
+  border-color: var(--border-strong);
 }
 
 .saip-vars-kind--hex,
@@ -58,21 +59,25 @@
 }
 
 .saip-vars-kind--text {
-  background: rgba(255, 200, 80, 0.12);
-  color: #ffc850;
-  border-color: rgba(255, 200, 80, 0.4);
+  background: var(--surface-alt);
+  color: var(--fg-muted);
+  border-color: var(--border-strong);
 }
 
+/* The chips wrap. With nowrap a six-chip row pushed the table's
+   min-content width past the list column, and the overflow painted
+   under the bind card: sticky header cells and buttons are positioned,
+   so they sat above it and hid the form's Value label. */
 .saip-vars-state {
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .saip-vars-state-chip {
   display: inline-flex;
   align-items: center;
-  margin-right: 4px;
+  margin: 1px 4px 1px 0;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -125,46 +130,6 @@
   font-size: 10px;
   color: var(--fg-muted);
   font-style: italic;
-}
-
-/* SA-G6: modal title row gets a stats chip strip next to the title. */
-
-.saip-modal-title-wrap {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  flex-grow: 1;
-}
-
-.saip-modal-stats {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.saip-modal-stat-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--fg);
-}
-
-.saip-modal-stat-chip--mono {
-  font-family: var(--mono);
-  font-weight: 500;
-  text-transform: lowercase;
-}
-
-.saip-modal-stat-chip--muted {
-  color: var(--fg-muted);
-  background: transparent;
 }
 
 /* Compare pane */
@@ -222,12 +187,12 @@
 }
 
 .saip-cmp-a {
-  color: #ff9a6a;
+  color: var(--fail);
   font-family: var(--mono);
 }
 
 .saip-cmp-b {
-  color: #78dc82;
+  color: var(--ok);
   font-family: var(--mono);
 }
 
@@ -243,4 +208,33 @@
 .saip-cmp-keys li {
   font-size: 11px;
   color: var(--fg-muted);
+}
+
+/* Inline template variables: a stored value resolves the placeholder for
+   DER/HEX export; without one the complete export stays blocked. */
+.saip-vars-state-chip.is-universal {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+}
+
+.saip-vars-state-chip.is-resolved {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 40%, transparent);
+}
+
+.saip-vars-state-chip.is-unresolved {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
+}
+
+.saip-token-inline-status {
+  margin-top: 4px;
+}
+
+.saip-token-list-actions .saip-token-export-complete[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }

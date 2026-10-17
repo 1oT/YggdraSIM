@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge APDU relay: forwards C-APDUs from a network client to the connected physical SIM and returns R-APDUs."""
 from __future__ import annotations
 
@@ -16,8 +15,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 
 from yggdrasim_common.card_bridge_auth import (
+    CARD_LEASE_HEADER,
     compare as _token_compare,
     fingerprint as _token_fingerprint,
+    generate_token as _generate_lease_token,
     is_loopback_host,
     parse_bearer_header,
 )
@@ -41,6 +42,158 @@ class _OversizedRequestBodyError(ValueError):
     """Raised when Content-Length exceeds the relay's request-body cap."""
 
 
+CARD_LEASE_PATH = "/lease"
+
+# A lease is short by design. It is renewed for as long as its holder is
+# alive, so the only thing the ceiling decides is how long a card stays
+# unreachable after a holder dies without releasing it -- on a rig that
+# may be in another building behind a hub with no per-port power.
+DEFAULT_LEASE_TTL_SECONDS = 120.0
+MIN_LEASE_TTL_SECONDS = 5.0
+MAX_LEASE_TTL_SECONDS = 900.0
+
+
+class CardLeaseConflict(RuntimeError):
+    """Raised when a lease operation collides with another holder."""
+
+    def __init__(self, holder: str, expires_in_seconds: float) -> None:
+        super().__init__(
+            f"Card lease is held by {holder or 'another consumer'}."
+        )
+        self.holder = holder
+        self.expires_in_seconds = expires_in_seconds
+
+
+@dataclass(frozen=True, slots=True)
+class CardLeaseState:
+    """Public view of the lease. Never carries the lease token itself."""
+
+    held: bool
+    holder: str = ""
+    expires_in_seconds: float = 0.0
+    ttl_seconds: float = 0.0
+
+
+class _CardLeaseRegistry:
+    """One cooperative lease over the card behind this relay.
+
+    Two consumers driving one card interleave on the same logical
+    channels and the same secure channel, which corrupts card state in a
+    way that reads as a card fault rather than as a collision. The lease
+    makes that collision a refusal instead.
+
+    It is cooperative, not an access control: anyone holding the relay's
+    bearer token can break it, and the relay refuses to grant one at all
+    when it has no bearer token, where a lease would only look like
+    protection. One card means one lease, so this holds a single record
+    and needs no bound.
+    """
+
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._token = ""
+        self._holder = ""
+        # Who held it last, kept only so a renewal arriving after the
+        # lease lapsed can re-establish it with its attribution intact.
+        # Never reported: state() carries a holder only while held.
+        self._last_holder = ""
+        self._expires_at = 0.0
+        self._ttl_seconds = 0.0
+
+    def _expire_locked(self, now: float) -> None:
+        if len(self._token) > 0 and now >= self._expires_at:
+            self._clear_locked()
+
+    def _clear_locked(self) -> None:
+        if len(self._holder) > 0:
+            self._last_holder = self._holder
+        self._token = ""
+        self._holder = ""
+        self._expires_at = 0.0
+        self._ttl_seconds = 0.0
+
+    def _state_locked(self, now: float) -> CardLeaseState:
+        if len(self._token) == 0:
+            return CardLeaseState(held=False)
+        return CardLeaseState(
+            held=True,
+            holder=self._holder,
+            expires_in_seconds=max(0.0, self._expires_at - now),
+            ttl_seconds=self._ttl_seconds,
+        )
+
+    def state(self) -> CardLeaseState:
+        with self._lock:
+            now = self._clock()
+            self._expire_locked(now)
+            return self._state_locked(now)
+
+    def claim(
+        self,
+        *,
+        holder: str,
+        ttl_seconds: float = DEFAULT_LEASE_TTL_SECONDS,
+        renew_token: str = "",
+    ) -> str:
+        """Take or renew the lease and return its token.
+
+        Presenting the current token renews rather than collides, so a
+        holder keeps the card by heartbeating instead of by asking for a
+        TTL long enough to outlive its own failure.
+
+        A renewal that arrives after the lease has already lapsed
+        re-establishes it under the same token. Minting a new one instead
+        would orphan the holder that is still renewing: it would keep
+        presenting a token the relay no longer knows, and the first call
+        that actually needs the lease -- a card reset at a session
+        boundary -- would be refused by a lease nobody can present.
+        """
+        ttl = min(max(float(ttl_seconds), MIN_LEASE_TTL_SECONDS), MAX_LEASE_TTL_SECONDS)
+        with self._lock:
+            now = self._clock()
+            self._expire_locked(now)
+            if len(self._token) > 0:
+                if _token_compare(renew_token, self._token) is False:
+                    raise CardLeaseConflict(
+                        self._holder, max(0.0, self._expires_at - now)
+                    )
+            elif len(renew_token) > 0:
+                self._token = renew_token
+                self._holder = holder or self._last_holder
+            else:
+                self._token = _generate_lease_token()
+                self._holder = holder
+            self._expires_at = now + ttl
+            self._ttl_seconds = ttl
+            return self._token
+
+    def release(self, *, lease_token: str = "", force: bool = False) -> bool:
+        """Drop the lease. Returns False when none was held."""
+        with self._lock:
+            now = self._clock()
+            self._expire_locked(now)
+            if len(self._token) == 0:
+                return False
+            if force is False and _token_compare(lease_token, self._token) is False:
+                raise CardLeaseConflict(self._holder, max(0.0, self._expires_at - now))
+            self._clear_locked()
+            return True
+
+    def authorize(self, presented: str) -> bool:
+        """True when the caller may reach the card.
+
+        No lease held means the relay behaves exactly as it did before
+        leases existed, which is what keeps every current consumer working.
+        """
+        with self._lock:
+            now = self._clock()
+            self._expire_locked(now)
+            if len(self._token) == 0:
+                return True
+            return _token_compare(presented, self._token)
+
+
 @dataclass(frozen=True, slots=True)
 class ApduRelayConfig:
     """Bind + security configuration for the APDU relay HTTP service.
@@ -49,14 +202,14 @@ class ApduRelayConfig:
     no auth, no audit) so existing single-machine deployments keep
     working without changes. Operators who expose the relay to anything
     other than ``127.0.0.1`` / ``::1`` must supply a non-empty
-    :attr:`auth_token`; the service refuses to start otherwise — see
+    :attr:`auth_token`; the service refuses to start otherwise -- see
     :meth:`HilBridgeApduRelayService.start`.
     """
 
     host: str = "127.0.0.1"
     port: int = 0
     enabled: bool = True
-    # Bearer token presented by clients in ``Authorization: Bearer …``.
+    # Bearer token presented by clients in ``Authorization: Bearer ...``.
     # Empty token + loopback bind = unauthenticated (back-compat).
     # Empty token + non-loopback bind = service refuses to start.
     auth_token: str = ""
@@ -67,7 +220,7 @@ class ApduRelayConfig:
     auth_lockout_failures: int = 3
     auth_lockout_window_seconds: float = 30.0
     auth_lockout_duration_seconds: float = 60.0
-    # Structured audit emission. Header-only by default — never logs
+    # Structured audit emission. Header-only by default -- never logs
     # APDU data bytes or response payloads. The full-hex form must be
     # opted into explicitly because PIN material rides through here.
     audit_enabled: bool = False
@@ -170,6 +323,13 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK, self.server.service.status_payload()
             )
             return
+        if normalized_path == CARD_LEASE_PATH:
+            if self._enforce_authorization() is False:
+                return
+            self._send_json_response(
+                HTTPStatus.OK, self.server.service.lease_payload()
+            )
+            return
         self._send_text_response(HTTPStatus.NOT_FOUND, b"not found\n")
 
     def do_POST(self) -> None:
@@ -178,12 +338,31 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
         if normalized_path == APDU_RELAY_PATH:
             if self._enforce_authorization() is False:
                 return
+            if self._enforce_card_lease() is False:
+                return
             self._handle_apdu_post()
             return
         if normalized_path == APDU_RELAY_CARD_RESET_PATH:
             if self._enforce_authorization() is False:
                 return
+            if self._enforce_card_lease() is False:
+                return
             self._handle_card_reset_post()
+            return
+        if normalized_path == CARD_LEASE_PATH:
+            if self._enforce_authorization() is False:
+                return
+            self._handle_lease_post()
+            return
+        self._send_text_response(HTTPStatus.NOT_FOUND, b"not found\n")
+
+    def do_DELETE(self) -> None:
+        """Handle HTTP DELETE requests (lease release only)."""
+        normalized_path = self.path.rstrip("/") or "/"
+        if normalized_path == CARD_LEASE_PATH:
+            if self._enforce_authorization() is False:
+                return
+            self._handle_lease_delete()
             return
         self._send_text_response(HTTPStatus.NOT_FOUND, b"not found\n")
 
@@ -274,6 +453,112 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
                 {"error": "Missing or invalid bearer token."},
             )
         return False
+
+    def _enforce_card_lease(self) -> bool:
+        """Return True if the caller may reach the card, else send 409."""
+        service: HilBridgeApduRelayService = self.server.service
+        presented = str(self.headers.get(CARD_LEASE_HEADER, "") or "").strip()
+        if service.lease.authorize(presented) is True:
+            return True
+        state = service.lease.state()
+        self._send_json_response(
+            HTTPStatus.CONFLICT,
+            {
+                "error": "The card is leased by another consumer.",
+                "holder": state.holder,
+                "expiresInSeconds": round(state.expires_in_seconds, 3),
+            },
+        )
+        return False
+
+    def _lease_request_json(self) -> dict[str, Any] | None:
+        """Read a lease request body, sending the error response itself."""
+        try:
+            return self._read_request_json()
+        except _OversizedRequestBodyError as exc:
+            self._send_json_response(
+                HTTPStatus.BAD_REQUEST, {"error": str(exc)}, close_connection=True
+            )
+            return None
+        except ValueError as exc:
+            self._send_json_response(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return None
+
+    def _handle_lease_post(self) -> None:
+        service: HilBridgeApduRelayService = self.server.service
+        if len(service.expected_token) == 0:
+            self._send_json_response(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": (
+                        "This relay has no bearer token, so a card lease would "
+                        "protect nothing. Start it with a token to use leases."
+                    )
+                },
+            )
+            return
+        request_json = self._lease_request_json()
+        if request_json is None:
+            return
+        holder = str(request_json.get("holder", "") or "").strip()
+        renew_token = str(request_json.get("leaseToken", "") or "").strip()
+        if len(holder) == 0 and len(renew_token) == 0:
+            self._send_json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "holder is required to claim a card lease."},
+            )
+            return
+        try:
+            ttl_seconds = float(
+                request_json.get("ttlSeconds", DEFAULT_LEASE_TTL_SECONDS)
+            )
+        except (TypeError, ValueError):
+            self._send_json_response(
+                HTTPStatus.BAD_REQUEST, {"error": "ttlSeconds must be a number."}
+            )
+            return
+        try:
+            lease_token = service.lease.claim(
+                holder=holder,
+                ttl_seconds=ttl_seconds,
+                renew_token=renew_token,
+            )
+        except CardLeaseConflict as exc:
+            self._send_json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": str(exc),
+                    "holder": exc.holder,
+                    "expiresInSeconds": round(exc.expires_in_seconds, 3),
+                },
+            )
+            return
+        payload = service.lease_payload()
+        payload["leaseToken"] = lease_token
+        self._send_json_response(HTTPStatus.OK, payload)
+
+    def _handle_lease_delete(self) -> None:
+        service: HilBridgeApduRelayService = self.server.service
+        request_json = self._lease_request_json()
+        if request_json is None:
+            return
+        lease_token = str(request_json.get("leaseToken", "") or "").strip()
+        force = bool(request_json.get("force", False))
+        try:
+            released = service.lease.release(lease_token=lease_token, force=force)
+        except CardLeaseConflict as exc:
+            self._send_json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": str(exc),
+                    "holder": exc.holder,
+                    "expiresInSeconds": round(exc.expires_in_seconds, 3),
+                },
+            )
+            return
+        payload = service.lease_payload()
+        payload["released"] = released
+        self._send_json_response(HTTPStatus.OK, payload)
 
     def _read_request_json(self) -> dict[str, Any]:
         try:
@@ -408,10 +693,30 @@ class HilBridgeApduRelayService:
         self._audit_logger = logging.getLogger(
             config.audit_logger_name or DEFAULT_AUDIT_LOGGER_NAME
         )
+        self._lease = _CardLeaseRegistry()
 
     @property
     def enabled(self) -> bool:
         return self._config.enabled
+
+    @property
+    def lease(self) -> _CardLeaseRegistry:
+        return self._lease
+
+    @property
+    def lease_url(self) -> str:
+        return self.base_url + CARD_LEASE_PATH
+
+    def lease_payload(self) -> dict[str, Any]:
+        """Describe the current lease without disclosing its token."""
+        state = self._lease.state()
+        return {
+            "held": state.held,
+            "holder": state.holder,
+            "ttlSeconds": state.ttl_seconds,
+            "expiresInSeconds": round(state.expires_in_seconds, 3),
+            "leaseSupported": len(self._config.auth_token) > 0,
+        }
 
     @property
     def base_url(self) -> str:
@@ -521,11 +826,21 @@ class HilBridgeApduRelayService:
             payload.setdefault("cardResetUrl", self.card_reset_url)
         # Surface auth posture so SSH-tunnelled consumers can confirm
         # they're hitting a daemon that requires a token. We never
-        # publish the token itself — the fingerprint is enough for an
+        # publish the token itself -- the fingerprint is enough for an
         # operator to correlate with the on-disk file.
         payload["authRequired"] = len(self._config.auth_token) > 0
         if len(self._config.auth_token) > 0:
             payload["tokenFingerprint"] = self.token_fingerprint
+        # Who is driving this card, if anyone. A card can be busy with a
+        # consumer that lives on another machine, which every local view
+        # of the reader would otherwise report as idle. Names the holder,
+        # never the lease itself.
+        lease = self._lease.state()
+        payload["cardLease"] = {
+            "held": lease.held,
+            "holder": lease.holder,
+            "expiresInSeconds": round(lease.expires_in_seconds, 3),
+        }
         return payload
 
     def exchange_apdu(self, apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
@@ -561,7 +876,7 @@ class HilBridgeApduRelayService:
         Header-only by default. The header bytes (CLA/INS/P1/P2) plus
         ``Lc``/``Le`` and the status word leak no secret material. PIN
         bodies and AUTHENTICATE responses ride in the data fields and
-        are deliberately omitted unless ``audit_full_apdu`` is set —
+        are deliberately omitted unless ``audit_full_apdu`` is set --
         which the operator must opt into and which logs a startup
         warning at the call site so they know what's on disk.
         """

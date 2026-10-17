@@ -107,9 +107,18 @@ class MsisdnEncoderTests(unittest.TestCase):
 
 
 class EccEncoderTests(unittest.TestCase):
+    """EF.ECC record (TS 31.102 §4.2.21): code + alpha + service category."""
+
     def setUp(self) -> None:
-        # 112 (BCD-swapped 211F) + 911 (19F1FF) + padding FFFFFF
-        self.record = bytes.fromhex("211FFF19F1FFFFFFFF")
+        # 112 (BCD 11 F2 FF, digit 1 in the low nibble) + alpha "Police" padded to 8 + category 0x01
+        self.record = bytes.fromhex("11F2FF" + b"Police".hex() + "FFFF" + "01")
+
+    def test_decode_record_layout(self) -> None:
+        decoded = _decode_ecc(self.record.hex())
+        self.assertEqual(decoded["emergencyCallCode"], "112")
+        self.assertEqual(decoded["alphaIdentifier"], "Police")
+        self.assertEqual(decoded["emergencyServiceCategory"], "0x01")
+        self.assertEqual(decoded["emergencyServiceCategories"], ["Police"])
 
     def test_identity_roundtrip(self) -> None:
         decoded = _decode_ecc(self.record.hex())
@@ -118,19 +127,42 @@ class EccEncoderTests(unittest.TestCase):
         encoded = encode_ef_ecc(payload, target_length=len(self.record))
         self.assertEqual(encoded, self.record)
 
-    def test_replace_code(self) -> None:
+    def test_replace_code_and_category(self) -> None:
         decoded = _decode_ecc(self.record.hex())
         payload = dict(decoded)
-        payload["emergencyCodes"] = ["999", "911"]
+        payload["emergencyCallCode"] = "911"
+        payload["emergencyServiceCategories"] = ["Ambulance", "Fire Brigade"]
         payload["_ygg_original_hex"] = self.record.hex().upper()
         encoded = encode_ef_ecc(payload, target_length=len(self.record))
+        self.assertEqual(len(encoded), len(self.record))
         redecoded = _decode_ecc(encoded.hex())
-        self.assertEqual(redecoded["emergencyCodes"][0], "999")
-        self.assertEqual(redecoded["emergencyCodes"][1], "911")
+        self.assertEqual(redecoded["emergencyCallCode"], "911")
+        self.assertEqual(redecoded["alphaIdentifier"], "Police")
+        self.assertEqual(redecoded["emergencyServiceCategory"], "0x06")
+
+    def test_code_only_record(self) -> None:
+        decoded = _decode_ecc("19F1FF")
+        self.assertEqual(decoded["emergencyCallCode"], "911")
+        self.assertNotIn("alphaIdentifier", decoded)
+        encoded = encode_ef_ecc({"emergencyCallCode": "999"}, target_length=3)
+        self.assertEqual(encoded, bytes.fromhex("99F9FF"))
+
+    def test_legacy_code_list_still_accepted(self) -> None:
+        encoded = encode_ef_ecc({"emergencyCodes": ["112", "911"]}, target_length=9)
+        self.assertEqual(encoded, bytes.fromhex("11F2FF19F1FFFFFFFF"))
 
     def test_reject_non_digit_code(self) -> None:
         with self.assertRaises(RoundtripEncoderError):
+            encode_ef_ecc({"emergencyCallCode": "9A9"})
+        with self.assertRaises(RoundtripEncoderError):
             encode_ef_ecc({"emergencyCodes": ["9A9"]})
+
+    def test_reject_unknown_category_name(self) -> None:
+        with self.assertRaises(RoundtripEncoderError):
+            encode_ef_ecc(
+                {"emergencyCallCode": "112", "emergencyServiceCategories": ["Coast Guard"]},
+                target_length=8,
+            )
 
     def test_dispatcher_routes_ef_ecc(self) -> None:
         self.assertIn("ef-ecc", roundtrip_capable_ef_keys())
@@ -161,8 +193,8 @@ class PuctEncoderTests(unittest.TestCase):
 
 class LociEncoderTests(unittest.TestCase):
     def setUp(self) -> None:
-        # TMSI 4B + TBCD LAI 3B (240-07) + LAC 2B + reserved FF + status 00
-        self.record = bytes.fromhex("DEADBEEF42F070" + "1234" + "FF" + "00")
+        # TMSI 4B + TBCD LAI 3B (001-01) + LAC 2B + reserved FF + status 00
+        self.record = bytes.fromhex("DEADBEEF00F110" + "1234" + "FF" + "00")
 
     def test_identity_roundtrip(self) -> None:
         decoded = _decode_loci(self.record.hex())
@@ -188,14 +220,14 @@ class LociEncoderTests(unittest.TestCase):
 
 class OplEncoderTests(unittest.TestCase):
     def test_identity_roundtrip(self) -> None:
-        raw = bytes.fromhex("42F070" + "0001" + "FFFE" + "01")
+        raw = bytes.fromhex("00F110" + "0001" + "FFFE" + "01")
         decoded = _decode_opl_record(raw.hex())
         encoded = encode_ef_opl_record(dict(decoded), target_length=len(raw))
         self.assertEqual(encoded, raw)
 
     def test_reject_missing_pnn_identifier(self) -> None:
         with self.assertRaises(RoundtripEncoderError):
-            encode_ef_opl_record({"plmn": "240-07", "lacStart": "0001", "lacEnd": "0002"})
+            encode_ef_opl_record({"plmn": "001-01", "lacStart": "0001", "lacEnd": "0002"})
 
     def test_dispatcher_routes_ef_opl(self) -> None:
         self.assertIn("ef-opl", roundtrip_capable_ef_keys())
@@ -294,7 +326,7 @@ class PcscfEncoderTests(unittest.TestCase):
 class SpdiEncoderTests(unittest.TestCase):
     def test_identity_roundtrip(self) -> None:
         # SPDI: A3 <len> 80 <len> <PLMN list>
-        plmn = bytes.fromhex("42F070")  # 240-07
+        plmn = bytes.fromhex("00F110")  # 001-01
         inner = bytes([0x80, len(plmn)]) + plmn
         raw = bytes([0xA3, len(inner)]) + inner
         decoded = _decode_spdi(raw.hex())
@@ -305,11 +337,11 @@ class SpdiEncoderTests(unittest.TestCase):
 
     def test_rebuild_without_hex_hint(self) -> None:
         encoded = encode_ef_spdi(
-            {"serviceProviderPlmnList": ["240-07", "240-10"]}
+            {"serviceProviderPlmnList": ["001-01", "001-10"]}
         )
         redecoded = _decode_spdi(encoded.hex())
         self.assertEqual(
-            redecoded["serviceProviderPlmnList"], ["240-07", "240-10"]
+            redecoded["serviceProviderPlmnList"], ["001-01", "001-10"]
         )
 
     def test_dispatcher_routes_ef_spdi(self) -> None:
@@ -317,10 +349,70 @@ class SpdiEncoderTests(unittest.TestCase):
 
 
 class EpsnscEncoderTests(unittest.TestCase):
+    """EF.EPSNSC (TS 31.102 §4.2.92): ``A0`` TLV of 80/81/82/83/84."""
+
+    _KASME = bytes(range(32))
+    _RECORD = (
+        bytes.fromhex("A034")
+        + bytes.fromhex("800103")
+        + bytes.fromhex("8120")
+        + _KASME
+        + bytes.fromhex("820400000010")
+        + bytes.fromhex("830400000011")
+        + bytes.fromhex("840112")
+    )
+
     def test_identity_roundtrip(self) -> None:
+        raw = self._RECORD + b"\xFF" * 8
+        decoded = _decode_eps_nas_security_context(raw.hex())
+        assert decoded is not None
+        self.assertEqual(decoded["ksiAsme"], 3)
+        self.assertEqual(decoded["kAsmeHex"], self._KASME.hex().upper())
+        self.assertEqual(decoded["uplinkNasCount"], 16)
+        self.assertEqual(decoded["downlinkNasCount"], 17)
+        self.assertEqual(decoded["nasCipheringAlgorithm"], "128-EEA1")
+        self.assertEqual(decoded["nasIntegrityAlgorithm"], "128-EIA2")
+        self.assertTrue(decoded["valid"])
+        encoded = encode_ef_eps_nas_security_context(
+            dict(decoded), target_length=len(raw)
+        )
+        self.assertEqual(encoded, raw)
+
+    def test_edited_fields_rebuild_the_tlv(self) -> None:
+        decoded = _decode_eps_nas_security_context(self._RECORD.hex())
+        assert decoded is not None
+        decoded["uplinkNasCount"] = 0x01020304
+        decoded["nasCipheringAlgorithm"] = "128-EEA3"
+        encoded = encode_ef_eps_nas_security_context(dict(decoded))
+        redecoded = _decode_eps_nas_security_context(encoded.hex())
+        assert redecoded is not None
+        self.assertEqual(redecoded["uplinkNasCount"], 0x01020304)
+        self.assertEqual(redecoded["nasCipheringAlgorithm"], "128-EEA3")
+        self.assertEqual(redecoded["nasIntegrityAlgorithm"], "128-EIA2")
+
+    def test_no_key_context_is_flagged_invalid(self) -> None:
+        # KSI '07' means no key is available (TS 33.401).
+        record = bytes.fromhex("A014" "800107" "8100" "820400000000" "830400000000" "840100")
+        decoded = _decode_eps_nas_security_context(record.hex())
+        assert decoded is not None
+        self.assertFalse(decoded["valid"])
+        self.assertEqual(decoded["kAsmeHex"], "")
+        self.assertEqual(encode_ef_eps_nas_security_context(dict(decoded)), record)
+
+    def test_erased_record(self) -> None:
+        decoded = _decode_eps_nas_security_context("FF" * 54)
+        assert decoded is not None
+        self.assertFalse(decoded["valid"])
+        self.assertEqual(decoded["state"], "erased (all FF)")
+
+    def test_legacy_flat_record_roundtrip(self) -> None:
+        # A record that is not an A0 TLV is surfaced as the pre-TLV split
+        # (with a warning) so its bytes still round-trip unchanged.
         kasme = bytes(range(16))
         raw = bytes([0x07]) + kasme + bytes([0xAA, 0xBB])
         decoded = _decode_eps_nas_security_context(raw.hex())
+        assert decoded is not None
+        self.assertIn("warning", decoded)
         encoded = encode_ef_eps_nas_security_context(
             dict(decoded), target_length=len(raw)
         )
@@ -330,6 +422,15 @@ class EpsnscEncoderTests(unittest.TestCase):
         with self.assertRaises(RoundtripEncoderError):
             encode_ef_eps_nas_security_context(
                 {"ksiHeader": "0x00", "kasmeFirst16Bytes": "AABB"}
+            )
+        with self.assertRaises(RoundtripEncoderError):
+            encode_ef_eps_nas_security_context(
+                {
+                    "ksiAsme": 0,
+                    "kAsmeHex": "AABB",
+                    "uplinkNasCount": 0,
+                    "downlinkNasCount": 0,
+                }
             )
 
     def test_dispatcher_routes_ef_epsnsc(self) -> None:

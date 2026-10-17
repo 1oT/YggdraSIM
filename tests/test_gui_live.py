@@ -196,7 +196,7 @@ class TestLiveReadersRoute:
 # with pyscard's default ``disposition=SCARD_UNPOWER_CARD``. On
 # ``SCARD_SHARE_SHARED`` setups (ours), that unpower propagates to the
 # live scp03 scan session and silently cold-resets the card between
-# polls — so every subsequent file-click failed with 6A82 and the GUI
+# polls -- so every subsequent file-click failed with 6A82 and the GUI
 # had to recover-scan after each click. The contract below codifies
 # the fix: probe with ``SCARD_LEAVE_CARD`` and only use the cached ATR
 # as a fallback for non-presence errors.
@@ -425,3 +425,21 @@ class TestSessionAtrLookup:
 
         assert live_module._close_scp03_sessions_for_reader_name("Reader A") == 1
         assert closed == ["deadbeef"]
+
+
+def test_the_readers_route_still_resolves_to_its_own_handler() -> None:
+    """A helper added above a decorated route silently steals the route.
+
+    The decorator binds to whatever function follows it, so inserting one
+    between the two turns /api/live/readers into that helper and the
+    response fails validation rather than pointing at the cause.
+    """
+    from yggdrasim_common.gui_server.routes import live
+
+    matches = [
+        route
+        for route in live.router.routes
+        if getattr(route, "path", "") == "/api/live/readers"
+    ]
+    assert len(matches) == 1
+    assert matches[0].endpoint is live.list_readers

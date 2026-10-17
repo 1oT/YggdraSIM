@@ -21,32 +21,55 @@ import atexit
 import hashlib
 import io
 import os
+import re
 import shlex
 import shutil
 import socket
 import ssl
 import sys
-from contextlib import redirect_stdout
+import traceback
+from contextlib import contextmanager, redirect_stdout
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 try:
     from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 except Exception:
     def hil_bridge_warning_text() -> str:
         return ""
+try:
+    from smartcard.Exceptions import SmartcardException
+except Exception:
+    class SmartcardException(Exception):
+        """Stand-in when pyscard is absent; nothing raises it then."""
+from yggdrasim_common.apdu_chunking import MAX_SHORT_APDU_DATA, plan_chunked_apdus
+from yggdrasim_common.command_log import (
+    LOG_FLAG_HELP,
+    log_flag_present,
+    run_with_command_log,
+)
 from yggdrasim_common.plugin_runtime import extend_target_with_plugins
-from yggdrasim_common.process_debug import is_global_debug_enabled
+from yggdrasim_common.process_debug import (
+    GLOBAL_DEBUG_ENV,
+    is_global_debug_enabled,
+    set_global_debug,
+)
 from yggdrasim_common.quit_control import quit_all
+from yggdrasim_common.stk_terminal import drain_proactive_commands, terminal_profile_apdu
 from yggdrasim_common.euicc_issuer import (
     format_ecasd_issuer_display,
     infer_ecasd_issuer_from_eid,
 )
+from SCP11.shared.certificate_view import format_certificate_rows
+from SCP11.shared.certificate_view import get_certs_rows
 from SCP11.shared.gsma_error_codes import describe_sgp22_notification_sent_result
 from SCP11.shared.gsma_error_codes import describe_sgp22_profile_state_result
+from SCP11.shared.profile_info import split_profile_info_list
 from SCP11.shared.profile_targeting import resolve_profile_target_identifier
 from SCP11.shared.tls_helpers import create_introspection_context
+from SCP11.transport import complete_response_data
+from SCP11.transport import exchange_with_length_correction
 
 try:
     from SCP03.core.utils import TlvParser
@@ -103,6 +126,17 @@ def _build_tlv(tag: bytes, value: bytes) -> bytes:
     return tag + _encode_length(len(value)) + value
 
 
+class CardTransportUnavailable(RuntimeError):
+    """The per-command PC/SC transport could not be rebuilt, so the command did not start."""
+
+
+# Failures a command may end with while the shell goes on: a dropped PC/SC
+# handle or a lost card (OSError, SmartcardException), an operator-visible
+# runtime failure (RuntimeError, CardTransportUnavailable included) or a
+# rejected value (ValueError). Anything else is a defect and still propagates.
+_COMMAND_RUNTIME_ERRORS = (OSError, RuntimeError, ValueError, SmartcardException)
+
+
 class _SCP03RelayTransportAdapter:
     def __init__(self, apdu_channel: Any):
         self._apdu_channel = apdu_channel
@@ -113,24 +147,33 @@ class _SCP03RelayTransportAdapter:
         if callable(reset_method):
             reset_method()
 
+    def is_connected(self) -> bool:
+        is_connected = getattr(self._apdu_channel, "is_connected", None)
+        if callable(is_connected):
+            return bool(is_connected())
+        return True
+
     def transmit(self, apdu_hex: str, silent: bool = False) -> Tuple[bytes, int, int]:
         """Transmit a C-APDU over the live SCP11 transport and return the R-APDU."""
-        apdu = bytes.fromhex(apdu_hex)
-        response, sw1, sw2 = self._exchange(apdu, "SCP03", silent)
-        if sw1 == 0x6C:
-            corrected_apdu = apdu[:-1] + bytes([sw2])
-            return self.transmit(corrected_apdu.hex().upper(), silent=silent)
-        if sw1 in (0x61, 0x9F):
-            accumulated = response
-            get_response_cla = 0x00
-            if len(apdu) > 0:
-                get_response_cla = apdu[0] & 0x03
-            while sw1 in (0x61, 0x9F):
-                get_response = bytes([get_response_cla, 0xC0, 0x00, 0x00, sw2])
-                chunk, sw1, sw2 = self._exchange(get_response, "SCP03 [GET RESPONSE]", silent)
-                accumulated += chunk
-            return accumulated, sw1, sw2
-        return response, sw1, sw2
+
+        def exchange(command: bytes, log_name: str) -> Tuple[bytes, int, int]:
+            return self._exchange(command, log_name, silent)
+
+        command, response, sw1, sw2 = exchange_with_length_correction(
+            exchange,
+            bytes.fromhex(apdu_hex),
+            "SCP03",
+        )
+        # '9Fxx' announces response data the way '61xx' does for SIM-class commands.
+        return complete_response_data(
+            exchange,
+            command,
+            response,
+            sw1,
+            sw2,
+            "SCP03",
+            continuation_sw1=(0x61, 0x9F),
+        )
 
     def _exchange(self, apdu: bytes, log_name: str, silent: bool) -> Tuple[bytes, int, int]:
         exchange_method = getattr(self._apdu_channel, "exchange", None)
@@ -149,6 +192,16 @@ class _SCP03RelayTransportAdapter:
         return response, 0x90, 0x00
 
 
+# SGP.22 v3.1 §5.7.15: a ProfileInfoListRequest carrying no tag list returns
+# only the default ProfileInfo set ('5A', '4F', '9F70', '90', '91', '92',
+# '93', '94', '95'). Every other member -- profile policy rules '99', the
+# SGP.32 fallbackAttribute '9F26' -- is omitted unless the '5C' tag list names
+# it, so 'BF2D00' can never answer whether a Profile is the Fallback Profile.
+# The list names exactly what this console renders; icon '94' alone would add
+# up to 1024 bytes per Profile that nothing here displays.
+PROFILE_INFO_TAG_LIST = bytes.fromhex("5A4F9F7090919295999F269F679F7B")
+
+
 @dataclass
 class ProfileRow:
     iccid: str
@@ -156,6 +209,18 @@ class ProfileRow:
     profile_class: str
     nickname: str
     aid: str
+    # SGP.32 §2.11.1.1 fallbackAttribute, tag '9F26'. Without it set on some
+    # Profile, ES10b.ExecuteFallbackMechanism answers fallbackNotAvailable.
+    # ``None`` means the eUICC was never asked for the tag -- an eUICC that
+    # rejects the tag list is not the same as one reporting no Fallback
+    # Profile, and the listing must not render the two alike.
+    fallback: Optional[bool] = None
+    # SGP.32 §2.11.1.1 fallbackAllowed, tag '9F67': whether the Profile Owner
+    # authorises this Profile to become the Fallback Profile. It is OPTIONAL
+    # rather than DEFAULT, and §3.4.6 step 4 stops with 'fallbackNotAllowed(2)'
+    # when the flag is absent *or* FALSE -- so a tag that was never asked for
+    # and a withheld authorisation are different answers and render differently.
+    fallback_allowed: Optional[bool] = None
 
 
 @dataclass
@@ -216,6 +281,9 @@ class CommandSpec:
     visible_in_help: bool
     trigger_notification_sync: bool
     session_policy: str = SessionPolicy.SHARED
+    # The handler brings the card up itself, so the connect phase is not run
+    # before it; a transport rebuild still is, under its session policy.
+    runs_own_connect: bool = False
 
 
 @dataclass
@@ -264,6 +332,10 @@ class SCP11Console:
     TAG_CTX_0 = 0xA0
     TAG_AID = 0x4F
     TAG_ICCID = 0x5A
+    # Set by :meth:`_fetch_profiles_raw` once the eUICC has answered a
+    # ProfileInfoListRequest carrying ``PROFILE_INFO_TAG_LIST``. Until then no
+    # response can be read as evidence about the tag-gated members.
+    _profile_info_tag_list_honoured = False
     MODULE_STATE_NAME = "scp11_live_config"
     DEFAULT_AID_REGISTRY_PATH = (
         getattr(SCP03Config, "AID_FILE", "")
@@ -376,6 +448,24 @@ class SCP11Console:
         return commands
 
     def _run_command_line(self, raw_line: str, show_help_on_unknown: bool = True) -> bool:
+        return run_with_command_log(
+            raw_line,
+            lambda line: self._dispatch_command_line(line, show_help_on_unknown),
+            shell="eSIM Management",
+            refused=True,
+            debug=self._command_log_debug,
+        )
+
+    @contextmanager
+    def _command_log_debug(self) -> Iterator[None]:
+        """Raw APDU logging for a ``--log`` command, the switch ``--debug`` flips."""
+        previous = self._set_transport_debug(True)
+        try:
+            yield
+        finally:
+            self._restore_transport_debug(previous)
+
+    def _dispatch_command_line(self, raw_line: str, show_help_on_unknown: bool = True) -> bool:
         if len(str(raw_line or "").strip()) == 0:
             return True
         command, argument = self._split_command(raw_line)
@@ -389,12 +479,47 @@ class SCP11Console:
                 else:
                     self._print_help()
             return True
-        return self._execute_command(command_upper, argument)
+        try:
+            return self._execute_command(command_upper, argument)
+        except _COMMAND_RUNTIME_ERRORS as error:
+            self._report_command_failure(command_upper, error)
+            return True
+
+    @staticmethod
+    def _report_command_failure(command_upper: str, error: BaseException) -> None:
+        """Print a command's runtime failure; the shell itself stays up.
+
+        The traceback is kept for the global debug flag, so an operator sees
+        one line and a developer still gets the stack.
+        """
+        if isinstance(error, CardTransportUnavailable):
+            print(f"[!] {command_upper}: {error}")
+        else:
+            print(f"[!] {command_upper}: {error.__class__.__name__}: {error}")
+        if is_global_debug_enabled():
+            traceback.print_exc()
 
     def _execute_command(self, command_upper: str, argument: str) -> bool:
         spec = self._commands[command_upper]
+        if log_flag_present(argument):
+            # The terminal path strips --log before this point; any other caller
+            # (the GUI's action dispatch) would have it write a file on the
+            # server host.
+            print(f"[!] {command_upper}: --log is read from a terminal command line only.")
+            return True
         self._notification_sync_attempted = False
         self._last_eim_download_reached_server = None
+        # Handled here rather than per handler: an unparsed --debug used to
+        # reach the handler as a positional (DOWNLOAD sent it upstream as a
+        # matchingId). The transport rebuild in _enter_command_session
+        # carries the raw-APDU setting over to the new channel.
+        argument, command_debug = self._extract_command_debug_flag(argument)
+        previous_global_debug: Optional[str] = None
+        previous_transport_debug: Optional[bool] = None
+        if command_debug:
+            previous_global_debug = os.environ.get(GLOBAL_DEBUG_ENV)
+            set_global_debug(True, persist=False)
+            previous_transport_debug = self._set_transport_debug(True)
         try:
             self._enter_command_session(spec, command_upper)
             keep_running = spec.handler(argument)
@@ -411,7 +536,66 @@ class SCP11Console:
                     self._clear_notifications_internal(quiet=True)
             return keep_running
         finally:
+            if command_debug:
+                self._restore_transport_debug(previous_transport_debug)
+                self._restore_global_debug(previous_global_debug)
             self._leave_command_session(spec, command_upper)
+
+    def _extract_command_debug_flag(self, argument: str) -> Tuple[str, bool]:
+        """Split ``--debug`` / ``-d`` out of a command argument."""
+        text = str(argument or "").strip()
+        if len(text) == 0:
+            return "", False
+        try:
+            tokens = shlex.split(text)
+        except ValueError:
+            return text, False
+        kept: List[str] = []
+        debug = False
+        for token in tokens:
+            if str(token).strip().lower() in ("--debug", "-d"):
+                debug = True
+                continue
+            kept.append(token)
+        if debug is False:
+            # Leave the original text untouched so no quoting survives a
+            # shlex round-trip on the common no-flag path.
+            return text, False
+        return " ".join(kept), True
+
+    def _set_transport_debug(self, enabled: bool) -> Optional[bool]:
+        setter = getattr(self.apdu_channel, "set_raw_apdu_logging", None)
+        if callable(setter) is False:
+            return None
+        previous: Optional[bool] = None
+        getter = getattr(self.apdu_channel, "get_raw_apdu_logging", None)
+        if callable(getter):
+            try:
+                previous = bool(getter())
+            except Exception:
+                previous = None
+        try:
+            setter(bool(enabled))
+        except Exception:
+            return previous
+        return previous
+
+    def _restore_transport_debug(self, previous: Optional[bool]) -> None:
+        if previous is None:
+            return
+        setter = getattr(self.apdu_channel, "set_raw_apdu_logging", None)
+        if callable(setter) is False:
+            return
+        try:
+            setter(bool(previous))
+        except Exception:
+            return
+
+    def _restore_global_debug(self, previous: Optional[str]) -> None:
+        if previous is None:
+            os.environ.pop(GLOBAL_DEBUG_ENV, None)
+            return
+        os.environ[GLOBAL_DEBUG_ENV] = previous
 
     def _enter_command_session(self, spec: CommandSpec, command_upper: str) -> None:
         """Apply the command's session reset policy before handler dispatch.
@@ -428,7 +612,8 @@ class SCP11Console:
             return
         if self._can_rebuild_command_transport():
             self._reset_card_transport_for_command(reason=spec.name)
-            if self._command_runs_own_connect(command_upper) is False:
+            runs_own_connect = bool(getattr(spec, "runs_own_connect", False))
+            if runs_own_connect is False and self._command_runs_own_connect(command_upper) is False:
                 self._connect_card_for_command(reason=spec.name)
             self._session_dirty = False
             return
@@ -472,6 +657,7 @@ class SCP11Console:
         self._session_dirty = True
 
     def _disconnect_card_transport_after_command(self, reason: str) -> None:
+        had_handle = self._transport_reports_connected()
         disconnect = getattr(self.apdu_channel, "disconnect", None)
         if callable(disconnect):
             try:
@@ -485,7 +671,18 @@ class SCP11Console:
             if hasattr(orchestrator, "_phase_connect_complete"):
                 orchestrator._phase_connect_complete = False
             orchestrator._use_stk_mode_for_es10b_store_data = False
-        print(f"[*] {reason}: released card transport after command flow.")
+        if had_handle:
+            print(f"[*] {reason}: released card transport after command flow.")
+
+    def _transport_reports_connected(self) -> bool:
+        """False only when the channel itself says its handle is gone."""
+        is_connected = getattr(self.apdu_channel, "is_connected", None)
+        if not callable(is_connected):
+            return True
+        try:
+            return bool(is_connected())
+        except Exception:
+            return True
 
     def _reset_orchestrator_ephemeral_state(self) -> None:
         """Zero per-flow crypto + STK history fields on ``orchestrator.state``.
@@ -618,8 +815,15 @@ class SCP11Console:
         if callable(build):
             try:
                 new_channel = build(self.client.cfg)
-            except Exception:
-                pass
+            except Exception as error:
+                # The previous handle is already released above. Staying
+                # quiet here let the command's first APDU fail with a bare
+                # "channel is disconnected" instead of the PC/SC error
+                # behind it; the next command retries the build.
+                self._reset_orchestrator_after_transport_rebind()
+                raise CardTransportUnavailable(
+                    f"card transport rebuild failed ({error}); command not started."
+                ) from error
             else:
                 set_raw_logging = getattr(new_channel, "set_raw_apdu_logging", None)
                 if callable(set_raw_logging):
@@ -934,6 +1138,14 @@ class SCP11Console:
             lines.append(f"{'Ver Supported':<{key_width}}: {supported_version}")
         if len(firmware_version) > 0:
             lines.append(f"{'Firmware Ver':<{key_width}}: {firmware_version}")
+        if snapshot.euicc_info2_summary.get("iot_specific_info", False):
+            # SGP.32 §6.3.1 IoTSpecificInfo: both flags are NULL-if-present, and
+            # fallbackSupported gates ES10b.ExecuteFallbackMechanism entirely.
+            capabilities = [
+                f"fallback={'yes' if snapshot.euicc_info2_summary.get('fallback_supported') else 'no'}",
+                f"eCall={'yes' if snapshot.euicc_info2_summary.get('ecall_supported') else 'no'}",
+            ]
+            lines.append(f"{'SGP.32 Support':<{key_width}}: {', '.join(capabilities)}")
         if isinstance(eim_entries, list) and len(eim_entries) > 0:
             lines.append(f"{'eIM Entries':<{key_width}}: {len(eim_entries)}")
             for index, entry in enumerate(eim_entries, start=1):
@@ -988,27 +1200,6 @@ class SCP11Console:
             self.orchestrator._es10b_logical_channel = 0
             self.orchestrator._use_stk_mode_for_es10b_store_data = False
         print(f"{self._style.green}[+] Relay shell ready.{self._style.end}")
-
-    def _run_watchdog_pre_reset(self) -> None:
-        # Build a brand-new APDU channel just like exiting and
-        # re-entering the module would.
-        build = getattr(self.client, "_build_apdu_channel", None)
-        if callable(build):
-            new_channel = build(self.client.cfg)
-            self.apdu_channel = new_channel
-            self.client.apdu_channel = new_channel
-            orchestrator = getattr(self, "orchestrator", None)
-            if orchestrator is not None:
-                orchestrator.apdu_channel = new_channel
-                orchestrator._es10b_logical_channel = 0
-                orchestrator._use_stk_mode_for_es10b_store_data = False
-                orchestrator._phase_connect_stk_sent = False
-                orchestrator._phase_connect_complete = False
-                try:
-                    delattr(orchestrator.state, "_stk_state_captured")
-                except (AttributeError, TypeError):
-                    pass
-        self._session_dirty = True
 
     def _hil_bridge_warning_text(self) -> str:
         return hil_bridge_warning_text()
@@ -1068,6 +1259,16 @@ class SCP11Console:
             print(f"Ver Supported:      {self._style.cyan}{supported_version}{self._style.end}")
         if len(firmware_version) > 0:
             print(f"Firmware Ver:       {self._style.cyan}{firmware_version}{self._style.end}")
+        if snapshot.euicc_info2_summary.get("iot_specific_info", False):
+            # SGP.32 §6.3.1 IoTSpecificInfo: both flags are NULL-if-present, and
+            # fallbackSupported gates ES10b.ExecuteFallbackMechanism entirely.
+            capabilities = ", ".join(
+                [
+                    f"fallback={'yes' if snapshot.euicc_info2_summary.get('fallback_supported') else 'no'}",
+                    f"eCall={'yes' if snapshot.euicc_info2_summary.get('ecall_supported') else 'no'}",
+                ]
+            )
+            print(f"SGP.32 Support:     {self._style.cyan}{capabilities}{self._style.end}")
         if isinstance(eim_entries, list) and len(eim_entries) > 0:
             print(f"eIM Entries:        {self._style.cyan}{len(eim_entries)}{self._style.end}")
             for index, entry in enumerate(eim_entries, start=1):
@@ -1223,6 +1424,8 @@ class SCP11Console:
 
     def _print_help(self, include_expert: bool = False) -> None:
         print(f"\n{self._style.bold}{self._style.header}eSIM Relay Command Groups{self._style.end}")
+        print("  Add --debug to card-facing commands for full raw APDU hex tracing.")
+        print(f"  {LOG_FLAG_HELP}")
         sections = self._help_sections(include_expert=include_expert)
         for title, section in sections:
             rows = self._get_help_rows(section, include_expert=include_expert)
@@ -1633,21 +1836,12 @@ class SCP11Console:
         )
         self._add_command(
             "DOWNLOAD",
-            "DOWNLOAD",
-            "IPAd eIM package request and relay flow",
+            "DOWNLOAD [matchingId] [--<n>[,<n>...]]",
+            "IPAd eIM package request and relay flow (--n selects configured eIM entries)",
             self._cmd_eim_download,
             aliases=["EIM-DOWNLOAD"],
             section=self.HELP_SECTION_IPAD,
             trigger_notification_sync=True,
-            session_policy=SessionPolicy.HARD_RESET,
-        )
-        self._add_command(
-            "POLL",
-            "POLL [attempts] [timerSeconds] [-t delaySeconds] [-s statusLoops] [--debug]",
-            "Run legacy status watchdog flow",
-            self._cmd_eim_poll,
-            section=self.HELP_SECTION_EXPERT,
-            visible_in_help=False,
             session_policy=SessionPolicy.HARD_RESET,
         )
 
@@ -1662,6 +1856,7 @@ class SCP11Console:
         visible_in_help: bool = True,
         trigger_notification_sync: bool = False,
         session_policy: str = SessionPolicy.SHARED,
+        runs_own_connect: bool = False,
     ) -> None:
         spec = CommandSpec(
             name=name,
@@ -1673,6 +1868,7 @@ class SCP11Console:
             visible_in_help=visible_in_help,
             trigger_notification_sync=trigger_notification_sync,
             session_policy=session_policy,
+            runs_own_connect=runs_own_connect,
         )
         self._commands[name] = spec
         self._primary_commands.append(name)
@@ -2189,20 +2385,88 @@ class SCP11Console:
         print(f"[*] Transaction ID: {transaction_id_hex}")
         return True
 
+    def _extract_eim_entry_selection(self, argument: str) -> Tuple[str, Optional[List[int]], str]:
+        """Split a ``--1`` / ``--1,2`` entry selector out of a DOWNLOAD argument.
+
+        The selector counts from 1 because that is how the eIM configuration
+        entries are numbered for the operator; the returned indices are the
+        0-based BF55 positions run_eim_poll expects. ``None`` means no selector
+        was given, so the sweep covers every configured entry. A malformed
+        selector comes back as the third element rather than silently becoming
+        a matchingId.
+        """
+        text = str(argument or "").strip()
+        if len(text) == 0:
+            return "", None, ""
+        try:
+            tokens = shlex.split(text)
+        except ValueError:
+            return text, None, ""
+        kept: List[str] = []
+        selected: List[int] = []
+        for token in tokens:
+            if token.startswith("--") is False:
+                kept.append(token)
+                continue
+            usage_error = f"Unrecognised DOWNLOAD option: {token}"
+            fields = token[2:].split(",")
+            for field_text in fields:
+                if field_text.isdigit() is False:
+                    return text, None, usage_error
+                ordinal = int(field_text)
+                if ordinal < 1:
+                    return text, None, "eIM entry numbers start at 1."
+                index = ordinal - 1
+                if index not in selected:
+                    selected.append(index)
+        if len(selected) == 0:
+            # Leave the original text untouched so no quoting survives a
+            # shlex round-trip on the common no-selector path.
+            return text, None, ""
+        return " ".join(kept), selected, ""
+
     def _cmd_eim_download(self, argument: str) -> bool:
-        matching_id = argument.strip()
+        remaining, entry_indices, selection_error = self._extract_eim_entry_selection(argument)
+        if len(selection_error) > 0:
+            print(f"{self._style.red}[!] {selection_error}{self._style.end}")
+            print(
+                f"{self._style.yellow}[!] Usage: DOWNLOAD [matchingId] [--<n>[,<n>...]]"
+                f"{self._style.end}"
+            )
+            # A rejected argument opened no channel, so the DOWNLOAD
+            # notification-sync hook has nothing to forward and must not
+            # reach a card this command never connected to.
+            self._notification_sync_attempted = True
+            self._last_eim_download_reached_server = False
+            return True
+        matching_id = remaining.strip()
         if "$" in matching_id:
             parsed = self._parse_activation_code(matching_id)
             if parsed is not None:
+                if entry_indices is not None:
+                    print(
+                        f"{self._style.yellow}[*] Entry selection does not apply to an activation code; ignored."
+                        f"{self._style.end}"
+                    )
                 print(
                     f"{self._style.yellow}[*] Activation code detected. Redirecting to DOWNLOAD-PROFILE flow."
                     f"{self._style.end}"
                 )
                 self._download_activation_code(matching_id)
                 return True
-        print(f"{self._style.cyan}[*] Running eIM poll and relay flow...{self._style.end}")
+        if entry_indices is None:
+            print(f"{self._style.cyan}[*] Running eIM poll and relay flow...{self._style.end}")
+        else:
+            ordinals = ", ".join(str(index + 1) for index in entry_indices)
+            print(
+                f"{self._style.cyan}[*] Running eIM poll and relay flow for configured "
+                f"entry(s) {ordinals}...{self._style.end}"
+            )
         try:
-            self.orchestrator.run_eim_poll(matching_id=matching_id)
+            if entry_indices is None:
+                self.orchestrator.run_eim_poll(matching_id=matching_id)
+            else:
+                self.orchestrator.run_eim_poll(matching_id=matching_id, entry_index=entry_indices)
         except Exception as error:
             self._last_eim_download_reached_server = False
             print(f"{self._style.red}[!] EIM-DOWNLOAD failed: {error}{self._style.end}")
@@ -2224,125 +2488,6 @@ class SCP11Console:
                 f"eIM server; on-card notifications left untouched.{self._style.end}"
             )
         return True
-
-    def _cmd_eim_poll(self, argument: str) -> bool:
-        # The polling plugin installs ``_eim_poll_runner`` (its STATUS-tick
-        # watchdog) when it extends this console; the orchestrator carries no
-        # watchdog of its own once the plugin owns the flow. Prefer the plugin
-        # runner, and fall back to the baseline parse-and-dispatch path only
-        # when no plugin is loaded (the CLI POLL command and the GUI EIM-POLL
-        # action both reach this handler).
-        plugin_runner = getattr(self, "_eim_poll_runner", None)
-        if callable(plugin_runner):
-            try:
-                plugin_runner(argument)
-            except KeyboardInterrupt:
-                print(f"{self._style.yellow}[*] POLL interrupted by user.{self._style.end}")
-            except Exception as error:
-                print(f"{self._style.red}[!] POLL failed: {error}{self._style.end}")
-            return True
-        options = self._parse_eim_poll_options(argument)
-        if options is None:
-            print(
-                f"{self._style.yellow}[!] Usage: "
-                "POLL [attempts] [timerSeconds] [-t delaySeconds] [-s statusLoops] [--debug]"
-                f"{self._style.end}"
-            )
-            return True
-        runner = getattr(self.orchestrator, "run_eim_status_watchdog", None)
-        if callable(runner) is False:
-            print(f"{self._style.red}[!] POLL failed: orchestrator does not expose status watchdog.{self._style.end}")
-            return True
-        try:
-            runner(**options)
-        except KeyboardInterrupt:
-            print(f"{self._style.yellow}[*] POLL interrupted by user.{self._style.end}")
-        except Exception as error:
-            print(f"{self._style.red}[!] POLL failed: {error}{self._style.end}")
-        return True
-
-    def _parse_eim_poll_options(self, argument: str) -> Optional[Dict[str, Any]]:
-        try:
-            tokens = shlex.split(str(argument or ""))
-        except ValueError:
-            return None
-        positional: List[str] = []
-        poll_attempt_delay_seconds = 0
-        poll_attempt_post_status_loops = 0
-        debug = is_global_debug_enabled()
-        index = 0
-        while index < len(tokens):
-            token = tokens[index]
-            normalized = token.strip().lower()
-            if normalized in ("--debug", "-d"):
-                debug = True
-                index += 1
-                continue
-            if normalized in ("-t", "--delay", "--poll-delay"):
-                if index + 1 >= len(tokens):
-                    return None
-                delay_value = self._parse_poll_seconds(tokens[index + 1])
-                if delay_value is None:
-                    return None
-                poll_attempt_delay_seconds = delay_value
-                index += 2
-                continue
-            if normalized in ("-s", "--status-loops", "--post-status"):
-                if index + 1 >= len(tokens):
-                    return None
-                loop_value = self._parse_poll_int(tokens[index + 1])
-                if loop_value is None:
-                    return None
-                poll_attempt_post_status_loops = loop_value
-                index += 2
-                continue
-            if token.startswith("-"):
-                return None
-            positional.append(token)
-            index += 1
-        if len(positional) > 2:
-            return None
-        poll_attempts_per_fqdn = 1
-        timer_expiration_window_seconds = 30
-        timer_window_explicit = False
-        if len(positional) >= 1:
-            parsed_attempts = self._parse_poll_int(positional[0])
-            if parsed_attempts is None:
-                return None
-            poll_attempts_per_fqdn = parsed_attempts
-        if len(positional) >= 2:
-            parsed_window = self._parse_poll_seconds(positional[1])
-            if parsed_window is None:
-                return None
-            timer_expiration_window_seconds = parsed_window
-            timer_window_explicit = True
-        return {
-            "poll_attempts_per_fqdn": poll_attempts_per_fqdn,
-            "timer_expiration_window_seconds": timer_expiration_window_seconds,
-            "timer_window_explicit": timer_window_explicit,
-            "poll_attempt_delay_seconds": poll_attempt_delay_seconds,
-            "poll_attempt_post_status_loops": poll_attempt_post_status_loops,
-            "status_tick_trigger_mode": poll_attempt_post_status_loops > 0,
-            "status_tick_seconds": 30,
-            "debug": debug,
-        }
-
-    @staticmethod
-    def _parse_poll_int(value: str) -> Optional[int]:
-        text = str(value or "").strip()
-        if text.isdigit() is False:
-            return None
-        parsed = int(text)
-        if parsed < 0:
-            return None
-        return parsed
-
-    @classmethod
-    def _parse_poll_seconds(cls, value: str) -> Optional[int]:
-        text = str(value or "").strip().lower()
-        if text.endswith("s"):
-            text = text[:-1]
-        return cls._parse_poll_int(text)
 
     def _collect_snapshot(self) -> CardSnapshot:
         eid = self._get_eid()
@@ -2475,9 +2620,11 @@ class SCP11Console:
             iot_parsed = self._parse_tlv_simple(iot_specific_info)
             summary["ecall_supported"] = 0x81 in iot_parsed
             summary["fallback_supported"] = 0x82 in iot_parsed
+            summary["fallback_allowed_update_supported"] = 0x83 in iot_parsed
         else:
             summary["ecall_supported"] = False
             summary["fallback_supported"] = False
+            summary["fallback_allowed_update_supported"] = False
         return summary
 
     def _summarize_eim_configuration_response(self, response: bytes) -> Dict[str, Any]:
@@ -2550,28 +2697,41 @@ class SCP11Console:
 
 
     def _get_eid(self) -> str:
+        # SGP.22 v3.1 §5.7.20 (SGP.32 v1.3 §5.9.19 for the IPA): the request
+        # carries the mandatory tagList '5C 01 5A'; the bare 'BF3E00' form is
+        # kept as a fallback for cards that accept it. A card may answer the
+        # bare form under a success status word with a BF3E body that holds
+        # no EID, so such an answer is a failed attempt and never the EID:
+        # the value feeds the issuer inference, the device inventory and the
+        # eIM poll metadata.
         errors: List[str] = []
         payload_attempts = [
-            (bytes.fromhex("BF3E00"), "GET: EID"),
-            (_build_tlv(bytes.fromhex("BF3E"), _build_tlv(bytes.fromhex("5C"), bytes.fromhex("5A"))), "GET: EID [TAGGED]"),
+            (_build_tlv(bytes.fromhex("BF3E"), _build_tlv(bytes.fromhex("5C"), bytes.fromhex("5A"))), "GET: EID"),
+            (bytes.fromhex("BF3E00"), "GET: EID [BARE]"),
         ]
         for payload, log_name in payload_attempts:
             try:
                 response = self._send_store_data_with_logical_fallback(payload, log_name)
-                parsed = self._parse_tlv_simple(response)
-                root_value = self._first_bytes(parsed.get(0xBF3E))
-                if root_value is None:
-                    return response.hex().upper()
-                inner = self._parse_tlv_simple(root_value)
-                eid_value = self._first_bytes(inner.get(0x5A))
-                if eid_value is None:
-                    return response.hex().upper()
-                return eid_value.hex().upper()
             except Exception as error:
                 errors.append(str(error))
+                continue
+            eid_value = self._eid_from_get_euicc_data_response(response)
+            if eid_value is not None:
+                return eid_value.hex().upper()
+            errors.append(f"{log_name}: no EID in response {response.hex().upper() or '(empty)'}")
         if len(errors) > 0:
             print(f"{self._style.red}[!] Could not read EID: {'; '.join(errors)}{self._style.end}")
         return ""
+
+    def _eid_from_get_euicc_data_response(self, response: bytes) -> Optional[bytes]:
+        # SGP.22 v3.1 §5.7.20 GetEuiccDataResponse: BF3E { eidValue '5A' Octet16 }.
+        root_value = self._first_bytes(self._parse_tlv_simple(response).get(0xBF3E))
+        if root_value is None:
+            return None
+        eid_value = self._first_bytes(self._parse_tlv_simple(root_value).get(0x5A))
+        if eid_value is None or len(eid_value) != 16:
+            return None
+        return eid_value
 
     def _get_configured_addresses_raw(self) -> bytes:
         try:
@@ -3024,9 +3184,27 @@ class SCP11Console:
             return []
 
     def _fetch_profiles_raw(self) -> bytes:
-        payload = bytes.fromhex("BF2D00")
-        response = self._send_store_data_with_logical_fallback(payload, "GET: ProfilesInfo")
-        return response
+        tagged = _build_tlv(
+            bytes.fromhex("BF2D"),
+            _build_tlv(bytes.fromhex("5C"), PROFILE_INFO_TAG_LIST),
+        )
+        try:
+            response = self._send_store_data_with_logical_fallback(
+                tagged,
+                "GET: ProfilesInfo [TAGGED]",
+            )
+            self._profile_info_tag_list_honoured = True
+            return response
+        except Exception as error:
+            # SGP.22 v3.1 §5.7.15 lets an eUICC reject a tag list it does not
+            # support. Re-ask for the default set so the listing still renders,
+            # and record that the tag-gated members were never on offer.
+            self._profile_info_tag_list_honoured = False
+            print(f"[*] ProfilesInfo tag list refused ({error}); re-reading the default set.")
+            return self._send_store_data_with_logical_fallback(
+                bytes.fromhex("BF2D00"),
+                "GET: ProfilesInfo",
+            )
 
     def _print_profiles_table(self, rows: List[ProfileRow], title: str) -> None:
         print(f"\n{title}:")
@@ -3034,15 +3212,31 @@ class SCP11Console:
             print("[*] No profile metadata decoded from response.")
             return
 
-        print("State     Class  ICCID                 Nickname                  AID / Alias")
-        print("-" * 112)
+        print(
+            "State     Class  FB  FBA ICCID                 Nickname                  "
+            "AID / Alias"
+        )
+        print("-" * 120)
         for row in rows:
             aid_alias = self._resolve_display_alias_for_aid(row.aid)
             aid_display = row.aid
             if aid_alias is not None:
                 aid_display = f"{row.aid} ({aid_alias})"
+            if row.fallback is None:
+                fallback_display = "?"
+            elif row.fallback:
+                fallback_display = "yes"
+            else:
+                fallback_display = "-"
+            if row.fallback_allowed is None:
+                allowed_display = "?"
+            elif row.fallback_allowed:
+                allowed_display = "yes"
+            else:
+                allowed_display = "no"
             print(
-                f"{self._format_profile_state(row.state, 9)} {row.profile_class:<6} {row.iccid:<20} "
+                f"{self._format_profile_state(row.state, 9)} {row.profile_class:<6} "
+                f"{fallback_display:<3} {allowed_display:<3} {row.iccid:<20} "
                 f"{row.nickname[:24]:<24} {aid_display[:44]}"
             )
 
@@ -3582,17 +3776,30 @@ class SCP11Console:
     def _find_tlv_values_recursive(self, data: bytes, wanted_tag: int) -> List[bytes]:
         matches: List[bytes] = []
         nodes = self._parse_tlv_nodes(data)
+        # Only constructed values hold TLVs; a primitive value such as a
+        # signature can look like TLVs by accident (X.690 8.1.2.5). The one
+        # primitive searched is an OCTET STRING whose whole value is a TLV
+        # run, the wrapper some lab eUICCs put around the notification list.
         for tag, value, constructed in nodes:
             if tag == wanted_tag:
                 matches.append(value)
-            should_descend = constructed
-            if should_descend is False:
-                nested_nodes = self._parse_tlv_nodes(value)
-                if len(nested_nodes) > 0:
-                    should_descend = True
-            if should_descend:
+            if constructed or (tag == 0x04 and self._is_complete_tlv_run(value)):
                 matches.extend(self._find_tlv_values_recursive(value, wanted_tag))
         return matches
+
+    def _is_complete_tlv_run(self, data: bytes) -> bool:
+        index = 0
+        count = 0
+        while index < len(data):
+            _, index_after_tag, _ = self._read_tag(data, index)
+            if index_after_tag <= index:
+                return False
+            length, length_size = self._decode_length(data, index_after_tag)
+            if length_size == 0:
+                return False
+            index = index_after_tag + length_size + length
+            count += 1
+        return index == len(data) and count > 0
 
     def _clear_notifications_internal(self, quiet: bool = False) -> int:
         removed_count = 0
@@ -3768,7 +3975,8 @@ class SCP11Console:
                 digits += char
                 continue
             return None
-        if len(digits) < 18:
+        # EF_ICCID holds at most twenty digits (ETSI TS 102 221 v18.4 13.2).
+        if len(digits) < 18 or len(digits) > 20:
             return None
         return digits
 
@@ -3926,6 +4134,9 @@ class SCP11Console:
             0x95: "Profile Class",
             0x99: "Profile Policy Rules",
             0x9F70: "State",
+            0x9F26: "Fallback Attribute",
+            0x9F67: "Fallback Allowed",
+            0x9F7B: "eCall Indication",
         }
         if tag in known:
             return known[tag]
@@ -4020,16 +4231,25 @@ class SCP11Console:
         return None
 
     def _parse_activation_code(self, activation_code: str) -> Optional[Tuple[str, str]]:
+        """Split an Activation Code into (SM-DP+ address, MatchingID).
+
+        SGP.22 v3.1 section 4.1: the code is ``AC_Format$SM-DP+ address$AC_Token$...``
+        with an ``LPA:`` prefix allowed, an AC_Format other than "1" is invalid,
+        and the MatchingID "MAY be zero-length".
+        """
         if "$" not in activation_code:
             return None
         parts = activation_code.split("$")
         if len(parts) < 3:
             return None
+        ac_format = parts[0].strip()
+        if ac_format.upper().startswith("LPA:"):
+            ac_format = ac_format[4:].strip()
+        if ac_format != "1":
+            return None
         server_address = parts[1].strip()
         matching_id = parts[2].strip()
         if len(server_address) == 0:
-            return None
-        if len(matching_id) == 0:
             return None
         return server_address, matching_id
 
@@ -4053,11 +4273,46 @@ class SCP11Console:
         return False
 
     def _build_store_data_apdu(self, payload: bytes, p1: int = 0x91, p2: int = 0x00, cla: int = 0x80) -> bytes:
-        if len(payload) > 255:
+        if len(payload) > MAX_SHORT_APDU_DATA:
             raise ValueError("Payload too long for single APDU. Use chunking path for large payloads.")
         return bytes([cla, 0xE2, p1, p2, len(payload)]) + payload
 
+    def _store_data_cla(self) -> int:
+        """Return the CLA the active ES10b logical channel needs (TS 102 221 v18.4 §10.1.1)."""
+        orchestrator = getattr(self, "orchestrator", None)
+        cla_getter = getattr(orchestrator, "_current_es10b_store_data_cla", None)
+        if callable(cla_getter):
+            try:
+                return int(cla_getter()) & 0xFF
+            except Exception:
+                return 0x80
+        return 0x80
+
+    def _send_store_data_blocks(self, payload: bytes, log_name: str) -> bytes:
+        """Carry an over-long ES10x payload as a STORE DATA block sequence.
+
+        SGP.22 v3.1 §2.5.5 sends the request in blocks of 255 bytes with a
+        last block that may be shorter, and §5.7.2 Table 48 marks every block
+        but the last with P1 '11'. The single-APDU retry ladder is not reused
+        here on purpose: its rungs power-cycle the card, which would abandon a
+        sequence the eUICC has already begun reassembling.
+        """
+        plan = plan_chunked_apdus(payload, cla=self._store_data_cla(), ins=0xE2, p1_last=0x91)
+        print(
+            f"{self._style.cyan}[*] {log_name}: {len(payload)} bytes exceed a short "
+            f"APDU; chaining {len(plan)} STORE DATA blocks.{self._style.end}"
+        )
+        response = b""
+        for chunk in plan:
+            response = self.apdu_channel.send(
+                chunk.apdu,
+                f"{log_name} [Block {chunk.index + 1}/{chunk.total}]",
+            )
+        return response
+
     def _send_store_data_with_logical_fallback(self, payload: bytes, log_name: str) -> bytes:
+        if len(payload) > MAX_SHORT_APDU_DATA:
+            return self._send_store_data_blocks(payload, log_name)
         if bool(getattr(self, "_force_basic_es10b_store_data", False)) is False:
             orchestrator = getattr(self, "orchestrator", None)
             orchestrator_sender = getattr(orchestrator, "_send_es10b_store_data", None)
@@ -4081,8 +4336,12 @@ class SCP11Console:
                 f"{self._style.yellow}[*] {log_name} failed on base channel, retrying on logical channel 1."
                 f"{self._style.end}"
             )
+            card_session_restarted = self._reset_card_before_store_data_retry(
+                log_name,
+                "logical channel 1",
+                base_error,
+            )
             try:
-                self._reset_card_before_store_data_retry(log_name, "logical channel 1")
                 return self._send_store_data_on_logical_channel(payload, log_name, channel_number=1)
             except Exception as logical_error:
                 print(
@@ -4090,21 +4349,59 @@ class SCP11Console:
                     f"{self._style.end}"
                 )
                 try:
-                    self._reset_card_before_store_data_retry(log_name, "STK mode")
-                    return self._send_store_data_with_stk_mode(payload, log_name)
+                    # Sticky across the cascade: the logical-channel rung
+                    # may already have power-cycled the card.
+                    card_session_restarted = (
+                        self._reset_card_before_store_data_retry(log_name, "STK mode", logical_error)
+                        or card_session_restarted
+                    )
+                    return self._send_store_data_with_stk_mode(
+                        payload,
+                        log_name,
+                        card_session_restarted=card_session_restarted,
+                    )
                 except Exception as stk_mode_error:
                     raise RuntimeError(
                         f"{base_error}; logical channel retry failed: {logical_error}; STK mode failed: {stk_mode_error}"
                     ) from stk_mode_error
 
-    def _reset_card_before_store_data_retry(self, log_name: str, attempt_label: str) -> None:
+    def _reset_card_before_store_data_retry(
+        self,
+        log_name: str,
+        attempt_label: str,
+        error: Optional[Exception] = None,
+    ) -> bool:
+        # The reset unpowers the card and reconnects, ending the card
+        # session along with its proactive/STK state, logical channels
+        # and selected AID. A status word means the card answered and
+        # simply declined, so the link is healthy and a power cycle only
+        # costs the session; a link that is actually broken raises out of
+        # PC/SC instead and still reaches the reset below. Returns True
+        # only when the card was power-cycled.
+        if error is None or self._is_transport_link_failure(error) is False:
+            return False
         reset = getattr(self.apdu_channel, "reset", None)
         if callable(reset) is False:
-            return
+            return False
         try:
             reset()
         except Exception as reset_error:
             print(f"{self._style.yellow}[*] {log_name}: {attempt_label} reset skipped ({reset_error}).{self._style.end}")
+            return False
+        return True
+
+    _CARD_STATUS_WORD_PATTERN = re.compile(r"APDU FAILED:\s*[0-9A-F]{4}")
+
+    @classmethod
+    def _is_transport_link_failure(cls, error: Exception) -> bool:
+        # Positive evidence that the link failed: pyscard's exceptions
+        # reach here unwrapped, and the transport's own link errors name
+        # PC/SC. ``APDU Failed: XXXX`` is the card answering.
+        if cls._CARD_STATUS_WORD_PATTERN.search(str(error).upper()) is not None:
+            return False
+        if (type(error).__module__ or "").startswith("smartcard."):
+            return True
+        return "PC/SC" in str(error)
 
     def _send_store_data_on_logical_channel(self, payload: bytes, log_name: str, channel_number: int = 1) -> bytes:
         open_response = self.apdu_channel.send(
@@ -4131,7 +4428,12 @@ class SCP11Console:
             except Exception:
                 pass
 
-    def _send_store_data_with_stk_mode(self, payload: bytes, log_name: str) -> bytes:
+    def _send_store_data_with_stk_mode(
+        self,
+        payload: bytes,
+        log_name: str,
+        card_session_restarted: bool = False,
+    ) -> bytes:
         print(f"{self._style.yellow}[*] {log_name}: entering STK mode bootstrap.{self._style.end}")
         with redirect_stdout(io.StringIO()):
             self.apdu_channel.send(
@@ -4141,9 +4443,32 @@ class SCP11Console:
             aid = self.cfg.AID_ISD_R
             select_apdu = bytes([0x00, 0xA4, 0x04, 0x00, len(aid)]) + aid
             self.apdu_channel.send(select_apdu, f"{log_name} [STK MODE SELECT ISD-R]")
-            self.apdu_channel.send(bytes.fromhex("80100000010C"), f"{log_name} [STK MODE TERMINAL PROFILE]")
+            # TERMINAL PROFILE opens a card session (TS 102 223 §5.4), so
+            # it goes out only when the reset above actually started one;
+            # mid-session it would restart the toolkit negotiation the STK
+            # bring-up already completed. The toolchain's one profile claims
+            # every facility, so the proactive commands a toolkit card
+            # answers it with are drained before ES10b goes out.
+            if card_session_restarted:
+                self._send_terminal_profile_draining(
+                    f"{log_name} [STK MODE TERMINAL PROFILE]"
+                )
         stk_mode_apdu = self._build_store_data_apdu(payload, cla=0x80)
         return self.apdu_channel.send(stk_mode_apdu, f"{log_name} [STK MODE BASIC]")
+
+    def _send_terminal_profile_draining(self, log_name: str) -> None:
+        """TERMINAL PROFILE, then FETCH and acknowledge what the card opens with it.
+
+        An open proactive cycle makes the eUICC refuse the ES10b STORE DATA
+        that follows with '69 85'. A channel without raw exchange (test stubs)
+        only gets the profile.
+        """
+        exchange = getattr(self.apdu_channel, "exchange", None)
+        if callable(exchange) is False:
+            self.apdu_channel.send(terminal_profile_apdu(), log_name)
+            return
+        _, sw1, sw2 = exchange(terminal_profile_apdu(), log_name)
+        drain_proactive_commands(exchange, sw1, sw2, log_name)
 
     def _decode_euicc_configured_data(self, raw_data: bytes) -> Dict[str, Any]:
         result: Dict[str, Any] = {
@@ -4200,9 +4525,12 @@ class SCP11Console:
         elif isinstance(values, bytes):
             blobs.append(values)
 
+        # additionalRootDsAddresses is SEQUENCE OF UTF8String (SGP.22 v3.1
+        # section 5.7.3): automatic tagging names the SEQUENCE OF A2 but leaves
+        # its elements as universal UTF8String, tag 0C.
         for blob in blobs:
             nested = self._parse_tlv_simple(blob)
-            nested_values = self._extract_text_values(nested, 0x82)
+            nested_values = self._extract_text_values(nested, 0x0C)
             if len(nested_values) > 0:
                 output.extend(nested_values)
             else:
@@ -4228,9 +4556,12 @@ class SCP11Console:
         return output
 
     def _decode_text_or_hex(self, value: bytes) -> str:
+        # UTF8String values may carry multi-octet characters (SGP.22 v3.1
+        # section 2.4a.2); only undecodable bytes and control characters
+        # fall back to hex.
         try:
-            text = value.decode("utf-8", "ignore")
-        except Exception:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError:
             return value.hex().upper()
 
         clean_text = text.replace("\x00", "").strip()
@@ -4238,7 +4569,7 @@ class SCP11Console:
             return value.hex().upper()
         for char in clean_text:
             code = ord(char)
-            if code < 0x20 or code > 0x7E:
+            if code < 0x20 or code == 0x7F:
                 return value.hex().upper()
         return clean_text
 
@@ -4292,27 +4623,12 @@ class SCP11Console:
 
     def _decode_profile_metadata_rows(self, raw_data: bytes) -> List[ProfileMetadataView]:
         rows: List[ProfileMetadataView] = []
-        index = 0
-        while index < len(raw_data):
-            if raw_data[index] != 0xE3:
-                index += 1
-                continue
-
-            length, length_size = self._decode_length(raw_data, index + 1)
-            if length_size == 0:
-                break
-
-            value_start = index + 1 + length_size
-            value_end = value_start + length
-            if value_end > len(raw_data):
-                break
-
-            blob = raw_data[value_start:value_end]
+        profiles, _error_code = split_profile_info_list(raw_data)
+        for blob in profiles:
             parsed = self._parse_tlv_simple(blob)
             row = self._profile_metadata_from_parsed(parsed, blob)
             if row is not None:
                 rows.append(row)
-            index = value_end
         return rows
 
     def _profile_metadata_from_parsed(self, parsed: Dict[int, Any], blob: bytes) -> Optional[ProfileMetadataView]:
@@ -4380,8 +4696,6 @@ class SCP11Console:
     def _decode_profile_metadata_extra_value(self, tag: int, value: bytes) -> str:
         if len(value) == 0:
             return "(empty)"
-        if len(value) <= 4:
-            return value.hex().upper()
         return self._decode_scalar_value(tag, value)
 
     def _decode_optional_text(self, value: Any) -> str:
@@ -4393,19 +4707,23 @@ class SCP11Console:
         return decoded
 
     def _decode_ppr_ids(self, ppr_hex: str) -> str:
-        if len(ppr_hex) < 4:
+        if len(ppr_hex) < 2:
             return "unknown"
         try:
             raw = bytes.fromhex(ppr_hex)
         except ValueError:
             return "invalid"
-        if len(raw) < 2:
+        if len(raw) == 0:
             return "unknown"
 
+        # X.690 8.6.2: the initial octet counts the unused bits (0..7); an
+        # empty BIT STRING is the single octet 00.
         unused_bits = raw[0]
+        if unused_bits > 7:
+            return "invalid"
         payload = raw[1:]
         if len(payload) == 0:
-            return "none"
+            return "none" if unused_bits == 0 else "invalid"
 
         labels: List[str] = []
         bit_index = 0
@@ -4504,8 +4822,17 @@ class SCP11Console:
 
         eum = decoded.get("eumCertificate", b"")
         euicc = decoded.get("euiccCertificate", b"")
-        print(f"    | EUM Certificate      : {'Present' if isinstance(eum, bytes) and len(eum) > 0 else 'Absent'}")
-        print(f"    | eUICC Certificate    : {'Present' if isinstance(euicc, bytes) and len(euicc) > 0 else 'Absent'}")
+        for label, value in (("EUM Certificate", eum), ("eUICC Certificate", euicc)):
+            if not isinstance(value, bytes) or len(value) == 0:
+                print(f"    | {label:<21}: Absent")
+        palette = {
+            "ok": self._style.green,
+            "warn": self._style.yellow,
+            "fail": self._style.red,
+            "end": self._style.end,
+        }
+        for line in format_certificate_rows(get_certs_rows(eum, euicc), min_label_width=21, palette=palette):
+            print(line)
         if isinstance(eum, bytes) and len(eum) > 0:
             print(f"    | EUM Cert Bytes       : {len(eum)}")
             print(f"    | EUM Cert DER Hex     : {eum.hex().upper()}")
@@ -4639,26 +4966,11 @@ class SCP11Console:
 
     def _decode_profiles_with_tlv_parser(self, raw_data: bytes) -> List[ProfileRow]:
         rows: List[ProfileRow] = []
-        index = 0
-        while index < len(raw_data):
-            if raw_data[index] != 0xE3:
-                index += 1
-                continue
-
-            length, length_size = self._decode_length(raw_data, index + 1)
-            if length_size == 0:
-                break
-
-            value_start = index + 1 + length_size
-            value_end = value_start + length
-            if value_end > len(raw_data):
-                break
-
-            blob = raw_data[value_start:value_end]
+        profiles, _error_code = split_profile_info_list(raw_data)
+        for blob in profiles:
             row = self._decode_single_profile(blob)
             if row is not None:
                 rows.append(row)
-            index = value_end
         return rows
 
     def _decode_single_profile(self, blob: bytes) -> Optional[ProfileRow]:
@@ -4667,27 +4979,12 @@ class SCP11Console:
 
     def _decode_profiles_with_local_parser(self, raw_data: bytes) -> List[ProfileRow]:
         rows: List[ProfileRow] = []
-        index = 0
-        while index < len(raw_data):
-            if raw_data[index] != 0xE3:
-                index += 1
-                continue
-
-            length, length_size = self._decode_length(raw_data, index + 1)
-            if length_size == 0:
-                break
-
-            value_start = index + 1 + length_size
-            value_end = value_start + length
-            if value_end > len(raw_data):
-                break
-
-            blob = raw_data[value_start:value_end]
+        profiles, _error_code = split_profile_info_list(raw_data)
+        for blob in profiles:
             parsed = self._parse_tlv_simple(blob)
             row = self._profile_row_from_parsed(parsed)
             if row is not None:
                 rows.append(row)
-            index = value_end
         return rows
 
     def _profile_row_from_parsed(self, parsed: Dict[int, Any]) -> Optional[ProfileRow]:
@@ -4733,12 +5030,34 @@ class SCP11Console:
         if nickname == "Unknown" and len(iccid) > 0:
             nickname = f"ICCID-{iccid[-4:]}"
 
+        fallback_bytes = self._get_tag(parsed, 0x9F26)
+        fallback: Optional[bool] = None
+        if isinstance(fallback_bytes, bytes) and len(fallback_bytes) > 0:
+            fallback = fallback_bytes[0] != 0x00
+        elif self._profile_info_tag_list_honoured:
+            # SGP.32 §2.11.1.1 declares fallbackAttribute DEFAULT FALSE, so DER
+            # omits it on every Profile that is not the Fallback Profile. Only
+            # a response to a tag list naming '9F26' makes that absence mean
+            # FALSE rather than "not asked for".
+            fallback = False
+
+        allowed_bytes = self._get_tag(parsed, 0x9F67)
+        fallback_allowed: Optional[bool] = None
+        if isinstance(allowed_bytes, bytes) and len(allowed_bytes) > 0:
+            fallback_allowed = allowed_bytes[0] != 0x00
+        elif self._profile_info_tag_list_honoured:
+            # Absent is not "unknown" once the tag list named '9F67': §3.4.6
+            # step 4 treats an absent flag exactly as FALSE.
+            fallback_allowed = False
+
         return ProfileRow(
             iccid=iccid,
             state=state,
             profile_class=profile_class,
             nickname=nickname,
             aid=aid,
+            fallback=fallback,
+            fallback_allowed=fallback_allowed,
         )
 
     def _get_tag(self, parsed: Dict[int, Any], tag: int, default: Any = None) -> Any:
@@ -4801,7 +5120,8 @@ class SCP11Console:
         if first < 0x80:
             return first, 1
         count = first & 0x7F
-        if count == 0:
+        if count == 0 or count == 0x7F:
+            # Indefinite form and the reserved octet 0xFF (X.690 8.1.3.5 c).
             return 0, 0
         end = offset + 1 + count
         if end > len(data):

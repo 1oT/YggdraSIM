@@ -172,7 +172,7 @@ jobs:
           set -euo pipefail
           NOTES="${RUNNER_TEMP}/draft-notes.md"
           cat > "${NOTES}" <<EOF
-          # INCOMPLETE — UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          # INCOMPLETE -- UNSIGNED TEST BUILD -- NOT FOR PRODUCTION
 
           This private draft is an operator-requested test build of the exact
           \`${GITHUB_SHA}\` revision from:
@@ -193,7 +193,7 @@ jobs:
             --prerelease \
             --latest=false \
             --target "${GITHUB_SHA}" \
-            --title "INCOMPLETE — UNSIGNED TEST BUILD ${TEST_TAG}" \
+            --title "INCOMPLETE -- UNSIGNED TEST BUILD ${TEST_TAG}" \
             --notes-file "${NOTES}"
 
   build-linux-x86_64:
@@ -302,7 +302,7 @@ jobs:
           install -m 0755 "dist/yggdrasim-gui-${FLAVOR}" \
             "${BUNDLE}/yggdrasim-gui-${FLAVOR}"
           cat > "${BUNDLE}/UNSIGNED-TEST-BUILD.txt" <<EOF
-          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          UNSIGNED TEST BUILD -- NOT FOR PRODUCTION
           Commit: ${GITHUB_SHA}
           Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           Flavor: ${FLAVOR}
@@ -486,7 +486,7 @@ jobs:
           install -m 0755 "dist/yggdrasim-gui-${FLAVOR}" \
             "${BUNDLE}/yggdrasim-gui-${FLAVOR}"
           cat > "${BUNDLE}/UNSIGNED-TEST-BUILD.txt" <<EOF
-          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          UNSIGNED TEST BUILD -- NOT FOR PRODUCTION
           Commit: ${GITHUB_SHA}
           Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           Flavor: ${FLAVOR}
@@ -597,7 +597,7 @@ jobs:
           Copy-Item -LiteralPath '.\dist\yggdrasim-gui-clean.exe' `
             -Destination (Join-Path $bundle 'yggdrasim-gui-clean.exe')
           @"
-          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          UNSIGNED TEST BUILD -- NOT FOR PRODUCTION
           Commit: $env:GITHUB_SHA
           Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
           Platform: Windows x86_64
@@ -714,7 +714,7 @@ jobs:
           install -m 0755 dist/yggdrasim-gui-clean \
             "${BUNDLE}/yggdrasim-gui-clean"
           cat > "${BUNDLE}/UNSIGNED-TEST-BUILD.txt" <<EOF
-          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          UNSIGNED TEST BUILD -- NOT FOR PRODUCTION
           Commit: ${GITHUB_SHA}
           Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           Platform: macOS arm64
@@ -917,7 +917,7 @@ jobs:
           set -euo pipefail
           NOTES="${RUNNER_TEMP}/complete-notes.md"
           cat > "${NOTES}" <<EOF
-          # COMPLETE — UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          # COMPLETE -- UNSIGNED TEST BUILD -- NOT FOR PRODUCTION
 
           Every primary asset, its individual SHA-256 sidecar, the CycloneDX
           SBOM, and the global \`SHA256SUMS\` manifest were redownloaded and
@@ -934,7 +934,7 @@ jobs:
             is never consumed by the release installers.
           EOF
           gh release edit "${TEST_TAG}" \
-            --title "COMPLETE — UNSIGNED TEST BUILD ${TEST_TAG}" \
+            --title "COMPLETE -- UNSIGNED TEST BUILD ${TEST_TAG}" \
             --notes-file "${NOTES}"
           gh release view "${TEST_TAG}" --json url \
             --jq '"Draft release: " + .url' >> "${GITHUB_STEP_SUMMARY}"
@@ -950,7 +950,7 @@ jobs:
         run: |
           NOTES="${RUNNER_TEMP}/incomplete-notes.md"
           cat > "${NOTES}" <<EOF
-          # INCOMPLETE — UNSIGNED TEST BUILD — DO NOT USE
+          # INCOMPLETE -- UNSIGNED TEST BUILD -- DO NOT USE
 
           A build, upload, integrity check, or finalization step failed for
           exact revision \`${EXPECTED_SHA}\`.
@@ -962,5 +962,5 @@ jobs:
           production release and its assets must not be used.
           EOF
           gh release edit "${TEST_TAG}" \
-            --title "INCOMPLETE — UNSIGNED TEST BUILD ${TEST_TAG}" \
+            --title "INCOMPLETE -- UNSIGNED TEST BUILD ${TEST_TAG}" \
             --notes-file "${NOTES}" || true

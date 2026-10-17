@@ -19,12 +19,12 @@ to keep the operator surface clean.
 
 Card-side note:
 
-- these templates are for Local eIM package construction and relay-side/localized execution
+- these templates are for Local eIM package construction
 - they do not change the simulated card's seeded BF55 identity by themselves
 - use `Workspace/SIMCARD/eim_identity.json` or `Workspace/SIMCARD/isdr_config.json` when the card-side default also needs to move
 
-Templates use `sgp32` or `sgp22` sections plus `runtime` hints for the current
-eIM local shell and localized bridge.
+Templates use `sgp32` or `sgp22` sections plus optional `runtime` hints for the
+eIM local shell.
 
 ## Canonical Templates
 
@@ -37,6 +37,7 @@ eIM local shell and localized bridge.
 - `template_euicc_memory_reset.json`
 - `template_eim_acknowledgements.json`
 - `template_eim_package_request.json`
+- `template_ipa_euicc_data_request.json` (operator-supplied; see the note below)
 - `template_eim_package_result.json`
 - `template_euicc_package_request_eim_configuration_data.json`
 - `template_euicc_package_request_ecos.json`
@@ -55,6 +56,12 @@ eIM local shell and localized bridge.
 - `template_euicc_memory_reset.json` defaults to selective `reset_eim_config_data` only.
 - `template_eim_acknowledgements.json` closes pending eIM operations.
 - `template_eim_package_request.json` is the top-level all-branch request CHOICE map.
+- `template_ipa_euicc_data_request.json` is operator-supplied and not part of the tracked
+  tree. One aligns to SGP.32 §2.11.1.2 `IpaEuiccDataRequest` (`BF52`): one `tag_list` row per
+  requested IPA/eUICC data item, plus the two search criteria the IPA applies to `A0`
+  Notifications and `A2` eUICC Package Results. The same body is the `ipa_euicc_data_request`
+  choice of an `eim_package_request` package. A body captured off the wire can be replayed
+  verbatim through `request_payload.value_hex` instead of composing one from `tag_list`.
 - `template_eim_package_result.json` is the top-level all-branch result CHOICE map.
 - `template_euicc_package_request_*.json` and `template_*_result.json` cover the individual branch families for request/result composition work.
 
@@ -70,4 +77,5 @@ eIM local shell and localized bridge.
   - `euicc_memory_reset`
 - Schema-first templates:
   - `eim_package_request`
+  - `ipa_euicc_data_request` (answered by the IPA, not by ISD-R; the eIM composes and queues it)
   - request/result branch families intended for linting, composition, and mock-registration mode unless `runtime.allow_model_only` is enabled

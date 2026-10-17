@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SGP.32 EuiccPackageRequest / EuiccPackageResult helpers.
 
 Implements the wire-level encoding and decoding the eUICC needs for
@@ -287,8 +286,33 @@ def verify_eim_signature(
     return True
 
 
-def _load_eim_public_key(payload: bytes):
+def unwrap_eim_key_material(payload: bytes) -> bytes:
+    """Return the DER of the key material behind eimPublicKeyData / trustedPublicKeyDataTls.
+
+    SGP.32 v1.3 EimConfigurationData carries the SubjectPublicKeyInfo as ``A0``
+    and the Certificate as ``A1``, each replacing the DER SEQUENCE tag, so the
+    SEQUENCE is rebuilt here. A bare SEQUENCE, the shape earlier packages used,
+    and a stray outer ``A5`` / ``A6`` CHOICE wrapper are accepted as well.
+    """
+
     raw = bytes(payload or b"")
+    if len(raw) == 0:
+        return raw
+    try:
+        tag, value, _raw_tlv, end = read_tlv(raw, 0)
+    except ValueError:
+        return raw
+    if end != len(raw):
+        return raw
+    if tag in (b"\xA5", b"\xA6"):
+        return unwrap_eim_key_material(value)
+    if tag in (b"\xA0", b"\xA1"):
+        return tlv(b"\x30", value)
+    return raw
+
+
+def _load_eim_public_key(payload: bytes):
+    raw = unwrap_eim_key_material(payload)
     if len(raw) == 0:
         raise ValueError("Empty eIM public key data.")
     try:

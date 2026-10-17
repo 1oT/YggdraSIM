@@ -5,7 +5,7 @@
 
 
 /* ---------------------------------------------------------------------
- * Service-table staging popout — mock-edit a UST / IST / generic
+ * Service-table staging popout -- mock-edit a UST / IST / generic
  * bitmap EF without touching the card. Live hex preview at the top,
  * checkbox list below, action bar (copy / reset / send to UPDATE
  * BINARY) docked between them.
@@ -24,7 +24,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
   margin: 6px 0 8px;
@@ -101,11 +101,11 @@
   outline: 1px solid var(--accent);
 }
 
-/* Generic stage-edit popout (Task 3) — non-bitmap decoded EFs ---------- */
+/* Generic stage-edit popout (Task 3) -- non-bitmap decoded EFs ---------- */
 .cc-stage-context {
   margin: 0 0 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
 }
 
@@ -152,7 +152,7 @@
 .cc-stage-decoded-preview {
   margin: 0 0 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: color-mix(in oklab, var(--bg-elev), transparent 30%);
   padding: 8px 10px;
 }
@@ -175,7 +175,7 @@
   color: var(--fg);
   background: var(--bg-deep);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   resize: vertical;
 }
 
@@ -407,7 +407,7 @@
   transform: rotate(90deg);
 }
 
-/* FCP block specifically — share the depth-0 grid with the decoded
+/* FCP block specifically -- share the depth-0 grid with the decoded
    body so visual rhythm is consistent across FCP + decoded. */
 
 .cc-fcp-block .cc-fcp-fields {
@@ -450,16 +450,17 @@
 
 /* -- Command Center: Maximize overlay ----------------------------------- */
 
+/* No `backdrop-filter`: without GPU compositing every scroll frame of the
+ * maximised pane would re-blur the whole window behind it. */
 .cc-max-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--scrim);
   z-index: 9000;
   display: flex;
   align-items: stretch;
   justify-content: stretch;
   padding: 24px;
-  backdrop-filter: blur(2px);
 }
 
 .cc-max-shell {

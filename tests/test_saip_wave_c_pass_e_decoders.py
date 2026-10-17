@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Wave C Pass E — semantic decoder coverage for DF.TELECOM / DF.PHONEBOOK /
+Wave C Pass E -- semantic decoder coverage for DF.TELECOM / DF.PHONEBOOK /
 ICE / DF.V2X / EAP / MCS / multimedia EFs.
 
 For every EF promoted from the generic opaque pass-through catalog we

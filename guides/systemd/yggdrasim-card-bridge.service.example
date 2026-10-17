@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+# Publishes a local PC/SC reader over the loopback Card Bridge, so a
+# reader host (a Raspberry Pi, a lab box) serves its card to operators
+# over SSH without anyone logging into it.
+#
+# Copy this file to:
+#   ~/.config/systemd/user/yggdrasim-card-bridge.service
+#
+# Then adjust:
+# - WorkingDirectory and ExecStart to the checkout and venv on this host
+# - --reader-index, or --reader-name when reader ordering is not stable
+# - --port, if 8642 is taken
+#
+# This example assumes a checkout at ~/YggdraSIM with its venv at
+# ~/YggdraSIM/.venv, which is the layout the Card Bridge GUI actions
+# default to for a remote rig.
+#
+# For an unattended host, enable lingering so the unit survives logout
+# and starts at boot without a login:
+#   loginctl enable-linger "$USER"
+
+[Unit]
+Description=YggdraSIM Card Bridge (PC/SC reader on 127.0.0.1:8642)
+Documentation=file:%h/YggdraSIM/guides/CARD_BRIDGE_GUIDE.md
+# No ``After=default.target``: see the note in
+# yggdrasim-hil-supervisor.service.example. A unit that is WantedBy a
+# target must not also be ordered after it.
+#
+# StartLimitIntervalSec=0 disables the start-rate limiter. The bridge
+# exits non-zero when it cannot open the card, so an empty reader would
+# otherwise burn through the default burst allowance and leave the unit
+# failed until someone restarts it by hand.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/YggdraSIM
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/YggdraSIM/.venv/bin/yggdrasim-card-bridge --host 127.0.0.1 --port 8642 --reader-index 0
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

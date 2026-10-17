@@ -72,9 +72,15 @@ class BerTlvDecoding(PayloadTestBase):
         self.assertIn("ProfileInfoList", names)
 
     def test_constructed_and_primitive_are_distinguished(self) -> None:
+        """X.690 clause 8.1.2 puts the flag in bit 6 of the tag.
+
+        It is rendered as a bit field of the identifier octet, the way
+        Wireshark's own BER dissector renders it, so the assertion is on
+        the masked form rather than on a value standing beside the tag.
+        """
         text = decode_text(self.capture, display_filter="frame.number==1")
-        self.assertIn("[Constructed: True]", text)
-        self.assertIn("[Constructed: False]", text)
+        self.assertIn("..1. .... = Constructed: True", text)
+        self.assertIn("..0. .... = Constructed: False", text)
 
     def test_two_byte_tags_are_read_whole(self) -> None:
         rows = decode_fields(self.capture, ["frame.number", "yapdu.tlv.tag"])
@@ -84,8 +90,21 @@ class BerTlvDecoding(PayloadTestBase):
         self.assertEqual(int(second[0][1], 16), 0xBF22)
 
     def test_short_primitive_values_get_an_integer_reading(self) -> None:
+        """Available to a display filter, and off the tree.
+
+        Reading a short primitive as a big-endian integer is a guess: it
+        is right for a counter and wrong for the packed BCD of the ICCID
+        this capture carries, where 66051 is arithmetic rather than
+        information. The field is still populated -- a filter on a
+        numeric tag needs it -- but it no longer spends a line per TLV
+        stating a number the value line already shows in hex.
+        """
+        rows = decode_fields(self.capture, ["yapdu.tlv.uint"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertTrue(values, "the integer reading should still be filterable")
+        self.assertIn("66051", values[0])
         text = decode_text(self.capture, display_filter="frame.number==1")
-        self.assertIn("Value (integer)", text)
+        self.assertNotIn("Value (integer)", text)
 
 
 class FileControlParameters(PayloadTestBase):
@@ -376,9 +395,14 @@ class PinStatusTemplateKeyReferences(PayloadTestBase):
         self.assertIn("Key reference", text)
 
     def test_the_keys_are_named(self) -> None:
+        """The name goes on the tag's own line, not under it.
+
+        A key reference is one byte, so a child restating it costs a line
+        per PIN in the template and says what the line above says.
+        """
         text = decode_text(self.capture, display_filter="frame.number==2")
-        self.assertIn("[Key: application PIN 1 (PIN1)]", text)
-        self.assertIn("[Key: second/local PIN 1 (PIN2)]", text)
+        self.assertIn("Key reference (0x83): 01 (application PIN 1 (PIN1))", text)
+        self.assertIn("Key reference (0x83): 81 (second/local PIN 1 (PIN2))", text)
 
     def test_the_template_is_walked_although_ber_calls_it_primitive(self) -> None:
         """'C6' has bit 6 clear, so a conforming BER walker stops at it.

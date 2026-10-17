@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """PE-PINCodes shared-context CHOICE helper.
 
 PE-PINCodes carries a CHOICE between ``pinconfig`` (a SEQUENCE OF
@@ -12,7 +11,7 @@ toggling to "Yes" replaces the configuration list with the file path
 and vice-versa.
 
 ASN.1 reference: ``PE-PINCodes`` in
-``pySim/esim/asn1/saip/PE_Definitions-3.3.1.asn`` (TCA SAIP §A.2).
+``pySim/esim/asn1/saip/PE_Definitions-3.3.1.asn`` (TCA SAIP v3.4.1 §8.5.1).
 
 Schema reminder::
 
@@ -24,8 +23,11 @@ Schema reminder::
       }
     }
 
-In the JSON-decoded document the CHOICE comes through as either a
-``"pinconfig"`` or a ``"filePath"`` key sitting next to ``"pin-Header"``.
+The SAIP JSON codec and pySim keep the CHOICE as a two-element tuple,
+``pinCodes: ("pinconfig", [...])`` or ``pinCodes: ("filePath", b"...")``;
+that is the shape every writer here produces. Older documents put a
+``"pinconfig"`` or ``"filePath"`` key in a ``pinCodes`` dict or next to
+``"pin-Header"``; readers still accept those.
 """
 
 from __future__ import annotations
@@ -54,28 +56,45 @@ def _normalise_path_hex(value: Any) -> str:
         raise ValueError(f"shared-context filePath malformed: {text!r}")
     if len(text) > 16:
         raise ValueError(
-            f"shared-context filePath exceeds 8 bytes (TCA SAIP §A.2 cap); got {len(text) // 2} bytes.",
+            f"shared-context filePath exceeds 8 bytes (TCA SAIP v3.4.1 §8.5.1 cap); got {len(text) // 2} bytes.",
         )
     return text.upper()
 
 
-def get_shared_context(pe_value: dict[str, Any]) -> dict[str, Any]:
-    """Return ``{"shared": bool, "file_path_hex": str, "pin_count": int}``.
+def _choice(pe_value: dict[str, Any]) -> tuple[str, Any] | None:
+    """The ``pinCodes`` CHOICE as ``(alternative, payload)``, or ``None``."""
+    value = pe_value.get("pinCodes")
+    if (
+        isinstance(value, (tuple, list))
+        and len(value) == 2
+        and value[0] in ("pinconfig", "filePath")
+    ):
+        return (str(value[0]), value[1])
+    container = value if isinstance(value, dict) else pe_value
+    if "filePath" in container:
+        return ("filePath", container["filePath"])
+    if "pinconfig" in container:
+        return ("pinconfig", container["pinconfig"])
+    return None
 
-    Tolerates the SAIP-decoded payload sitting either directly inside
-    ``pe_value`` (legacy shape) or nested under a ``pinCodes`` key
-    (newer pySim revisions keep the CHOICE wrapper).
-    """
+
+def _write_choice(pe_value: dict[str, Any], alternative: str, payload: Any) -> None:
+    """Store the CHOICE in the codec's tuple shape, dropping older spellings."""
+    pe_value.pop("filePath", None)
+    pe_value.pop("pinconfig", None)
+    pe_value["pinCodes"] = (alternative, payload)
+
+
+def get_shared_context(pe_value: dict[str, Any]) -> dict[str, Any]:
+    """Return ``{"shared": bool, "file_path_hex": str, "pin_count": int}``."""
     if isinstance(pe_value, dict) is False:
         raise ValueError("PE-PINCodes value must be a dict.")
-    container = pe_value
-    if isinstance(pe_value.get("pinCodes"), dict):
-        container = pe_value["pinCodes"]
-    file_path = container.get("filePath")
-    if file_path is None:
-        pinconfig = container.get("pinconfig")
+    choice = _choice(pe_value)
+    if choice is None or choice[0] == "pinconfig":
+        pinconfig = choice[1] if choice is not None else None
         pin_count = len(pinconfig) if isinstance(pinconfig, list) else 0
         return {"shared": False, "file_path_hex": "", "pin_count": pin_count}
+    file_path = choice[1]
     if isinstance(file_path, (bytes, bytearray)):
         hex_text = bytes(file_path).hex().upper()
     elif isinstance(file_path, dict) and "__ygg_saip_bytes__" in file_path:
@@ -92,46 +111,32 @@ def set_shared_context(
 ) -> str:
     """Switch the PE to shared-context mode with the supplied filePath.
 
-    Passing an empty / None ``file_path_hex`` while the PE is already in
-    shared mode is a no-op (useful for the GUI's "Apply" pattern when
-    the operator clears the field by accident). Use
-    :func:`set_local_context` to flip back to ``pinconfig``.
+    TCA SAIP v3.4.1 page 52: ``filePath`` names the DF or ADF whose PINs this
+    context shares, an ADF by its temporary file ID. An empty value is legal
+    per SIZE (0..8) and names the MF. Use :func:`set_local_context` to flip
+    back to ``pinconfig``.
     """
     if isinstance(pe_value, dict) is False:
         raise ValueError("PE-PINCodes value must be a dict.")
-    container = pe_value
-    if isinstance(pe_value.get("pinCodes"), dict):
-        container = pe_value["pinCodes"]
-
     cleaned = _normalise_path_hex(file_path_hex)
+    _write_choice(pe_value, "filePath", bytes.fromhex(cleaned))
     if len(cleaned) == 0:
-        # Empty filePath is technically legal per ASN.1 SIZE(0..8), but
-        # it implies the MF temporary FID — the manual still expects an
-        # explicit value. Allow it but tag the summary so the GUI can
-        # surface a hint.
-        container.pop("pinconfig", None)
-        container["filePath"] = b""
         return "PE-PINCodes set to shared context (empty filePath -> MF)."
-    container.pop("pinconfig", None)
-    container["filePath"] = bytes.fromhex(cleaned)
     return f"PE-PINCodes set to shared context (filePath={cleaned})."
 
 
 def set_local_context(pe_value: dict[str, Any]) -> str:
     """Switch the PE back to local ``pinconfig`` mode.
 
-    The pinconfig list is reset to an empty list — the GUI/TUI is
-    expected to repopulate it from the existing PIN-row editor before
-    re-encoding (otherwise the encoder will reject SIZE(1..26)).
+    A PE already local keeps its PINs; one coming from a shared context
+    starts with an empty list, which the PIN editor fills before the PE
+    encodes (``pinconfig`` is SIZE (1..26)).
     """
     if isinstance(pe_value, dict) is False:
         raise ValueError("PE-PINCodes value must be a dict.")
-    container = pe_value
-    if isinstance(pe_value.get("pinCodes"), dict):
-        container = pe_value["pinCodes"]
-    container.pop("filePath", None)
-    if isinstance(container.get("pinconfig"), list) is False:
-        container["pinconfig"] = []
+    choice = _choice(pe_value)
+    pins = choice[1] if choice is not None and choice[0] == "pinconfig" else None
+    _write_choice(pe_value, "pinconfig", pins if isinstance(pins, list) else [])
     return "PE-PINCodes set to local context (pinconfig list ready for entries)."
 
 

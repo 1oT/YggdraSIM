@@ -5,29 +5,28 @@
 
 /* Per-kind colour cues so the eye immediately separates directory
    files from elementary files in deep ETSI hierarchies. Each kind
-   pulls its hue from a ``--tree-<kind>-*`` triplet so themes can
-   override the look without touching these rules. The fallbacks
-   match the legacy hard-coded RGB so non-Nord themes keep their
-   established palette. */
+   reads its triplet from ``--tree-<kind>-*`` in base.css, which every
+   theme inherits. The ramp is filled -> outlined -> neutral -> hairline,
+   so the cue survives a theme that has no spare hues. */
 .cc-tree-icon--mf {
-  background: var(--tree-mf-bg, var(--accent-soft));
-  color: var(--tree-mf-fg, var(--accent));
-  border: 1px solid var(--tree-mf-edge, var(--accent));
+  background: var(--tree-mf-bg);
+  color: var(--tree-mf-fg);
+  border: 1px solid var(--tree-mf-edge);
 }
 .cc-tree-icon--adf {
-  background: var(--tree-adf-bg, rgba(255, 184, 92, 0.18));
-  color: var(--tree-adf-fg, #ffb85c);
-  border: 1px solid var(--tree-adf-edge, rgba(255, 184, 92, 0.55));
+  background: var(--tree-adf-bg);
+  color: var(--tree-adf-fg);
+  border: 1px solid var(--tree-adf-edge);
 }
 .cc-tree-icon--df {
-  background: var(--tree-df-bg, rgba(177, 156, 217, 0.18));
-  color: var(--tree-df-fg, #b19cd9);
-  border: 1px solid var(--tree-df-edge, rgba(177, 156, 217, 0.55));
+  background: var(--tree-df-bg);
+  color: var(--tree-df-fg);
+  border: 1px solid var(--tree-df-edge);
 }
 .cc-tree-icon--ef {
-  background: var(--tree-ef-bg, rgba(120, 220, 180, 0.14));
-  color: var(--tree-ef-fg, #78dcb4);
-  border: 1px solid var(--tree-ef-edge, rgba(120, 220, 180, 0.45));
+  background: var(--tree-ef-bg);
+  color: var(--tree-ef-fg);
+  border: 1px solid var(--tree-ef-edge);
 }
 
 .cc-tree-name {
@@ -60,6 +59,11 @@
   border-radius: var(--radius-md);
   padding: 14px 16px;
   min-height: 200px;
+  /* Without a cap this grows to its content height and the page -- which
+     does not scroll -- clips the tail (a long decoded body such as EF.UST
+     loses its last rows behind the log dock). Cap it the same way the tree
+     is capped so the overflow below becomes a scrollbar. */
+  max-height: calc(100vh - var(--scp03-pane-reserve, 280px));
   overflow: auto;
 }
 

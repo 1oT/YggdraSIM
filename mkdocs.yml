@@ -152,6 +152,8 @@ nav:
       - Profile Package: subsystems/profile-package.md
       - Universal GUI Command Center: subsystems/gui-command-center.md
       - HIL Bridge: subsystems/hil-bridge.md
+      - Card Bridge: subsystems/card-bridge.md
+      - Remote Lab: subsystems/remote-lab.md
       - SUCI Tool: subsystems/suci-tool.md
       - SIMCARD Simulator: subsystems/simcard-simulator.md
       - APDU Mutation Fuzzer: subsystems/apdu-fuzzer.md
@@ -164,7 +166,7 @@ nav:
       - Enable, Disable, Delete a Profile: how-to/enable-disable-delete-profile.md
       - Inspect and Transcode SAIP: how-to/inspect-and-transcode-saip.md
       - Write a Profile Policy Pack: how-to/write-a-profile-policy-pack.md
-      - Remote APDU Streaming: how-to/remote-apdu-streaming.md
+      - Card Bridge over SSH: how-to/remote-apdu-streaming.md
       - Run a Remote Lab Agent: how-to/run-a-remote-lab-agent.md
       - Install RemSIM / APDU Streaming: how-to/install-remsim-apdu-streaming.md
       - Run a HIL Capture: how-to/run-hil-capture.md
@@ -186,6 +188,7 @@ nav:
       - Command Suite: reference/command-suite.md
       - CLI And Piping Cheatsheet: reference/cli-and-piping-cheatsheet.md
       - CLI Matrix: reference/cli-matrix.md
+      - Environment Flags: reference/env-flags.md
       - State Schema: reference/state-schema.md
       - Runtime Root: reference/runtime-root.md
       - Standards Map: reference/standards-map.md
@@ -200,6 +203,7 @@ nav:
       - Testing Guide: internals/testing-guide.md
       - Coding Standards: internals/coding-standards.md
       - Release Checklist: internals/release-checklist.md
+      - SCP11 Test Compatibility Namespace: subsystems/scp11-test.md
   - Source Library: source-library.md
   - Build and Packaging: build-and-packaging.md
   - About:

@@ -286,7 +286,7 @@ class LauncherTemplateTests(unittest.TestCase):
         iccid_position = argv.index("--iccid")
         self.assertEqual(argv[iccid_position + 1], "8988004000000000000004")
         # The profile path (with whitespace) must survive as a single argv
-        # entry — that is exactly what shlex.split guarantees for quoted
+        # entry -- that is exactly what shlex.split guarantees for quoted
         # substrings after format_map expansion.
         self.assertTrue(
             any(" " in chunk for chunk in argv),

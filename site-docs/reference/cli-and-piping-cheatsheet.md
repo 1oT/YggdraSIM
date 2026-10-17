@@ -20,7 +20,7 @@ scripted local operation. Use this alongside the full
 
 ## Assumptions
 
-Every `python -m …` example assumes one of the following:
+Every `python -m ...` example assumes one of the following:
 
 - you are running the command from the repository root, or
 - you already ran `python -m pip install -e /path/to/YggdraSIM` in the same
@@ -58,7 +58,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `python -m SCP03` | Yes | Yes | Yes | Supports `--out` YAML export with `--cmd` or `--stdin`. |
 | `python -m SCP80` | Yes | Yes | Yes | Uses the same OTA shell commands as the interactive prompt. |
-| `python -m SCP11.relay` | Yes | Yes | Yes | Relay shell using the default relay certificate set. |
+| `python -m SCP11.relay` | Yes | Yes | Yes | Compatibility alias of the `SCP11.live` shell. |
 | `python -m SCP11.live` | Yes | Yes | Yes | eSIM management relay shell. |
 | `python -m SCP11.local_access` | Yes | Yes | Yes | Local SMDPP shell against ISD-R. |
 | `python -m SCP11.eim_local` | Yes | Yes | Yes | Local eIM shell and localized flows. |
@@ -160,6 +160,88 @@ DUMP
 EXIT
 EOF
 ```
+
+## Capture commands to a file
+
+Every shell command line takes `--log <file>`. The command runs as it
+would with `--debug` -- the raw APDU trace and the debug narration
+included -- and everything it prints is appended to `<file>` as well as
+shown on the terminal. The terminal therefore shows the debug output
+too; the file carries the same text without colour codes.
+
+```text
+[eSIM Management] > DOWNLOAD --log logs/download.log
+[Local eIM] > IPAD-DISCOVER --log "logs/ipad discover.log"
+[APDU] > SELECT 3F00 --log=logs/select.log
+```
+
+- The flag can sit anywhere on the line and comes off before the command
+  reads its arguments; `--log=<file>` and a quoted path both work.
+- A relative path is taken from the working directory, and `~` and
+  environment variables are expanded. A directory (an existing one, or a
+  path ending in `/`) gets a file named after the command and the local
+  time, such as `logs/poll-20261014-102233.log`.
+- The file is opened for append, and a new one is readable by its owner
+  only: the debug trace carries key material in full. Each run opens with a
+  `===` header naming the shell and the command, and closes with a trailer
+  that says how it ended (`ended`, `interrupted (Ctrl+C)`, ...) and how
+  long it took. A traceback goes to the file only.
+- The body is laid out to fold by indentation, so an editor that folds
+  that way collapses a run, a block or a row. A line printed at the left
+  margin opens a block and starts with the local time it was printed, to
+  the millisecond; an indented line -- the decoded rows under an APDU, the
+  full hex under a row, the fields under a TLS handshake -- continues the
+  block above it without a time of its own, in the columns the terminal
+  showed it in. The whole run sits one level under its `===` header:
+
+```text
+=== 2026-10-14 10:22:33 +0200  eSIM Management > poll --debug ===
+  10:22:41.886  Card:      SEND DATA #1                             90 00
+                           81 03 01 43 01  Command details     SEND DATA #1, 01: send immediately
+                           82 02 81 21     Device identities   UICC -> channel 1
+                           36 76 16 03..03 Channel data        118 bytes
+                                           16 03 03 00 71 01 00 00 6D 03 03 ...
+  10:22:41.887  Network:   sent 118 bytes to 192.0.2.4:443
+                           TLS Handshake: ClientHello sni=eim.example.test (109 byte(s))
+=== 2026-10-14 10:27:05 +0200  ended after 272.4 s ===
+```
+
+- Batch mode takes the flag too:
+
+```bash
+python -m SCP11.live --cmd "SCAN --log reports/scan.log; EXIT"
+```
+
+- The GUI refuses the flag: its action panels already hold the output, and
+  a path typed into a web form would be written on the server host.
+
+### SCP03 `TRACE`
+
+The SCP03 shell can keep one log open across commands:
+
+```text
+[APDU] > TRACE START logs/session.log
+[TRACE APDU] > SELECT 3F00
+[TRACE APDU] > 00B0000010
+[TRACE APDU] > TRACE STOP
+```
+
+From `TRACE START` to `TRACE STOP` (or `TRACE END`) every command runs
+with debug output and is copied into the file, its output one level
+under a `> command` line; a `RUN` script notes each of its lines one
+level deeper again. `TRACE
+STATUS`, or `TRACE` alone, reports the file and its line count. `TRACE
+START` without a file writes `reports/command_logs/scp03-trace-<time>.log`
+under the runtime root. `EXIT`, `QA` and the end of a `--cmd` batch close
+an open trace. `--log` on one command still works during a trace; that
+command then goes to both files. Debug output stays on until `TRACE STOP`:
+a `DEBUG` typed during a trace flips the switch for that one command only.
+
+A command log is a transcript: `--json` / `--yaml` output lands in it like
+any other text, its first line stamped and the rest indented under it, so
+the file does not parse as JSON or YAML. For a structured report use the shells'
+own outputs (`--out` in SCP03, `RECORD START` / `RECORD STOP` in the SCP11
+Local SMDPP and Local eIM shells).
 
 ## Profile lifecycle fast paths
 
@@ -341,7 +423,7 @@ EOF
 ### HIL Bridge daemons
 
 Both `yggdrasim-hil-bridge` and `yggdrasim-hil-supervisor` are
-`argparse`-only daemons — no `--cmd` / `--stdin`. Drive them through
+`argparse`-only daemons -- no `--cmd` / `--stdin`. Drive them through
 systemd or the launcher's `[B]` Local SIMtrace2 HIL Bridge Session menu instead:
 
 ```bash
@@ -403,8 +485,8 @@ EXIT
 EOF
 ```
 
-`python -m SCP11.live --dump-keybag …` is an intentional **no-op
-stub** — live-mode SCP11c BSP keys are derived inside the eUICC and
+`python -m SCP11.live --dump-keybag ...` is an intentional **no-op
+stub** -- live-mode SCP11c BSP keys are derived inside the eUICC and
 never reach the host. Use `SCP11.local_access` or SCP03 for real
 exports.
 

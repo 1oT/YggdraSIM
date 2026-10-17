@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 PE-AKAParameter / PE-AKAParameter2 structured editor.
 
@@ -273,7 +272,7 @@ class AkaParameterEditor(BasePeEditor):
         if self._sqn_count == 0:
             host.mount(
                 Static(
-                    "(empty sqnInit list — use '+ Add SQN init slot' to add one)",
+                    "(empty sqnInit list -- use '+ Add SQN init slot' to add one)",
                     classes="aka_section_note",
                 ),
             )

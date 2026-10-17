@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Profile import pipeline: DER→pySim decode, ES8+ command sequence execution, and rollback on failure."""
 from __future__ import annotations
 
@@ -14,6 +13,7 @@ from SIMCARD.profile_store import (
     load_profile_image_json_file,
     load_profiles_from_store,
     profile_store_has_entries,
+    profile_store_is_initialized,
     sync_profiles_to_store,
 )
 from SIMCARD.saip_profile import decode_profile_image, _get_saip_asn1
@@ -52,6 +52,8 @@ def import_profile_artifact(
 
     if profile_store_has_entries(store_path):
         profiles = load_profiles_from_store(store_path)
+    elif profile_store_is_initialized(store_path):
+        profiles = []
     else:
         profiles = build_default_state().profiles
 

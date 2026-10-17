@@ -95,8 +95,14 @@ M.split_candidate = ProtoField.string(PREFIX .. ".split.candidate", "Candidate")
 -- ---------------------------------------------------------------- command
 M.command = ProtoField.bytes(PREFIX .. ".command", "Command APDU")
 M.cla = ProtoField.uint8(PREFIX .. ".cla", "CLA", base.HEX)
+-- Bit 8 alone separates the two classes (ISO/IEC 7816-4 clause 5.4.1),
+-- so it is rendered as the bit field it is. The channel, the
+-- secure-messaging level and the chaining flag cannot follow: their bits
+-- move between the standard and extended forms of TS 102 221
+-- tables 10.3 and 10.4a, and the extended form's channel is the low
+-- nibble plus four, which no fixed mask can show.
 M.cla_type = ProtoField.uint8(
-    PREFIX .. ".cla.type", "Class type", base.DEC, CLA_TYPE_NAMES
+    PREFIX .. ".cla.type", "Class type", base.DEC, CLA_TYPE_NAMES, 0x80
 )
 M.cla_channel = ProtoField.uint8(
     PREFIX .. ".cla.channel", "Logical channel", base.DEC
@@ -117,9 +123,6 @@ M.p1 = ProtoField.uint8(PREFIX .. ".p1", "P1", base.HEX)
 M.p2 = ProtoField.uint8(PREFIX .. ".p2", "P2", base.HEX)
 M.lc = ProtoField.uint32(PREFIX .. ".lc", "Lc", base.DEC)
 M.le = ProtoField.uint32(PREFIX .. ".le", "Le", base.DEC)
-M.le_effective = ProtoField.uint32(
-    PREFIX .. ".le_effective", "Le (effective)", base.DEC
-)
 M.data = ProtoField.bytes(PREFIX .. ".data", "Command data")
 M.case = ProtoField.string(PREFIX .. ".case", "ISO 7816-4 case")
 M.extended_length = ProtoField.bool(
@@ -127,7 +130,6 @@ M.extended_length = ProtoField.bool(
 )
 
 M.risk = ProtoField.uint8(PREFIX .. ".risk", "Risk", base.DEC, M.risk_names)
-M.risk_name = ProtoField.string(PREFIX .. ".risk_name", "Risk detail")
 
 -- --------------------------------------------------------------- response
 M.response = ProtoField.bytes(PREFIX .. ".response", "Response APDU")
@@ -178,17 +180,25 @@ M.tlv_base_tag = ProtoField.uint32(
     PREFIX .. ".tlv.base_tag", "Tag (comprehension bit cleared)", base.HEX
 )
 M.tlv_name = ProtoField.string(PREFIX .. ".tlv.name", "Tag name")
+-- ITU-T X.690 clause 8.1.2: bits 8 and 7 of the leading identifier octet
+-- are the class and bit 6 the constructed flag, so both are rendered as
+-- the bit fields they are rather than as values standing beside the tag.
 M.tlv_class = ProtoField.uint8(
-    PREFIX .. ".tlv.class", "Tag class", base.DEC, TAG_CLASS_NAMES
+    PREFIX .. ".tlv.class", "Tag class", base.DEC, TAG_CLASS_NAMES, 0xC0
 )
-M.tlv_constructed = ProtoField.bool(PREFIX .. ".tlv.constructed", "Constructed")
+M.tlv_constructed = ProtoField.bool(
+    PREFIX .. ".tlv.constructed", "Constructed", 8, nil, 0x20
+)
 M.tlv_length = ProtoField.uint32(PREFIX .. ".tlv.length", "Length", base.DEC)
 M.tlv_indefinite = ProtoField.bool(
     PREFIX .. ".tlv.indefinite", "Indefinite length"
 )
 M.tlv_value = ProtoField.bytes(PREFIX .. ".tlv.value", "Value")
+-- ETSI TS 101 220 clause 7.1.1: bit 8 of the tag is the comprehension
+-- required flag of a COMPREHENSION-TLV.
 M.tlv_comprehension = ProtoField.bool(
-    PREFIX .. ".tlv.comprehension_required", "Comprehension required"
+    PREFIX .. ".tlv.comprehension_required", "Comprehension required",
+    8, nil, 0x80
 )
 M.tlv_text = ProtoField.string(PREFIX .. ".tlv.text", "Value (text)")
 -- uint32, not uint64: a Lua number cannot be handed to a 64-bit field
@@ -402,6 +412,14 @@ M.cat_channel_data_length = ProtoField.uint8(
 )
 M.cat_bearer = ProtoField.string(PREFIX .. ".cat.bearer", "Bearer")
 M.cat_apn = ProtoField.string(PREFIX .. ".cat.apn", "Network access name")
+-- The domain name a SEND DATA / RECEIVE DATA channel payload carries: the
+-- DNS query name an IPAd resolves before reaching the eIM or SM-DP+, or
+-- the SNI of the ClientHello it then sends to the resolved address. Read
+-- from the channel data (which Wireshark also hands to the stock dns and
+-- tls dissectors); surfaced here so it reaches the Detail column and a
+-- filter. cat.payload_protocol on the same row says which of the two it
+-- came from.
+M.cat_fqdn = ProtoField.string(PREFIX .. ".cat.fqdn", "Domain name")
 M.cat_address = ProtoField.string(PREFIX .. ".cat.address", "Address")
 -- Typed peers of cat.address, carrying the raw address bytes so
 -- Wireshark filters them the way it filters ip.addr -- subnet match,
@@ -471,8 +489,8 @@ M.all = {
     M.split_method, M.split_ambiguous, M.split_candidate,
     M.command, M.cla, M.cla_type, M.cla_channel, M.cla_secure_messaging,
     M.cla_chaining, M.ins, M.command_name, M.command_source,
-    M.p1, M.p2, M.lc, M.le, M.le_effective, M.data, M.case,
-    M.extended_length, M.risk, M.risk_name,
+    M.p1, M.p2, M.lc, M.le, M.data, M.case,
+    M.extended_length, M.risk,
     M.response, M.response_data, M.sw, M.sw1, M.sw2, M.sw_meaning,
     M.sw_success, M.sw_category,
     M.atr, M.atr_ts, M.atr_t0, M.atr_historical_count, M.atr_interface,
@@ -510,7 +528,7 @@ M.all = {
     M.cat_event, M.cat_event_name,
     M.cat_channel, M.cat_channel_established, M.cat_channel_info,
     M.cat_channel_data_length,
-    M.cat_bearer, M.cat_apn, M.cat_address,
+    M.cat_bearer, M.cat_apn, M.cat_fqdn, M.cat_address,
     M.cat_address_ipv4, M.cat_address_ipv6, M.cat_buffer_size,
     M.cat_transport, M.cat_port, M.cat_channel_data,
     M.cat_payload_protocol, M.tls_content_type, M.tls_alert_level,

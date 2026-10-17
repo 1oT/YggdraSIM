@@ -1,6 +1,15 @@
 __head.js
 core.js
 command-center.js
+plugin-console.js
+plugin-console-forms.js
+plugin-console-poll.js
+plugin-console-compare.js
+plugin-console-tabs.js
+plugin-console-pills.js
+plugin-console-runform.js
+plugin-console-credentials.js
+plugin-console-runs.js
 saip-workbench.js
 trailing.js
 __foot.js

@@ -369,24 +369,15 @@ Validate these before publication:
 - state persistence writes land in runtime state, not inside the installed bundle
 - smart-card flows are validated on each target OS that will be supported
 
-## Pre-release sanitization
+## Pre-release identifier scan
 
-Before a commit that goes to a public tree, scan for identifiers that must
-not ship:
+Before a commit that goes to a public tree, run the hygiene scan over the
+tracked files (stage new files first; it reads `git ls-files`):
 
 ```bash
-python scripts/release/validate_release.py sanitize
+python scripts/check_repo_hygiene.py
 ```
 
-It reports every tracked file carrying a real MCC/MNC, a non-test ICCID
-IIN, or a routable address outside RFC 5737, and exits non-zero so it can
-gate a release commit. Banned-prose findings are printed as advisory and do
-not fail the run; `python -m plugins.release_sanitizer --phrases-are-fatal`
-makes them fail too.
-
-The rules live in an untracked plugin rather than in this tree. They name
-the allocations the repo is scrubbed of, so publishing the detector would
-tell a reader which allocations were once here -- it would leak more than
-it prevents. A checkout without the plugin prints that it is skipping and
-exits zero, so a public clone is never blocked by the absence of a check it
-cannot run.
+It reports a real MCC/MNC, IMSI or ICCID IIN in ASCII or packed-BCD form,
+banned prose, and attribution to an assistant tool, and
+`tests/test_repo_hygiene.py` fails on any new violation.

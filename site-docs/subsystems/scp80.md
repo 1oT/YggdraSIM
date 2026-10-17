@@ -61,7 +61,7 @@ OTA sequence against a per-ICCID state.
 | `iccid <hex>` | bind the session to a specific ICCID state |
 | `build <hex>` | assemble a secured packet from direct payload hex |
 | `send` | transmit the last built packet |
-| `sendraw <hex>` | transmit a raw APDU without OTA wrapping |
+| `sendraw <hex>` | transmit a raw APDU without OTA wrapping; a data field over 255 bytes is sent as a STORE DATA block sequence |
 | `ota <hex>` | build and send in one step |
 | `script <path>` | execute a command script |
 | `history` | show session history |

@@ -1,11 +1,34 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM package codec: decodes and lints bound profile package documents from the eIM hot-folder."""
 import json
 import os
 from typing import Any
+
+# SGP.32 §2.11.1.2: the IPA and eUICC data items an IpaEuiccDataRequest may
+# name in its tagList. Anything else is ignored by the IPA without error.
+IPA_EUICC_DATA_REQUEST_TAGS: tuple[str, ...] = (
+    "A0",    # List of Notifications
+    "81",    # Default SM-DP+ address
+    "A2",    # eUICC Package Results
+    "BF20",  # eUICCInfo1
+    "BF22",  # eUICCInfo2
+    "83",    # Root SM-DS address
+    "84",    # Association token
+    "A5",    # EUM certificate
+    "A6",    # eUICC certificate
+    "A8",    # IPA Capabilities
+    "A9",    # Device Information
+)
+
+# SGP.22 NotificationEvent ::= BIT STRING bit positions.
+NOTIFICATION_EVENT_BITS: dict[str, int] = {
+    "notification_install": 0,
+    "notification_local_enable": 1,
+    "notification_local_disable": 2,
+    "notification_local_delete": 3,
+}
 
 
 def load_eim_package_document(path: str) -> dict[str, Any]:
@@ -129,6 +152,8 @@ def lint_eim_package_document(document: dict[str, Any]) -> dict[str, Any]:
         errors.extend(_lint_provide_eim_package_result_spec(document))
     elif package_type_lc == "eim_package_request":
         errors.extend(_lint_eim_package_request_spec(document))
+    elif package_type_lc == "ipa_euicc_data_request":
+        errors.extend(_lint_ipa_euicc_data_request_spec(document))
     elif package_type_lc == "euicc_package_request_eim_configuration_data":
         errors.extend(_lint_euicc_package_request_eim_configuration_data_spec(document))
     elif package_type_lc == "euicc_package_request_ecos":
@@ -454,9 +479,11 @@ def _lint_provide_eim_package_result_spec(document: dict[str, Any]) -> list[str]
     if _bool_value(request.get("include"), True) is False:
         errors.append("sgp32.provide_eim_package_result.include must be true for package_type provide_eim_package_result.")
     result_choice = _compact_string(request.get("result_choice")).lower()
+    # SGP.32 v1.3 EimPackageResult alternatives.
     allowed = (
         "euicc_package_result",
         "epr_and_notifications",
+        "ipa_euicc_data_response",
         "profile_download_trigger_result",
         "eim_package_result_response_error",
     )
@@ -487,12 +514,120 @@ def _lint_eim_package_request_spec(document: dict[str, Any]) -> list[str]:
     choice = _compact_string(request.get("choice")).lower()
     allowed = (
         "euicc_package_request",
+        "ipa_euicc_data_request",
         "profile_download_trigger_request",
         "eim_acknowledgements",
     )
     if choice not in allowed:
         errors.append("sgp32.eim_package_request.choice must be a valid request family.")
+    if choice == "ipa_euicc_data_request":
+        errors.extend(_lint_ipa_euicc_data_request_fields(_mapping_value(request.get("ipa_euicc_data_request"))))
     return errors
+
+
+def _lint_ipa_euicc_data_request_spec(document: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    sgp32 = _mapping_value(document.get("sgp32"))
+    request = _mapping_value(sgp32.get("ipa_euicc_data_request"))
+    if _bool_value(request.get("include"), True) is False:
+        errors.append("sgp32.ipa_euicc_data_request.include must be true for package_type ipa_euicc_data_request.")
+    errors.extend(_lint_ipa_euicc_data_request_fields(request))
+    return errors
+
+
+def _lint_ipa_euicc_data_request_fields(request: dict[str, Any]) -> list[str]:
+    """Validate the SGP.32 §2.11.1.2 IpaEuiccDataRequest body of a package document."""
+    errors: list[str] = []
+    path = "sgp32.ipa_euicc_data_request"
+
+    # A request body is either composed field-by-field from tag_list and the
+    # search criteria, or supplied verbatim through request_payload for a body
+    # captured off the wire. The typed form wins when both are present.
+    opaque_body = ipa_euicc_data_request_opaque_body(request)
+    request_payload = _mapping_value(request.get("request_payload"))
+    if _bool_value(request_payload.get("include"), False) and len(opaque_body) == 0:
+        errors.append(f"{path}.request_payload.value_hex must be non-empty even-length hex.")
+
+    tag_list = _mapping_value(request.get("tag_list"))
+    tag_items = ipa_euicc_data_request_tag_items(request)
+    if len(tag_items) == 0 and len(opaque_body) == 0:
+        if _bool_value(tag_list.get("include"), True) is False:
+            errors.append(f"{path}.tag_list.include must be true; tagList is a mandatory field.")
+        else:
+            errors.append(f"{path}.tag_list must select at least one data item.")
+    for key, row in _mapping_value(tag_list.get("items")).items():
+        if isinstance(row, dict) is False:
+            errors.append(f"{path}.tag_list.items.{key} must be an object.")
+            continue
+        if _bool_value(row.get("include"), False) is False:
+            continue
+        tag_hex = _compact_hex_lenient(row.get("tag_hex"))
+        if len(tag_hex) == 0 or len(tag_hex) % 2 != 0:
+            errors.append(f"{path}.tag_list.items.{key}.tag_hex must be non-empty even-length hex.")
+        elif tag_hex not in IPA_EUICC_DATA_REQUEST_TAGS:
+            errors.append(
+                f"{path}.tag_list.items.{key}.tag_hex '{tag_hex}' is not an SGP.32 §2.11.1.2 data item; "
+                "the IPA ignores it without error."
+            )
+
+    ci_pk = _mapping_value(request.get("euicc_ci_pk_identifier_to_be_used"))
+    if _bool_value(ci_pk.get("include"), False):
+        value_hex = _compact_hex_lenient(ci_pk.get("value_hex"))
+        if len(value_hex) == 0 or len(value_hex) % 2 != 0:
+            errors.append(f"{path}.euicc_ci_pk_identifier_to_be_used.value_hex must be non-empty even-length hex.")
+        elif len(value_hex) > 40:
+            errors.append(
+                f"{path}.euicc_ci_pk_identifier_to_be_used.value_hex must be at most 20 bytes "
+                "(full or truncated CI Public Key Identifier)."
+            )
+
+    notification = _mapping_value(request.get("search_criteria_notification"))
+    if _bool_value(notification.get("include"), False):
+        choice = _compact_string(notification.get("choice")).lower()
+        if choice not in ("seq_number", "profile_management_operation"):
+            errors.append(
+                f"{path}.search_criteria_notification.choice must be seq_number or profile_management_operation."
+            )
+        elif choice == "seq_number":
+            errors.extend(_lint_search_criteria_seq_number(notification, f"{path}.search_criteria_notification"))
+        else:
+            events = _mapping_value(_mapping_value(notification.get("profile_management_operation")).get("events"))
+            if len([key for key in NOTIFICATION_EVENT_BITS if _bool_value(events.get(key), False)]) == 0:
+                errors.append(
+                    f"{path}.search_criteria_notification.profile_management_operation.events "
+                    "must set at least one notification type."
+                )
+            for key in events:
+                if key not in NOTIFICATION_EVENT_BITS:
+                    errors.append(
+                        f"{path}.search_criteria_notification.profile_management_operation.events.{key} "
+                        "is not an SGP.22 NotificationEvent bit."
+                    )
+
+    package_result = _mapping_value(request.get("search_criteria_euicc_package_result"))
+    if _bool_value(package_result.get("include"), False):
+        errors.extend(
+            _lint_search_criteria_seq_number(package_result, f"{path}.search_criteria_euicc_package_result")
+        )
+
+    transaction_id = _mapping_value(request.get("eim_transaction_id"))
+    if _bool_value(transaction_id.get("include"), False):
+        value_hex = _compact_hex_lenient(transaction_id.get("value_hex"))
+        if len(value_hex) == 0 or len(value_hex) % 2 != 0:
+            errors.append(f"{path}.eim_transaction_id.value_hex must be non-empty even-length hex.")
+        elif len(value_hex) > 32:
+            errors.append(f"{path}.eim_transaction_id.value_hex must be at most 16 bytes.")
+    return errors
+
+
+def _lint_search_criteria_seq_number(section: dict[str, Any], path: str) -> list[str]:
+    seq_number = _mapping_value(section.get("seq_number"))
+    if _bool_value(seq_number.get("include"), True) is False:
+        return [f"{path}.seq_number.include must be true when the search criteria is included."]
+    value = seq_number.get("value")
+    if isinstance(value, bool) or isinstance(value, int) is False or value < 0:
+        return [f"{path}.seq_number.value must be a non-negative integer."]
+    return []
 
 
 def _lint_euicc_package_request_eim_configuration_data_spec(document: dict[str, Any]) -> list[str]:
@@ -684,7 +819,10 @@ def _lint_eim_package_result_spec(document: dict[str, Any]) -> list[str]:
     choice = _compact_string(result.get("choice")).lower()
     allowed = (
         "euicc_package_result",
+        "epr_and_notifications",
+        "ipa_euicc_data_response",
         "profile_download_trigger_result",
+        "eim_package_result_response_error",
     )
     if choice not in allowed:
         errors.append("sgp32.eim_package_result.choice must be a valid result family.")
@@ -809,8 +947,8 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
         checks.append(
             _spec_check(
                 "SGP.32 addEim eCO choice [8]",
-                _compact_string(request.get("eco_choice_tag_hex")).upper() in ("08", "88"),
-                "eco_choice_tag_hex should encode addEim [8].",
+                _compact_string(request.get("eco_choice_tag_hex")).upper() == "A8",
+                "eco_choice_tag_hex should be A8, the constructed context tag of addEim [8].",
             )
         )
         rows = request.get("eim_configuration_data_list", [])
@@ -905,12 +1043,27 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
                 "eIM Package Request family CHOICE valid",
                 choice in (
                     "euicc_package_request",
+                    "ipa_euicc_data_request",
                     "profile_download_trigger_request",
                     "eim_acknowledgements",
                 ),
                 "choice must be one of the SGP.32 eIM Package Request families.",
             )
         )
+        if choice == "ipa_euicc_data_request":
+            checks.extend(
+                _ipa_euicc_data_request_spec_checks(_mapping_value(request.get("ipa_euicc_data_request")))
+            )
+    elif package_type_lc == "ipa_euicc_data_request":
+        request = _mapping_value(sgp32.get("ipa_euicc_data_request"))
+        checks.append(
+            _spec_check(
+                "SGP.32 IpaEuiccDataRequest tag BF52",
+                _compact_string(request.get("command_tag_hex")).upper() == "BF52",
+                "command_tag_hex should be BF52.",
+            )
+        )
+        checks.extend(_ipa_euicc_data_request_spec_checks(request))
     elif package_type_lc == "euicc_package_request_eim_configuration_data":
         request = _mapping_value(sgp32.get("euicc_package_request"))
         choice = _compact_string(request.get("choice")).lower()
@@ -1029,6 +1182,111 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
     else:
         checks.append(_spec_check("Package type recognized by spec checker", False, f"No spec checker profile for package_type={package_type_lc}"))
 
+    return checks
+
+
+def ipa_euicc_data_request_tag_items(request: dict[str, Any]) -> tuple[str, ...]:
+    """Return the selected tagList items of an IpaEuiccDataRequest body.
+
+    Items come back in the SGP.32 §2.11.1.2 listing order so the encoding does
+    not depend on how the operator ordered the JSON.
+    """
+    rows = _mapping_value(_mapping_value(request.get("tag_list")).get("items"))
+    selected: list[str] = []
+    for row in rows.values():
+        if isinstance(row, dict) is False:
+            continue
+        if _bool_value(row.get("include"), False) is False:
+            continue
+        tag_hex = _compact_hex_lenient(row.get("tag_hex"))
+        if len(tag_hex) == 0 or len(tag_hex) % 2 != 0:
+            continue
+        if tag_hex not in selected:
+            selected.append(tag_hex)
+    ordered = [tag for tag in IPA_EUICC_DATA_REQUEST_TAGS if tag in selected]
+    ordered.extend([tag for tag in selected if tag not in IPA_EUICC_DATA_REQUEST_TAGS])
+    return tuple(ordered)
+
+
+def ipa_euicc_data_request_tag_list(request: dict[str, Any]) -> bytes:
+    """Concatenate the selected tagList items into the '5C' OCTET STRING body."""
+    return b"".join(bytes.fromhex(tag) for tag in ipa_euicc_data_request_tag_items(request))
+
+
+def ipa_euicc_data_request_opaque_body(request: dict[str, Any]) -> bytes:
+    """Return the verbatim IpaEuiccDataRequest body from ``request_payload``.
+
+    An operator replaying a body captured off the wire supplies it here instead
+    of composing one from tag_list; an empty result means no opaque body.
+    """
+    payload = _mapping_value(request.get("request_payload"))
+    if _bool_value(payload.get("include"), False) is False:
+        return b""
+    value_hex = _compact_hex_lenient(payload.get("value_hex"))
+    if len(value_hex) == 0 or len(value_hex) % 2 != 0:
+        return b""
+    try:
+        return bytes.fromhex(value_hex)
+    except ValueError:
+        return b""
+
+
+def encode_notification_event_bits(events: dict[str, Any]) -> bytes:
+    """Encode selected NotificationEvent names as DER BIT STRING contents."""
+    positions = [
+        NOTIFICATION_EVENT_BITS[key]
+        for key in NOTIFICATION_EVENT_BITS
+        if _bool_value(_mapping_value(events).get(key), False)
+    ]
+    if len(positions) == 0:
+        return b"\x00"
+    highest = max(positions)
+    payload = bytearray((highest // 8) + 1)
+    for position in positions:
+        payload[position // 8] |= 0x80 >> (position % 8)
+    unused_bits = (8 - ((highest % 8) + 1)) % 8
+    return bytes([unused_bits]) + bytes(payload)
+
+
+def _ipa_euicc_data_request_spec_checks(request: dict[str, Any]) -> list[dict[str, Any]]:
+    """Spec rows for an IpaEuiccDataRequest body (SGP.32 §2.11.1.2)."""
+    checks: list[dict[str, Any]] = []
+    tag_items = ipa_euicc_data_request_tag_items(request)
+    opaque_body = ipa_euicc_data_request_opaque_body(request)
+    if len(tag_items) == 0 and len(opaque_body) > 0:
+        checks.append(
+            _spec_check(
+                "IpaEuiccDataRequest body supplied verbatim",
+                True,
+                "request_payload replaces the composed body; tagList and search criteria are not applied.",
+            )
+        )
+        return checks
+    checks.append(
+        _spec_check(
+            "tagList names at least one IPA/eUICC data item",
+            len(tag_items) > 0,
+            "tagList is mandatory and must select at least one item.",
+        )
+    )
+    notification = _mapping_value(request.get("search_criteria_notification"))
+    if _bool_value(notification.get("include"), False):
+        checks.append(
+            _spec_check(
+                "searchCriteriaNotification paired with tagList 'A0'",
+                "A0" in tag_items,
+                "The IPA ignores searchCriteriaNotification unless tag 'A0' is in the tagList.",
+            )
+        )
+    package_result = _mapping_value(request.get("search_criteria_euicc_package_result"))
+    if _bool_value(package_result.get("include"), False):
+        checks.append(
+            _spec_check(
+                "searchCriteriaEuiccPackageResult paired with tagList 'A2'",
+                "A2" in tag_items,
+                "The IPA ignores searchCriteriaEuiccPackageResult unless tag 'A2' is in the tagList.",
+            )
+        )
     return checks
 
 

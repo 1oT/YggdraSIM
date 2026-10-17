@@ -118,6 +118,114 @@ class GeneratedTablesContent(unittest.TestCase):
         self.assertIn('"ADF.USIM"', self.text)
 
 
+class RspMembersAgreeWithTheSpecification(unittest.TestCase):
+    """The ASN.1 reader is checked against the documents it reads.
+
+    Member names are only worth having if they sit on the right tag, and
+    a tag is computed from a class and a number that a PDF conversion can
+    garble. Two things make that checkable: the specifications state the
+    encoded tag beside most declarations, and the repository already
+    carries a hand-written EUICCInfo2 table that was compiled
+    independently of this reader.
+    """
+
+    def setUp(self) -> None:
+        self.generator = _load_generator()
+
+    def _root_with_specs(self, text: str) -> Path:
+        # The generator compares its computed tags with the stated ones
+        # whenever it reads the documents, so `--check` runs this comparison
+        # wherever the gitignored library is present; here the refusal
+        # itself is exercised on synthetic text, which every checkout has.
+        import tempfile
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        for relative in self.generator.SPEC_SOURCES:
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        return root
+
+    def test_a_computed_tag_that_disagrees_with_the_stated_one_is_refused(self) -> None:
+        # The reader computes BF20 for a [32] SEQUENCE; the comment says BF21.
+        root = self._root_with_specs("SyntheticRequest ::= [32] SEQUENCE { -- Tag 'BF21'\n}\n")
+        with self.assertRaisesRegex(self.generator.TableExtractionError, "disagrees.*SyntheticRequest"):
+            self.generator.rsp_members_from_specs(root)
+
+    def test_documents_whose_tag_comments_go_unread_are_refused(self) -> None:
+        # One agreeing statement: the comparison finds nothing wrong, which
+        # is also what it finds when the comment pattern stops matching.
+        root = self._root_with_specs("SyntheticRequest ::= [32] SEQUENCE { -- Tag 'BF20'\n}\n")
+        with self.assertRaisesRegex(self.generator.TableExtractionError, "stated tags"):
+            self.generator.rsp_members_from_specs(root)
+
+    def test_euicc_info2_carries_every_member_of_the_clause(self) -> None:
+        """GSMA SGP.22 clause 2.6.2, tag by tag.
+
+        The set is written out rather than derived from another table in
+        the repository: two tables compiled from one clause are a useful
+        cross-check while writing the reader and a coupling once
+        committed, since either is free to be corrected on its own.
+        """
+        tables = self.generator.collect_rsp_members(REPO_ROOT)
+        self.assertEqual(
+            tables["rsp_members"]["EUICCInfo2"],
+            {
+                "81": "baseProfilePackageVersion",
+                "82": "lowestSvn",
+                "83": "euiccFirmwareVersion",
+                "84": "extCardResource",
+                "85": "uiccCapability",
+                "86": "ts102241Version",
+                "87": "globalplatformVersion",
+                "88": "euiccRspCapability",
+                "8B": "euiccCategory",
+                "8D": "treProperties",
+                "8E": "treProductReference",
+                "90": "lpaMode",
+                "92": "additionalEuiccInfo",
+                "93": "highestSvn",
+                "99": "forbiddenProfilePolicyRules",
+                "A9": "euiccCiPKIdListForVerification",
+                "AA": "euiccCiPKIdListForSigning",
+                "AC": "certificationDataObject",
+                "AF": "additionalProfilePackageVersions",
+                # [17] is constructed, so it is 'B1' and not '91'.
+                "B1": "euiccCiPKIdListForSigningV3",
+                "B4": "iotSpecificInfo",
+                # The two members the clause leaves untagged keep the
+                # universal tag of their own type.
+                "04": "ppVersion",
+                "0C": "sasAcreditationNumber",
+            },
+        )
+
+    def test_the_bound_profile_package_follows_table_4(self) -> None:
+        """SGP.22 Table 4: 'A2' is the second run of '87', 'A3' the '86's."""
+        tables = self.generator.collect_rsp_members(REPO_ROOT)
+        self.assertEqual(
+            tables["rsp_members"]["BoundProfilePackage"],
+            {
+                "A0": "firstSequenceOf87",
+                "A1": "sequenceOf88",
+                "A2": "secondSequenceOf87",
+                "A3": "sequenceOf86",
+                "BF23": "initialiseSecureChannelRequest",
+            },
+        )
+
+    def test_a_misread_structure_yields_no_names_rather_than_wrong_ones(self) -> None:
+        """Two members on one tag means the body was misread."""
+        module = self.generator._Asn1Module()
+        module.types["Broken"] = {
+            "kind": "SEQUENCE",
+            "body": "   first [1] OCTET STRING,\n   second [1] OCTET STRING",
+        }
+        self.assertIsNone(module.members("Broken"))
+
+
 class GeneratedTablesAreAsciiClean(unittest.TestCase):
     """The generated Lua must satisfy the repo hygiene rules.
 
@@ -167,6 +275,45 @@ class GeneratedTablesAreAsciiClean(unittest.TestCase):
             generator.lua_string("clause \u00a75.7"), '"clause section 5.7"'
         )
         self.assertEqual(generator.lua_string("1oT O\u00dc"), '"1oT OU"')
+
+
+class RspExtractStandsInForTheLibrary(unittest.TestCase):
+    """A checkout without the specification library renders the same tables.
+
+    The RSP member names come from the converted SGP.22 / SGP.32 documents,
+    which are gitignored. ``scripts/apdu_dissector_rsp_members.json`` holds
+    what the generator last read from them, so CI and a fresh clone check
+    the Lua tables in full.
+    """
+
+    def setUp(self) -> None:
+        self.generator = _load_generator()
+
+    def test_the_extract_is_read_where_the_library_is_absent(self) -> None:
+        import shutil
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / self.generator.RSP_EXTRACT
+            target.parent.mkdir(parents=True)
+            shutil.copy2(REPO_ROOT / self.generator.RSP_EXTRACT, target)
+            self.assertFalse(self.generator.specs_present(root))
+            self.assertEqual(
+                self.generator.collect_rsp_members(root),
+                self.generator.read_rsp_extract(REPO_ROOT),
+            )
+
+    def test_a_malformed_extract_is_refused(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / self.generator.RSP_EXTRACT
+            target.parent.mkdir(parents=True)
+            target.write_text('{"rsp_roots": {}}', encoding="utf-8")
+            with self.assertRaises(self.generator.TableExtractionError):
+                self.generator.collect_rsp_members(root)
 
 
 class GeneratorFailsLoudlyOnMissingSources(unittest.TestCase):

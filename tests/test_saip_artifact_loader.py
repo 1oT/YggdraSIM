@@ -50,28 +50,34 @@ class SharedSaipArtifactLoaderTests(unittest.TestCase):
         self.assertTrue(loaded.is_strictly_complete)
 
     def test_tolerant_recovery_is_never_reported_as_strict_complete(self) -> None:
+        # The stray segment sits before PE-End: anything after it is a
+        # tail, not an element the tolerant walker tries to decode.
         good = self._end_pe_der()
-        raw = good + bytes.fromhex("50 00") + good
+        raw = bytes.fromhex("50 00") + good
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "partial.der"
             source.write_bytes(raw)
 
             loaded = load_saip_artifact(source)
 
-        self.assertEqual(loaded.pe_count, 2)
+        self.assertEqual(loaded.pe_count, 1)
         self.assertFalse(loaded.strict_complete)
         self.assertIsNotNone(loaded.strict_failure)
         self.assertEqual(len(loaded.warnings), 1)
         warning = loaded.warnings[0]
         self.assertEqual(warning.stage, "pe_decode")
-        self.assertEqual(warning.byte_offset, len(good))
+        self.assertEqual(warning.byte_offset, 0)
         self.assertEqual(warning.segment_head_hex, "50 00")
 
         legacy = loaded.to_legacy_mapping()
         self.assertFalse(legacy["strict_complete"])
         self.assertEqual(legacy["warnings"][0]["head_hex"], "50 00")
 
-    def test_terminal_tlv_chop_failure_is_retained_as_warning_evidence(self) -> None:
+    def test_bytes_after_the_end_pe_are_retained_as_trailing_data_evidence(self) -> None:
+        # TCA SAIP V3.4.1 section 8.1 provides PE-End once, at the end of
+        # the package, so a byte after it is not a chopped element but a
+        # tail (a package overwritten in place by a shorter one keeps the
+        # old one); the loader files it as trailing data at that offset.
         good = self._end_pe_der()
         raw = good + bytes.fromhex("A0")
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -83,7 +89,7 @@ class SharedSaipArtifactLoaderTests(unittest.TestCase):
         self.assertEqual(loaded.pe_count, 1)
         self.assertFalse(loaded.strict_complete)
         self.assertEqual(len(loaded.warnings), 1)
-        self.assertEqual(loaded.warnings[0].stage, "tlv_chop")
+        self.assertEqual(loaded.warnings[0].stage, "trailing_data")
         self.assertEqual(loaded.warnings[0].byte_offset, len(good))
 
     def test_asn1_placeholder_is_exposed_as_typed_evidence(self) -> None:

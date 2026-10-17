@@ -3,7 +3,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-# Card Bridge — Operator Guide
+# Card Bridge -- Operator Guide
 
 The Card Bridge lets you run YggdraSIM on one machine while the smart
 card reader is plugged into another. The reader-side machine runs
@@ -56,7 +56,7 @@ PC/SC stack and OpenSSH. This separation lets the same clean GUI control
 a Linux/Raspberry Pi SIMtrace2 rig without installing Linux USB packages
 on Windows or macOS.
 
-## Step 1 — Start the bridge on the reader machine
+## Step 1 -- Start the bridge on the reader machine
 
 ```bash
 python main/main.py --card-bridge \
@@ -81,7 +81,7 @@ You'll see a banner like:
 
 ```
 ========================================================================
-YggdraSIM Card Bridge — ready
+YggdraSIM Card Bridge -- ready
 ========================================================================
   reader     : ACR38U USB Reader (1.00) 00 00
   ATR        : 3B9F95801FC78031E073FE21
@@ -101,12 +101,12 @@ the running daemon with the on-disk token file.
 
 Use either:
 
-* `--card-bridge-reader-index N` / `--reader-index N` — position in
+* `--card-bridge-reader-index N` / `--reader-index N` -- position in
   the PC/SC reader list (default 0).
-* `--card-bridge-reader-name "substring"` / `--reader-name "substring"` — case-insensitive substring match;
+* `--card-bridge-reader-name "substring"` / `--reader-name "substring"` -- case-insensitive substring match;
   overrides `--reader-index`.
 * `--card-bridge-pcsc-share-mode shared|exclusive` /
-  `--pcsc-share-mode shared|exclusive` — defaults to `shared` so the
+  `--pcsc-share-mode shared|exclusive` -- defaults to `shared` so the
   bridge can start while the GUI or `pcsc_scan` has a non-exclusive
   handle open. Use `exclusive` only for isolated reader hosts where no
   other local process touches the reader.
@@ -114,7 +114,7 @@ Use either:
 Run `pcsc_scan -n` on the reader machine to inspect the available
 reader names.
 
-## Step 2 — Open the SSH tunnel from the consumer machine
+## Step 2 -- Open the SSH tunnel from the consumer machine
 
 The simplest form:
 
@@ -123,7 +123,7 @@ ssh -fN -L 8642:127.0.0.1:8642 user@pc-host
 ```
 
 The `-fN` flags background the SSH process without running a remote
-command — only the port forward stays alive.
+command -- only the port forward stays alive.
 
 A more durable approach is to add a stanza to `~/.ssh/config` on the
 consumer machine:
@@ -141,7 +141,7 @@ Host pc-card
 Then `ssh -fN pc-card` opens the tunnel and `ssh pc-card` opens an
 interactive session that shares the same forwarded port.
 
-## Step 3 — Point YggdraSIM at the forwarded port
+## Step 3 -- Point YggdraSIM at the forwarded port
 
 Two environment variables drive the consumer:
 
@@ -150,10 +150,10 @@ Two environment variables drive the consumer:
 # tunnel terminates there):
 export YGGDRASIM_CARD_RELAY_URL=http://127.0.0.1:8642/apdu
 
-# Either the raw token …
+# Either the raw token ...
 export YGGDRASIM_CARD_RELAY_TOKEN="$(ssh pc-card cat ~/.config/yggdrasim/card_bridge/8642.token)"
 
-# … or a 0600 file holding the same value (preferred — avoids the
+# ... or a 0600 file holding the same value (preferred -- avoids the
 # token appearing in `ps` output):
 export YGGDRASIM_CARD_RELAY_TOKEN_FILE=$HOME/.config/yggdrasim/card_bridge/8642.token
 ```
@@ -202,7 +202,7 @@ guided terminal flow:
 
 ```bash
 python main/main.py
-# choose [CB] Card Bridge / Remote APDU Streaming
+# choose [CB] Card Bridge / APDU Streaming
 ```
 
 The `[CB]` menu can:
@@ -241,6 +241,54 @@ still publishes its normal `apduUrl`, `statusUrl`, and `cardResetUrl`,
 so local SCP03 / SAIP consumers on the rig keep using the same relay
 surface while the physical card stays on the workstation.
 
+#### The rig holds a lease on your card
+
+`yggdrasim-hil-supervisor` takes a **card lease** on the workstation's
+bridge before it starts the bridge child, and releases it on shutdown.
+While the rig holds it, a shell on the workstation reaching the same
+card gets `409` naming the holder instead of interleaving APDUs with
+the modem. Two masters on one card share its logical channels and its
+secure channel, and the resulting corruption reads as a card fault
+rather than as a collision, so the refusal is the useful outcome.
+
+Nothing needs configuring. The behaviour follows the existing
+`--remote-card-url`:
+
+- A bridge whose card relay grants no lease runs exactly as before. A
+  relay started without a bearer token refuses to grant one, because
+  there it would protect nothing.
+- The supervisor holds the lease across bridge restarts, so a restart
+  does not drop the card. It renews while it runs and the lease expires
+  on its own, so a supervisor that dies frees the card without anyone
+  reaching the rig.
+- If the card is already held when the supervisor starts, it does not
+  start the bridge. `state/hil_bridge_supervisor.json` reports
+  `cardLease` and the supervisor retries on its backoff.
+- The lease reaches the bridge child as a `0600` file path, never as a
+  command-line value, for the same reason the bearer token does.
+
+Pass `--no-remote-card-lease` only when a second consumer is meant to
+drive the same card deliberately.
+
+#### Reaching the rig's own relay without SSH
+
+The HIL bridge publishes its own `/apdu` relay for tools on the rig. It
+used to be loopback-only in practice: the router built it with no bearer
+token, and the service refuses to serve a routable address
+unauthenticated, so any other `--apdu-relay-host` killed the bridge at
+startup and the supervisor crash-looped it.
+
+It now resolves a token before binding. A loopback bind with nothing
+configured stays unauthenticated exactly as before, which is every
+single-machine deployment. Naming `--apdu-relay-token-file` reads that
+file or writes one, and a non-loopback bind with no file named generates
+one at the conventional path for the port, because asking to be
+reachable should make the bridge reachable rather than make it exit.
+
+The relay marker names the token file so in-tree consumers on the rig
+keep resolving the relay without being told about it. The marker carries
+the path, never the token.
+
 ### Doctor preflight
 
 Once the URL/token are configured, `yggdrasim --doctor` includes a
@@ -248,7 +296,7 @@ Once the URL/token are configured, `yggdrasim --doctor` includes a
 resolved bearer token:
 
 ```
-✔ Remote card bridge — http://127.0.0.1:8642 reachable; auth ok (token fp: a1b2c3); audit on
+✔ Remote card bridge -- http://127.0.0.1:8642 reachable; auth ok (token fp: a1b2c3); audit on
 ```
 
 The probe distinguishes the common failure modes (unreachable,
@@ -296,7 +344,7 @@ in a focused diagnostics surface:
   `ssh -tt`. Device permissions must be configured for the service
   account; the GUI never inserts `sudo`. Custom modem-shell commands
   remain editable and are saved by the browser.
-* Auto-refresh toggle (5 s) — pauses automatically when the operator
+* Auto-refresh toggle (5 s) -- pauses automatically when the operator
   navigates to another view so the GUI doesn't poll in the background.
 * Latency history sparkline (60-sample rolling buffer) with stacked
   ping + status polylines and red dots marking failed probes.
@@ -415,7 +463,7 @@ curl -s -H "Authorization: Bearer $(cat $YGGDRASIM_CARD_RELAY_TOKEN_FILE)" \
 
 The bridge **refuses to start** if you try to bind anything other than
 loopback without a token. There is no `--unsafe-bind` escape hatch by
-design — if you need network exposure you must either accept the
+design -- if you need network exposure you must either accept the
 SSH-tunnel topology or supply a token (and almost certainly terminate
 TLS at a reverse proxy).
 
@@ -440,7 +488,7 @@ of `journalctl` can tell whether PIN material rode through the log.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `card-bridge: Refusing to bind …` | `--host` is not loopback and no token was provided. | Drop the host flag, supply `--token-file`, or remove `--no-token`. |
+| `card-bridge: Refusing to bind ...` | `--host` is not loopback and no token was provided. | Drop the host flag, supply `--token-file`, or remove `--no-token`. |
 | `401 Missing or invalid bearer token` | Consumer didn't pick up the token file or env var. | Confirm `YGGDRASIM_CARD_RELAY_TOKEN_FILE` resolves and is readable. Verify the fingerprint (`yggdrasim ... --doctor` matches the bridge banner). |
 | `429 Too many authentication failures` | The peer hit the 3-failure threshold. | Wait 60 s, then retry with the correct token. The bridge logs which peer locked out. |
 | `Cannot open PC/SC reader` | Bridge can't see the reader or another process holds the reader exclusively. | `pcsc_scan -n`; verify the reader name; restart `pcscd`; close other card tools. The GUI-launched bridge uses `--pcsc-share-mode shared` to avoid normal reader-probe conflicts. |
@@ -454,14 +502,14 @@ bridge's APDU relay (`Tools/HilBridge/apdu_relay.py`). HilBridge
 already auto-publishes a marker file (`hil_bridge_card_relay.json`)
 on its host, so a YggdraSIM CLI invocation on the same machine
 discovers the relay automatically. The Card Bridge daemon does
-**not** write that marker — its address is intentional, explicit,
+**not** write that marker -- its address is intentional, explicit,
 and operator-supplied, because the relay is being exposed through
 SSH rather than auto-discovered on a single host.
 
 ## Related runbooks
 
-- `site-docs/how-to/remote-apdu-streaming.md` — compact end-to-end
+- `site-docs/how-to/remote-apdu-streaming.md` -- compact end-to-end
   recipe for Card Bridge over SSH.
-- `site-docs/how-to/install-remsim-apdu-streaming.md` — Linux /
+- `site-docs/how-to/install-remsim-apdu-streaming.md` -- Linux /
   Raspberry Pi RemSIM, SIMtrace2, Card Bridge, and service setup.
-- `guides/HIL_BRIDGE_GUIDE.md` — full HIL operator procedure.
+- `guides/HIL_BRIDGE_GUIDE.md` -- full HIL operator procedure.

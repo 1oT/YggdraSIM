@@ -3,7 +3,7 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
-/* YggdraSIM Universal GUI — theme stylesheet.
+/* YggdraSIM Universal GUI -- theme stylesheet.
  *
  * All surface colours resolve via CSS custom properties. A theme is
  * applied by setting `data-theme` on the <html> element; see
@@ -15,10 +15,32 @@
  * to the secure-element roots of the project.
  *
  * `gruv-dark`, `ink-light`, and `ocean-dark` are standalone bundles in
- * the same token vocabulary (no `--ygg-*`; tree icons fall back via
- * `var(--tree-*-*, legacy)` defaults). */
+ * the same token vocabulary (no `--ygg-*`; the file-kind chips below
+ * derive from `--accent` / `--surface` / `--border`, so every theme
+ * inherits them without declaring a palette of its own). */
 
 :root {
+  /* File-kind chips (MF / ADF / DF / EF): four hues, each derived from
+     the theme's own palette so no theme has to declare a file-kind
+     palette. Root and applications sit on the accent pair, folders on
+     the warn hue and files on the ok hue, both pulled toward the text
+     colour so they stay legible on light and dark grounds and read as
+     a kind rather than a status. A theme whose accent already occupies
+     one of those hues overrides the triplet in its own file (matrix and
+     the oneot pair). */
+  --tree-mf-bg: color-mix(in oklab, var(--accent) 18%, transparent);
+  --tree-mf-fg: var(--accent-strong);
+  --tree-mf-edge: var(--accent);
+  --tree-adf-bg: var(--accent-soft);
+  --tree-adf-fg: var(--accent);
+  --tree-adf-edge: color-mix(in oklab, var(--accent) 50%, transparent);
+  --tree-df-bg: color-mix(in oklab, var(--warn) 14%, transparent);
+  --tree-df-fg: color-mix(in oklab, var(--warn) 78%, var(--fg));
+  --tree-df-edge: color-mix(in oklab, var(--warn) 48%, transparent);
+  --tree-ef-bg: color-mix(in oklab, var(--ok) 9%, transparent);
+  --tree-ef-fg: color-mix(in oklab, var(--ok) 64%, var(--fg-dim));
+  --tree-ef-edge: color-mix(in oklab, var(--ok) 36%, transparent);
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -90,6 +112,11 @@
   --mono: var(--font-mono);
   --focus-ring: var(--accent);
   --focus-ring-soft: var(--accent-soft);
+
+  /* Overlay chrome shared by every modal, popover and maximised pane.
+     A theme may retune both; views never spell the literals. */
+  --scrim: rgba(0, 0, 0, 0.5);
+  --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.45);
 }
 
 @keyframes ygg-pulse {
@@ -154,14 +181,14 @@ html[data-theme="nord-dark"] {
   /* -- Yggdrasil weave (Nord-only) -------------------------------------
    * Norse-mythology palette tokens, deliberately desaturated so they
    * still read as Nord. Naming maps to the world-tree imagery:
-   *   --ygg-frost   — Niflheim / Polar Night frost  (Nord: nord8)
-   *   --ygg-amber   — Asgard's golden bough         (muted Nord nord13)
-   *   --ygg-runic   — runestone violet / Bifrost    (Nord nord15 dimmed)
-   *   --ygg-leaf    — ash leaves of Yggdrasil       (Nord nord14)
-   *   --ygg-bark    — weathered bark / Midgard soil (custom muted brown)
-   *   --ygg-ember   — Muspelheim ember              (muted Nord nord12)
-   *   --ygg-mist    — pale mist / spiritual halo    (custom muted slate)
-   * Other themes keep their existing look — these tokens are only
+   *   --ygg-frost   -- Niflheim / Polar Night frost  (Nord: nord8)
+   *   --ygg-amber   -- Asgard's golden bough         (muted Nord nord13)
+   *   --ygg-runic   -- runestone violet / Bifrost    (Nord nord15 dimmed)
+   *   --ygg-leaf    -- ash leaves of Yggdrasil       (Nord nord14)
+   *   --ygg-bark    -- weathered bark / Midgard soil (custom muted brown)
+   *   --ygg-ember   -- Muspelheim ember              (muted Nord nord12)
+   *   --ygg-mist    -- pale mist / spiritual halo    (custom muted slate)
+   * Other themes keep their existing look -- these tokens are only
    * referenced through ``var(--ygg-*, fallback)`` so the inheritance
    * is opt-in. */
   --ygg-frost: #88c0d0;
@@ -172,23 +199,6 @@ html[data-theme="nord-dark"] {
   --ygg-ember: #c98a6e;
   --ygg-mist:  #aebed1;
 
-  /* Tree-icon palette (filesystem). Per-kind tokens so themes can
-   * overlay without touching the .cc-tree-icon-* rules. Defaults
-   * preserve the legacy hard-coded values; Nord swaps them for the
-   * Yggdrasil weave. */
-  --tree-mf-fg:    var(--ygg-frost);
-  --tree-mf-bg:    rgba(136, 192, 208, 0.16);
-  --tree-mf-edge:  rgba(136, 192, 208, 0.55);
-  --tree-adf-fg:   var(--ygg-amber);
-  --tree-adf-bg:   rgba(216, 167, 106, 0.16);
-  --tree-adf-edge: rgba(216, 167, 106, 0.50);
-  --tree-df-fg:    var(--ygg-runic);
-  --tree-df-bg:    rgba(156, 142, 182, 0.16);
-  --tree-df-edge:  rgba(156, 142, 182, 0.50);
-  --tree-ef-fg:    var(--ygg-leaf);
-  --tree-ef-bg:    rgba(163, 190, 140, 0.14);
-  --tree-ef-edge:  rgba(163, 190, 140, 0.45);
-
   --theme-tint:
     radial-gradient(circle at top left,     rgba(136, 192, 208, 0.12), transparent 42%),
     radial-gradient(circle at bottom right, rgba(156, 142, 182, 0.09), transparent 40%),
@@ -198,35 +208,35 @@ html[data-theme="nord-dark"] {
 
 /* -- Theme: Nord Light --------------------------------------------------- */
 html[data-theme="nord-light"] {
-  --bg: #eceff4;
+  --bg: #e5e9f0;
   --bg-elev: #ffffff;
-  --bg-elev-2: #e5e9f0;
+  --bg-elev-2: #d8dee9;
   --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(46, 52, 64, 0.05);
-  --border: rgba(76, 86, 106, 0.18);
-  --border-strong: rgba(76, 86, 106, 0.32);
+  --border: rgba(76, 86, 106, 0.28);
+  --border-strong: rgba(76, 86, 106, 0.48);
   --fg: #2e3440;
   --fg-dim: #4c566a;
-  --accent: #496b96;
+  --accent: #44648d;
   --accent-strong: #34547c;
   --accent-soft: rgba(94, 129, 172, 0.12);
   --accent-fg: #ffffff;
   --accent-glow: rgba(94, 129, 172, 0.35);
-  --gradient-accent: linear-gradient(135deg, #496b96 0%, #3f5f87 60%, #34547c 100%);
-  --gradient-brand: linear-gradient(135deg, #496b96 0%, #765a76 100%);
-  --ok: #52763f;
+  --gradient-accent: linear-gradient(135deg, #44648d 0%, #3f5f87 60%, #34547c 100%);
+  --gradient-brand: linear-gradient(135deg, #44648d 0%, #765a76 100%);
+  --ok: #4a6b38;
   --ok-soft: rgba(124, 160, 99, 0.16);
   --warn: #985343;
   --warn-soft: rgba(208, 135, 112, 0.18);
   --fail: #9b3f48;
   --fail-soft: rgba(191, 97, 106, 0.18);
-  --code-bg: #eceff4;
+  --code-bg: #e5e9f0;
   --kbd-bg: rgba(236, 239, 244, 0.96);
-  --shadow-card: 0 10px 26px rgba(46, 52, 64, 0.08);
-  --shadow-card-hover: 0 20px 44px rgba(46, 52, 64, 0.14);
+  --shadow-card: 0 1px 2px rgba(46, 52, 64, 0.06), 0 8px 22px -6px rgba(46, 52, 64, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(46, 52, 64, 0.08), 0 16px 34px -8px rgba(46, 52, 64, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.78);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
 
   /* Yggdrasil weave (Nord-Light). Same semantics as nord-dark, hues
    * shifted darker so they still read against the pale Polar-Night
@@ -239,19 +249,6 @@ html[data-theme="nord-light"] {
   --ygg-bark:  #6f5e4a;
   --ygg-ember: #b46748;
   --ygg-mist:  #7d8da3;
-
-  --tree-mf-fg:    var(--ygg-frost);
-  --tree-mf-bg:    rgba(94, 129, 172, 0.12);
-  --tree-mf-edge:  rgba(94, 129, 172, 0.55);
-  --tree-adf-fg:   var(--ygg-amber);
-  --tree-adf-bg:   rgba(185, 134, 63, 0.13);
-  --tree-adf-edge: rgba(185, 134, 63, 0.55);
-  --tree-df-fg:    var(--ygg-runic);
-  --tree-df-bg:    rgba(126, 111, 160, 0.13);
-  --tree-df-edge:  rgba(126, 111, 160, 0.55);
-  --tree-ef-fg:    var(--ygg-leaf);
-  --tree-ef-bg:    rgba(111, 141, 87, 0.12);
-  --tree-ef-edge:  rgba(111, 141, 87, 0.50);
 
   --theme-tint:
     radial-gradient(circle at top left,     rgba(136, 192, 208, 0.22), transparent 36%),
@@ -285,6 +282,12 @@ html[data-theme="oneot-dark"] {
   --warn-soft: rgba(254, 193, 7, 0.18);
   --fail: #ee5d1f;
   --fail-soft: rgba(238, 93, 31, 0.18);
+
+  /* The brand accent is the ok green, so files keep the neutral
+     hairline instead of a second green beside the ADF teal. */
+  --tree-ef-bg: transparent;
+  --tree-ef-fg: var(--fg-dim);
+  --tree-ef-edge: var(--border);
   --code-bg: #041a33;
   --kbd-bg: rgba(6, 36, 64, 0.9);
   --shadow-card: 0 14px 38px rgba(0, 0, 0, 0.35);
@@ -299,35 +302,41 @@ html[data-theme="oneot-dark"] {
 
 /* -- Theme: 1oT Light ---------------------------------------------------- */
 html[data-theme="oneot-light"] {
-  --bg: #f5f8fb;
+  --bg: #eaf0f6;
   --bg-elev: #ffffff;
-  --bg-elev-2: #e8f4ef;
+  --bg-elev-2: #e0ece7;
   --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(1, 215, 153, 0.06);
-  --border: rgba(194, 204, 215, 0.55);
-  --border-strong: rgba(194, 204, 215, 0.95);
+  --border: rgba(13, 25, 38, 0.16);
+  --border-strong: rgba(13, 25, 38, 0.32);
   --fg: #0d1926;
   --fg-dim: #576675;
-  --accent: #007f62;
-  --accent-strong: #006b52;
+  --accent: #00745a;
+  --accent-strong: #00614a;
   --accent-soft: rgba(2, 180, 128, 0.12);
   --accent-fg: #ffffff;
   --accent-glow: rgba(1, 215, 153, 0.45);
-  --gradient-accent: linear-gradient(135deg, #007f62 0%, #006b52 100%);
-  --gradient-brand: linear-gradient(135deg, #007f62 0%, #425fc0 100%);
-  --ok: #007f62;
+  --gradient-accent: linear-gradient(135deg, #00745a 0%, #00614a 100%);
+  --gradient-brand: linear-gradient(135deg, #00745a 0%, #425fc0 100%);
+  --ok: #00745a;
   --ok-soft: rgba(2, 180, 128, 0.14);
   --warn: #875800;
   --warn-soft: rgba(232, 158, 0, 0.16);
   --fail: #ad3b0c;
   --fail-soft: rgba(238, 93, 31, 0.14);
-  --code-bg: #f5f8fb;
+
+  /* The brand accent is the ok green, so files keep the neutral
+     hairline instead of a second green beside the ADF teal. */
+  --tree-ef-bg: transparent;
+  --tree-ef-fg: var(--fg-dim);
+  --tree-ef-edge: var(--border);
+  --code-bg: #eaf0f6;
   --kbd-bg: #ffffff;
-  --shadow-card: 0 14px 38px rgba(13, 25, 38, 0.08);
-  --shadow-card-hover: 0 24px 48px rgba(13, 25, 38, 0.14);
+  --shadow-card: 0 1px 2px rgba(13, 25, 38, 0.06), 0 8px 22px -6px rgba(13, 25, 38, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(13, 25, 38, 0.08), 0 16px 34px -8px rgba(13, 25, 38, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 18px 40px -14px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.82);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
   --theme-tint:
     radial-gradient(circle at 88% 0%, rgba(1, 215, 153, 0.16), transparent 48%),
     radial-gradient(circle at 8% 100%, rgba(99, 130, 238, 0.12), transparent 50%),
@@ -359,6 +368,15 @@ html[data-theme="matrix"] {
   --warn-soft: rgba(255, 216, 102, 0.14);
   --fail: #ff4d4d;
   --fail-soft: rgba(255, 77, 77, 0.16);
+
+  /* Monochrome phosphor: file kinds stay a ramp of presence rather
+     than hues, since the accent already is the ok green. */
+  --tree-df-bg: var(--surface-alt);
+  --tree-df-fg: var(--fg);
+  --tree-df-edge: var(--border-strong);
+  --tree-ef-bg: transparent;
+  --tree-ef-fg: var(--fg-dim);
+  --tree-ef-edge: var(--border);
   --code-bg: #020805;
   --kbd-bg: #050f0a;
   --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.55);
@@ -410,14 +428,14 @@ html[data-theme="gruv-dark"] {
 
 /* -- Theme: Ink · light (paper field + steel blue accent) ---------------- */
 html[data-theme="ink-light"] {
-  --bg: #f5f4f1;
+  --bg: #edebe6;
   --bg-elev: #ffffff;
-  --bg-elev-2: #ebe8e2;
+  --bg-elev-2: #e2dfd8;
   --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(61, 90, 128, 0.07);
-  --border: rgba(40, 48, 60, 0.14);
-  --border-strong: rgba(40, 48, 60, 0.28);
+  --border: rgba(40, 48, 60, 0.24);
+  --border-strong: rgba(40, 48, 60, 0.44);
   --fg: #1e2430;
   --fg-dim: #4f5d6e;
   --fg-muted: var(--fg-dim);
@@ -434,12 +452,12 @@ html[data-theme="ink-light"] {
   --warn-soft: rgba(184, 98, 10, 0.14);
   --fail: #b33a3a;
   --fail-soft: rgba(179, 58, 58, 0.14);
-  --code-bg: #eceae6;
+  --code-bg: #e9e6e0;
   --kbd-bg: rgba(248, 247, 244, 0.98);
-  --shadow-card: 0 10px 26px rgba(28, 35, 48, 0.08);
-  --shadow-card-hover: 0 20px 44px rgba(28, 35, 48, 0.13);
+  --shadow-card: 0 1px 2px rgba(28, 35, 48, 0.06), 0 8px 22px -6px rgba(28, 35, 48, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(28, 35, 48, 0.08), 0 16px 34px -8px rgba(28, 35, 48, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.85);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
   --theme-tint:
     radial-gradient(circle at 8% 0%, rgba(52, 80, 122, 0.10), transparent 42%),
     radial-gradient(circle at 85% 95%, rgba(61, 104, 104, 0.08), transparent 46%),
@@ -524,24 +542,24 @@ html[data-theme="solarized-dark"] {
 
 /* -- Theme: Solarized · light (base3 ground, classic operator palette) --- */
 html[data-theme="solarized-light"] {
-  --bg: #fdf6e3;
-  --bg-elev: #ffffff;
-  --bg-elev-2: #eee8d5;
-  --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --bg: #eee8d5;
+  --bg-elev: #fdf6e3;
+  --bg-elev-2: #e6dfc8;
+  --surface: #fdf6e3;
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(101, 123, 131, 0.07);
-  --border: rgba(101, 123, 131, 0.18);
-  --border-strong: rgba(101, 123, 131, 0.32);
+  --border: rgba(101, 123, 131, 0.30);
+  --border-strong: rgba(101, 123, 131, 0.50);
   --fg: #073642;
-  --fg-dim: #53686f;
+  --fg-dim: #4d626a;
   --fg-muted: var(--fg-dim);
-  --accent: #176ea6;
-  --accent-strong: #145f8e;
+  --accent: #14649a;
+  --accent-strong: #11557f;
   --accent-soft: rgba(38, 139, 210, 0.12);
   --accent-fg: #ffffff;
   --accent-glow: rgba(38, 139, 210, 0.34);
-  --gradient-accent: linear-gradient(135deg, #176ea6 0%, #145f8e 70%, #5c6f00 130%);
-  --gradient-brand: linear-gradient(135deg, #176ea6 0%, #565bab 100%);
+  --gradient-accent: linear-gradient(135deg, #14649a 0%, #11557f 70%, #5c6f00 130%);
+  --gradient-brand: linear-gradient(135deg, #14649a 0%, #565bab 100%);
   --ok: #5c6f00;
   --ok-soft: rgba(133, 153, 0, 0.14);
   --warn: #786000;
@@ -550,10 +568,10 @@ html[data-theme="solarized-light"] {
   --fail-soft: rgba(220, 50, 47, 0.14);
   --code-bg: #eee8d5;
   --kbd-bg: rgba(253, 246, 227, 0.98);
-  --shadow-card: 0 10px 26px rgba(7, 54, 66, 0.08);
-  --shadow-card-hover: 0 20px 44px rgba(7, 54, 66, 0.14);
+  --shadow-card: 0 1px 2px rgba(7, 54, 66, 0.06), 0 8px 22px -6px rgba(7, 54, 66, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(7, 54, 66, 0.08), 0 16px 34px -8px rgba(7, 54, 66, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.86);
+  --topbar-bg: rgba(253, 246, 227, 0.88);
   --theme-tint:
     radial-gradient(circle at 8% 0%, rgba(38, 139, 210, 0.10), transparent 42%),
     radial-gradient(circle at 90% 100%, rgba(42, 161, 152, 0.08), transparent 46%),
@@ -638,40 +656,119 @@ html[data-theme="catppuccin-mocha"] {
 
 /* -- Theme: Catppuccin · Latte (warm pastel light, mauve accent) --------- */
 html[data-theme="catppuccin-latte"] {
-  --bg: #eff1f5;
+  --bg: #e6e9ef;
   --bg-elev: #ffffff;
-  --bg-elev-2: #e6e9ef;
+  --bg-elev-2: #dce0e8;
   --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(76, 79, 105, 0.06);
-  --border: rgba(76, 79, 105, 0.16);
-  --border-strong: rgba(76, 79, 105, 0.30);
+  --border: rgba(76, 79, 105, 0.28);
+  --border-strong: rgba(76, 79, 105, 0.48);
   --fg: #4c4f69;
-  --fg-dim: #626579;
+  --fg-dim: #5c5f72;
   --fg-muted: var(--fg-dim);
-  --accent: #8839ef;
+  --accent: #7f2fe6;
   --accent-strong: #1e66d0;
   --accent-soft: rgba(136, 57, 239, 0.10);
   --accent-fg: #ffffff;
   --accent-glow: rgba(136, 57, 239, 0.32);
-  --gradient-accent: linear-gradient(135deg, #8839ef 0%, #1e66d0 60%, #0e6097 100%);
-  --gradient-brand: linear-gradient(135deg, #8839ef 0%, #8f3b80 100%);
+  --gradient-accent: linear-gradient(135deg, #7f2fe6 0%, #1e66d0 60%, #0e6097 100%);
+  --gradient-brand: linear-gradient(135deg, #7f2fe6 0%, #8f3b80 100%);
   --ok: #246817;
   --ok-soft: rgba(64, 160, 43, 0.14);
   --warn: #8a5200;
   --warn-soft: rgba(223, 142, 29, 0.14);
-  --fail: #d20f39;
+  --fail: #c60d35;
   --fail-soft: rgba(210, 15, 57, 0.14);
   --code-bg: #e6e9ef;
   --kbd-bg: rgba(239, 241, 245, 0.98);
-  --shadow-card: 0 10px 26px rgba(76, 79, 105, 0.08);
-  --shadow-card-hover: 0 20px 44px rgba(76, 79, 105, 0.14);
+  --shadow-card: 0 1px 2px rgba(76, 79, 105, 0.06), 0 8px 22px -6px rgba(76, 79, 105, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(76, 79, 105, 0.08), 0 16px 34px -8px rgba(76, 79, 105, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.84);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
   --theme-tint:
     radial-gradient(circle at 8% 4%, rgba(136, 57, 239, 0.10), transparent 42%),
     radial-gradient(circle at 90% 96%, rgba(30, 102, 245, 0.08), transparent 46%),
     radial-gradient(circle at 60% 40%, rgba(64, 160, 43, 0.05), transparent 50%);
+}
+
+/* -- Theme: Catppuccin · Frappe (mid-dark pastel, mauve accent) ---------- */
+html[data-theme="catppuccin-frappe"] {
+  --bg: #303446;
+  --bg-elev: #292c3c;
+  --bg-elev-2: #414559;
+  --surface: #292c3c;
+  --surface-alt: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(198, 208, 245, 0.06);
+  --border: rgba(198, 208, 245, 0.12);
+  --border-strong: rgba(198, 208, 245, 0.28);
+  --fg: #c6d0f5;
+  /* Frappe carries the lightest base of the four flavours, so the usual
+     subtext0 reaches only 4.26:1 on --bg-elev-2. Secondary text steps up to
+     subtext1 to clear the 4.5:1 the design-system test requires. */
+  --fg-dim: #b5bfe2;
+  --fg-muted: var(--fg-dim);
+  --accent: #ca9ee6;
+  --accent-strong: #b680e9;
+  --accent-soft: rgba(202, 158, 230, 0.14);
+  --accent-fg: #303446;
+  --accent-glow: rgba(202, 158, 230, 0.46);
+  --gradient-accent: linear-gradient(135deg, #ca9ee6 0%, #8caaee 60%, #99d1db 100%);
+  --gradient-brand: linear-gradient(135deg, #ca9ee6 0%, #f4b8e4 100%);
+  --ok: #a6d189;
+  --ok-soft: rgba(166, 209, 137, 0.16);
+  --warn: #e5c890;
+  --warn-soft: rgba(229, 200, 144, 0.16);
+  --fail: #e78284;
+  --fail-soft: rgba(231, 130, 132, 0.16);
+  --code-bg: #232634;
+  --kbd-bg: rgba(35, 38, 52, 0.96);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.36);
+  --shadow-card-hover: 0 20px 46px rgba(0, 0, 0, 0.50);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 16px 42px -12px var(--accent-glow);
+  --topbar-bg: rgba(41, 44, 60, 0.82);
+  --theme-tint:
+    radial-gradient(circle at 90% 8%, rgba(202, 158, 230, 0.12), transparent 46%),
+    radial-gradient(circle at 6% 92%, rgba(244, 184, 228, 0.08), transparent 48%),
+    radial-gradient(circle at 50% 45%, rgba(140, 170, 238, 0.04), transparent 56%);
+}
+
+/* -- Theme: Catppuccin · Macchiato (deep pastel dark, mauve accent) ------ */
+html[data-theme="catppuccin-macchiato"] {
+  --bg: #24273a;
+  --bg-elev: #1e2030;
+  --bg-elev-2: #363a4f;
+  --surface: #1e2030;
+  --surface-alt: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(202, 211, 245, 0.06);
+  --border: rgba(202, 211, 245, 0.12);
+  --border-strong: rgba(202, 211, 245, 0.28);
+  --fg: #cad3f5;
+  --fg-dim: #a5adcb;
+  --fg-muted: var(--fg-dim);
+  --accent: #c6a0f6;
+  --accent-strong: #b381f4;
+  --accent-soft: rgba(198, 160, 246, 0.14);
+  --accent-fg: #24273a;
+  --accent-glow: rgba(198, 160, 246, 0.46);
+  --gradient-accent: linear-gradient(135deg, #c6a0f6 0%, #8aadf4 60%, #91d7e3 100%);
+  --gradient-brand: linear-gradient(135deg, #c6a0f6 0%, #f5bde6 100%);
+  --ok: #a6da95;
+  --ok-soft: rgba(166, 218, 149, 0.16);
+  --warn: #eed49f;
+  --warn-soft: rgba(238, 212, 159, 0.16);
+  --fail: #ed8796;
+  --fail-soft: rgba(237, 135, 150, 0.16);
+  --code-bg: #181926;
+  --kbd-bg: rgba(24, 25, 38, 0.96);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.36);
+  --shadow-card-hover: 0 20px 46px rgba(0, 0, 0, 0.50);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 16px 42px -12px var(--accent-glow);
+  --topbar-bg: rgba(30, 32, 48, 0.82);
+  --theme-tint:
+    radial-gradient(circle at 90% 8%, rgba(198, 160, 246, 0.12), transparent 46%),
+    radial-gradient(circle at 6% 92%, rgba(245, 189, 230, 0.08), transparent 48%),
+    radial-gradient(circle at 50% 45%, rgba(138, 173, 244, 0.04), transparent 56%);
 }
 
 /* -- Theme: Dracula (canonical purple/cyan dark, zenodb / vim) ----------- */
@@ -757,8 +854,8 @@ html[data-theme="github-light"] {
   --surface: #f6f8fa;
   --surface-alt: rgba(0, 0, 0, 0.04);
   --bg-hover: rgba(208, 215, 222, 0.30);
-  --border: rgba(208, 215, 222, 0.85);
-  --border-strong: rgba(140, 149, 159, 0.55);
+  --border: rgba(208, 215, 222, 1);
+  --border-strong: rgba(140, 149, 159, 0.70);
   --fg: #1f2328;
   --fg-dim: #646c75;
   --fg-muted: var(--fg-dim);
@@ -777,13 +874,96 @@ html[data-theme="github-light"] {
   --fail-soft: rgba(207, 34, 46, 0.12);
   --code-bg: #f6f8fa;
   --kbd-bg: rgba(255, 255, 255, 0.96);
-  --shadow-card: 0 10px 26px rgba(31, 35, 40, 0.06);
-  --shadow-card-hover: 0 20px 42px rgba(31, 35, 40, 0.12);
+  --shadow-card: 0 1px 2px rgba(31, 35, 40, 0.05), 0 6px 18px -8px rgba(31, 35, 40, 0.10);
+  --shadow-card-hover: 0 2px 4px rgba(31, 35, 40, 0.07), 0 12px 28px -8px rgba(31, 35, 40, 0.16);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
   --topbar-bg: rgba(246, 248, 250, 0.92);
   --theme-tint:
     radial-gradient(circle at 8% 0%, rgba(9, 105, 218, 0.07), transparent 42%),
     radial-gradient(circle at 92% 100%, rgba(130, 80, 223, 0.05), transparent 46%);
+}
+
+/* -- Theme: Islands · light (soft grey canvas, white raised cards) ------- */
+html[data-theme="islands-light"] {
+  --bg: #e9ecf1;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #e4e7ed;
+  --surface: #ffffff;
+  --surface-alt: rgba(0, 0, 0, 0.05);
+  --bg-hover: rgba(8, 8, 8, 0.06);
+  --border: rgba(101, 105, 118, 0.30);
+  --border-strong: rgba(101, 105, 118, 0.52);
+  --fg: #080808;
+  --fg-dim: #5d616e;
+  --fg-muted: var(--fg-dim);
+  --accent: #0033b3;
+  --accent-strong: #002a94;
+  --accent-soft: rgba(0, 51, 179, 0.10);
+  --accent-fg: #ffffff;
+  --accent-glow: rgba(0, 51, 179, 0.30);
+  --gradient-accent: linear-gradient(135deg, #0033b3 0%, #002a94 60%, #00227a 100%);
+  --gradient-brand: linear-gradient(135deg, #0033b3 0%, #871094 100%);
+  --ok: #067316;
+  --ok-soft: rgba(6, 125, 23, 0.12);
+  --warn: #7a680a;
+  --warn-soft: rgba(131, 112, 11, 0.14);
+  --fail: #d0182a;
+  --fail-soft: rgba(221, 27, 46, 0.12);
+  --code-bg: #e9ecf1;
+  --kbd-bg: rgba(255, 255, 255, 0.96);
+  --shadow-card: 0 1px 2px rgba(8, 8, 8, 0.06), 0 8px 22px -6px rgba(8, 8, 8, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(8, 8, 8, 0.08), 0 16px 34px -8px rgba(8, 8, 8, 0.20);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
+  --theme-tint:
+    radial-gradient(circle at 8% 0%, rgba(0, 51, 179, 0.06), transparent 42%),
+    radial-gradient(circle at 92% 100%, rgba(135, 16, 148, 0.05), transparent 46%);
+}
+/*
+ * Graphite Light -- the only fully achromatic palette in the set. Every grey
+ * is R=G=B, so the sole chroma on screen is meaning-bearing: the accent, and
+ * ok / warn / fail. Hex dumps, TLV trees and APDU traces carry their own
+ * syntax colour, and a tinted chrome competes with it.
+ *
+ * The field is grey and panels lift toward white, so a card edge reads
+ * without a heavy border. `--theme-tint` is a faint neutral vignette rather
+ * than the coloured radial blooms the other themes use -- a wash would put
+ * chroma back into the chrome.
+ */
+
+html[data-theme="graphite-light"] {
+  --bg: #eaeaea;
+  --bg-elev: #f5f5f5;
+  --bg-elev-2: #dedede;
+  --surface: #f5f5f5;
+  --surface-alt: rgba(0, 0, 0, 0.045);
+  --bg-hover: rgba(23, 24, 26, 0.06);
+  --border: rgba(23, 24, 26, 0.16);
+  --border-strong: rgba(23, 24, 26, 0.34);
+  --fg: #17181a;
+  --fg-dim: #54585e;
+  --fg-muted: var(--fg-dim);
+  --accent: #4338ca;
+  --accent-strong: #312a9c;
+  --accent-soft: rgba(67, 56, 202, 0.10);
+  --accent-fg: #ffffff;
+  --accent-glow: rgba(67, 56, 202, 0.26);
+  --gradient-accent: linear-gradient(135deg, #4338ca 0%, #3d34b4 55%, #312a9c 100%);
+  --gradient-brand: linear-gradient(135deg, #4338ca 0%, #7c3f9e 100%);
+  --ok: #1f7743;
+  --ok-soft: rgba(31, 119, 67, 0.12);
+  --warn: #8a5a00;
+  --warn-soft: rgba(138, 90, 0, 0.12);
+  --fail: #c0202e;
+  --fail-soft: rgba(192, 32, 46, 0.12);
+  --code-bg: #f0f0f0;
+  --kbd-bg: rgba(255, 255, 255, 0.96);
+  --shadow-card: 0 1px 2px rgba(23, 24, 26, 0.06), 0 6px 16px -6px rgba(23, 24, 26, 0.12);
+  --shadow-card-hover: 0 2px 4px rgba(23, 24, 26, 0.08), 0 12px 28px -8px rgba(23, 24, 26, 0.18);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 10px 26px -12px var(--accent-glow);
+  --topbar-bg: rgba(245, 245, 245, 0.92);
+  --theme-tint:
+    radial-gradient(circle at 50% -10%, rgba(23, 24, 26, 0.035), transparent 55%);
 }
 
 /* -- Matrix font override: use mono everywhere for the terminal look. */
@@ -832,18 +1012,16 @@ html[data-theme="gruv-dark"],
 html[data-theme="solarized-dark"],
 html[data-theme="tokyo-night"],
 html[data-theme="catppuccin-mocha"],
+html[data-theme="catppuccin-macchiato"],
+html[data-theme="catppuccin-frappe"],
 html[data-theme="dracula"],
 html[data-theme="github-dark"],
 html[data-theme="matrix"] {
   color-scheme: dark;
 }
 
-html[data-theme="nord-light"],
-html[data-theme="oneot-light"],
-html[data-theme="ink-light"],
-html[data-theme="solarized-light"],
-html[data-theme="catppuccin-latte"],
-html[data-theme="github-light"] {
+html[data-theme$="-light"],
+html[data-theme="catppuccin-latte"] {
   color-scheme: light;
 }
 
@@ -1017,7 +1195,7 @@ select option:hover {
 }
 
 /* ``<datalist>`` popups inherit option styling where the engine allows
-   it (Chromium). Firefox renders them natively — operators will still
+   it (Chromium). Firefox renders them natively -- operators will still
    see readable colours from the list above. */
 
 /* Layout shell ----------------------------------------------------------- */
@@ -1036,6 +1214,10 @@ select option:hover {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* Positioned so the auto-hide overlays further down can take their
+     own grid area as containing block. */
+  position: relative;
+  --panel-hotzone: 8px;
 }
 
 .app-shell[data-log-collapsed="true"] {
@@ -1043,7 +1225,7 @@ select option:hover {
 }
 
 /* SA-G8: collapsible Command Center sidebar. The 260px column folds
-   away so the main content gets the full width — matches the
+   away so the main content gets the full width -- matches the
    ``data-log-collapsed`` pattern already used for the log dock. The
    chevron handle stays in the topbar at all times so the operator
    can bring the sidebar back without keyboard tricks. */
@@ -1064,7 +1246,7 @@ select option:hover {
    grid row collapses to a slim handle strip. Both the sidebar
    toggle (left edge) and the topbar toggle (right edge) stay
    visible so the operator can independently control either panel
-   regardless of which one is currently collapsed — hiding the top
+   regardless of which one is currently collapsed -- hiding the top
    bar must NOT also remove the operator's only handle to the
    sidebar. */
 .app-shell[data-topbar-collapsed="true"] {
@@ -1096,16 +1278,198 @@ select option:hover {
 }
 
 /* When the sidebar is collapsed independently, also drop its column
-   to zero — but the sidebar toggle (always rendered in the topbar)
+   to zero -- but the sidebar toggle (always rendered in the topbar)
    stays clickable so the operator can bring it back. */
 .app-shell[data-sidebar-collapsed="true"][data-topbar-collapsed="true"]
   .sidebar-collapse-toggle {
   margin-right: 0;
 }
 
+/* Auto-hide: a third state beside shown / collapsed for either chrome
+   panel. ``data-sidebar-mode`` / ``data-topbar-mode`` carry
+   ``shown`` | ``hidden`` | ``auto``; the collapsed flags above remain
+   the ``hidden`` case. In ``auto`` the panel's grid track shrinks to
+   an edge strip (``.panel-hotzone``) and the panel itself leaves the
+   flow. An absolutely positioned child of the grid container takes
+   its own grid area as containing block (CSS Grid Layout Level 1
+   §9.1), so the overlay's extent follows whatever height the other
+   panels currently have without coordinate bookkeeping. The panel
+   slides in over the workbench while ``data-*-revealed="true"`` --
+   set when the pointer rests on the strip, keyboard focus enters
+   the panel or the strip is tapped -- and back out when the pointer
+   leaves. */
+.panel-hotzone {
+  display: none;
+  position: relative;
+  z-index: 5;
+  background: var(--bg-elev);
+  cursor: pointer;
+}
+
+.panel-hotzone::after {
+  content: "";
+  position: absolute;
+  border-radius: var(--radius-pill);
+  background: var(--fg-dim);
+  opacity: 0.45;
+  transition: background-color var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.panel-hotzone:hover {
+  background: var(--surface-hover);
+}
+
+.panel-hotzone:hover::after {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.panel-hotzone--left {
+  grid-area: sidebar;
+  border-right: 1px solid var(--border);
+}
+
+.panel-hotzone--left::after {
+  top: 50%;
+  left: 2px;
+  width: 3px;
+  height: 28px;
+  transform: translateY(-50%);
+}
+
+.panel-hotzone--top {
+  grid-area: topbar;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-hotzone--top::after {
+  left: 50%;
+  top: 2px;
+  width: 28px;
+  height: 3px;
+  transform: translateX(-50%);
+}
+
+.app-shell[data-sidebar-mode="auto"] .panel-hotzone--left,
+.app-shell[data-topbar-mode="auto"] .panel-hotzone--top {
+  display: block;
+}
+
+.app-shell[data-sidebar-mode="auto"] {
+  grid-template-columns: var(--panel-hotzone) minmax(0, 1fr);
+}
+
+/* A concealed panel is parked past the shell edge, so it takes no
+   clicks and stays reachable for keyboard focus. The motion is a short
+   slide with a fade rather than a sweep from the edge: a large sweep
+   turns into visible steps as soon as the compositor drops below 60
+   frames a second, which the desktop shell does (it runs QtWebEngine
+   without GPU compositing), while a 28px offset under a fade stays
+   smooth at half that rate. ``data-*-revealed`` goes true -> leaving
+   -> false; the leaving phase plays the fade-out in place and lets
+   clicks through before the panel parks again. Both panels keep their
+   own compositor layer for as long as the mode is on. */
+.app-shell[data-sidebar-mode="auto"] .sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: min(260px, 88vw);
+  z-index: 6;
+  box-shadow: var(--shadow-card-hover);
+  transform: translateX(calc(-100% - 48px));
+  will-change: transform, opacity;
+}
+
+.app-shell[data-sidebar-mode="auto"][data-sidebar-revealed="true"] .sidebar {
+  transform: none;
+  animation: ygg-panel-reveal-left 160ms cubic-bezier(0.25, 0.8, 0.4, 1) both;
+}
+
+.app-shell[data-sidebar-mode="auto"][data-sidebar-revealed="leaving"] .sidebar {
+  transform: none;
+  pointer-events: none;
+  animation: ygg-panel-leave-left 130ms cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+@keyframes ygg-panel-reveal-left {
+  from { transform: translateX(-28px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+@keyframes ygg-panel-leave-left {
+  from { transform: none; opacity: 1; }
+  to   { transform: translateX(-20px); opacity: 0; }
+}
+
+.app-shell[data-topbar-mode="auto"] {
+  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
+}
+
+.app-shell[data-topbar-mode="auto"][data-log-collapsed="true"] {
+  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) 28px 28px;
+}
+
+/* Opaque while it moves: the glass blur of the resting bar would have
+   to be recomputed from the backdrop on every frame of the motion. */
+.app-shell[data-topbar-mode="auto"] .topbar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 52px;
+  z-index: 7;
+  background: var(--bg-elev);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(calc(-100% - 48px));
+  will-change: transform, opacity;
+}
+
+.app-shell[data-topbar-mode="auto"][data-topbar-revealed="true"] .topbar {
+  transform: none;
+  animation: ygg-panel-reveal-top 160ms cubic-bezier(0.25, 0.8, 0.4, 1) both;
+}
+
+.app-shell[data-topbar-mode="auto"][data-topbar-revealed="leaving"] .topbar {
+  transform: none;
+  pointer-events: none;
+  animation: ygg-panel-leave-top 130ms cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+@keyframes ygg-panel-reveal-top {
+  from { transform: translateY(-16px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+@keyframes ygg-panel-leave-top {
+  from { transform: none; opacity: 1; }
+  to   { transform: translateY(-12px); opacity: 0; }
+}
+
+/* The chevrons point away while a panel is auto-hidden -- a click pins
+   it open -- and carry an accent dot so the state reads differently
+   from plain collapsed. */
+.app-shell[data-sidebar-mode="auto"] .sidebar-collapse-glyph,
+.app-shell[data-topbar-mode="auto"] .topbar-collapse-glyph {
+  transform: rotate(180deg);
+}
+
+.app-shell[data-sidebar-mode="auto"] .sidebar-collapse-toggle::after,
+.app-shell[data-topbar-mode="auto"] .topbar-collapse-toggle::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px 0 var(--accent-glow);
+}
+
 .topbar-collapse-toggle,
 .app-close-button {
   display: inline-flex;
+  position: relative;
   align-items: center;
   justify-content: center;
   width: 28px;
@@ -1153,6 +1517,7 @@ select option:hover {
 
 .sidebar-collapse-toggle {
   display: inline-flex;
+  position: relative;
   align-items: center;
   justify-content: center;
   width: 28px;
@@ -1389,13 +1754,53 @@ select option:hover {
 
 .topbar-card-bridge[data-state="running"] .topbar-card-bridge-dot {
   opacity: 1;
-  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 10px rgba(163, 190, 140, 0.38);
+  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 10px color-mix(in oklab, var(--ok) 38%, transparent);
 }
 
 .topbar-card-bridge[data-state="error"] {
   border-color: color-mix(in oklab, var(--fail) 42%, transparent);
   background: var(--fail-soft);
   color: var(--fail);
+}
+
+.topbar-card-bridge[data-state="warn"] {
+  border-color: color-mix(in oklab, var(--warn) 42%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* Plugin console pills sit with the bridge pills and share their classes.
+   Their values go first when the bar runs out of room: the dot keeps the
+   tone and the title the whole text. */
+.topbar-plugin-pills {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 1760px) {
+  .topbar-plugin-pill .topbar-card-bridge-value {
+    display: none;
+  }
+}
+
+/* Then a console's further pills, then the suite chip (the version is in
+   About) and, while a plugin pill shows, the crumb the page title repeats. */
+@media (max-width: 1400px) {
+  .topbar-plugin-pill--more {
+    display: none;
+  }
+}
+
+@media (max-width: 1300px) {
+  .topbar-suite-health {
+    display: none;
+  }
+
+  .topbar:has(.topbar-plugin-pills:not([hidden])) > .breadcrumbs {
+    display: none;
+  }
 }
 
 .topbar-control-label {
@@ -1550,6 +1955,16 @@ select option:hover {
     top: 30px;
   }
 
+  .app-shell[data-topbar-mode="auto"] .sidebar {
+    top: var(--panel-hotzone);
+  }
+
+  /* No edge strip on a touch-sized viewport; the chevron pins the
+     sidebar open instead. */
+  .app-shell[data-sidebar-mode="auto"] .panel-hotzone--left {
+    display: none;
+  }
+
   .brand-name,
   .topbar-card-bridge {
     display: none;
@@ -1565,10 +1980,6 @@ select option:hover {
   .brand-mark {
     width: 28px;
     height: 28px;
-  }
-
-  .topbar-readers {
-    min-width: 140px;
   }
 }
 /* Theme picker ----------------------------------------------------------- */
@@ -1616,10 +2027,11 @@ select option:hover {
 
 .theme-picker select:focus-visible {
   outline: none;
-  box-shadow: none;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
-/* Match the popup to the page theme — the old rule hard-coded a light
+/* Match the popup to the page theme -- the old rule hard-coded a light
    palette which looked broken on every dark theme (white-on-dark
    trigger + black-on-white popup). Now options track the active theme
    via ``--bg-elev`` / ``--fg``. */
@@ -1951,7 +2363,7 @@ select option:hover {
   flex: 0 0 auto;
   width: 9px;
   height: 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fg-dim);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15) inset;
 }
@@ -2040,6 +2452,10 @@ select option:hover {
   cursor: ns-resize;
   touch-action: none;
   outline: none;
+}
+
+.log-dock-resize-handle:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
 }
 
 .log-dock-resize-handle::before {
@@ -2176,7 +2592,7 @@ body.log-dock-resizing * {
 .log-dock-tab-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fg-dim);
   flex: 0 0 auto;
 }
@@ -2329,7 +2745,7 @@ body.log-dock-resizing * {
     background-color 140ms ease,
     color 140ms ease,
     border-color 140ms ease;
-  /* The button itself shouldn't be selectable text — it would steal
+  /* The button itself shouldn't be selectable text -- it would steal
      selection clicks meant for the row. Keep cursor pointer to match. */
   user-select: none;
   -webkit-user-select: none;
@@ -2639,6 +3055,50 @@ dd {
 .btn-primary:disabled {
   box-shadow: none;
   filter: grayscale(0.3);
+}
+
+/* The four modifiers below are the only sanctioned variants of `.btn`.
+ * Each was previously defined in one view's scope (or not at all), so
+ * the same class rendered as a plain button elsewhere. */
+.btn-small {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.btn-secondary {
+  background: var(--bg-elev);
+  border-color: var(--border);
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-dim);
+}
+
+.btn-ghost:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+  border-color: var(--border);
+  transform: none;
+}
+
+.btn-danger {
+  background: var(--fail-soft);
+  border-color: color-mix(in oklab, var(--fail) 42%, var(--border));
+  color: var(--fail);
+}
+
+.btn-danger:hover {
+  background: color-mix(in oklab, var(--fail) 24%, var(--bg-elev));
+  border-color: var(--fail);
+  color: var(--fail);
 }
 
 .inline-actions {
@@ -3764,7 +4224,7 @@ kbd {
   box-shadow: 0 1px 0 var(--border);
 }
 
-/* -- Command Center (R2-004 Phase C) ------------------------------------ */
+/* -- Command Center ----------------------------------------------------- */
 
 #command-center-nav .subsystem-entry {
   display: flex;
@@ -3989,7 +4449,7 @@ kbd {
   }
 }
 /* Subsystems that render a full workbench (SCP03, SAIP) must occupy the
-   entire ``.cc-actions`` row — the default 2-column grid is only meant
+   entire ``.cc-actions`` row -- the default 2-column grid is only meant
    for stacked action cards. Without this override, the workbench gets
    squeezed into half of the viewport once the window crosses 1200 px. */
 .cc-actions > .cc-workbench {
@@ -4064,7 +4524,7 @@ kbd {
   width: 8px;
   height: 8px;
   transform: translateY(-50%);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
   box-shadow: 0 0 8px var(--accent-glow);
   animation: ygg-busy-pulse 1.2s ease-in-out infinite;
@@ -4168,7 +4628,7 @@ kbd {
 }
 
 #command-center-nav .cc-nav-leaf.is-stub {
-  /* Reserved-but-not-wired surfaces — hint at it without making the
+  /* Reserved-but-not-wired surfaces -- hint at it without making the
      entry look broken. Still clickable; shows a placeholder card. */
   opacity: 0.65;
   font-style: italic;
@@ -4215,7 +4675,7 @@ kbd {
   color: var(--fg);
 }
 
-/* -- Compact workbench (SCP80 / eIM / eSIM Management / HIL / …) ---------------
+/* -- Compact workbench (SCP80 / eIM / eSIM Management / HIL / ...) ---------------
    Shared chrome for every subsystem that isn't SCP03 (workbench v2) or
    SAIP (package workbench). Mirrors the Filesystem/Applications visual
    idiom: slim action picker on the left, active card on the right. */
@@ -4309,6 +4769,9 @@ kbd {
   overflow: hidden;
 }
 
+/* The module frame is canvas, not a raised slab: the panes, cards and
+   tool panels inside it are the raised surfaces, so they keep a visible
+   step against their container in the light palettes as well. */
 .main--module-workbench .cc-workbench {
   height: 100%;
   max-height: 100%;
@@ -4319,7 +4782,7 @@ kbd {
   border-color: var(--border-soft);
   border-radius: var(--radius-md);
   box-shadow: none;
-  background: var(--surface);
+  background: var(--bg);
 }
 
 .main--module-workbench .cc-workbench.cc-workbench--compact {
@@ -4529,7 +4992,7 @@ kbd {
   font-weight: 500;
   color: var(--fg-dim);
   background: var(--bg-hover);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 7px;
   min-width: 18px;
   text-align: center;
@@ -4553,6 +5016,7 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-elev);
+  box-shadow: var(--shadow-card);
 }
 
 .cc-reader-session-copy,
@@ -4664,6 +5128,118 @@ kbd {
   padding-left: 8px;
 }
 
+.cc-hil-toolbar-group-label {
+  align-self: center;
+  padding: 0 4px 0 2px;
+  color: var(--fg-dim);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* Overflow menu for the backend HIL actions. A <details> element keeps
+ * the open/close state without script; the summary borrows the toolbar
+ * button look so the menu reads as one more control in the row. */
+.cc-hil-more {
+  position: relative;
+  display: inline-flex;
+}
+
+.cc-hil-more-summary {
+  list-style: none;
+  user-select: none;
+}
+
+.cc-hil-more-summary::-webkit-details-marker {
+  display: none;
+}
+
+.cc-hil-more-summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.cc-hil-more[open] > .cc-hil-more-summary {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent), transparent 45%);
+}
+
+.cc-hil-more-count {
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, currentColor, transparent 88%);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.cc-hil-more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 280px;
+  max-width: min(420px, 80vw);
+  max-height: min(60vh, 460px);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-card);
+}
+
+.cc-hil-more-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cc-hil-more-item:hover {
+  background: var(--bg-hover);
+}
+
+.cc-hil-more-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.cc-hil-more-item .cc-hil-action-icon {
+  margin-top: 1px;
+}
+
+.cc-hil-more-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cc-hil-more-item-title {
+  font-weight: 600;
+}
+
+.cc-hil-more-item-desc {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
 .cc-hil-action-btn {
   display: inline-flex;
   align-items: center;
@@ -4821,6 +5397,54 @@ kbd {
   grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.1fr);
   gap: 0;
   overflow: hidden;
+}
+
+/* Drag handles between the dissector panes. Inline chrome, not a floating
+   surface: they sit in the grid and in the detail column's flow. The hit
+   area is wider than the visible line so the pointer does not have to be
+   precise. */
+.cc-hil-pane-divider {
+  flex: 0 0 auto;
+  position: relative;
+  background: var(--border);
+  border: none;
+  padding: 0;
+  touch-action: none;
+}
+
+.cc-hil-pane-divider--col {
+  width: 1px;
+  cursor: col-resize;
+}
+
+.cc-hil-pane-divider--row {
+  height: 1px;
+  cursor: row-resize;
+}
+
+/* The grab area, kept off the visible line so the panes keep their exact
+   widths and nothing shifts when the handle lights up. */
+.cc-hil-pane-divider::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.cc-hil-pane-divider--col::after {
+  left: -3px;
+  right: -3px;
+}
+
+.cc-hil-pane-divider--row::after {
+  top: -3px;
+  bottom: -3px;
+}
+
+.cc-hil-pane-divider:hover,
+.cc-hil-pane-divider:focus-visible,
+.cc-hil-pane-divider.is-dragging {
+  background: var(--accent);
+  outline: none;
 }
 
 .cc-hil-pane {
@@ -5130,6 +5754,28 @@ kbd {
   font-size: 12px;
 }
 
+.cc-hil-empty--guide {
+  max-width: 460px;
+  padding: 18px 16px;
+}
+
+.cc-hil-empty-title {
+  margin-bottom: 6px;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.cc-hil-empty-steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.cc-hil-empty-steps li + li {
+  margin-top: 3px;
+}
 .cc-hil-modem-shell {
   flex: 1 1 auto;
   min-height: 0;
@@ -5932,6 +6578,7 @@ kbd {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 
@@ -6113,7 +6760,7 @@ kbd {
   justify-content: center;
   min-width: 74px;
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -6442,7 +7089,7 @@ kbd {
 .cc-esim-action-tab-count {
   min-width: 18px;
   padding: 1px 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-hover);
   color: var(--fg-muted);
   font-size: 10px;
@@ -7724,7 +8371,7 @@ kbd {
   background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: 10px;
   /* The tree historically capped at 460px which left a third of the
      viewport empty on tall monitors and forced extra scrolling on
      deep ETSI hierarchies (MF/ADF.USIM/DF.GSM-ACCESS/...). Cap to a
@@ -7732,22 +8379,28 @@ kbd {
      still leaves room for the dock + ribbon. The hard floor keeps it
      usable on very short windows. */
   min-height: 360px;
-  max-height: calc(100vh - 280px);
+  max-height: calc(100vh - var(--scp03-pane-reserve, 280px));
   overflow: auto;
   font-family: var(--font-mono);
   font-size: 12.5px;
 }
 
+/* Indentation is kept tight on purpose: every row already carries a
+   16px caret column and a kind chip before its name, so the nesting
+   reads from those and the guide line rather than from distance. An
+   ETSI hierarchy is commonly four deep (MF/ADF.USIM/DF.GSM-ACCESS/EF),
+   and the wide steps this replaced pushed a fourth-level name 145px
+   into the panel with the file id still right-aligned at the far edge. */
 .cc-tree-list {
   list-style: none;
   margin: 0;
-  padding-left: 14px;
+  padding-left: 4px;
 }
 
 .cc-tree-list .cc-tree-list {
-  padding-left: 18px;
+  padding-left: 12px;
   border-left: 1px dashed var(--border);
-  margin-left: 6px;
+  margin-left: 4px;
 }
 
 .cc-tree-list[hidden] {
@@ -7820,29 +8473,28 @@ kbd {
 }
 /* Per-kind colour cues so the eye immediately separates directory
    files from elementary files in deep ETSI hierarchies. Each kind
-   pulls its hue from a ``--tree-<kind>-*`` triplet so themes can
-   override the look without touching these rules. The fallbacks
-   match the legacy hard-coded RGB so non-Nord themes keep their
-   established palette. */
+   reads its triplet from ``--tree-<kind>-*`` in base.css, which every
+   theme inherits. The ramp is filled -> outlined -> neutral -> hairline,
+   so the cue survives a theme that has no spare hues. */
 .cc-tree-icon--mf {
-  background: var(--tree-mf-bg, var(--accent-soft));
-  color: var(--tree-mf-fg, var(--accent));
-  border: 1px solid var(--tree-mf-edge, var(--accent));
+  background: var(--tree-mf-bg);
+  color: var(--tree-mf-fg);
+  border: 1px solid var(--tree-mf-edge);
 }
 .cc-tree-icon--adf {
-  background: var(--tree-adf-bg, rgba(255, 184, 92, 0.18));
-  color: var(--tree-adf-fg, #ffb85c);
-  border: 1px solid var(--tree-adf-edge, rgba(255, 184, 92, 0.55));
+  background: var(--tree-adf-bg);
+  color: var(--tree-adf-fg);
+  border: 1px solid var(--tree-adf-edge);
 }
 .cc-tree-icon--df {
-  background: var(--tree-df-bg, rgba(177, 156, 217, 0.18));
-  color: var(--tree-df-fg, #b19cd9);
-  border: 1px solid var(--tree-df-edge, rgba(177, 156, 217, 0.55));
+  background: var(--tree-df-bg);
+  color: var(--tree-df-fg);
+  border: 1px solid var(--tree-df-edge);
 }
 .cc-tree-icon--ef {
-  background: var(--tree-ef-bg, rgba(120, 220, 180, 0.14));
-  color: var(--tree-ef-fg, #78dcb4);
-  border: 1px solid var(--tree-ef-edge, rgba(120, 220, 180, 0.45));
+  background: var(--tree-ef-bg);
+  color: var(--tree-ef-fg);
+  border: 1px solid var(--tree-ef-edge);
 }
 
 .cc-tree-name {
@@ -7875,6 +8527,11 @@ kbd {
   border-radius: var(--radius-md);
   padding: 14px 16px;
   min-height: 200px;
+  /* Without a cap this grows to its content height and the page -- which
+     does not scroll -- clips the tail (a long decoded body such as EF.UST
+     loses its last rows behind the log dock). Cap it the same way the tree
+     is capped so the overflow below becomes a scrollbar. */
+  max-height: calc(100vh - var(--scp03-pane-reserve, 280px));
   overflow: auto;
 }
 
@@ -8352,7 +9009,7 @@ kbd {
   font-weight: 700;
   letter-spacing: 0.05em;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-hover);
 }
 
@@ -8523,7 +9180,7 @@ kbd {
   background: var(--surface-alt);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 6px 14px;
   font-size: 13px;
   cursor: pointer;
@@ -8577,7 +9234,7 @@ kbd {
   background: transparent;
   border: 1px dashed var(--border);
   color: var(--fg-muted);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 6px 12px;
   font-size: 14px;
   cursor: pointer;
@@ -8656,7 +9313,7 @@ kbd {
   }
 }
 
-/* Ribbon (G-2) — grouped icon toolbar inside workbench tabs ------------- */
+/* Ribbon (G-2) -- grouped icon toolbar inside workbench tabs ------------- */
 
 .ribbon {
   display: flex;
@@ -8773,10 +9430,10 @@ kbd {
 }
 
 /* ----------------------------------------------------------------------- */
-/* Workbench shell — unified module layout contract                        */
+/* Workbench shell -- unified module layout contract                        */
 /* ----------------------------------------------------------------------- */
 /*
- * Every subsystem view (Shell, Host shell, SCP11 live, SAIP, SCP80, …)
+ * Every subsystem view (Shell, Host shell, SCP11 live, SAIP, SCP80, ...)
  * renders against the same skeleton:
  *
  *   .cc-wb-shell                             // outer flex column
@@ -8786,7 +9443,7 @@ kbd {
  *     .cc-wb-status-strip                    // horizontal chip row (state)
  *       span.cc-chip+
  *     .ribbon (existing G-2 ribbon)          // grouped action toolbar
- *       .ribbon-group [.ribbon-group-label .ribbon-btn …]
+ *       .ribbon-group [.ribbon-group-label .ribbon-btn ...]
  *     .cc-wb-frame                           // main content card
  *       (tree + detail, terminal canvas, table, etc.)
  *     .cc-wb-extras                          // auxiliary cards on demand
@@ -9080,6 +9737,31 @@ kbd {
   margin: 4px 4px;
 }
 
+/* Radio items (``spec.checked`` on the item spec): the icon slot is
+   the radio, so a mode menu reads like a settings group. */
+.ctx-menu-icon--radio {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-inline: 3px;
+  border-radius: 50%;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--accent);
+}
+
+.ctx-menu-item[aria-checked="true"] .ctx-menu-icon--radio {
+  border-color: var(--accent);
+}
+
+.ctx-menu-item[aria-checked="true"] .ctx-menu-icon--radio::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 /* The legacy ``.cc-wb-extras`` strip is kept in the DOM for backward
  * compatibility with a handful of defensive ``.innerHTML = ""`` cleanup
  * sites (cancelled prompts etc.). Action output now lives in inline
@@ -9089,7 +9771,7 @@ kbd {
   display: none;
 }
 
-/* Legacy card styling — still referenced by a handful of callers that
+/* Legacy card styling -- still referenced by a handful of callers that
  * haven't migrated yet. Harmless: if no ``.cc-wb-extras-card`` ever gets
  * created, these rules have no effect. */
 .cc-wb-extras-card {
@@ -9647,7 +10329,7 @@ kbd {
 
 .cc-record {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0;
   background: color-mix(in oklab, var(--bg-elev), transparent 44%);
   overflow: hidden;
@@ -9757,7 +10439,7 @@ kbd {
 .cc-decoded {
   background: color-mix(in oklab, var(--bg-elev), transparent 35%);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
 }
 
@@ -9974,6 +10656,23 @@ kbd {
   background: var(--warn-soft);
 }
 
+/* The bench is running a rig; this card is still free to take. Warn
+   rather than fail: it reports a neighbour's activity, not a fault. */
+.remote-lab-status--host-busy {
+  --remote-lab-status-color: var(--warn);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
+  background: var(--warn-soft);
+}
+
+/* Recorded for SSH alone: a kind of host, not a broken one. */
+.remote-lab-status--ssh-only {
+  --remote-lab-status-color: var(--fg-dim);
+  color: var(--fg-dim);
+  border-color: var(--border);
+  background: var(--bg-elev-2);
+}
+
 .remote-lab-status--error,
 .remote-lab-status--offline {
   --remote-lab-status-color: var(--fail);
@@ -10025,6 +10724,1358 @@ kbd {
   }
 }
 
+/* An open editor takes the whole row: eight fields in a 280px card column
+   stack into a scroll, and the grid has the width to spare. */
+.remote-lab-card--editing {
+  grid-column: 1 / -1;
+}
+
+/* -- Inline device editor ------------------------------------------------
+   Opens inside the card that owns it rather than as a floating surface, the
+   same way the import panel sits inside the toolbar it belongs to. */
+.remote-lab-edit-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+}
+
+.remote-lab-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 14px;
+}
+
+.remote-lab-edit-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.remote-lab-edit-field label {
+  margin-bottom: 4px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.remote-lab-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  color: var(--fg);
+  caret-color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.remote-lab-edit-input:hover {
+  border-color: var(--accent);
+}
+
+.remote-lab-edit-input:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
+.remote-lab-edit-error {
+  margin: 10px 0 0;
+  color: var(--fail);
+  font-size: 12px;
+}
+
+.remote-lab-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+/* -- Plugin consoles ---------------------------------------------------- */
+
+.pc-shell > .cc-wb-page-header {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pc-toolbar,
+.pc-panel-head,
+.pc-buttons,
+.pc-action-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.pc-toolbar .cc-chip {
+  margin: 0;
+}
+
+.pc-toolbar .cc-chip[data-state="error"] {
+  color: var(--fail);
+  border-color: color-mix(in oklab, var(--fail) 42%, var(--border));
+}
+
+.pc-notice {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklab, var(--warn) 42%, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--warn-soft);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Two panes, controls and output, each with its own tab strip. */
+.pc-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.pc-layout[data-single="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pc-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pc-pane-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.pc-tab-panel {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* The stream tab panels are generated inside this holder; they lay out as
+   children of the pane body. */
+.pc-streams {
+  display: contents;
+}
+
+.pc-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pc-tab {
+  appearance: none;
+  position: relative;
+  bottom: -1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-bottom-color: transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.pc-tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.pc-tab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.pc-tab.is-active {
+  border-color: var(--accent);
+  border-bottom-color: var(--accent-soft);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* The console fills the main area and each pane scrolls on its own, so a
+   long form never pushes the other pane's content below the fold. */
+.main--plugin-console {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.main--plugin-console > section[data-view="plugin_console"].view-active {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.main--plugin-console .pc-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.main--plugin-console .pc-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.main--plugin-console .pc-pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* Room for the focus ring of a control at the scroller edge. */
+  padding: 2px;
+}
+
+.main--plugin-console .pc-stream-tab {
+  flex: 1 1 auto;
+  min-height: 14rem;
+}
+
+.main--plugin-console .pc-stream-tab > .pc-stream {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.main--plugin-console .pc-stream-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.pc-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: var(--bg-elev);
+  min-width: 0;
+}
+
+.pc-panel h2 {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+}
+
+.pc-panel-head {
+  margin-bottom: 10px;
+}
+
+.pc-panel-head h2 {
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.pc-panel h3 {
+  margin: 14px 0 8px 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pc-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.pc-field-help {
+  grid-column: 2;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.pc-buttons {
+  margin-top: 12px;
+}
+
+.pc-message {
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.pc-message[data-state="error"] {
+  color: var(--fail);
+}
+
+.pc-status {
+  --pc-status-color: var(--fg-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px 8px;
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pc-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pc-status-color);
+}
+
+.pc-status[data-state="ok"] {
+  --pc-status-color: var(--ok);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--ok) 42%, var(--border));
+  background: var(--ok-soft);
+}
+
+.pc-status[data-state="busy"] {
+  --pc-status-color: var(--warn);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
+  background: var(--warn-soft);
+}
+
+.pc-error {
+  margin: 12px 0 0 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--fail) 42%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--fail-soft);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.pc-state {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 14px 0 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* In its own tab the state list is the panel's content, not a footer under a form. */
+.pc-state-panel .pc-state {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* Keys and aliases are the plugin's data: keep their case (views-base lowercases every dt). */
+.pc-state dt,
+.pc-help-list dt {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.pc-state dt {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.pc-state dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.pc-action-group + .pc-action-group {
+  margin-top: 6px;
+}
+
+.pc-action {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  transition: border-color var(--transition-fast);
+}
+
+.pc-action + .pc-action {
+  margin-top: 8px;
+}
+
+.pc-action:focus-within {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+}
+
+.pc-action-template {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.pc-action-hint {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* The answer to the action that ran, under its own card. */
+.pc-action-result {
+  max-height: 7.5em;
+  overflow: auto;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pc-action-result[data-state="error"] {
+  border-color: color-mix(in oklab, var(--fail) 42%, var(--border));
+  color: var(--fail);
+}
+
+.pc-transcript {
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.pc-transcript:empty {
+  display: none;
+}
+
+.pc-transcript-entry + .pc-transcript-entry {
+  margin-top: 8px;
+}
+
+.pc-transcript-line {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+/* The transcript is already the code surface: its output is plain text in it,
+   not the boxed block base-resets gives every pre. */
+.pc-transcript-output {
+  margin: 4px 0 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pc-transcript-entry.is-error .pc-transcript-output {
+  color: var(--fail);
+}
+
+.pc-command {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.pc-prompt {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+}
+
+.pc-command input {
+  min-width: 0;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  caret-color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  transition: border-color var(--transition-fast);
+}
+
+.pc-command input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.pc-help {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.pc-help summary {
+  cursor: pointer;
+  color: var(--fg-dim);
+}
+
+.pc-help-body {
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.pc-help-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  margin: 0;
+}
+
+.pc-help-list dd {
+  margin: 0 0 8px 14px;
+  color: var(--fg-dim);
+  line-height: 1.4;
+}
+
+.pc-help-list dd code {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.pc-help-list dd p {
+  margin: 2px 0 0 0;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.pc-help-command {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pc-help-command:hover,
+.pc-help-command:focus-visible {
+  text-decoration: underline;
+}
+
+.pc-help-aliases {
+  margin-left: 8px;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.pc-help-text {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+
+.pc-stream-count {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.pc-stream-count[data-state="error"] {
+  color: var(--fail);
+}
+
+.pc-stream-scroll {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  /* Rows land every second: keep their layout and paint inside the scroller. */
+  contain: content;
+}
+
+/* Fixed layout: the column widths come from the colgroup, so a new row never
+   re-measures the rows before it. Fill columns share what the fixed ones leave. */
+.pc-stream-table {
+  width: 100%;
+  /* Set per table from its columns (pcRenderStreams). */
+  min-width: var(--pc-table-min);
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.pc-col--time {
+  width: 8.8em;
+}
+
+.pc-col--narrow {
+  width: 6.5em;
+}
+
+.pc-col--medium {
+  width: 14em;
+}
+
+.pc-stream-table th {
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-stream-table tbody tr {
+  cursor: pointer;
+}
+
+.pc-stream-table tbody tr:hover > .pc-cell {
+  background: var(--bg-hover);
+}
+
+.pc-cell {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+/* A cut value stays on one line; its row opens on a click, the table on Wrap. */
+.pc-cell--clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-cell--time {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+}
+
+.pc-cell--hex {
+  font-family: var(--font-mono);
+}
+
+/* A captured terminal: the mono font with its spacing kept, wrapped at the column edge. */
+.pc-cell--mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.pc-stream-table.is-wrapped .pc-cell--clip,
+.pc-stream-table tr.is-expanded > .pc-cell--clip {
+  overflow: visible;
+  white-space: normal;
+}
+
+.pc-stream-table.is-wrapped .pc-cell--hex,
+.pc-stream-table tr.is-expanded > .pc-cell--hex {
+  word-break: break-all;
+}
+
+.pc-stream-table tr.is-expanded > .pc-cell {
+  background: var(--bg-elev-2);
+}
+
+/* A start field the console fills: the input and its button share the row's input column. */
+.pc-field-with-fill {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+/* The button goes under the input when the column cannot hold both. */
+.pc-field-with-fill input {
+  flex: 1 1 16em;
+  min-width: 0;
+}
+
+.pc-field-fill {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Comparison panel: one table per section, one column per declared side. */
+.pc-compare-summary {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.pc-compare-note {
+  margin: 0 0 8px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.pc-compare-body {
+  display: grid;
+  gap: 14px;
+}
+
+/* A section folds on its heading (a details element); the caret follows its state. */
+.pc-compare-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.pc-compare-heading::-webkit-details-marker {
+  display: none;
+}
+
+.pc-compare-heading::before {
+  content: "";
+  align-self: center;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--fg-dim);
+  transition: transform var(--transition-fast);
+}
+
+.pc-compare-section[open] > .pc-compare-heading::before {
+  transform: rotate(90deg);
+}
+
+.pc-compare-heading:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.pc-compare-heading-meta {
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* Actions placed in the panel: one row per group, the answer in a shared box below. */
+.pc-compare-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  margin: 0 0 8px;
+}
+
+.pc-compare-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.pc-compare-toolbar-label {
+  margin-right: 2px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pc-toolbar-action {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+}
+
+.pc-toolbar-field {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.pc-toolbar-field input,
+.pc-toolbar-field select {
+  width: 6em;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+.pc-compare-result {
+  margin-bottom: 8px;
+}
+
+.pc-compare-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+}
+
+/* Narrow enough for the output pane beside the controls: long cells wrap. */
+.pc-compare-table {
+  width: 100%;
+  min-width: 26rem;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.pc-compare-table th,
+.pc-compare-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.pc-compare-table thead th {
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+
+.pc-compare-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.pc-compare-label {
+  width: 22%;
+  border-left: 3px solid transparent;
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+
+.pc-compare-cell {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+}
+
+.pc-compare-table .pc-compare-verdict {
+  width: 5.5rem;
+  white-space: nowrap;
+}
+
+.pc-compare-row .pc-compare-verdict:not(:empty) {
+  font-weight: 600;
+}
+
+.pc-compare-row--same .pc-compare-verdict {
+  color: var(--ok);
+}
+
+.pc-compare-row--differs .pc-compare-label {
+  border-left-color: var(--warn);
+}
+
+.pc-compare-row--differs .pc-compare-verdict {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.pc-compare-row--missing .pc-compare-label {
+  border-left-color: var(--fail);
+}
+
+.pc-compare-row--missing .pc-compare-verdict {
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+
+/* One column: the panes stack and the page scrolls as a whole again. */
+@media (max-width: 960px) {
+  .pc-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .main--plugin-console {
+    display: block;
+    overflow: auto;
+  }
+
+  .main--plugin-console .pc-pane-body {
+    overflow: visible;
+  }
+
+  .main--plugin-console .pc-stream-scroll {
+    max-height: 60vh;
+  }
+
+  .pc-shell > .cc-wb-page-header {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .pc-fields .cc-form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pc-field-help {
+    grid-column: 1;
+  }
+}
+/* -- Plugin consoles: run form, current run, history ---------------------- */
+
+/* The current run over the history, in the output pane's runs tab. */
+.pc-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.pc-run-form .cc-form-row.is-missing > input,
+.pc-run-form .cc-form-row.is-missing > select,
+.pc-run-form .cc-form-row.is-missing > textarea {
+  border-color: var(--fail);
+}
+
+.pc-run-form > .pc-fields + .pc-fields:not(:empty) {
+  margin-top: 8px;
+}
+
+.pc-run-items,
+.pc-run-groups,
+.pc-run-credentials {
+  display: grid;
+  gap: 8px;
+}
+
+.pc-run-groups:not(:empty) {
+  margin-top: 8px;
+}
+
+.pc-run-credentials:empty {
+  display: none;
+}
+
+.pc-run-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  transition: border-color var(--transition-fast);
+}
+
+.pc-run-item.is-checked {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+}
+
+.pc-run-item.is-unavailable {
+  opacity: 0.75;
+}
+
+.pc-run-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 4px 12px;
+}
+
+.pc-run-item-head .cc-checkbox {
+  min-height: 0;
+}
+
+.pc-run-item-head .cc-chip {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.pc-run-item-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pc-run-item-summary {
+  margin: 0;
+  padding: 0 12px 10px 40px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.pc-run-item-body {
+  padding: 10px 12px 12px 40px;
+  border-top: 1px solid var(--border);
+}
+
+.pc-run-group {
+  border: 1px dashed color-mix(in oklab, var(--accent) 35%, var(--border));
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: var(--bg);
+}
+
+.pc-run-group-title {
+  margin-bottom: 8px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pc-run-credential.is-missing,
+.pc-run-credential-need.is-missing {
+  border-style: solid;
+  border-color: var(--fail);
+}
+
+/* The run form's line for a needed credential: title and a way to its tab. */
+.pc-run-credential-need-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.pc-run-credential-need-head .pc-run-group-title {
+  margin-bottom: 0;
+}
+
+.pc-run-credential-need > .pc-run-credential-status:last-child {
+  margin-bottom: 0;
+}
+
+/* In their own tab the panels stand apart like the run form's groups. */
+#pc-credentials {
+  gap: 12px;
+}
+
+.pc-run-credential-status {
+  margin: 0 0 8px 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.pc-run-credential-status[data-state="ok"] {
+  color: var(--fg);
+}
+
+.pc-run-credential-status[data-state="error"] {
+  color: var(--fail);
+}
+
+.pc-run-credential > .pc-field-help {
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* A named credential: the picker, then one row per stored entry. */
+.pc-run-credential-pick {
+  margin: 8px 0;
+}
+
+.pc-run-credential-entries {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.pc-run-credential-entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  background: var(--bg-elev);
+}
+
+.pc-run-credential-entry-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.pc-run-credential-entry-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pc-run-credential-entry .pc-run-credential-status {
+  margin: 0;
+}
+
+.pc-run-credential-entry > .pc-fields,
+.pc-run-credential-entry > .pc-buttons {
+  margin-top: 6px;
+}
+
+.pc-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* The start button stays in reach at the bottom edge of the pane while the
+   operator scrolls a long list of items; it spans the panel's padding. */
+.pc-run-form .pc-run-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 14px -16px -14px;
+  padding: 12px 16px 14px;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--bg-elev);
+}
+
+/* Run and result states: the view maps the fixed vocabulary onto these tones. */
+
+.pc-status[data-state="warn"] {
+  --pc-status-color: var(--warn);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
+  background: var(--warn-soft);
+}
+
+.pc-status[data-state="fail"] {
+  --pc-status-color: var(--fail);
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--fail) 42%, var(--border));
+  background: var(--fail-soft);
+}
+
+.pc-run-title {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pc-run-title:empty {
+  display: none;
+}
+
+.pc-run-meta {
+  margin: 0 0 10px 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.pc-run-results {
+  display: grid;
+  gap: 6px;
+}
+
+.pc-run-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.pc-run-result-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pc-run-result-note,
+.pc-run-checks,
+.pc-run-result details {
+  grid-column: 1 / -1;
+}
+
+.pc-run-result-note {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.pc-run-checks {
+  margin: 0;
+  padding: 0 0 0 16px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pc-run-checks li.is-failed {
+  color: var(--fail);
+}
+
+.pc-run-result details {
+  font-size: 12px;
+}
+
+/* Evidence is the plugin's text: keep its case and wrap it (views-base styles pre). */
+.pc-run-result pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 6px 0 0 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-transform: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pc-run-log {
+  max-height: 320px;
+}
+
+.pc-run-log:empty {
+  display: none;
+}
+
+.pc-run-list {
+  display: grid;
+  gap: 6px;
+}
+
+.pc-run-empty {
+  margin: 4px 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pc-run-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.pc-run-row:hover,
+.pc-run-row:focus-visible {
+  border-color: var(--accent);
+}
+
+.pc-run-row.is-active {
+  border-color: color-mix(in oklab, var(--accent) 60%, var(--border));
+}
+
+.pc-run-row-text {
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.pc-run-row-time {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+@media (max-width: 640px) {
+  .pc-run-item-summary,
+  .pc-run-item-body {
+    padding-left: 12px;
+  }
+
+  .pc-run-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .pc-run-row-time {
+    grid-column: 1 / -1;
+  }
+}
+
 /* -- Pretty value renderer (FCP fields, decoded record bodies) ---------- */
 
 .cc-decoded-tools {
@@ -10068,7 +12119,7 @@ kbd {
   border-color: var(--ok);
 }
 
-/* Pretty primitives — type chips help an operator read a row without
+/* Pretty primitives -- type chips help an operator read a row without
    parsing it. Hex strings get their own monospace pill so an ICCID or
    IMSI is byte-grouped exactly like the hex dump panes. */
 
@@ -10142,7 +12193,7 @@ kbd {
   padding: 0 6px;
 }
 
-/* Pretty containers — arrays of primitives become chip rows; arrays of
+/* Pretty containers -- arrays of primitives become chip rows; arrays of
    objects become a numbered stack; nested objects recurse into their
    own dl. */
 
@@ -10158,7 +12209,7 @@ kbd {
   gap: 6px;
 }
 
-/* Vertical "one item per line" layout — used for arrays of
+/* Vertical "one item per line" layout -- used for arrays of
    human-readable strings (EF.ARR decoded rules, multi-line lint
    findings, etc.). Each line stays on its own row so the operator
    can scan the values without parsing whitespace. */
@@ -10177,7 +12228,7 @@ kbd {
 }
 
 /* ---------------------------------------------------------------------
- * Service-table checklist (EF.UST / EF.IST / EF_PSISMSC, …)
+ * Service-table checklist (EF.UST / EF.IST / EF_PSISMSC, ...)
  *
  * Operators asked for parity with what is *not* set so they can audit
  * a card without re-decoding the bitmap manually. The renderer pairs
@@ -10200,7 +12251,7 @@ kbd {
   flex-wrap: wrap;
   gap: 8px;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
 }
@@ -10248,7 +12299,7 @@ kbd {
   flex-direction: column;
   gap: 4px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
   min-width: 0;
@@ -10331,7 +12382,7 @@ kbd {
   background: var(--fail-soft);
 }
 
-/* Yggdrasil-Nord palette accent on the active column — keeps the
+/* Yggdrasil-Nord palette accent on the active column -- keeps the
  * checklist visually anchored to the wider Norse-tinted theme but
  * stays subtle so the inactive column doesn't fight for attention. */
 [data-theme="nord"] .cc-svc-table-row--active .cc-svc-table-mark {
@@ -10339,11 +12390,11 @@ kbd {
 }
 
 [data-theme="nord"] .cc-svc-table-col--active {
-  border-color: rgba(136, 192, 208, 0.25);
+  border-color: color-mix(in oklab, var(--accent) 25%, transparent);
 }
 
 /* ---------------------------------------------------------------------
- * Service-table staging popout — mock-edit a UST / IST / generic
+ * Service-table staging popout -- mock-edit a UST / IST / generic
  * bitmap EF without touching the card. Live hex preview at the top,
  * checkbox list below, action bar (copy / reset / send to UPDATE
  * BINARY) docked between them.
@@ -10362,7 +12413,7 @@ kbd {
   flex-direction: column;
   gap: 4px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
   margin: 6px 0 8px;
@@ -10439,11 +12490,11 @@ kbd {
   outline: 1px solid var(--accent);
 }
 
-/* Generic stage-edit popout (Task 3) — non-bitmap decoded EFs ---------- */
+/* Generic stage-edit popout (Task 3) -- non-bitmap decoded EFs ---------- */
 .cc-stage-context {
   margin: 0 0 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
 }
 
@@ -10490,7 +12541,7 @@ kbd {
 .cc-stage-decoded-preview {
   margin: 0 0 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: color-mix(in oklab, var(--bg-elev), transparent 30%);
   padding: 8px 10px;
 }
@@ -10513,7 +12564,7 @@ kbd {
   color: var(--fg);
   background: var(--bg-deep);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   resize: vertical;
 }
 
@@ -10745,7 +12796,7 @@ kbd {
   transform: rotate(90deg);
 }
 
-/* FCP block specifically — share the depth-0 grid with the decoded
+/* FCP block specifically -- share the depth-0 grid with the decoded
    body so visual rhythm is consistent across FCP + decoded. */
 
 .cc-fcp-block .cc-fcp-fields {
@@ -10788,16 +12839,17 @@ kbd {
 
 /* -- Command Center: Maximize overlay ----------------------------------- */
 
+/* No `backdrop-filter`: without GPU compositing every scroll frame of the
+ * maximised pane would re-blur the whole window behind it. */
 .cc-max-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--scrim);
   z-index: 9000;
   display: flex;
   align-items: stretch;
   justify-content: stretch;
   padding: 24px;
-  backdrop-filter: blur(2px);
 }
 
 .cc-max-shell {
@@ -10856,7 +12908,7 @@ kbd {
   to   { opacity: 1; }
 }
 
-/* ---- SAIP Workbench (SA-2) ------------------------------------------- */
+/* ---- SAIP Workbench -------------------------------------------------- */
 
 .saip-workbench {
   display: flex;
@@ -10916,7 +12968,7 @@ kbd {
   accent-color: var(--accent);
   background: var(--bg-input);
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   box-shadow: inset 0 0 0 2px var(--surface);
   box-sizing: border-box;
   cursor: pointer;
@@ -10989,23 +13041,23 @@ kbd {
   overflow: hidden;
 }
 
-/* Drop overlay — shown only while a file is being dragged over the
+/* Drop overlay -- shown only while a file is being dragged over the
  * workbench surface. The pseudo-element captures pointer events for
  * the visual cue but the actual drop event still bubbles to the
  * workbench root because the overlay sits below the listening
  * element in the box order (it's pseudo, not a sibling). */
 .saip-workbench[data-saip-drop-active="true"]::after {
-  content: "Drop a SAIP package here to load it";
+  content: "Drop SAIP packages here to load them";
   position: absolute;
   inset: 0;
   z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(33, 65, 110, 0.55);
-  border: 2px dashed rgba(180, 210, 255, 0.7);
-  border-radius: 6px;
-  color: #f5fbff;
+  background: var(--accent-soft);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
   font-size: 16px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -11014,11 +13066,15 @@ kbd {
 }
 
 /*
- * SA-G1: outer layout drops to 2 columns — package drawer (left) and a
- * main column that owns the top-tab strip + per-tab body. The PE list
- * and detail are nested inside the per-tab split inside the body.
+ * SA-G1: outer layout is 2 columns -- package drawer (left) and a main
+ * column that owns the top-tab strip + per-tab body. The PE list and
+ * detail are nested inside the per-tab split inside the body. The token
+ * dock adds a third column while it is open; its width is a custom
+ * property so the dock's grip can resize it without touching the
+ * template.
  */
 .saip-layout {
+  --saip-token-dock-width: clamp(360px, 27vw, 520px);
   display: grid;
   grid-template-columns: 274px 1fr;
   gap: 8px;
@@ -11029,6 +13085,14 @@ kbd {
 
 .saip-layout--drawer-collapsed {
   grid-template-columns: 44px 1fr;
+}
+
+.saip-layout--token-dock {
+  grid-template-columns: 274px minmax(0, 1fr) var(--saip-token-dock-width);
+}
+
+.saip-layout--drawer-collapsed.saip-layout--token-dock {
+  grid-template-columns: 44px minmax(0, 1fr) var(--saip-token-dock-width);
 }
 
 .saip-main {
@@ -11098,7 +13162,7 @@ kbd {
   justify-content: center;
   min-width: 1.8rem;
   padding: 0 0.4rem;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--accent);
   color: var(--accent);
   font-size: 11px;
@@ -11227,7 +13291,7 @@ kbd {
   justify-content: center;
   min-width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--accent-soft);
   color: var(--accent);
   background: var(--accent-soft);
@@ -11259,7 +13323,7 @@ kbd {
   top: -2px;
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--tone-warning);
 }
 
@@ -11403,7 +13467,7 @@ kbd {
 }
 
 .saip-recent-drop:hover {
-  color: #d04848;
+  color: var(--fail);
   background: var(--bg-elev);
 }
 
@@ -11425,7 +13489,7 @@ kbd {
   border: 1px solid var(--border);
   color: var(--fg);
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: 12px;
 }
@@ -11454,7 +13518,7 @@ kbd {
   grid-template-rows: auto auto;
   column-gap: 8px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
@@ -11528,7 +13592,7 @@ kbd {
 .saip-pkg-close:hover {
   border-color: var(--danger);
   color: var(--danger);
-  background: rgba(255, 102, 128, 0.08);
+  background: color-mix(in oklab, var(--danger) 8%, transparent);
 }
 
 .saip-pkg-close:focus-visible {
@@ -11550,7 +13614,7 @@ kbd {
 
 /*
  * SA-G1 retired the in-pane "PEs | Files | Variables" sub-tab strip
- * (.saip-pane-tabs / .saip-pane-tab) — those affordances now live in
+ * (.saip-pane-tabs / .saip-pane-tab) -- those affordances now live in
  * the workbench-level top-tab strip (Profile Elements / File System)
  * and the ribbon (Variable editor). The selectors are intentionally
  * gone so any rogue caller fails loudly during review instead of
@@ -11681,11 +13745,18 @@ kbd {
   overscroll-behavior: contain;
 }
 
+/* While a view's saved folds and scroll offset are put back, a fold opening
+   above the viewport must not drag the offset along (saip-workbench.js,
+   saipRestoreDetailUiState). */
+.saip-detail-body--restoring {
+  overflow-anchor: none;
+}
+
 .saip-valnot {
   margin: 0;
   padding: 10px;
   background: var(--surface-alt);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: 11px;
   color: var(--fg);
@@ -11723,6 +13794,8 @@ kbd {
   }
   .saip-layout,
   .saip-layout.saip-layout--drawer-collapsed,
+  .saip-layout.saip-layout--token-dock,
+  .saip-layout.saip-layout--drawer-collapsed.saip-layout--token-dock,
   .saip-split {
     grid-template-columns: 1fr;
   }
@@ -11733,7 +13806,9 @@ kbd {
 
 @media (max-width: 820px) {
   .saip-layout,
-  .saip-layout.saip-layout--drawer-collapsed {
+  .saip-layout.saip-layout--drawer-collapsed,
+  .saip-layout.saip-layout--token-dock,
+  .saip-layout.saip-layout--drawer-collapsed.saip-layout--token-dock {
     grid-template-columns: 1fr;
   }
   .saip-split {
@@ -11754,7 +13829,7 @@ kbd {
   gap: 10px;
   padding: 8px 10px 6px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   align-items: stretch;
   min-height: 0;
@@ -11775,7 +13850,7 @@ kbd {
 }
 
 .saip-ribbon::-webkit-scrollbar-thumb {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--border-strong);
 }
 
@@ -11823,7 +13898,7 @@ kbd {
   padding: 5px 7px 4px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--fg);
   cursor: pointer;
   transition:
@@ -11848,6 +13923,12 @@ kbd {
 }
 
 .saip-ribbon-btn:active:not(.is-disabled):not([disabled]) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* A toggle button (the Token editor dock) shows its open state. */
+.saip-ribbon-btn[aria-pressed="true"] {
   background: var(--accent-soft);
   border-color: var(--accent);
 }
@@ -11954,7 +14035,7 @@ kbd {
   background: var(--surface-alt);
   border: 1px solid var(--border);
   color: var(--fg-muted);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 7px;
   line-height: 18px;
   min-width: 18px;
@@ -12005,7 +14086,7 @@ kbd {
   color: var(--fg-muted);
   background: var(--surface-alt);
   border: 1px dashed var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
 }
 
@@ -12039,7 +14120,9 @@ kbd {
 .saip-apps-jump {
   text-align: right;
 }
-/* ---- SA-G1: variable editor modal ---------------------------------- */
+/* ---- SAIP modal host: action palette, form dialogs, add file --------- */
+/* The token editor is not one of these any more; it docks beside the
+   main column (views/saip/token-editor.css). */
 
 .saip-modal-host {
   position: fixed;
@@ -12056,11 +14139,14 @@ kbd {
   pointer-events: auto;
 }
 
+/* No `backdrop-filter`: the desktop shell renders without GPU compositing,
+ * where a window-sized blur under the card is recomputed on the CPU for every
+ * caret blink, hover and scroll inside it (the Add PE dialog dropped to about
+ * 12 frames a second while typing). The scrim alone separates the card. */
 .saip-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: var(--scrim);
 }
 
 .saip-modal-card {
@@ -12068,8 +14154,8 @@ kbd {
   z-index: 1;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
   width: min(720px, 92vw);
   max-height: 82vh;
   display: flex;
@@ -12091,12 +14177,6 @@ kbd {
   font-size: 14px;
   font-weight: 600;
   color: var(--fg);
-}
-
-.saip-modal-sub {
-  font-size: 11px;
-  color: var(--fg-muted);
-  font-family: var(--mono);
 }
 
 .saip-modal-close {
@@ -12141,8 +14221,10 @@ kbd {
 
 /* Generic ribbon form modal (Batch generate, Import PE, Export PE,
  * Batch lint, ARR sync). Stacked rows with label-on-top so picker
- * buttons sit beside the path field at any width. */
-.saip-form-row {
+ * buttons sit beside the path field at any width. Scoped to the modal
+ * host: the applications tab defines the same class as a two-column
+ * grid and loads later in the bundle. */
+.saip-form-modal-host .saip-form-row {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -12166,7 +14248,7 @@ kbd {
 }
 
 .saip-form-text,
-.saip-form-select {
+.saip-form-modal-host .saip-form-select {
   flex: 1 1 auto;
   min-width: 0;
   background: var(--surface-alt);
@@ -12179,7 +14261,7 @@ kbd {
 }
 
 .saip-form-text:focus,
-.saip-form-select:focus {
+.saip-form-modal-host .saip-form-select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
@@ -12188,6 +14270,14 @@ kbd {
 .saip-form-text--invalid {
   border-color: var(--danger);
   background: var(--fail-soft);
+}
+
+/* A value the form shows and keeps (a PE-Application instance's package). */
+.saip-form-text[readonly] {
+  background: transparent;
+  border-style: dashed;
+  color: var(--fg-muted);
+  cursor: default;
 }
 
 .saip-form-hint {
@@ -12241,10 +14331,14 @@ kbd {
   cursor: pointer;
 }
 
-.saip-action-palette-row:hover:not([disabled]),
+.saip-action-palette-row:hover:not([disabled]) {
+  border-color: var(--accent);
+}
+
 .saip-action-palette-row:focus-visible {
   border-color: var(--accent);
   outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring-soft);
 }
 
 .saip-action-palette-row[disabled] {
@@ -12284,22 +14378,95 @@ kbd {
     grid-template-columns: 1fr;
   }
 }
+/* ---- PE library modal: saved profile elements ---------------------- */
 
-/* ---- Bit-mask field editor (P1.8 / P1.9 / P2.11) -------------------- */
-.saip-form-bitmask-wrap {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 4px 12px;
+.saip-pe-library-list {
+  margin-top: 8px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.saip-pe-library-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.saip-pe-library-table thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-pe-library-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.saip-pe-library-name,
+.saip-pe-library-saved {
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.saip-pe-library-placeholders {
+  font-family: var(--mono);
+  word-break: break-word;
+}
+
+.saip-pe-library-error {
+  color: var(--warn);
+}
+
+.saip-pe-library-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+/* ---- Insert PE dialog: PE types and saved PEs as palette rows ------ */
+
+.saip-add-pe-modal .saip-action-palette-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
 }
 
+.saip-add-pe-modal .saip-add-pe-row .saip-pe-icon {
+  grid-row: 1 / 4;
+  align-self: start;
+}
+
+.saip-add-pe-modal .saip-action-palette-row-description,
+.saip-add-pe-modal .saip-action-palette-row-meta {
+  grid-column: 2 / -1;
+}
+
+.saip-add-pe-section {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.saip-add-pe-insert-row {
+  margin: 6px 0 0;
+}
+
+/* ---- Bit-mask field editor (P1.8 / P1.9 / P2.11) --------------------
+   One bit per row (flag-rows.css), then the hex the bits make and the raw
+   override below them. */
 .saip-form-bitmask-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
   color: var(--fg);
-  cursor: pointer;
 }
 
 .saip-form-bitmask-label {
@@ -12307,17 +14474,16 @@ kbd {
 }
 
 .saip-form-bitmask-hex {
-  grid-column: 1 / -1;
   font-family: var(--mono);
   font-size: 12px;
   color: var(--fg-muted);
   border-top: 1px dashed var(--border);
-  padding-top: 4px;
+  padding: 4px 8px 0;
   margin-top: 4px;
 }
 
 .saip-form-bitmask-raw {
-  grid-column: 1 / -1;
+  margin-top: 4px;
 }
 
 .saip-form-keyusage-list {
@@ -12350,7 +14516,7 @@ kbd {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -12462,7 +14628,7 @@ kbd {
 
 .saip-find-hit {
   background: var(--accent);
-  color: #181a1f;
+  color: var(--accent-fg);
   padding: 0 1px;
   border-radius: 2px;
 }
@@ -12542,19 +14708,60 @@ kbd {
   word-break: break-all;
 }
 
-/* ---- Token editor — wider modal + two-column layout ----------------- */
+/* ---- Token editor dock ------------------------------------------------ */
 /*
- * The token editor modal carries a list-on-left + bind-form-on-right
- * layout. It needs more horizontal real estate than the default modal
- * card so the bind form can stay inline rather than wrapping under the
- * token table on every paint.
+ * The token editor is the third column of the workbench grid: a docked
+ * panel beside the main column, so the package drawer, the PE list and
+ * the detail pane stay live while values are bound. It is hidden until
+ * the ribbon's Token editor button (Ctrl+E) opens it and it never
+ * floats: no backdrop, no blur over the workbench, no focus trap.
  */
-.saip-token-modal {
-  width: min(1080px, 96vw);
+.saip-token-dock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.saip-token-modal-header {
-  padding: 12px 16px;
+.saip-token-dock[hidden] {
+  display: none;
+}
+
+/* Left-edge grip: drag to resize, double-click or Home to reset. */
+.saip-token-dock-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.saip-token-dock-grip:hover,
+.saip-token-dock-grip:focus-visible,
+.is-resizing-token-dock .saip-token-dock-grip {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.saip-layout.is-resizing-token-dock {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.saip-token-dock-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+  border-bottom: 1px solid var(--border);
   background:
     linear-gradient(
       180deg,
@@ -12563,19 +14770,34 @@ kbd {
     );
 }
 
-.saip-token-modal-title-row {
+.saip-token-dock-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.saip-token-dock-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.saip-token-modal-glyph {
+.saip-token-dock-title-row h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-token-dock-glyph {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--mono);
@@ -12584,17 +14806,92 @@ kbd {
   letter-spacing: 0.04em;
 }
 
-.saip-token-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-  gap: 16px;
-  align-items: start;
+.saip-token-dock-sub {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@media (max-width: 880px) {
-  .saip-token-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.saip-token-dock-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.saip-token-dock-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.saip-token-dock-stat-chip--mono {
+  font-family: var(--mono);
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
+.saip-token-dock-stat-chip--muted {
+  color: var(--fg-muted);
+  background: transparent;
+}
+
+.saip-token-dock-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.saip-token-dock-close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.saip-token-dock-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.saip-token-dock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 12px 12px 14px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* A listing reload keeps the mounted form; only the table reads as
+   stale until the fresh rows land. */
+.saip-token-dock[aria-busy="true"] .saip-token-col--list {
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+}
+
+/* One column: the Set form first, the variable list under it. */
+.saip-token-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 
 .saip-token-col {
@@ -12604,19 +14901,48 @@ kbd {
   min-width: 0;
 }
 
+/* The table must never paint outside the dock. Wrapped state chips keep
+   its min-content width inside the column; the clip guards the rest.
+   Not auto: that would make the column a scroll container inside the
+   scrolling dock body. */
+.saip-token-col--list {
+  overflow-x: clip;
+}
+
 .saip-token-list-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .saip-token-list-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+/* The bound-list selector and its buttons travel as one group so a
+   narrow header wraps the whole group instead of splitting it. */
+.saip-token-list-binding {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.saip-token-list-binding-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.saip-token-list-select {
+  max-width: 220px;
 }
 
 .saip-token-list-title-wrap {
@@ -12644,7 +14970,7 @@ kbd {
   margin: 0;
   padding: 18px 14px;
   border: 1px dashed var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   color: var(--fg-muted);
   line-height: 1.5;
@@ -12652,6 +14978,79 @@ kbd {
 
 .saip-token-table {
   margin-top: 0;
+}
+
+/* The variable table folds into stacked rows for the dock's width:
+   name, kind chip and Reset on the first line, the bound value under
+   it, the state chips last. The header row stays for assistive
+   technology but is not painted. */
+.saip-token-dock .saip-token-table,
+.saip-token-dock .saip-token-table tbody {
+  display: block;
+}
+
+.saip-token-dock .saip-token-table thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.saip-token-dock .saip-token-table tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "name kind actions"
+    "value value value"
+    "state state state";
+  gap: 3px 8px;
+  align-items: center;
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-token-dock .saip-token-table td {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(1) {
+  grid-area: name;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(2) {
+  grid-area: value;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(3) {
+  grid-area: kind;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(4) {
+  grid-area: state;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(5) {
+  grid-area: actions;
+}
+
+/* The whole value shows; a long hex string wraps instead of clipping. */
+.saip-token-dock .saip-token-table .saip-vars-val {
+  max-width: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.saip-token-dock .saip-token-table .saip-vars-row.is-overridden {
+  border-left: 2px solid color-mix(in oklab, var(--warn) 50%, transparent);
+}
+
+.saip-token-dock .saip-token-table .saip-vars-row.is-overridden td:first-child {
+  border-left: 0;
 }
 
 .saip-token-bind-card {
@@ -12683,6 +15082,183 @@ kbd {
   padding: 0;
   border: none;
   background: transparent;
+}
+
+/* Below the single-column breakpoint the dock stacks under the main
+   column as a bounded row; the grip has nothing to resize there. */
+@media (max-width: 1100px) {
+  .saip-token-dock {
+    max-height: 70vh;
+  }
+  .saip-token-dock-grip {
+    display: none;
+  }
+}
+
+/* The name form folds under a summary; rows are the editor. */
+.saip-token-bind-details {
+  margin: 0;
+}
+
+.saip-token-bind-summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 0;
+}
+
+.saip-token-list-actions--more {
+  margin-top: 4px;
+}
+
+.saip-vars-value-input {
+  width: 100%;
+  min-width: 0;
+  font-family: var(--mono);
+}
+
+.saip-vars-row.is-draft .saip-vars-value-input {
+  border-color: var(--warn);
+}
+/* Placeholder picker: the panel {T} and "Insert variable" open under a row
+   of the Data tab, the JSON tab or an editor, and the "Define a variable"
+   form of the Variables panel. It reads the tokens and sets no colour of
+   its own, so it looks native in every theme. */
+
+.saip-ph-picker {
+  margin: 6px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.saip-ph-picker-title {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-ph-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-dim);
+}
+
+.saip-ph-row select,
+.saip-ph-row input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.saip-ph-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 12px;
+}
+
+.saip-ph-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 10px;
+}
+
+.saip-ph-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.saip-ph-grid input,
+.saip-ph-grid select {
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.saip-ph-preview {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+.saip-ph-hint {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.saip-ph-hint[data-tone="warn"] {
+  color: var(--warn);
+}
+
+.saip-ph-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The flag under an Unset row whose type decides a length byte. */
+.saip-vars-hint--flag {
+  color: var(--warn);
+}
+
+.saip-insert-variable {
+  white-space: nowrap;
+}
+
+/* The define form folds like the name form; its grid is the picker's. */
+.saip-token-define-form .saip-ph-grid {
+  margin-bottom: 6px;
+}
+
+/* A listed variable is a chip: dragged into a field or the JSON tab it
+   places its placeholder, clicked it copies it. */
+.saip-vars-name[draggable="true"] {
+  cursor: grab;
+}
+
+.saip-vars-name[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.saip-vars-name.is-copied {
+  outline: 1px solid var(--ok);
+  outline-offset: 1px;
+}
+
+/* The universal-list section below the package rows: the same table. */
+.saip-token-list-section {
+  margin-top: 16px;
+}
+
+.saip-token-list-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-token-list-lead {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+
+.saip-vars-row--list .saip-vars-value-input[readonly] {
+  cursor: default;
+}
+
+.saip-ph-offset {
+  width: 5em;
 }
 /* ---- SA-G1: placeholder lead sentence in empty tab body ------------ */
 
@@ -12857,7 +15433,7 @@ kbd {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 700;
@@ -12877,48 +15453,18 @@ kbd {
 }
 
 /*
- * Icon family colours — non-semantic deliberate choices so the eye
- * groups USIM/ISIM/CSIM as one family even when several PE-OPT
- * variants are sprinkled in. ``default`` carries the same accent
- * tone as the rest of the workbench so unknown PE types still feel
- * native.
+ * Icon family treatment. The six family chips carried literal Nord values,
+ * so on any light theme they rendered pastel-on-white at roughly 1.5:1 --
+ * and they were, by the previous comment's own admission, non-semantic.
+ * Every chip now shares one neutral treatment and the mono glyph inside it
+ * names the family, which leaves colour free to mean status.
  */
-.saip-pe-icon--template {
-  background: rgba(94, 129, 172, 0.18);
-  border-color: rgba(94, 129, 172, 0.45);
-  color: #8fa6cc;
-}
-
-.saip-pe-icon--domain {
-  background: rgba(163, 190, 140, 0.16);
-  border-color: rgba(163, 190, 140, 0.45);
-  color: #b4cf99;
-}
-
-.saip-pe-icon--security {
-  background: rgba(208, 135, 112, 0.16);
-  border-color: rgba(208, 135, 112, 0.45);
-  color: #e2a288;
-}
-
-.saip-pe-icon--auth {
-  background: rgba(180, 142, 173, 0.18);
-  border-color: rgba(180, 142, 173, 0.45);
-  color: #c5a4be;
-}
-
-.saip-pe-icon--fs {
-  background: rgba(136, 192, 208, 0.16);
-  border-color: rgba(136, 192, 208, 0.45);
-  color: #9fc8d6;
-}
-
-.saip-pe-icon--remote {
-  background: rgba(235, 203, 139, 0.16);
-  border-color: rgba(235, 203, 139, 0.45);
-  color: #ddc485;
-}
-
+.saip-pe-icon--template,
+.saip-pe-icon--domain,
+.saip-pe-icon--security,
+.saip-pe-icon--auth,
+.saip-pe-icon--fs,
+.saip-pe-icon--remote,
 .saip-pe-icon--meta,
 .saip-pe-icon--app,
 .saip-pe-icon--access,
@@ -12968,27 +15514,24 @@ kbd {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-alt);
   border: 1px solid var(--border);
   color: var(--fg-muted);
   font-family: var(--mono);
 }
 
-.saip-pe-chip--fs {
-  border-color: rgba(136, 192, 208, 0.45);
-  color: #9fc8d6;
-}
-
+.saip-pe-chip--fs,
 .saip-pe-chip--app {
-  border-color: rgba(163, 190, 140, 0.45);
-  color: #b4cf99;
+  border-color: var(--border-strong);
+  color: var(--fg-muted);
 }
 
+/* Unsaved edits are a state, not a category, so it takes the warn token. */
 .saip-pe-chip--dirty {
-  border-color: rgba(208, 135, 112, 0.5);
-  color: #e2a288;
-  background: rgba(208, 135, 112, 0.08);
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 
 .saip-pe-chip--lint-fail {
@@ -13015,7 +15558,7 @@ kbd {
   color: var(--fg-muted);
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px 8px;
   min-width: 28px;
   text-align: center;
@@ -13035,7 +15578,7 @@ kbd {
   align-items: center;
 }
 
-/* Detail-head chips (FID / sEFID / size / path) — harmonised with
+/* Detail-head chips (FID / sEFID / size / path) -- harmonised with
    the FCP editor controls so the surface tone is uniform across
    the file detail panel. The previous ``cc-chip`` background was
    noticeably darker than the editable rows below, which read as
@@ -13056,6 +15599,35 @@ kbd {
   color: var(--fg);
   background: transparent;
   padding: 0;
+}
+
+/* PEHeader ``mandated`` flag (TCA SAIP v3.4.1 §8.1.3) beside the chips. */
+.saip-pe-mandated-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-alt);
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.saip-pe-mandated-toggle input {
+  margin: 0;
+}
+
+/* A PE that does not encode yet names the member it still needs. */
+.saip-pe-encode-error {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--fg);
+  font-size: 12px;
 }
 
 /* ---- SA-G2: typed PE editor cards ---------------------------------- */
@@ -13183,7 +15755,7 @@ kbd {
 .saip-sd-param-summary-chip,
 .saip-sd-param-group-chip {
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--fg-muted);
   font-size: 10px;
   line-height: 1;
@@ -13208,7 +15780,7 @@ kbd {
   grid-template-columns: minmax(220px, 28%) minmax(0, 1fr);
   height: clamp(320px, 58vh, 560px);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -13248,7 +15820,7 @@ kbd {
   gap: 8px;
   min-height: 30px;
   padding: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .saip-sd-param-tree-row.depth-1 {
@@ -13262,7 +15834,7 @@ kbd {
 .saip-sd-param-tree-label {
   appearance: none;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg);
   display: flex;
@@ -13287,7 +15859,7 @@ kbd {
 }
 
 .saip-sd-param-dot {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fg-muted);
   flex: 0 0 auto;
   height: 7px;
@@ -13360,6 +15932,12 @@ kbd {
   grid-template-columns: minmax(72px, 96px) minmax(0, 1fr) auto;
 }
 
+/* A menu entry: position and identifier side by side, then Remove. */
+.saip-sd-param-list-row--pair {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+}
+
 .saip-sd-param-list-row input[type="number"] {
   min-width: 84px;
 }
@@ -13388,6 +15966,19 @@ kbd {
   color: var(--danger);
 }
 
+.saip-draft-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.saip-draft-chip-label {
+  color: var(--warn);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 900px) {
   .saip-sd-param-shell {
     grid-template-columns: 1fr;
@@ -13401,7 +15992,7 @@ kbd {
   }
 }
 
-/* ── Add-file modal (Phase 3 wizard-parity) ─────────────────────────── */
+/* ── Add-file modal (wizard-parity) ─────────────────────────────────── */
 
 .saip-add-file-btn {
   margin-left: auto;
@@ -13529,7 +16120,7 @@ kbd {
 
 .saip-chip {
   display: inline-block;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 8px;
   font-size: 10px;
   line-height: 1.5;
@@ -13561,8 +16152,8 @@ button.saip-chip:focus-visible {
 }
 
 .saip-row-flash {
-  outline: 1px solid rgba(123, 194, 255, 0.85);
-  background: rgba(88, 143, 196, 0.2);
+  outline: 1px solid color-mix(in oklab, var(--accent) 85%, transparent);
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
 }
 
 .saip-cell-sub {
@@ -13572,7 +16163,7 @@ button.saip-chip:focus-visible {
   font-style: italic;
 }
 
-/* Template catalog tree — TCA SAIP §9 file-template registry projected
+/* Template catalog tree -- TCA SAIP §9 file-template registry projected
    into a checkable tree. */
 
 .saip-template-tree,
@@ -13608,7 +16199,7 @@ button.saip-chip:focus-visible {
 }
 
 .saip-template-row--present {
-  color: var(--nord-frost-1, #8FBCBB);
+  color: var(--ok);
 }
 
 .saip-template-row--required:not(.saip-template-row--present) {
@@ -13671,18 +16262,18 @@ button.saip-chip:focus-visible {
 }
 
 .saip-template-badge--req {
-  color: var(--nord-aurora-3, #EBCB8B);
-  border-color: rgba(235, 203, 139, 0.3);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 30%, transparent);
 }
 
 .saip-template-badge--hu {
-  color: var(--nord-aurora-2, #D08770);
-  border-color: rgba(208, 135, 112, 0.3);
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
 }
 
 .saip-template-badge--arr {
-  color: var(--nord-frost-2, #88C0D0);
-  border-color: rgba(136, 192, 208, 0.3);
+  color: var(--fg-muted);
+  border-color: var(--border-strong);
 }
 
 .saip-tag-muted {
@@ -13711,6 +16302,499 @@ button.saip-chip:focus-visible {
   font-size: 10px;
   color: var(--fg-muted);
   max-width: 240px;
+}
+
+/* PE-Application load and install card (TCA SAIP v3.4.1 §8.7) and the
+   other from-scratch typed editors: a section title opens each block. */
+.saip-app-pe-card .saip-sd-param-subtitle {
+  margin-top: 10px;
+}
+
+.saip-app-instance-row {
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+/* One PE-Application instance: its INSTALL members as rows, then its
+   Edit and Remove buttons. */
+.saip-app-instance {
+  padding: 6px 0 2px;
+  border-top: 1px solid var(--border);
+}
+
+.saip-app-instance-text {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* One editable member of a typed PE: label, hex input, Apply; the decoded
+   caption sits under the input. */
+.saip-typed-field-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 190px) minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  margin: 4px 0;
+}
+
+.saip-typed-field-row .saip-form-row-hint {
+  grid-column: 2 / -1;
+  margin: 0;
+}
+
+.saip-typed-field-label {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+/* ---- Fields of a profile element -------------------------------------
+   Every member the SAIP ASN.1 module gives the element, nested as the
+   module nests them. A constructed member folds; an absent one is muted
+   until a value lands in it. */
+
+.saip-structure-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.saip-structure-node {
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+  margin: 2px 0;
+}
+
+.saip-structure-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 3px 4px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: var(--radius-sm);
+}
+
+.saip-structure-head:hover {
+  background: var(--bg-hover);
+}
+
+.saip-structure-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.saip-structure-head::-webkit-details-marker {
+  display: none;
+}
+
+.saip-structure-head::before {
+  content: "▸";
+  display: inline-block;
+  color: var(--fg-muted);
+  transition: transform var(--transition-fast);
+}
+
+.saip-structure-node[open] > .saip-structure-head::before {
+  transform: rotate(90deg);
+}
+
+.saip-structure-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 12px;
+}
+
+.saip-structure-row {
+  padding: 3px 4px;
+}
+
+/* A leaf or an absent member: label, value, actions on one line, so the
+   inputs of one level line up whatever the member names; in a narrow pane
+   the value and the actions wrap under the label instead of leaving it. */
+.saip-structure-leaf,
+.saip-structure-absent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.saip-structure-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  flex: 0 0 38%;
+  min-width: min(150px, 100%);
+}
+
+/* A leaf whose value is a list of flags: the label stays level with the
+   first row instead of the middle of the list. */
+.saip-structure-leaf--list {
+  align-items: flex-start;
+}
+
+.saip-structure-leaf--list > .saip-structure-label {
+  padding-top: 4px;
+}
+
+.saip-structure-value {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.saip-structure-value .saip-form-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font-family: var(--mono);
+}
+
+.saip-structure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.saip-structure-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.saip-structure-choice .saip-form-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.saip-structure-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.saip-structure-type {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.saip-structure-meta {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.saip-structure-absent .saip-structure-name {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--fg-muted);
+}
+
+/* A value the member was added with rather than one the operator chose. */
+.saip-structure-placeholder {
+  font-size: 10px;
+  padding: 0 6px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-pill);
+  background: var(--warn-soft);
+  color: var(--fg);
+}
+
+.saip-structure-status {
+  margin: 0;
+}
+
+/* Edits pySim cannot build yet: the reason beside Discard draft. */
+.saip-structure-draft {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.saip-structure-draft-text {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.saip-field-tree-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.saip-structure-absent-group > .saip-structure-head .saip-structure-name {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--fg-muted);
+}
+
+/* The decoded reading of the bytes, and a value refused before it left. */
+.saip-structure-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.saip-structure-error {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fail);
+}
+
+.saip-structure-select,
+.saip-structure-access {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.saip-structure-select .saip-form-select,
+.saip-structure-access > .saip-form-select {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.saip-structure-custom {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+/* A file descriptor's structure, Shareable box and record length on one
+   wrapping line. The bit fields list one field per row instead
+   (.saip-structure-flags, flag-rows.css). */
+.saip-structure-bits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+/* An access domain's key bits go below its parameter list, full width. */
+.saip-structure-access > .saip-structure-flags {
+  flex: 1 0 100%;
+}
+
+.saip-structure-bit,
+.saip-structure-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.saip-structure-number {
+  width: 6em;
+}
+
+.saip-structure-decoded {
+  margin: 4px 0 6px 12px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+/* A security domain's privileges: a grid of chips across the full width
+   under the member's name, the held ones lit, under a count of them. The
+   chip is the label of a check box kept out of sight but focusable. The
+   AID directory's security-domain cards show the same grid read-only, as
+   plain chips without the pointer or the hover (applications-tab-cards.css
+   holds the card around it). */
+.saip-structure-leaf--grid > .saip-structure-value {
+  flex-basis: 100%;
+}
+
+.saip-priv-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 4px;
+}
+
+.saip-priv-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-priv-count::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.saip-priv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
+}
+
+.saip-priv-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: 12px;
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+/* :where() keeps the hover below .is-on, so a held chip keeps its accent. */
+.saip-priv-chip:where(label) {
+  cursor: pointer;
+}
+
+.saip-priv-chip:where(label):hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.saip-priv-chip.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.saip-priv-chip:has(> .saip-priv-box:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.saip-priv-grid .saip-priv-chip > input.saip-priv-box {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.saip-priv-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.saip-priv-chip.is-on .saip-priv-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.saip-priv-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Flag lists ------------------------------------------------------
+   The bit and service lists of the SAIP editors (an application's privileges
+   and the other bit fields, service tables, access conditions, the profile
+   header's mandatory services) hold one flag per row, top to bottom; a
+   security domain's privileges are chips instead (structure-editor.css).
+   A list reads down a column instead of wrapping like running text. Each
+   row is the label of its check box: a click anywhere on the line toggles
+   it. The lists keep their own frame, height and font; this file owns the
+   row layout. */
+
+.saip-structure-flags,
+.saip-wizard-ust-grid,
+.saip-wizard-bitgrid,
+.saip-arr-wizard-am,
+.saip-profile-services-grid,
+.saip-decoded-services-list,
+.saip-form-bitmask-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+}
+
+.saip-structure-flags > .saip-structure-bit,
+.saip-wizard-ust-cell,
+.saip-wizard-bit-cell,
+.saip-profile-service-option,
+.saip-decoded-services-row,
+.saip-form-bitmask-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.saip-structure-flags > .saip-structure-bit + .saip-structure-bit,
+.saip-wizard-ust-cell + .saip-wizard-ust-cell,
+.saip-wizard-bit-cell + .saip-wizard-bit-cell,
+.saip-profile-service-option + .saip-profile-service-option,
+.saip-decoded-services-row + .saip-decoded-services-row,
+.saip-form-bitmask-row + .saip-form-bitmask-row {
+  border-top: 1px solid var(--border);
+}
+
+.saip-structure-flags > .saip-structure-bit:hover,
+.saip-wizard-ust-cell:hover,
+.saip-wizard-bit-cell:hover,
+.saip-profile-service-option:hover,
+.saip-decoded-services-row:hover,
+.saip-form-bitmask-row:hover {
+  background: var(--surface-hover);
+}
+
+.saip-structure-flags input[type="checkbox"],
+.saip-wizard-ust-cell input[type="checkbox"],
+.saip-wizard-bit-cell input[type="checkbox"],
+.saip-profile-service-option input[type="checkbox"],
+.saip-decoded-services-row input[type="checkbox"],
+.saip-form-bitmask-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* A field of several bits keeps its list or number at the end of its row. */
+.saip-structure-flags > .saip-structure-bit > .saip-form-select,
+.saip-structure-flags > .saip-structure-bit > .saip-structure-number {
+  margin-left: auto;
+}
+
+/* The removal note closes the list, below its last row. */
+.saip-structure-flags > .saip-structure-meta {
+  padding: 4px 8px 0;
 }
 /* ---- SA-G3: SD perso-data DGI decode table ----------------------- */
 
@@ -13769,10 +16853,41 @@ button.saip-chip:focus-visible {
   max-width: 320px;
 }
 
+.saip-dgi-row-dgi .saip-dgi-col-name {
+  font-weight: 600;
+}
+
+.saip-dgi-row-depth-1 .saip-dgi-col-tag {
+  padding-left: 20px;
+}
+
+.saip-dgi-row-depth-2 .saip-dgi-col-tag {
+  padding-left: 34px;
+}
+
+.saip-dgi-row-depth-3 .saip-dgi-col-tag {
+  padding-left: 48px;
+}
+
+/* ---- Add a DGI record (sdPersoData append) ------------------------ */
+
+.saip-sd-perso-add {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.saip-sd-perso-add-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ---- SA-G3: file system tree -------------------------------------- */
 /*
  * Hierarchical tree view for the File System tab. Section roots
- * (MF / DF.TELECOM / ADF.USIM / …) sit at depth 0; mf / df-* / adf-*
+ * (MF / DF.TELECOM / ADF.USIM / ...) sit at depth 0; mf / df-* / adf-*
  * containers sit at depth 1; EFs sit at depth 2 (or depth 1 in
  * sections without an explicit container row). Each row is a compact
  * lane with a caret + glyph + label + optional FID / sFID
@@ -13931,6 +17046,14 @@ button.saip-chip:focus-visible {
   color: var(--accent);
 }
 
+/* The caret toggles expand/collapse while the rest of the row selects
+   the node, so it needs a hit area of its own rather than a colour
+   change alone. */
+.saip-file-caret--toggle:hover {
+  background: var(--surface-alt);
+  border-radius: 4px;
+}
+
 .saip-file-caret--leaf {
   cursor: default;
   pointer-events: none;
@@ -13948,10 +17071,10 @@ button.saip-chip:focus-visible {
 }
 
 .saip-file-glyph--section { color: var(--accent); }
-.saip-file-glyph--mf      { color: #9fc8d6; }
-.saip-file-glyph--adf     { color: #b4cf99; }
-.saip-file-glyph--df      { color: #88c0d0; }
-.saip-file-glyph--ef      { color: var(--fg-muted); }
+.saip-file-glyph--mf      { color: var(--tree-mf-fg); }
+.saip-file-glyph--adf     { color: var(--tree-adf-fg); }
+.saip-file-glyph--df      { color: var(--tree-df-fg); font-size: 10px; }
+.saip-file-glyph--ef      { color: var(--tree-ef-fg); }
 
 .saip-file-label {
   font-size: 12px;
@@ -13970,8 +17093,7 @@ button.saip-chip:focus-visible {
   color: var(--fg);
 }
 
-.saip-file-fid,
-.saip-file-sfid {
+.saip-file-fid {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.04em;
@@ -13983,13 +17105,7 @@ button.saip-chip:focus-visible {
   flex-shrink: 0;
 }
 
-.saip-file-sfid {
-  color: var(--accent);
-  border-color: var(--accent-soft);
-}
-
-.saip-file-node-row.is-active .saip-file-fid,
-.saip-file-node-row.is-active .saip-file-sfid {
+.saip-file-node-row.is-active .saip-file-fid {
   border-color: var(--accent);
   color: var(--fg);
 }
@@ -14010,17 +17126,23 @@ button.saip-chip:focus-visible {
   text-transform: uppercase;
 }
 
-.saip-file-template-default {
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  background: var(--ok-soft);
-  border: 1px solid color-mix(in oklab, var(--ok) 38%, transparent);
-  border-radius: 4px;
-  padding: 0 4px;
-  color: var(--ok);
-  flex-shrink: 0;
-  text-transform: uppercase;
+/* The EF.ARR rules a securityAttributesReferenced can point at. */
+.saip-arr-rule-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* A select is as wide as its longest option; a rule summary would widen the
+   whole FCP table. It fills the cell instead, and the open list shows the
+   full text. */
+.saip-arr-rule-picker .saip-form-select {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
 }
 /* ---- PE Editor: encoded-PE-bytes card + JSON tab ------------------- */
 
@@ -14054,7 +17176,7 @@ button.saip-chip:focus-visible {
   background: var(--surface);
   color: var(--fg);
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   margin: 0;
   white-space: pre;
@@ -14084,6 +17206,77 @@ button.saip-chip:focus-visible {
   line-height: 1.5;
 }
 
+/* Template placeholders inside a hex dump: the literal is shown as one
+   cell, and the legend maps each literal to its variable and stored value. */
+.saip-inline-placeholder-legend {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  font-size: 11px;
+}
+
+.saip-inline-placeholder-legend-title {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 9px;
+  color: var(--fg-muted);
+}
+
+.saip-inline-placeholder-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.saip-inline-placeholder-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  font-size: 11px;
+}
+
+.saip-inline-placeholder-meta {
+  color: var(--fg-muted);
+}
+
+.saip-inline-placeholder-note {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.saip-profile-header-input.is-placeholder {
+  color: var(--accent);
+  border-style: dashed;
+}
+
+/* The JSON tab holds one card: the body becomes a flex column so the
+   projection takes the detail pane's remaining height and scrolls inside
+   it instead of ending in a short box. */
+.saip-detail-body--json {
+  display: flex;
+  flex-direction: column;
+}
+
+.saip-detail-body--json .saip-pe-json-card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.saip-pe-json-card .saip-pe-json-text {
+  flex: 1 1 auto;
+  resize: none;
+}
+
 /* ---- Hex-dump and decoded-hex toolbars (Data tab) ------------------ */
 
 .saip-hexdump-tools,
@@ -14108,7 +17301,7 @@ button.saip-chip:focus-visible {
   background: var(--surface);
   color: var(--fg);
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   max-height: 480px;
   overflow: auto;
@@ -14157,6 +17350,21 @@ button.saip-chip:focus-visible {
   background: var(--accent-soft);
 }
 
+/* Hex-pane scope switch (whole file vs a single record window). It
+   rides in the pane head, so it drops the standalone bar's bottom
+   margin and shrinks to sit on one 28px row. */
+.saip-file-data-viewbar--pane {
+  align-self: center;
+  margin: 0 0 0 auto;
+  padding: 1px;
+}
+
+.saip-file-data-viewbar--pane .saip-file-data-viewbtn {
+  min-width: 0;
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
 .saip-file-data-view {
   flex: 1 1 auto;
   min-height: 0;
@@ -14188,7 +17396,7 @@ button.saip-chip:focus-visible {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-alt);
   overflow: hidden;
 }
@@ -14296,7 +17504,7 @@ button.saip-chip:focus-visible {
 }
 
 .saip-app-card--sd {
-  border-left: 3px solid rgba(163, 190, 140, 0.55);
+  border-left: 3px solid color-mix(in oklab, var(--ok) 55%, transparent);
   padding-left: 9px;
 }
 
@@ -14332,7 +17540,7 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg-muted);
@@ -14344,21 +17552,21 @@ button.saip-chip:focus-visible {
  * accent) so PERSONALIZED / INSTALLED / LOCKED read as semantic
  * traffic-lights regardless of the active theme. */
 .saip-app-lifecycle.is-personalized {
-  border-color: rgba(163, 190, 140, 0.5);
-  background: rgba(163, 190, 140, 0.12);
-  color: #b4cf99;
+  border-color: color-mix(in oklab, var(--ok) 50%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
 }
 
 .saip-app-lifecycle.is-installed {
-  border-color: rgba(235, 203, 139, 0.5);
-  background: rgba(235, 203, 139, 0.10);
-  color: #ddc485;
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 .saip-app-lifecycle.is-locked {
-  border-color: rgba(208, 135, 112, 0.5);
-  background: rgba(208, 135, 112, 0.12);
-  color: #e2a288;
+  border-color: color-mix(in oklab, var(--fail) 50%, transparent);
+  background: var(--fail-soft);
+  color: var(--fail);
 }
 
 .saip-app-lifecycle.is-unknown {
@@ -14459,9 +17667,9 @@ button.saip-chip:focus-visible {
 
 .saip-app-priv--tar {
   font-family: var(--mono);
-  background: rgba(94, 129, 172, 0.12);
-  border-color: rgba(94, 129, 172, 0.45);
-  color: #8fa6cc;
+  background: var(--surface-alt);
+  border-color: var(--border-strong);
+  color: var(--fg-muted);
 }
 
 .saip-app-privs-hex {
@@ -14539,6 +17747,30 @@ button.saip-chip:focus-visible {
 .saip-template-default-card .saip-edit-card-title,
 .saip-template-default-card h5 {
   color: var(--ok);
+}
+
+/* Linked file (TCA SAIP linkPath): the Data tab shows the source file's
+   bytes; the card names that file. */
+.saip-link-source-card {
+  background:
+    linear-gradient(90deg, var(--accent-soft), var(--accent-soft));
+  border-color: color-mix(in oklab, var(--accent) 38%, transparent);
+}
+
+.saip-link-source-card .saip-edit-card-title,
+.saip-link-source-card h5 {
+  color: var(--accent);
+}
+
+.saip-link-source-card--unresolved {
+  background:
+    linear-gradient(90deg, var(--warn-soft), var(--warn-soft));
+  border-color: color-mix(in oklab, var(--warn) 38%, transparent);
+}
+
+.saip-link-source-card--unresolved .saip-edit-card-title,
+.saip-link-source-card--unresolved h5 {
+  color: var(--warn);
 }
 
 .saip-file-card-title {
@@ -14754,9 +17986,73 @@ button.saip-chip:focus-visible {
   font-style: italic;
 }
 
+/* One pill per DF the GFM creates files in; a click shows the first
+   file created there. The value keeps the mono font of the chip. */
+.saip-gfm-parent-chip-value {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+}
+
+.saip-gfm-df-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-alt);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.saip-gfm-df-pill:hover,
+.saip-gfm-df-pill:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.saip-gfm-df-pill-count {
+  font-size: 0.7rem;
+  color: var(--fg-muted);
+}
+
+/* The files of a GFM listed under the DF they are created in. The head
+   stays in view while a long DF scrolls under it. */
+.saip-gfm-list-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 52px;
+  gap: 6px;
+  padding: 5px 10px 3px 10px;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.saip-gfm-list-group-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saip-gfm-list-group-hex {
+  font-family: var(--mono);
+  text-transform: none;
+  text-align: right;
+}
+
 /* Inline file-creation form mounted at the top of the GFM card. The
    bar's parent field hides automatically when the parent chip above
-   shows ``data-state="bound"`` — the dispatcher then reuses that path. */
+   shows ``data-state="bound"`` -- the dispatcher then reuses that path. */
 .saip-gfm-addbar {
   display: flex;
   flex-wrap: wrap;
@@ -15119,6 +18415,16 @@ button.saip-chip:focus-visible {
   text-transform: uppercase;
 }
 
+/* A placeholder literal is an identifier: its case and full length are
+   the information, so the chip shows it verbatim in the mono face. */
+.saip-form-section-chip--literal,
+.saip-form-lock-chip--literal {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
 .saip-form-section-body {
   padding: 4px 8px 6px 14px;
   display: flex;
@@ -15126,6 +18432,12 @@ button.saip-chip:focus-visible {
   gap: 3px;
   border-top: 1px solid var(--border);
   background: var(--bg);
+}
+
+.saip-form-inline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .saip-form-row {
@@ -15340,28 +18652,6 @@ button.saip-chip:focus-visible {
   padding: 2px 8px;
 }
 
-/* Inline tokenize button rendered next to every editable leaf in
-   the decoded form. Compact glyph style so it slots beside hex /
-   text inputs without disrupting the row rhythm. */
-.saip-form-tokenize {
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  padding: 1px 6px;
-  margin-left: 6px;
-  border: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
-  background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-  border-radius: 3px;
-  align-self: center;
-  white-space: nowrap;
-}
-
-.saip-form-tokenize:hover {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border-style: solid;
-}
-
 /* Token-bound row variant: same shell as the read-only row but
    tinted with the accent so the operator can scan for placeholder
    bindings at a glance. The chip carries [NAME] and the action
@@ -15448,7 +18738,7 @@ button.saip-chip:focus-visible {
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -15627,7 +18917,7 @@ button.saip-chip:focus-visible {
   font-weight: 600;
   letter-spacing: 0.04em;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg-muted);
@@ -15946,7 +19236,7 @@ button.saip-chip:focus-visible {
   border: 1px solid var(--border);
   color: var(--fg);
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: 11px;
 }
@@ -16002,7 +19292,7 @@ button.saip-chip:focus-visible {
   font-size: 11px;
 }
 
-/* Decoded fileDescriptor editor — replaces a raw hex input on the
+/* Decoded fileDescriptor editor -- replaces a raw hex input on the
    FCP tab with structure / file-type dropdowns + record-size /
    record-count fields. The hex carrier stays hidden so the existing
    Apply button keeps writing through to ``saip.update_file_field``. */
@@ -16076,7 +19366,15 @@ button.saip-chip:focus-visible {
   padding-top: 2px;
 }
 
-/* ASN.1 + JSON tabs — view-only listings of the CHOICE list. */
+/* A stored descriptor or size a card refuses (a fifth descriptor byte,
+   a size that is not a whole number of records). */
+.saip-fd-warning {
+  font-size: 11px;
+  color: var(--warn);
+  padding-top: 2px;
+}
+
+/* ASN.1 + JSON tabs -- view-only listings of the CHOICE list. */
 .saip-asn1-table {
   width: 100%;
   border-collapse: collapse;
@@ -16136,7 +19434,7 @@ button.saip-chip:focus-visible {
   border-radius: 4px;
 }
 
-/* ARR record summary line — distinct from the rule list. */
+/* ARR record summary line -- distinct from the rule list. */
 .saip-arr-record-summary {
   margin: 0 0 6px;
   font-size: 11px;
@@ -16166,7 +19464,7 @@ button.saip-chip:focus-visible {
   flex: 1 1 auto;
 }
 
-/* File-kind chip ("ADF" / "Linear-fixed EF" / …) sits above the
+/* File-kind chip ("ADF" / "Linear-fixed EF" / ...) sits above the
  * editable rows and tells the operator which applicability column
  * the M/O/C/F glyphs are evaluated in. */
 .saip-fcp-kind-row {
@@ -16181,7 +19479,7 @@ button.saip-chip:focus-visible {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -16196,7 +19494,7 @@ button.saip-chip:focus-visible {
   font-style: italic;
 }
 
-/* Per-row applicability glyph — single-letter chip (M / O / C / F)
+/* Per-row applicability glyph -- single-letter chip (M / O / C / F)
  * pinned next to the field label. Operators flagged the previous
  * uniform layout for hiding which fields are actually expected by
  * TCA SAIP createFCP for the current file kind. */
@@ -16278,7 +19576,7 @@ button.saip-chip:focus-visible {
   text-decoration-color: color-mix(in oklab, var(--fail) 55%, transparent);
 }
 
-/* Per-record navigator — dropdown + prev/next + keyboard (PageUp /
+/* Per-record navigator -- dropdown + prev/next + keyboard (PageUp /
  * PageDown / Home / End). Keeps 22-record EF.ARRs / phonebooks to
  * one visible record instead of flooding the Data tab. */
 
@@ -16290,6 +19588,10 @@ button.saip-chip:focus-visible {
   min-width: 0;
   box-sizing: border-box;
   outline: none;
+}
+
+.saip-record-nav:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring-soft);
 }
 
 .saip-record-nav--data {
@@ -16352,7 +19654,7 @@ button.saip-chip:focus-visible {
 }
 
 /* EF.ARR per-record card list (consumes the backend's arr_records
- * decode — the SAIP TUI uses the same decoder). One collapsible
+ * decode -- the SAIP TUI uses the same decoder). One collapsible
  * row per access-rule record; populated rows expand by default,
  * FF-padded slots collapse. */
 
@@ -16371,7 +19673,7 @@ button.saip-chip:focus-visible {
 
 .saip-arr-record {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-alt);
   overflow: hidden;
 }
@@ -16452,6 +19754,38 @@ button.saip-chip:focus-visible {
   gap: 4px;
 }
 
+/* The reading that the files citing this record do not use: same rules,
+   named against the other access-mode table. */
+.saip-arr-rule-list--alt {
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  opacity: 0.85;
+}
+
+.saip-arr-rule-scope {
+  margin: 8px 0 4px;
+}
+
+.saip-arr-rule-list + .saip-arr-record-cited {
+  margin-top: 8px;
+}
+
+/* Rules the FCP's securityAttributesReferenced points at, nested under that
+   row so the reference and what it resolves to read as one unit. */
+.saip-fcp-access-rules {
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+
+.saip-fcp-access-rules .saip-arr-rule-list {
+  margin: 4px 0;
+}
+
+.saip-fcp-access-head {
+  font-style: normal;
+}
+
 .saip-arr-rule {
   display: flex;
   align-items: baseline;
@@ -16482,7 +19816,7 @@ button.saip-chip:focus-visible {
   flex: 0 0 auto;
   font-size: 10px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent-soft);
   color: var(--accent);
   border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
@@ -16501,7 +19835,7 @@ button.saip-chip:focus-visible {
 }
 
 .saip-arr-cond--bool {
-  color: #b48ead;
+  color: var(--accent);
 }
 
 .saip-arr-cond--cmd {
@@ -16635,7 +19969,7 @@ button.saip-chip:focus-visible {
 
 .saip-record-copy.is-copied {
   background: var(--accent);
-  color: #2e3440;
+  color: var(--accent-fg);
 }
 
 .saip-record-actions {
@@ -16683,7 +20017,7 @@ button.saip-chip:focus-visible {
   margin-top: 6px;
 }
 
-/* Structured file wizards (EF.IMSI / EF.AD / EF.UST / …). */
+/* Structured file wizards (EF.IMSI / EF.AD / EF.UST / ...). */
 
 .saip-wizard-card {
   border-color: var(--accent-soft);
@@ -16788,28 +20122,19 @@ button.saip-chip:focus-visible {
   color: var(--danger);
 }
 
+/* Service tables list one service per row (flag-rows.css). */
 .saip-wizard-ust-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 4px 12px;
-  max-height: 320px;
+  max-height: min(480px, 60vh);
   overflow-y: auto;
-  padding: 6px;
+  padding: 2px 0;
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 4px;
 }
 
 .saip-wizard-ust-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
   color: var(--fg);
-}
-
-.saip-wizard-ust-cell input[type="checkbox"] {
-  flex: 0 0 auto;
 }
 
 .saip-wizard-text--wide {
@@ -16849,30 +20174,25 @@ button.saip-chip:focus-visible {
   border-radius: 4px;
 }
 
+/* Bit grids list one bit per row (flag-rows.css). */
 .saip-wizard-bitgrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 4px 10px;
-  padding: 4px 6px;
+  padding: 2px 0;
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 4px;
 }
 
 .saip-wizard-bit-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
   color: var(--fg);
 }
 
-.saip-wizard-bit-cell input[type="checkbox"] {
-  flex: 0 0 auto;
-}
-
-.saip-wizard-acc-grid {
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+/* Address editors: type of number, numbering plan and digits on one line. */
+.saip-wizard-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .saip-wizard-preview--error {
@@ -16891,8 +20211,67 @@ button.saip-chip:focus-visible {
   overflow: hidden;
 }
 
+/* Placeholder binding rows sit between the size line and the hex editor
+   of a file that carries template placeholders. */
+.saip-file-placeholder-bindings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+.saip-form-hex-chip--declared {
+  opacity: 0.85;
+}
+
+/* The hex pane carries a placeholder's value (or its literal) in place of
+   the sentinel; the tint and the flag line say so. */
+.saip-rawbytes-input.is-placeholder-bearing {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+}
+
+.saip-rawbytes-placeholder-flag {
+  color: var(--accent);
+}
+
+/* The decoded form of a placeholder's value sits under the hex pane and
+   reads like it; the head line names the literal and the value form. */
+.saip-placeholder-value-editor {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.saip-placeholder-value-head {
+  color: var(--accent);
+  margin: 0 0 4px;
+}
+
+.saip-placeholder-value-input {
+  min-height: 32px;
+}
+
+/* Compact placeholder editor: byte rows in the mono face, raw model folded. */
+.saip-placeholder-bytes-input {
+  font-family: var(--mono);
+}
+
+.saip-placeholder-model-json {
+  margin-top: 8px;
+}
+
+.saip-placeholder-model-json summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
 .saip-rawbytes-card {
   margin-top: 12px;
+}
+
+.saip-record-hex-card .saip-record-hex-toolbar {
+  margin: 6px 0;
 }
 
 .saip-rawbytes-input {
@@ -16969,23 +20348,12 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.5px;
 }
 
-.saip-arr-wizard-am {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 2px 10px;
-}
-
 .saip-arr-wizard-sc {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.btn-small {
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 4px;
-}
 
 .saip-edit-hint {
   margin: 8px 0 0;
@@ -17092,7 +20460,7 @@ button.saip-chip:focus-visible {
 
 .saip-decoded-entry-group {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-alt);
   overflow: hidden;
 }
@@ -17100,7 +20468,7 @@ button.saip-chip:focus-visible {
 .saip-decoded-entry-group-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   padding: 7px 9px;
   border-bottom: 1px solid var(--border);
@@ -17127,7 +20495,9 @@ button.saip-chip:focus-visible {
 .saip-decoded-entry-group-title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   min-width: 0;
   color: var(--fg);
   font-size: 12px;
@@ -17135,10 +20505,12 @@ button.saip-chip:focus-visible {
 }
 
 .saip-decoded-entry-group-meta {
+  margin-left: auto;
   color: var(--fg-muted);
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 400;
+  white-space: nowrap;
 }
 
 .saip-decoded-entry-group-body {
@@ -17146,6 +20518,165 @@ button.saip-chip:focus-visible {
   flex-direction: column;
   gap: 8px;
   padding: 8px;
+}
+
+/* Security Domain keyList: the overview table and its expand / collapse
+   controls above the per-key groups, one divider per key version, and
+   the value preview a folded key-field row carries. */
+.saip-sd-keylist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  container-type: inline-size;
+}
+
+.saip-sd-keylist-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.saip-sd-keylist-title {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.saip-sd-keylist-meta {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.saip-sd-keylist-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.saip-sd-keytable-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.saip-sd-keytable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.saip-sd-keytable thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.saip-sd-keytable td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.saip-sd-keytable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.saip-sd-keytable-row {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.saip-sd-keytable-row:hover {
+  background: var(--surface);
+}
+
+.saip-sd-keytable-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--surface);
+}
+
+.saip-sd-keytable-idx {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+}
+
+.saip-sd-keytable-mono {
+  font-family: var(--font-mono);
+}
+
+.saip-sd-keytable-sub {
+  margin-left: 5px;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+/* The key column is the one that may wrap: in a narrow pane the hex
+   folds at the column's minimum instead of pushing the table sideways. */
+.saip-sd-keytable td.saip-sd-keytable-hex {
+  font-family: var(--font-mono);
+  white-space: normal;
+  word-break: break-all;
+  min-width: 16ch;
+}
+
+@container (max-width: 720px) {
+  .saip-sd-keytable-sub {
+    display: none;
+  }
+
+  .saip-sd-keytable thead th,
+  .saip-sd-keytable td {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .saip-sd-keytable td.saip-sd-keytable-hex {
+    min-width: 14ch;
+  }
+}
+
+.saip-sd-keytable-default {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.saip-sd-keyset-divider {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 2px 0;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--fg);
+}
+
+.saip-sd-keyset-divider-meta {
+  font-size: 10px;
+  font-weight: 400;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+}
+
+.saip-decoded-row-preview {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
 }
 
 .saip-pe-decoded-direct {
@@ -17235,7 +20766,7 @@ button.saip-chip:focus-visible {
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
 }
 
@@ -17249,7 +20780,7 @@ button.saip-chip:focus-visible {
   width: 100%;
   padding: 3px 7px 3px 3px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-muted);
   cursor: pointer;
@@ -17273,7 +20804,7 @@ button.saip-chip:focus-visible {
   width: 22px;
   height: 22px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-alt);
   color: var(--fg-muted);
   font-size: 10px;
@@ -17300,26 +20831,14 @@ button.saip-chip:focus-visible {
   margin: auto;
 }
 
-.saip-profile-services-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 5px 8px;
-}
-
 .saip-profile-service-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
   font-size: 11px;
   color: var(--fg);
 }
 
 .saip-profile-service-option span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .saip-profile-header-textarea {
@@ -17471,7 +20990,7 @@ button.saip-chip:focus-visible {
 
 .saip-decoded-row {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
   background: var(--surface-alt);
   transition: border-color 120ms ease, box-shadow 120ms ease;
@@ -17502,14 +21021,14 @@ button.saip-chip:focus-visible {
 }
 
 .saip-decoded-chip-mod {
-  color: var(--ygg-amber, #ebcb8b);
-  border-color: var(--ygg-amber, #ebcb8b);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 45%, transparent);
 }
 
 .saip-decoded-revert-btn {
   font-size: 10px;
   padding: 3px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   min-height: 28px;
 }
 
@@ -17546,7 +21065,7 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   padding: 2px 6px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg-muted);
@@ -17778,21 +21297,16 @@ button.saip-chip:focus-visible {
   color: var(--fg-muted);
 }
 
+/* One service per row (flag-rows.css). */
 .saip-decoded-services-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 4px 12px;
-  max-height: 220px;
+  max-height: min(480px, 60vh);
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 8px 10px;
+  padding: 2px 0;
 }
 
 .saip-decoded-services-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
   font-family: var(--font-mono);
 }
@@ -17912,8 +21426,9 @@ button.saip-chip:focus-visible {
 .saip-vars-kind {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -17923,15 +21438,15 @@ button.saip-chip:focus-visible {
 }
 
 .saip-vars-kind--iccid {
-  background: rgba(120, 220, 130, 0.12);
-  color: #78dc82;
-  border-color: rgba(120, 220, 130, 0.4);
+  background: var(--surface-alt);
+  color: var(--fg-muted);
+  border-color: var(--border-strong);
 }
 
 .saip-vars-kind--imsi {
-  background: rgba(120, 180, 240, 0.12);
-  color: #78b4f0;
-  border-color: rgba(120, 180, 240, 0.4);
+  background: var(--surface-alt);
+  color: var(--fg-muted);
+  border-color: var(--border-strong);
 }
 
 .saip-vars-kind--hex,
@@ -17942,21 +21457,25 @@ button.saip-chip:focus-visible {
 }
 
 .saip-vars-kind--text {
-  background: rgba(255, 200, 80, 0.12);
-  color: #ffc850;
-  border-color: rgba(255, 200, 80, 0.4);
+  background: var(--surface-alt);
+  color: var(--fg-muted);
+  border-color: var(--border-strong);
 }
 
+/* The chips wrap. With nowrap a six-chip row pushed the table's
+   min-content width past the list column, and the overflow painted
+   under the bind card: sticky header cells and buttons are positioned,
+   so they sat above it and hid the form's Value label. */
 .saip-vars-state {
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .saip-vars-state-chip {
   display: inline-flex;
   align-items: center;
-  margin-right: 4px;
+  margin: 1px 4px 1px 0;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -18009,46 +21528,6 @@ button.saip-chip:focus-visible {
   font-size: 10px;
   color: var(--fg-muted);
   font-style: italic;
-}
-
-/* SA-G6: modal title row gets a stats chip strip next to the title. */
-
-.saip-modal-title-wrap {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  flex-grow: 1;
-}
-
-.saip-modal-stats {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.saip-modal-stat-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--fg);
-}
-
-.saip-modal-stat-chip--mono {
-  font-family: var(--mono);
-  font-weight: 500;
-  text-transform: lowercase;
-}
-
-.saip-modal-stat-chip--muted {
-  color: var(--fg-muted);
-  background: transparent;
 }
 
 /* Compare pane */
@@ -18106,12 +21585,12 @@ button.saip-chip:focus-visible {
 }
 
 .saip-cmp-a {
-  color: #ff9a6a;
+  color: var(--fail);
   font-family: var(--mono);
 }
 
 .saip-cmp-b {
-  color: #78dc82;
+  color: var(--ok);
   font-family: var(--mono);
 }
 
@@ -18127,6 +21606,35 @@ button.saip-chip:focus-visible {
 .saip-cmp-keys li {
   font-size: 11px;
   color: var(--fg-muted);
+}
+
+/* Inline template variables: a stored value resolves the placeholder for
+   DER/HEX export; without one the complete export stays blocked. */
+.saip-vars-state-chip.is-universal {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+}
+
+.saip-vars-state-chip.is-resolved {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 40%, transparent);
+}
+
+.saip-vars-state-chip.is-unresolved {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
+}
+
+.saip-token-inline-status {
+  margin-top: 4px;
+}
+
+.saip-token-list-actions .saip-token-export-complete[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* ---- Semantic diff section inside compare / diff-vs-saved views ---- */
@@ -18334,19 +21842,19 @@ button.saip-chip:focus-visible {
 }
 
 .cc-chip--a {
-  background: rgba(255, 154, 106, 0.18);
-  color: #ff9a6a;
-  border-color: rgba(255, 154, 106, 0.35);
+  background: var(--fail-soft);
+  color: var(--fail);
+  border-color: color-mix(in oklab, var(--fail) 45%, transparent);
 }
 
 .cc-chip--b {
-  background: rgba(120, 220, 130, 0.18);
-  color: #78dc82;
-  border-color: rgba(120, 220, 130, 0.35);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
 }
 
 /* =====================================================================
-   SCP03 Workbench v2 — internal session tabs + hidden legacy sidebar.
+   SCP03 Workbench v2 -- internal session tabs + hidden legacy sidebar.
    Overrides the older inline "ribbon + card" layout defined earlier.
    ===================================================================== */
 
@@ -18632,6 +22140,111 @@ button.saip-chip:focus-visible {
   padding: 12px 16px 18px;
   gap: 12px;
   overflow-x: hidden;
+  /* The tree and detail panes scroll themselves. In the narrow layout
+     (<= 1040px, where .main--module-workbench lets the page scroll) they
+     cap against the viewport minus this guess at the chrome stacked above
+     and below them (status strip, ribbon, breadcrumb, log dock), and
+     collapsing the ribbon hands its share back. The wide layout does not
+     use the guess at all: see "2c. Wide layout" below. */
+  --scp03-pane-reserve: 280px;
+}
+
+.scp03-session-main.is-ribbon-collapsed {
+  --scp03-pane-reserve: 190px;
+}
+
+.scp03-session-main.is-ribbon-collapsed .scp03-ribbon-section {
+  display: none;
+}
+
+/* 2c. Wide layout: the panes take the room the frame gives them --------
+   Above the 1040px breakpoint the module frame clips (main, .cc-actions,
+   .cc-workbench and .cc-wb-body are all overflow: hidden), so anything in
+   the chain sized against 100vh minus a guessed chrome height overshoots
+   the frame and its tail can never be scrolled into view: at 1900x960 the
+   panes ran 113px past .cc-wb-body and the last tree row and the end of a
+   decoded body sat behind the log dock. Hand the height down the chain
+   with flex instead. The 100vh caps and floors (on the workbench, the
+   shell and the two panes) stay in force below the breakpoint, where the
+   page itself scrolls and a viewport cap is the right tool. */
+@media (min-width: 1041px) {
+  .main--module-workbench .cc-workbench[data-wb="scp03"] {
+    min-height: 0;
+  }
+
+  .main--module-workbench .cc-wb-body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main--module-workbench .scp03-shell {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  /* Last-resort scroller: inline .cc-panel output stacks below the panes
+     inside this column, so once the panes are down to their floor the
+     column scrolls rather than clipping. */
+  .main--module-workbench .scp03-session-main {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .main--module-workbench .cc-wb-session {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .main--module-workbench .cc-wb-session > .cc-scan-layout {
+    flex: 1 1 auto;
+    min-height: 220px;
+    grid-auto-rows: minmax(0, 1fr);
+  }
+
+  .main--module-workbench .cc-wb-session .cc-tree,
+  .main--module-workbench .cc-wb-session .cc-scan-preview {
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+.scp03-ribbon-collapse {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  margin-bottom: 3px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.scp03-ribbon-collapse:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.scp03-ribbon-collapse:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.scp03-ribbon-collapse-caret {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--accent);
 }
 
 .scp03-session-main .cc-scan-header {
@@ -18639,11 +22252,20 @@ button.saip-chip:focus-visible {
   gap: 6px;
 }
 
-/* 3. Ribbon v2 — tab strip + active section ---------------------------- */
+/* 3. Ribbon v2 -- tab strip + active section ---------------------------- */
 
 .scp03-ribbon-v2 {
   display: flex;
   flex-direction: column;
+  /* The overflow below makes this a scroll container, which zeroes the
+     automatic minimum size it would otherwise get as a flex item of
+     .cc-wb-session. Every sibling there keeps a content or declared floor
+     (.cc-breadcrumb 30px, .cc-scan-layout 220px), so without this the
+     ribbon is the only item the column can shrink below its content and
+     it absorbs the whole deficit: measured at 37px against a 118px
+     content height, cutting the tab labels in half. The panes are what
+     the squeeze is meant to reach -- they scroll, the chrome does not. */
+  flex: 0 0 auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -18783,7 +22405,7 @@ button.saip-chip:focus-visible {
 }
 
 /* ----------------------------------------------------------------------
-   SGP.32 bulk telemetry — structured report
+   SGP.32 bulk telemetry -- structured report
    One titled sub-card per ES10 retrieval (scan, RAT, notifications,
    eIM config, certs). Replaces the old raw-stdout `<pre>` dump.
    ---------------------------------------------------------------------- */
@@ -18868,7 +22490,7 @@ button.saip-chip:focus-visible {
   line-height: 1.5;
 }
 
-/* Inline trace block — rendered directly in the card body (no
+/* Inline trace block -- rendered directly in the card body (no
    <details> wrapper). Used by scp03RenderTrace() across every SCP03
    action that previously hid a "Show trace" disclosure. Operators
    wanted the captured stdout visible at a glance, matching CLI
@@ -18879,7 +22501,7 @@ button.saip-chip:focus-visible {
   padding: 10px 12px;
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
@@ -18891,7 +22513,7 @@ button.saip-chip:focus-visible {
 }
 
 /* When the inline trace sits inside an SGP.32 section card it's
-   already inside a bordered panel — tighten spacing so it doesn't
+   already inside a bordered panel -- tighten spacing so it doesn't
    look nested-in-nested. */
 .cc-sgp32-section > .cc-log-inline {
   margin: 4px 0 0;
@@ -18969,7 +22591,7 @@ button.saip-chip:focus-visible {
   text-align: left;
 }
 
-/* "No card in reader" notice — styled as an informational banner
+/* "No card in reader" notice -- styled as an informational banner
    (amber/warn, not red/error) because it's a routine operator
    condition, not a crash. Keeps the scan error channel free for
    real regressions. */
@@ -19038,7 +22660,7 @@ button.saip-chip:focus-visible {
 }
 
 /* ----------------------------------------------------------------------
-   FS-Admin guided wizards (CREATE FILE / lifecycle / resize / …)
+   FS-Admin guided wizards (CREATE FILE / lifecycle / resize / ...)
    ---------------------------------------------------------------------- */
 
 .cc-fs-mode-bar {
@@ -19058,7 +22680,7 @@ button.saip-chip:focus-visible {
 .cc-fs-mode-bar .btn {
   padding: 5px 14px;
   font-size: 12.5px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   border: 1px solid transparent;
   color: var(--fg-muted);
@@ -19104,7 +22726,7 @@ button.saip-chip:focus-visible {
   padding: 12px 14px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   margin-top: 6px;
 }
 
@@ -19149,7 +22771,7 @@ button.saip-chip:focus-visible {
   font-size: 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -19296,7 +22918,7 @@ button.saip-chip:focus-visible {
   background-color: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   width: min(320px, 100%);
   min-width: 0;
   max-width: 100%;
@@ -19338,7 +22960,7 @@ button.saip-chip:focus-visible {
   padding: 10px 12px;
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.4;
@@ -19357,7 +22979,7 @@ button.saip-chip:focus-visible {
   padding: 8px 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   min-height: 44px;
   max-width: 100%;
   overflow-x: auto;
@@ -19429,7 +23051,7 @@ button.saip-chip:focus-visible {
   background: var(--surface);
   border: 1px solid var(--border);
   border-left-width: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .scp03-apdu-result--ok {
@@ -19794,6 +23416,7 @@ button.saip-chip:focus-visible {
 @media (max-width: 1040px) {
   .topbar-readers {
     flex-basis: 210px;
+    min-width: 140px;
     max-width: 260px;
   }
 }
@@ -19937,17 +23560,50 @@ button.saip-chip:focus-visible {
   padding-right: 38px;
 }
 
-/* Short status tooltip strip below the pill — rendered on :hover via
+/* Short status tooltip strip below the pill -- rendered on :hover via
    the ``title`` attribute instead of a floating tooltip to keep focus
    mgmt simple. Reserved class for future native tooltip styling. */
 /* --- breadcrumbs squish when the strip is wide ------------------------ */
 
+/* The crumb yields before the status cluster does: it shrinks to an
+   ellipsis instead of being covered by controls that cannot shrink. */
 .topbar > .breadcrumbs {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.topbar > .status-cluster {
+  flex: 0 1 auto;
+}
+
+/* Progressive disclosure for the top bar. Every control keeps its
+   title and aria-label; only the redundant text goes at each step, so
+   a 1280 px laptop still shows the brand and every bridge pill. Below
+   1300 px the suite chip goes, and the crumb gives way while a plugin
+   console pill shows (shell.css). */
+@media (max-width: 1500px) {
+  .topbar-suite-separator,
+  .topbar-suite-active {
+    display: none;
+  }
+
+  .theme-picker label {
+    display: none;
+  }
+}
+
+@media (max-width: 1400px) {
+  .topbar-card-bridge-value {
+    display: none;
+  }
+
+  .topbar-backend-switch .topbar-control-label {
+    display: none;
+  }
 }
 
 /* Hide the legacy SCP03 per-tab session strip and left reader pane.
@@ -19972,14 +23628,14 @@ button.saip-chip:focus-visible {
 /* ============================================================
  * Contextual FS-Admin action bar
  *
- * Lives inside the FCP preview header (``.cc-fcp-header``) —
+ * Lives inside the FCP preview header (``.cc-fcp-header``) --
  * renders right after the ``path:`` and ``fid:`` chips, gated by
  * the selected-file kind. Replaces the old ribbon-hosted "Files"
  * tab: operators now see exactly the actions that apply to the
  * node they just clicked, and nothing else. Disabled buttons
  * stay visible (as opposed to hidden) so operators can *discover*
- * the rule — the tooltip explains *why* the button is greyed out
- * ("CREATE FILE is issued under a DF — select MF / a DF / an ADF
+ * the rule -- the tooltip explains *why* the button is greyed out
+ * ("CREATE FILE is issued under a DF -- select MF / a DF / an ADF
  * first").
  * ============================================================ */
 
@@ -19998,21 +23654,26 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.01em;
 }
 
+/* Same file-kind palette as the SAIP file-system tree so a DF, an ADF
+ * and an EF read the same colour on both surfaces. */
 .cc-fs-kind.cc-fs-kind--df {
-  background: rgba(74, 144, 226, 0.18);
-  border-color: rgba(74, 144, 226, 0.4);
+  background: var(--tree-df-bg);
+  border-color: var(--tree-df-edge);
+  color: var(--tree-df-fg);
 }
 
 .cc-fs-kind.cc-fs-kind--application {
-  background: rgba(170, 110, 220, 0.18);
-  border-color: rgba(170, 110, 220, 0.4);
+  background: var(--tree-adf-bg);
+  border-color: var(--tree-adf-edge);
+  color: var(--tree-adf-fg);
 }
 
 .cc-fs-kind.cc-fs-kind--transparent,
 .cc-fs-kind.cc-fs-kind--linear,
 .cc-fs-kind.cc-fs-kind--cyclic {
-  background: rgba(63, 185, 80, 0.15);
-  border-color: rgba(63, 185, 80, 0.35);
+  background: var(--tree-ef-bg);
+  border-color: var(--tree-ef-edge);
+  color: var(--tree-ef-fg);
 }
 
 .cc-fs-kind.cc-fs-kind--unknown {
@@ -20021,7 +23682,7 @@ button.saip-chip:focus-visible {
   color: var(--fg-muted);
 }
 
-/* Action strip wrapper — pushes itself to the right when the
+/* Action strip wrapper -- pushes itself to the right when the
    header has room (margin-left:auto), otherwise wraps under the
    chips. Two sub-groups inside: file-scoped actions + a small
    "Card" group for SUSPEND so it can't be confused for a file op. */
@@ -20057,7 +23718,7 @@ button.saip-chip:focus-visible {
 }
 
 /* The pill buttons themselves. Enabled state mirrors the compact
-   ``.btn`` small variant — tight padding, subtle hover. Danger
+   ``.btn`` small variant -- tight padding, subtle hover. Danger
    variants (DELETE / RESIZE / SUSPEND / TERMINATE-via-Lifecycle)
    tint red on hover so fat-fingering is visually loud. */
 .cc-fs-action-btn {
@@ -20100,7 +23761,7 @@ button.saip-chip:focus-visible {
   color: var(--err);
 }
 
-/* Disabled state — greyed out but still visible. Keeping the
+/* Disabled state -- greyed out but still visible. Keeping the
    button in the DOM is deliberate: it's a teaching aid, not noise.
    Operators who used to hunt the ribbon for "where is CREATE FILE?"
    can now *see* the button sitting dimmed with a tooltip that
@@ -20115,7 +23776,7 @@ button.saip-chip:focus-visible {
 }
 
 .cc-fs-action-btn.is-disabled.is-danger {
-  /* A disabled danger button has no "red" meaning — fall back
+  /* A disabled danger button has no "red" meaning -- fall back
      to the neutral dim look so the red doesn't falsely suggest
      it's armed. */
   color: var(--fg-muted);
@@ -20306,11 +23967,12 @@ button.saip-chip:focus-visible {
   display: flex;
 }
 
+/* No `backdrop-filter`: without GPU compositing every scroll frame of a
+ * long guide would re-blur the whole window behind the card. */
 .cc-doc-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: var(--scrim);
 }
 
 .cc-doc-modal-card {
@@ -20321,7 +23983,7 @@ button.saip-chip:focus-visible {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -20497,7 +24159,7 @@ button.saip-chip:focus-visible {
   margin: 16px 0;
 }
 
-/* GitHub-flavoured tables in the doc / README modal — operators were
+/* GitHub-flavoured tables in the doc / README modal -- operators were
  * seeing raw pipe / dash glyphs because the renderer fell through to
  * paragraph mode. The renderer now emits real <table>s; the styling
  * keeps them visually consistent with the doc body (zebra striping,
@@ -20563,6 +24225,26 @@ button.saip-chip:focus-visible {
   color: var(--err);
 }
 
+/* Mermaid diagrams. Until a diagram renders -- and after a failed render
+   -- the placeholder holds the source <pre>, which carries its own rule
+   above; once the SVG lands the container styles the figure instead.
+   Diagram colour arrives as Mermaid theme variables read from the design
+   tokens, so nothing here sets a palette. */
+.cc-doc-modal-body .cc-doc-mermaid[data-mermaid-state="rendered"] {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin: 12px 0;
+  overflow: auto;
+  text-align: center;
+}
+
+.cc-doc-modal-body .cc-doc-mermaid[data-mermaid-state="rendered"] svg {
+  max-width: 100%;
+  height: auto;
+}
+
 /* ---------------------------------------------------------------------
  * In-browser fallback file explorer (web-server mode / no pywebview)
  *
@@ -20571,7 +24253,7 @@ button.saip-chip:focus-visible {
  * that operators no longer have to hand-type absolute paths into the
  * legacy ``window.prompt`` fallback.
  * ------------------------------------------------------------------- */
-/* File explorer modal — fallback browser opened by ``pickForField``
+/* File explorer modal -- fallback browser opened by ``pickForField``
  * when no native pywebview picker is available. Uses the YggdraSIM
  * theme tokens (``--bg``, ``--bg-elev``, ``--bg-elev-2``, ``--fg``,
  * ``--fg-dim``, ``--accent``, ``--accent-soft``, ``--fail``,
@@ -20581,8 +24263,11 @@ button.saip-chip:focus-visible {
 .cc-fs-explorer-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
+  /* No `backdrop-filter` here. A viewport-sized blur over the app shell --
+   * whose topbar carries its own `blur(14px)` -- is re-composited by
+   * WebKitGTK for the whole time the modal is up, which costs more frames
+   * than a 2px blur under the scrim is worth seeing. */
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -20958,6 +24643,514 @@ button.saip-chip:focus-visible {
   }
 }
 /* ============================================================
+ * Offline Tools: context decoder
+ *
+ * One paste box above the tool cards. The result is a banner naming
+ * the detected domain, then one card per exchange: header semantics
+ * (field / value / meaning / clause), the decoded command data, the
+ * status word and the decoded response. Trees reuse the compact list
+ * rhythm of the TLV tree so the two surfaces read alike.
+ * ============================================================ */
+
+.cc-decoder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--border));
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-card);
+}
+
+.cc-decoder-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cc-decoder-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.cc-decoder-hint {
+  margin: 0;
+  max-width: 78ch;
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.cc-decoder-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cc-decoder-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.cc-decoder-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.cc-decoder-select {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.cc-decoder-select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.cc-decoder-input {
+  width: 100%;
+  min-height: 96px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.cc-decoder-input::placeholder {
+  color: var(--fg-dim);
+  opacity: 0.7;
+}
+
+.cc-decoder-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.cc-decoder-status {
+  min-height: 18px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.cc-decoder-status--busy {
+  color: var(--accent);
+}
+
+.cc-decoder-status--error {
+  color: var(--fail);
+}
+
+.cc-decoder-status--ok {
+  color: var(--fg);
+}
+
+.cc-decoder-output {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cc-decoder-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--bg-elev), var(--bg) 40%);
+}
+
+.cc-decoder-banner-text {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cc-decoder-banner-title {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cc-decoder-banner-summary {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.cc-decoder-spec {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+.cc-decoder-meaning .cc-decoder-spec {
+  display: block;
+}
+
+.cc-decoder-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cc-decoder-chip--ok {
+  border-color: color-mix(in oklab, var(--ok) 40%, var(--border));
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.cc-decoder-chip--warn {
+  border-color: color-mix(in oklab, var(--warn) 40%, var(--border));
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.cc-decoder-chip--muted {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+.cc-decoder-chip--domain-es10,
+.cc-decoder-chip--domain-gp,
+.cc-decoder-chip--domain-uicc,
+.cc-decoder-chip--domain-cat,
+.cc-decoder-chip--domain-auth {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cc-decoder-chip--domain-unknown {
+  border-color: color-mix(in oklab, var(--warn) 40%, var(--border));
+  color: var(--warn);
+}
+
+.cc-decoder-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid color-mix(in oklab, var(--accent) 55%, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.cc-decoder-exchange-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cc-decoder-exchange-index {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.cc-decoder-exchange-name {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cc-decoder-exchange-bytes {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.cc-decoder-exchange-summary {
+  flex: 1 1 200px;
+  min-width: 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.cc-decoder-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.cc-decoder-details > summary {
+  padding: 6px 10px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.cc-decoder-details > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.cc-decoder-details[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.cc-decoder-fields {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.cc-decoder-fields th,
+.cc-decoder-fields td {
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in oklab, var(--border), transparent 45%);
+  text-align: left;
+  vertical-align: top;
+}
+
+.cc-decoder-fields tr:last-child th,
+.cc-decoder-fields tr:last-child td {
+  border-bottom: none;
+}
+
+.cc-decoder-fields th {
+  width: 22%;
+  color: var(--fg-dim);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cc-decoder-fields code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.cc-decoder-meaning {
+  color: var(--fg);
+}
+
+.cc-decoder-payload {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.cc-decoder-payload-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cc-decoder-payload-role {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cc-decoder-payload-title {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.cc-decoder-response {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cc-decoder-sw {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  font-size: 12px;
+}
+
+.cc-decoder-sw.is-ok {
+  border-color: color-mix(in oklab, var(--ok) 40%, var(--border));
+}
+
+.cc-decoder-sw.is-error {
+  border-color: color-mix(in oklab, var(--fail) 45%, var(--border));
+}
+
+.cc-decoder-sw-code {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cc-decoder-sw.is-ok .cc-decoder-sw-code {
+  color: var(--ok);
+}
+
+.cc-decoder-sw.is-error .cc-decoder-sw-code {
+  color: var(--fail);
+}
+
+.cc-decoder-sw-meaning {
+  color: var(--fg);
+}
+
+.cc-decoder-sw-follow {
+  color: var(--fg-dim);
+}
+
+.cc-decoder-tree {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.cc-decoder-tree .cc-decoder-tree {
+  padding-left: 18px;
+  border-left: 1px solid color-mix(in oklab, var(--border), transparent 30%);
+  margin-left: 6px;
+}
+
+.cc-decoder-node-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cc-decoder-node-tag {
+  min-width: 34px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.cc-decoder-node-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.cc-decoder-node-length {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.cc-decoder-node-decoded {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.cc-decoder-node-value {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.cc-decoder-schema {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cc-decoder-schema-head {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.cc-decoder-note {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .cc-decoder-fields th {
+    width: auto;
+  }
+
+  .cc-decoder-fields,
+  .cc-decoder-fields tbody,
+  .cc-decoder-fields tr {
+    display: block;
+  }
+
+  .cc-decoder-fields th,
+  .cc-decoder-fields td {
+    display: block;
+    padding: 2px 8px;
+    border-bottom: none;
+  }
+
+  .cc-decoder-fields tr {
+    padding: 4px 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--border), transparent 45%);
+  }
+}
+/* ============================================================
  * Reader pill popover (Connect / Disconnect panel)
  *
  * Anchored under the pill the operator clicks. Provides explicit
@@ -20971,8 +25164,8 @@ button.saip-chip:focus-visible {
   background: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
   padding: 12px 14px 14px;
   font-size: 13px;
   display: flex;
@@ -21008,7 +25201,7 @@ button.saip-chip:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--fg-muted);
@@ -21103,7 +25296,7 @@ button.saip-chip:focus-visible {
   padding: 7px 10px;
   font-size: 12.5px;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   border: 1px solid var(--border);
   transition: background 120ms ease, border-color 120ms ease,
@@ -21112,7 +25305,7 @@ button.saip-chip:focus-visible {
 
 .topbar-reader-popover-actions .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   border-color: var(--accent);
 }
 
@@ -21299,9 +25492,6 @@ button.saip-chip:focus-visible {
   margin: 14px 0 10px;
 }
 
-.cb-rig-primary-actions .btn {
-  min-height: 36px;
-}
 
 .cb-rig-manual {
   margin-top: 8px;
@@ -21318,10 +25508,56 @@ button.saip-chip:focus-visible {
   margin: 14px 0;
 }
 
-.cb-rig-actions .btn {
-  min-height: 32px;
+
+.cb-steps {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  color: var(--fg-dim);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
+.cb-steps li + li {
+  margin-top: 3px;
+}
+
+.cb-steps li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cb-rig-manual .hint {
+  margin: 8px 0 10px;
+}
+
+.cb-rig-action-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.cb-rig-action-group-label {
+  margin-right: 2px;
+  color: var(--fg-dim);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cb-subhead {
+  margin: 18px 0 8px;
+  color: var(--fg-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 .cb-rig-status-grid {
   display: grid;
   grid-template-columns: repeat(
@@ -21368,7 +25604,7 @@ button.saip-chip:focus-visible {
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -21419,7 +25655,7 @@ button.saip-chip:focus-visible {
   color: var(--fg-dim);
 }
 
-/* Manual probe override panel — collapsed by default so the common
+/* Manual probe override panel -- collapsed by default so the common
  * case (no overrides) keeps the panel compact.
  */
 .cb-override {
@@ -21518,8 +25754,8 @@ button.saip-chip:focus-visible {
   line-height: 1.4;
 }
 
-/* Latency history sparkline. Two polylines — ``--cb-history-ping``
- * and ``--cb-history-status`` — share the same SVG. We plot from the
+/* Latency history sparkline. Two polylines -- ``--cb-history-ping``
+ * and ``--cb-history-status`` -- share the same SVG. We plot from the
  * left so the freshest sample is on the right edge, matching the
  * convention of the SCP03 throughput chart.
  */
@@ -21571,10 +25807,6 @@ button.saip-chip:focus-visible {
   font-family: var(--font-mono);
 }
 
-.btn-small {
-  padding: 4px 10px;
-  font-size: 0.78rem;
-}
 
 @media (max-width: 640px) {
   .cb-panel {

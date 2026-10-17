@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""``/api/registry/*`` — introspection over ``yggdrasim_common.registry``.
+"""``/api/registry/*`` -- introspection over ``yggdrasim_common.registry``.
 
 The GUI's left-rail navigation is built from ``SUBSYSTEMS`` so the
 frontend never has to hard-code the list. Lookups (``/symbol/{key}``)
-return just the dotted import target as a string — the engine object
+return just the dotted import target as a string -- the engine object
 itself is never serialised to JSON.
 """
 

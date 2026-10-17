@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP Workbench actions.
 
 Each action dispatcher lazy-imports the heavyweight SAIP stack
@@ -11,7 +10,7 @@ installed.
 
 The module exposes two complementary surfaces:
 
-Session-scoped browsing — mirrors ``SCP03`` session conventions:
+Session-scoped browsing -- mirrors ``SCP03`` session conventions:
 
 * ``saip.open_package`` takes a filesystem path, decodes the package,
   and stashes the resulting ``ProfileElementSequence`` in the shared
@@ -23,11 +22,11 @@ Session-scoped browsing — mirrors ``SCP03`` session conventions:
   and operate purely in memory. No APDUs, no network round-trips.
 * ``saip.close_package`` drops the session (ActionContext-free).
 
-Stateless one-shots — for operators who just want to run a quick lint
+Stateless one-shots -- for operators who just want to run a quick lint
 or transcode against a path without cycling a session:
 
-* ``saip.lint_path`` — lint a DER / JSON package in one call.
-* ``saip.decode_to_json`` — DER → decoded JSON in one call.
+* ``saip.lint_path`` -- lint a DER / JSON package in one call.
+* ``saip.decode_to_json`` -- DER → decoded JSON in one call.
 
 The session-scoped surface does not mutate the package. Package
 transcoding / editing remains the domain of the standalone
@@ -38,15 +37,17 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import os
+import builtins
 import re
 import tempfile
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
 from yggdrasim_common.gui_server.actions.registry import (
     ActionContext,
@@ -102,7 +103,7 @@ def _ensure_pysim_importable() -> None:
 
     Also applies a one-shot compatibility patch against upstream pySim
     so unknown PE types do not crash ``ProfileElementSequence.from_der``
-    — see :func:`_patch_pysim_profile_element` for the details.
+    -- see :func:`_patch_pysim_profile_element` for the details.
     """
     from Tools.ProfilePackage.saip_json_codec import (
         ensure_workspace_pysim_on_path,
@@ -125,14 +126,14 @@ def _patch_pysim_profile_element() -> None:
         inst.type = pe_type
 
     However ``ProfileElement.__init__`` dereferences ``self.header_name``
-    (which in turn reads ``self.type``) whenever ``decoded`` is falsy —
+    (which in turn reads ``self.type``) whenever ``decoded`` is falsy --
     which happens for PEs whose ASN.1 body decodes to an empty dict.
     ``self.type`` is only assigned on the NEXT line, so ``__init__``
     raises ``AttributeError: 'ProfileElement' object has no attribute
     'type'`` and the whole package load aborts.
 
     This patch swaps in an ``__init__`` that treats the missing ``type``
-    attribute as "caller will set it" — identical to how registered
+    attribute as "caller will set it" -- identical to how registered
     subclasses behave (they carry ``type`` as a class attribute). All
     other behaviour is preserved byte-for-byte.
     """
@@ -143,7 +144,7 @@ def _patch_pysim_profile_element() -> None:
     try:
         from collections import OrderedDict
         from pySim.esim.saip import ProfileElement
-    except Exception:  # noqa: BLE001 — pySim not importable; nothing to patch
+    except Exception:  # noqa: BLE001 -- pySim not importable; nothing to patch
         return
 
     if getattr(ProfileElement.__init__, "_yggdrasim_patched", False):
@@ -167,7 +168,7 @@ def _patch_pysim_profile_element() -> None:
             # ``self.type`` is not set yet. ``ProfileElement.from_der``
             # assigns it immediately after the ctor returns, so the
             # header-bootstrap we skip here is redundant for the
-            # from-DER code path — it only matters for from-scratch PE
+            # from-DER code path -- it only matters for from-scratch PE
             # construction, which never reaches this branch.
             return
         if header_key:
@@ -190,6 +191,22 @@ _ASN_VALUE_INPUT_SUFFIXES = {".asn", ".asn1"}
 _SPREADSHEET_INPUT_SUFFIXES = frozenset({".xlsx", ".xlsm", ".xls", ".ods"})
 _MAX_SAIP_UPLOAD_BYTES = 64 * 1024 * 1024
 _MAX_SAIP_UPLOAD_BASE64_CHARS = 4 * ((_MAX_SAIP_UPLOAD_BYTES + 2) // 3)
+# An authoring session holds a decoded document, not a reader. The
+# manager's short default exists to release PC/SC handles, and applying
+# it here closed packages an operator was still reading: the GUI renders
+# the PE list, the FS tree and the AID directory from its own cache, so
+# browsing a package never reaches the backend on its own. The workbench
+# touches every open package on a five-minute beat instead
+# (saip-workbench.js, ``saipKeepOpenSessionsAlive``), so this ceiling only
+# decides how long a package outlives the page that loaded it. Automatic
+# close still protects unsaved work.
+_AUTHORING_SESSION_IDLE_TIMEOUT_S = 8 * 60 * 60
+# Authoring sessions are bounded on their own, not by the reader cap: the
+# shared cap of eight admitted a ninth package by evicting the first one
+# the operator had dropped. The ceiling refuses the next open instead of
+# evicting a package that was loaded on purpose (``SessionManager.open``,
+# ``max_of_kind``).
+_AUTHORING_SESSION_CAP = 32
 _ZIP_MAGIC_PREFIXES = (
     b"PK\x03\x04",  # local file header
     b"PK\x05\x06",  # empty archive / end of central directory
@@ -296,7 +313,7 @@ def _looks_like_ascii_hex(raw: bytes) -> bool:
         if ch in allowed_whitespace:
             continue
         return False
-    # Make sure there is at least one hex digit in the head — an
+    # Make sure there is at least one hex digit in the head -- an
     # all-whitespace blob is not a hex-text profile.
     return any(bytes([b]) in allowed_letters for b in raw[:64])
 
@@ -473,7 +490,7 @@ def _load_asn1_value_package(
 
 def _restore_inline_placeholder_sentinels_in_tagged_json(
     text_payload: str,
-) -> tuple[str, list[Any]]:
+) -> tuple[str, list[Any], dict[str, str]]:
     """Reverse JSON display literals to their persisted sentinel bytes.
 
     Tagged JSON saves keep unresolved compact placeholders visible in ``hex``
@@ -482,16 +499,17 @@ def _restore_inline_placeholder_sentinels_in_tagged_json(
     treats an undefined compact token as an empty byte string, which changes
     ASN.1 field geometry and can make an otherwise valid saved authoring
     document impossible to reopen.  Restore the recorded sentinels before
-    parsing, then return the records so the live session can continue to show
-    and materialise the unresolved variables.
+    parsing, then return the records -- and the stored variable values the
+    block carries -- so the live session can show the placeholders and
+    export a complete profile again.
     """
 
     loaded = json.loads(text_payload)
     if not isinstance(loaded, dict):
-        return text_payload, []
+        return text_payload, [], {}, {}, ""
     sidecar_payload = loaded.get("__ygg_inline_placeholders__")
     if sidecar_payload is None:
-        return text_payload, []
+        return text_payload, [], {}, {}, ""
 
     from Tools.ProfilePackage.saip_hex_template import (
         sidecar_payload_to_records,
@@ -499,7 +517,29 @@ def _restore_inline_placeholder_sentinels_in_tagged_json(
 
     records = sidecar_payload_to_records(sidecar_payload)
     if not records:
-        return text_payload, []
+        return text_payload, [], {}, {}, ""
+    raw_values = sidecar_payload.get("values") if isinstance(sidecar_payload, dict) else None
+    stored_values: dict[str, str] = {}
+    if isinstance(raw_values, dict):
+        stored_values = {
+            str(name): str(value)
+            for name, value in raw_values.items()
+            if isinstance(value, str) and str(name).strip()
+        }
+    raw_block = (
+        sidecar_payload.get("raw_values") if isinstance(sidecar_payload, dict) else None
+    )
+    embedded_raw_values: dict[str, str] = {}
+    if isinstance(raw_block, dict):
+        embedded_raw_values = {
+            str(key): str(value)
+            for key, value in raw_block.items()
+            if isinstance(value, str) and str(key).strip()
+        }
+    bound_block = (
+        sidecar_payload.get("test_value_list") if isinstance(sidecar_payload, dict) else None
+    )
+    embedded_test_value_list = bound_block.strip() if isinstance(bound_block, str) else ""
     sections = loaded.get("sections")
     if not isinstance(sections, dict):
         raise ValueError(
@@ -586,33 +626,302 @@ def _restore_inline_placeholder_sentinels_in_tagged_json(
                 f"its sidecar describes ({unexpected})."
             )
 
-    return json.dumps(loaded, ensure_ascii=False), ordered_records
+    return (
+        json.dumps(loaded, ensure_ascii=False),
+        ordered_records,
+        stored_values,
+        embedded_raw_values,
+        embedded_test_value_list,
+    )
+
+
+def _discover_inline_variable_values(
+    resolved_path: Path,
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Return the stored inline-variable values for a freshly loaded template.
+
+    Tagged JSON carries them in its ``__ygg_inline_placeholders__`` block;
+    varder and ASN.1 templates keep them in a ``<stem>.variables.json``
+    sidecar beside the file. Every value is encoded against its
+    occurrences before it is accepted; one the template cannot use becomes
+    a load warning rather than a stored value.
+    """
+    records = list(payload.get("inline_placeholder_records") or [])
+    if not records:
+        return {}, []
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        SaipVariableMaterializationError,
+        inline_variable_sidecar_path_for,
+        match_inline_variable_values,
+        read_inline_variable_sidecar,
+        validate_inline_variable_value,
+    )
+
+    warnings: list[dict[str, Any]] = []
+    candidates: dict[str, str] = dict(
+        payload.get("inline_variable_values_embedded") or {}
+    )
+    source_label = "tagged JSON"
+    if not candidates:
+        sidecar_path = inline_variable_sidecar_path_for(resolved_path)
+        if sidecar_path.is_file():
+            source_label = sidecar_path.name
+            try:
+                candidates = read_inline_variable_sidecar(sidecar_path)
+            except (SaipVariableMaterializationError, OSError, ValueError) as error:
+                warnings.append(
+                    {
+                        "stage": "inline-variables",
+                        "error": f"{sidecar_path.name}: {error}",
+                    }
+                )
+                candidates = {}
+    if not candidates:
+        return {}, warnings
+    matched, _unresolved = match_inline_variable_values(records, candidates)
+    accepted: dict[str, str] = {}
+    for name, value in matched.items():
+        try:
+            validate_inline_variable_value(records, name, value)
+        except SaipVariableMaterializationError as error:
+            warnings.append(
+                {
+                    "stage": "inline-variables",
+                    "error": f"{source_label}: {name}: {error}",
+                }
+            )
+            continue
+        accepted[name] = value
+    return accepted, warnings
+
+
+def _universal_defaults_enabled() -> bool:
+    """The universal list seeds every open template unless the flag says no."""
+    raw = str(os.environ.get("YGGDRASIM_SAIP_UNIVERSAL_DEFAULTS", "") or "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _seed_universal_defaults(
+    records: list[Any],
+    typed_values: Mapping[str, Any],
+    raw_values: dict[str, str],
+    test_value_list: str = "",
+    raw_sources: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Fill the occurrences that still lack a value from the test-value lists.
+
+    Stored values (typed or raw) always win; the lists only answer what is
+    left, so a template opens with test bytes in place and the operator
+    replaces the ones that matter. ``test_value_list`` selects the list
+    bound to the template, consulted before the universal one. Returns
+    load warnings for a bound list that is missing and for rejected lines;
+    a missing universal list is silent.
+    """
+    if not records or not _universal_defaults_enabled():
+        return []
+    from Tools.ProfilePackage.saip_universal_tokens import (
+        layered_universal_match,
+        load_test_value_layers,
+    )
+    from Tools.ProfilePackage.saip_hex_template import placeholder_key_fold
+    from Tools.ProfilePackage.saip_variable_materialization import inline_record_key
+
+    layers, _ref, layer_warnings = load_test_value_layers(test_value_list)
+    warnings: list[dict[str, Any]] = [
+        {"stage": "universal-tokens", "error": str(message)} for message in layer_warnings
+    ]
+    loaded = [token_list for token_list in layers if token_list.loaded]
+    if not loaded:
+        return warnings
+    typed_folded = {str(name).casefold() for name, value in dict(typed_values).items() if str(value)}
+    raw_folded = {placeholder_key_fold(str(key)) for key in raw_values}
+    open_records = [
+        record
+        for record in records
+        if str(getattr(record, "variable_name", "") or "").casefold() not in typed_folded
+        and placeholder_key_fold(inline_record_key(record)) not in raw_folded
+    ]
+    match = layered_universal_match(open_records, loaded)
+    raw_values.update(match.raw_values)
+    if raw_sources is not None:
+        for item in match.matched:
+            raw_sources[str(item["key"])] = str(item.get("list") or "")
+    for token_list in loaded:
+        if token_list.problems:
+            warnings.append(
+                {
+                    "stage": "universal-tokens",
+                    "error": (
+                        f"{token_list.path}: {len(token_list.problems)} line(s) rejected; "
+                        "open Test-value lists to see them."
+                    ),
+                }
+            )
+    return warnings
+
+
+def _discover_test_value_list(
+    resolved_path: Path,
+    payload: Mapping[str, Any],
+) -> tuple[str, list[dict[str, Any]]]:
+    """Return the selector of the list bound to a freshly loaded template.
+
+    Tagged JSON carries it in its ``__ygg_inline_placeholders__`` block,
+    varder and ASN.1 templates in the ``<stem>.variables.json`` sidecar;
+    a template saved without either falls back to the machine-local
+    binding store (:func:`_recall_test_value_binding`). ``""`` means the
+    universal list alone. An unusable selector is reported and dropped.
+    """
+    records = list(payload.get("inline_placeholder_records") or [])
+    if not records:
+        return "", []
+    from Tools.ProfilePackage.saip_universal_tokens import (
+        UniversalTokensError,
+        resolve_token_list_ref,
+    )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        SaipVariableMaterializationError,
+        inline_variable_sidecar_path_for,
+        read_inline_variable_sidecar_document,
+    )
+
+    candidate = str(payload.get("test_value_list_embedded") or "").strip()
+    source_label = "tagged JSON"
+    if not candidate:
+        sidecar_path = inline_variable_sidecar_path_for(resolved_path)
+        if sidecar_path.is_file():
+            source_label = sidecar_path.name
+            try:
+                candidate = str(
+                    read_inline_variable_sidecar_document(sidecar_path).get("test_value_list") or ""
+                ).strip()
+            except (SaipVariableMaterializationError, OSError, ValueError):
+                # The typed-value discovery already reported this sidecar.
+                candidate = ""
+    if not candidate:
+        source_label = "binding store"
+        candidate = _recall_test_value_binding(resolved_path)
+    if not candidate:
+        return "", []
+    try:
+        ref = resolve_token_list_ref(candidate)
+    except UniversalTokensError as error:
+        return "", [{"stage": "test-value-list", "error": f"{source_label}: {error}"}]
+    return ("" if ref.is_universal else ref.selector), []
+
+
+def _discover_inline_raw_values(
+    resolved_path: Path,
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, str], list[dict[str, Any]], dict[str, str]]:
+    """Return the pre-encoded per-occurrence values stored with a template.
+
+    The third item names, per occurrence key, the list file that answered
+    it on this open; a value that came from the sidecar has no entry.
+
+    Tagged JSON carries them in its ``__ygg_inline_placeholders__`` block
+    under ``raw_values``; varder and ASN.1 templates keep them in the
+    ``<stem>.variables.json`` sidecar. A value is checked against its
+    occurrence's width before it is accepted; one for an occurrence the
+    template does not have is ignored. Occurrences left without a typed
+    or stored value take the universal test value (see
+    :func:`_seed_universal_defaults`).
+    """
+    records = list(payload.get("inline_placeholder_records") or [])
+    if not records:
+        return {}, [], {}
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        SaipVariableMaterializationError,
+        inline_variable_sidecar_path_for,
+        match_inline_raw_values,
+        read_inline_variable_sidecar_document,
+        records_for_raw_key,
+    )
+
+    warnings: list[dict[str, Any]] = []
+    candidates: dict[str, str] = dict(payload.get("inline_raw_values_embedded") or {})
+    source_label = "tagged JSON"
+    if not candidates:
+        sidecar_path = inline_variable_sidecar_path_for(resolved_path)
+        if sidecar_path.is_file():
+            source_label = sidecar_path.name
+            try:
+                candidates = read_inline_variable_sidecar_document(sidecar_path)["raw_values"]
+            except (SaipVariableMaterializationError, OSError, ValueError):
+                # The typed-value discovery already reported this sidecar.
+                candidates = {}
+    accepted: dict[str, str] = {}
+    for key, value in candidates.items():
+        occurrences = records_for_raw_key(records, key)
+        if not occurrences:
+            continue
+        try:
+            accepted.update(match_inline_raw_values(occurrences, {str(key): value}))
+        except SaipVariableMaterializationError as error:
+            warnings.append(
+                {
+                    "stage": "inline-variables",
+                    "error": f"{source_label}: {key}: {error}",
+                }
+            )
+    sources: dict[str, str] = {}
+    warnings.extend(
+        _seed_universal_defaults(
+            records,
+            dict(payload.get("inline_variable_values") or {}),
+            accepted,
+            str(payload.get("test_value_list") or ""),
+            sources,
+        )
+    )
+    return accepted, warnings, sources
 
 
 def _load_package_payload_impl(resolved_path: Path) -> dict[str, Any]:
+    """Load a package and attach the stored inline-variable values.
+
+    See :func:`_load_package_payload_core` for the accepted input flavours.
+    This wrapper adds ``inline_variable_values`` (validated against the
+    template's placeholders), ``inline_raw_values`` (pre-encoded
+    per-occurrence values) and ``inline_variable_warnings``.
+    """
+    payload = _load_package_payload_core(resolved_path)
+    values, value_warnings = _discover_inline_variable_values(resolved_path, payload)
+    payload["inline_variable_values"] = values
+    bound_selector, binding_warnings = _discover_test_value_list(resolved_path, payload)
+    payload["test_value_list"] = bound_selector
+    raw_values, raw_warnings, raw_sources = _discover_inline_raw_values(resolved_path, payload)
+    payload["inline_raw_values"] = raw_values
+    payload["inline_raw_sources"] = raw_sources
+    payload["inline_variable_warnings"] = value_warnings + binding_warnings + raw_warnings
+    return payload
+
+
+def _load_package_payload_core(resolved_path: Path) -> dict[str, Any]:
     """Return ``{"pes", "decoded_document", "encoding", "warnings"}`` for a package.
 
     Supports four input flavours, matching what the SAIP TUI accepts
     (``Tools/ProfilePackage/saip_open_picker_tui.py``):
 
-    1. **Binary DER** — passed straight to ``ProfileElementSequence.from_der``.
-    2. **ASCII hex text** (``.hex`` / ``.txt`` or content-sniffed) — the
+    1. **Binary DER** -- passed straight to ``ProfileElementSequence.from_der``.
+    2. **ASCII hex text** (``.hex`` / ``.txt`` or content-sniffed) -- the
        bytes are interpreted as UTF-8, whitespace is stripped, and the
        resulting hex is decoded with ``bytes.fromhex`` before being fed
        to the DER parser. Matches
        :meth:`SaipToolBridge._prepare_input_for_tool`.
-    3. **ASN.1 value notation** (``.asn`` / ``.asn1``) — parsed into
+    3. **ASN.1 value notation** (``.asn`` / ``.asn1``) -- parsed into
        decoded PE values, then encoded and decoded through pySim so
        defaults and post-decode hooks match DER imports.
-    4. **Decoded JSON** (transcode output) — round-tripped through
+    4. **Decoded JSON** (transcode output) -- round-tripped through
        :func:`build_profile_sequence_from_document`.
 
     DER parsing itself uses a two-stage strategy:
 
-    1. Fast path — call ``ProfileElementSequence.from_der`` which parses
+    1. Fast path -- call ``ProfileElementSequence.from_der`` which parses
        every PE strictly. This is what's used for well-formed packages
        and is byte-for-byte compatible with pySim's native behaviour.
-    2. Tolerant fallback — if the strict parse raises (e.g. asn1tools
+    2. Tolerant fallback -- if the strict parse raises (e.g. asn1tools
        ``MissingDataError`` deep inside one PE), walk the BER-TLV
        segments ourselves and decode each one independently, skipping
        broken PEs while collecting per-segment diagnostics. This lets
@@ -653,12 +962,15 @@ def _load_package_payload_impl(resolved_path: Path) -> dict[str, Any]:
 
     warnings: list[dict[str, Any]] = []
     inline_placeholder_records: list[Any] = []
+    embedded_inline_values: dict[str, str] = {}
+    embedded_raw_values: dict[str, str] = {}
+    embedded_test_value_list = ""
     placeholder_paths: list[str] = []
     undefined_tokens: list[str] = []
     strict_complete = True
     strict_failure: str | None = None
 
-    # Suffix wins over content sniffing — operators occasionally save
+    # Suffix wins over content sniffing -- operators occasionally save
     # genuine DER under a ``.txt`` extension; we still want to honour
     # that legacy hint by trying hex first and falling back to DER if
     # the generic hex decode fails. Template-specific failures stay
@@ -678,7 +990,7 @@ def _load_package_payload_impl(resolved_path: Path) -> dict[str, Any]:
         except ValueError:
             if suffix in _TEMPLATE_HEX_INPUT_SUFFIXES:
                 raise
-            # Hex decode failed — treat the original bytes as DER and
+            # Hex decode failed -- treat the original bytes as DER and
             # let the strict / tolerant pipeline below report what's
             # actually wrong instead of swallowing a clue.
             raw = raw_disk
@@ -704,9 +1016,21 @@ def _load_package_payload_impl(resolved_path: Path) -> dict[str, Any]:
                 "Decoded SAIP JSON must be valid UTF-8; invalid byte "
                 f"at offset {error.start} in {resolved_path}."
             ) from error
-        json_text, persisted_inline_records = (
-            _restore_inline_placeholder_sentinels_in_tagged_json(json_text)
-        )
+        if f'"{_PE_DOCUMENT_KEY}"' in json_text:
+            # A single-PE document has no header / end anchors, so opening
+            # it as a package would build a broken session.
+            raise ValueError(
+                f"{resolved_path.name} is a single profile element document "
+                f"({_PE_DOCUMENT_SCHEMA}), not a package: open a package and "
+                "use Import PE (saip.import_pe) to add it."
+            )
+        (
+            json_text,
+            persisted_inline_records,
+            embedded_inline_values,
+            embedded_raw_values,
+            embedded_test_value_list,
+        ) = _restore_inline_placeholder_sentinels_in_tagged_json(json_text)
         decoded_document, placeholders, undefined = parse_editor_json_template_aware(
             json_text,
         )
@@ -731,15 +1055,19 @@ def _load_package_payload_impl(resolved_path: Path) -> dict[str, Any]:
             decoded_document, workspace_root=_workspace_root()
         )
     else:
+        raw, trailing = _split_at_end_pe(raw)
+        if trailing is not None:
+            warnings.append(trailing)
         try:
             pes = ProfileElementSequence.from_der(raw)
             _require_usable_pe_types(pes)
-        except Exception as strict_err:  # noqa: BLE001 — any asn1tools/pySim error
+        except Exception as strict_err:  # noqa: BLE001 -- any asn1tools/pySim error
             strict_complete = False
             strict_failure = (
                 f"{strict_err.__class__.__name__}: {strict_err}"
             )
-            pes, warnings, first_fail = _parse_pes_tolerant(raw)
+            pes, tolerant_warnings, first_fail = _parse_pes_tolerant(raw)
+            warnings.extend(tolerant_warnings)
             if first_fail is not None and first_fail not in warnings:
                 # A TLV-chop failure can occur after one or more valid PEs were
                 # recovered. Preserve that terminal diagnostic as evidence;
@@ -758,6 +1086,9 @@ def _load_package_payload_impl(resolved_path: Path) -> dict[str, Any]:
         "encoding": encoding,
         "warnings": warnings,
         "inline_placeholder_records": inline_placeholder_records,
+        "inline_variable_values_embedded": embedded_inline_values,
+        "inline_raw_values_embedded": embedded_raw_values,
+        "test_value_list_embedded": embedded_test_value_list,
         "placeholder_paths": placeholder_paths,
         "undefined_tokens": undefined_tokens,
         "raw_input_bytes": raw_disk,
@@ -779,6 +1110,67 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
     return load_saip_artifact(resolved_path).to_legacy_mapping()
 
 
+# BER tag of the ``end`` alternative of the ProfileElement CHOICE:
+# context-specific, constructed, tag number 10.
+_END_PE_TAG = 0xAA
+
+
+def _trailing_data_warning(index: int, offset: int, trailer: bytes) -> dict[str, Any]:
+    """Describe bytes that follow the ``end`` PE in the walker's warning shape."""
+    return {
+        "stage": "trailing_data",
+        "index": index,
+        "offset": offset,
+        "segment_len": len(trailer),
+        "head_hex": trailer[:16].hex(" ").upper(),
+        "error": (
+            f"{len(trailer)} byte(s) follow the end PE and were ignored -- "
+            "TCA SAIP V3.4.1 §8.1 provides PE-End once at the end of the "
+            "Profile Package, so they are not profile elements (a package "
+            "overwritten in place by a shorter one keeps the old tail)"
+        ),
+    }
+
+
+def _split_at_end_pe(raw: bytes) -> tuple[bytes, dict[str, Any] | None]:
+    """Cut *raw* after its ``end`` PE and describe whatever follows it.
+
+    The walk steps BER-TLV segments and decodes only a segment whose tag is
+    the ``end`` alternative; any parse trouble before that point returns the
+    input unchanged so the strict and tolerant parsers report it themselves.
+    """
+    from pySim.esim.saip import asn1, bertlv_first_segment
+
+    remainder = raw
+    offset = 0
+    index = 0
+    while len(remainder) > 0:
+        try:
+            first_tlv, next_remainder = bertlv_first_segment(remainder)
+        except Exception:  # noqa: BLE001 -- the parsers below report this
+            return raw, None
+        segment_len = len(first_tlv)
+        if segment_len == 0:
+            return raw, None
+        if first_tlv[0] == _END_PE_TAG:
+            try:
+                pe_type, _decoded = asn1.decode("ProfileElement", first_tlv)
+            except Exception:  # noqa: BLE001 -- the parsers below report this
+                return raw, None
+            if pe_type == "end":
+                end_offset = offset + segment_len
+                trailer = raw[end_offset:]
+                if len(trailer) == 0:
+                    return raw, None
+                return raw[:end_offset], _trailing_data_warning(
+                    index + 1, end_offset, trailer
+                )
+        remainder = next_remainder
+        offset += segment_len
+        index += 1
+    return raw, None
+
+
 def _parse_pes_tolerant(
     raw: bytes,
 ) -> tuple[Any, list[dict[str, Any]], dict[str, Any] | None]:
@@ -789,10 +1181,12 @@ def _parse_pes_tolerant(
     * ``pes`` is a fresh :class:`ProfileElementSequence` populated only
       with the PEs we could decode. Post-processing (``_process_pelist``)
       is attempted so downstream accessors work, but any exception from
-      that is suppressed — the tolerant path must always return a
+      that is suppressed -- the tolerant path must always return a
       sequence object.
     * ``warnings`` is one dict per failed segment with ``index``,
-      ``offset``, ``segment_len``, ``head_hex`` and ``error`` keys.
+      ``offset``, ``segment_len``, ``head_hex`` and ``error`` keys. The
+      walk stops after an ``end`` PE; bytes behind it are reported as a
+      single ``trailing_data`` entry instead of a run of broken PEs.
     * ``first_fail`` mirrors the first entry in ``warnings`` (or a
       TLV-chop failure if the outer walker itself ran out of bytes),
       so :func:`_make_saip_load_error` can quote a single failure.
@@ -813,7 +1207,7 @@ def _parse_pes_tolerant(
     while len(remainder) > 0:
         try:
             first_tlv, next_remainder = bertlv_first_segment(remainder)
-        except Exception as err:  # noqa: BLE001 — any asn1tools error
+        except Exception as err:  # noqa: BLE001 -- any asn1tools error
             first_fail = {
                 "stage": "tlv_chop",
                 "index": index,
@@ -826,7 +1220,7 @@ def _parse_pes_tolerant(
 
         segment_len = len(first_tlv)
         if segment_len == 0:
-            # Degenerate empty segment — avoid an infinite loop and note
+            # Degenerate empty segment -- avoid an infinite loop and note
             # the anomaly for the operator.
             entry = {
                 "stage": "tlv_chop",
@@ -834,7 +1228,7 @@ def _parse_pes_tolerant(
                 "offset": offset,
                 "segment_len": 0,
                 "head_hex": remainder[:16].hex(" ").upper(),
-                "error": "empty TLV segment — aborting tolerant walk",
+                "error": "empty TLV segment -- aborting tolerant walk",
             }
             warnings.append(entry)
             if first_fail is None:
@@ -850,7 +1244,14 @@ def _parse_pes_tolerant(
                     f"type (got {pe_type!r})"
                 )
             pes.pe_list.append(pe)
-        except Exception as err:  # noqa: BLE001 — any asn1tools/pySim error
+            if pe.type == "end" and len(next_remainder) > 0:
+                warnings.append(
+                    _trailing_data_warning(
+                        index + 1, offset + segment_len, next_remainder
+                    )
+                )
+                break
+        except Exception as err:  # noqa: BLE001 -- any asn1tools/pySim error
             entry = {
                 "stage": "pe_decode",
                 "index": index,
@@ -869,7 +1270,7 @@ def _parse_pes_tolerant(
 
     try:
         pes._process_pelist()  # type: ignore[attr-defined]
-    except Exception:  # noqa: BLE001 — best effort
+    except Exception:  # noqa: BLE001 -- best effort
         pass
 
     return pes, warnings, first_fail
@@ -886,7 +1287,7 @@ def _make_saip_load_error(
     The message embeds enough forensic detail that the operator can
     tell at a glance whether the file is malformed, wrapped in some
     other container, or simply not a SAIP profile at all. The original
-    exception is preserved via ``raise … from`` at the call site.
+    exception is preserved via ``raise ... from`` at the call site.
     """
     head_hex = raw[:16].hex(" ").upper() if raw else "(empty)"
     size = len(raw)
@@ -908,7 +1309,7 @@ def _make_saip_load_error(
             f"Root error: {type(original_err).__name__}: {original_err}"
         )
 
-    # Guidance tailored to the first byte — SAIP PEs are BER-TLV
+    # Guidance tailored to the first byte -- SAIP PEs are BER-TLV
     # class-context constructed (0xA0..0xBF) at the top level.
     first_byte = raw[0] if size > 0 else None
     if first_byte in (0x7B, 0x5B):  # '{' or '['
@@ -919,7 +1320,7 @@ def _make_saip_load_error(
             "JSON content."
         )
     elif first_byte is not None and (first_byte & 0xE0) != 0xA0:
-        # Not class-context constructed — probably not a raw SAIP PE.
+        # Not class-context constructed -- probably not a raw SAIP PE.
         lines.append(
             f"Hint: first byte 0x{first_byte:02X} is not a class-context "
             "constructed BER-TLV tag (expected 0xA0..0xBF). The file may "
@@ -957,33 +1358,6 @@ def _build_decoded_document(pes: Any, source_path: Path) -> dict[str, Any]:
         ],
         "sections": sections,
     }
-
-
-def _jsonify_decoded(value: Any) -> Any:
-    """JSON-safe projection for PE decoded dicts.
-
-    The underlying pySim decoder returns ``OrderedDict``, ``bytes``,
-    ``tuple``, etc. We flatten bytes to hex and tuples to lists so the
-    payload survives ``json.dumps`` without ``default=repr`` surprises.
-    """
-    from Tools.ProfilePackage.saip_json_codec import jsonify_saip_value
-
-    try:
-        return json.loads(json.dumps(jsonify_saip_value(value, path=("root",))))
-    except Exception:
-        # Fallback: best-effort scalar flatten (for when the SAIP path
-        # isn't available or the payload isn't a decoded subtree).
-        return _coerce_scalar(value)
-
-
-def _coerce_scalar(value: Any) -> Any:
-    if isinstance(value, (bytes, bytearray)):
-        return value.hex().upper()
-    if isinstance(value, dict):
-        return {str(k): _coerce_scalar(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_coerce_scalar(v) for v in value]
-    return value
 
 
 def _pe_summary_row(pe: Any, index: int) -> dict[str, Any]:
@@ -1079,9 +1453,11 @@ def _decoded_contains_apps(value: Any) -> bool:
 # SA-G4: GlobalPlatform privilege / lifecycle decoders for the
 # Applications tab.
 #
-# Privilege bits per GP Card Specification 2.3 Table 6-1 (3 bytes,
-# big-endian, MSB first within each byte). Bit names track the
-# specification verbatim so cross-referencing GP audits is friction-free.
+# Privilege bits per GP Card Spec v2.3.1 §11.1.2 Tables 11-7 to 11-9
+# (page 149): three bytes, b8 first within each byte, named as the coding
+# tables name them. These are the named rows of
+# saip_security_domain_decode._PRIVILEGE_FLAGS, so the AID directory and
+# the PE editors call a bit the same thing.
 # ---------------------------------------------------------------------
 
 _GP_PRIVILEGE_BITS: tuple[tuple[int, int, str], ...] = (
@@ -1095,7 +1471,7 @@ _GP_PRIVILEGE_BITS: tuple[tuple[int, int, str], ...] = (
     (0, 0x01, "Mandated DAP Verification"),
     (1, 0x80, "Trusted Path"),
     (1, 0x40, "Authorized Management"),
-    (1, 0x20, "Token Verification"),
+    (1, 0x20, "Token Management"),
     (1, 0x10, "Global Delete"),
     (1, 0x08, "Global Lock"),
     (1, 0x04, "Global Registry"),
@@ -1105,6 +1481,7 @@ _GP_PRIVILEGE_BITS: tuple[tuple[int, int, str], ...] = (
     (2, 0x40, "Ciphered Load File Data Block"),
     (2, 0x20, "Contactless Activation"),
     (2, 0x10, "Contactless Self-Activation"),
+    (2, 0x08, "Self-Removal"),
 )
 
 
@@ -1167,7 +1544,7 @@ def _decode_gp_lifecycle(hex_value: str, pe_type: str) -> dict[str, str]:
     """Map a 1-byte lifecycle state to its GP label."""
     clean = "".join(ch for ch in str(hex_value or "").lower() if ch in "0123456789abcdef")
     if len(clean) == 0:
-        return {"hex": "", "label": "—", "category": ""}
+        return {"hex": "", "label": "--", "category": ""}
     try:
         value = int(clean[:2], 16)
     except ValueError:
@@ -1617,27 +1994,22 @@ def _apply_optional_bytes_field(
     return True
 
 
-def _normalise_toolkit_parameter_payload(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        value = {}
-    payload = dict(value)
-    if _state_enabled(payload, "useRawHex"):
-        raw_hex = _strict_hex_text(
-            payload.get("rawHex", ""),
-            label="uiccToolkitApplicationSpecificParametersField.rawHex",
-        )
-        if len(raw_hex) == 0:
-            raise ValueError(
-                "uiccToolkitApplicationSpecificParametersField.rawHex is required."
-            )
-        return {"rawHex": raw_hex}
-    payload["rawHex"] = ""
-    for key in (
-        "accessDomain",
-        "minimumSecurityLevelRaw",
-        "trailingPadding",
-    ):
-        payload[key] = _strict_hex_text(payload.get(key, ""), label=key)
+_TOOLKIT_RESOURCE_KEYS = (
+    "priorityLevelOfToolkitAppInstance",
+    "maxNumberOfTimers",
+    "maxTextLengthForMenuEntry",
+    "menuEntries",
+    "maxNumberOfChannels",
+    "minimumSecurityLevelRaw",
+    "tarValues",
+)
+
+
+def _normalise_toolkit_resources(payload: dict[str, Any], *, label: str) -> dict[str, Any]:
+    """The toolkit resource members both toolkit blocks share, checked
+    (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.1 and §8.2.1.3.2.2.1)."""
+    for key in ("minimumSecurityLevelRaw", "additionalBytes"):
+        payload[key] = _strict_hex_text(payload.get(key, ""), label=f"{label}.{key}")
     for key, default in (
         ("priorityLevelOfToolkitAppInstance", 0),
         ("maxNumberOfTimers", 1),
@@ -1660,17 +2032,17 @@ def _normalise_toolkit_parameter_payload(value: Any) -> dict[str, Any]:
         if not isinstance(entry, dict):
             raise ValueError(f"menuEntries[{index}] must be an object.")
         try:
-            entry_id = int(entry.get("id", 0))
             position = int(entry.get("position", 0))
+            entry_id = int(entry.get("id", 0))
         except Exception as error:
             raise ValueError(
-                f"menuEntries[{index}] id and position must be integers."
+                f"menuEntries[{index}] position and id must be integers."
             ) from error
         if not (0 <= entry_id <= 0xFF and 0 <= position <= 0xFF):
             raise ValueError(
-                f"menuEntries[{index}] id and position must fit in one byte."
+                f"menuEntries[{index}] position and id must fit in one byte."
             )
-        menu_entries.append({"id": entry_id, "position": position})
+        menu_entries.append({"position": position, "id": entry_id})
     payload["menuEntries"] = menu_entries
 
     tar_values: list[str] = []
@@ -1688,46 +2060,61 @@ def _normalise_toolkit_parameter_payload(value: Any) -> dict[str, Any]:
     return payload
 
 
-def _normalise_ca_parameter_payload(value: Any) -> dict[str, Any]:
+def _normalise_toolkit_parameter_payload(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
-        return {
-            "hex": _strict_hex_text(
-                value,
-                label="ts102226SIMFileAccessToolkitParameter",
+        value = {}
+    payload = dict(value)
+    if _state_enabled(payload, "useRawHex"):
+        raw_hex = _strict_hex_text(
+            payload.get("rawHex", ""),
+            label="uiccToolkitApplicationSpecificParametersField.rawHex",
+        )
+        if len(raw_hex) == 0:
+            raise ValueError(
+                "uiccToolkitApplicationSpecificParametersField.rawHex is required."
             )
-        }
+        return {"rawHex": raw_hex}
+    payload["rawHex"] = ""
+    payload = _normalise_toolkit_resources(
+        payload,
+        label="uiccToolkitApplicationSpecificParametersField",
+    )
+    services = payload.get("maxNumberOfServices")
+    if services is None or str(services).strip() == "":
+        payload["maxNumberOfServices"] = None
+    else:
+        try:
+            services = int(services)
+        except Exception as error:
+            raise ValueError("maxNumberOfServices must be an integer.") from error
+        if not 0 <= services <= 0xFF:
+            raise ValueError("maxNumberOfServices must fit in one byte.")
+        payload["maxNumberOfServices"] = services
+    return payload
+
+
+def _normalise_ca_parameter_payload(value: Any) -> dict[str, Any]:
+    """The SIM file access and toolkit block ('CA'): the access domain, then
+    the toolkit resources (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.1)."""
+    label = "ts102226SIMFileAccessToolkitParameter"
+    if not isinstance(value, dict):
+        return {"hex": _strict_hex_text(value, label=label)}
     payload = dict(value)
     if _state_enabled(payload, "useRawHex"):
         return {
             "hex": _strict_hex_text(
                 payload.get("rawHex", ""),
-                label="ts102226SIMFileAccessToolkitParameter.rawHex",
+                label=f"{label}.rawHex",
             )
         }
-    return {
-        "simToolkitApplicationParameters": {
-            "hex": _strict_hex_text(
-                payload.get("simToolkitApplicationParametersHex", ""),
-                label=(
-                    "ts102226SIMFileAccessToolkitParameter."
-                    "simToolkitApplicationParameters"
-                ),
-            )
-        },
-        "simFileAccessParameters": {
-            "hex": _strict_hex_text(
-                payload.get("simFileAccessParametersHex", ""),
-                label=(
-                    "ts102226SIMFileAccessToolkitParameter."
-                    "simFileAccessParameters"
-                ),
-            )
-        },
-        "trailingBytes": _strict_hex_text(
-            payload.get("trailingBytes", ""),
-            label="ts102226SIMFileAccessToolkitParameter.trailingBytes",
-        ),
-    }
+    payload = _normalise_toolkit_resources(payload, label=label)
+    normalised = {key: payload[key] for key in _TOOLKIT_RESOURCE_KEYS}
+    normalised["accessDomain"] = _strict_hex_text(
+        payload.get("accessDomain", ""),
+        label=f"{label}.accessDomain",
+    )
+    normalised["additionalBytes"] = payload["additionalBytes"]
+    return normalised
 
 
 def _normalise_ber_tlv_items(value: Any, *, label: str) -> list[dict[str, str]]:
@@ -1832,6 +2219,7 @@ def _normalise_implicit_selection_payload(value: Any) -> dict[str, Any]:
 
 
 def _normalise_access_parameter_payload(value: Any, *, label: str) -> dict[str, Any]:
+    """Entries of AID, access domain and DAP (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.2)."""
     if not isinstance(value, dict):
         return {"hex": _strict_hex_text(value, label=label)}
     payload = dict(value)
@@ -1842,36 +2230,20 @@ def _normalise_access_parameter_payload(value: Any, *, label: str) -> dict[str, 
                 label=f"{label}.rawHex",
             )
         }
-    raw_records = payload.get("accessDomainRecords") or []
-    if not isinstance(raw_records, list):
-        raise ValueError(f"{label}.accessDomainRecords must be a list.")
-    records: list[dict[str, str]] = []
-    for index, record in enumerate(raw_records):
-        if not isinstance(record, dict):
-            raise ValueError(f"{label}.accessDomainRecords[{index}] must be an object.")
-        if _state_enabled(record, "useRawHex"):
-            record_hex = _strict_hex_text(
-                record.get("hex", ""),
-                label=f"{label}.accessDomainRecords[{index}].hex",
-            )
-        else:
-            domain_byte = _strict_hex_text(
-                record.get("domainByte", "00"),
-                label=f"{label}.accessDomainRecords[{index}].domainByte",
-            )
-            if len(domain_byte) != 2:
-                raise ValueError(
-                    f"{label}.accessDomainRecords[{index}].domainByte must be one byte."
-                )
-            parameters = _strict_hex_text(
-                record.get("parameters", ""),
-                label=f"{label}.accessDomainRecords[{index}].parameters",
-            )
-            record_hex = domain_byte + parameters
-        if len(record_hex) == 0:
-            continue
-        records.append({"hex": record_hex})
-    return {"accessDomainRecords": records}
+    raw_entries = payload.get("entries")
+    if not isinstance(raw_entries, list):
+        raise ValueError(f"{label}.entries must be a list of AID, access domain and DAP entries.")
+    entries: list[dict[str, str]] = []
+    for index, entry in enumerate(raw_entries):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{label}.entries[{index}] must be an object.")
+        entries.append(
+            {
+                key: _strict_hex_text(entry.get(key, ""), label=f"{label}.entries[{index}].{key}")
+                for key in ("aid", "accessDomain", "dap")
+            }
+        )
+    return {"entries": entries}
 
 
 def _apply_sd_parameter_state_to_section(
@@ -2099,7 +2471,7 @@ def _apply_sd_parameter_state_to_section(
 
             value = parameter_state.get("uicc_access")
             if value is None:
-                value = parameter_state.get("uicc_access_hex", "0100")
+                value = parameter_state.get("uicc_access_hex", "00010000")
             app_params["uiccAccessApplicationSpecificParametersField"] = (
                 encode_uicc_access_application_specific_parameters_field(
                     _normalise_access_parameter_payload(
@@ -2123,7 +2495,7 @@ def _apply_sd_parameter_state_to_section(
 
             value = parameter_state.get("uicc_admin")
             if value is None:
-                value = parameter_state.get("uicc_admin_hex", "0100")
+                value = parameter_state.get("uicc_admin_hex", "00010000")
             app_params["uiccAdministrativeAccessApplicationSpecificParametersField"] = (
                 encode_uicc_administrative_access_application_specific_parameters_field(
                     _normalise_access_parameter_payload(
@@ -2172,7 +2544,7 @@ def _file_definitions(decoded_document: dict[str, Any]) -> list[dict[str, Any]]:
 
     Tries the linter's flat-dict extractor first (works on certain
     canonicalised templates) and falls back to a tuple-aware walk that
-    matches the runtime decoded shape produced by pySim — the form most
+    matches the runtime decoded shape produced by pySim -- the form most
     SAIP packages carry once round-tripped through ``ProfileElementSequence``.
     """
     from Tools.ProfilePackage.lint_engine import SaipProfileLinter
@@ -2243,24 +2615,33 @@ def _summarise_file_choices(value: Any) -> dict[str, Any] | None:
         "security_attrs": "",
         "max_size": "",
         "details": "",
+        # Fcp.lcsi -- life cycle status integer (TS 102 221 §11.1.1.4.9,
+        # tag '8A'). TCA SAIP v3.4.1 §8.3.2 gives it DEFAULT '05'H, so an
+        # absent member means operational - activated.
+        "lcsi": "",
         # SAIP createFCP / fileDescriptor → proprietaryEFInfo block
         # (TCA SAIP §createFCP, TCA Profile Package PEDocumentation
         # ProprietaryEFInfo). Five known sub-fields:
-        #   specialFileInformation – 1 B; high-update + readable-when-
+        #   specialFileInformation - 1 B; high-update + readable-when-
         #       deactivated flags (TS 102 222 Table 5).
-        #   fileDetails            – 1 B; BER-TLV DER-only flag
+        #   fileDetails            - 1 B; BER-TLV DER-only flag
         #       (TCA SAIP TCA 3.1+).
-        #   fillPattern            – pattern bytes used once across the
+        #   fillPattern            - pattern bytes used once across the
         #       file body (ETSI TS 102 222 §6.3.2.2.x).
-        #   repeatPattern          – pattern bytes repeated until the
+        #   repeatPattern          - pattern bytes repeated until the
         #       file is filled.
-        #   maximumFileSize        – BER-TLV upper bound (TCA 3.1+);
+        #   maximumFileSize        - BER-TLV upper bound (TCA 3.1+);
         #       distinct from the top-level ``maximumFileSize`` slot.
         "proprietary_special_info": "",
         "proprietary_details": "",
         "proprietary_fill_pattern": "",
         "proprietary_repeat_pattern": "",
         "proprietary_max_size": "",
+        # pinStatusTemplateDO (TCA SAIP v3.4.1 page 27: mandatory for a
+        # DF or ADF, not allowed for an EF) -- the PIN status row of the
+        # FCP tab reads this key.
+        "pin_status_template": "",
+        "df_name": "",
     }
     saw_marker = False
     for item in value:
@@ -2305,6 +2686,18 @@ def _summarise_file_choices(value: Any) -> dict[str, Any] | None:
                 if hex_val:
                     summary["security_attrs"] = hex_val
                 continue
+            if sub_key_text == "lcsi":
+                if hex_val:
+                    summary["lcsi"] = hex_val
+                continue
+            if sub_key_text == "pinStatusTemplateDO":
+                if hex_val:
+                    summary["pin_status_template"] = hex_val
+                continue
+            if sub_key_text == "dfName":
+                if hex_val:
+                    summary["df_name"] = hex_val
+                continue
             if sub_key_text == "maximumFileSize":
                 if hex_val:
                     summary["max_size"] = hex_val
@@ -2330,6 +2723,10 @@ def _summarise_file_choices(value: Any) -> dict[str, Any] | None:
                         if not inner_hex:
                             continue
                         inner_text = str(inner_key)
+                        if _PROPRIETARY_INFO_DEFAULTS.get(inner_text) == inner_hex.upper():
+                            # The decoder's fill-in for an absent member, not
+                            # a value the package carries.
+                            continue
                         if inner_text == "specialFileInformation":
                             summary["proprietary_special_info"] = inner_hex
                         elif inner_text == "fileDetails":
@@ -2344,6 +2741,17 @@ def _summarise_file_choices(value: Any) -> dict[str, Any] | None:
     if saw_marker is False:
         return None
     return summary
+
+
+# TCA SAIP V3.4.1 §8.3.2 ProprietaryInfo gives these members a DEFAULT
+# ('00'H and '01'H). DER never encodes a component equal to its default
+# (ITU-T X.690 (02/2021) §11.5) and asn1tools fills it back in on decode,
+# so every Fcp carrying proprietaryEFInfo would otherwise show both -- and
+# a fileDetails byte that is forbidden outside BER-TLV EFs.
+_PROPRIETARY_INFO_DEFAULTS: dict[str, str] = {
+    "specialFileInformation": "00",
+    "fileDetails": "01",
+}
 
 
 def _coerce_hex_field(value: Any) -> str:
@@ -2446,7 +2854,7 @@ def _kind_from_descriptor(
 
     ETSI TS 102 221 §11.1.1.4.3 defines the FDB. Bit positions:
     - b6 b5 b4 = 111 (mask 0x38): DF / ADF (FDB does not distinguish
-      between the two — caller hints disambiguate)
+      between the two -- caller hints disambiguate)
     - b1 b2 b3 = 001 / 010 / 110: transparent / linear-fixed / cyclic
     - b4 set together with structure: BER-TLV
 
@@ -2456,7 +2864,7 @@ def _kind_from_descriptor(
     - ``fid_hex`` lies in the reserved 7FF0-7FFF range (TS 102 221
       §13.1 reserves this band for application root files).
     - ``has_df_name`` indicates the FCP carried a DF Name (tag 84)
-      AID — only ADFs carry one.
+      AID -- only ADFs carry one.
     """
     if not desc_hex or len(desc_hex) < 2:
         return ""
@@ -2596,6 +3004,74 @@ def _template_default_info(ft: Any, value: Any) -> dict[str, Any]:
     return info
 
 
+# pySim template file types -> the (file_type, structure) pair of pySim's
+# ``FileDescriptor`` construct (``pySim.ts_102_221``), which codes TS 102 221
+# v18.4 §11.1.1.4.3 Table 11.5: b7 shareable, b6-b4 file type, b3-b1 structure.
+_TEMPLATE_DESCRIPTOR_SHAPES: dict[str, tuple[str, str]] = {
+    "MF": ("df", "no_info_given"),
+    "DF": ("df", "no_info_given"),
+    "ADF": ("df", "no_info_given"),
+    "TR": ("working_ef", "transparent"),
+    "LF": ("working_ef", "linear_fixed"),
+    "CY": ("working_ef", "cyclic"),
+    "BT": ("working_ef", "ber_tlv"),
+}
+_TEMPLATE_DESCRIPTOR_CACHE: dict[tuple[str, int], str] = {}
+
+
+def _template_descriptor_hex(ft: Any) -> str:
+    """Return the file descriptor a template file inherits, as hex.
+
+    TCA SAIP v3.4.1 §8.3.3 keeps a template file's type as the template
+    defines it ("Changing the file type (byte 1 of fileDescriptor) as
+    defined in the template is not allowed"), and pySim creates every
+    template file shareable (``File.from_template``), so the bytes are
+    the descriptor pySim itself encodes for the file: the descriptor
+    byte, the data coding byte and, for a record-structured file, the
+    template's record length. The record count is left to ``efFileSize``.
+    """
+    file_type = str(getattr(ft, "file_type", "") or "").upper()
+    shape = _TEMPLATE_DESCRIPTOR_SHAPES.get(file_type)
+    if shape is None:
+        return ""
+    rec_len = getattr(ft, "rec_len", None)
+    record_len = (
+        int(rec_len)
+        if shape[1] in {"linear_fixed", "cyclic"}
+        and isinstance(rec_len, int)
+        and isinstance(rec_len, bool) is False
+        and rec_len > 0
+        else 0
+    )
+    cache_key = (file_type, record_len)
+    cached = _TEMPLATE_DESCRIPTOR_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        _ensure_pysim_importable()
+        from construct import ConstructError
+        from osmocom.construct import build_construct
+        from pySim.ts_102_221 import FileDescriptor
+    except ImportError:
+        return ""
+    payload: dict[str, Any] = {
+        "file_descriptor_byte": {
+            "shareable": True,
+            "file_type": shape[0],
+            "structure": shape[1],
+        },
+    }
+    if record_len > 0:
+        payload["record_len"] = record_len
+    try:
+        encoded = bytes(build_construct(FileDescriptor._construct, payload))
+    except (ConstructError, KeyError, TypeError, ValueError):
+        return ""
+    descriptor_hex = encoded.hex().upper()
+    _TEMPLATE_DESCRIPTOR_CACHE[cache_key] = descriptor_hex
+    return descriptor_hex
+
+
 def _template_fcp_info(ft: Any) -> dict[str, Any]:
     """Return FCP fields inherited from a pySim file template.
 
@@ -2639,17 +3115,21 @@ def _template_fcp_info(ft: Any) -> dict[str, Any]:
     if isinstance(size_value, int) and size_value > 0:
         info["ef_size"] = _minimal_unsigned_hex(size_value)
         info["ef_size_source"] = "template"
+    descriptor_hex = _template_descriptor_hex(ft)
+    if descriptor_hex:
+        info["descriptor"] = descriptor_hex
+        info["descriptor_source"] = "template"
     return info
 
 
 # Legacy SIM (3GPP TS 51.011 §10.2 / TS 31.102 §4.2) and TS 11.11 EFs
 # that fall outside pySim's TCA SAIP §9 template tables. GFM-defined
-# files routinely target these — particularly DF.TELECOM EFs that the
+# files routinely target these -- particularly DF.TELECOM EFs that the
 # pre-USIM legacy stack still relies on (EF.ADN under 7F10 vs the
 # DF.PHONEBOOK EF.ADN at 5F3A/4F00..4F3F that TCA models). Without
 # this table the GUI would render them as anonymous ``EF.<FID>`` rows.
 _LEGACY_FID_TABLE: dict[tuple[str, str], str] = {
-    # DF.TELECOM (3F00/7F10) — TS 51.011 §10.4
+    # DF.TELECOM (3F00/7F10) -- TS 51.011 §10.4
     ("7F10", "6F3A"): "EF.ADN",
     ("7F10", "6F3B"): "EF.FDN",
     ("7F10", "6F3C"): "EF.SMS",
@@ -2669,7 +3149,7 @@ _LEGACY_FID_TABLE: dict[tuple[str, str], str] = {
     ("7F10", "6F53"): "EF.RMA",
     ("7F10", "6F54"): "EF.SUME",
     ("7F10", "6F58"): "EF.CMI",
-    # DF.GSM-ACCESS (3F00/7F20) — TS 51.011 §10.3
+    # DF.GSM-ACCESS (3F00/7F20) -- TS 51.011 §10.3
     ("7F20", "6F05"): "EF.LP",
     ("7F20", "6F07"): "EF.IMSI",
     ("7F20", "6F20"): "EF.KC",
@@ -2695,23 +3175,32 @@ def _saip_reverse_fid_friendly(
     fid_hex: str,
     *,
     parent_fid_hex: str = "",
+    template_name: str = "",
 ) -> str:
     """Reverse-lookup a friendly ``FOO.BAR`` name from a 4-nibble hex FID.
 
+    ``template_name`` is the name of the pySim ``FileTemplate`` that
+    defines the file, when the caller has one. It wins over every FID
+    table entry that is not registered for the file's own parent: the
+    tables span the same 4Fxx numbers several times (EF.IIDF fills
+    4F40-4F7F under DF.GRAPHICS, the vendor-extension rows sit at
+    4F61-4F6E), so a positional fallback would relabel a DF.PHONEBOOK
+    file with a name from another directory.
+
     Resolution order:
 
-    1. ``(parent_fid, fid)`` lookup in the legacy SIM table — needed for
+    1. ``(parent_fid, fid)`` lookup in the legacy SIM table -- needed for
        GFM-created DF.TELECOM EFs (EF.ADN at 6F3A under 7F10 etc.) that
        pySim's TCA SAIP §9 templates do not model.
     2. Parent-context-aware resolver from
-       ``Tools.ProfilePackage.saip_asn1_decode.fid_name`` — disambiguates
+       ``Tools.ProfilePackage.saip_asn1_decode.fid_name`` -- disambiguates
        the cross-ADF collisions (6F40 → MSISDN vs CSIM-MDN, 6F07 → IMSI
        vs IST, 4F01 → SUCI-CALC-INFO-USIM vs 5GS3GPPLOCI vs V2X-CFG).
        The parent token is derived from the slash-joined ``parent_fid_hex``
        chain (``3F00/7FF0`` → ``adf-usim``, ``3F00/7F10`` → ``df-telecom``).
     3. pySim's template registry (preferred for USIM / ISIM / CSIM /
        opt-USIM EFs and the TCA DF.PHONEBOOK numbered EFs). With no
-       parent context, the first matching template wins — the lookup
+       parent context, the first matching template wins -- the lookup
        above is what prevents the ADF.USIM / ADF.CSIM mislabel.
     """
     if not fid_hex or len(fid_hex) < 4:
@@ -2736,7 +3225,7 @@ def _saip_reverse_fid_friendly(
     parent_token: str | None = None
     # If the chain root is a friendly ADF name (``ADF.USIM`` / ``ADF.ISIM``),
     # turn it into the canonical pySim parent token (``adf-usim``) so the
-    # collision resolver can disambiguate 6F40 / 6F07 / 4F01 — the legacy
+    # collision resolver can disambiguate 6F40 / 6F07 / 4F01 -- the legacy
     # hex-only path won't recognise ``ADF.USIM`` since it has no FID.
     if parent_chain:
         head = parent_chain.split("/", 1)[0]
@@ -2756,7 +3245,7 @@ def _saip_reverse_fid_friendly(
     # single contextual name instead of the resolver's compound
     # fallback ("EF.UST / EF.UST-SERVICE-TABLE", "DF.GSM / DF.EAP").
     # The compound output is informative for a debugger but bad for an
-    # operator-facing tree label — it implies the same row is two
+    # operator-facing tree label -- it implies the same row is two
     # files at once when in reality it's either one EF with two
     # registry aliases, or one EF that the bench can't disambiguate
     # given the chain context.
@@ -2771,9 +3260,12 @@ def _saip_reverse_fid_friendly(
                 candidates,
                 parent_token=parent_token,
                 parent_chain=parent_chain,
+                first_candidate_fallback=not template_name,
             )
             if picked:
                 return picked
+    if template_name:
+        return template_name
     if fid_name is not None:
         resolved = fid_name(canon_fid, parent_hint=parent_token)
         if resolved:
@@ -2795,31 +3287,34 @@ def _pick_single_friendly_name(
     *,
     parent_token: str | None,
     parent_chain: str,
+    first_candidate_fallback: bool = True,
 ) -> str:
     """Reduce a candidate ``[(parent_token, label), ...]`` list to one label.
 
     Selection ladder, in order of confidence:
 
-    1. **Parent-token match** — pick candidates whose registered parent
+    1. **Parent-token match** -- pick candidates whose registered parent
        equals the row's resolved parent token (``adf-usim`` /
-       ``df-telecom`` / ``mf`` …). When multiple candidates match
+       ``df-telecom`` / ``mf`` ...). When multiple candidates match
        (e.g. EF.UST + EF.UST-SERVICE-TABLE both at adf-usim/6F38),
        the first registered alias wins. Aliases are added in
        canonical 3GPP-spec order in the FID name registry, so the
        first-wins policy hits the spec spelling reliably without
        a hand-curated preference table.
-    2. **MF-anchored container fallback** — when the row is at MF
+    2. **MF-anchored container fallback** -- when the row is at MF
        level (parent_chain == ``3F00``) and no candidate carries a
        parent token (top-level container aliases like ``DF.GSM`` /
        ``DF.EAP`` at ``7F20``), again the first registered name
        wins. The legacy GSM ``DF.GSM`` is registered before the
        newer ``DF.EAP`` repurposing, matching the canonical
        TS 51.011 §10.4 assignment.
-    3. **First-candidate fallback** — for orphaned rows whose
+    3. **First-candidate fallback** -- for orphaned rows whose
        location does not match any registered parent (typically a
        malformed GFM that creates a USIM EF directly under MF),
        pick the first registered candidate so the row stays
-       readable.
+       readable. A caller that already holds the file's template
+       name passes ``first_candidate_fallback=False`` and gets ``""``
+       here instead, so the template name is used.
     """
     if len(candidates) == 0:
         return ""
@@ -2836,6 +3331,8 @@ def _pick_single_friendly_name(
         if no_parent:
             return no_parent[0]
 
+    if first_candidate_fallback is False:
+        return ""
     return candidates[0][1]
 
 
@@ -2887,14 +3384,14 @@ def _build_adf_temp_fid_map(
 ) -> dict[str, str]:
     """Build the ``{temp_fid_hex: 'ADF.<NAME>'}`` lookup the walkers need.
 
-    SAIP encodes each ADF (USIM, ISIM, CSIM, …) inside its own PE
+    SAIP encodes each ADF (USIM, ISIM, CSIM, ...) inside its own PE
     section keyed ``adf-<name>``. The ADF carries a temporary FID
-    in the ``7FF0`` … ``7FFF`` range (TS 102 221 §13.1) that GFM
+    in the ``7FF0`` ... ``7FFF`` range (TS 102 221 §13.1) that GFM
     SELECT bytecode uses to navigate into the application. Both the
     template walker (which sees the ``adf-usim`` payload directly)
     and the GFM walker (which only sees raw SELECT path bytes) need
     to translate that ``7FFx`` token back to the ADF's friendly name
-    so the GUI can present ADFs as their own roots — never under MF.
+    so the GUI can present ADFs as their own roots -- never under MF.
     """
     mapping: dict[str, str] = {}
     sections = decoded_document.get("sections") or {}
@@ -2952,12 +3449,12 @@ def _filesystem_tree_rows(
     """Return one row per file in the package, enriched with FS context.
 
     Every row carries the legacy ``_file_definitions`` fields plus:
-    - ``parent_path`` — slash-joined hex FID chain of the containing DF
-    - ``fid_chain``  — same incl. the file's own FID
-    - ``kind``       — ``mf`` / ``df`` / ``adf`` / ``ef-trans`` /
+    - ``parent_path`` -- slash-joined hex FID chain of the containing DF
+    - ``fid_chain``  -- same incl. the file's own FID
+    - ``kind``       -- ``mf`` / ``df`` / ``adf`` / ``ef-trans`` /
                        ``ef-lf`` / ``ef-cyclic`` / ``ef-bertlv``
-    - ``friendly_name`` — canonical ``EF.IMSI`` / ``DF.PHONEBOOK`` etc.
-    - ``source``     — ``template`` or ``gfm``
+    - ``friendly_name`` -- canonical ``EF.IMSI`` / ``DF.PHONEBOOK`` etc.
+    - ``source``     -- ``template`` or ``gfm``
 
     MF and every ADF are emitted as **separate roots** (parent_path
     empty). This matches the operator's mental model of the smart
@@ -2989,8 +3486,8 @@ def _template_parent_chain_fids(
 
     Uses the pySim ``FileTemplate.parent`` link populated by
     ``ProfileTemplate.__init_subclass__`` (see
-    ``pySim/esim/saip/templates.py`` lines 167–187). This is the
-    authoritative nesting for files that belong to a known template —
+    ``pySim/esim/saip/templates.py`` lines 167-187). This is the
+    authoritative nesting for files that belong to a known template --
     it correctly distinguishes "DF.PHONEBOOK is a child of DF.TELECOM"
     from "DF.PHONEBOOK is a sibling of DF.TELECOM under MF" without
     relying on payload insertion order.
@@ -2998,11 +3495,11 @@ def _template_parent_chain_fids(
     Root resolution rules:
     - If the topmost ancestor is an MF or DF template, the chain is
       anchored at ``3F00`` (prepended when the topmost FID is not
-      already MF — handles DF.TELECOM templates whose root is the
+      already MF -- handles DF.TELECOM templates whose root is the
       DF itself).
     - If the topmost ancestor is an ADF (file_type=='ADF'), the
       chain is anchored at the ADF's friendly name (``ADF.USIM``
-      etc.) — never under MF. This matches the on-card model where
+      etc.) -- never under MF. This matches the on-card model where
       ADFs are independent application roots, not folders inside
       MF; the GUI tree builder shows them as siblings of MF.
     - If the topmost ancestor has no MF/DF/ADF root (orphan file
@@ -3011,7 +3508,7 @@ def _template_parent_chain_fids(
       ``FilesUsimMandatory``), the caller may pass
       ``extended_root_chain`` so the chain anchors under the parent
       template's base DF (``ADF.USIM`` for opt-usim, ``ADF.ISIM``
-      for opt-isim, …) instead of the implicit MF.
+      for opt-isim, ...) instead of the implicit MF.
 
     A chain of length zero is returned for files whose template
     carries no FID and no resolvable root (rare).
@@ -3065,6 +3562,27 @@ def _template_parent_chain_fids(
     return chain
 
 
+def _template_adf_base_chain(template: Any) -> list[str]:
+    """Chain root for a DF template that pySim places inside an ADF.
+
+    A template with neither ``extends`` nor ``parent`` still says where it
+    lives: pySim's ``base_path`` names the ADF its base DF is created in
+    (``ADF.USIM`` for the DF.PHONEBOOK template, TCA SAIP v3.4.1 §9.5.3).
+    The parent walk from that DF stops at the DF itself and would anchor
+    it under the MF, as a sibling of DF.TELECOM.
+    """
+    base_path = str(getattr(template, "base_path", "") or "").strip()
+    if base_path.upper().startswith("ADF.") is False:
+        return []
+    files = list(getattr(template, "files", None) or [])
+    if len(files) == 0:
+        return []
+    root_type = str(getattr(files[0], "file_type", "") or "").upper()
+    if root_type != "DF":
+        return []
+    return [base_path]
+
+
 def _emit_template_filesystem_rows(
     section_key: str,
     payload: dict[str, Any],
@@ -3076,7 +3594,7 @@ def _emit_template_filesystem_rows(
     root, building the hex FID chain. This matches pySim's own tree
     construction (``ProfileTemplate.__init_subclass__``) and stays
     correct regardless of the order pySim emits sibling DFs in the
-    decoded dict — important because deeply-nested templates (TELECOM
+    decoded dict -- important because deeply-nested templates (TELECOM
     with DF.PHONEBOOK / DF.GRAPHICS / DF.MMSS, USIM with DF.PHONEBOOK +
     DF.5GS) used to mis-anchor child DFs as siblings under MF.
 
@@ -3102,7 +3620,7 @@ def _emit_template_filesystem_rows(
         if explicit_fid:
             fid_overrides[str(raw_key)] = explicit_fid
 
-    # Optional templates (FilesUsimOptional, FilesIsimOptional, …) carry
+    # Optional templates (FilesUsimOptional, FilesIsimOptional, ...) carry
     # ``extends = <mandatory template>`` and their first file is a plain
     # EF (not MF/DF/ADF). The pySim parent walk on those EFs terminates
     # at the EF itself with parent=None, which would otherwise leave us
@@ -3119,6 +3637,8 @@ def _emit_template_filesystem_rows(
                 extended_root_chain = _template_parent_chain_fids(base_df_ft)
             except Exception:
                 extended_root_chain = []
+        if anchor is None:
+            extended_root_chain = _template_adf_base_chain(template)
 
     rows: list[dict[str, Any]] = []
     cursor_stack: list[tuple[str, str]] = [("mf", "3F00")]
@@ -3257,7 +3777,7 @@ def _emit_template_filesystem_rows(
             continue
         ef_fid = local_fid or (_fid_int_to_hex(getattr(ft, "fid", None)))
         if template_chain:
-            # template_chain ends with the EF's own FID — the parent
+            # template_chain ends with the EF's own FID -- the parent
             # is everything before it.
             parent_path = "/".join(template_chain[:-1])
             fid_chain = "/".join(template_chain)
@@ -3283,6 +3803,7 @@ def _emit_template_filesystem_rows(
             friendly = _saip_reverse_fid_friendly(
                 ef_fid,
                 parent_fid_hex=parent_path,
+                template_name=str(getattr(ft, "name", "") or ""),
             )
         if not friendly:
             friendly = getattr(ft, "name", "") or key_text
@@ -3319,15 +3840,15 @@ def _emit_gfm_filesystem_rows(
 
     ``adf_map`` (``{temp_fid_hex: 'ADF.<NAME>'}``) lets the walker
     re-anchor SELECT chains that traverse an ADF's temporary FID
-    (``7FF0`` … ``7FFF`` per TS 102 221 §13.1) under the ADF's
+    (``7FF0`` ... ``7FFF`` per TS 102 221 §13.1) under the ADF's
     friendly name. Without it, files placed under an ADF via GFM
-    would render as siblings of MF children — visually wrong.
+    would render as siblings of MF children -- visually wrong.
 
     SELECT cursor semantics:
     - Cursor starts at ``[0x3F00]`` (MF) at the top of every section.
     - ``filePath = b''`` resets the cursor to ``[0x3F00]``.
     - ``filePath = b'<even-length FID concat>'`` becomes
-      ``[0x3F00] + path_from_gfm(bytes)`` — the path is always rooted
+      ``[0x3F00] + path_from_gfm(bytes)`` -- the path is always rooted
       at MF; ADF context (if any) is selected via the ADF's temporary
       FID inside the chain (TCA SAIP §9 / TS 102 221 §13.1: 7FF0..7FFF).
     - Odd-length ``filePath`` is malformed (pySim raises); the row is
@@ -3521,11 +4042,14 @@ def _make_filesystem_row(
             "security_attrs": "",
             "max_size": "",
             "details": "",
+            "lcsi": "",
             "proprietary_special_info": "",
             "proprietary_details": "",
             "proprietary_fill_pattern": "",
             "proprietary_repeat_pattern": "",
             "proprietary_max_size": "",
+            "pin_status_template": "",
+        "df_name": "",
         }
     row = dict(summary)
     row["section_key"] = section_key
@@ -3557,7 +4081,7 @@ def _make_filesystem_row(
 
 
 # ----------------------------------------------------------------------
-# Dirty state + mutation helpers (SA-3)
+# Dirty state + mutation helpers
 # ----------------------------------------------------------------------
 
 
@@ -3601,6 +4125,8 @@ def _ensure_session_state(handle: dict[str, Any]) -> None:
         )
     handle.setdefault("dirty_pes", set())
     handle.setdefault("applied_overrides", {})
+    handle.setdefault("inline_raw_values", {})
+    handle.setdefault("test_value_list", "")
     records = handle.get("inline_placeholder_records") or []
     handle.setdefault(
         "inline_variable_names",
@@ -3926,15 +4452,758 @@ def _dirty_response_fields(handle: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _inline_stored_values(handle: Mapping[str, Any]) -> dict[str, str]:
+    """Return the operator-supplied values for the session's inline variables.
+
+    Values live in ``applied_overrides`` under the name the operator typed;
+    the match against record names is case-insensitive.
+    """
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        match_inline_variable_values,
+    )
+
+    records = list(handle.get("inline_placeholder_records") or [])
+    if not records:
+        return {}
+    matched, _unresolved = match_inline_variable_values(
+        records,
+        dict(handle.get("applied_overrides") or {}),
+    )
+    return matched
+
+
+def _inline_raw_values(handle: Mapping[str, Any]) -> dict[str, str]:
+    """Return the pre-encoded per-occurrence values a universal list stored.
+
+    Keys are canonical record keys; every value was width-checked when it
+    was stored and is checked again here, so a stale entry fails loudly
+    rather than reaching an export.
+    """
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        match_inline_raw_values,
+    )
+
+    records = list(handle.get("inline_placeholder_records") or [])
+    if not records:
+        return {}
+    return match_inline_raw_values(records, dict(handle.get("inline_raw_values") or {}))
+
+
+def _inline_template_state(handle: Mapping[str, Any]) -> dict[str, Any]:
+    """Describe the inline template held by a session.
+
+    A session opened from a varder / ASN.1 / tagged-JSON template keeps
+    every placeholder occurrence for its whole life; assigning a value only
+    stores it. A variable is resolved by a typed value or by a universal
+    test value for each of its occurrences. ``unresolved_variables`` lists
+    the names still lacking either, which is what blocks a complete
+    (DER / HEX) export.
+    """
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        inline_record_key,
+        inline_variable_names,
+        resolve_inline_records,
+    )
+
+    records = list(handle.get("inline_placeholder_records") or [])
+    names = inline_variable_names(records)
+    matched, raw_matched, unresolved = resolve_inline_records(
+        records,
+        dict(handle.get("applied_overrides") or {}),
+        dict(handle.get("inline_raw_values") or {}),
+    )
+    universal_values: dict[str, str] = {}
+    for name in names:
+        if name in matched or name in unresolved:
+            continue
+        group_hex = sorted(
+            {
+                raw_matched[inline_record_key(record)]
+                for record in records
+                if str(getattr(record, "variable_name", "") or "").casefold()
+                == name.casefold()
+            }
+        )
+        # Universal test values are shared operator data, shown even for a
+        # secret-classified name; only typed values are redacted.
+        universal_values[name] = " / ".join(group_hex)
+    unresolved_folded = {name.casefold() for name in unresolved}
+    unresolved_occurrences = sum(
+        1
+        for record in records
+        if str(getattr(record, "variable_name", "") or "").casefold() in unresolved_folded
+    )
+    policy = handle.get("export_policy")
+    policy_blocks = bool(
+        isinstance(policy, dict) and policy.get("concrete_export_allowed") is False
+    )
+    # Literals a vendor template spelt in a compact form; the typed form is
+    # the one the tool writes, and ``saip.normalise_placeholder_spelling``
+    # rewrites these to it.
+    from Tools.ProfilePackage.saip_hex_template import placeholder_literal_style
+
+    non_typed: list[str] = []
+    for record in records:
+        literal = str(getattr(record, "literal", "") or "")
+        if literal and placeholder_literal_style(literal) not in ("typed", None):
+            if literal not in non_typed:
+                non_typed.append(literal)
+    return {
+        "occurrence_count": len(records),
+        "non_typed_literals": non_typed,
+        "variable_count": len(names),
+        "variables": names,
+        "resolved_variables": [name for name in names if name not in unresolved],
+        "universal_variables": sorted(universal_values),
+        "unresolved_variables": unresolved,
+        "unresolved_occurrence_count": unresolved_occurrences,
+        "stored_values": {
+            **{name: value for name, value in matched.items()},
+            **universal_values,
+        },
+        "complete_export_ready": len(unresolved) == 0 and policy_blocks is False,
+        "test_value_list": _session_test_value_ref(handle).to_wire(),
+    }
+
+
+def _session_test_value_ref(handle: Mapping[str, Any]) -> Any:
+    """Return the session's bound test-value list; the universal one by default."""
+    from Tools.ProfilePackage.saip_universal_tokens import (
+        UniversalTokensError,
+        resolve_token_list_ref,
+    )
+
+    try:
+        return resolve_token_list_ref(str(handle.get("test_value_list") or ""))
+    except UniversalTokensError:
+        return resolve_token_list_ref("")
+
+
+def _session_test_value_layers(
+    handle: Mapping[str, Any],
+) -> tuple[list[Any], Any, list[str]]:
+    """Load the session's lists, bound list first, then the universal one."""
+    from Tools.ProfilePackage.saip_universal_tokens import load_test_value_layers
+
+    return load_test_value_layers(str(handle.get("test_value_list") or ""))
+
+
+def _test_value_list_catalogue(
+    handle: Mapping[str, Any],
+    *,
+    with_counts: bool = False,
+) -> list[dict[str, Any]]:
+    """Describe the universal list, the library, and a bound file outside it."""
+    from Tools.ProfilePackage.saip_universal_tokens import token_list_catalogue
+
+    ref = _session_test_value_ref(handle)
+    return token_list_catalogue(
+        extra=[ref] if ref.kind == "path" else (),
+        with_counts=with_counts,
+    )
+
+
+def _inline_template_response_fields(handle: Mapping[str, Any]) -> dict[str, Any]:
+    """Project inline-template counters into an action response."""
+    state = _inline_template_state(handle)
+    return {
+        "inline_placeholder_count": state["occurrence_count"],
+        "remaining_inline_placeholder_count": state["unresolved_occurrence_count"],
+        "inline_template": state,
+    }
+
+
+def _splice_inline_literals(handle: Mapping[str, Any], value: Any) -> Any:
+    """Show placeholder literals instead of sentinel hex in a display payload.
+
+    Mutates and returns ``value``. A session without inline placeholder
+    records passes through untouched.
+    """
+    records = handle.get("inline_placeholder_records") or []
+    if not records:
+        return value
+    from Tools.ProfilePackage.saip_hex_template import (
+        splice_literals_into_projection,
+    )
+
+    splice_literals_into_projection(value, records)
+    return value
+
+
+def _strings_in_tree(value: Any) -> list[str]:
+    """Every string of a JSON-shaped value, bytes as upper-case hex."""
+    found: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for nested in node.values():
+                walk(nested)
+        elif isinstance(node, (list, tuple)):
+            for nested in node:
+                walk(nested)
+        elif isinstance(node, str):
+            found.append(node)
+        elif isinstance(node, (bytes, bytearray)):
+            found.append(bytes(node).hex().upper())
+
+    walk(value)
+    return found
+
+
+def _placeholder_literal_slots(tree: Any) -> list[tuple[Any, Any]]:
+    """``(container, key)`` of every string in ``tree`` carrying a placeholder literal."""
+    from Tools.ProfilePackage.saip_hex_template import detect_inline_placeholders
+
+    slots: list[tuple[Any, Any]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, nested in list(node.items()):
+                if isinstance(nested, str):
+                    if detect_inline_placeholders(nested):
+                        slots.append((node, key))
+                else:
+                    walk(nested)
+        elif isinstance(node, list):
+            for index, nested in enumerate(node):
+                if isinstance(nested, str):
+                    if detect_inline_placeholders(nested):
+                        slots.append((node, index))
+                else:
+                    walk(nested)
+
+    walk(tree)
+    return slots
+
+
+def _tagged_value_at_rel_path(section_value: Any, rel_path: list[Any]) -> Any:
+    """The value ``rel_path`` addresses in a tagged section, or ``None``."""
+    cursor = section_value
+    for segment in rel_path:
+        if isinstance(segment, int) and isinstance(segment, bool) is False:
+            if isinstance(cursor, list) is False or segment < 0 or segment >= len(cursor):
+                return None
+            cursor = cursor[segment]
+            continue
+        if isinstance(cursor, dict) is False or str(segment) not in cursor:
+            return None
+        cursor = cursor[str(segment)]
+    return cursor
+
+
+# Placeholder types whose value decides a length byte in front of them
+# (EF.IMSI, the dialling-number and service-centre fields), so one without
+# a value blocks more than the complete export.
+_LENGTH_COUNTED_PLACEHOLDER_TYPES = frozenset({"IMSI", "MSISDN"})
+
+
+def _absorb_inline_literals(
+    handle: dict[str, Any],
+    texts: list[Any],
+    *,
+    previous: Any = None,
+) -> tuple[list[Any], dict[str, Any], list[Any]]:
+    """Register the placeholder literals typed into an edited value.
+
+    Each text comes back with its literals replaced by sentinel hex, so the
+    encoders see bytes. ``previous`` is the value the edit replaces (bytes,
+    hex or a JSON-shaped tree): the records whose sentinel it carries belong
+    to this field, a literal with the same parts takes one of them back (the
+    projections show every placeholder as its literal, so an unchanged
+    field round-trips), and a record the new value no longer carries leaves
+    the session with the bytes stored for it. A new occurrence is answered
+    from the test-value lists where they can; the summary names the ones
+    still without a value and returns the new records.
+    """
+    from Tools.ProfilePackage.saip_hex_template import (
+        allocate_inline_placeholder_records,
+        detect_inline_placeholders,
+    )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        inline_record_key,
+        resolve_inline_records,
+    )
+
+    records = list(handle.get("inline_placeholder_records") or [])
+    previous_hex = (
+        "|".join(_strings_in_tree(previous)).upper() if previous is not None else ""
+    )
+    owned = [
+        record
+        for record in records
+        if previous_hex
+        and str(getattr(record, "sentinel_hex", "") or "").upper() in previous_hex
+    ]
+    summary: dict[str, Any] = {
+        "added": [],
+        "reused": 0,
+        "dropped": [],
+        "unresolved": [],
+        "warnings": [],
+    }
+    has_literal = any(
+        isinstance(text, str) and detect_inline_placeholders(text) for text in texts
+    )
+    if not has_literal and not owned:
+        return list(texts), summary, []
+    rewritten, new_records, reused = allocate_inline_placeholder_records(
+        texts, existing=records, reusable=owned
+    )
+    rewritten_hex = "|".join(text for text in rewritten if isinstance(text, str)).upper()
+    dropped = [
+        record
+        for record in owned
+        if record not in reused
+        and str(getattr(record, "sentinel_hex", "") or "").upper() not in rewritten_hex
+    ]
+    if dropped:
+        records = [record for record in records if record not in dropped]
+    records.extend(new_records)
+    handle["inline_placeholder_records"] = records
+    names = {
+        str(getattr(record, "variable_name", "") or "").casefold()
+        for record in records
+        if str(getattr(record, "variable_name", "") or "").strip()
+    }
+    handle["inline_variable_names"] = names
+    raw_values = handle.setdefault("inline_raw_values", {})
+    raw_sources = handle.setdefault("inline_raw_sources", {})
+    overrides = handle.setdefault("applied_overrides", {})
+    live_keys = {inline_record_key(record).casefold() for record in records}
+    for record in dropped:
+        key = inline_record_key(record)
+        if key.casefold() not in live_keys:
+            for stale in [item for item in raw_values if str(item).casefold() == key.casefold()]:
+                raw_values.pop(stale, None)
+                raw_sources.pop(stale, None)
+        name = str(getattr(record, "variable_name", "") or "")
+        if name.casefold() not in names:
+            for stale in [item for item in overrides if str(item).casefold() == name.casefold()]:
+                overrides.pop(stale, None)
+        summary["dropped"].append(str(getattr(record, "literal", "") or ""))
+    summary["reused"] = len(reused)
+    if new_records:
+        for warning in _seed_universal_defaults(
+            new_records,
+            overrides,
+            raw_values,
+            str(handle.get("test_value_list") or ""),
+            raw_sources,
+        ):
+            summary["warnings"].append(str(warning.get("error") or warning))
+        _typed, _raw, unresolved = resolve_inline_records(
+            new_records, dict(overrides), dict(raw_values)
+        )
+        unresolved_fold = {str(name).casefold() for name in unresolved}
+        for record in new_records:
+            summary["added"].append(
+                {
+                    "literal": record.literal,
+                    "variable": record.variable_name,
+                    "type": record.type_name,
+                    "byte_length": record.byte_length,
+                    "modifier": record.modifier,
+                    "key": inline_record_key(record),
+                    "resolved": record.variable_name.casefold() not in unresolved_fold,
+                }
+            )
+        for name in unresolved:
+            first = next(
+                record
+                for record in new_records
+                if record.variable_name.casefold() == str(name).casefold()
+            )
+            type_text = str(first.type_name).upper()
+            message = (
+                f"{name}: no value yet ({type_text}, {first.byte_length} B). Type one in "
+                f"the Variables panel or add {first.literal} to the universal list; "
+                "the complete export is blocked until then."
+            )
+            if type_text in _LENGTH_COUNTED_PLACEHOLDER_TYPES:
+                message += " A length byte that counts it cannot be reconciled until then."
+            summary["warnings"].append(message)
+        summary["unresolved"] = [str(name) for name in unresolved]
+        summary["_new_indexes"] = [int(record.index) for record in new_records]
+    return rewritten, summary, new_records
+
+
+def _drop_placeholders_missing_from(
+    handle: dict[str, Any],
+    summary: dict[str, Any],
+    document: Mapping[str, Any],
+    *,
+    context: str,
+) -> None:
+    """Refuse an edit whose new placeholders did not reach the bytes.
+
+    A structured editor encodes its fields and ignores a mirror such as the
+    ``hex`` of a decoded view, so a literal typed there registers a record
+    whose sentinel the document never carries. The records are withdrawn
+    and the edit refused before it lands, naming where the literal goes.
+    """
+    indexes = set(summary.pop("_new_indexes", []) or [])
+    if not indexes:
+        return
+    records = list(handle.get("inline_placeholder_records") or [])
+    document_hex = "|".join(_strings_in_tree(document.get("sections") or {})).upper()
+    new_records = [record for record in records if int(record.index) in indexes]
+    missing = [
+        record
+        for record in new_records
+        if str(record.sentinel_hex or "").upper() not in document_hex
+    ]
+    if not missing:
+        return
+    from Tools.ProfilePackage.saip_variable_materialization import inline_record_key
+
+    # A decoded view mirrors a field's hex in derived strings (an AID's
+    # ``aid`` and ``summary`` beside its ``raw``); a copy of the literal
+    # there registers a record the encoder never writes. Those copies are
+    # withdrawn quietly as long as the literal landed through another one.
+    landed = {
+        str(record.literal)
+        for record in new_records
+        if str(record.sentinel_hex or "").upper() in document_hex
+    }
+    mirrors = [record for record in missing if str(record.literal) in landed]
+    missing = [record for record in missing if str(record.literal) not in landed]
+    if mirrors:
+        kept_mirrorless = [record for record in records if record not in mirrors]
+        handle["inline_placeholder_records"] = kept_mirrorless
+        records = kept_mirrorless
+        seen_keys: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for item in summary.get("added") or []:
+            key = str(item.get("key") or "")
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(item)
+        summary["added"] = deduped
+    if not missing:
+        return
+    kept = [record for record in records if record not in missing]
+    handle["inline_placeholder_records"] = kept
+    handle["inline_variable_names"] = {
+        str(record.variable_name or "").casefold() for record in kept if str(record.variable_name or "").strip()
+    }
+    live_keys = {inline_record_key(record).casefold() for record in kept}
+    raw_values = handle.setdefault("inline_raw_values", {})
+    raw_sources = handle.setdefault("inline_raw_sources", {})
+    for record in missing:
+        key = inline_record_key(record).casefold()
+        if key not in live_keys:
+            for stale in [item for item in raw_values if str(item).casefold() == key]:
+                raw_values.pop(stale, None)
+                raw_sources.pop(stale, None)
+    literals = ", ".join(str(record.literal) for record in missing)
+    raise ValueError(
+        f"{context}: {literals} did not reach the bytes. This editor encodes its "
+        "fields and ignores the hex mirror; put the placeholder in the field it "
+        "stands for, in the raw hex editor, or in the JSON tab."
+    )
+
+
+def _withdraw_new_placeholders(handle: dict[str, Any], summary: Mapping[str, Any]) -> None:
+    """Forget the records an edit registered before the edit failed."""
+    indexes = set(summary.get("_new_indexes") or [])
+    if not indexes:
+        return
+    from Tools.ProfilePackage.saip_variable_materialization import inline_record_key
+
+    records = list(handle.get("inline_placeholder_records") or [])
+    doomed = [record for record in records if int(record.index) in indexes]
+    kept = [record for record in records if record not in doomed]
+    handle["inline_placeholder_records"] = kept
+    handle["inline_variable_names"] = {
+        str(record.variable_name or "").casefold()
+        for record in kept
+        if str(record.variable_name or "").strip()
+    }
+    live_keys = {inline_record_key(record).casefold() for record in kept}
+    raw_values = handle.setdefault("inline_raw_values", {})
+    raw_sources = handle.setdefault("inline_raw_sources", {})
+    for record in doomed:
+        key = inline_record_key(record).casefold()
+        if key not in live_keys:
+            for stale in [item for item in raw_values if str(item).casefold() == key]:
+                raw_values.pop(stale, None)
+                raw_sources.pop(stale, None)
+
+
+def _absorb_literals_in_tree(
+    handle: dict[str, Any],
+    tree: Any,
+    *,
+    previous: Any = None,
+) -> dict[str, Any]:
+    """Rewrite the literal-bearing strings of a request tree in place."""
+    slots = _placeholder_literal_slots(tree)
+    texts = [str(container[key]) for container, key in slots]
+    rewritten, summary, _records = _absorb_inline_literals(handle, texts, previous=previous)
+    for (container, key), text in zip(slots, rewritten):
+        container[key] = text
+    return summary
+
+
+def _absorb_hex_input(
+    handle: dict[str, Any],
+    hex_value: Any,
+    *,
+    previous: Any = None,
+) -> tuple[Any, dict[str, Any]]:
+    """A hex input with its literals registered; bytes pass through."""
+    if isinstance(hex_value, (bytes, bytearray)):
+        return hex_value, {"added": [], "reused": 0, "dropped": [], "unresolved": [], "warnings": []}
+    rewritten, summary, _records = _absorb_inline_literals(
+        handle, [str(hex_value or "")], previous=previous
+    )
+    return rewritten[0], summary
+
+
+def _merge_placeholder_fields(
+    response: dict[str, Any],
+    handle: Mapping[str, Any],
+    summary: Mapping[str, Any],
+) -> None:
+    """Report what an edit did to the session's placeholders."""
+    response["placeholders"] = {
+        key: value for key, value in summary.items() if not str(key).startswith("_")
+    }
+    if summary.get("added") or summary.get("dropped"):
+        response.update(_inline_template_response_fields(handle))
+        if summary.get("warnings"):
+            existing = response.get("warnings")
+            response["warnings"] = (
+                list(existing) if isinstance(existing, list) else []
+            ) + list(summary["warnings"])
+
+
+def _inline_placeholder_ranges(
+    handle: Mapping[str, Any],
+    data: bytes,
+) -> list[dict[str, Any]]:
+    """Locate sentinel runs in ``data`` and pair each with its stored value."""
+    records = handle.get("inline_placeholder_records") or []
+    if not records or not data:
+        return []
+    from Tools.ProfilePackage.saip_hex_template import locate_sentinels_in_bytes
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        SaipVariableMaterializationError,
+        encode_inline_placeholder_value,
+    )
+
+    stored = _inline_stored_values(handle)
+    stored_folded = {name.casefold(): value for name, value in stored.items()}
+    raw = {key.casefold(): value for key, value in _inline_raw_values(handle).items()}
+    records_by_index = {int(getattr(record, "index", -1)): record for record in records}
+    ranges = locate_sentinels_in_bytes(data, records)
+    for entry in ranges:
+        variable = str(entry.get("variable") or "")
+        key = (
+            f"{variable}{entry.get('type') or ''}{int(entry.get('byte_length') or 0)}"
+            f"{entry.get('modifier') or ''}"
+        )
+        typed_value = stored_folded.get(variable.casefold())
+        raw_value = raw.get(key.casefold())
+        source: str | None = None
+        shown = ""
+        # ``value_hex`` is what the hex pane shows in place of the sentinel.
+        value_hex = ""
+        if typed_value is not None:
+            source = "typed"
+            shown = typed_value
+            record = records_by_index.get(int(entry.get("index", -1)))
+            if record is not None:
+                try:
+                    value_hex = encode_inline_placeholder_value(
+                        record, typed_value
+                    ).hex().upper()
+                except SaipVariableMaterializationError:
+                    value_hex = ""
+        elif raw_value is not None:
+            # A universal test value is shared operator data, not a secret:
+            # it is shown whatever the variable's name suggests.
+            source = "universal"
+            shown = raw_value
+            value_hex = raw_value
+        entry["resolved"] = source is not None
+        entry["source"] = source
+        entry["key"] = key
+        entry["stored_value"] = shown
+        entry["value_hex"] = value_hex
+    return ranges
+
+
+
+def _record_size_from_row_descriptor(row: Mapping[str, Any]) -> int | None:
+    """Record size of a tree row's own descriptor, when it carries one."""
+    from Tools.ProfilePackage.saip_ef_length_fields import record_size_from_descriptor
+
+    descriptor = str(row.get("descriptor") or "").replace(" ", "")
+    if len(descriptor) < 8:
+        return None
+    try:
+        raw = bytes.fromhex(descriptor)
+    except ValueError:
+        return None
+    size, _file_size = record_size_from_descriptor({"fileDescriptor": raw})
+    return size
+
+
+def _placeholder_resolved_image(
+    image: bytes,
+    ranges: list[dict[str, Any]],
+    *,
+    row: Mapping[str, Any],
+    record_size: int | None,
+) -> tuple[bytes | None, list[Any]]:
+    """``(image with stored values in, length edits)``.
+
+    ``None`` when no range has a value, so the decoders keep reading the
+    template bytes. With values in, the length bytes that count a
+    substituted field follow it (``saip_ef_length_fields``), so a record
+    decodes what a complete export writes.
+    """
+    from Tools.ProfilePackage.saip_ef_length_fields import (
+        apply_length_edits,
+        coding_for_file,
+        derive_length_edits,
+        substitute_ranges,
+    )
+
+    resolved = [
+        entry for entry in ranges if entry.get("resolved") and entry.get("value_hex")
+    ]
+    if not resolved:
+        return None, []
+    shown = substitute_ranges(image, resolved)
+    parent = str(row.get("parent_path") or "").rsplit("/", 1)[-1]
+    coding = coding_for_file(
+        row.get("friendly_name"), row.get("file_id"), parent_fid=parent
+    )
+    edits: list[Any] = []
+    if coding is not None:
+        unresolved = [
+            (int(entry["start"]), int(entry["end"]))
+            for entry in ranges
+            if not entry.get("resolved")
+        ]
+        edits = derive_length_edits(coding, shown, record_size, skip_ranges=unresolved)
+        if edits:
+            shown = apply_length_edits(shown, edits)
+    return shown, edits
+
+
+def _length_reconciliation_summaries(handle: Mapping[str, Any]) -> list[str]:
+    """What a complete export rewrites so length bytes follow the stored values."""
+    records = list(handle.get("inline_placeholder_records") or [])
+    values = dict(handle.get("applied_overrides") or {})
+    raw_values = dict(handle.get("inline_raw_values") or {})
+    if not records or not (values or raw_values):
+        return []
+    from Tools.ProfilePackage.saip_ef_length_fields import (
+        reconcile_document,
+        record_sizes_from_sequence,
+    )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        SaipVariableMaterializationError,
+        materialize_inline_records,
+    )
+
+    try:
+        candidate, remaining, _results = materialize_inline_records(
+            handle["decoded_document"],
+            records,
+            values,
+            raw_values=raw_values,
+            require_complete=False,
+        )
+    except SaipVariableMaterializationError:
+        return []
+    candidate.pop("__ygg_inline_placeholders__", None)
+    _document, edits = reconcile_document(
+        candidate,
+        apply=False,
+        sentinel_hexes=[str(getattr(record, "sentinel_hex", "")) for record in remaining],
+        record_sizes=record_sizes_from_sequence(handle.get("pes")),
+    )
+    return [f"{item.describe()}; a complete export writes it." for item in edits]
+
+
+def _lint_document_for_handle(
+    handle: Mapping[str, Any],
+) -> tuple[dict[str, Any], frozenset[str]]:
+    """The document the session linter reads, plus the sentinels still in it.
+
+    A template session lints what its complete export writes: stored
+    values substituted and the length bytes reconciled. Placeholders
+    without a value keep their sentinel bytes; their hexes let the length
+    rule leave those records alone.
+    """
+    document = handle["decoded_document"]
+    records = list(handle.get("inline_placeholder_records") or [])
+    if not records:
+        return document, frozenset()
+    values = dict(handle.get("applied_overrides") or {})
+    raw_values = dict(handle.get("inline_raw_values") or {})
+    remaining = records
+    if values or raw_values:
+        from Tools.ProfilePackage.saip_ef_length_fields import (
+            reconcile_document,
+            record_sizes_from_sequence,
+        )
+        from Tools.ProfilePackage.saip_variable_materialization import (
+            SaipVariableMaterializationError,
+            materialize_inline_records,
+        )
+
+        try:
+            candidate, remaining, _results = materialize_inline_records(
+                document,
+                records,
+                values,
+                raw_values=raw_values,
+                require_complete=False,
+            )
+        except SaipVariableMaterializationError:
+            remaining = records
+        else:
+            candidate.pop("__ygg_inline_placeholders__", None)
+            candidate, _edits = reconcile_document(
+                candidate,
+                sentinel_hexes=[
+                    str(getattr(record, "sentinel_hex", "")) for record in remaining
+                ],
+                record_sizes=record_sizes_from_sequence(handle.get("pes")),
+            )
+            document = candidate
+    return document, frozenset(
+        str(getattr(record, "sentinel_hex", "")).upper() for record in remaining
+    )
+
 def _assert_handle_concrete_export_allowed(handle: dict[str, Any]) -> None:
     """Enforce both the immutable session lock and persisted metadata."""
-    inline_placeholders = handle.get("inline_placeholder_records")
-    if isinstance(inline_placeholders, list) and inline_placeholders:
+    unresolved = _inline_template_state(handle)["unresolved_variables"]
+    if unresolved:
         raise ValueError(
-            "Concrete DER/HEX export is blocked while the opened template "
-            f"contains {len(inline_placeholders)} unresolved inline "
-            "placeholder occurrence(s). Materialise every variable first."
+            "Concrete DER/HEX export is blocked while the opened template has "
+            f"{len(unresolved)} unresolved inline placeholder variable(s) "
+            "without a stored value: "
+            + ", ".join(unresolved)
+            + ". Type a value in the Variables panel or define one in a "
+            "test-value list."
         )
+    _assert_export_policy_allows_concrete(handle)
+
+
+def _assert_export_policy_allows_concrete(handle: Mapping[str, Any]) -> None:
+    """Refuse concrete bytes for a guarded generated partial draft.
+
+    The unresolved-placeholder half of the session lock lives in
+    ``_assert_handle_concrete_export_allowed``; a single PE that carries no
+    placeholder may still leave the session as bytes.
+    """
     policy = handle.get("export_policy")
     if isinstance(policy, dict) and policy.get("concrete_export_allowed") is False:
         scope = str(policy.get("generation_scope") or "GENERATED_PARTIAL")
@@ -4003,32 +5272,64 @@ def _refresh_decoded_document(handle: dict[str, Any]) -> None:
     )
 
 
+# CHOICE arms whose payload is the Fcp an operator edits: a template-backed
+# ``File`` carries it as ``fileDescriptor`` (TCA SAIP v3.4.1 page 27), a
+# genericFileManagement transaction as ``createFCP``.
+_FCP_HOST_CHOICE_NAMES: frozenset[str] = frozenset({"fileDescriptor", "createFCP"})
+# Arms that rule out growing a new Fcp arm: ``doNotCreate`` names no file
+# to override, a GFM transaction addresses its files by ``createFCP``
+# position, and a ``File`` that already repeats ``fileDescriptor`` (several
+# files from one entry, page 28) leaves the target ambiguous.
+_NO_NEW_FCP_CHOICE_NAMES: frozenset[str] = frozenset(
+    {"doNotCreate", "filePath", "createFCP", "fileDescriptor"}
+)
+
+
+def _fcp_host_payload(choice_list: list[Any]) -> dict[str, Any] | None:
+    """Return the one dict payload carrying a file's FCP members, if any."""
+    hosts: list[dict[str, Any]] = []
+    for item in choice_list:
+        if not (isinstance(item, tuple) and len(item) == 2):
+            continue
+        choice_name, choice_payload = item
+        if str(choice_name) in _FCP_HOST_CHOICE_NAMES and isinstance(
+            choice_payload, dict
+        ):
+            hosts.append(choice_payload)
+    if len(hosts) == 1:
+        return hosts[0]
+    return None
+
+
 def _apply_hex_mutation(
     choice_list: Any,
     sub_key: str,
     new_bytes: bytes,
 ) -> bool:
-    """Mutate the first CHOICE tuple whose payload carries ``sub_key``.
+    """Write ``sub_key`` into the FCP of a decoded file, adding it when absent.
 
-    Returns ``True`` if a substitution was made. Operates on the live
-    pySim-decoded list of ``(choice_name, OrderedDict)`` tuples.
+    Operates on the live pySim-decoded list of ``(choice_name, OrderedDict)``
+    tuples and returns ``True`` once the value landed. Dotted ``sub_key``
+    names address one level of nesting (``proprietaryEFInfo.<leaf>``); the
+    outer container is created on demand.
 
-    Dotted ``sub_key`` names address one level of nesting —
-    ``proprietaryEFInfo.specialFileInformation``,
-    ``proprietaryEFInfo.fileDetails``,
-    ``proprietaryEFInfo.fillPattern``,
-    ``proprietaryEFInfo.repeatPattern`` and
-    ``proprietaryEFInfo.maximumFileSize``. The outer container is
-    created on demand when missing so a freshly cloned EF can grow
-    its proprietary block without a full re-encode.
+    A member the package does not carry is inserted into the arm that holds
+    the file's FCP: TCA SAIP v3.4.1 §8.3.3 overwrites a template parameter
+    by naming it in the Fcp of the PE, which is how a template-inherited
+    value becomes an explicit override. A ``File`` with no Fcp arm at all
+    (everything inherited) grows one at index 0, ahead of any fill entry:
+    §8.3.2 Figure 2 has the Fcp create the file and the fill entries that
+    follow update the last file created, so an Fcp appended after them
+    would create a second file. ``doNotCreate``, a GFM transaction and a
+    ``File`` that already repeats ``fileDescriptor`` grow nothing; the
+    caller reports the miss.
     """
     from collections import OrderedDict as _OrderedDict
 
     if isinstance(choice_list, list) is False:
         return False
     head, _, tail = sub_key.partition(".")
-    # First pass: try to update an existing entry (existing nested
-    # dict, or top-level field).
+    # First pass: an existing member, top-level or one level down.
     for index in range(len(choice_list)):
         item = choice_list[index]
         if not (isinstance(item, tuple) and len(item) == 2):
@@ -4048,32 +5349,30 @@ def _apply_hex_mutation(
             continue
         nested[tail] = new_bytes
         return True
-    # Second pass (dotted only): grow the outer container if the file
-    # has FCP siblings (fileDescriptor / fileID / efFileSize) but no
-    # proprietaryEFInfo yet. PEDocumentation ProprietaryEFInfo defines
-    # this dict as optional; SAIP packages omit it when default.
-    if tail == "":
-        return False
-    fcp_siblings = {
-        "fileDescriptor",
-        "fileID",
-        "efFileSize",
-        "shortEFID",
-        "linkPath",
-        "securityAttributesReferenced",
-    }
-    for index in range(len(choice_list)):
-        item = choice_list[index]
-        if not (isinstance(item, tuple) and len(item) == 2):
-            continue
-        _choice_name, choice_payload = item
-        if isinstance(choice_payload, dict) is False:
-            continue
-        if not any(key in choice_payload for key in fcp_siblings):
-            continue
-        choice_payload[head] = _OrderedDict([(tail, new_bytes)])
+    host = _fcp_host_payload(choice_list)
+    if host is None:
+        names = {
+            str(item[0])
+            for item in choice_list
+            if isinstance(item, tuple) and len(item) == 2
+        }
+        if names & _NO_NEW_FCP_CHOICE_NAMES:
+            return False
+        if tail == "":
+            fresh: Any = _OrderedDict([(sub_key, new_bytes)])
+        else:
+            fresh = _OrderedDict([(head, _OrderedDict([(tail, new_bytes)]))])
+        choice_list.insert(0, ("fileDescriptor", fresh))
         return True
-    return False
+    if tail == "":
+        host[sub_key] = new_bytes
+        return True
+    nested_host = host.get(head)
+    if isinstance(nested_host, dict):
+        nested_host[tail] = new_bytes
+    else:
+        host[head] = _OrderedDict([(tail, new_bytes)])
+    return True
 
 
 def _mutable_file_choice_list_for_path(
@@ -4085,11 +5384,14 @@ def _mutable_file_choice_list_for_path(
     Template-backed filesystem PEs store files directly under
     ``pe.decoded[field_path]``. Generic File Management files are
     addressed in the GUI as ``fileManagementCMD[i][j]`` where ``j`` is
-    the ``createFCP`` operation inside a transaction; for mutation the
-    live transaction itself is the correct choice-list because it owns
-    the ``("createFCP", {...})`` tuple that carries the editable FCP
-    fields. ``fillFile*`` entries in the same transaction remain
-    untouched by :func:`_apply_hex_mutation`.
+    the ``createFCP`` operation inside a transaction. One transaction
+    creates any number of files (TCA SAIP V3.4.1 §8.3.5: each
+    ``createFCP`` makes a new current EF), so the list handed back holds
+    that one ``("createFCP", {...})`` tuple: its payload is the live
+    dict, the edit lands in place, and it lands on file ``j`` -- the whole
+    transaction would let :func:`_apply_hex_mutation` write into the
+    first ``createFCP`` that already carries the member. ``None`` when
+    ``j`` is not a ``createFCP``.
     """
     decoded = getattr(pe, "decoded", None)
     if isinstance(decoded, dict) is False:
@@ -4109,7 +5411,75 @@ def _mutable_file_choice_list_for_path(
     if transaction_index < 0 or transaction_index >= len(fmc):
         return None
     transaction = fmc[transaction_index]
-    return transaction if isinstance(transaction, list) else None
+    if isinstance(transaction, list) is False:
+        return None
+    cmd_index = int(match.group(2))
+    if cmd_index < 0 or cmd_index >= len(transaction):
+        return None
+    head = transaction[cmd_index]
+    if not (
+        isinstance(head, tuple)
+        and len(head) == 2
+        and head[0] == "createFCP"
+        and isinstance(head[1], dict)
+    ):
+        return None
+    return [head]
+
+
+_SAIP_SEQUENCE_MEMBERS_CACHE: dict[str, frozenset[str]] = {}
+
+
+def _saip_sequence_members(type_name: str) -> frozenset[str]:
+    """Member names of a SAIP SEQUENCE type from pySim's compiled module.
+
+    asn1tools drops a payload key its schema does not define without a
+    word, so a member is written only after the compiled ``Fcp`` or
+    ``ProprietaryInfo`` has been seen to carry it.
+    """
+    cached = _SAIP_SEQUENCE_MEMBERS_CACHE.get(type_name)
+    if cached is not None:
+        return cached
+    _ensure_pysim_importable()
+    from pySim.esim.saip import asn1
+
+    compiled = asn1.types[type_name].type
+    members = frozenset(
+        str(member.name) for member in getattr(compiled, "root_members", ())
+    )
+    if len(members) == 0:
+        raise RuntimeError(
+            f"pySim's compiled SAIP module exposes no members for {type_name}; "
+            "refusing to edit a file against an unknown schema."
+        )
+    _SAIP_SEQUENCE_MEMBERS_CACHE[type_name] = members
+    return members
+
+
+def _assert_fcp_member_editable(sub_key: str) -> None:
+    """Refuse a sub-field the compiled SAIP schema would drop on encode."""
+    head, _, tail = sub_key.partition(".")
+    if tail == "":
+        if head in _saip_sequence_members("Fcp"):
+            return
+        hint = ""
+        if head in _saip_sequence_members("ProprietaryInfo"):
+            hint = (
+                f" (it is a proprietaryEFInfo leaf; use "
+                f"'proprietaryEFInfo.{head}')"
+            )
+        raise ValueError(
+            f"{sub_key!r} is not a member of the SAIP Fcp SEQUENCE{hint}; "
+            "the encoder would drop it silently."
+        )
+    if head == "proprietaryEFInfo" and tail in _saip_sequence_members(
+        "ProprietaryInfo"
+    ):
+        return
+    raise ValueError(
+        f"{sub_key!r} is not a member of the SAIP ProprietaryInfo SEQUENCE; "
+        "the encoder would drop it silently."
+    )
 
 
 def _normalise_hex_input(value: Any) -> bytes:
@@ -4130,22 +5500,122 @@ def _normalise_hex_input(value: Any) -> bytes:
         raise ValueError(f"invalid hex value: {error}") from error
 
 
+def _descriptor_is_record_structured(descriptor: bytes) -> bool:
+    """True when the descriptor byte codes a linear fixed or cyclic EF.
+
+    ETSI TS 102 221 V18.4.0 §11.1.1.4.3 Table 11.5: b3-b1 '010' is linear
+    fixed and '110' cyclic; a BER-TLV EF ('39') ends in '001' and a DF
+    ('38') in '000'.
+    """
+    return len(descriptor) > 0 and (descriptor[0] & 0x07) in (0x02, 0x06)
+
+
+# ETSI TS 102 221 V18.4.0 §8.2.2.2 / §8.2.2.3: at most 254 records in a
+# linear fixed or cyclic EF.
+_MAX_RECORD_COUNT = 254
+
+
+def _check_create_fcp_descriptor(descriptor: bytes) -> None:
+    """Refuse a fileDescriptor a card does not take in a createFCP.
+
+    TCA SAIP V3.4.1 §8.3.2 codes ``Fcp.fileDescriptor`` as ETSI TS 102 222,
+    ``OCTET STRING (SIZE(2..4))``. TS 102 222 V17.1.0 §6.3.2.2.1 gives a DF
+    2 bytes and §6.3.2.2.2 Table 4 gives an EF 2, or 4 with the record
+    length a linear fixed or cyclic EF requires. The number of records is
+    not part of it: tag '80' is record length x number of records. The
+    5-byte layout ending in a record count is the SELECT response of TS 102
+    221 V18.4.0 §11.1.1.4.3; a card that meets it in a profile answers
+    invalid-request-format.
+    """
+    record = _descriptor_is_record_structured(descriptor)
+    expected = 4 if record else 2
+    if len(descriptor) == expected:
+        if record and int.from_bytes(descriptor[2:4], "big") == 0:
+            raise ValueError(
+                "fileDescriptor gives a record length of 0; a linear fixed or "
+                "cyclic EF needs one of at least 1 byte."
+            )
+        return
+    if record and len(descriptor) == 5:
+        raise ValueError(
+            f"fileDescriptor {descriptor.hex().upper()} carries a record count "
+            f"({descriptor[4]}) as a fifth byte. A createFCP descriptor is 2 or "
+            "4 bytes (TS 102 222 V17.1.0 §6.3.2.2.2 Table 4); the record count "
+            "goes in efFileSize as record length x records."
+        )
+    kind = "a linear fixed or cyclic EF" if record else "this file structure"
+    raise ValueError(
+        f"fileDescriptor is {len(descriptor)} bytes; {kind} takes {expected} "
+        "(TS 102 222 V17.1.0 §6.3.2.2: descriptor byte and data coding byte, "
+        "plus the 2-byte record length of a linear fixed or cyclic EF)."
+    )
+
+
+def _minimal_size_octets(value: int) -> bytes:
+    """``value`` on the fewest octets, as ``Fcp.efFileSize`` requires.
+
+    TCA SAIP V3.4.1 §8.3.2: efFileSize "shall be encoded on the minimum
+    number of octets possible (i.e. no leading bytes set to '00' are
+    allowed)".
+    """
+    return int(value).to_bytes(max(1, (int(value).bit_length() + 7) // 8), "big")
+
+
+def _record_count_input(value: Any) -> int | None:
+    """The ``record_count`` companion of a descriptor edit, or ``None``."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        count = value
+    else:
+        text = str(value).strip()
+        if text == "":
+            return None
+        if not text.isdigit():
+            raise ValueError(f"record_count must be a decimal number, got {text!r}.")
+        count = int(text)
+    if count < 1 or count > _MAX_RECORD_COUNT:
+        raise ValueError(
+            f"record_count {count} is outside 1..{_MAX_RECORD_COUNT} "
+            "(TS 102 221 V18.4.0 §8.2.2.2 / §8.2.2.3)."
+        )
+    return count
+
+
+def _declared_ef_size(choice_list: Any, pe_file: Any) -> int | None:
+    """The size a card allocates for a file: its efFileSize, else the template's."""
+    host = _fcp_host_payload(choice_list) if isinstance(choice_list, list) else None
+    explicit = host.get("efFileSize") if isinstance(host, dict) else None
+    if isinstance(explicit, (bytes, bytearray)) and len(explicit) > 0:
+        return int.from_bytes(bytes(explicit), "big")
+    template = getattr(pe_file, "template", None)
+    rec_len = getattr(template, "rec_len", None)
+    nb_rec = getattr(template, "nb_rec", None)
+    if isinstance(rec_len, int) and isinstance(nb_rec, int) and rec_len > 0 and nb_rec > 0:
+        return rec_len * nb_rec
+    return None
+
+
 def _validate_sub_field_value(sub_key: str, raw: bytes) -> None:
     """Enforce simple length bounds on the whitelisted editable fields."""
+    if sub_key == "fileDescriptor":
+        _check_create_fcp_descriptor(raw)
+        return
     n = len(raw)
     expectations = {
         "shortEFID": (1, 1),
-        "fileDescriptor": (2, 8),
         "efFileSize": (1, 4),
         "fileID": (2, 2),
         "lcsi": (1, 1),
-        "linkPath": (1, 32),
+        # TCA SAIP v3.4.1 page 27: linkPath OCTET STRING (SIZE (0..8)); the
+        # empty form is handled by _link_path_input, never written here.
+        "linkPath": (2, 8),
         "securityAttributesReferenced": (1, 32),
         "maximumFileSize": (1, 4),
         "pinStatusTemplateDO": (1, 64),
         "proprietaryEFInfo.specialFileInformation": (1, 1),
         "proprietaryEFInfo.fileDetails": (1, 1),
-        # ETSI TS 102 222 §6.3.2.2 — fillPattern / repeatPattern carry
+        # ETSI TS 102 222 §6.3.2.2 -- fillPattern / repeatPattern carry
         # a sequence of bytes that is written once (fillPattern) or
         # tiled until the body is full (repeatPattern). 1..32 B keeps
         # the editor honest without inventing a hard upper bound.
@@ -4170,7 +5640,7 @@ def _mark_dirty(handle: dict[str, Any], pe_index: int) -> None:
 
 
 # --------------------------------------------------------------------
-# SA-G6 — per-session undo / redo snapshot stack.
+# SA-G6 -- per-session undo / redo snapshot stack.
 #
 # Mutating dispatchers call ``_history_snapshot`` immediately after
 # claiming the session handle and before mutating the document. The
@@ -4179,7 +5649,7 @@ def _mark_dirty(handle: dict[str, Any], pe_index: int) -> None:
 # any new edit (standard linear-history semantics).
 #
 # A capped stack avoids unbounded memory growth on long-lived sessions
-# — the SAIP authoring UI is interactive so 64 steps is plenty for the
+# -- the SAIP authoring UI is interactive so 64 steps is plenty for the
 # usual workflow without holding tens of megabytes of decoded JSON.
 # --------------------------------------------------------------------
 
@@ -4225,7 +5695,35 @@ def _capture_history_snapshot(handle: dict[str, Any]) -> dict[str, Any]:
         "inline_placeholder_records": _copy.deepcopy(
             list(handle.get("inline_placeholder_records") or [])
         ),
+        "inline_raw_values": _copy.deepcopy(
+            dict(handle.get("inline_raw_values") or {})
+        ),
+        "test_value_list": str(handle.get("test_value_list") or ""),
     }
+
+
+def _history_snapshot_test_value_list(snapshot: Any, current: Any) -> str:
+    """Bound list stored with a snapshot; one taken before bindings keeps ``current``."""
+    if (
+        isinstance(snapshot, dict)
+        and snapshot.get("schema") == _SESSION_HISTORY_SNAPSHOT_SCHEMA
+        and "test_value_list" in snapshot
+    ):
+        return str(snapshot.get("test_value_list") or "")
+    return str(current or "")
+
+
+def _history_snapshot_raw_values(snapshot: Any) -> dict[str, str]:
+    """Raw per-occurrence values stored with a snapshot; older entries carry none."""
+    if (
+        isinstance(snapshot, dict)
+        and snapshot.get("schema") == _SESSION_HISTORY_SNAPSHOT_SCHEMA
+    ):
+        return {
+            str(key): str(value)
+            for key, value in dict(snapshot.get("inline_raw_values") or {}).items()
+        }
+    return {}
 
 
 def _history_snapshot_parts(
@@ -4311,6 +5809,10 @@ def _with_history(dispatcher: Any) -> Any:
                     handle["pes"] = restored_pes
                     handle["applied_overrides"] = overrides
                     handle["inline_placeholder_records"] = inline_records
+                    handle["inline_raw_values"] = _history_snapshot_raw_values(snapshot)
+                    handle["test_value_list"] = _history_snapshot_test_value_list(
+                        snapshot, handle.get("test_value_list")
+                    )
                     handle["inline_variable_names"] = {
                         str(getattr(record, "variable_name", "") or "").casefold()
                         for record in inline_records
@@ -4404,7 +5906,10 @@ def _reload_source_into_handle(handle: dict[str, Any]) -> None:
         if str(getattr(record, "variable_name", "") or "").strip()
     }
     _replace_dirty_pes(handle, set())
-    handle["applied_overrides"] = {}
+    handle["applied_overrides"] = dict(package.get("inline_variable_values") or {})
+    handle["inline_raw_values"] = dict(package.get("inline_raw_values") or {})
+    handle["inline_raw_sources"] = dict(package.get("inline_raw_sources") or {})
+    handle["test_value_list"] = str(package.get("test_value_list") or "")
     if existing_block:
         # Session policy is monotonic. Editing the backing JSON outside the
         # process and pressing Revert can refresh authoring data, but can never
@@ -4420,7 +5925,7 @@ def _reload_source_into_handle(handle: dict[str, Any]) -> None:
 
 
 # ----------------------------------------------------------------------
-# Compare + variables helpers (SA-4)
+# Compare + variables helpers
 # ----------------------------------------------------------------------
 
 
@@ -4479,19 +5984,50 @@ def _file_row_signature(row: dict[str, Any]) -> str:
 def _collect_variables(
     decoded_document: dict[str, Any],
     inline_placeholder_records: Any = (),
+    stored_values: Mapping[str, Any] | None = None,
+    raw_values: Mapping[str, Any] | None = None,
+    raw_sources: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return legacy, semantic-catalog, and inline-template variables."""
+    """Return legacy, semantic-catalog, and inline-template variables.
+
+    ``raw_sources`` names, per occurrence key, the list file a stored test
+    value came from; an inline row resolved by lists then reports
+    ``test_value_source`` as ``universal``, ``bound`` (the profile's own
+    list) or ``stored`` (bytes whose list is not known).
+
+    ``stored_values`` carries the operator-supplied values for inline
+    variables (matched case-insensitively); a row with one reports
+    ``BOUND_INLINE_RESOLVED`` and shows the value. ``raw_values`` are the
+    universal test values per occurrence; a row whose every occurrence
+    has one is resolved the same way and flagged ``universal``. The
+    ``secret`` flag is the name's classification only: whoever holds the
+    profile sees every value in the workbench, and it is the logs that
+    stay clear of them.
+    """
     _ensure_pysim_importable()
     from Tools.ProfilePackage.saip_profile_template import (
         extract_template_placeholder_names,
     )
     from Tools.ProfilePackage.saip_variable_materialization import (
         catalog_variables,
+        inline_record_key,
         variable_is_secret,
     )
 
     token_defs = decoded_document.get("__ygg_token_defs__")
     style = decoded_document.get("__ygg_placeholder_style__", "brace")
+
+    from Tools.ProfilePackage.saip_hex_template import format_placeholder_literal
+
+    def typed_literals(occurrences: list[Any]) -> list[str]:
+        """The occurrences' literals in the typed spelling, first seen first."""
+        return list(
+            dict.fromkeys(
+                format_placeholder_literal(str(getattr(item, "literal", "") or ""), "typed")
+                for item in occurrences
+                if str(getattr(item, "literal", "") or "").strip()
+            )
+        )
 
     names_from_doc = extract_template_placeholder_names(
         decoded_document.get("sections") or {}
@@ -4532,6 +6068,23 @@ def _collect_variables(
             "masked": secret,
         }
 
+    stored_folded: dict[str, str] = {
+        str(name).strip().casefold(): str(value)
+        for name, value in dict(stored_values or {}).items()
+        if str(value) != ""
+    }
+    raw_by_key: dict[str, str] = {
+        str(key).strip().casefold(): str(value)
+        for key, value in dict(raw_values or {}).items()
+        if str(value) != ""
+    }
+    sources_by_key: dict[str, str] = {
+        str(key).strip().casefold(): str(value)
+        for key, value in dict(raw_sources or {}).items()
+    }
+    from Tools.ProfilePackage.saip_universal_tokens import universal_tokens_path
+
+    universal_list_path = str(universal_tokens_path())
     inline_groups: dict[str, list[Any]] = {}
     for record in inline_placeholder_records or []:
         record_name = str(getattr(record, "variable_name", "") or "").strip()
@@ -4549,18 +6102,45 @@ def _collect_variables(
             }
         )
         secret = variable_is_secret(name)
+        stored_value = stored_folded.get(normalized_name)
+        raw_hex = [raw_by_key.get(inline_record_key(item).casefold()) for item in records]
+        universal = stored_value is None and all(raw_hex)
+        test_value_source = ""
+        if universal:
+            stored_value = " / ".join(sorted({str(item) for item in raw_hex}))
+            source_paths = {
+                sources_by_key.get(inline_record_key(item).casefold(), "") for item in records
+            }
+            if "" in source_paths:
+                test_value_source = "stored"
+            elif source_paths == {universal_list_path}:
+                test_value_source = "universal"
+            else:
+                test_value_source = "bound"
+        inline_status = (
+            "BOUND_INLINE_RESOLVED"
+            if stored_value is not None
+            else "BOUND_INLINE_UNRESOLVED"
+        )
         existing = variables_by_name.get(normalized_name)
         if existing is not None:
             existing.update(
                 {
-                    "status": "BOUND_INLINE_UNRESOLVED",
+                    "status": inline_status,
                     "used_in_document": True,
                     "inline_occurrence_count": len(records),
                     "source": "semantic_catalog+inline_varder",
                     "secret": bool(existing.get("secret")) or secret,
                     "masked": bool(existing.get("secret")) or secret,
+                    "universal": universal,
+                    "test_value_source": test_value_source,
+                    "literals": typed_literals(records),
                 }
             )
+            if stored_value is not None:
+                existing["defined"] = True
+                existing["value"] = stored_value
+                existing["masked"] = False
             continue
         kind = "/".join(type_names)
         if modifiers:
@@ -4569,7 +6149,7 @@ def _collect_variables(
             "name": name,
             "label": name,
             "aliases": [],
-            "value": "",
+            "value": "" if stored_value is None else stored_value,
             "kind": kind,
             "input_format": type_names[0] if len(type_names) == 1 else "TYPED_INLINE",
             "constraints": {
@@ -4579,14 +6159,17 @@ def _collect_variables(
             },
             "classification": "SECRET" if secret else "INLINE_TEMPLATE_VALUE",
             "required": True,
-            "status": "BOUND_INLINE_UNRESOLVED",
-            "defined": False,
+            "status": inline_status,
+            "defined": stored_value is not None,
             "used_in_document": True,
             "binding_count": len(records),
             "inline_occurrence_count": len(records),
             "source": "inline_varder",
             "secret": secret,
-            "masked": secret,
+            "masked": False,
+            "universal": universal,
+            "test_value_source": test_value_source,
+            "literals": typed_literals(records),
         }
 
     all_names = set(defs_map.keys()) | {str(n) for n in names_from_doc}
@@ -4603,7 +6186,7 @@ def _collect_variables(
         )
         existing = variables_by_name.get(name.casefold())
         if existing is not None:
-            existing["defined"] = name in defs_map
+            existing["defined"] = bool(existing.get("defined")) or name in defs_map
             existing["used_in_document"] = bool(existing["used_in_document"]) or (
                 name in names_from_doc
             )
@@ -4699,7 +6282,9 @@ def _dispatch_open_package(
     pes = package["pes"]
     decoded_document = package["decoded_document"]
     encoding = package["encoding"]
-    warnings = package.get("warnings") or []
+    warnings = list(package.get("warnings") or []) + list(
+        package.get("inline_variable_warnings") or []
+    )
     inline_placeholder_records = package.get("inline_placeholder_records") or []
     raw_input = package.get("raw_input_bytes")
     size_bytes = (
@@ -4717,6 +6302,10 @@ def _dispatch_open_package(
         "size_bytes": size_bytes,
         "load_warnings": warnings,
         "inline_placeholder_records": inline_placeholder_records,
+        "applied_overrides": dict(package.get("inline_variable_values") or {}),
+        "inline_raw_values": dict(package.get("inline_raw_values") or {}),
+        "inline_raw_sources": dict(package.get("inline_raw_sources") or {}),
+        "test_value_list": str(package.get("test_value_list") or ""),
     }
     _ensure_session_state(handle)
     _apply_generation_session_policy(handle)
@@ -4733,6 +6322,8 @@ def _dispatch_open_package(
         kind="saip",
         handle=handle,
         close=lambda: None,
+        idle_timeout_s=_AUTHORING_SESSION_IDLE_TIMEOUT_S,
+        max_of_kind=_AUTHORING_SESSION_CAP,
         metadata={
             "source_path": str(resolved),
             "encoding": encoding,
@@ -4756,6 +6347,7 @@ def _dispatch_open_package(
         "inline_placeholder_count": len(inline_placeholder_records),
     }
     response.update(_generation_response_fields(handle))
+    response.update(_inline_template_response_fields(handle))
     response.update(_dirty_response_fields(handle))
     return response
 
@@ -4869,6 +6461,659 @@ def _dispatch_list_pes(
 
 
 @_with_session_lock
+def _pe_header_summary(pe: Any) -> dict[str, Any]:
+    """The PEHeader of ``pe``: its ``identification`` and ``mandated`` flag.
+
+    TCA SAIP v3.4.1 §8.1.3 (page 15): every PE but the ProfileHeader opens
+    with a PEHeader; ``mandated`` (NULL, OPTIONAL) makes the eUICC abort
+    the installation when it does not support the PE.
+    """
+    decoded = getattr(pe, "decoded", None)
+    pe_type = str(getattr(pe, "type", "") or "")
+    key = str(getattr(pe, "header_name", "") or "") if pe_type != "header" else ""
+    header = decoded.get(key) if isinstance(decoded, dict) and key else None
+    if isinstance(header, dict) is False:
+        return {"key": "", "identification": None, "mandated": False, "editable": False}
+    identification = header.get("identification")
+    return {
+        "key": key,
+        "identification": identification if isinstance(identification, int) else None,
+        "mandated": "mandated" in header,
+        "editable": True,
+    }
+
+
+def _dispatch_set_pe_mandated(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    mandated: Any = None,
+) -> dict[str, Any]:
+    """Set or clear the ``mandated`` flag of one PE's PEHeader (page 15)."""
+    from yggdrasim_common.gui_server.sessions import get_manager
+
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    try:
+        idx = int(pe_index)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"pe_index must be an integer: {pe_index!r}") from error
+    if isinstance(mandated, bool):
+        flag = mandated
+    else:
+        text = str(mandated or "").strip().lower()
+        if text not in ("true", "false", "1", "0", "yes", "no"):
+            raise ValueError(f"mandated must be true or false: {mandated!r}")
+        flag = text in ("true", "1", "yes")
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    _assert_handle_mutation_allowed(handle)
+    pes = handle["pes"]
+    if idx < 0 or idx >= len(pes.pe_list):
+        raise IndexError(f"pe_index {idx} out of range 0..{len(pes.pe_list) - 1}")
+    pe = pes.pe_list[idx]
+    summary = _pe_header_summary(pe)
+    if summary["editable"] is False:
+        raise ValueError(f"the PE at index {idx} carries no PEHeader to mark mandated.")
+    header = pe.decoded[summary["key"]]
+    if flag:
+        header["mandated"] = None
+    else:
+        header.pop("mandated", None)
+    _mark_dirty(handle, idx)
+    _refresh_decoded_document(handle)
+    return {
+        "session_id": sid,
+        "pe_index": idx,
+        "pe_header": _pe_header_summary(pe),
+        "summary": f"PE {idx} {'mandated' if flag else 'not mandated'}.",
+    }
+
+
+# ITU-T X.660 dotted OID: first arc 0..2, then at least one more arc.
+_OID_TEXT_RE = re.compile(r"^[0-2](\.(?:0|[1-9][0-9]*))+$")
+
+
+def _nonstandard_summary(section: Mapping[str, Any]) -> dict[str, Any]:
+    content = section.get("content")
+    return {
+        "issuer_id": str(section.get("issuerID") or ""),
+        "content_hex": bytes(content).hex().upper() if isinstance(content, (bytes, bytearray)) else "",
+    }
+
+
+def _dispatch_set_nonstandard_field(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    field: Any = None,
+    value: Any = None,
+) -> dict[str, Any]:
+    """Set ``issuerID`` or ``content`` of a PE-NonStandard.
+
+    TCA SAIP v3.4.1 §8.9 (page 64): ``issuerID OBJECT IDENTIFIER`` names who
+    defines the ``content OCTET STRING``; both are mandatory, and the content
+    may be empty.
+    """
+    sid, handle, section_key, section, idx = _typed_pe_dispatch_prelude(
+        session_id, pe_index, allowed_bases={"nonStandard"}, label="nonStandard",
+    )
+    field_text = str(field or "").strip().lower()
+    text = str(value or "").strip()
+    if field_text in ("issuer_id", "issuerid"):
+        if _OID_TEXT_RE.match(text) is None:
+            raise ValueError(f"issuerID must be a dotted object identifier such as 1.3.6.1.4.1; got {text!r}.")
+        arcs = [int(arc) for arc in text.split(".")]
+        if arcs[0] < 2 and arcs[1] > 39:
+            raise ValueError(f"issuerID arc 2 must be 0..39 under arc {arcs[0]} (ITU-T X.660); got {text!r}.")
+        section["issuerID"] = text
+        summary = f"issuerID set to {text}."
+    elif field_text == "content":
+        compact = re.sub(r"\s+|0x|0X|-|:", "", text)
+        if len(compact) % 2 != 0 or (compact and _HEX_LITERAL_RE.match(compact) is None):
+            raise ValueError("content must be hex bytes.")
+        section["content"] = bytes.fromhex(compact)
+        summary = f"content set ({len(compact) // 2} bytes)."
+    else:
+        raise ValueError(f"unknown PE-NonStandard field {field!r}; use issuer_id or content.")
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=_nonstandard_summary,
+    )
+
+
+def _dispatch_aka_configure(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    algorithm: Any = None,
+    key_hex: Any = None,
+    opc_hex: Any = "",
+    number_of_keccak: Any = None,
+    auth_counter_max_hex: Any = "",
+    sqn_init_hex: Any = "",
+    algorithm_options_hex: Any = "",
+    rotation_constants_hex: Any = "",
+    xoring_constants_hex: Any = "",
+) -> dict[str, Any]:
+    """Set the algorithm of a PE-AKAParameter (TCA SAIP v3.4.1 §8.4.2).
+
+    The same validation and write as the CLI's PROVISION-AKA wizard
+    (``saip_aka_wizard.configure_aka_section``).
+    """
+    from Tools.ProfilePackage.saip_aka_mapping import get_choice
+    from Tools.ProfilePackage.saip_aka_wizard import configure_aka_section
+
+    sid, handle, section_key, section, idx = _typed_pe_dispatch_prelude(
+        session_id, pe_index, allowed_bases={"akaParameter"}, label="akaParameter",
+    )
+    summary = configure_aka_section(
+        section,
+        algorithm=str(algorithm or ""),
+        key_hex=key_hex,
+        opc_hex=opc_hex,
+        number_of_keccak=number_of_keccak,
+        auth_counter_max_hex=auth_counter_max_hex,
+        sqn_init_hex=sqn_init_hex,
+        algorithm_options_hex=algorithm_options_hex,
+        rotation_constants_hex=rotation_constants_hex,
+        xoring_constants_hex=xoring_constants_hex,
+    )
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=get_choice,
+    )
+
+
+def _structure_prelude(
+    session_id: Any,
+    pe_index: Any,
+) -> tuple[str, dict[str, Any], str, dict[str, Any], int, str]:
+    """``(sid, handle, section_key, section, pe_index, pe_type)`` of any PE."""
+    from yggdrasim_common.gui_server.sessions import get_manager
+
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    try:
+        idx = int(pe_index)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"pe_index must be an integer: {pe_index!r}") from error
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    keys = _sections_by_pe_index(handle["decoded_document"])
+    if idx < 0 or idx >= len(keys):
+        raise IndexError(f"pe_index {idx} out of range 0..{len(keys) - 1}")
+    section_key = keys[idx]
+    section = handle["decoded_document"].get("sections", {}).get(section_key)
+    if isinstance(section, dict) is False:
+        raise LookupError(f"section {section_key!r} is not a dict.")
+    return sid, handle, section_key, section, idx, _section_key_base(section_key)
+
+
+_STRUCTURE_PLACEHOLDER_REASON = (
+    "Holds a template placeholder; change or unbind it in the Variables panel."
+)
+
+
+def _structure_template_marks(handle: Mapping[str, Any], section: Any) -> dict[str, int]:
+    """How often each template placeholder of the session sits in one element.
+
+    Inline placeholders live in the document as sentinel byte runs, found by
+    search like ``_drop_placeholders_missing_from`` does; bound names are the
+    ``__ygg_placeholder__`` references. Keys are what the operator reads.
+    """
+    marks: dict[str, int] = {}
+    joined = "|".join(_strings_in_tree(section)).upper()
+    for record in handle.get("inline_placeholder_records") or []:
+        sentinel = str(getattr(record, "sentinel_hex", "") or "").upper()
+        if sentinel and sentinel in joined:
+            literal = str(getattr(record, "literal", "") or sentinel)
+            marks[literal] = marks.get(literal, 0) + joined.count(sentinel)
+    for name in _walk_for_dict_placeholder_bindings(section):
+        marks[name] = marks.get(name, 0) + 1
+    return marks
+
+
+def _mark_structure_placeholders(handle: Mapping[str, Any], tree: dict[str, Any]) -> None:
+    """Show a leaf holding a template sentinel as its literal, read-only.
+
+    An Apply over it would replace the sentinel and lose the placeholder, so
+    the Structure view leaves those leaves to the template-aware editors.
+    """
+    records = list(handle.get("inline_placeholder_records") or [])
+    if not records:
+        return
+    from Tools.ProfilePackage.saip_hex_template import splice_literals_into_hex_text
+
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.get("children") or [])
+        value = node.get("value")
+        if node.get("kind") != "octets" or not isinstance(value, str) or not value:
+            continue
+        shown, hits = splice_literals_into_hex_text(value, records)
+        if hits:
+            node["value"] = shown
+            node["read_only"] = True
+            node["read_only_reason"] = _STRUCTURE_PLACEHOLDER_REASON
+            node["template_placeholder"] = True
+
+
+def _structure_fingerprint(handle: Mapping[str, Any], section_key: str) -> str | None:
+    """A digest of the element as the profile holds it; ``None`` once it is gone.
+
+    pySim normalises a section in place the first time it encodes the element
+    (it drops members equal to their DEFAULT, rebuilds a key list), so the
+    digest is taken after one encode, which leaves it as it is from then on.
+    """
+    document = handle.get("decoded_document") or {}
+    section = (document.get("sections") or {}).get(section_key)
+    if section is None:
+        return None
+    keys = _sections_by_pe_index(document)
+    pe_list = list(getattr(handle.get("pes"), "pe_list", None) or [])
+    if section_key in keys and keys.index(section_key) < len(pe_list):
+        pe = pe_list[keys.index(section_key)]
+        if getattr(pe, "decoded", None) is section:
+            try:
+                pe.to_der()
+            except Exception:  # noqa: BLE001 -- an element that does not encode keeps its shape
+                pass
+    return hashlib.sha256(repr(section).encode("utf-8")).hexdigest()
+
+
+def _structure_drafts(handle: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The Structure view's drafts: edits pySim cannot build yet, per element.
+
+    A draft is bound to the committed section it started from and dropped as
+    soon as that section changes (undo, another editor) or goes, so the store
+    never holds more than one entry per element of the session.
+    """
+    drafts = handle.setdefault("structure_drafts", {})
+    # Keys whose draft went stale, until the view of that element says so;
+    # bounded like the drafts, by the elements of the session.
+    dropped = handle.setdefault("structure_drafts_dropped", set())
+    for key in list(drafts):
+        entry = drafts.get(key)
+        if entry is not None and entry.get("base") != _structure_fingerprint(handle, key):
+            drafts.pop(key, None)
+            dropped.add(key)
+    sections = (handle.get("decoded_document") or {}).get("sections") or {}
+    dropped.intersection_update(sections)
+    return drafts
+
+
+def _structure_draft_dropped(handle: dict[str, Any], section_key: str) -> bool:
+    """Whether this element's draft went stale since its view last said so."""
+    dropped = handle.get("structure_drafts_dropped") or set()
+    if section_key in dropped:
+        dropped.discard(section_key)
+        return True
+    return False
+
+
+def _structure_decoded_entries(
+    handle: Mapping[str, Any],
+    section_key: str,
+    section: Mapping[str, Any],
+) -> dict[tuple[Any, ...], dict[str, Any]]:
+    """The decoded-field entries of one element, keyed by their tagged path."""
+    from Tools.ProfilePackage.saip_decoded_edit import enumerate_pe_decodable_fields
+    from Tools.ProfilePackage.saip_json_codec import jsonify_document
+
+    document = dict(handle.get("decoded_document") or {})
+    document["sections"] = {section_key: section}
+    try:
+        tagged = jsonify_document(document)
+        entries = enumerate_pe_decodable_fields(
+            (tagged.get("sections") or {}).get(section_key), pe_section_key=section_key,
+        )
+    except Exception:  # noqa: BLE001 -- captions are a convenience; the fields stay editable
+        return {}
+    return {tuple(entry.get("rel_path") or []): entry for entry in entries}
+
+
+def _attach_decoded_captions(
+    tree: dict[str, Any],
+    pe_type: str,
+    entries: Mapping[tuple[Any, ...], Mapping[str, Any]],
+) -> None:
+    """Give each held leaf the summary its decoder reads from the bytes.
+
+    A payload with structure of its own (a TLV list, DGI records) is marked
+    ``rich`` unless the leaf has a widget already: the editor then offers
+    the decoded form of that one field.
+    """
+    from Tools.ProfilePackage.saip_structure_edit import SaipStructureError, tagged_path
+
+    if not entries:
+        return
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.get("children") or [])
+        if not node.get("present") or node.get("children") is not None:
+            continue
+        try:
+            entry = entries.get(tuple(tagged_path(pe_type, list(node.get("path") or []))))
+        except SaipStructureError:
+            continue
+        if not entry:
+            continue
+        model = entry.get("model") if isinstance(entry.get("model"), dict) else {}
+        payload = model.get("payload") if isinstance(model.get("payload"), dict) else {}
+        structured = any(
+            isinstance(value, (list, dict)) for key, value in payload.items() if key != "summary"
+        )
+        node["decoded"] = {
+            "summary": str(payload.get("summary") or ""),
+            "rel_path": list(entry.get("rel_path") or []),
+            "rich": structured and "widget" not in node,
+        }
+
+
+def _structure_payload(
+    sid: str,
+    handle: dict[str, Any],
+    section_key: str,
+    section: dict[str, Any],
+    idx: int,
+    pe_type: str,
+    draft: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    from Tools.ProfilePackage.saip_structure_edit import structure
+
+    encode_error = ""
+    pe_hex = ""
+    try:
+        pe_hex = bytes(handle["pes"].pe_list[idx].to_der()).hex().upper()
+    except Exception as error:  # noqa: BLE001 -- the reason is shown to the operator
+        encode_error = f"{type(error).__name__}: {error}"
+    # A template session whose policy blocks concrete export shows no bytes,
+    # as saip.show_pe does.
+    policy = handle.get("export_policy")
+    if isinstance(policy, dict) and policy.get("concrete_export_allowed") is False:
+        pe_hex = ""
+    from Tools.ProfilePackage.saip_field_choices import (
+        annotate,
+        profile_aids,
+        template_choices,
+    )
+
+    shown = draft["section"] if draft else section
+    tree = structure(shown, pe_type)
+    annotate(
+        tree, pe_type,
+        aids=profile_aids(handle["decoded_document"]),
+        templates=template_choices(str(shown.get("templateID") or "")),
+    )
+    _attach_decoded_captions(tree, pe_type, _structure_decoded_entries(handle, section_key, shown))
+    _mark_structure_placeholders(handle, tree)
+    if draft:
+        # The bytes are the profile's, not the draft's.
+        pe_hex = ""
+    return {
+        "session_id": sid,
+        "pe_index": idx,
+        "section_key": section_key,
+        "pe_type": pe_type,
+        "tree": tree,
+        "encode_error": encode_error,
+        "draft": {"error": str(draft.get("error") or "")} if draft else None,
+        # The element as it encodes now, so the editor shows the bytes it builds.
+        "pe_hex": pe_hex,
+        "pe_size": len(pe_hex) // 2,
+    }
+
+
+def _structure_path(path: Any) -> list[Any]:
+    """A path from the editor: member names, list indices, alternative names."""
+    if path is None or path == "":
+        return []
+    if isinstance(path, str):
+        try:
+            path = json.loads(path)
+        except ValueError as error:
+            raise ValueError(f"path must be a JSON list: {path!r}") from error
+    if isinstance(path, list) is False:
+        raise ValueError("path must be a list of member names and indices.")
+    steps: list[Any] = []
+    for step in path:
+        if isinstance(step, bool) or not isinstance(step, (str, int)):
+            raise ValueError(f"path step {step!r} is neither a name nor an index.")
+        steps.append(step)
+    return steps
+
+
+def _dispatch_pe_structure(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+) -> dict[str, Any]:
+    """Every member TCA SAIP v3.4.1 section 8 gives one PE, present or not."""
+    _ensure_pysim_importable()
+    sid, handle, section_key, section, idx, pe_type = _structure_prelude(session_id, pe_index)
+    draft = _structure_drafts(handle).get(section_key)
+    payload = _structure_payload(sid, handle, section_key, section, idx, pe_type, draft=draft)
+    payload["draft_dropped"] = _structure_draft_dropped(handle, section_key)
+    return payload
+
+
+def _structure_bind_placeholder(
+    ctx: ActionContext,
+    sid: str,
+    handle: dict[str, Any],
+    section_key: str,
+    committed: dict[str, Any],
+    idx: int,
+    pe_type: str,
+    path: list[Any],
+    literal: str,
+) -> dict[str, Any]:
+    """Bind a placeholder literal typed into the leaf at ``path``.
+
+    Either grammar is taken (``parse_placeholder_literal``); the field shows
+    the typed form ``{name:TYPE:length[:modifier]}`` afterwards.
+
+    The binding is ``saip.add_variable_to_pe``'s. A field the element does
+    not hold yet, or one of another length, is first set to that many zero
+    bytes; the variable then starts without a value instead of taking
+    those. A failed binding takes that first step back.
+    """
+    from Tools.ProfilePackage.saip_hex_template import (
+        parse_placeholder_literal,
+        splice_literals_into_hex_text,
+    )
+    from Tools.ProfilePackage.saip_structure_edit import (
+        _is_present,
+        _locate,
+        apply,
+        load_schema,
+        tagged_path,
+    )
+    from Tools.ProfilePackage.saip_json_codec import build_profile_sequence_from_document
+    from yggdrasim_common.gui_server.actions.registry import get_registry
+
+    import copy as _copy
+
+    text = literal.strip()
+    parts = parse_placeholder_literal(text) if text[:1] in "{[" else None
+    if parts is None:
+        raise ValueError(
+            "A field takes one placeholder, {name:TYPE:length[:modifier]} or "
+            "[nameTYPElength], and nothing else."
+        )
+    if section_key in _structure_drafts(handle):
+        raise ValueError("This element has a draft; land or discard it before binding a placeholder.")
+    length = int(parts["byte_length"])
+    schema = load_schema()
+    held = _locate(schema, pe_type, committed, path)[1] if _is_present(schema, pe_type, committed, path) else None
+    if isinstance(held, (bytes, bytearray)):
+        records = list(handle.get("inline_placeholder_records") or [])
+        if records and splice_literals_into_hex_text(bytes(held).hex().upper(), records)[1]:
+            raise ValueError(
+                "This field holds a template placeholder already; change or unbind it in "
+                "the Variables panel."
+            )
+    resized = not isinstance(held, (bytes, bytearray)) or len(held) != length
+    if resized:
+        work = _copy.deepcopy(committed)
+        apply(work, pe_type, "set", path, value="00" * length)
+        document = handle["decoded_document"]
+        trial = dict(document)
+        trial["sections"] = dict(document.get("sections") or {})
+        trial["sections"][section_key] = work
+        try:
+            built = build_profile_sequence_from_document(trial, workspace_root=_workspace_root())
+        except Exception as error:  # noqa: BLE001 -- refused with pySim's reason
+            raise ValueError(
+                f"pySim cannot build the element with this field at {length} bytes, so the "
+                f"placeholder was not bound: {error}"
+            ) from error
+        _history_snapshot(handle)
+        document["sections"][section_key] = work
+        handle["pes"] = built
+        _mark_dirty(handle, idx)
+    dotted = ".".join(str(step) for step in tagged_path(pe_type, path))
+    try:
+        result = get_registry()._specs["saip.add_variable_to_pe"].dispatcher(
+            ctx,
+            session_id=sid,
+            pe_index=idx,
+            field_path=dotted,
+            variable_name=parts["variable"],
+            placeholder_type=parts["type"],
+            modifier=parts["modifier"] or "",
+            keep_value=not resized,
+        )
+    except Exception:
+        if resized:
+            _dispatch_undo(ctx, session_id=sid)
+        raise
+    section = handle["decoded_document"]["sections"][section_key]
+    payload = _structure_payload(sid, handle, section_key, section, idx, pe_type)
+    payload["summary"] = str(result.get("summary") or f"{result.get('literal', text)} bound.")
+    payload["warnings"] = list(result.get("warnings") or [])
+    return payload
+
+
+def _dispatch_pe_structure_edit(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    op: Any = None,
+    path: Any = None,
+    name: Any = None,
+    value: Any = None,
+    index: Any = None,
+    alternative: Any = None,
+) -> dict[str, Any]:
+    """One schema-checked edit of a PE (``saip_structure_edit.apply``).
+
+    The edit lands in the profile once pySim builds the profile with it, as
+    one undo step. Until then it is held as the element's draft with pySim's
+    reason (a member often needs several edits before it builds: a key list
+    its key type and data, a template file its sizes) and the profile stays
+    as it was; ``discard_draft`` drops it. An edit that would remove a
+    template placeholder is refused.
+    """
+    import copy as _copy
+
+    from Tools.ProfilePackage.saip_hex_template import detect_inline_placeholders
+    from Tools.ProfilePackage.saip_json_codec import (
+        build_profile_sequence_from_document,
+    )
+    from Tools.ProfilePackage.saip_structure_edit import apply
+
+    _ensure_pysim_importable()
+    sid, handle, section_key, committed, idx, pe_type = _structure_prelude(session_id, pe_index)
+    _assert_handle_mutation_allowed(handle)
+    drafts = _structure_drafts(handle)
+    draft_dropped = _structure_draft_dropped(handle, section_key)
+    op_text = str(op or "").strip()
+    if op_text == "discard_draft":
+        if drafts.pop(section_key, None) is None:
+            raise ValueError("This element has no draft to discard.")
+        payload = _structure_payload(sid, handle, section_key, committed, idx, pe_type)
+        payload["summary"] = "Draft discarded."
+        return payload
+    if isinstance(value, str) and detect_inline_placeholders(value):
+        if op_text != "set":
+            raise ValueError("A template placeholder is typed into a field.")
+        return _structure_bind_placeholder(
+            ctx, sid, handle, section_key, committed, idx, pe_type, _structure_path(path), value,
+        )
+    draft = drafts.get(section_key)
+    work = _copy.deepcopy(draft["section"] if draft else committed)
+    steps = _structure_path(path)
+    summary = apply(
+        work, pe_type, op_text, steps,
+        name=name, value=value, index=index, alternative=alternative,
+    )
+    if op_text == "set" and len(steps) == 2 and steps[0] == "sdPersoData":
+        # A record is whole DGI objects, as saip.apply_decoded_edit checks.
+        from Tools.ProfilePackage.saip_dgi_decode import validate_dgi_stream
+
+        record = (work.get("sdPersoData") or [])[steps[1]]
+        try:
+            validate_dgi_stream(bytes(record))
+        except ValueError as error:
+            raise ValueError(f"sdPersoData record: {error}") from error
+    if pe_type == "application":
+        # TCA SAIP v3.4.1 §8.7.1: the instances install the PE's one package.
+        from Tools.ProfilePackage.saip_application_edit import keep_one_package
+
+        followed = keep_one_package(draft["section"] if draft else committed, work)
+        if followed:
+            summary = f"{summary} {followed}"
+    marks_before = _structure_template_marks(handle, committed)
+    marks_after = _structure_template_marks(handle, work)
+    lost = sorted(
+        literal for literal, count in marks_before.items() if marks_after.get(literal, 0) < count
+    )
+    if lost:
+        raise ValueError(
+            "This edit would remove the template placeholder "
+            + ", ".join(lost)
+            + " from the element; change or unbind it in the Variables panel first."
+        )
+    document = handle["decoded_document"]
+    trial = dict(document)
+    trial["sections"] = dict(document.get("sections") or {})
+    trial["sections"][section_key] = work
+    try:
+        built = build_profile_sequence_from_document(trial, workspace_root=_workspace_root())
+    except Exception as error:  # noqa: BLE001 -- held with pySim's reason
+        drafts[section_key] = {
+            "section": work,
+            "base": _structure_fingerprint(handle, section_key),
+            "error": str(error),
+        }
+        payload = _structure_payload(
+            sid, handle, section_key, committed, idx, pe_type, draft=drafts[section_key],
+        )
+        payload["summary"] = summary + " Held as a draft until pySim builds the element."
+        payload["draft_dropped"] = draft_dropped
+        return payload
+    _history_snapshot(handle)
+    document["sections"][section_key] = work
+    handle["pes"] = built
+    drafts.pop(section_key, None)
+    _mark_dirty(handle, idx)
+    payload = _structure_payload(sid, handle, section_key, work, idx, pe_type)
+    payload["summary"] = summary
+    payload["draft_dropped"] = draft_dropped
+    return payload
+
+
 def _dispatch_show_pe(
     ctx: ActionContext,
     *,
@@ -4892,19 +7137,12 @@ def _dispatch_show_pe(
         raise IndexError(f"pe_index {idx} out of range 0..{len(pes.pe_list) - 1}")
 
     pe = pes.pe_list[idx]
-    decoded = _jsonify_decoded(getattr(pe, "decoded", {}))
-    inline_placeholder_records = handle.get("inline_placeholder_records") or []
-    if len(inline_placeholder_records) > 0:
-        try:
-            from Tools.ProfilePackage.saip_hex_template import (
-                splice_literals_into_tagged_document,
-            )
+    # ``_jsonify_decoded`` flattens bytes to plain hex strings, so the
+    # placeholder splice has to run on that projection: the tagged-hex
+    # walker never matched here and sentinel bytes reached the JSON tab.
+    decoded = _splice_inline_literals(handle, _jsonify_decoded(getattr(pe, "decoded", {})))
 
-            splice_literals_into_tagged_document(decoded, inline_placeholder_records)
-        except Exception:
-            pass
-
-    # Encoded PE bytes — pySim ``ProfileElement.to_der()`` re-encodes
+    # Encoded PE bytes -- pySim ``ProfileElement.to_der()`` re-encodes
     # the in-memory dict back through asn1tools so the Editor tab can
     # surface a "Reconstructed PE bytes" card the same way the file-
     # detail Data tab surfaces the reconstructed file image. Best-
@@ -4914,6 +7152,7 @@ def _dispatch_show_pe(
     # card instead of crashing.
     pe_hex = ""
     pe_byte_len = 0
+    pe_encode_error = ""
     preview_blocked = bool(
         isinstance(handle.get("export_policy"), dict)
         and handle["export_policy"].get("concrete_export_allowed") is False
@@ -4924,9 +7163,26 @@ def _dispatch_show_pe(
             if isinstance(encoded_bytes, (bytes, bytearray)):
                 pe_hex = bytes(encoded_bytes).hex().upper()
                 pe_byte_len = len(encoded_bytes)
-        except Exception:
+        except Exception as error:  # noqa: BLE001 -- the reason is shown to the operator
             pe_hex = ""
             pe_byte_len = 0
+            pe_encode_error = f"{type(error).__name__}: {error}"
+    # Template sessions also get the bytes with each sentinel run replaced
+    # by its placeholder literal, plus the byte ranges, so the bytes card
+    # can label the placeholders instead of printing sentinel hex.
+    pe_hex_template = ""
+    pe_inline_placeholders: list[dict[str, Any]] = []
+    if pe_hex and handle.get("inline_placeholder_records"):
+        from Tools.ProfilePackage.saip_hex_template import (
+            splice_literals_into_hex_text,
+        )
+
+        pe_inline_placeholders = _inline_placeholder_ranges(handle, bytes.fromhex(pe_hex))
+        if pe_inline_placeholders:
+            pe_hex_template, _hits = splice_literals_into_hex_text(
+                pe_hex,
+                handle["inline_placeholder_records"],
+            )
 
     # Enrich securityDomain-like PEs with decoded DGI records so the
     # GUI can render the sdPersoData as connectivity / key-object tables
@@ -4966,6 +7222,14 @@ def _dispatch_show_pe(
             tar_summary = app_param_summary.get("tar_values")
             if isinstance(tar_summary, list) and tar_summary:
                 decoded["_tar_summary"] = tar_summary
+        instance_list = decoded.get("instanceList")
+        if isinstance(instance_list, list) and len(instance_list) > 0:
+            # PE-Application: each instance has its own parameter editor.
+            decoded = dict(decoded)
+            decoded["_instance_parameter_summaries"] = [
+                _application_parameter_summary({"instance": entry}) if isinstance(entry, dict) else None
+                for entry in instance_list
+            ]
 
     # Look up the section_key so the GUI can drive
     # ``saip.list_decoded_fields`` / ``saip.apply_decoded_edit`` for
@@ -4982,12 +7246,18 @@ def _dispatch_show_pe(
         "label": _pe_display_label(pe),
         "decoded": decoded,
         # Encoded form for the Editor tab's "PE bytes" card. Empty
-        # when ``pe.to_der()`` raised — the GUI hides the card in
+        # when ``pe.to_der()`` raised -- the GUI hides the card in
         # that case rather than rendering a misleading 0-byte image.
         "pe_hex": pe_hex,
         "pe_size": pe_byte_len,
+        # Why ``pe_hex`` is empty when the element does not encode yet
+        # (a member it needs is still missing), so the editor can say so.
+        "pe_encode_error": pe_encode_error,
+        "pe_header": _pe_header_summary(pe),
         "pe_hex_export_blocked": preview_blocked,
-        # Phase 3: lets the GUI gate the "Add file…" button on PEs that
+        "pe_hex_template": pe_hex_template,
+        "pe_inline_placeholders": pe_inline_placeholders,
+        # Lets the GUI gate the "Add file..." button on PEs that
         # actually expose ``create_file()``. PE types without a
         # filesystem template (PIN, PUK, AKA, SecurityDomain, GFM, etc.)
         # report False; the GUI hides the button on those.
@@ -5001,18 +7271,18 @@ def _dispatch_show_pe(
 # pySim's ``ProfileTemplateRegistry`` (TCA SAIP §9 / Annex A) carries
 # the full catalog of DFs/EFs each filesystem-bearing PE can hold. The
 # eUICC Profile Creator surfaces this catalog as a checkable tree so
-# operators see *all* files defined by the template — not just the
+# operators see *all* files defined by the template -- not just the
 # ones currently materialised in the PE.
 #
 # These three actions expose:
-#   * list_pe_template — read the catalog, with ``in_pe`` flags so the
+#   * list_pe_template -- read the catalog, with ``in_pe`` flags so the
 #                        GUI can render checkboxes that reflect which
 #                        files this PE currently carries;
-#   * add_template_file — materialise a file by its ``pe_name`` using
+#   * add_template_file -- materialise a file by its ``pe_name`` using
 #                         the pySim default-content rules (FCP defaults
 #                         from the FileTemplate, fillFileContent of
 #                         the right length, etc.);
-#   * remove_template_file — drop a ``pe_name`` from the PE.
+#   * remove_template_file -- drop a ``pe_name`` from the PE.
 # ----------------------------------------------------------------------
 
 
@@ -5089,7 +7359,7 @@ def _build_template_tree(
     materialized_keys: set[str],
 ) -> list[dict[str, Any]]:
     """Walk the template ``tree`` recursively. ``children`` lives on every
-    ``FileTemplate`` instance — pySim assembles the parent/child links in
+    ``FileTemplate`` instance -- pySim assembles the parent/child links in
     ``ProfileTemplate.__init_subclass__``."""
     def _walk(ft: Any, parent_pename: str | None) -> dict[str, Any]:
         row = _file_template_to_row(
@@ -5189,7 +7459,7 @@ def _dispatch_list_pe_template(
     }
 
     if template_oid is None:
-        # Non-filesystem-bearing PE (PIN, PUK, AKA, GFM, SD, etc.) —
+        # Non-filesystem-bearing PE (PIN, PUK, AKA, GFM, SD, etc.) --
         # no catalog to project. The caller can still distinguish this
         # case by ``supported == False``.
         return response
@@ -5549,20 +7819,20 @@ def _dispatch_add_template_subtree(
 
 
 # ----------------------------------------------------------------------
-# Generic File Management — Add file element
+# Generic File Management -- Add file element
 #
 # The eUICC Profile Creator manual ("Profile Elements for File System
 # Creation" → "File System Creation by Generic File Management")
 # documents two affordances inside a PE-GFM editor:
 #
-#   * Add select element — appends a ``filePath`` SELECT that moves
+#   * Add select element -- appends a ``filePath`` SELECT that moves
 #     the cursor to an existing DF/ADF.
-#   * Add file element — appends a ``createFCP`` that defines a new
+#   * Add file element -- appends a ``createFCP`` that defines a new
 #     file at the current cursor.
 #
 # Template PEs (USIM / ISIM / OPT-USIM / MF / Telecom / Phonebook /
 # GSM-Access / 5GS / SAIP / SNPN / 5GProSe / EAP / CD) use the
-# ``saip.add_template_file`` / ``saip.add_template_subtree`` pair —
+# ``saip.add_template_file`` / ``saip.add_template_subtree`` pair --
 # they are template-bounded. GFM is the free-form fallback for
 # everything else, so we expose an equivalent dispatcher here.
 #
@@ -5614,21 +7884,23 @@ def _dispatch_gfm_add_file_element(
     Args:
       section_key: GFM section key (``genericFileManagement`` or a
         ``genericFileManagement_N`` suffix variant).
-      parent_path: Hex FID chain identifying the containing DF — e.g.
+      parent_path: Hex FID chain identifying the containing DF -- e.g.
         ``"7F10"`` for DF.TELECOM or ``""`` for the MF root. The chain
         is encoded raw into the ``filePath`` SELECT per
         pe2files semantics (pySim prepends 3F00 on replay).
       file_id: 4-nibble hex FID of the new file (e.g. ``"6F3A"``).
-      file_descriptor: Optional 2-byte hex File-Descriptor Byte +
-        coding (e.g. ``"4221"`` for a linear-fixed EF with record-
-        oriented coding). Defaults to ``"01"`` (transparent EF, no
-        further structure) when omitted, which the operator can
-        edit afterwards via the FCP editor.
+      file_descriptor: Optional hex File Descriptor: descriptor byte and
+        data coding byte, plus the 2-byte record length of a linear
+        fixed or cyclic EF (``"4221001C"``; ETSI TS 102 222 V17.1.0
+        §6.3.2.2.2 Table 4). Defaults to ``"4121"`` (transparent EF)
+        when omitted, which the operator can edit afterwards via the
+        FCP editor.
       short_efid: Optional 1-byte hex Short EF Identifier.
-      ef_size / record_size / record_count: Optional sizing fields
-        the operator can refine later. Stored as hex bytes per the
-        SAIP encoder contract.
-      lcsi: Optional Life-Cycle Status Integer (default ``"05"`` —
+      ef_size / record_size / record_count: Optional sizing fields, hex.
+        ``record_size`` completes a 2-byte record descriptor with its
+        record length; ``record_count`` sets efFileSize to record length
+        x records (tag '80'), so a given ``ef_size`` has to agree.
+      lcsi: Optional Life-Cycle Status Integer (default ``"05"`` --
         "Operational state - activated", ETSI TS 102 221 §11.1.1.4.9).
       transaction_index: When provided, append into that existing
         transaction instead of starting a new one. Defaults to a new
@@ -5644,7 +7916,7 @@ def _dispatch_gfm_add_file_element(
         raise ValueError("section_key is required.")
     if sk.lower().startswith("genericfilemanagement") is False:
         raise ValueError(
-            f"section {sk!r} is not a Generic File Management PE — use "
+            f"section {sk!r} is not a Generic File Management PE -- use "
             f"saip.add_template_file for template-based PEs."
         )
 
@@ -5663,24 +7935,60 @@ def _dispatch_gfm_add_file_element(
     desc_hex = ""
     if file_descriptor is not None and str(file_descriptor).strip() != "":
         desc_hex = _normalise_hex(file_descriptor, label="file_descriptor")
-        if len(desc_hex) < 2:
-            raise ValueError("file_descriptor must be at least 1 byte (2 hex digits).")
     else:
-        # ETSI TS 102 221 §11.1.1.4.3: 0x41 = transparent working EF,
-        # not shareable. Operator can refine via the FCP editor.
+        # ETSI TS 102 221 V18.4.0 §11.1.1.4.3 Table 11.5: 0x41 is a
+        # shareable transparent working EF. Operator can refine via the
+        # FCP editor.
         desc_hex = "4121"
+    descriptor = bytes.fromhex(desc_hex)
     short_efid_hex = ""
     if short_efid is not None and str(short_efid).strip() != "":
         short_efid_hex = _normalise_hex(short_efid, label="short_efid")
-    ef_size_hex = ""
+    ef_size_value: int | None = None
     if ef_size is not None and str(ef_size).strip() != "":
-        ef_size_hex = _normalise_hex(ef_size, label="ef_size")
-    record_size_hex = ""
+        ef_size_value = int(_normalise_hex(ef_size, label="ef_size"), 16)
+    record_size_value: int | None = None
     if record_size is not None and str(record_size).strip() != "":
-        record_size_hex = _normalise_hex(record_size, label="record_size")
-    record_count_hex = ""
+        record_size_value = int(_normalise_hex(record_size, label="record_size"), 16)
+    record_count_value: int | None = None
     if record_count is not None and str(record_count).strip() != "":
-        record_count_hex = _normalise_hex(record_count, label="record_count")
+        record_count_value = _record_count_input(
+            int(_normalise_hex(record_count, label="record_count"), 16)
+        )
+    record_structured = _descriptor_is_record_structured(descriptor)
+    if not record_structured and (
+        record_size_value is not None or record_count_value is not None
+    ):
+        raise ValueError(
+            "record_size / record_count apply to a linear fixed or cyclic EF; "
+            f"file_descriptor {descriptor.hex().upper()} codes neither."
+        )
+    if record_size_value is not None:
+        if not 1 <= record_size_value <= 0xFFFF:
+            raise ValueError(f"record_size {record_size_value} does not fit the 2-byte record length.")
+        if len(descriptor) == 2:
+            descriptor += record_size_value.to_bytes(2, "big")
+        elif len(descriptor) >= 4 and int.from_bytes(descriptor[2:4], "big") != record_size_value:
+            raise ValueError(
+                f"record_size {record_size_value} disagrees with the record length "
+                f"{int.from_bytes(descriptor[2:4], 'big')} in file_descriptor."
+            )
+    _check_create_fcp_descriptor(descriptor)
+    if record_structured:
+        record_length = int.from_bytes(descriptor[2:4], "big")
+        if record_count_value is not None:
+            total = record_length * record_count_value
+            if ef_size_value is not None and ef_size_value != total:
+                raise ValueError(
+                    f"ef_size {ef_size_value} B disagrees with record_count "
+                    f"{record_count_value} x {record_length} B = {total} B."
+                )
+            ef_size_value = total
+        elif ef_size_value is not None and ef_size_value % record_length != 0:
+            raise ValueError(
+                f"ef_size {ef_size_value} B is not a whole number of "
+                f"{record_length} B records."
+            )
     lcsi_hex = "05"
     if lcsi is not None and str(lcsi).strip() != "":
         lcsi_hex = _normalise_hex(lcsi, label="lcsi")
@@ -5691,7 +7999,7 @@ def _dispatch_gfm_add_file_element(
     pe_index, pe = _resolve_pe_for_section(handle, sk)
     if str(getattr(pe, "type", "")).lower() != "genericfilemanagement":
         raise ValueError(
-            f"section {sk!r} resolves to a {getattr(pe, 'type', '?')!r} PE — expected genericFileManagement."
+            f"section {sk!r} resolves to a {getattr(pe, 'type', '?')!r} PE -- expected genericFileManagement."
         )
 
     decoded = getattr(pe, "decoded", None)
@@ -5703,28 +8011,17 @@ def _dispatch_gfm_add_file_element(
         decoded["fileManagementCMD"] = fmc
 
     fcp_payload: dict[str, Any] = {
-        "fileDescriptor": bytes.fromhex(desc_hex),
+        "fileDescriptor": descriptor,
         "fileID": bytes.fromhex(fid_hex),
         "lcsi": bytes.fromhex(lcsi_hex),
     }
     if short_efid_hex:
         fcp_payload["shortEFID"] = bytes.fromhex(short_efid_hex)
-    if ef_size_hex:
-        fcp_payload["efFileSize"] = bytes.fromhex(ef_size_hex)
-    if record_size_hex:
-        fcp_payload["proprietaryEFInfo"] = {
-            "specialFileInformation": bytes.fromhex(record_size_hex),
-        }
-    if record_count_hex:
-        # ``proprietaryEFInfo`` is a free-form dict per SAIP §5; we
-        # surface the operator's input under a stable key so the FCP
-        # editor can refine it without losing context.
-        existing = fcp_payload.setdefault("proprietaryEFInfo", {})
-        if isinstance(existing, dict):
-            existing["maximumFileSize"] = bytes.fromhex(record_count_hex)
+    if ef_size_value is not None:
+        fcp_payload["efFileSize"] = _minimal_size_octets(ef_size_value)
 
     new_transaction: list[tuple[str, Any]] = []
-    # Always emit an explicit filePath SELECT — even when the operator
+    # Always emit an explicit filePath SELECT -- even when the operator
     # is targeting MF (empty path). Without it the file would inherit
     # the cursor left behind by the previous transaction, which is
     # almost never what the operator meant. ETSI TS 102 222 §6
@@ -5749,7 +8046,7 @@ def _dispatch_gfm_add_file_element(
         existing_transaction = fmc[target_index]
         if isinstance(existing_transaction, list) is False:
             raise ValueError(
-                f"transaction {target_index} is not a list — refusing to extend a malformed GFM PE."
+                f"transaction {target_index} is not a list -- refusing to extend a malformed GFM PE."
             )
         existing_transaction.extend(new_transaction)
         appended_at = target_index
@@ -5784,7 +8081,8 @@ def _dispatch_gfm_add_file_element(
         "transaction_index": appended_at,
         "file_id": fid_hex,
         "parent_path": parent_hex,
-        "file_descriptor": desc_hex,
+        "file_descriptor": descriptor.hex().upper(),
+        "ef_file_size": fcp_payload["efFileSize"].hex().upper() if "efFileSize" in fcp_payload else "",
         "added": True,
     }
 
@@ -6050,9 +8348,9 @@ def _dispatch_search_files(
 # PE: Security Domains (ISD-R / ISD-P / MNO-SD / SSD via ``securityDomain``
 # / ``mnoSD`` / ``ssd``), JavaCard ``application`` instances, and the
 # Remote File / App Management surfaces (``rfm`` / ``ram``). For each
-# row we surface the canonical GP bookkeeping fields — Instance AID,
+# row we surface the canonical GP bookkeeping fields -- Instance AID,
 # Class AID, Load Package AID, decoded privileges, decoded lifecycle
-# state, key-list size — so the GUI can render a profile-authoring
+# state, key-list size -- so the GUI can render a profile-authoring
 # Applications view without re-decoding the JSON tree client-side.
 # ---------------------------------------------------------------------
 
@@ -6081,7 +8379,7 @@ def _dispatch_list_applications(
 
         # SD / Application PEs nest the GP install bookkeeping under
         # ``instance``. RFM / RAM PEs flatten ``instanceAID`` (and
-        # adjacent fields) at the top level — we look in both places
+        # adjacent fields) at the top level -- we look in both places
         # and fall back to a top-level read whenever the nested entry
         # is absent. This keeps the row shape consistent across all
         # six application-bearing PE flavours.
@@ -6115,7 +8413,7 @@ def _dispatch_list_applications(
                     application_parameters[str(key)] = hx.upper()
 
         # RFM / RAM expose a TAR list (Toolkit Application Reference,
-        # ETSI TS 102 226 §5.1.1 — three bytes per entry). Surface the
+        # ETSI TS 102 226 §5.1.1 -- three bytes per entry). Surface the
         # decoded TAR strings so the Applications card can render them
         # as chips next to the AID.
         tar_list: list[str] = []
@@ -6128,6 +8426,14 @@ def _dispatch_list_applications(
 
         key_list = decoded.get("keyList") if isinstance(decoded, dict) else None
         key_count = len(key_list) if isinstance(key_list, list) else 0
+
+        # An RFM instance's default directory (TCA SAIP v3.4.1 section 8.8):
+        # the ADF its adfRFMAccess names, or the MF without one.
+        rfm_scope = ""
+        if pe_type_lo == "rfm" and isinstance(decoded, dict):
+            binding = decoded.get("adfRFMAccess")
+            adf_aid = _hex_value(binding.get("adfAID")) if isinstance(binding, dict) else ""
+            rfm_scope = f"ADF {adf_aid.upper()}" if adf_aid else "MF"
 
         rows.append(
             {
@@ -6143,6 +8449,7 @@ def _dispatch_list_applications(
                 "c9_params_hex": (c9_params or "").upper(),
                 "application_parameters": application_parameters,
                 "tar_list": tar_list,
+                "rfm_scope": rfm_scope,
                 "key_count": key_count,
                 "is_security_domain": pe_type_lo in _SD_PE_TYPES,
             }
@@ -6152,6 +8459,122 @@ def _dispatch_list_applications(
         "session_id": sid,
         "count": len(rows),
         "rows": rows,
+    }
+
+
+def _arr_record_citations(
+    decoded_document: dict[str, Any] | None,
+    *,
+    section_key: str,
+    file_id: Any,
+    field_path: Any = None,
+) -> dict[int, dict[str, Any]]:
+    """Return, per EF.ARR record, the files whose FCP cites it.
+
+    An ARR record does not say which file kind it governs -- the FCP citing it
+    does (the ISO/IEC 7816-4 AM byte, as TS 102 221 §9.2.2 applies it). Every
+    file in the package is scanned for a ``securityAttributesReferenced``
+    designating this EF.ARR: a record cited by MF, a DF or an ADF reads its
+    low three bits as DELETE FILE (child) / CREATE FILE (EF) / CREATE FILE
+    (DF), and one cited only by EFs reads them as READ / UPDATE / APPEND.
+
+    Each entry carries ``scope`` (the reading the record is reported under,
+    the container one when both kinds cite it), ``mixed`` (both kinds do cite
+    it, so one byte carries two meanings), and ``citedBy``.
+
+    Which EF.ARR a reference designates is decided by the same resolver the
+    FCP tab uses (``_locate_referenced_arr``): the explicit identifier of a
+    3-byte reference, or the one SAIP V3.4.1 §8.3 implies for a 1-byte
+    reference, found along the TS 102 221 §9.2.7 walk. When the package does
+    not carry the designated EF.ARR, or the citer's place in the tree is
+    unknown, the designation alone decides -- so ``citedBy`` names the citers
+    this package can prove, not necessarily every one.
+    """
+    if isinstance(decoded_document, dict) is False:
+        return {}
+    arr_fid = str(file_id or "").strip().upper()
+    section_lower = str(section_key or "").strip().lower()
+    path_lower = str(field_path or "").strip().lower()
+    try:
+        from Tools.ProfilePackage.saip_asn1_decode import (
+            ARR_SCOPE_DF,
+            arr_scope_for_file_kind,
+        )
+        rows = _filesystem_tree_rows(decoded_document)
+    except Exception:  # noqa: BLE001
+        return {}
+    target = next(
+        (
+            candidate for candidate in rows
+            if str(candidate.get("section_key") or "").strip().lower()
+            == section_lower
+            and str(candidate.get("file_id") or "").strip().upper() == arr_fid
+            and (
+                path_lower == ""
+                or str(candidate.get("field_path") or "").strip().lower()
+                == path_lower
+            )
+        ),
+        None,
+    )
+    citations: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        located = _locate_referenced_arr(rows, row)
+        if located is None or located["record"] <= 0:
+            continue
+        arr_row = located["arr_row"]
+        if arr_row is not None and target is not None:
+            cites = _same_tree_row(arr_row, target)
+        elif located["implicit"]:
+            # Designation only: the identifier the tree implies where it
+            # gives one, the citer's own PE section otherwise.
+            cites = (
+                located["arr_file_id"] in ("", arr_fid)
+                and str(row.get("section_key") or "").strip().lower()
+                == section_lower
+            )
+        else:
+            cites = located["arr_file_id"] == arr_fid
+        if cites is False:
+            continue
+        record_number = located["record"]
+        scope = arr_scope_for_file_kind(row.get("kind"))
+        entry = citations.setdefault(
+            record_number,
+            {"scope": scope, "mixed": False, "citedBy": []},
+        )
+        entry["citedBy"].append(
+            {
+                "file": str(
+                    row.get("friendly_name") or row.get("field_path") or ""
+                ),
+                "kind": str(row.get("kind") or ""),
+                "section": str(row.get("section_key") or ""),
+                "scope": scope,
+            }
+        )
+        if scope != entry["scope"]:
+            # One record, two meanings: the container reading is reported and
+            # the divergence is flagged rather than silently resolved.
+            entry["mixed"] = True
+            entry["scope"] = ARR_SCOPE_DF
+    return citations
+
+
+def _arr_record_scopes(
+    decoded_document: dict[str, Any] | None,
+    *,
+    section_key: str,
+    file_id: Any,
+) -> dict[int, str]:
+    """Map each EF.ARR record number to the table its citers read it with."""
+    return {
+        record: str(info.get("scope") or "")
+        for record, info in _arr_record_citations(
+            decoded_document,
+            section_key=section_key,
+            file_id=file_id,
+        ).items()
     }
 
 
@@ -6166,7 +8589,784 @@ def _is_arr_field_path(field_path: Any) -> bool:
     )
 
 
+# The identifiers TS 102 221 §13.4 gives EF.ARR under the MF and under a DF
+# / ADF. A file whose place in the tree is unknown cannot have the SAIP §8.3
+# implied identifier worked out, so a 1-byte reference from it is matched
+# against any EF.ARR of its own PE section -- these are the identifiers that
+# scan accepts alongside a path the package itself names EF.ARR.
+_DEFAULT_ARR_FILE_IDS: frozenset[str] = frozenset({"2F06", "6F06"})
+
+# Slash-joined chain of the MF: the root every MF-anchored row hangs off.
+_MF_CHAIN: str = "3F00"
+
+
+def _is_adf_chain_segment(segment: str) -> bool:
+    """True for a chain segment that roots an ADF.
+
+    Template rows anchor an ADF by its label (``ADF.USIM``); a GFM section
+    that SELECTs through the ADF's temporary identifier keeps the FID
+    (``7FF0``..``7FFF``) when no label is known.
+    """
+    text = str(segment or "").strip().upper()
+    if text.startswith("ADF"):
+        return True
+    if len(text) == 4:
+        try:
+            return 0x7FF0 <= int(text, 16) <= 0x7FFF
+        except ValueError:
+            return False
+    return False
+
+
+def _arr_reference_search_chain(row: dict[str, Any]) -> list[str]:
+    """DF paths to search for a referenced EF.ARR, nearest first.
+
+    TS 102 221 §9.2.7 resolves the identifier in the DF holding an EF, in the
+    parent DF of a DF, and under the MF for the MF itself and for an ADF,
+    walking upwards until the EF.ARR is found or an ADF or the MF is reached.
+    The walk therefore never crosses from an ADF into the MF: an ADF is its
+    own root, so a file inside one stops there.
+    """
+    kind = str(row.get("kind") or "").strip().lower()
+    if kind in {"mf", "adf"}:
+        return [_MF_CHAIN]
+    base = str(row.get("parent_path") or "").strip("/")
+    if base == "":
+        return []
+    parts = [segment for segment in base.split("/") if segment != ""]
+    chain: list[str] = []
+    for depth in range(len(parts), 0, -1):
+        chain.append("/".join(parts[:depth]))
+        if _is_adf_chain_segment(parts[depth - 1]):
+            break
+    return chain
+
+
+def _implicit_arr_file_id(row: dict[str, Any]) -> tuple[str, str]:
+    """EF.ARR identifier a 1-byte ``securityAttributesReferenced`` implies.
+
+    SAIP V3.4.1 §8.3: '2F06' for an ADF, the MF and every file directly under
+    the MF; '6F06' for any other file. Returns ``(identifier, reason)``; the
+    identifier is empty when the row's place in the tree is unknown.
+    """
+    kind = str(row.get("kind") or "").strip().lower()
+    if kind == "mf":
+        return "2F06", "the file is the MF"
+    if kind == "adf":
+        return "2F06", "the file is an ADF"
+    parent = str(row.get("parent_path") or "").strip("/")
+    if parent == "":
+        return "", "the file's place in the tree is unknown"
+    if parent.upper() == _MF_CHAIN:
+        return "2F06", "the file sits directly under the MF"
+    return "6F06", "the file sits below a DF or an ADF"
+
+
+def _same_tree_row(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """True when two tree rows describe the same file entry."""
+    if left is right:
+        return True
+    return (
+        str(left.get("section_key") or "").strip().lower()
+        == str(right.get("section_key") or "").strip().lower()
+        and str(left.get("field_path") or "").strip().lower()
+        == str(right.get("field_path") or "").strip().lower()
+    )
+
+
+def _locate_referenced_arr(
+    rows: list[dict[str, Any]],
+    row: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Find the EF.ARR row a file's ``securityAttributesReferenced`` designates.
+
+    Returns ``None`` when the FCP carries no reference. Otherwise a dict with
+    ``reference_hex``, ``form`` (``record-id`` / ``arr-fid-record`` /
+    ``unrecognised``), ``arr_file_id`` (the explicit identifier, or the one
+    SAIP V3.4.1 §8.3 implies -- empty when the file's place in the tree is
+    unknown), ``implicit``, ``record``, ``search_chain``, ``resolution``
+    (``path`` / ``section`` / ``file-id`` / empty), ``arr_row`` and ``note``.
+
+    The identifier is walked the way TS 102 221 §9.2.7 prescribes
+    (``_arr_reference_search_chain``). Two fallbacks cover what the walk
+    cannot place: a file whose DF chain is unknown takes the EF.ARR of its own
+    PE section, and an explicit identifier the walk never meets is matched by
+    identifier alone and labelled ``file-id`` -- the card would not find it
+    there, but the record is what the profile author pointed at. A 1-byte
+    reference gets no such fallback: the identifier it implies is the one the
+    card looks for, so a miss is reported as a miss.
+    """
+    reference = re.sub(
+        r"[^0-9A-Fa-f]", "", str(row.get("security_attrs") or "")
+    ).upper()
+    if len(reference) == 0:
+        return None
+
+    section_lower = str(row.get("section_key") or "").strip().lower()
+    chain = _arr_reference_search_chain(row)
+    result: dict[str, Any] = {
+        "reference_hex": reference,
+        "form": "",
+        "arr_file_id": "",
+        "implicit": False,
+        "record": 0,
+        "search_chain": chain,
+        "resolution": "",
+        "arr_row": None,
+        "note": "",
+    }
+    reason = ""
+    if len(reference) == 6:
+        arr_fid = reference[:4]
+        result["form"] = "arr-fid-record"
+        result["record"] = int(reference[4:], 16)
+    elif len(reference) == 2:
+        arr_fid, reason = _implicit_arr_file_id(row)
+        result["form"] = "record-id"
+        result["implicit"] = True
+        result["record"] = int(reference, 16)
+    else:
+        result["form"] = "unrecognised"
+        result["note"] = (
+            f"reference is {len(reference) // 2} B -- TS 102 221 §9.2.7 "
+            "and SAIP V3.4.1 §8.3 define the 1-byte and 3-byte forms only."
+        )
+        return result
+    result["arr_file_id"] = arr_fid
+
+    def _fid(candidate: dict[str, Any]) -> str:
+        return str(candidate.get("file_id") or "").strip().upper()
+
+    if arr_fid != "":
+        candidates = [candidate for candidate in rows if _fid(candidate) == arr_fid]
+    else:
+        candidates = [
+            candidate for candidate in rows
+            if _is_arr_field_path(candidate.get("field_path"))
+            or _fid(candidate) in _DEFAULT_ARR_FILE_IDS
+        ]
+
+    # Nearest DF first, then upwards: a package that repeats FID '6F06' under
+    # DF.TELECOM and under ADF.USIM sends each citer to the one above it.
+    arr_row: dict[str, Any] | None = None
+    for ancestor in chain:
+        arr_row = next(
+            (
+                candidate for candidate in candidates
+                if str(candidate.get("parent_path") or "").strip("/") == ancestor
+            ),
+            None,
+        )
+        if arr_row is not None:
+            result["resolution"] = "path"
+            break
+    if arr_row is None and len(chain) == 0:
+        # No place in the tree to walk from: a PE that carries the file
+        # without its DF chain still names the ARR of its own section.
+        arr_row = next(
+            (
+                candidate for candidate in candidates
+                if str(candidate.get("section_key") or "").strip().lower()
+                == section_lower
+            ),
+            None,
+        )
+        if arr_row is not None:
+            result["resolution"] = "section"
+    if arr_row is None and result["implicit"] is False and len(candidates) > 0:
+        # The identifier is explicit, so the file it names is the answer even
+        # where the walk above cannot reach it; the label says so.
+        arr_row = candidates[0]
+        result["resolution"] = "file-id"
+    result["arr_row"] = arr_row
+    if arr_row is not None:
+        return result
+
+    chain_text = " → ".join(chain) if len(chain) > 0 else "(unknown)"
+    if result["implicit"] is False:
+        result["note"] = (
+            f"no file with identifier {arr_fid} in this package -- the rules "
+            "live on a file this profile does not create."
+        )
+    elif arr_fid == "":
+        result["note"] = (
+            "the file's place in the tree is unknown and its PE section "
+            "creates no EF.ARR -- the runtime walks the parent DF / ADF chain "
+            "for the default ARR (TS 102 221 §9.2.7)."
+        )
+    else:
+        remedy = (
+            "reference '2F06' explicitly with the 3-byte form, or create an "
+            "EF.ARR '6F06' where the walk can reach it."
+            if arr_fid == "6F06" else
+            "the MF-level EF.ARR '2F06' is not created in this package."
+        )
+        result["note"] = (
+            f"a 1-byte reference names EF.ARR '{arr_fid}' here (SAIP V3.4.1 "
+            f"§8.3: {reason}); no file with that identifier is created on "
+            f"the TS 102 221 §9.2.7 search chain {chain_text} -- {remedy}"
+        )
+    return result
+
+
+def _arr_record_choices(records: Any, scope: str) -> list[dict[str, Any]]:
+    """``{record, summary, empty}`` for each record of a decoded EF.ARR.
+
+    A record is read under ``scope``, the access-mode reading the citing
+    file's kind takes (TS 102 221 §9.2.2), as the resolver reads the one
+    record a reference names.
+    """
+    choices: list[dict[str, Any]] = []
+    for item in records or []:
+        if not isinstance(item, dict) or not isinstance(item.get("record"), int):
+            continue
+        if item.get("empty") is True:
+            choices.append({"record": item["record"], "summary": "", "empty": True})
+            continue
+        decoded = item.get("decoded")
+        if not isinstance(decoded, dict):
+            continue
+        reading = decoded
+        alternate = decoded.get("alternateReading")
+        if (
+            str(decoded.get("accessModeScope") or "") != scope
+            and isinstance(alternate, dict)
+            and str(alternate.get("accessModeScope") or "") == scope
+        ):
+            reading = alternate
+        choices.append({"record": item["record"], "summary": str(reading.get("summary") or ""), "empty": False})
+    return choices
+
+
+def _resolve_referenced_access_rule(
+    rows: list[dict[str, Any]],
+    row: dict[str, Any],
+    *,
+    pes: Any = None,
+    decoded_document: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Decode the EF.ARR record a file's FCP points at.
+
+    ``securityAttributesReferenced`` has two forms (TS 102 221 §9.2.7 Table
+    9.0c, SAIP V3.4.1 §8.3): an EF.ARR file identifier plus a record number,
+    or a record number alone against the EF.ARR the file's place in the tree
+    implies. Neither form carries the rules, and the record they name does not
+    say which operations its access-mode byte gates -- the citing file's kind
+    does (ISO/IEC 7816-4 AM byte, TS 102 221 §9.2.2). Both halves are
+    resolved here so the FCP tab reads the rules through the same decoder the
+    Data tab uses, under the one reading that applies to this file.
+
+    Returns ``None`` when the FCP carries no reference at all; the caller
+    then has nothing to show beyond the empty row.
+    """
+    located = _locate_referenced_arr(rows, row)
+    if located is None:
+        return None
+
+    from Tools.ProfilePackage.saip_asn1_decode import arr_scope_for_file_kind
+
+    scope = arr_scope_for_file_kind(row.get("kind"))
+    result: dict[str, Any] = {
+        "reference_hex": located["reference_hex"],
+        "scope": scope,
+        "resolved": False,
+        "note": located["note"],
+        "form": located["form"],
+    }
+    if located["form"] == "unrecognised":
+        return result
+
+    result["arr_file_id"] = located["arr_file_id"]
+    result["implicit_file_id"] = located["implicit"]
+    result["search_chain"] = list(located["search_chain"])
+    result["record"] = located["record"]
+    if located["resolution"] != "":
+        result["resolution"] = located["resolution"]
+    arr_row = located["arr_row"]
+    if arr_row is None:
+        return result
+
+    record_number = located["record"]
+    result["arr_section_key"] = str(arr_row.get("section_key") or "")
+    result["arr_field_path"] = str(arr_row.get("field_path") or "")
+    result["arr_file_id"] = str(arr_row.get("file_id") or "").upper()
+    result["arr_file_name"] = str(
+        arr_row.get("friendly_name") or arr_row.get("field_path") or ""
+    )
+    result["arr_path"] = str(arr_row.get("fid_chain") or "")
+
+    arr_value = _locate_file_payload(
+        decoded_document,
+        section_key=result["arr_section_key"],
+        field_path=result["arr_field_path"],
+    )
+    if arr_value is None:
+        result["note"] = "the referenced file carries no decodable body."
+        return result
+    # An EF.ARR entry that is a link shares the source file's records (TCA
+    # SAIP V3.4.1 §8.3.3 Note 1); they are read there, the way the file's
+    # own Data tab reads them.
+    layout_source: tuple[str, str] | None = None
+    body_override: bytes | None = None
+    if len(str(arr_row.get("link_path") or "").strip()) > 0:
+        link_lookup = _link_source_lookup(
+            rows, arr_row, _build_adf_temp_fid_map(decoded_document or {})
+        )
+        if link_lookup["resolved"]:
+            source_row = link_lookup["row"]
+            layout_source = (
+                str(source_row.get("section_key") or ""),
+                str(source_row.get("field_path") or ""),
+            )
+            source_value = _locate_file_payload(
+                decoded_document,
+                section_key=layout_source[0],
+                field_path=layout_source[1],
+            )
+            linked = _linked_body_resolution(
+                {"pes": pes, "decoded_document": decoded_document},
+                source_row,
+                source_value,
+                own_payload=arr_value,
+            )
+            if linked is not None:
+                body_override = linked[0]
+            arr_value = source_value
+            result["arr_link_source"] = str(source_row.get("fid_chain") or "")
+    _decoded, records = _decode_for_show_file(
+        section_key=result["arr_section_key"],
+        field_path=result["arr_field_path"],
+        file_value=arr_value,
+        file_id=result["arr_file_id"],
+        pes=pes,
+        decoded_document=decoded_document,
+        body_override=body_override,
+        layout_source=layout_source,
+    )
+    # Every record of the EF.ARR, read for this file's kind: the rules the
+    # FCP tab offers to point the reference at.
+    result["choices"] = _arr_record_choices(records, scope)
+    entry = next(
+        (
+            item for item in (records or [])
+            if isinstance(item, dict) and item.get("record") == record_number
+        ),
+        None,
+    )
+    if entry is None:
+        result["note"] = (
+            f"record {record_number} is outside the "
+            f"{result['arr_file_name'] or 'EF.ARR'} record window."
+        )
+        return result
+    if entry.get("empty") is True:
+        result["resolved"] = True
+        result["record_empty"] = True
+        result["note"] = (
+            "the record is unallocated -- it still holds what the file is "
+            "created with, and no rule is encoded there."
+        )
+        return result
+
+    decoded_record = entry.get("decoded")
+    if isinstance(decoded_record, dict) is False:
+        result["note"] = "the record did not decode as EF.ARR access rules."
+        return result
+
+    reading: dict[str, Any] = decoded_record
+    alternate = decoded_record.get("alternateReading")
+    if str(decoded_record.get("accessModeScope") or "") != scope:
+        if (
+            isinstance(alternate, dict)
+            and str(alternate.get("accessModeScope") or "") == scope
+        ):
+            reading = alternate
+    result["resolved"] = True
+    result["record_empty"] = False
+    result["summary"] = str(reading.get("summary") or "")
+    result["rules"] = list(reading.get("rules") or ())
+    parse_error = decoded_record.get("parseErrorOffset")
+    if isinstance(parse_error, int):
+        result["parse_error_offset"] = parse_error
+    return result
+
+
 @_with_session_lock
+def _inline_placeholder_decode_block(
+    ranges: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Decoded-view stand-in for bytes that are template placeholders."""
+    return {
+        "format": "Inline template placeholder",
+        "placeholders": [
+            {
+                key: entry.get(key)
+                for key in (
+                    "literal",
+                    "variable",
+                    "type",
+                    "byte_length",
+                    "modifier",
+                    "start",
+                    "end",
+                    "resolved",
+                    "stored_value",
+                    "source",
+                    "key",
+                    "value_hex",
+                )
+            }
+            for entry in ranges
+        ],
+        "note": (
+            "These bytes are a template placeholder, not data. The value is "
+            "encoded from the stored variable when a complete profile is "
+            "exported."
+        ),
+    }
+
+
+def _mark_inline_placeholder_decodes(
+    response: dict[str, Any],
+    ranges: list[dict[str, Any]],
+) -> None:
+    """Replace decoder output that covers a placeholder with a placeholder view.
+
+    Sentinel bytes decode as nonsense (a random-looking IMSI, an impossible
+    ICCID). Swap the ``decoded`` block, and any record whose slice overlaps
+    a sentinel, for a block that names the placeholder instead.
+    """
+    if response.get("decoded") is not None:
+        response["decoded"] = _inline_placeholder_decode_block(ranges)
+    records = response.get("records")
+    record_length = response.get("body_record_size")
+    if (
+        isinstance(records, list) is False
+        or isinstance(record_length, int) is False
+        or record_length <= 0
+    ):
+        return
+    for entry in records:
+        if isinstance(entry, dict) is False:
+            continue
+        try:
+            record_number = int(entry.get("record") or 0)
+        except (TypeError, ValueError):
+            continue
+        start = (record_number - 1) * record_length
+        end = start + record_length
+        overlapping = [
+            item for item in ranges if item["start"] < end and item["end"] > start
+        ]
+        if overlapping:
+            entry["empty"] = False
+            entry["decoded"] = _inline_placeholder_decode_block(overlapping)
+
+
+# ----------------------------------------------------------------------
+# Linked files
+#
+# TCA Profile interoperability technical specification V3.4.1 §8.3.2:
+# ``Fcp.linkPath`` names the file an entry is linked to, coded like
+# ``filePath`` (a concatenation of file identifiers selected from the MF;
+# a file inside an ADF is addressed through the ADF's temporary file
+# identifier). §8.3.3 Note 1 and the §8.3.5 createFCP table: the linked
+# file takes the source file's fileDescriptor, efFileSize and
+# proprietaryEFInfo, so its body is the source file's body and the entry
+# carries none of its own. ``saip.show_file`` therefore answers a link
+# entry with the source file's bytes, and a body write addressed to a
+# link lands on the source.
+_LINK_CHAIN_MAX_HOPS = 8
+_LINK_SOURCE_FCP_KEYS: tuple[str, ...] = (
+    "descriptor",
+    "ef_size",
+    "max_size",
+    "proprietary_special_info",
+    "proprietary_details",
+    "proprietary_fill_pattern",
+    "proprietary_repeat_pattern",
+    "proprietary_max_size",
+)
+
+
+def _link_path_fid_chain(link_path: Any, adf_map: Mapping[str, str]) -> str:
+    """The tree ``fid_chain`` a ``linkPath`` addresses, ``""`` when malformed.
+
+    The path is rooted at the MF (a leading ``3F00`` is kept once); a path
+    through an ADF's temporary FID lands under the ADF's label the way the
+    tree rows do (``ADF.USIM/6F46``).
+    """
+    if isinstance(link_path, (bytes, bytearray)):
+        raw = bytes(link_path).hex().upper()
+    else:
+        raw = str(link_path or "").replace(" ", "").upper()
+    if len(raw) == 0 or len(raw) % 4 != 0 or _HEX_LITERAL_RE.match(raw) is None:
+        return ""
+    segments = [raw[index : index + 4] for index in range(0, len(raw), 4)]
+    if segments[0] != "3F00":
+        segments = ["3F00"] + segments
+    return "/".join(_reanchor_chain_under_adf(segments, dict(adf_map)))
+
+
+def _tree_row_for_chain(rows: list[dict[str, Any]], chain: str) -> dict[str, Any] | None:
+    """The row whose ``fid_chain`` is ``chain``, else a unique tail match."""
+    wanted = str(chain or "").upper()
+    if len(wanted) == 0:
+        return None
+    for row in rows:
+        if str(row.get("fid_chain") or "").upper() == wanted:
+            return row
+    tail = "/" + (wanted[len("3F00/") :] if wanted.startswith("3F00/") else wanted)
+    matches = [
+        row for row in rows if str(row.get("fid_chain") or "").upper().endswith(tail)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _link_source_lookup(
+    rows: list[dict[str, Any]],
+    row: Mapping[str, Any],
+    adf_map: Mapping[str, str],
+) -> dict[str, Any]:
+    """Follow ``row``'s ``linkPath`` to the file that holds the body.
+
+    A target that is itself a link is followed further, bounded by
+    ``_LINK_CHAIN_MAX_HOPS``; a missing file or a cycle resolves to nothing.
+    Returns ``resolved``, the source ``row`` (``None`` when unresolved), the
+    ``hops`` walked as ``fid_chain`` strings and a ``reason`` for a miss.
+    """
+    hops: list[str] = []
+    seen: set[int] = {id(row)}
+    current: Mapping[str, Any] = row
+    for _hop in range(_LINK_CHAIN_MAX_HOPS):
+        link_path = str(current.get("link_path") or "").strip()
+        if len(link_path) == 0:
+            return {"resolved": True, "row": current, "hops": hops, "reason": ""}
+        chain = _link_path_fid_chain(link_path, adf_map)
+        if len(chain) == 0:
+            return {
+                "resolved": False,
+                "row": None,
+                "hops": hops,
+                "reason": (
+                    f"linkPath {link_path} is not a concatenation of "
+                    "2-byte file identifiers"
+                ),
+            }
+        hops.append(chain)
+        target = _tree_row_for_chain(rows, chain)
+        if target is None:
+            return {
+                "resolved": False,
+                "row": None,
+                "hops": hops,
+                "reason": f"no file at {chain} in this package",
+            }
+        if id(target) in seen:
+            return {
+                "resolved": False,
+                "row": None,
+                "hops": hops,
+                "reason": "the link chain loops back on itself",
+            }
+        seen.add(id(target))
+        current = target
+    return {
+        "resolved": False,
+        "row": None,
+        "hops": hops,
+        "reason": f"the link chain exceeds {_LINK_CHAIN_MAX_HOPS} hops",
+    }
+
+
+def _link_source_summary(
+    lookup: Mapping[str, Any],
+    *,
+    link_path: Any,
+    own_payload: Any,
+) -> dict[str, Any]:
+    """The ``link_source`` block of a ``show_file`` or body-write response."""
+    own_bytes = sum(len(chunk) for _offset, chunk in _iter_fill_chunks(own_payload))
+    summary: dict[str, Any] = {
+        "resolved": bool(lookup.get("resolved")),
+        "link_path": _coerce_hex_field(link_path),
+        "chain": list(lookup.get("hops") or []),
+        "reason": str(lookup.get("reason") or ""),
+        "own_content_bytes": own_bytes,
+    }
+    source = lookup.get("row")
+    if isinstance(source, Mapping):
+        for key in ("section_key", "field_path", "file_id", "fid_chain", "friendly_name", "kind", "source"):
+            summary[key] = str(source.get(key) or "")
+        summary["fcp"] = {key: str(source.get(key) or "") for key in _LINK_SOURCE_FCP_KEYS}
+    return summary
+
+
+def _row_body_resolution(
+    handle: Mapping[str, Any],
+    row: Mapping[str, Any],
+    payload: Any,
+) -> tuple[bytes, int | None, int | None, int | None] | None:
+    """``(body, rec_len, nb_rec, file_size)`` of one tree row.
+
+    pySim's ``File.body`` for a template entry and for a file generic file
+    management creates; the virtual image rebuilt from the ``fillFile*``
+    entries only for a GFM entry pySim cannot build a ``File`` for.
+    """
+    resolved = _file_body_from_pe(
+        pes=handle.get("pes"),
+        decoded_document=handle.get("decoded_document"),
+        section_key=str(row.get("section_key") or ""),
+        field_path=str(row.get("field_path") or ""),
+    )
+    if resolved is not None:
+        return resolved
+    if _GFM_FIELD_PATH_RE.match(str(row.get("field_path") or "")) is None:
+        return None
+    declared_size: int | None = None
+    try:
+        declared_size = int(str(row.get("ef_size") or ""), 16)
+    except ValueError:
+        declared_size = None
+    image = _virtual_file_image_from_entries(payload, declared_size)
+    if len(image) == 0:
+        return None
+    record_size = _record_size_from_row_descriptor(row)
+    record_count: int | None = None
+    if isinstance(record_size, int) and record_size > 0:
+        record_count = max(1, -(-len(image) // record_size))
+    return (image, record_size, record_count, declared_size or len(image))
+
+
+def _linked_body_resolution(
+    handle: Mapping[str, Any],
+    source_row: Mapping[str, Any],
+    source_payload: Any,
+    *,
+    own_payload: Any,
+) -> tuple[bytes, int | None, int | None, int | None] | None:
+    """The body a link entry shows: the source file's, with the entry's own
+    ``fillFileContent`` (if it carries any) written over it, which is what
+    the eUICC holds once the link is created and the entry's content lands
+    in the shared file (TCA SAIP V3.4.1 §8.3.5)."""
+    resolved = _row_body_resolution(handle, source_row, source_payload)
+    if resolved is None:
+        return None
+    body, rec_len, nb_rec, file_size = resolved
+    if any(True for _chunk in _iter_fill_chunks(own_payload)):
+        body = _overlay_fill_chunks(body, own_payload)
+    return (body, rec_len, nb_rec, file_size)
+
+
+def _tree_row_at(
+    rows: list[dict[str, Any]],
+    section_key: str,
+    field_path: str,
+) -> dict[str, Any] | None:
+    for row in rows:
+        if row.get("section_key") == section_key and row.get("field_path") == field_path:
+            return row
+    return None
+
+
+def _link_write_redirect(
+    handle: Mapping[str, Any],
+    section: str,
+    path_text: str,
+) -> dict[str, Any] | None:
+    """Where a body write addressed to ``section::path_text`` lands.
+
+    ``None`` for an independent file. For a link entry, the source file's
+    address plus the ``link_entry`` / ``link_source`` blocks the response
+    carries: a link has no body of its own (TCA SAIP V3.4.1 §8.3.3 Note 1),
+    so the bytes belong to the source. A link whose source is not in the
+    package, or that carries ``fillFileContent`` of its own, is refused so
+    a write can never land somewhere the operator did not see.
+    """
+    document = handle["decoded_document"]
+    rows = _filesystem_tree_rows(document)
+    row = _tree_row_at(rows, section, path_text)
+    if row is None or len(str(row.get("link_path") or "").strip()) == 0:
+        return None
+    lookup = _link_source_lookup(rows, row, _build_adf_temp_fid_map(document))
+    chain_text = " -> ".join(lookup["hops"]) or _coerce_hex_field(row.get("link_path"))
+    if not lookup["resolved"]:
+        raise ValueError(
+            f"{section}::{path_text} links to {chain_text} and that file is "
+            f"not in this package ({lookup['reason']}); a link carries no "
+            "body of its own to write."
+        )
+    own_payload = _locate_file_payload(document, section_key=section, field_path=path_text)
+    own_bytes = sum(len(chunk) for _offset, chunk in _iter_fill_chunks(own_payload))
+    if own_bytes > 0:
+        raise ValueError(
+            f"{section}::{path_text} links to {chain_text} but also carries "
+            f"{own_bytes} B of fillFileContent of its own; edit the source "
+            "file, or clear this entry's content first, so the two cannot "
+            "disagree."
+        )
+    source = lookup["row"]
+    return {
+        "section_key": str(source.get("section_key") or ""),
+        "field_path": str(source.get("field_path") or ""),
+        "link_entry": {
+            "section_key": section,
+            "field_path": path_text,
+            "fid_chain": str(row.get("fid_chain") or ""),
+        },
+        "link_source": _link_source_summary(
+            lookup, link_path=row.get("link_path"), own_payload=own_payload
+        ),
+    }
+
+
+def _link_alias_entries(
+    rows: list[dict[str, Any]],
+    adf_map: Mapping[str, str],
+    target: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    """Every link entry whose chain resolves to ``target``.
+
+    A write to the target changes what each of them shows, so the GUI
+    drops their cached views.
+    """
+    aliases: list[dict[str, str]] = []
+    for row in rows:
+        if row is target or len(str(row.get("link_path") or "").strip()) == 0:
+            continue
+        lookup = _link_source_lookup(rows, row, adf_map)
+        if lookup["resolved"] and lookup["row"] is target:
+            aliases.append(
+                {
+                    "section_key": str(row.get("section_key") or ""),
+                    "field_path": str(row.get("field_path") or ""),
+                    "fid_chain": str(row.get("fid_chain") or ""),
+                }
+            )
+    return aliases
+
+
+def _attach_link_write_info(
+    result: dict[str, Any],
+    handle: Mapping[str, Any],
+    redirect: Mapping[str, Any] | None,
+    section: str,
+    path_text: str,
+) -> None:
+    """Name the link entry a write came through and the aliases it touched."""
+    if redirect is not None:
+        result["link_entry"] = dict(redirect["link_entry"])
+        result["link_source"] = dict(redirect["link_source"])
+    document = handle["decoded_document"]
+    rows = _filesystem_tree_rows(document)
+    target = _tree_row_at(rows, section, path_text)
+    if target is None:
+        return
+    aliases = _link_alias_entries(rows, _build_adf_temp_fid_map(document), target)
+    if aliases:
+        result["link_aliases"] = aliases
+
+
 def _dispatch_show_file(
     ctx: ActionContext,
     *,
@@ -6211,6 +9411,8 @@ def _dispatch_show_file(
                     "security_attrs": row["security_attrs"],
                     "link_path": row["link_path"],
                     "details": row["details"],
+                    "lcsi": row.get("lcsi", ""),
+                    "pin_status_template": row.get("pin_status_template", ""),
                     "proprietary_special_info": row.get("proprietary_special_info", ""),
                     "proprietary_details": row.get("proprietary_details", ""),
                     "proprietary_fill_pattern": row.get("proprietary_fill_pattern", ""),
@@ -6225,6 +9427,7 @@ def _dispatch_show_file(
                     "short_efid_source": row.get("short_efid_source", ""),
                     "ef_size_source": row.get("ef_size_source", ""),
                     "security_attrs_source": row.get("security_attrs_source", ""),
+                    "descriptor_source": row.get("descriptor_source", ""),
                     "template_fcp_inherited_fields": list(
                         row.get("template_fcp_inherited_fields", [])
                     ),
@@ -6245,16 +9448,31 @@ def _dispatch_show_file(
                     "template_record_size": row.get("template_record_size"),
                     "template_record_count": row.get("template_record_count"),
                 },
-                "payload": _jsonify_decoded(match_payload),
+                "payload": _splice_inline_literals(
+                    handle,
+                    _jsonify_decoded(match_payload),
+                ),
             }
+            # The FCP tab shows the rules the file's
+            # ``securityAttributesReferenced`` points at, resolved through the
+            # EF.ARR record it names (TS 102 221 §9.2.7; SAIP V3.4.1 §8.3 for
+            # the identifier a 1-byte reference implies).
+            access_rule = _resolve_referenced_access_rule(
+                rows,
+                row,
+                pes=handle.get("pes"),
+                decoded_document=handle.get("decoded_document"),
+            )
+            if access_rule is not None:
+                response["access_rule"] = access_rule
             # Surface canonical Python decoder output so the GUI does
             # not re-implement BER-TLV / spec-specific decoders. Two
             # shapes are emitted:
             #
-            #   ``decoded``  — single dict for transparent / BER-TLV EFs
+            #   ``decoded``  -- single dict for transparent / BER-TLV EFs
             #                  (whole-image decode through
             #                  ``_decode_known_ef_payload``).
-            #   ``records``  — per-record list for linear-fixed / cyclic
+            #   ``records``  -- per-record list for linear-fixed / cyclic
             #                  EFs (each record decoded individually,
             #                  FF-padded slots flagged as ``empty``).
             #
@@ -6263,13 +9481,98 @@ def _dispatch_show_file(
             # ``records``. Old EF.ARR-only ``arr_records`` is preserved
             # for backwards-compat with frontend versions that have
             # not yet picked up the generalised path.
+            # The image first: a record whose placeholder has a stored value
+            # decodes what the export writes, so the body and its placeholder
+            # ranges are resolved before the decoders run. pySim ``File.body``
+            # is the canonical on-card image (the template's ``default_val``
+            # pattern across ``file_size``, then the package's diffs); a
+            # generic-file-management file gets the ``File`` its live
+            # ``createFCP`` span builds, and the workbench's virtual image
+            # stands in only where pySim cannot build one.
+            # A link entry shows the file its ``linkPath`` names: the source
+            # file's bytes and layout, decoded under the link's own identity
+            # (``linked_files`` above).
+            body_resolution: tuple[bytes, int | None, int | None, int | None] | None = None
+            decode_value: Any = match_payload
+            layout_source: tuple[str, str] | None = None
+            placeholder_row: Mapping[str, Any] = row
+            link_lookup: dict[str, Any] | None = None
+            if len(str(row.get("link_path") or "").strip()) > 0:
+                link_lookup = _link_source_lookup(
+                    rows, row, _build_adf_temp_fid_map(handle["decoded_document"])
+                )
+                response["link_source"] = _link_source_summary(
+                    link_lookup, link_path=row.get("link_path"), own_payload=match_payload
+                )
+            if link_lookup is not None and link_lookup["resolved"]:
+                source_row = link_lookup["row"]
+                decode_value = _locate_file_payload(
+                    handle["decoded_document"],
+                    section_key=str(source_row.get("section_key") or ""),
+                    field_path=str(source_row.get("field_path") or ""),
+                )
+                layout_source = (
+                    str(source_row.get("section_key") or ""),
+                    str(source_row.get("field_path") or ""),
+                )
+                placeholder_row = source_row
+                try:
+                    body_resolution = _linked_body_resolution(
+                        handle, source_row, decode_value, own_payload=match_payload
+                    )
+                except Exception:  # noqa: BLE001
+                    body_resolution = None
+            else:
+                try:
+                    body_resolution = _file_body_from_pe(
+                        pes=handle.get("pes"),
+                        decoded_document=handle.get("decoded_document"),
+                        section_key=section,
+                        field_path=path_text,
+                    )
+                except Exception:  # noqa: BLE001
+                    body_resolution = None
+            image_bytes: bytes | None = None
+            image_record_size: int | None = None
+            virtual_image: bytes | None = None
+            if body_resolution is not None:
+                image_bytes = body_resolution[0]
+                image_record_size = body_resolution[1]
+            elif handle.get("inline_placeholder_records"):
+                declared_size: int | None = None
+                try:
+                    declared_size = int(str(row.get("ef_size") or ""), 16)
+                except ValueError:
+                    declared_size = None
+                virtual_image = _virtual_file_image_from_entries(match_payload, declared_size)
+                if virtual_image:
+                    image_bytes = virtual_image
+                    image_record_size = _record_size_from_row_descriptor(row)
+            inline_ranges: list[dict[str, Any]] = []
+            length_edits: list[Any] = []
+            decode_override: bytes | None = None
+            if image_bytes:
+                inline_ranges = _inline_placeholder_ranges(handle, image_bytes)
+            if inline_ranges:
+                decode_override, length_edits = _placeholder_resolved_image(
+                    image_bytes,
+                    inline_ranges,
+                    row=placeholder_row,
+                    record_size=image_record_size,
+                )
+            if layout_source is not None and decode_override is None and image_bytes:
+                # The link's own content may sit over the source bytes; the
+                # decoders read the same image the hex pane shows.
+                decode_override = image_bytes
             decoded_payload, records_payload = _decode_for_show_file(
                 section_key=section,
                 field_path=path_text,
-                file_value=match_payload,
+                file_value=decode_value,
                 file_id=row.get("file_id"),
                 pes=handle.get("pes"),
                 decoded_document=handle.get("decoded_document"),
+                body_override=decode_override,
+                layout_source=layout_source,
             )
             if decoded_payload is not None:
                 response["decoded"] = decoded_payload
@@ -6279,25 +9582,6 @@ def _dispatch_show_file(
                 response["arr_records"] = _flatten_arr_records_legacy(
                     records_payload
                 )
-            # Canonical on-card image — pySim ``File.body`` after
-            # ``file_content_from_tuples`` has applied the template's
-            # ``default_val`` pattern across ``file_size`` and overlaid
-            # the package's diffs. The frontend's
-            # ``saipBuildVirtualFileImage`` only walks explicit
-            # fillFileContent / fillFileOffset tuples, so files whose
-            # bytes live in the template default (e.g. EF.ICCID,
-            # EF.IMSI on a freshly-cloned profile) reconstructed as
-            # all-FF. Surfacing the composed body lets the frontend
-            # render the actual hex.
-            try:
-                body_resolution = _file_body_from_pe(
-                    pes=handle.get("pes"),
-                    decoded_document=handle.get("decoded_document"),
-                    section_key=section,
-                    field_path=path_text,
-                )
-            except Exception:  # noqa: BLE001
-                body_resolution = None
             if body_resolution is not None:
                 body_bytes, body_rec_len, body_nb_rec, body_size = body_resolution
                 response["body_hex"] = body_bytes.hex().upper()
@@ -6308,6 +9592,31 @@ def _dispatch_show_file(
                     response["body_record_count"] = body_nb_rec
                 if isinstance(body_size, int) and body_size > 0:
                     response["body_declared_size"] = body_size
+            elif virtual_image and inline_ranges:
+                # Hand the virtual image over so the hex pane shows the
+                # literal or the value instead of a sentinel parsed from
+                # spliced text. The record layout travels with it so the
+                # placeholder marks reach the right record.
+                response["body_hex"] = virtual_image.hex().upper()
+                response["body_size"] = len(virtual_image)
+                if isinstance(image_record_size, int) and image_record_size > 0:
+                    response["body_record_size"] = image_record_size
+                    response["body_record_count"] = max(
+                        1, -(-len(virtual_image) // image_record_size)
+                    )
+            if inline_ranges:
+                response["inline_placeholders"] = inline_ranges
+                if length_edits:
+                    # Length bytes that follow a stored value: shown with the
+                    # value, written by a complete export.
+                    response["inline_length_fields"] = [
+                        edit.to_wire() for edit in length_edits
+                    ]
+                unresolved = [
+                    entry for entry in inline_ranges if not entry.get("resolved")
+                ]
+                if unresolved:
+                    _mark_inline_placeholder_decodes(response, unresolved)
             return response
     # Soft-fail when the row doesn't exist instead of raising. Operators
     # can hit this by clicking a synthetic tree node (a parent DF that
@@ -6324,7 +9633,7 @@ def _dispatch_show_file(
         "fcp": {},
         "payload": None,
         "warning": (
-            f"no file definition at {section}::{path_text} — likely a "
+            f"no file definition at {section}::{path_text} -- likely a "
             "synthetic tree parent or a stale selection (try re-clicking "
             "or refreshing the file list)."
         ),
@@ -6339,23 +9648,36 @@ def _decode_for_show_file(
     file_id: Any,
     pes: Any = None,
     decoded_document: dict[str, Any] | None = None,
+    body_override: bytes | None = None,
+    layout_source: tuple[str, str] | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
     """Run the canonical Python decoders against a file's payload.
 
-    Returns ``(decoded, records)`` — exactly one of which is non-None
+    ``body_override`` stands in for the file bytes while the layout still
+    comes from pySim's File or the descriptor: the file view passes the
+    image with stored placeholder values substituted, so a record decodes
+    what a complete export writes.
+
+    ``layout_source`` names the ``(section_key, field_path)`` whose pySim
+    ``File`` carries the record layout when it is not the file's own: a
+    link entry decodes under its own identity with the source file's
+    layout (TCA SAIP V3.4.1 §8.3.3 Note 1), and ``file_value`` is then the
+    source file's entries.
+
+    Returns ``(decoded, records)`` -- exactly one of which is non-None
     for files we can decode. ``decoded`` is the
     ``_decode_known_ef_payload`` output for the reconstructed image.
     ``records`` is a per-record list for linear-fixed / cyclic EFs,
     each item carrying the same dispatcher's output for that record's
     slice plus a 1-based ``record`` number and an ``empty`` flag.
 
-    The reconstruction prefers pySim's ``File.body`` when available —
+    The reconstruction prefers pySim's ``File.body`` when available --
     that path applies the TCA template's ``default_val`` to all record
     slots before overlaying the package's ``fillFileContent`` /
     ``fillFileOffset`` diffs (pySim ``saip/__init__.py``
     ``file_content_from_tuples`` line 414+). The local fallback uses
     the SEEK_CUR semantic for ``fillFileOffset`` (pySim line 432:
-    ``stream.seek(v, os.SEEK_CUR)``) — a delta from the current write
+    ``stream.seek(v, os.SEEK_CUR)``) -- a delta from the current write
     head, NOT an absolute offset.
     """
     fp_lower = str(field_path or "").strip().lower()
@@ -6373,6 +9695,42 @@ def _decode_for_show_file(
         )
     except ImportError:
         return (None, None)
+
+    arr_scopes: dict[int, str] | None = None
+    arr_citations: dict[int, dict[str, Any]] = {}
+    is_arr_file = _is_arr_field_path(field_path)
+    if is_arr_file:
+        arr_citations = _arr_record_citations(
+            decoded_document,
+            section_key=section_key,
+            file_id=file_id,
+            field_path=field_path,
+        )
+        arr_scopes = {
+            record: str(info.get("scope") or "")
+            for record, info in arr_citations.items()
+        }
+
+    def _annotate(
+        result: tuple[dict[str, Any] | None, list[dict[str, Any]] | None],
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
+        """Name the files that cite each ARR record next to its rules.
+
+        An empty ``citedBy`` is meaningful: no file in the package references
+        that record, so its rules govern nothing here.
+        """
+        _decoded_part, records_part = result
+        if is_arr_file is False or not records_part:
+            return result
+        for entry in records_part:
+            try:
+                record_number = int(entry.get("record") or 0)
+            except (TypeError, ValueError):
+                continue
+            info = arr_citations.get(record_number) or {}
+            entry["citedBy"] = list(info.get("citedBy") or ())
+            entry["scopeMixed"] = bool(info.get("mixed"))
+        return result
 
     descriptor_payload: dict[str, Any] | None = None
     fill_chunks: list[tuple[int, bytes]] = []
@@ -6414,12 +9772,13 @@ def _decode_for_show_file(
     # Records that the package never explicitly writes (the test
     # profile's records 3..22 of EF.ARR, populated only by the
     # template default) end up with the template-default bytes, not
-    # all-FF — which is what the on-card image actually carries.
+    # all-FF -- which is what the on-card image actually carries.
+    layout_section, layout_path = layout_source or (section_key, field_path)
     body_from_pe = _file_body_from_pe(
         pes=pes,
         decoded_document=decoded_document,
-        section_key=section_key,
-        field_path=field_path,
+        section_key=layout_section,
+        field_path=layout_path,
     )
     if body_from_pe is not None:
         body_bytes, body_rec_len, body_nb_rec, body_size = body_from_pe
@@ -6429,8 +9788,8 @@ def _decode_for_show_file(
             record_count = int(body_nb_rec)
         if body_size is not None and body_size > 0:
             file_size = int(body_size)
-        raw = bytearray(body_bytes)
-        return _slice_and_decode(
+        raw = bytearray(body_override if body_override is not None else body_bytes)
+        return _annotate(_slice_and_decode(
             raw=raw,
             record_length=record_length,
             record_count=record_count,
@@ -6439,10 +9798,14 @@ def _decode_for_show_file(
             fid=fid_upper,
             parent_hint=sk_lower,
             decode_known_ef_payload=_decode_known_ef_payload,
-        )
+            arr_scopes=arr_scopes,
+            blank=_creation_image(
+                pes, decoded_document, layout_section, layout_path, len(raw)
+            ),
+        ))
 
     # Fallback: rebuild from the tuple list. This path is hit when
-    # the session never built a pySim File for this entry (rare —
+    # the session never built a pySim File for this entry (rare --
     # JSON-loaded packages also feed through ``ProfileElementSequence``
     # so File objects are populated). It does NOT apply template
     # defaults; trailing records will read as FF-only and be flagged
@@ -6487,8 +9850,10 @@ def _decode_for_show_file(
         if end > len(raw):
             raw.extend(b"\xFF" * (end - len(raw)))
         raw[start:end] = blob
+    if body_override is not None:
+        raw = bytearray(body_override)
 
-    return _slice_and_decode(
+    return _annotate(_slice_and_decode(
         raw=raw,
         record_length=record_length,
         record_count=total_records if is_record_fixed else record_count,
@@ -6497,7 +9862,11 @@ def _decode_for_show_file(
         fid=fid_upper,
         parent_hint=sk_lower,
         decode_known_ef_payload=_decode_known_ef_payload,
-    )
+        arr_scopes=arr_scopes,
+        blank=_creation_image(
+            pes, decoded_document, layout_section, layout_path, len(raw)
+        ),
+    ))
 
 
 def _slice_and_decode(
@@ -6510,8 +9879,15 @@ def _slice_and_decode(
     fid: str,
     parent_hint: str,
     decode_known_ef_payload,
+    arr_scopes: dict[int, str] | None = None,
+    blank: bytes | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
-    """Slice ``raw`` into records (when record-fixed) or decode whole."""
+    """Slice ``raw`` into records (when record-fixed) or decode whole.
+
+    A record is ``empty`` -- unallocated -- while it still holds what the
+    file is created with: ``blank``'s bytes at its offset, or erased 'FF'
+    bytes when the creation content is unknown.
+    """
     is_record_fixed = (
         isinstance(record_length, int)
         and record_length > 0
@@ -6527,14 +9903,22 @@ def _slice_and_decode(
                 records.append({"record": record_number, "empty": True})
                 continue
             slice_bytes = bytes(raw[start:end])
-            is_empty = all(byte_value == 0xFF for byte_value in slice_bytes)
+            if blank is not None and len(blank) >= end:
+                is_empty = slice_bytes == bytes(blank[start:end])
+            else:
+                is_empty = all(byte_value == 0xFF for byte_value in slice_bytes)
             entry: dict[str, Any] = {"record": record_number, "empty": is_empty}
             if not is_empty:
+                record_scope = (arr_scopes or {}).get(record_number)
+                extra: dict[str, Any] = {}
+                if record_scope is not None:
+                    extra["arr_scope"] = record_scope
                 decoded = decode_known_ef_payload(
                     ef_key=ef_key,
                     fid=fid,
                     hex_clean=slice_bytes.hex(),
                     parent_hint=parent_hint,
+                    **extra,
                 )
                 if isinstance(decoded, dict):
                     entry["decoded"] = _jsonify_decoded(decoded)
@@ -6550,6 +9934,78 @@ def _slice_and_decode(
     if isinstance(decoded, dict):
         return (_jsonify_decoded(decoded), None)
     return (None, None)
+
+
+def _iter_fill_chunks(entries: Any) -> Iterator[tuple[int, bytes]]:
+    """``(offset, bytes)`` of every ``fillFileContent`` in a file's entries.
+
+    The offset is the write head: ``fillFileOffset`` advances it and each
+    content moves it past what was written (TCA Profile interoperability
+    technical specification V3.4.1 §8.3.5). Entries come as tagged tuples,
+    single-key dicts or ``{"@": [name, value]}`` envelopes.
+    """
+    if not isinstance(entries, (list, tuple)):
+        return
+    offset = 0
+    for entry in entries:
+        name: str | None = None
+        value: Any = None
+        if isinstance(entry, dict):
+            tagged = entry.get("@")
+            if isinstance(tagged, (list, tuple)) and len(tagged) == 2:
+                name, value = str(tagged[0]), tagged[1]
+            elif len(entry) == 1:
+                name, value = next(iter(entry.items()))
+                name = str(name)
+        elif isinstance(entry, (list, tuple)) and len(entry) == 2 and isinstance(entry[0], str):
+            name, value = entry[0], entry[1]
+        if name == "fillFileOffset":
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                offset += value
+            continue
+        if name not in {"fillFileContent", "fillFileContents"}:
+            continue
+        if isinstance(value, (bytes, bytearray)):
+            chunk = bytes(value)
+        elif isinstance(value, dict) and isinstance(value.get("hex"), str):
+            try:
+                chunk = bytes.fromhex(value["hex"])
+            except ValueError:
+                continue
+        elif isinstance(value, str):
+            try:
+                chunk = bytes.fromhex(value)
+            except ValueError:
+                continue
+        else:
+            continue
+        yield offset, chunk
+        offset += len(chunk)
+
+
+def _overlay_fill_chunks(base: bytes, entries: Any) -> bytes:
+    """``base`` with a file's ``fillFileContent`` entries written over it."""
+    image = bytearray(base)
+    for offset, chunk in _iter_fill_chunks(entries):
+        while len(image) < offset:
+            image.append(0xFF)
+        image[offset : offset + len(chunk)] = chunk
+    return bytes(image)
+
+
+def _virtual_file_image_from_entries(entries: Any, declared_size: int | None) -> bytes:
+    """Rebuild a file image from its ``fillFileOffset`` / ``fillFileContent`` entries.
+
+    Mirrors the workbench's own reconstruction: writes land at a cursor that
+    ``fillFileOffset`` advances, gaps and the tail up to the declared size
+    are FF. Used for a generic-file-management entry pySim cannot build a
+    ``File`` for (:func:`_gfm_file_for_path`), so placeholder ranges can
+    still be located in the bytes the operator sees.
+    """
+    image = bytearray(_overlay_fill_chunks(b"", entries))
+    if isinstance(declared_size, int) and declared_size > len(image):
+        image.extend(b"\xff" * (declared_size - len(image)))
+    return bytes(image)
 
 
 def _file_body_from_pe(
@@ -6568,25 +10024,24 @@ def _file_body_from_pe(
     diffs (pySim ``saip/__init__.py`` line 414+). Using it sidesteps
     the SEEK_CUR / template-default interpretation that the local
     reconstruction has historically gotten wrong.
+
+    A file that generic file management creates is resolved through
+    :func:`_gfm_file_for_path`, so its Fcp fill or repeat pattern reaches
+    the image the same way it does for a template file.
     """
-    if pes is None:
+    pe = _pe_at_section(pes, decoded_document, section_key)
+    if pe is None:
         return None
-    sections = (decoded_document or {}).get("sections") or {}
-    section_keys = list(sections.keys())
-    try:
-        idx = section_keys.index(str(section_key))
-    except ValueError:
-        return None
-    pe_list = getattr(pes, "pe_list", None)
-    if pe_list is None or idx < 0 or idx >= len(pe_list):
-        return None
-    pe = pe_list[idx]
     files_attr = getattr(pe, "files", None)
     if not isinstance(files_attr, dict):
         return None
     pe_file = files_attr.get(str(field_path))
+    gfm_file = False
     if pe_file is None:
-        return None
+        pe_file = _gfm_file_for_path(pe, str(field_path))
+        if pe_file is None:
+            return None
+        gfm_file = True
     try:
         body = pe_file.body
     except Exception:  # noqa: BLE001
@@ -6599,12 +10054,126 @@ def _file_body_from_pe(
         size_val = pe_file.file_size
     except Exception:  # noqa: BLE001
         size_val = None
-    return (
-        bytes(body),
-        int(rec_len) if isinstance(rec_len, int) and rec_len > 0 else None,
-        int(nb_rec) if isinstance(nb_rec, int) and nb_rec > 0 else None,
-        int(size_val) if isinstance(size_val, int) and size_val > 0 else None,
-    )
+    rec_len_out = int(rec_len) if isinstance(rec_len, int) and rec_len > 0 else None
+    nb_rec_out = int(nb_rec) if isinstance(nb_rec, int) and nb_rec > 0 else None
+    size_out = int(size_val) if isinstance(size_val, int) and size_val > 0 else None
+    if rec_len_out is not None:
+        nb_rec_out, size_out = _record_count_from_declared_size(
+            pe_file, bytes(body), rec_len_out, nb_rec_out, size_out
+        )
+    if gfm_file and size_out is not None and len(body) < size_out:
+        # pySim ends the body at the last write when the Fcp declares no
+        # pattern; the rest of the declared size is what the file was
+        # created with, the same tail a short write is padded with.
+        tail, _tail_source = _fcp_fill_span(
+            pe_file,
+            window=rec_len_out or size_out,
+            start=len(body),
+            count=size_out - len(body),
+        )
+        body = bytes(body) + tail
+    return (bytes(body), rec_len_out, nb_rec_out, size_out)
+
+
+def _pe_at_section(pes: Any, decoded_document: dict[str, Any] | None, section_key: str) -> Any:
+    """The pySim PE a document section stands for, or ``None``."""
+    if pes is None:
+        return None
+    section_keys = list(((decoded_document or {}).get("sections") or {}).keys())
+    try:
+        idx = section_keys.index(str(section_key))
+    except ValueError:
+        return None
+    pe_list = getattr(pes, "pe_list", None)
+    if pe_list is None or idx < 0 or idx >= len(pe_list):
+        return None
+    return pe_list[idx]
+
+
+def _creation_image(
+    pes: Any,
+    decoded_document: dict[str, Any] | None,
+    section_key: str,
+    field_path: str,
+    length: int,
+) -> bytes | None:
+    """``length`` bytes of what a file holds before any content lands in it.
+
+    The Fcp pattern, else the template default, else erased (ETSI TS 102 222
+    V17.1.0 §6.3.2.2.2, TCA SAIP V3.4.1 §8.3.3), from the ``File`` the live
+    entries build; ``None`` when there is none to build.
+    """
+    pe = _pe_at_section(pes, decoded_document, section_key)
+    pe_file = _fcp_edit_file(pe, str(field_path)) if pe is not None else None
+    if pe_file is None:
+        return None
+    from Tools.ProfilePackage.saip_pysim_compat import file_creation_content
+
+    try:
+        return file_creation_content(pe_file, length)
+    except (TypeError, ValueError):
+        return None
+
+
+def _gfm_file_for_path(pe: Any, field_path: str) -> Any:
+    """The pySim ``File`` of the EF a GFM ``createFCP`` at ``field_path`` creates.
+
+    ``ProfileElementGFM.files`` is keyed by the path pySim walks, not by the
+    ``fileManagementCMD[i][j]`` address the workbench uses, and is not rebuilt
+    after an edit. :func:`_gfm_body_target` builds the ``File`` from the live
+    entries instead -- the one the body editors write through -- so the image
+    shown is the one a write starts from, Fcp fill or repeat pattern included
+    (ETSI TS 102 222 V17.1.0 §6.3.2.2.2, applied per record by
+    ``Tools/ProfilePackage/saip_pysim_compat.py``).
+
+    ``None`` for any other PE or address, for a DF, and for a ``createFCP``
+    pySim cannot size (no usable descriptor, or record geometry without a
+    count or a size); the callers then fall back to the virtual image.
+    """
+    if _GFM_FIELD_PATH_RE.match(field_path) is None:
+        return None
+    try:
+        target = _gfm_body_target(pe, field_path)
+    except (ValueError, TypeError):
+        return None
+    if target is None:
+        return None
+    pe_file = target[3]
+    if getattr(pe_file, "file_type", None) not in ("TR", "LF", "CY", "BT"):
+        return None
+    return pe_file
+
+
+def _record_count_from_declared_size(
+    pe_file: Any,
+    body: bytes,
+    rec_len: int,
+    nb_rec: int | None,
+    size_val: int | None,
+) -> tuple[int | None, int | None]:
+    """Record count that honours the profile's own file size.
+
+    pySim ``File.from_template`` copies the TCA template's record count and
+    ``from_fcp`` recomputes it from ``efFileSize`` only while it is still
+    ``None``, so a profile whose descriptor omits the count but declares a
+    larger size keeps the template default (EF.MSISDN: one record from
+    ``FilesUsimOptional`` against a 68-byte, two-record file). ETSI TS 102
+    222 sizes a linear fixed EF as record length times record count, so
+    the declared size decides here. The result is the largest of the
+    template count, the declared size and the body; it equals pySim's own
+    count once pySim honours the size, which is what
+    ``upstream_patches/osmocom-pysim-saip-record-count/`` asks for.
+    """
+    declared = getattr(pe_file, "_file_size", None)
+    candidates = [nb_rec or 0]
+    if isinstance(declared, int) and declared >= rec_len:
+        candidates.append(declared // rec_len)
+    if len(body) >= rec_len:
+        candidates.append(-(-len(body) // rec_len))
+    count = max(candidates)
+    if count <= 0:
+        return nb_rec, size_val
+    return count, max(size_val or 0, count * rec_len)
 
 
 def snapshot_saip_session(session_id: str) -> dict[str, Any]:
@@ -6727,7 +10296,7 @@ def _unjsonify_decoded(value: Any) -> Any:
 
     Walks a JSON-loaded tree and substitutes bytes-shaped hex strings
     back into ``bytes``. Dicts become ``OrderedDict`` so the inverse
-    preserves the same key order operators saw on the JSON tab — pySim
+    preserves the same key order operators saw on the JSON tab -- pySim
     is permissive about FCP key ordering, but reviewers diffing
     re-emitted JSON expect a byte-for-byte round-trip. Strings that
     aren't even-length hex pass through unchanged: that mirrors the
@@ -6777,6 +10346,9 @@ def _flatten_arr_records_legacy(
             for key in (
                 "format",
                 "reference",
+                "accessModeScope",
+                "alternateReading",
+                "scopeSensitive",
                 "ruleCount",
                 "rules",
                 "summary",
@@ -6785,6 +10357,9 @@ def _flatten_arr_records_legacy(
             ):
                 if key in decoded:
                     flat[key] = decoded[key]
+        for key in ("citedBy", "scopeMixed"):
+            if key in entry:
+                flat[key] = entry[key]
         out.append(flat)
     return out
 
@@ -6801,9 +10376,9 @@ def _locate_gfm_file_payload(
 ) -> Any:
     """Return a synthetic CHOICE-tuple list for a GFM-defined file.
 
-    The synthetic list mimics the shape of a template EF —
+    The synthetic list mimics the shape of a template EF --
     ``[("fileDescriptor", {...}), ("fillFileOffset", n),
-    ("fillFileContent", b"..."), ...]`` — by stitching the
+    ("fillFileContent", b"..."), ...]`` -- by stitching the
     ``createFCP`` payload at ``transaction[cmd_index]`` to the
     ``fillFileContent`` / ``fillFileOffset`` entries that follow it
     inside the same transaction (until the next ``createFCP`` or
@@ -6891,6 +10466,59 @@ def _locate_file_payload(
     return None
 
 
+def _unresolved_placeholder_findings(
+    handle: Mapping[str, Any],
+    pe_index_by_section: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """``YRL-VAR-001`` for every inline variable without a value."""
+    state = _inline_template_state(handle)
+    unresolved = {str(name).casefold() for name in state["unresolved_variables"]}
+    if not unresolved:
+        return []
+    sections = (handle.get("decoded_document") or {}).get("sections") or {}
+    section_text = {
+        str(key): "|".join(_strings_in_tree(value)).upper() for key, value in sections.items()
+    }
+    findings: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for record in handle.get("inline_placeholder_records") or []:
+        name = str(getattr(record, "variable_name", "") or "")
+        if name.casefold() not in unresolved or name.casefold() in seen:
+            continue
+        seen.add(name.casefold())
+        sentinel = str(getattr(record, "sentinel_hex", "") or "").upper()
+        location = next(
+            (key for key, text in section_text.items() if sentinel and sentinel in text), ""
+        )
+        type_text = str(getattr(record, "type_name", "") or "").upper()
+        message = (
+            f"placeholder {record.literal} has no value; the complete export is blocked "
+            "until one is typed or a test-value list answers it."
+        )
+        if type_text in _LENGTH_COUNTED_PLACEHOLDER_TYPES:
+            message += " A length byte that counts it cannot be reconciled until then."
+        finding: dict[str, Any] = {
+            "code": "YRL-VAR-001",
+            "severity": "WARN",
+            "spec": "",
+            "path": location,
+            "message": message,
+            "recommendation": (
+                f"Type a value for '{name}' in the Variables panel, or add "
+                f"{record.literal} with its value to the universal list."
+            ),
+        }
+        if location:
+            finding["section_key"] = location
+            pe_index = pe_index_by_section.get(location)
+            if pe_index is None:
+                pe_index = pe_index_by_section.get(location.lower())
+            if pe_index is not None:
+                finding["pe_index"] = pe_index
+        findings.append(finding)
+    return findings
+
+
 @_with_session_lock
 def _dispatch_validate(
     ctx: ActionContext,
@@ -6910,10 +10538,15 @@ def _dispatch_validate(
     handle = get_manager().claim(sid)
     source_path = handle.get("source_path") or "(in-memory package)"
 
+    from Tools.ProfilePackage.saip_ef_length_fields import record_sizes_from_sequence
+
+    lint_document, sentinel_hexes = _lint_document_for_handle(handle)
     linter = SaipProfileLinter(strict=strict_flag)
     report = linter.lint_decoded_document(
-        handle["decoded_document"],
+        lint_document,
         profile_label=str(source_path),
+        inline_sentinel_hexes=sentinel_hexes,
+        record_sizes=record_sizes_from_sequence(handle.get("pes")),
     )
     report_dict = report.to_dict()
 
@@ -6939,7 +10572,7 @@ def _dispatch_validate(
             "path": path_text,
             "message": item.get("message", ""),
             "recommendation": item.get("recommendation", ""),
-            # SA-G5 — only emit the resolved keys when we found a
+            # SA-G5 -- only emit the resolved keys when we found a
             # match so the frontend's "is this clickable?" check is
             # a simple ``finding.pe_index !== undefined``.
         }
@@ -6950,6 +10583,7 @@ def _dispatch_validate(
         if target.get("field_path"):
             finding["field_path"] = target["field_path"]
         findings.append(finding)
+    findings.extend(_unresolved_placeholder_findings(handle, pe_index_by_section))
     return {
         "session_id": sid,
         "profile": report_dict.get("profile", source_path),
@@ -7000,7 +10634,7 @@ def _build_validation_jump_indexes(
 
 # Linter ``path`` strings that don't map to a PE / file by design.
 # These are document-level or sequence-level findings (PE order,
-# service-coverage rollups, document totals) — we leave them
+# service-coverage rollups, document totals) -- we leave them
 # unrouted so the GUI shows them in the dock without a Jump button.
 _VALIDATION_NON_ROUTABLE_PATHS: frozenset[str] = frozenset(
     {
@@ -7023,11 +10657,11 @@ def _resolve_finding_target(
 
     Recognised patterns (per the in-tree ``SaipProfileLinter`` output):
 
-    * ``"<section>"``  — bare PE section (``header`` / ``mf`` / ``usim`` …)
-    * ``"<section>.<field>"`` — section-rooted field path
-    * ``"<section>::<field>"`` — explicit file key (linter forward-compat)
-    * ``"service:<name>"`` — service rollup; not routable
-    * Anything in :data:`_VALIDATION_NON_ROUTABLE_PATHS` — left unrouted
+    * ``"<section>"``  -- bare PE section (``header`` / ``mf`` / ``usim`` ...)
+    * ``"<section>.<field>"`` -- section-rooted field path
+    * ``"<section>::<field>"`` -- explicit file key (linter forward-compat)
+    * ``"service:<name>"`` -- service rollup; not routable
+    * Anything in :data:`_VALIDATION_NON_ROUTABLE_PATHS` -- left unrouted
 
     Falls through to ``{}`` when no pattern matches.
     """
@@ -7051,7 +10685,7 @@ def _resolve_finding_target(
     if raw.lower().startswith("service:"):
         return {}
 
-    # Try ``<section>.<field>`` first — split on the first dot only,
+    # Try ``<section>.<field>`` first -- split on the first dot only,
     # so paths like ``header.connectivityParameters.spnDisplayCondition``
     # still anchor on the top-level section.
     section_candidate: str | None = None
@@ -7144,6 +10778,350 @@ def _dispatch_get_dirty(
     }
 
 
+_FILE_BODY_TUPLE_KEYS: tuple[str, ...] = ("fillFileContent", "fillFileOffset")
+# Fcp members that size a file: the descriptor carries the structure and
+# the record geometry, efFileSize the allocated body.
+_SIZING_SUB_FIELDS: frozenset[str] = frozenset({"efFileSize", "fileDescriptor"})
+
+
+def _fcp_edit_file(pe: Any, path_text: str) -> Any:
+    """The pySim ``File`` the live entries at ``path_text`` build, or ``None``.
+
+    Built from the decoded tuples -- what the encoder writes -- so it reflects
+    the Fcp as it stands now, never the object pySim cached when the package
+    was loaded. ``None`` for a DF, a ``doNotCreate`` entry, an address with no
+    file, and an Fcp pySim cannot size.
+    """
+    gfm_file = _gfm_file_for_path(pe, path_text)
+    if gfm_file is not None:
+        return gfm_file
+    files_attr = getattr(pe, "files", None)
+    existing = files_attr.get(path_text) if isinstance(files_attr, dict) else None
+    if existing is None or getattr(existing, "file_type", None) not in ("TR", "LF", "CY", "BT"):
+        return None
+    decoded = getattr(pe, "decoded", None)
+    tuples = decoded.get(path_text) if isinstance(decoded, dict) else None
+    if not isinstance(tuples, list):
+        return None
+    _ensure_pysim_importable()
+    from pySim.esim.saip import File
+
+    try:
+        return File(path_text, tuples, getattr(existing, "template", None))
+    except (ValueError, TypeError):
+        return None
+
+
+def _file_geometry(pe_file: Any) -> tuple[Any, Any, Any]:
+    """``(file_type, record length, size)``: what an Fcp edit can resize."""
+    file_type = getattr(pe_file, "file_type", None)
+    record_length = getattr(pe_file, "rec_len", None) if file_type in ("LF", "CY") else None
+    try:
+        size = pe_file.file_size
+    except (TypeError, ValueError):
+        size = None
+    return (file_type, record_length, size)
+
+
+def _creation_content_source(pe_file: Any) -> str:
+    """What a file holds before any content lands in it."""
+    if getattr(pe_file, "fill_pattern", None):
+        return "repeatPattern" if getattr(pe_file, "fill_pattern_repeat", False) else "fillPattern"
+    template = getattr(pe_file, "template", None)
+    if template is not None and getattr(template, "default_val", None):
+        return "templateDefault"
+    return "erased"
+
+
+def _resync_template_file(pe: Any, path_text: str, fresh: Any) -> None:
+    """Put a rebuilt ``File`` where pySim keeps a template file.
+
+    pySim builds ``pe.files`` once, at decode; an Fcp edit changes only the
+    decoded tuples, so the cached object would keep the old size, pattern and
+    image. The filesystem node keeps pointing at the file it describes. A GFM
+    file has no ``pe.files`` entry under its address -- every read rebuilds it
+    from its span -- so the call changes nothing for one.
+    """
+    files_attr = getattr(pe, "files", None)
+    if fresh is None or not isinstance(files_attr, dict):
+        return
+    existing = files_attr.get(path_text)
+    if existing is None or existing is fresh:
+        return
+    node = getattr(existing, "node", None)
+    fresh.node = node
+    if node is not None and getattr(node, "file", None) is existing:
+        node.file = fresh
+    files_attr[path_text] = fresh
+
+
+def _reset_body_on_resize(
+    handle: dict[str, Any],
+    pe: Any,
+    path_text: str,
+    before: Any,
+    sub_key: str,
+) -> dict[str, Any] | None:
+    """Return a file an Fcp edit resized to the content it is created with.
+
+    ETSI TS 102 222 V17.1.0 §6.3.2.2.2 creates an EF from its Filling or
+    Repeat Pattern, and TCA SAIP V3.4.1 §8.3.3 (page 30) makes the
+    ``fillFileContent`` / ``fillFileOffset`` entries an UPDATE after that
+    creation, so content written for one geometry has no meaning in another.
+    When the file type, the record length or the size changes, those entries
+    are dropped: the file reads back as its pattern, the template default,
+    or erased, and the placeholders the old content carried leave with it.
+    A sizing edit that keeps the geometry does the same when the content
+    runs past the declared size, which no card accepts. Returns what was
+    reset, or ``None`` when the content stays.
+    """
+    after = _fcp_edit_file(pe, path_text)
+    if before is None or after is None:
+        _resync_template_file(pe, path_text, after)
+        return None
+    size = _file_geometry(after)[2]
+    body = getattr(after, "body", None)
+    overflow = (
+        sub_key in _SIZING_SUB_FIELDS
+        and isinstance(size, int)
+        and size > 0
+        and body is not None
+        and len(body) > size
+    )
+    resized = _file_geometry(before) != _file_geometry(after)
+    if not resized and not overflow:
+        _resync_template_file(pe, path_text, after)
+        return None
+    old_body = bytes(getattr(before, "body", b"") or b"")
+    dropped_bytes, reindexed = _drop_file_body_entries(pe, path_text)
+    rebuilt = _fcp_edit_file(pe, path_text)
+    _resync_template_file(pe, path_text, rebuilt)
+    new_body = bytes(getattr(rebuilt, "body", b"") or b"") if rebuilt is not None else b""
+    _hex_text, placeholder_summary = _absorb_hex_input(
+        handle, new_body.hex().upper(), previous=old_body
+    )
+    return {
+        "content_reset": {
+            "reason": "resized" if resized else "overflow",
+            "dropped_bytes": dropped_bytes,
+            "source": _creation_content_source(rebuilt if rebuilt is not None else after),
+            "size": _file_geometry(rebuilt if rebuilt is not None else after)[2],
+        },
+        "gfm_reindexed": reindexed,
+        "placeholders": placeholder_summary,
+    }
+
+
+def _drop_file_body_entries(pe: Any, path_text: str) -> tuple[int, bool | None]:
+    """Remove the ``fillFileContent`` / ``fillFileOffset`` entries of one file.
+
+    Returns the content bytes dropped and, for a file generic file management
+    creates, whether the files after it in the transaction moved (their
+    ``fileManagementCMD[i][j]`` addresses shift); ``None`` for a template file.
+    """
+    gfm_target = (
+        _gfm_body_target(pe, path_text)
+        if _gfm_file_for_path(pe, path_text) is not None
+        else None
+    )
+    if gfm_target is not None:
+        transaction, cmd_index, span_end, _gfm_file = gfm_target
+        dropped_bytes = sum(
+            len(item[1])
+            for item in transaction[cmd_index + 1:span_end]
+            if isinstance(item, tuple) and len(item) == 2 and item[0] == "fillFileContent"
+        )
+        return (dropped_bytes, _splice_gfm_file_body(gfm_target, []) != 0)
+    entries = pe.decoded.get(path_text)
+    dropped_bytes = 0
+    kept: list[Any] = []
+    for item in entries if isinstance(entries, list) else []:
+        if isinstance(item, tuple) and len(item) == 2 and item[0] in _FILE_BODY_TUPLE_KEYS:
+            if item[0] == "fillFileContent":
+                dropped_bytes += len(item[1])
+            continue
+        kept.append(item)
+    if isinstance(entries, list):
+        pe.decoded[path_text] = kept
+    return (dropped_bytes, None)
+
+
+# TCA Profile interoperability technical specification V3.4.1 page 46: the
+# createFCP of a generic file management "Create EF Link" carries neither
+# efFileSize nor proprietaryEFInfo -- the source file's apply -- while a plain
+# "Create EF" needs efFileSize.
+_GFM_LINK_FORBIDDEN_MEMBERS: tuple[str, ...] = ("efFileSize", "proprietaryEFInfo")
+
+
+def _link_path_input(value: Any) -> bytes:
+    """A ``linkPath`` from the editor; empty text asks for the link to go.
+
+    Page 27 codes ``linkPath`` like ``filePath``, which page 45 defines as a
+    concatenation of 2-byte file identifiers selected from the MF (an ADF by
+    its temporary file ID), and bounds it to 8 bytes.
+    """
+    if isinstance(value, (bytes, bytearray)):
+        raw = bytes(value)
+    elif len(str(value or "").strip()) == 0:
+        return b""
+    else:
+        raw = _normalise_hex_input(value)
+    if len(raw) % 2 != 0:
+        raise ValueError(
+            f"linkPath is a concatenation of 2-byte file identifiers; got {len(raw)} bytes."
+        )
+    _validate_sub_field_value("linkPath", raw)
+    return raw
+
+
+def _apply_link_path_edit(
+    handle: dict[str, Any],
+    pe: Any,
+    section: str,
+    path_text: str,
+    choice_list: Any,
+    new_bytes: bytes,
+) -> dict[str, Any]:
+    """Link, relink or unlink one file through ``Fcp.linkPath``.
+
+    TCA Profile interoperability technical specification V3.4.1 page 30 note 1
+    lets a file a template defines as independent become a link; the card
+    then creates it with the source file's fileDescriptor, efFileSize and
+    proprietaryEFInfo. Page 46 makes a generic file management createFCP that
+    names a ``linkPath`` a "Create EF Link", which carries neither efFileSize
+    nor proprietaryEFInfo. A link has no body of its own, so the content the
+    file carried is dropped when it becomes one.
+
+    An empty ``new_bytes`` removes the member, and the entry is created as
+    the file its template or its own Fcp defines. A generic file management
+    entry that loses its link takes the source file's descriptor and size,
+    because a plain "Create EF" needs efFileSize (page 46) and that is the
+    file the operator saw until then.
+
+    Returns ``link_change`` for the response, plus ``content_reset`` and
+    ``gfm_reindexed`` when content was dropped.
+    """
+    if isinstance(choice_list, list) is False:
+        raise LookupError(f"no file entry at {section}::{path_text}.")
+    gfm_entry = (
+        str(getattr(pe, "type", "") or "").lower() == "genericfilemanagement"
+        and _GFM_FIELD_PATH_RE.match(path_text) is not None
+    )
+    host = _fcp_host_payload(choice_list)
+    stored = host.get("linkPath") if host is not None else None
+    current = bytes(stored) if isinstance(stored, (bytes, bytearray)) else None
+    if len(new_bytes) == 0:
+        return _remove_link_path(handle, section, path_text, host, current, gfm_entry)
+
+    was_link = current is not None and len(current) > 0
+    before = _fcp_edit_file(pe, path_text)
+    old_body = bytes(getattr(before, "body", b"") or b"")
+    dropped_bytes = 0
+    reindexed: bool | None = None
+    if not was_link:
+        dropped_bytes, reindexed = _drop_file_body_entries(pe, path_text)
+        # A template entry's list was replaced and a GFM span may have moved,
+        # so the Fcp is looked up again by address.
+        choice_list = _mutable_file_choice_list_for_path(pe, path_text)
+    if _apply_hex_mutation(choice_list, "linkPath", new_bytes) is False:
+        raise LookupError(
+            f"no Fcp arm can carry 'linkPath' under {section}::{path_text}: "
+            "the entry is doNotCreate, repeats fileDescriptor, or its "
+            "generic file management address is not a createFCP."
+        )
+    dropped_members: list[str] = []
+    if gfm_entry:
+        host = _fcp_host_payload(choice_list)
+        for member in _GFM_LINK_FORBIDDEN_MEMBERS:
+            if host is not None and member in host:
+                del host[member]
+                dropped_members.append(member)
+    _resync_template_file(pe, path_text, _fcp_edit_file(pe, path_text))
+    result: dict[str, Any] = {
+        "link_change": {
+            "action": "relinked" if was_link else "linked",
+            "link_path": new_bytes.hex().upper(),
+            "dropped_members": dropped_members,
+            "copied_members": {},
+        },
+    }
+    if dropped_bytes > 0:
+        _hex_text, placeholder_summary = _absorb_hex_input(handle, "", previous=old_body)
+        result["content_reset"] = {
+            "reason": "linked",
+            "dropped_bytes": dropped_bytes,
+            "source": "link",
+            "size": None,
+        }
+        result["placeholders"] = placeholder_summary
+    if reindexed is not None:
+        result["gfm_reindexed"] = reindexed
+    return result
+
+
+def _remove_link_path(
+    handle: dict[str, Any],
+    section: str,
+    path_text: str,
+    host: dict[str, Any] | None,
+    current: bytes | None,
+    gfm_entry: bool,
+) -> dict[str, Any]:
+    """Take ``linkPath`` out of an entry's Fcp (see :func:`_apply_link_path_edit`).
+
+    An entry that carries an empty ``linkPath`` already turns a template
+    link into an independent file (page 27); removing that would hand the
+    file back to the template's link, so it is refused.
+    """
+    if host is None or current is None:
+        raise ValueError(f"{section}::{path_text} carries no linkPath to remove.")
+    if len(current) == 0:
+        raise ValueError(
+            f"{section}::{path_text} carries an empty linkPath, which makes a "
+            "template link an independent file (TCA SAIP v3.4.1 page 27); "
+            "there is no link to remove."
+        )
+    copied: dict[str, str] = {}
+    if gfm_entry and "efFileSize" not in host:
+        document = handle["decoded_document"]
+        rows = _filesystem_tree_rows(document)
+        row = _tree_row_at(rows, section, path_text)
+        lookup = (
+            _link_source_lookup(rows, row, _build_adf_temp_fid_map(document))
+            if row is not None
+            else {"resolved": False, "row": None, "reason": "no tree row"}
+        )
+        source = lookup.get("row") if lookup.get("resolved") else None
+        source_kind = str((source or {}).get("kind") or "").lower()
+        if source is None or source_kind not in ("ef-trans", "ef-lf", "ef-cyclic", "ef-bertlv"):
+            raise ValueError(
+                f"{section}::{path_text} is a generic file management link whose "
+                "source EF is not in this package; a Create EF needs efFileSize "
+                "(TCA SAIP v3.4.1 page 46), so set EF size before removing the link."
+            )
+        for member, row_key in (("fileDescriptor", "descriptor"), ("efFileSize", "ef_size")):
+            value = _coerce_hex_field(source.get(row_key))
+            if len(value) == 0:
+                continue
+            host[member] = bytes.fromhex(value)
+            copied[member] = value
+        if "efFileSize" not in host:
+            raise ValueError(
+                f"the link source of {section}::{path_text} declares no efFileSize; "
+                "a Create EF needs one (TCA SAIP v3.4.1 page 46), so set EF size "
+                "before removing the link."
+            )
+    del host["linkPath"]
+    return {
+        "link_change": {
+            "action": "unlinked",
+            "link_path": "",
+            "dropped_members": ["linkPath"],
+            "copied_members": copied,
+        },
+    }
+
+
 def _dispatch_update_file_field(
     ctx: ActionContext,
     *,
@@ -7152,8 +11130,21 @@ def _dispatch_update_file_field(
     field_path: Any = None,
     sub_key: Any = None,
     hex_value: Any = None,
+    record_count: Any = None,
 ) -> dict[str, Any]:
-    """Mutate a single file-definition sub-field (hex-encoded)."""
+    """Mutate a single file-definition sub-field (hex-encoded).
+
+    An edit that changes the file type, the record length or the size returns
+    the file to the content it is created with (:func:`_reset_body_on_resize`);
+    ``content_reset`` in the response says what was dropped and what the file
+    holds again.
+
+    A linear fixed or cyclic descriptor takes ``record_count`` beside it and
+    sets efFileSize to record length x records in the same edit: the
+    createFCP descriptor carries no record count (ETSI TS 102 222 V17.1.0
+    §6.3.2.2.2 Table 4, tag '80'). Without one, the size the file has must
+    stay a whole number of the new records.
+    """
     from yggdrasim_common.gui_server.sessions import get_manager
 
     sid = str(session_id or "").strip()
@@ -7171,9 +11162,30 @@ def _dispatch_update_file_field(
             f"sub_key {sub!r} is not editable in SA-3. "
             f"Allowed: {sorted(_EDITABLE_SUB_FIELDS)}"
         )
+    _assert_fcp_member_editable(sub)
+    count = _record_count_input(record_count)
+    if count is not None and sub != "fileDescriptor":
+        raise ValueError(
+            "record_count goes with a fileDescriptor edit; set efFileSize "
+            "directly for any other change of size."
+        )
 
-    new_bytes = _normalise_hex_input(hex_value)
-    _validate_sub_field_value(sub, new_bytes)
+    # Only ``linkPath`` takes an empty value: it removes the link.
+    if sub == "linkPath":
+        new_bytes = _link_path_input(hex_value)
+    else:
+        new_bytes = _normalise_hex_input(hex_value)
+        if sub == "efFileSize":
+            new_bytes = _minimal_size_octets(int.from_bytes(new_bytes, "big"))
+        _validate_sub_field_value(sub, new_bytes)
+    record_length: int | None = None
+    if sub == "fileDescriptor" and _descriptor_is_record_structured(new_bytes):
+        record_length = int.from_bytes(new_bytes[2:4], "big")
+    elif count is not None:
+        raise ValueError(
+            "record_count applies to a linear fixed or cyclic EF; the "
+            f"descriptor {new_bytes.hex().upper()} codes neither."
+        )
 
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
@@ -7181,12 +11193,52 @@ def _dispatch_update_file_field(
     pe = handle["pes"].pe_list[pe_index]
 
     choice_list = _mutable_file_choice_list_for_path(pe, path_text)
-    applied = _apply_hex_mutation(choice_list, sub, new_bytes)
-    if applied is False:
-        raise LookupError(
-            f"no CHOICE payload carrying {sub!r} under "
-            f"{section}::{path_text}."
+    link_change: dict[str, Any] | None = None
+    size_bytes: bytes | None = None
+    if sub == "linkPath":
+        link_change = _apply_link_path_edit(
+            handle, pe, section, path_text, choice_list, new_bytes
         )
+        reset = (
+            {
+                "content_reset": link_change["content_reset"],
+                "gfm_reindexed": link_change.get("gfm_reindexed"),
+                "placeholders": link_change["placeholders"],
+            }
+            if "content_reset" in link_change
+            else None
+        )
+    else:
+        before = _fcp_edit_file(pe, path_text)
+        if record_length is not None and count is not None:
+            size_bytes = _minimal_size_octets(record_length * count)
+        elif record_length is not None:
+            declared = _declared_ef_size(choice_list, before)
+            if declared is not None and declared % record_length != 0:
+                raise ValueError(
+                    f"efFileSize {declared} B is not a whole number of "
+                    f"{record_length} B records; pass record_count to size "
+                    "the file with the new record length."
+                )
+        elif sub == "efFileSize" and getattr(before, "file_type", None) in ("LF", "CY"):
+            current_length = getattr(before, "rec_len", None)
+            new_size = int.from_bytes(new_bytes, "big")
+            if isinstance(current_length, int) and current_length > 0 and new_size % current_length != 0:
+                raise ValueError(
+                    f"efFileSize {new_size} B is not a whole number of "
+                    f"{current_length} B records (TS 102 222 V17.1.0 §6.3.2.2.2 "
+                    "tag '80': record length x records)."
+                )
+        applied = _apply_hex_mutation(choice_list, sub, new_bytes)
+        if applied is False:
+            raise LookupError(
+                f"no Fcp arm can carry {sub!r} under {section}::{path_text}: "
+                "the entry is doNotCreate, repeats fileDescriptor, or its "
+                "generic file management address is not a createFCP."
+            )
+        if size_bytes is not None:
+            _apply_hex_mutation(choice_list, "efFileSize", size_bytes)
+        reset = _reset_body_on_resize(handle, pe, path_text, before, sub)
 
     _mark_dirty(handle, pe_index)
     _refresh_decoded_document(handle)
@@ -7199,7 +11251,7 @@ def _dispatch_update_file_field(
         field_path=path_text,
     )
     refreshed_row = _summarise_file_choices(refreshed_payload)
-    return {
+    result: dict[str, Any] = {
         "session_id": sid,
         "section_key": section,
         "field_path": path_text,
@@ -7209,6 +11261,235 @@ def _dispatch_update_file_field(
         "dirty_pe_count": len(handle["dirty_pes"]),
         "row": refreshed_row,
     }
+    if size_bytes is not None:
+        result["ef_file_size"] = size_bytes.hex().upper()
+    if link_change is not None:
+        result["link_change"] = link_change["link_change"]
+        if link_change.get("gfm_reindexed") is not None:
+            result["gfm_reindexed"] = link_change["gfm_reindexed"]
+    if reset is not None:
+        result["content_reset"] = reset["content_reset"]
+        if reset["gfm_reindexed"] is not None:
+            result["gfm_reindexed"] = reset["gfm_reindexed"]
+        _merge_placeholder_fields(result, handle, reset["placeholders"])
+    return result
+
+
+_ERASED_STATE_BYTE = 0xFF
+
+
+def _fcp_fill_span(
+    pe_file: Any,
+    *,
+    window: int,
+    start: int,
+    count: int,
+) -> tuple[bytes, str]:
+    """Return what an unwritten span of ``count`` bytes carries from ``start``.
+
+    A hex edit shorter than the record or file it lands in leaves the tail
+    untouched, and what that tail holds is the content the file was created
+    with: ETSI TS 102 222 6.3.2.2 expands the Fcp Filling Pattern (tag 'C1')
+    or Repeat Pattern (tag 'C2') across each record -- or across the body for a
+    transparent EF -- and a file declaring neither reads back erased.
+
+    ``window`` is that repeat unit (record length for LF / CY, declared file
+    size otherwise) and ``start`` is the absolute body offset the span begins
+    at, so the tail of record three continues its own pattern instead of
+    restarting it. The second element names the source ('fillPattern' /
+    'repeatPattern' / 'erased') so callers can report which one filled the span.
+    """
+    if count <= 0:
+        return (b"", "")
+    pattern = bytes(getattr(pe_file, "fill_pattern", None) or b"")
+    repeat = bool(getattr(pe_file, "fill_pattern_repeat", False))
+    if len(pattern) == 0 or window <= 0:
+        return (bytes([_ERASED_STATE_BYTE]) * count, "erased")
+
+    from pySim import ts_102_222
+
+    expanded = ts_102_222.expand_pattern(pattern, repeat, window)[:window]
+    span = bytearray()
+    for offset in range(start, start + count):
+        index = offset % window
+        span.append(
+            expanded[index] if index < len(expanded) else _ERASED_STATE_BYTE
+        )
+    return (bytes(span), "repeatPattern" if repeat else "fillPattern")
+
+
+# A genericFileManagement PE holds no ``pe.decoded[field_path]`` entry for its
+# files: the GUI addresses them by the position of the defining ``createFCP``
+# (``fileManagementCMD[i][j]``), while pySim keys ``ProfileElementGFM.files`` by
+# the path it walks through the transaction and leaves its ``files2pe()``
+# unimplemented. The decoded transaction is therefore the only writable
+# representation of a GFM-created body, so the body editors rebuild the pySim
+# ``File`` from the live entries -- the construction ``pe2files()`` itself
+# performs -- and splice the re-encoded tuples back into the span that
+# ``createFCP`` owns.
+_GFM_BODY_TUPLE_KEYS = ("fillFileContent", "fillFileOffset")
+
+
+def _gfm_body_target(
+    pe: Any,
+    path_text: str,
+) -> tuple[list[Any], int, int, Any] | None:
+    """Resolve ``fileManagementCMD[i][j]`` to a writable body target.
+
+    Returns ``(transaction, cmd_index, span_end, pe_file)`` -- the live
+    transaction list, the index of the ``createFCP``, the exclusive end of the
+    body span it owns, and a pySim ``File`` built from both -- or ``None`` when
+    the PE is not generic file management or the path does not land on a
+    ``createFCP``.
+
+    TCA Profile interoperability technical specification V3.4.1 §8.3.5: a
+    created EF becomes the current EF and stays selected until the next
+    ``createFCP`` or ``filePath``, so those two bound the span whose
+    ``fillFileContent`` / ``fillFileOffset`` entries carry this file's body.
+    """
+    if str(getattr(pe, "type", "") or "").lower() != "genericfilemanagement":
+        return None
+    match = _GFM_FIELD_PATH_RE.match(str(path_text or ""))
+    if match is None:
+        return None
+    decoded = getattr(pe, "decoded", None)
+    if isinstance(decoded, dict) is False:
+        return None
+    fmc = decoded.get("fileManagementCMD")
+    if isinstance(fmc, list) is False:
+        return None
+    transaction_index = int(match.group(1))
+    if transaction_index < 0 or transaction_index >= len(fmc):
+        return None
+    transaction = fmc[transaction_index]
+    if isinstance(transaction, list) is False:
+        return None
+    cmd_index = int(match.group(2))
+    if cmd_index < 0 or cmd_index >= len(transaction):
+        return None
+    head = transaction[cmd_index]
+    if not (
+        isinstance(head, tuple)
+        and len(head) == 2
+        and head[0] == "createFCP"
+    ):
+        return None
+
+    entries: list[tuple[str, Any]] = [
+        ("fileDescriptor", head[1] if isinstance(head[1], dict) else {}),
+    ]
+    span_end = cmd_index + 1
+    while span_end < len(transaction):
+        item = transaction[span_end]
+        if (
+            isinstance(item, tuple)
+            and len(item) == 2
+            and isinstance(item[0], str)
+        ):
+            if item[0] in ("createFCP", "filePath"):
+                break
+            if item[0] in _GFM_BODY_TUPLE_KEYS:
+                entries.append(item)
+        span_end += 1
+
+    _ensure_pysim_importable()
+    from pySim.esim.saip import File
+
+    try:
+        pe_file = File(path_text, entries)
+    except ValueError as error:
+        raise ValueError(
+            f"createFCP at {path_text} carries no usable file descriptor: "
+            f"{error}"
+        ) from error
+    return (transaction, cmd_index, span_end, pe_file)
+
+
+def _splice_gfm_file_body(
+    target: tuple[list[Any], int, int, Any],
+    new_data_tuples: list[Any],
+) -> int:
+    """Replace a GFM file's body tuples in place; return the index delta.
+
+    A span that opened with a no-op ``fillFileOffset`` of zero keeps it -- per
+    TCA V3.4.1 §8.3.5 the pointer already sits at the start of a freshly
+    created EF, so it changes nothing, and keeping it holds the transaction
+    length (and every later ``fileManagementCMD[i][j]`` address) steady for the
+    shape this encoding style produces. Entries inside the span that are not
+    body tuples survive in order. A non-zero delta means later files in the
+    same transaction moved, which the caller reports so the GUI can drop the
+    addresses it cached.
+    """
+    transaction, cmd_index, span_end, _pe_file = target
+    span = transaction[cmd_index + 1:span_end]
+    kept_others = [
+        item for item in span
+        if not (
+            isinstance(item, tuple)
+            and len(item) == 2
+            and str(item[0]) in _GFM_BODY_TUPLE_KEYS
+        )
+    ]
+    replacement = list(new_data_tuples)
+    leading = span[0] if span else None
+    opens_with_noop_offset = (
+        isinstance(leading, tuple)
+        and len(leading) == 2
+        and str(leading[0]) == "fillFileOffset"
+        and leading[1] == 0
+    )
+    starts_with_offset = bool(replacement) and (
+        isinstance(replacement[0], tuple)
+        and len(replacement[0]) == 2
+        and str(replacement[0][0]) == "fillFileOffset"
+    )
+    if opens_with_noop_offset and replacement and not starts_with_offset:
+        replacement.insert(0, ("fillFileOffset", 0))
+    transaction[cmd_index + 1:span_end] = replacement + kept_others
+    return len(replacement) + len(kept_others) - len(span)
+
+
+def _body_edit_target(
+    pe: Any,
+    section: str,
+    path_text: str,
+) -> tuple[Any, tuple[list[Any], int, int, Any] | None]:
+    """Return ``(pe_file, gfm_target)`` for a body edit, or raise.
+
+    ``gfm_target`` is ``None`` for a template-backed filesystem PE, whose file
+    lives under ``pe.files[field_path]`` and writes back through
+    ``pe.decoded[field_path]``.
+    """
+    files_attr = getattr(pe, "files", None)
+    if isinstance(files_attr, dict):
+        pe_file = files_attr.get(path_text)
+        if pe_file is not None:
+            return (pe_file, None)
+    gfm_target = _gfm_body_target(pe, path_text)
+    if gfm_target is not None:
+        return (gfm_target[3], gfm_target)
+    if isinstance(files_attr, dict) is False:
+        raise LookupError(
+            f"PE at {section!r} does not expose a files dict."
+        )
+    raise LookupError(
+        f"no File object for {section}::{path_text}."
+    )
+
+
+def _encode_body_tuples(pe_file: Any, gfm_target: Any) -> list[Any]:
+    """Re-encode a file body into ``fillFile*`` tuples for its PE kind.
+
+    ``file_content_to_tuples(optimize=True)`` compresses the body against the
+    profile template's default pattern, and against the erased state when there
+    is no template. A GFM ``createFCP`` never has one, so optimising there
+    encodes an all-erased body as *no* tuples at all and the operator's write
+    reads back empty; the GFM path writes the body verbatim instead.
+    """
+    compress_against_template = gfm_target is None
+    return list(
+        pe_file.file_content_to_tuples(optimize=compress_against_template)
+    )
 
 
 def _dispatch_update_record_bytes(
@@ -7248,23 +11529,16 @@ def _dispatch_update_record_bytes(
     if rec_idx < 1:
         raise ValueError("record_index must be >= 1.")
 
-    new_bytes = _normalise_hex_input(hex_value)
-
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
+    redirect = _link_write_redirect(handle, section, path_text)
+    if redirect is not None:
+        section = redirect["section_key"]
+        path_text = redirect["field_path"]
     pe_index = _resolve_pe_index(handle, section)
     pe = handle["pes"].pe_list[pe_index]
 
-    files_attr = getattr(pe, "files", None)
-    if not isinstance(files_attr, dict):
-        raise LookupError(
-            f"PE at {section!r} does not expose a files dict."
-        )
-    pe_file = files_attr.get(path_text)
-    if pe_file is None:
-        raise LookupError(
-            f"no File object for {section}::{path_text}."
-        )
+    pe_file, gfm_target = _body_edit_target(pe, section, path_text)
 
     file_type = getattr(pe_file, "file_type", None)
     if file_type not in ("LF", "CY"):
@@ -7276,10 +11550,22 @@ def _dispatch_update_record_bytes(
     rec_len = getattr(pe_file, "rec_len", None)
     if not isinstance(rec_len, int) or rec_len <= 0:
         raise ValueError("file has no record length declared.")
-    if len(new_bytes) != rec_len:
+    current_body = bytes(getattr(pe_file, "body", b"") or b"")
+    hex_text, placeholder_summary = _absorb_hex_input(
+        handle,
+        hex_value,
+        previous=current_body[(rec_idx - 1) * rec_len : rec_idx * rec_len],
+    )
+    try:
+        new_bytes = _normalise_hex_input(hex_text)
+    except ValueError:
+        _withdraw_new_placeholders(handle, placeholder_summary)
+        raise
+    if len(new_bytes) > rec_len:
+        _withdraw_new_placeholders(handle, placeholder_summary)
         raise ValueError(
-            f"hex_value must be exactly {rec_len} B "
-            f"(got {len(new_bytes)} B)."
+            f"hex_value is longer than one record ({len(new_bytes)} B) -- "
+            f"the file declares {rec_len} B per record."
         )
     nb_rec = getattr(pe_file, "nb_rec", None)
     if isinstance(nb_rec, int) and nb_rec > 0 and rec_idx > nb_rec:
@@ -7290,40 +11576,70 @@ def _dispatch_update_record_bytes(
     body = bytearray(pe_file.body or b"")
     start = (rec_idx - 1) * rec_len
     end = start + rec_len
+    pad_len = rec_len - len(new_bytes)
+    pad_source = ""
+    if pad_len > 0:
+        # A short edit writes the head of the record; the rest keeps the
+        # content the record was created with (TS 102 222 §6.3.2.2).
+        pad_bytes, pad_source = _fcp_fill_span(
+            pe_file,
+            window=rec_len,
+            start=start + len(new_bytes),
+            count=pad_len,
+        )
+        new_bytes = new_bytes + pad_bytes
     if end > len(body):
-        # Pad with FF up to the record's end (post-personalisation
-        # default for unwritten record slots, TS 102 222 §6.x).
-        body.extend(b"\xFF" * (end - len(body)))
+        # Record slots the package never wrote carry the same pattern as
+        # this one, so grow the body with it rather than with a flat byte.
+        grow_bytes, _grow_source = _fcp_fill_span(
+            pe_file,
+            window=rec_len,
+            start=len(body),
+            count=end - len(body),
+        )
+        body.extend(grow_bytes)
     body[start:end] = new_bytes
     pe_file.body = bytes(body)
 
-    new_data_tuples = list(pe_file.file_content_to_tuples(optimize=True))
-
-    data_keys = {"fillFileContent", "fillFileOffset", "doNotCreate"}
-    existing = pe.decoded.get(path_text)
-    if not isinstance(existing, list):
-        existing = []
-    kept: list[Any] = []
-    for item in existing:
-        if (isinstance(item, tuple) and len(item) == 2
-                and str(item[0]) in data_keys):
-            continue
-        kept.append(item)
-    pe.decoded[path_text] = kept + new_data_tuples
+    new_data_tuples = _encode_body_tuples(pe_file, gfm_target)
+    index_delta = 0
+    if gfm_target is not None:
+        index_delta = _splice_gfm_file_body(gfm_target, new_data_tuples)
+    else:
+        data_keys = {"fillFileContent", "fillFileOffset", "doNotCreate"}
+        existing = pe.decoded.get(path_text)
+        if not isinstance(existing, list):
+            existing = []
+        kept: list[Any] = []
+        for item in existing:
+            if (isinstance(item, tuple) and len(item) == 2
+                    and str(item[0]) in data_keys):
+                continue
+            kept.append(item)
+        pe.decoded[path_text] = kept + new_data_tuples
+        # The image shown is the one the tuples just written rebuild.
+        _resync_template_file(pe, path_text, _fcp_edit_file(pe, path_text))
 
     _mark_dirty(handle, pe_index)
     _refresh_decoded_document(handle)
 
-    return {
+    result: dict[str, Any] = {
         "session_id": sid,
         "section_key": section,
         "field_path": path_text,
         "record_index": rec_idx,
         "record_size": rec_len,
         "new_hex": new_bytes.hex().upper(),
+        "pad_bytes": max(pad_len, 0),
+        "pad_source": pad_source,
         "pe_index": pe_index,
         "dirty_pe_count": len(handle["dirty_pes"]),
     }
+    if gfm_target is not None:
+        result["gfm_reindexed"] = index_delta != 0
+    _merge_placeholder_fields(result, handle, placeholder_summary)
+    _attach_link_write_info(result, handle, redirect, section, path_text)
+    return result
 
 
 def _dispatch_update_file_decoded(
@@ -7337,7 +11653,7 @@ def _dispatch_update_file_decoded(
     """Replace ``pe.decoded[field_path]`` with the supplied JSON tree.
 
     The frontend's JSON tab projects every file's CHOICE list through
-    ``_jsonify_decoded``. This dispatcher applies the inverse — it
+    ``_jsonify_decoded``. This dispatcher applies the inverse -- it
     walks the JSON, substitutes hex strings back into ``bytes``, and
     drops the result onto ``pe.decoded``. The corresponding
     ``pe.files[field_path]`` is then re-hydrated from the new tuple
@@ -7348,7 +11664,7 @@ def _dispatch_update_file_decoded(
     Companion to ``saip.update_file_content`` (whole-body hex splice)
     and ``saip.update_record_bytes`` (per-record splice). Use this
     one when the operator needs to edit FCP fields, swap descriptor
-    tags, or otherwise restructure the CHOICE list — e.g. flipping
+    tags, or otherwise restructure the CHOICE list -- e.g. flipping
     a doNotCreate marker on a clone, or surgically rewriting the
     ``proprietaryEFInfo`` block from JSON.
     """
@@ -7375,14 +11691,38 @@ def _dispatch_update_file_decoded(
     pe = handle["pes"].pe_list[pe_index]
 
     if path_text not in pe.decoded:
+        if (
+            _GFM_FIELD_PATH_RE.match(path_text) is not None
+            and str(getattr(pe, "type", "") or "").lower()
+            == "genericfilemanagement"
+        ):
+            # The CHOICE list the JSON tab shows for a GFM file is synthetic:
+            # its head is the transaction's ``createFCP`` payload and the rest
+            # are the body tuples that follow it. Writing an arbitrary list
+            # back would let names through that TCA V3.4.1 §8.3.5 does not
+            # allow in a transaction, so the two editable halves keep their
+            # own dispatchers.
+            raise ValueError(
+                f"{section}::{path_text} is defined by generic file "
+                f"management; its CHOICE list is assembled from the "
+                f"transaction and is not JSON-editable. Edit the body on the "
+                f"Data tab and the descriptor through the FCP fields."
+            )
         raise LookupError(
             f"no decoded entry for {section}::{path_text}; "
             f"only existing files can be JSON-edited."
         )
 
+    # The projection showed every placeholder as its literal, and a new one
+    # may have been typed where its bytes go: both become sentinel bytes here.
+    placeholder_summary = _absorb_literals_in_tree(
+        handle, payload, previous=_jsonify_decoded(pe.decoded.get(path_text))
+    )
+
     new_choices: list[tuple[str, Any]] = []
     for index, entry in enumerate(payload):
         if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            _withdraw_new_placeholders(handle, placeholder_summary)
             raise ValueError(
                 f"entry #{index} is not a [name, value] pair "
                 f"(got {type(entry).__name__})."
@@ -7390,12 +11730,14 @@ def _dispatch_update_file_decoded(
         name = entry[0]
         value = entry[1]
         if not isinstance(name, str) or len(name) == 0:
+            _withdraw_new_placeholders(handle, placeholder_summary)
             raise ValueError(
                 f"entry #{index} carries a non-string CHOICE name "
                 f"({name!r})."
             )
         new_choices.append((str(name), _unjsonify_decoded(value)))
 
+    previous_choices = pe.decoded.get(path_text)
     pe.decoded[path_text] = new_choices
 
     files_attr = getattr(pe, "files", None)
@@ -7404,7 +11746,9 @@ def _dispatch_update_file_decoded(
         if pe_file is not None:
             try:
                 pe_file.from_tuples(new_choices)
-            except Exception as error:  # noqa: BLE001 — pySim raises ValueError + AttributeError
+            except Exception as error:  # noqa: BLE001 -- pySim raises ValueError + AttributeError
+                pe.decoded[path_text] = previous_choices
+                _withdraw_new_placeholders(handle, placeholder_summary)
                 raise ValueError(
                     f"pySim rejected the new tuple list: {error}"
                 ) from error
@@ -7412,7 +11756,7 @@ def _dispatch_update_file_decoded(
     _mark_dirty(handle, pe_index)
     _refresh_decoded_document(handle)
 
-    return {
+    result: dict[str, Any] = {
         "session_id": sid,
         "section_key": section,
         "field_path": path_text,
@@ -7421,6 +11765,42 @@ def _dispatch_update_file_decoded(
         "pe_index": pe_index,
         "dirty_pe_count": len(handle["dirty_pes"]),
     }
+    _merge_placeholder_fields(result, handle, placeholder_summary)
+    return result
+
+
+def _ef_body_geometry(pe_file: Any, file_type: str) -> tuple[int | None, int]:
+    """Return ``(declared_size, pattern_window)`` for a whole-body write.
+
+    TS 102 222 v17.1 6.3.2.2.2: tag '80' sizes a linear-fixed or cyclic EF
+    as the record length multiplied by the number of records, and the
+    Filling / Repeat Pattern (tags 'C1' / 'C2') initialises each record of a
+    record-oriented EF on its own, so the pattern window is the record
+    length there and the declared size for a transparent / BER-TLV EF. A
+    declared size of ``None`` skips the length check and the padding, as it
+    always did for transparent EFs whose FCP carries no size.
+    """
+    if file_type in ("LF", "CY"):
+        rec_len = getattr(pe_file, "rec_len", None)
+        if not isinstance(rec_len, int) or rec_len <= 0:
+            raise ValueError("file has no record length declared.")
+        nb_rec = getattr(pe_file, "nb_rec", None)
+        if isinstance(nb_rec, int) and nb_rec > 0:
+            return (rec_len * nb_rec, rec_len)
+        try:
+            declared = pe_file.file_size
+        except Exception:  # noqa: BLE001 -- pySim derives nb_rec lazily and may raise
+            declared = None
+        if isinstance(declared, int) and declared > 0:
+            return (declared, rec_len)
+        return (None, rec_len)
+    try:
+        declared = pe_file.file_size
+    except Exception:  # noqa: BLE001 -- pySim accessor may raise on missing FCP
+        declared = None
+    if isinstance(declared, int) and declared > 0:
+        return (declared, declared)
+    return (None, 0)
 
 
 def _dispatch_update_file_content(
@@ -7431,12 +11811,13 @@ def _dispatch_update_file_content(
     field_path: Any = None,
     hex_value: Any = None,
 ) -> dict[str, Any]:
-    """Replace a transparent / BER-TLV EF's body bytes wholesale.
+    """Replace an EF's body bytes wholesale.
 
-    Companion to ``saip.update_record_bytes``. The two cover the
-    record-fixed and non-record EF cases respectively. Both rely on
-    pySim ``File.body`` + ``file_content_to_tuples(optimize=True)``
-    to round-trip the in-memory package.
+    Serves transparent, BER-TLV, linear-fixed and cyclic EFs; for the
+    record-structured kinds ``saip.update_record_bytes`` is the per-record
+    companion (the workbench's "Record" hex scope). Both rely on pySim
+    ``File.body`` + ``file_content_to_tuples(optimize=True)`` to round-trip
+    the in-memory package.
     """
     from yggdrasim_common.gui_server.sessions import get_manager
 
@@ -7450,74 +11831,107 @@ def _dispatch_update_file_content(
     if len(path_text) == 0:
         raise ValueError("field_path is required.")
 
-    new_bytes = _normalise_hex_input(hex_value)
-
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
+    redirect = _link_write_redirect(handle, section, path_text)
+    if redirect is not None:
+        section = redirect["section_key"]
+        path_text = redirect["field_path"]
     pe_index = _resolve_pe_index(handle, section)
     pe = handle["pes"].pe_list[pe_index]
 
-    files_attr = getattr(pe, "files", None)
-    if not isinstance(files_attr, dict):
-        raise LookupError(
-            f"PE at {section!r} does not expose a files dict."
-        )
-    pe_file = files_attr.get(path_text)
-    if pe_file is None:
-        raise LookupError(
-            f"no File object for {section}::{path_text}."
-        )
+    pe_file, gfm_target = _body_edit_target(pe, section, path_text)
 
     file_type = getattr(pe_file, "file_type", None)
-    if file_type not in ("TR", "BT"):
+    if file_type not in ("TR", "BT", "LF", "CY"):
         raise ValueError(
-            f"file is not transparent / BER-TLV (file_type={file_type!r}); "
-            f"use saip.update_record_bytes for record-fixed EFs."
+            f"file carries no body to replace (file_type={file_type!r}); "
+            f"only transparent, BER-TLV, linear-fixed and cyclic EFs do."
         )
-
-    declared_size = None
+    hex_text, placeholder_summary = _absorb_hex_input(
+        handle, hex_value, previous=bytes(getattr(pe_file, "body", b"") or b"")
+    )
     try:
-        declared_size = pe_file.file_size
-    except Exception:  # noqa: BLE001 — pySim accessor may raise on missing FCP
-        declared_size = None
-    if isinstance(declared_size, int) and declared_size > 0:
+        new_bytes = _normalise_hex_input(hex_text)
+    except ValueError:
+        _withdraw_new_placeholders(handle, placeholder_summary)
+        raise
+    record_file = file_type in ("LF", "CY")
+    declared_size, pattern_window = _ef_body_geometry(pe_file, str(file_type))
+
+    pad_len = 0
+    pad_source = ""
+    if declared_size is not None:
         if len(new_bytes) > declared_size:
+            _withdraw_new_placeholders(handle, placeholder_summary)
+            if record_file:
+                raise ValueError(
+                    f"hex_value too long ({len(new_bytes)} B) -- the file "
+                    f"declares {declared_size // pattern_window} records of "
+                    f"{pattern_window} B ({declared_size} B)."
+                )
             raise ValueError(
-                f"hex_value too long ({len(new_bytes)} B) — "
+                f"hex_value too long ({len(new_bytes)} B) -- "
                 f"file_size declares {declared_size} B."
             )
         if len(new_bytes) < declared_size:
-            # Pad short writes with FF up to the declared size so the
-            # on-card image stays consistent with the FCP.
-            new_bytes = new_bytes + b"\xFF" * (declared_size - len(new_bytes))
+            # A short write keeps the on-card image the size the FCP declares;
+            # the tail carries the file's own fill / repeat pattern, or the
+            # erased state when it declares neither (TS 102 222 v17.1
+            # 6.3.2.2.2). A record-structured EF lays the pattern into every
+            # record anew, which ``pattern_window`` carries.
+            pad_bytes, pad_source = _fcp_fill_span(
+                pe_file,
+                window=pattern_window,
+                start=len(new_bytes),
+                count=declared_size - len(new_bytes),
+            )
+            pad_len = len(pad_bytes)
+            new_bytes = new_bytes + pad_bytes
 
     pe_file.body = bytes(new_bytes)
-    new_data_tuples = list(pe_file.file_content_to_tuples(optimize=True))
-
-    data_keys = {"fillFileContent", "fillFileOffset", "doNotCreate"}
-    existing = pe.decoded.get(path_text)
-    if not isinstance(existing, list):
-        existing = []
-    kept: list[Any] = []
-    for item in existing:
-        if (isinstance(item, tuple) and len(item) == 2
-                and str(item[0]) in data_keys):
-            continue
-        kept.append(item)
-    pe.decoded[path_text] = kept + new_data_tuples
+    new_data_tuples = _encode_body_tuples(pe_file, gfm_target)
+    index_delta = 0
+    if gfm_target is not None:
+        index_delta = _splice_gfm_file_body(gfm_target, new_data_tuples)
+    else:
+        data_keys = {"fillFileContent", "fillFileOffset", "doNotCreate"}
+        existing = pe.decoded.get(path_text)
+        if not isinstance(existing, list):
+            existing = []
+        kept: list[Any] = []
+        for item in existing:
+            if (isinstance(item, tuple) and len(item) == 2
+                    and str(item[0]) in data_keys):
+                continue
+            kept.append(item)
+        pe.decoded[path_text] = kept + new_data_tuples
+        # The image shown is the one the tuples just written rebuild.
+        _resync_template_file(pe, path_text, _fcp_edit_file(pe, path_text))
 
     _mark_dirty(handle, pe_index)
     _refresh_decoded_document(handle)
 
-    return {
+    result: dict[str, Any] = {
         "session_id": sid,
         "section_key": section,
         "field_path": path_text,
+        "file_type": str(file_type),
         "new_hex": new_bytes.hex().upper(),
         "byte_count": len(new_bytes),
+        "pad_bytes": pad_len,
+        "pad_source": pad_source,
         "pe_index": pe_index,
         "dirty_pe_count": len(handle["dirty_pes"]),
     }
+    if gfm_target is not None:
+        result["gfm_reindexed"] = index_delta != 0
+    if record_file:
+        result["record_size"] = pattern_window
+        result["record_count"] = len(new_bytes) // pattern_window
+    _merge_placeholder_fields(result, handle, placeholder_summary)
+    _attach_link_write_info(result, handle, redirect, section, path_text)
+    return result
 
 
 _SAVE_PACKAGE_FORMATS: tuple[str, ...] = (
@@ -7541,8 +11955,19 @@ _EXPORT_PE_FORMATS: tuple[str, ...] = ("der", "hex", "json")
 _EXPORT_PE_DEFAULT_EXTS: dict[str, str] = {
     "der": ".der",
     "hex": ".hex",
-    "json": ".json",
+    "json": ".pe.json",
 }
+# Single-PE document: the ``json`` form of ``saip.export_pe`` and the
+# preferred input of ``saip.import_pe``. It carries the schema, the PE type
+# and the PE's tagged decoded tree under ``sections`` (the package codec, so
+# workbench annotations such as ``pe-name`` survive); a template PE adds
+# ``template`` and its ``placeholders``. Nothing derived from the tree and
+# nothing about the package it left travels with it.
+_PE_DOCUMENT_KEY = "__ygg_pe_document__"
+_PE_DOCUMENT_SCHEMA = "ygg.pe_document.v1"
+# TCA eUICC Profile Package v3.4.1 section 8.1.3: PEHeader.identification is
+# UInt15 and shall be unique within the profile.
+_PE_IDENTIFICATION_MAX = 32767
 _GENERATED_SOURCE_WORKBOOK_SUFFIXES = frozenset(
     {".xlsx", ".xlsm", ".xltx", ".xltm"}
 )
@@ -7649,25 +12074,34 @@ def _dispatch_save_package(
     *,
     session_id: Any = None,
     output_path: Any = None,
-    format: Any = None,  # noqa: A002 — GUI facing param name
+    format: Any = None,  # noqa: A002 -- GUI facing param name
     clear_dirty: Any = None,
     overwrite: Any = None,
+    resolve_variables: Any = None,
+    write_variable_sidecar: Any = None,
 ) -> dict[str, Any]:
     """Write the current in-memory package out to disk.
 
     ``format`` choices (manual's "Save As" dialog):
-      * ``der`` — binary DER, default extension ``.der``.
-      * ``hex`` — ASCII hex of the DER, default ``.hex``. Round-
+      * ``der`` -- binary DER, default extension ``.der``.
+      * ``hex`` -- ASCII hex of the DER, default ``.hex``. Round-
         trippable through ``saip.open_package``.
-      * ``asn1`` (alias ``asn``) — ASN.1 value notation, default
+      * ``asn1`` (alias ``asn``) -- ASN.1 value notation, default
         ``.asn``. Preserves unresolved inline template literals.
-      * ``varder`` — compact typed-placeholder DER text, default
+      * ``varder`` -- compact typed-placeholder DER text, default
         ``.varder``. Available only while inline placeholders remain.
-      * ``json`` — transcoded JSON document, default ``.json``.
+      * ``json`` -- transcoded JSON document, default ``.json``.
         Preserves PE names, variable references, placeholder literals,
-        and their exact sentinel sidecar.
+        their exact sentinel sidecar, and the stored variable values.
 
-    By default refuses to overwrite an existing target — pass
+    A session opened from an inline template keeps its placeholders for
+    its whole life. DER / HEX output substitutes the stored values into a
+    copy of the sequence (every variable needs one); varder, ASN.1 and
+    JSON keep the literals unless ``resolve_variables`` asks for a
+    complete ASN.1 / JSON document. A template save rebinds the session
+    to the new file; a resolved export leaves the session untouched.
+
+    By default refuses to overwrite an existing target -- pass
     ``overwrite=true`` to replace. The format-default extension is
     appended when the supplied path has no suffix.
     """
@@ -7679,6 +12113,17 @@ def _dispatch_save_package(
         raise ValueError("session_id is required (run saip.open_package first).")
     if len(out_text) == 0:
         raise ValueError("output_path is required.")
+    if out_text.lower().startswith("upload:"):
+        # ``upload:<name>`` is the display label of a package dropped into
+        # the browser; its bytes live in a private temporary copy and the
+        # browser never learns where the original is. Resolving the label
+        # used to write ``upload:<name>`` into the server's working
+        # directory.
+        raise ValueError(
+            "output_path is the browser upload label, not a file location: "
+            "a dropped package has no on-disk source, so choose the path "
+            "to save it to.",
+        )
     fmt = _normalize_save_package_format(format)
     overwrite_flag = bool(overwrite) if overwrite is not None else False
 
@@ -7691,7 +12136,34 @@ def _dispatch_save_package(
         )
     session, handle = _require_saip_session(sid)
     inline_placeholder_records = _unresolved_inline_placeholder_records(handle)
+    resolve_requested = (
+        bool(resolve_variables) if resolve_variables is not None else None
+    )
     if fmt in ("der", "hex"):
+        if resolve_requested is False and inline_placeholder_records:
+            raise ValueError(
+                f"{fmt.upper()} output cannot carry template placeholders. Save "
+                "as varder, ASN.1 or JSON to keep them, or let the stored "
+                "values resolve them."
+            )
+        resolve = bool(inline_placeholder_records)
+    elif fmt == "varder":
+        if resolve_requested is True:
+            raise ValueError(
+                "Varder output always keeps its placeholders. Choose DER, HEX, "
+                "ASN.1 or JSON to export the stored values."
+            )
+        resolve = False
+    else:
+        resolve = bool(resolve_requested) and bool(inline_placeholder_records)
+
+    list_fill_warnings: list[str] = []
+    if fmt in ("der", "hex") or resolve:
+        if resolve:
+            # A test profile takes the lists' current values for whatever
+            # has no typed value, so an entry added since the package opened
+            # answers without an Apply test values round.
+            list_fill_warnings = _fill_open_occurrences_from_lists(handle)["warnings"]
         _assert_handle_concrete_export_allowed(handle)
     elif fmt == "asn1":
         _assert_asn1_save_allowed(handle, inline_placeholder_records)
@@ -7708,12 +12180,59 @@ def _dispatch_save_package(
                 "concrete export."
             )
         raise ValueError(
-            "Varder save requires an unresolved inline-template session. "
+            "Varder save requires an unresolved inline-template session "
+            "(a template opened with typed placeholders). "
             "Use DER, ASN.1, or JSON for a concrete profile."
         )
     _assert_generated_save_target_allowed(handle, out_path)
     pes = handle["pes"]
-    warnings: list[str] = []
+    warnings: list[str] = list(list_fill_warnings)
+    output_records = list(inline_placeholder_records)
+    materialized_variables: list[str] = []
+    length_reconciliations: list[str] = []
+    output_document: dict[str, Any] | None = None
+
+    if resolve:
+        # The session keeps its template; the export takes a materialised
+        # copy so the operator can still save the template afterwards.
+        _refresh_decoded_document(handle)
+        _ensure_pysim_importable()
+        from Tools.ProfilePackage.saip_json_codec import (
+            build_profile_sequence_from_document,
+        )
+        from Tools.ProfilePackage.saip_variable_materialization import (
+            materialize_inline_records,
+        )
+
+        output_document, _remaining, results = materialize_inline_records(
+            handle["decoded_document"],
+            inline_placeholder_records,
+            dict(handle.get("applied_overrides") or {}),
+            raw_values=dict(handle.get("inline_raw_values") or {}),
+        )
+        output_document.pop("__ygg_inline_placeholders__", None)
+        # Length bytes follow the stored values (an 11-digit MSISDN in an
+        # 8-byte slot counts 7, not the template's 9): reconcile the copy
+        # before it is encoded and say what changed.
+        from Tools.ProfilePackage.saip_ef_length_fields import (
+            reconcile_document,
+            record_sizes_from_sequence,
+        )
+
+        output_document, length_edits = reconcile_document(
+            output_document,
+            record_sizes=record_sizes_from_sequence(handle["pes"]),
+        )
+        for item in length_edits:
+            warnings.append(f"{item.describe()}; written for this export.")
+        length_reconciliations = [item.describe() for item in length_edits]
+        pes = build_profile_sequence_from_document(
+            output_document,
+            workspace_root=_workspace_root(),
+        )
+        _assert_handle_sequence_allowed(handle, list(pes.pe_list))
+        output_records = []
+        materialized_variables = [result.variable_name for result in results]
 
     if fmt == "der":
         output_bytes = bytes(pes.to_der())
@@ -7736,7 +12255,7 @@ def _dispatch_save_package(
 
         text = render_asn1_value_profile(
             pes,
-            inline_placeholder_records=inline_placeholder_records,
+            inline_placeholder_records=output_records,
         )
         output_bytes = text.encode("utf-8")
         warnings.append(
@@ -7750,17 +12269,12 @@ def _dispatch_save_package(
         )
         output_bytes = b"\xef\xbb\xbf" + text.encode("utf-8")
         warnings.append(
-            "Varder is a template artifact with unresolved typed placeholders; "
-            "materialise every variable before concrete DER export.",
+            "Varder is a template artifact with typed placeholders; DER and "
+            "HEX exports substitute the stored variable values.",
         )
     else:
         import copy as _copy
 
-        _refresh_decoded_document(handle)
-        # The placeholder sidecar is a serialization detail.  Mutating the
-        # live decoded document here used to leave sentinel metadata behind
-        # after Save As, breaking later in-session Excel/template exports.
-        doc = _copy.deepcopy(handle["decoded_document"])
         _ensure_pysim_importable()
         from Tools.ProfilePackage.saip_json_codec import jsonify_document
         from Tools.ProfilePackage.saip_hex_template import (
@@ -7768,23 +12282,40 @@ def _dispatch_save_package(
             splice_literals_into_tagged_document,
         )
 
-        if inline_placeholder_records:
-            doc["__ygg_inline_placeholders__"] = records_to_sidecar_payload(
-                inline_placeholder_records
-            )
+        if output_document is not None:
+            doc = _copy.deepcopy(output_document)
+        else:
+            _refresh_decoded_document(handle)
+            # The placeholder sidecar is a serialization detail.  Mutating
+            # the live decoded document here used to leave sentinel metadata
+            # behind after Save As, breaking later in-session exports.
+            doc = _copy.deepcopy(handle["decoded_document"])
+
+        if output_records:
+            sidecar_block = records_to_sidecar_payload(output_records)
+            stored_values = _inline_stored_values(handle)
+            if stored_values:
+                sidecar_block["values"] = dict(stored_values)
+            raw_block_values = _inline_raw_values(handle)
+            if raw_block_values:
+                sidecar_block["raw_values"] = dict(raw_block_values)
+            bound_selector = str(handle.get("test_value_list") or "").strip()
+            if bound_selector:
+                sidecar_block["test_value_list"] = bound_selector
+            doc["__ygg_inline_placeholders__"] = sidecar_block
         else:
             doc.pop("__ygg_inline_placeholders__", None)
 
         tagged = jsonify_document(doc)
-        if inline_placeholder_records:
+        if output_records:
             replacement_count = splice_literals_into_tagged_document(
                 tagged,
-                inline_placeholder_records,
+                output_records,
             )
-            if replacement_count != len(inline_placeholder_records):
+            if replacement_count != len(output_records):
                 raise ValueError(
                     "Could not preserve every inline placeholder in tagged JSON: "
-                    f"expected {len(inline_placeholder_records)} occurrence(s), "
+                    f"expected {len(output_records)} occurrence(s), "
                     f"replaced {replacement_count}."
                 )
         text = json.dumps(tagged, indent=2, ensure_ascii=False)
@@ -7797,41 +12328,90 @@ def _dispatch_save_package(
     )
     size = len(output_bytes)
 
-    if bool(clear_dirty) if clear_dirty is not None else True:
-        _replace_dirty_pes(handle, set())
-
-    # A successful Save As establishes the new file as the session source.
-    # Keep the immutable export policy/scope lock on the handle: a later
-    # Revert may refresh authoring bytes from this file but can never
-    # declassify a generated-partial session.
-    handle["source_path"] = str(out_path)
-    handle["source_backing_path"] = str(out_path)
-    handle["encoding"] = fmt
-    handle["size_bytes"] = size
-    session.metadata.update(
-        {
-            "source_path": str(out_path),
-            "encoding": fmt,
-            "pe_count": len(pes.pe_list),
-            "scope_lock": str(handle.get("scope_lock") or ""),
-        }
+    # Varder and ASN.1 cannot embed the stored values, so a template save
+    # keeps them in a ``<stem>.variables.json`` sidecar the loader picks up.
+    variable_sidecar_path = ""
+    write_sidecar_flag = (
+        bool(write_variable_sidecar) if write_variable_sidecar is not None else True
     )
+    if resolve is False and fmt in ("varder", "asn1") and write_sidecar_flag:
+        stored_values = _inline_stored_values(handle)
+        sidecar_raw_values = _inline_raw_values(handle)
+        bound_list = str(handle.get("test_value_list") or "").strip()
+        if stored_values or sidecar_raw_values or bound_list:
+            from Tools.ProfilePackage.saip_variable_materialization import (
+                inline_variable_sidecar_path_for,
+                write_inline_variable_sidecar,
+            )
+
+            sidecar_path = inline_variable_sidecar_path_for(out_path)
+            if sidecar_path.exists() and overwrite_flag is False:
+                warnings.append(
+                    f"Existing {sidecar_path.name} kept; pass overwrite=true to "
+                    "refresh the stored variable values beside the template."
+                )
+            else:
+                write_inline_variable_sidecar(
+                    sidecar_path,
+                    stored_values,
+                    created_from=out_path.name,
+                    raw_values=sidecar_raw_values,
+                    test_value_list=bound_list,
+                )
+                variable_sidecar_path = str(sidecar_path)
+
+    rebind_session = resolve is False
+    if rebind_session:
+        if bool(clear_dirty) if clear_dirty is not None else True:
+            _replace_dirty_pes(handle, set())
+
+        # A successful Save As establishes the new file as the session
+        # source. Keep the immutable export policy/scope lock on the handle:
+        # a later Revert may refresh authoring bytes from this file but can
+        # never declassify a generated-partial session.
+        handle["source_path"] = str(out_path)
+        handle["source_backing_path"] = str(out_path)
+        handle["encoding"] = fmt
+        handle["size_bytes"] = size
+        if str(handle.get("test_value_list") or "").strip():
+            _remember_test_value_binding(out_path, str(handle["test_value_list"]))
+        session.metadata.update(
+            {
+                "source_path": str(out_path),
+                "encoding": fmt,
+                "pe_count": len(pes.pe_list),
+                "scope_lock": str(handle.get("scope_lock") or ""),
+            }
+        )
+    else:
+        warnings.append(
+            "Complete profile exported with the stored variable values; the "
+            "session still holds the template and its placeholders."
+        )
 
     response = {
         "session_id": sid,
         "output_path": str(out_path),
-        "source_path": str(out_path),
+        "source_path": str(handle.get("source_path") or ""),
         "file_name": out_path.name,
         "format": fmt,
-        "encoding": fmt,
+        "encoding": str(handle.get("encoding") or fmt),
         "size_bytes": size,
         "pe_count": len(pes.pe_list),
-        "dirty_cleared": bool(clear_dirty) if clear_dirty is not None else True,
-        "remaining_inline_placeholder_count": len(inline_placeholder_records),
+        "dirty_cleared": (
+            rebind_session
+            and (bool(clear_dirty) if clear_dirty is not None else True)
+        ),
+        "materialized": resolve,
+        "materialized_variables": materialized_variables,
+        "length_reconciliations": length_reconciliations,
+        "session_source_rebound": rebind_session,
+        "variable_sidecar_path": variable_sidecar_path,
         "warnings": warnings,
     }
     response.update(_generation_response_fields(handle))
     response.update(_dirty_response_fields(handle))
+    response.update(_inline_template_response_fields(handle))
     return response
 
 
@@ -7857,9 +12437,9 @@ def _dispatch_revert_changes(
         "source_path": handle["source_path"],
         "pe_count": len(handle["pes"].pe_list),
         "dirty": False,
-        "remaining_inline_placeholder_count": len(handle.get("inline_placeholder_records") or []),
     }
     response.update(_generation_response_fields(handle))
+    response.update(_inline_template_response_fields(handle))
     response.update(_dirty_response_fields(handle))
     return response
 
@@ -7871,7 +12451,7 @@ def _dispatch_revert_changes(
 # tagged-bytes substitution the SA-3 slice shipped with. That surface
 # remains useful for power users (descriptor / link-path / pin-status
 # mutations stay byte-accurate), but it forces the operator to know the
-# encoding of every field in advance — typing IMSI digits, ICCID
+# encoding of every field in advance -- typing IMSI digits, ICCID
 # digits, LCSI states, USIM service flags, or even a 16-bit FID via
 # raw hex is unforgiving.
 #
@@ -7899,20 +12479,176 @@ def _dispatch_revert_changes(
 # ----------------------------------------------------------------------
 
 
+def _test_profile_value_rows(handle: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """One row per variable: the value a generated test profile carries and its source.
+
+    ``source`` is ``typed`` for a value stored through the panel, the name of
+    the list file that answered every occurrence, ``stored`` for bytes whose
+    list is not known and ``none`` while the variable has no value.
+    """
+    from Tools.ProfilePackage.saip_hex_template import format_placeholder_literal
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        inline_record_key,
+        inline_variable_names,
+        resolve_inline_records,
+        variable_is_secret,
+    )
+
+    records = list(handle.get("inline_placeholder_records") or [])
+    typed, raw, _unresolved = resolve_inline_records(
+        records,
+        dict(handle.get("applied_overrides") or {}),
+        dict(handle.get("inline_raw_values") or {}),
+    )
+    typed_folded = {name.casefold(): value for name, value in typed.items()}
+    sources = {
+        str(key): str(value) for key, value in dict(handle.get("inline_raw_sources") or {}).items()
+    }
+    rows: list[dict[str, Any]] = []
+    for name in inline_variable_names(records):
+        group = [
+            record
+            for record in records
+            if str(getattr(record, "variable_name", "") or "").casefold() == name.casefold()
+        ]
+        literals = list(
+            dict.fromkeys(
+                format_placeholder_literal(str(getattr(record, "literal", "") or ""), "typed")
+                for record in group
+                if str(getattr(record, "literal", "") or "").strip()
+            )
+        )
+        if name.casefold() in typed_folded:
+            value = typed_folded[name.casefold()]
+            source = "typed"
+        else:
+            keys = [inline_record_key(record) for record in group]
+            value = " / ".join(sorted({raw[key] for key in keys if key in raw}))
+            if not value:
+                source = "none"
+            elif all(sources.get(key) for key in keys):
+                source = ", ".join(sorted({Path(sources[key]).name for key in keys}))
+            else:
+                source = "stored"
+        rows.append(
+            {
+                "name": name,
+                "value": value,
+                "source": source,
+                "literals": literals,
+                "occurrences": len(group),
+                "secret": variable_is_secret(name),
+            }
+        )
+    return rows
+
+
+def _dispatch_generate_test_profile(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    output_path: Any = None,
+    format: Any = None,  # noqa: A002 -- GUI facing param name
+    overwrite: Any = None,
+) -> dict[str, Any]:
+    """Write one profile with every placeholder replaced by its value.
+
+    The values are the ones the Variables panel shows: a typed value, else
+    the test value of the profile's list or the universal one, read again
+    now so an entry added since the package opened counts. The session
+    keeps its template. The run refuses, naming the variables, while one
+    has neither, and ``values`` reports the value and source used for each
+    variable so the operator sees what the file carries.
+    """
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    fmt = _normalize_save_package_format(format or "der")
+    if fmt not in ("der", "hex"):
+        raise ValueError(
+            "A test profile is DER or HEX; save the template as varder, ASN.1 or "
+            "JSON to keep its placeholders."
+        )
+    _session, handle = _require_saip_session(sid)
+    records = _unresolved_inline_placeholder_records(handle)
+    if not records:
+        raise ValueError(
+            "This package carries no placeholders, so there is nothing to "
+            "substitute; Save as DER or HEX writes it as it is."
+        )
+    fill = _fill_open_occurrences_from_lists(handle)
+    state = _inline_template_state(handle)
+    unresolved = list(state["unresolved_variables"])
+    if unresolved:
+        unresolved_folded = {name.casefold() for name in unresolved}
+        reasons = [
+            f"{item.get('literal')}: {item.get('reason')}"
+            for item in fill["unmatched"]
+            if str(item.get("variable") or "").casefold() in unresolved_folded
+            and item.get("reason")
+        ]
+        raise ValueError(
+            "No value for " + ", ".join(unresolved) + ": type one in the Variables "
+            "panel or define one in a test-value list"
+            + (" (" + "; ".join(reasons) + ")" if reasons else "")
+            + "."
+        )
+    saved = _dispatch_save_package(
+        ctx,
+        session_id=sid,
+        output_path=output_path,
+        format=fmt,
+        overwrite=overwrite,
+        clear_dirty=False,
+    )
+    values = _test_profile_value_rows(handle)
+    by_source: dict[str, int] = {}
+    for row in values:
+        by_source[str(row["source"])] = by_source.get(str(row["source"]), 0) + 1
+    summaries = [
+        f"Generated {fmt.upper()} test profile {saved['output_path']} "
+        f"({saved['size_bytes']} bytes); the session keeps its template.",
+        f"{len(values)} variable(s) substituted: "
+        + ", ".join(
+            f"{count} {'typed' if source == 'typed' else 'from ' + source}"
+            for source, count in by_source.items()
+        )
+        + ".",
+    ]
+    if fill["applied"] and fill["changed"]:
+        summaries.append(
+            f"{len(fill['applied'])} occurrence(s) took the lists' current values first."
+        )
+    response = dict(saved)
+    response["values"] = values
+    response["summaries"] = summaries
+    response["warnings"] = [
+        warning
+        for warning in saved.get("warnings", [])
+        if not str(warning).startswith("Complete profile exported")
+    ]
+    return response
+
+
 def _splice_tagged_value_at_rel_path(
     section_value: Any,
     rel_path: list[Any],
     encoded_value: Any,
+    *,
+    append: bool = False,
 ) -> None:
     """Replace the value at ``rel_path`` inside ``section_value``.
 
     Mutates ``section_value`` in place. Integer segments index into a
     list, string segments key into a dict. The function refuses to
-    create new keys or extend lists — every intermediate segment must
+    create new keys or extend lists -- every intermediate segment must
     already exist on the tagged document (a missing slot would mean
     the operator's editor model was built against a different
     document version, which is recoverable only by re-running
-    ``saip.list_decoded_fields``).
+    ``saip.list_decoded_fields``). ``append`` is the one sanctioned
+    extension: a final integer segment equal to the list's length
+    appends the value, and a list the document does not carry yet (an
+    OPTIONAL SEQUENCE OF such as ``sdPersoData``) is created for it.
     """
     if isinstance(rel_path, list) is False:
         raise ValueError("rel_path must be a list of segments.")
@@ -7926,6 +12662,9 @@ def _splice_tagged_value_at_rel_path(
                 raise ValueError(
                     f"rel_path[{idx}] expected list, got {type(cursor).__name__}."
                 )
+            if append and is_last and segment == len(cursor):
+                cursor.append(encoded_value)
+                return
             if segment < 0 or segment >= len(cursor):
                 raise ValueError(
                     f"rel_path[{idx}]={segment} is out of range "
@@ -7942,9 +12681,18 @@ def _splice_tagged_value_at_rel_path(
                 f"rel_path[{idx}] expected dict, got {type(cursor).__name__}."
             )
         if seg_text not in cursor:
-            raise ValueError(
-                f"rel_path[{idx}] segment {seg_text!r} not present in document."
+            opens_new_list = (
+                append
+                and idx == len(rel_path) - 2
+                and isinstance(rel_path[-1], int)
+                and isinstance(rel_path[-1], bool) is False
+                and rel_path[-1] == 0
             )
+            if opens_new_list is False:
+                raise ValueError(
+                    f"rel_path[{idx}] segment {seg_text!r} not present in document."
+                )
+            cursor[seg_text] = []
         if is_last:
             cursor[seg_text] = encoded_value
             return
@@ -8029,6 +12777,13 @@ def _dispatch_list_decoded_fields(
     from Tools.ProfilePackage.saip_json_codec import jsonify_document
 
     tagged_doc = jsonify_document(handle["decoded_document"])
+    inline_records = handle.get("inline_placeholder_records") or []
+    if inline_records:
+        from Tools.ProfilePackage.saip_hex_template import (
+            splice_literals_into_tagged_document,
+        )
+
+        splice_literals_into_tagged_document(tagged_doc, inline_records)
     section_value = (tagged_doc.get("sections") or {}).get(section)
     if section_value is None:
         return {
@@ -8071,6 +12826,23 @@ def _dispatch_list_decoded_fields(
     }
 
 
+def _assert_dgi_record_value(encoded_value: Any) -> None:
+    """Refuse an ``sdPersoData`` record whose bytes are not whole DGI blocks."""
+    from Tools.ProfilePackage.saip_dgi_decode import validate_dgi_stream
+
+    hex_text = ""
+    if isinstance(encoded_value, dict):
+        hex_text = str(encoded_value.get("hex") or "")
+    try:
+        data = bytes.fromhex(hex_text)
+    except ValueError as error:
+        raise ValueError(f"sdPersoData record: {error}") from error
+    try:
+        validate_dgi_stream(data)
+    except ValueError as error:
+        raise ValueError(f"sdPersoData record: {error}") from error
+
+
 def _dispatch_apply_decoded_edit(
     ctx: ActionContext,
     *,
@@ -8082,6 +12854,7 @@ def _dispatch_apply_decoded_edit(
     editor_kind: Any = None,
     editor_payload: Any = None,
     target_length: Any = None,
+    append: Any = None,
 ) -> dict[str, Any]:
     """Apply a decoded-editor payload to the in-memory profile element.
 
@@ -8122,6 +12895,8 @@ def _dispatch_apply_decoded_edit(
         except Exception as err:
             raise ValueError(f"target_length is not an integer: {target_length!r}") from err
 
+    append_flag = bool(append) if append is not None else False
+
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
     pe_index = _resolve_pe_index(handle, section)
@@ -8140,33 +12915,88 @@ def _dispatch_apply_decoded_edit(
         jsonify_document,
     )
 
-    encoded_value = encode_decoded_value_editor_payload(
-        field_name=field_text,
-        editor_payload=editor_payload,
-        last_ef_key=last_ef_text,
-        target_length=target_length_value,
-        editor_kind=kind_text,
-    )
-
     tagged_doc = jsonify_document(handle["decoded_document"])
     sections = tagged_doc.get("sections") or {}
     section_value = sections.get(section)
     if section_value is None:
         raise LookupError(f"section {section!r} missing in document.")
 
-    _splice_tagged_value_at_rel_path(section_value, list(rel_path), encoded_value)
+    # A placeholder literal typed into an editor field stands for bytes:
+    # register it and hand the encoder its sentinel hex. The digits box of
+    # the ICCID and IMSI editors takes one too, as the field's whole bytes
+    # (EF.IMSI keeps its length byte in front, TS 31.102 section 4.2.2).
+    from Tools.ProfilePackage.saip_hex_template import detect_inline_placeholders
 
-    restored = dejsonify_document(tagged_doc)
+    for digits_key, prefix in (("iccid", ""), ("imsi", "08")):
+        typed = editor_payload.get(digits_key)
+        if isinstance(typed, str) and detect_inline_placeholders(typed):
+            editor_payload.pop(digits_key, None)
+            editor_payload["hex"] = prefix + typed.strip() if "hex" not in editor_payload else editor_payload["hex"]
+    placeholder_summary = _absorb_literals_in_tree(
+        handle,
+        editor_payload,
+        previous=_tagged_value_at_rel_path(section_value, list(rel_path)),
+    )
+    try:
+        encoded_value = encode_decoded_value_editor_payload(
+            field_name=field_text,
+            editor_payload=editor_payload,
+            last_ef_key=last_ef_text,
+            target_length=target_length_value,
+            editor_kind=kind_text,
+        )
+    except Exception:
+        _withdraw_new_placeholders(handle, placeholder_summary)
+        raise
+    if append_flag and field_text == "sdPersoData":
+        # A new record is one STORE DATA body: whole DGI || L || V blocks.
+        try:
+            _assert_dgi_record_value(encoded_value)
+        except ValueError:
+            _withdraw_new_placeholders(handle, placeholder_summary)
+            raise
+
+    _splice_tagged_value_at_rel_path(
+        section_value, list(rel_path), encoded_value, append=append_flag
+    )
+
+    try:
+        restored = dejsonify_document(tagged_doc)
+    except Exception:
+        _withdraw_new_placeholders(handle, placeholder_summary)
+        raise
     header_sync_summary: str | None = None
     ef_sync_key = re.sub(r"[^a-z0-9]+", "-", str(last_ef_text or "").strip().lower()).strip("-")
     field_sync_key = re.sub(r"[^a-z0-9]+", "", field_text.strip().lower())
+    field_carries_placeholder = bool(
+        placeholder_summary.get("added") or placeholder_summary.get("reused")
+    )
     if (
         ef_sync_key in ("ef-iccid", "iccid")
         and field_sync_key in ("fillfilecontent", "fillfilecontents")
     ):
-        header_sync_summary = sync_header_iccid_from_ef(restored)
-    pes_new = build_profile_sequence_from_document(
-        restored, _workspace_root()
+        if field_carries_placeholder:
+            # EF.ICCID now stands for a variable; the header follows it only
+            # through a placeholder of the same name, not through a copy.
+            placeholder_summary.setdefault("warnings", []).append(
+                "EF.ICCID holds a placeholder, so the header ICCID was not copied "
+                "from it; give the header's ICCID the same variable to keep them in step."
+            )
+        else:
+            try:
+                header_sync_summary = sync_header_iccid_from_ef(restored)
+            except Exception:
+                _withdraw_new_placeholders(handle, placeholder_summary)
+                raise
+    try:
+        pes_new = build_profile_sequence_from_document(
+            restored, _workspace_root()
+        )
+    except Exception:
+        _withdraw_new_placeholders(handle, placeholder_summary)
+        raise
+    _drop_placeholders_missing_from(
+        handle, placeholder_summary, restored, context=f"{section} / {field_text}"
     )
     handle["pes"] = pes_new
     _refresh_decoded_document(handle)
@@ -8202,6 +13032,7 @@ def _dispatch_apply_decoded_edit(
     }
     if header_sync_summary:
         response["header_sync_summary"] = header_sync_summary
+    _merge_placeholder_fields(response, handle, placeholder_summary)
     return response
 
 
@@ -8211,7 +13042,14 @@ def _dispatch_update_sd_parameters(
     session_id: Any = None,
     section_key: Any = None,
     parameter_state: Any = None,
+    instance_index: Any = None,
 ) -> dict[str, Any]:
+    """Write the install parameters of a PE's ApplicationInstance.
+
+    The instance is the PE's ``instance`` (PE-SecurityDomain, TCA SAIP v3.4.1
+    §8.6), or entry ``instance_index`` of its ``instanceList``
+    (PE-Application, §8.7.1); both are an ApplicationInstance (§8.7.3).
+    """
     from yggdrasim_common.gui_server.sessions import get_manager
 
     sid = str(session_id or "").strip()
@@ -8230,10 +13068,26 @@ def _dispatch_update_sd_parameters(
     section_value = sections.get(section)
     if not isinstance(section_value, dict):
         raise LookupError(f"section {section!r} missing in document.")
+    target = section_value
+    position: int | None = None
+    if instance_index is not None and instance_index != "":
+        if isinstance(instance_index, bool):
+            raise ValueError(f"instance_index must be an integer: {instance_index!r}")
+        try:
+            position = int(instance_index)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"instance_index must be an integer: {instance_index!r}") from error
+        entries = section_value.get("instanceList")
+        if not isinstance(entries, list) or not 0 <= position < len(entries):
+            raise LookupError(f"section {section!r} has no instance {position}.")
+        if not isinstance(entries[position], dict):
+            raise LookupError(f"instance {position} of section {section!r} is not a SEQUENCE.")
+        # The applier writes the ``instance`` member it is handed, in place.
+        target = {"instance": entries[position]}
 
     _ensure_pysim_importable()
     mutation = _apply_sd_parameter_state_to_section(
-        section_value,
+        target,
         parameter_state,
     )
 
@@ -8251,6 +13105,10 @@ def _dispatch_update_sd_parameters(
     refreshed_section = (
         handle["decoded_document"].get("sections") or {}
     ).get(section)
+    if isinstance(refreshed_section, dict) and position is not None:
+        refreshed_entries = refreshed_section.get("instanceList")
+        if isinstance(refreshed_entries, list) and position < len(refreshed_entries):
+            refreshed_section = {"instance": refreshed_entries[position]}
     refreshed_summary = (
         _application_parameter_summary(refreshed_section)
         if isinstance(refreshed_section, dict)
@@ -8261,6 +13119,7 @@ def _dispatch_update_sd_parameters(
         "session_id": sid,
         "section_key": section,
         "pe_index": pe_index,
+        "instance_index": position,
         "changed": mutation["changed"],
         "parameter_summary": refreshed_summary,
         "dirty": True,
@@ -8479,7 +13338,7 @@ def _dispatch_compare_packages(
 # and emit the categorised, severity-tagged diff used by the SAIP
 # workbench's "Compare" view. The legacy ``saip.compare`` action above
 # stays in place for callers that depend on its (raw PE / file row)
-# shape — the new family only adds a richer surface alongside it.
+# shape -- the new family only adds a richer surface alongside it.
 
 
 def _jsonified_session_document(handle: dict[str, Any]) -> dict[str, Any]:
@@ -8520,7 +13379,7 @@ def _dispatch_diff_packages(
 
     Same input shape as the legacy ``saip.compare`` action, but the
     payload is the rich ``ProfileDiffReport`` from
-    :mod:`Tools.ProfilePackage.saip_profile_diff` — categorised
+    :mod:`Tools.ProfilePackage.saip_profile_diff` -- categorised
     entries, severity tags, human-readable summaries, and the
     underlying structural counts.
     """
@@ -8666,6 +13525,9 @@ def _dispatch_list_variables(
     payload = _collect_variables(
         handle["decoded_document"],
         handle.get("inline_placeholder_records") or [],
+        _inline_stored_values(handle),
+        _inline_raw_values(handle),
+        raw_sources=handle.get("inline_raw_sources") or {},
     )
     payload["session_id"] = sid
     payload["overrides_applied"] = _redacted_applied_overrides(
@@ -8675,7 +13537,65 @@ def _dispatch_list_variables(
     payload["override_names"] = sorted(
         str(name) for name in (handle.get("applied_overrides") or {})
     )
+    payload.update(_inline_template_response_fields(handle))
+    if handle.get("inline_placeholder_records"):
+        payload["test_value_lists"] = _test_value_list_catalogue(handle)
     return payload
+
+
+def _drop_inline_raw_values(handle: dict[str, Any], variable_name: str) -> list[str]:
+    """Forget the universal bytes stored for every occurrence of one variable."""
+    from Tools.ProfilePackage.saip_variable_materialization import inline_record_key
+
+    wanted = str(variable_name or "").casefold()
+    keys = {
+        inline_record_key(record).casefold()
+        for record in handle.get("inline_placeholder_records") or []
+        if str(getattr(record, "variable_name", "") or "").casefold() == wanted
+    }
+    store = handle.setdefault("inline_raw_values", {})
+    sources = handle.setdefault("inline_raw_sources", {})
+    dropped = [key for key in list(store) if str(key).casefold() in keys]
+    for key in dropped:
+        store.pop(key, None)
+        sources.pop(key, None)
+    return dropped
+
+
+# Names the legacy token grammar injects structurally (ICCID also writes
+# ICCID_EF); a value for one of them is accepted on any package.
+_STRUCTURAL_TOKEN_NAMES = frozenset({"ICCID", "ICCID_EF", "IMSI"})
+
+
+def _assert_legacy_token_known(handle: Mapping[str, Any], name: str) -> None:
+    """Refuse a value for a name no placeholder of the package carries.
+
+    Storing it would only add an orphan token definition that nothing
+    references, which looks like success and changes no byte of the
+    profile. A name the document references, one already defined, or a
+    structural one goes through.
+    """
+    from Tools.ProfilePackage.saip_profile_template import (
+        extract_template_placeholder_names,
+    )
+
+    document = handle.get("decoded_document") or {}
+    folded = str(name).casefold()
+    if folded.upper() in _STRUCTURAL_TOKEN_NAMES:
+        return
+    referenced = {
+        str(item).casefold()
+        for item in extract_template_placeholder_names(document.get("sections") or {})
+    }
+    defs = document.get("__ygg_token_defs__")
+    defined = {str(key).casefold() for key in defs} if isinstance(defs, Mapping) else set()
+    if folded in referenced or folded in defined:
+        return
+    raise ValueError(
+        f"No placeholder named {name!r} in this package. Insert one where the bytes "
+        f"go (type {{{name}:TYPE:len}} in the Data or JSON tab, or use {{T}} on the "
+        "field), or pick a variable the panel lists."
+    )
 
 
 def _apply_variable_to_handle(
@@ -8696,7 +13616,7 @@ def _apply_variable_to_handle(
     from Tools.ProfilePackage.saip_variable_materialization import (
         find_catalog_variable,
         materialize_catalog_variable,
-        materialize_inline_variable,
+        validate_inline_variable_value,
         variable_is_secret,
     )
 
@@ -8716,28 +13636,29 @@ def _apply_variable_to_handle(
     warnings: list[str] = []
 
     if inline_matches:
-        candidate_document, remaining, result = materialize_inline_variable(
-            handle["decoded_document"],
-            records,
-            normalised,
-            value_text,
+        # Storing a value keeps the template intact: the placeholder stays
+        # in every projection and template export, and a DER / HEX save
+        # encodes the stored value into a copy of the sequence. Encoding
+        # here proves the value fits every occurrence before it is kept.
+        validate_inline_variable_value(records, normalised, value_text)
+        canonical_name = str(
+            getattr(inline_matches[0], "variable_name", "") or normalised
         )
-        candidate_pes = build_profile_sequence_from_document(
-            candidate_document,
-            workspace_root=_workspace_root(),
-        )
-        candidate_pes.to_der()
-        _assert_handle_sequence_allowed(handle, list(candidate_pes.pe_list))
-        handle["decoded_document"] = candidate_document
-        handle["pes"] = candidate_pes
-        handle["inline_placeholder_records"] = remaining
-        _refresh_decoded_document(handle)
-        canonical_name = result.variable_name
+        for stale_name in [
+            name
+            for name in handle["applied_overrides"]
+            if str(name).casefold() == canonical_name.casefold()
+            and name != canonical_name
+        ]:
+            handle["applied_overrides"].pop(stale_name, None)
+        _drop_inline_raw_values(handle, canonical_name)
         summaries = [
-            f"{canonical_name} materialized at {result.binding_count} inline occurrence(s)."
+            f"{canonical_name} value stored for {len(inline_matches)} inline "
+            "occurrence(s); the template keeps its placeholder. Save as DER or "
+            "HEX to export a complete profile with the stored values."
         ]
-        secret = result.secret
-        source = result.source
+        secret = variable_is_secret(canonical_name)
+        source = "inline_varder"
     elif catalog_variable is not None:
         candidate_pes = build_profile_sequence_from_document(
             handle["decoded_document"],
@@ -8765,6 +13686,7 @@ def _apply_variable_to_handle(
                 f"Inline variable {normalised!r} is already materialized. Reset it to "
                 "the source template before assigning a different value."
             )
+        _assert_legacy_token_known(handle, normalised)
         candidate_document = _copy.deepcopy(handle["decoded_document"])
         summaries = apply_placeholder_overrides_to_loaded_document(
             candidate_document,
@@ -8817,23 +13739,613 @@ def _dispatch_set_variable(
     variable_payload = _collect_variables(
         handle["decoded_document"],
         handle.get("inline_placeholder_records") or [],
+        _inline_stored_values(handle),
+        _inline_raw_values(handle),
     )
-    return {
+    response = {
         "session_id": sid,
         "name": applied["name"],
         "value": "" if applied["secret"] else value_text,
         "value_redacted": bool(applied["secret"]),
         "materialization_source": applied["source"],
-        "summaries": applied["summaries"],
+        "summaries": list(applied["summaries"]) + _length_reconciliation_summaries(handle),
         "warnings": applied["warnings"],
         "overrides_applied": _redacted_applied_overrides(
             dict(handle["applied_overrides"]),
             variable_payload["variables"],
         ),
-        "remaining_inline_placeholder_count": len(
-            handle.get("inline_placeholder_records") or []
+    }
+    response.update(_inline_template_response_fields(handle))
+    return response
+
+
+def _coerce_bool(value: Any) -> bool:
+    """Read a form or CLI boolean: true, 1, yes, on and y (any case) are true."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
+def _universal_token_list(path_text: Any) -> Any:
+    """Load the universal list from an explicit path or its configured home."""
+    from Tools.ProfilePackage.saip_universal_tokens import (
+        load_universal_tokens,
+        universal_tokens_path,
+    )
+
+    text = str(path_text or "").strip()
+    target = Path(os.path.expanduser(text)) if text else universal_tokens_path()
+    return load_universal_tokens(target)
+
+
+def _apply_test_value_layers(
+    handle: dict[str, Any],
+    layers: list[Any],
+    *,
+    replace_typed: bool = False,
+) -> dict[str, Any]:
+    """Store the lists' bytes for every occurrence they answer.
+
+    The first list answers an occurrence; a typed value is kept unless
+    ``replace_typed``. Returns the match, the applied items, the kept
+    variable names and whether any stored byte changed.
+    """
+    from Tools.ProfilePackage.saip_universal_tokens import layered_universal_match
+
+    records = list(handle.get("inline_placeholder_records") or [])
+    match = layered_universal_match(records, layers)
+    typed = dict(handle.get("applied_overrides") or {})
+    kept: list[str] = []
+    applied: list[dict[str, Any]] = []
+    store = handle.setdefault("inline_raw_values", {})
+    changed = False
+    for item in match.matched:
+        variable = str(item["variable"])
+        typed_names = [name for name in typed if str(name).casefold() == variable.casefold()]
+        if typed_names:
+            if not replace_typed:
+                if variable not in kept:
+                    kept.append(variable)
+                continue
+            for name in typed_names:
+                handle["applied_overrides"].pop(name, None)
+                typed.pop(name, None)
+            changed = True
+        new_hex = match.raw_values[item["key"]]
+        if store.get(item["key"]) != new_hex:
+            changed = True
+        store[item["key"]] = new_hex
+        handle.setdefault("inline_raw_sources", {})[item["key"]] = str(item.get("list") or "")
+        applied.append(item)
+    return {"match": match, "applied": applied, "kept": kept, "changed": changed}
+
+
+def _layered_token_defs(names: list[str], layers: list[Any]) -> dict[str, dict[str, str]]:
+    """``{NAME}`` definitions from the first list that answers each name."""
+    from Tools.ProfilePackage.saip_universal_tokens import universal_token_defs
+
+    defs: dict[str, dict[str, str]] = {}
+    for token_list in layers:
+        for name, definition in universal_token_defs(names, token_list).items():
+            defs.setdefault(name, definition)
+    return defs
+
+
+def _fill_open_occurrences_from_lists(handle: dict[str, Any]) -> dict[str, Any]:
+    """Store the lists' current values for the occurrences without a typed value.
+
+    A generated test profile carries the values the Variables panel shows:
+    a typed value first, else the test value of the profile's list or the
+    universal one. The lists are read again here, so an entry added since
+    the package opened answers without an Apply test values round; a typed
+    value is never replaced. Returns the applied items, the occurrences no
+    list answers (each with its reason, so a declaration without a value is
+    named as such), the load warnings and whether a stored byte changed.
+    """
+    records = list(handle.get("inline_placeholder_records") or [])
+    empty = {"applied": [], "unmatched": [], "warnings": [], "changed": False}
+    if not records:
+        return empty
+    layers, _ref, layer_warnings = _session_test_value_layers(handle)
+    warnings = [str(message) for message in layer_warnings]
+    loaded = [token_list for token_list in layers if token_list.loaded]
+    if not loaded:
+        return dict(empty, warnings=warnings)
+    outcome = _apply_test_value_layers(handle, loaded, replace_typed=False)
+    for token_list in loaded:
+        if token_list.problems:
+            warnings.append(
+                f"{Path(str(token_list.path)).name}: {len(token_list.problems)} line(s) "
+                "rejected; open Edit lists to see them."
+            )
+    return {
+        "applied": list(outcome["applied"]),
+        "unmatched": [dict(item) for item in outcome["match"].unmatched],
+        "warnings": warnings,
+        "changed": bool(outcome["changed"]),
+    }
+
+
+def _dispatch_apply_universal_tokens(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    path: Any = None,
+    overwrite: Any = None,
+) -> dict[str, Any]:
+    """Store the test-value lists' bytes for every placeholder they answer.
+
+    Without ``path`` the session's bound list is consulted first and the
+    universal list answers what is left; ``path`` applies that one list
+    instead. Inline occurrences take the bytes per literal
+    (``iccidICCID10NibbleSwap``); ``{NAME}`` tokens of a tagged JSON
+    template take a ``hex`` definition. Placeholders stay in the template.
+    A typed value already stored for a variable is kept unless
+    ``overwrite`` is set; a list entry whose width disagrees with its name
+    is reported and never applied.
+    """
+    from yggdrasim_common.gui_server.sessions import get_manager
+    from Tools.ProfilePackage.saip_profile_template import (
+        extract_template_placeholder_names,
+    )
+
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    replace_typed = _coerce_bool(overwrite)
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    path_text = str(path or "").strip()
+    warnings: list[str] = []
+    if path_text:
+        explicit = _universal_token_list(path_text)
+        layers = [explicit]
+        if not explicit.loaded:
+            warnings.append(f"No token list at {explicit.path}.")
+    else:
+        layers, _ref, layer_warnings = _session_test_value_layers(handle)
+        warnings.extend(layer_warnings)
+        if not any(token_list.loaded for token_list in layers):
+            warnings.append(
+                "No test-value list is available; open Test-value lists to create the "
+                "universal list."
+            )
+    loaded_layers = [token_list for token_list in layers if token_list.loaded]
+    records = list(handle.get("inline_placeholder_records") or [])
+    outcome = _apply_test_value_layers(handle, loaded_layers, replace_typed=replace_typed)
+    match = outcome["match"]
+    applied = outcome["applied"]
+    kept = list(outcome["kept"])
+
+    inline_names = {
+        str(getattr(record, "variable_name", "") or "").casefold() for record in records
+    }
+    document_names = extract_template_placeholder_names(
+        handle["decoded_document"].get("sections") or {}
+    )
+    legacy_names = sorted(
+        name for name in document_names if str(name).casefold() not in inline_names
+    )
+    legacy_applied: list[str] = []
+    for name, definition in _layered_token_defs(legacy_names, loaded_layers).items():
+        if name in handle["applied_overrides"] and not replace_typed:
+            if name not in kept:
+                kept.append(name)
+            continue
+        _apply_variable_to_handle(handle, name, definition["hex"])
+        legacy_applied.append(name)
+    if (applied and outcome["changed"]) or legacy_applied:
+        _mark_dirty(handle, -1)
+
+    per_list: dict[str, int] = {}
+    for item in applied:
+        label = Path(str(item.get("list") or "")).name or "list"
+        per_list[label] = per_list.get(label, 0) + 1
+    summaries: list[str] = list(warnings)
+    summaries.append(
+        f"{len(applied)} placeholder occurrence(s) took test values"
+        + (
+            " (" + ", ".join(f"{count} from {label}" for label, count in per_list.items()) + ")"
+            if len(per_list) > 1
+            else ""
+        )
+        + (f"; {len(legacy_applied)} token definition(s) set" if legacy_applied else "")
+        + "."
+    )
+    if kept:
+        summaries.append(
+            "Kept typed values for " + ", ".join(kept) + " (pass overwrite to replace them)."
+        )
+    if match.unmatched:
+        summaries.append(
+            f"{len(match.unmatched)} occurrence(s) have no usable entry: "
+            + ", ".join(str(item["literal"]) for item in match.unmatched[:8])
+            + ("..." if len(match.unmatched) > 8 else "")
+        )
+    problems = [
+        dict(problem.to_wire(), list=str(token_list.path or ""))
+        for token_list in loaded_layers
+        for problem in token_list.problems
+    ]
+    if problems:
+        summaries.append(f"{len(problems)} list line(s) rejected; see problems.")
+    summaries.extend(_length_reconciliation_summaries(handle))
+    variable_payload = _collect_variables(
+        handle["decoded_document"],
+        records,
+        _inline_stored_values(handle),
+        _inline_raw_values(handle),
+    )
+    primary = layers[0] if layers else None
+    response = {
+        "session_id": sid,
+        "path": str(primary.path or "") if primary is not None else "",
+        "loaded": bool(loaded_layers),
+        "entry_count": sum(len(token_list.entries) for token_list in loaded_layers),
+        "lists": [
+            {
+                "path": str(token_list.path or ""),
+                "name": Path(str(token_list.path or "")).name,
+                "entry_count": len(token_list.entries),
+                "problem_count": len(token_list.problems),
+                "loaded": token_list.loaded,
+            }
+            for token_list in layers
+        ],
+        "applied": applied,
+        "applied_count": len(applied),
+        "legacy_applied": legacy_applied,
+        "kept": kept,
+        "unmatched": list(match.unmatched),
+        "problems": problems,
+        "summaries": summaries,
+        "warnings": warnings,
+        "overrides_applied": _redacted_applied_overrides(
+            dict(handle["applied_overrides"]),
+            variable_payload["variables"],
         ),
     }
+    response.update(_inline_template_response_fields(handle))
+    return response
+
+
+def _dispatch_universal_tokens(
+    ctx: ActionContext,
+    *,
+    list: Any = None,
+    path: Any = None,
+    contents: Any = None,
+    save: Any = None,
+    save_as: Any = None,
+    delete: Any = None,
+) -> dict[str, Any]:
+    """Show, update, create or delete a test-value list.
+
+    ``list`` selects the universal list, a library name or a file path
+    (``path`` is the same selector from a file picker). Without ``save``
+    the selected list is read. ``save`` writes ``contents`` to it;
+    ``save_as`` writes ``contents`` to a new library list and selects it;
+    ``delete`` removes a library list or file, never the universal one.
+    Every response carries the catalogue the editor's selector shows.
+    """
+    from Tools.ProfilePackage.saip_hex_template import PLACEHOLDER_STYLE_EXAMPLES
+    from Tools.ProfilePackage.saip_universal_tokens import (
+        STYLE_SOURCE_DIRECTIVE,
+        STYLE_SOURCE_ENTRIES,
+        UniversalTokenList,
+        UniversalTokensError,
+        delete_library_token_list,
+        load_universal_tokens,
+        normalise_list_name,
+        resolve_token_list_ref,
+        token_list_catalogue,
+        write_universal_tokens,
+    )
+
+    selector = str(path or "").strip() or str(list or "").strip()
+    try:
+        ref = resolve_token_list_ref(selector)
+    except UniversalTokensError as error:
+        raise ValueError(str(error)) from error
+    saved = False
+    deleted = False
+    summaries: list[str] = []
+    try:
+        if _coerce_bool(delete):
+            if ref.is_universal:
+                raise ValueError(
+                    "The universal list cannot be deleted; clear its contents and save instead."
+                )
+            if ref.kind == "library":
+                removed = delete_library_token_list(ref.selector)
+            else:
+                removed = ref.path
+                if not removed.is_file():
+                    raise ValueError(f"No token list at {removed}.")
+                removed.unlink()
+            deleted = True
+            token_list = UniversalTokenList(
+                path=ref.path, loaded=False, text="", entries=(), problems=()
+            )
+            summaries.append(f"Deleted {ref.name} ({removed}).")
+        elif str(save_as or "").strip():
+            new_name = normalise_list_name(save_as)
+            target = resolve_token_list_ref(new_name)
+            if target.path.is_file():
+                raise ValueError(
+                    f"A list named {new_name!r} already exists; select it and tick Save to "
+                    "update it."
+                )
+            if contents is None:
+                raise ValueError("contents is required to save a list.")
+            token_list = write_universal_tokens(str(contents), target.path)
+            ref = target
+            saved = True
+        elif _coerce_bool(save):
+            if contents is None:
+                raise ValueError("contents is required to save the list.")
+            token_list = write_universal_tokens(str(contents), ref.path)
+            saved = True
+        else:
+            token_list = load_universal_tokens(ref.path)
+    except UniversalTokensError as error:
+        raise ValueError(str(error)) from error
+    if not deleted:
+        summaries.append(
+            (
+                f"{'Saved' if saved else 'Loaded'} {len(token_list.entries)} entr"
+                f"{'y' if len(token_list.entries) == 1 else 'ies'} from {token_list.path}"
+            )
+            if token_list.loaded
+            else f"No list at {token_list.path} yet."
+        )
+        if token_list.problems:
+            summaries.append(f"{len(token_list.problems)} line(s) will not apply; see problems.")
+        if token_list.loaded:
+            origin = {
+                STYLE_SOURCE_DIRECTIVE: "declared by its '# style:' line",
+                STYLE_SOURCE_ENTRIES: "inferred from its entries; a '# style:' line pins it",
+            }.get(token_list.style_source, "the default; a '# style:' line changes it")
+            summaries.append(
+                f"Style: {token_list.style}, names like "
+                f"{PLACEHOLDER_STYLE_EXAMPLES[token_list.style]} ({origin})."
+            )
+    response = {
+        "list": ref.to_wire(),
+        "lists": token_list_catalogue(
+            extra=[ref] if ref.kind == "path" else (), with_counts=True
+        ),
+        "saved": saved,
+        "deleted": deleted,
+        "exists": token_list.loaded,
+        "contents": token_list.text,
+        "summaries": summaries,
+    }
+    response.update(token_list.to_wire())
+    return response
+
+
+def _dispatch_set_test_value_list(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    list: Any = None,
+    apply: Any = None,
+) -> dict[str, Any]:
+    """Bind a test-value list to the open profile.
+
+    The bound list is consulted before the universal one whenever test
+    values are seeded or applied; ``universal`` (or nothing) drops the
+    binding. The binding is remembered for the template's path at once
+    and travels with the template once it is saved. With ``apply`` (the
+    default) every occurrence without a typed value takes the lists' bytes
+    right away.
+    """
+    from yggdrasim_common.gui_server.sessions import get_manager
+    from Tools.ProfilePackage.saip_universal_tokens import (
+        UniversalTokensError,
+        resolve_token_list_ref,
+    )
+
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    try:
+        ref = resolve_token_list_ref(list)
+    except UniversalTokensError as error:
+        raise ValueError(str(error)) from error
+    if not ref.is_universal and not ref.path.is_file():
+        raise ValueError(
+            f"Token list {ref.name} not found at {ref.path}; create it in Test-value lists "
+            "or export this profile's values to it first."
+        )
+    previous = str(handle.get("test_value_list") or "")
+    selector = "" if ref.is_universal else ref.selector
+    handle["test_value_list"] = selector
+    _remember_test_value_binding(handle.get("source_path"), selector)
+    summaries: list[str] = [
+        f"Bound {ref.name}; the universal list answers what it does not."
+        if selector
+        else "Bound the universal list."
+    ]
+    warnings: list[str] = []
+    applied: list[dict[str, Any]] = []
+    kept: list[str] = []
+    unmatched: list[dict[str, Any]] = []
+    if apply is None or _coerce_bool(apply):
+        layers, _bound, layer_warnings = _session_test_value_layers(handle)
+        warnings.extend(layer_warnings)
+        outcome = _apply_test_value_layers(
+            handle, [token_list for token_list in layers if token_list.loaded]
+        )
+        applied = outcome["applied"]
+        kept = outcome["kept"]
+        unmatched = [*outcome["match"].unmatched]
+        if outcome["changed"]:
+            _mark_dirty(handle, -1)
+        summaries.append(
+            f"{len(applied)} placeholder occurrence(s) took test values"
+            + (f"; typed values kept for {', '.join(kept)}" if kept else "")
+            + "."
+        )
+    response = {
+        "session_id": sid,
+        "previous_list": previous or "universal",
+        "applied": applied,
+        "applied_count": len(applied),
+        "kept": kept,
+        "unmatched": unmatched,
+        "summaries": summaries + warnings,
+        "warnings": warnings,
+    }
+    response.update(_inline_template_response_fields(handle))
+    response["test_value_lists"] = _test_value_list_catalogue(handle)
+    return response
+
+
+def _dispatch_export_test_value_list(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    list: Any = None,
+    overwrite: Any = None,
+    bind: Any = None,
+    style: Any = None,
+) -> dict[str, Any]:
+    """Write the profile's current test values as a reusable list.
+
+    Every resolved occurrence contributes one ``name,hex`` line keyed by
+    its literal: a typed value is encoded to its wire form, a test value
+    is written as stored. Secret-classified names are included, since the
+    list is what rebuilds this profile's test values. ``list`` names a
+    library entry or a file; the universal list is edited in Test-value
+    lists instead. ``bind`` makes the exported list the profile's bound
+    list. ``style`` is the spelling of the names (``typed``, ``compact``,
+    ``brace``, ``bracket``); ``universal`` or nothing follows the universal
+    list's style.
+    """
+    from yggdrasim_common.gui_server.sessions import get_manager
+    from Tools.ProfilePackage.saip_hex_template import (
+        DEFAULT_PLACEHOLDER_STYLE,
+        PLACEHOLDER_STYLES,
+    )
+    from Tools.ProfilePackage.saip_universal_tokens import (
+        UniversalTokensError,
+        format_token_list,
+        load_universal_tokens,
+        resolve_token_list_ref,
+        universal_tokens_path,
+        write_universal_tokens,
+    )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        SaipVariableMaterializationError,
+        encode_inline_placeholder_value,
+        inline_record_key,
+    )
+
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    try:
+        ref = resolve_token_list_ref(list)
+    except UniversalTokensError as error:
+        raise ValueError(str(error)) from error
+    if ref.is_universal:
+        raise ValueError(
+            "The universal list is edited in Test-value lists; export to a library name "
+            "or a file."
+        )
+    if ref.path.is_file() and not _coerce_bool(overwrite):
+        raise ValueError(f"{ref.path} exists; pass overwrite to replace it.")
+    style_text = str(style or "").strip().casefold()
+    if style_text == "":
+        # A list keeps its own spelling; a new one takes the typed spelling,
+        # the only one the tool chooses on its own.
+        from Tools.ProfilePackage.saip_universal_tokens import destination_list_style
+
+        style_text = destination_list_style(ref.path) or DEFAULT_PLACEHOLDER_STYLE
+    elif style_text == "universal":
+        try:
+            universal = load_universal_tokens(universal_tokens_path())
+        except UniversalTokensError:
+            universal = None
+        style_text = (
+            universal.style
+            if universal is not None and universal.loaded
+            else DEFAULT_PLACEHOLDER_STYLE
+        )
+    elif style_text not in PLACEHOLDER_STYLES:
+        raise ValueError(
+            f"Unknown list style {style!r}; use universal, {', '.join(PLACEHOLDER_STYLES)}."
+        )
+    records = [*(handle.get("inline_placeholder_records") or [])]
+    if not records:
+        raise ValueError("This profile has no inline placeholders to export values for.")
+    stored = {name.casefold(): value for name, value in _inline_stored_values(handle).items()}
+    raw = _inline_raw_values(handle)
+    values: dict[str, str] = {}
+    unresolved: list[str] = []
+    for record in records:
+        key = inline_record_key(record)
+        variable = str(getattr(record, "variable_name", "") or "")
+        typed = stored.get(variable.casefold())
+        if typed is not None:
+            try:
+                values[key] = encode_inline_placeholder_value(record, typed).hex().upper()
+            except SaipVariableMaterializationError as error:
+                raise ValueError(f"{variable}: {error}") from error
+            continue
+        raw_hex = raw.get(key)
+        if raw_hex:
+            values[key] = str(raw_hex).upper()
+            continue
+        if variable not in unresolved:
+            unresolved.append(variable)
+    source_name = Path(str(handle.get("source_path") or "profile")).name
+    text = format_token_list(
+        values,
+        comments=[
+            f"test values exported from {source_name}",
+            "one name,hex line per placeholder literal; typed values in wire form",
+        ],
+        style=style_text,
+    )
+    try:
+        token_list = write_universal_tokens(text, ref.path)
+    except UniversalTokensError as error:
+        raise ValueError(str(error)) from error
+    summaries = [
+        f"Exported {len(values)} entr{'y' if len(values) == 1 else 'ies'} to {ref.path}."
+    ]
+    if unresolved:
+        summaries.append(
+            "No value yet for " + ", ".join(unresolved) + "; those literals were not written."
+        )
+    if _coerce_bool(bind):
+        handle["test_value_list"] = ref.selector
+        _remember_test_value_binding(handle.get("source_path"), ref.selector)
+        summaries.append(f"Bound {ref.name} to this profile.")
+    response = {
+        "session_id": sid,
+        "list": ref.to_wire(),
+        "style": style_text,
+        "entry_count": len(token_list.entries),
+        "unresolved": unresolved,
+        "contents": token_list.text,
+        "summaries": summaries,
+        "warnings": [],
+    }
+    response.update(_inline_template_response_fields(handle))
+    response["test_value_lists"] = _test_value_list_catalogue(handle)
+    return response
 
 
 def _dispatch_reset_variable(
@@ -8878,11 +14390,45 @@ def _dispatch_reset_variable(
         (name for name in overrides if str(name).casefold() == normalised.casefold()),
         normalised,
     )
+    inline_names = {
+        str(getattr(record, "variable_name", "") or "").casefold()
+        for record in handle.get("inline_placeholder_records") or []
+    }
+    universal_keys = (
+        _drop_inline_raw_values(handle, normalised)
+        if normalised.casefold() in inline_names
+        else []
+    )
+    if override_name not in overrides and universal_keys:
+        _mark_dirty(handle, -1)
+        variable_payload = _collect_variables(
+            handle["decoded_document"],
+            handle.get("inline_placeholder_records") or [],
+            _inline_stored_values(handle),
+            _inline_raw_values(handle),
+        )
+        response = {
+            "session_id": sid,
+            "name": normalised,
+            "removed": True,
+            "overrides_applied": _redacted_applied_overrides(
+                dict(handle["applied_overrides"]),
+                variable_payload["variables"],
+            ),
+            "summaries": [
+                f"{normalised} universal test value cleared for "
+                f"{len(universal_keys)} occurrence(s); the placeholder stays in "
+                "the template."
+            ],
+            "warnings": [],
+        }
+        response.update(_inline_template_response_fields(handle))
+        return response
     if override_name not in overrides:
-        # Nothing to do — surface the no-op so the GUI can downgrade
+        # Nothing to do -- surface the no-op so the GUI can downgrade
         # the toast severity. This is *not* an error: the operator
         # may have already reset the value in a sibling tab.
-        return {
+        response = {
             "session_id": sid,
             "name": normalised,
             "removed": False,
@@ -8891,13 +14437,42 @@ def _dispatch_reset_variable(
                 _collect_variables(
                     handle["decoded_document"],
                     handle.get("inline_placeholder_records") or [],
+                    _inline_stored_values(handle),
+                    _inline_raw_values(handle),
                 )["variables"],
-            ),
-            "remaining_inline_placeholder_count": len(
-                handle.get("inline_placeholder_records") or []
             ),
             "summaries": [f"{normalised} was not overridden; nothing to reset."],
         }
+        response.update(_inline_template_response_fields(handle))
+        return response
+
+    if normalised.casefold() in inline_names:
+        # The template never lost its placeholder, so dropping the stored
+        # value is the whole reset -- no source reload involved.
+        handle["applied_overrides"].pop(override_name, None)
+        _mark_dirty(handle, -1)
+        variable_payload = _collect_variables(
+            handle["decoded_document"],
+            handle.get("inline_placeholder_records") or [],
+            _inline_stored_values(handle),
+            _inline_raw_values(handle),
+        )
+        response = {
+            "session_id": sid,
+            "name": normalised,
+            "removed": True,
+            "overrides_applied": _redacted_applied_overrides(
+                dict(handle["applied_overrides"]),
+                variable_payload["variables"],
+            ),
+            "summaries": [
+                f"{normalised} stored value cleared; the placeholder stays in "
+                "the template."
+            ],
+            "warnings": [],
+        }
+        response.update(_inline_template_response_fields(handle))
+        return response
 
     _require_session_source(handle, "Variable reset")
     overrides.pop(override_name, None)
@@ -8925,9 +14500,11 @@ def _dispatch_reset_variable(
     variable_payload = _collect_variables(
         handle["decoded_document"],
         handle.get("inline_placeholder_records") or [],
+        _inline_stored_values(handle),
+        _inline_raw_values(handle),
     )
 
-    return {
+    response = {
         "session_id": sid,
         "name": normalised,
         "removed": True,
@@ -8935,10 +14512,11 @@ def _dispatch_reset_variable(
             dict(handle["applied_overrides"]),
             variable_payload["variables"],
         ),
-        "remaining_inline_placeholder_count": len(handle.get("inline_placeholder_records") or []),
         "summaries": summaries,
         "warnings": warnings,
     }
+    response.update(_inline_template_response_fields(handle))
+    return response
 
 
 # -- PE-sequence authoring: insert / remove / load / write ------------
@@ -8947,13 +14525,13 @@ def _dispatch_reset_variable(
 # below let a session mutate which PEs are present and shuttle
 # individual PEs between the in-memory sequence and disk:
 #
-#   * insert — splice a fresh / scaffolded PE between header and end
-#   * remove — drop a PE while protecting the mandatory anchors
-#   * load   — decode a single-PE blob from disk into the sequence
-#   * write  — serialise a single PE out to disk in der/hex/json
+#   * insert -- splice a fresh / scaffolded PE between header and end
+#   * remove -- drop a PE while protecting the mandatory anchors
+#   * load   -- decode a single-PE blob from disk into the sequence
+#   * write  -- serialise a single PE out to disk in der/hex/json
 #
 # Header (index 0) and PE-End (last index) are anchors; the
-# dispatchers refuse to displace either one (TCA SAIP §A.2).
+# dispatchers refuse to displace either one (TCA SAIP v3.4.1 §8.2.1 / §8.10).
 
 
 # Minimal default decoded payloads for the PE types the manual lists
@@ -8974,9 +14552,6 @@ _PE_ADD_DEFAULTS: dict[str, dict[str, Any]] = {
         "sqnAgeLimit": bytes.fromhex("000010000000"),
         "sqnInit": [bytes(6) for _ in range(32)],
     },
-    # NOTE: ``cdmaParameter`` is not a registered pySim ProfileElement
-    # class in the 3.3.1 schema bundled with this release; saip.add_pe
-    # cannot scaffold one. Use saip.import_pe with a raw .der blob.
     "pinCodes": {
         "pin-Header": {"identification": 0},
         "pinCodes": ("pinconfig", []),
@@ -9037,8 +14612,21 @@ _PE_ADD_PRESET_ROWS: tuple[dict[str, str], ...] = (
     {
         "pe_type": "rfm",
         "preset_id": "rfm_default_access",
-        "title": "RFM default access",
-        "summary": "Example RFM AIDs, TAR B00001, MSL 0x16, and UICC/ADF access domains.",
+        "title": "RFM: ADF RFM bound to ADF.USIM",
+        "summary": (
+            "Example RFM AIDs, TAR B00001, MSL 0x16, UICC access domains, and an "
+            "adfRFMAccess binding to the profile's ADF.USIM (an RFM script selects "
+            "the ADF by default, TS 102 226 7.3)."
+        ),
+    },
+    {
+        "pe_type": "rfm",
+        "preset_id": "rfm_uicc_shared_fs",
+        "title": "RFM: UICC shared file system (MF only)",
+        "summary": (
+            "Example RFM AIDs, TAR B00000, MSL 0x16 and UICC access domains, with "
+            "no ADF binding (an RFM script selects the MF, TS 102 226 7.2)."
+        ),
     },
 )
 
@@ -9175,19 +14763,25 @@ def _apply_pe_add_preset(pe: Any, pe_type: str, preset: str) -> str:
         decoded["sqnInit"] = [bytes(6) for _ in range(32)]
         return "MILENAGE placeholder"
 
-    if pe_type_text == "rfm" and preset_id == "rfm_default_access":
+    if pe_type_text == "rfm" and preset_id in ("rfm_default_access", "rfm_uicc_shared_fs"):
+        # ETSI TS 101 220 v19 Annex D Table D.1: 'B0 00 01' is an ADF RFM
+        # TAR, 'B0 00 00' the UICC shared file system one.
         decoded["instanceAID"] = bytes.fromhex("A00000055910100002")
         decoded["securityDomainAID"] = bytes.fromhex("A000000151000000")
-        decoded["tarList"] = [bytes.fromhex("B00001")]
         decoded["minimumSecurityLevel"] = b"\x16"
         decoded["uiccAccessDomain"] = bytes.fromhex("02030104")
         decoded["uiccAdminAccessDomain"] = bytes.fromhex("02030104")
+        if preset_id == "rfm_uicc_shared_fs":
+            decoded["tarList"] = [bytes.fromhex("B00000")]
+            decoded.pop("adfRFMAccess", None)
+            return "RFM: UICC shared file system (MF only)"
+        decoded["tarList"] = [bytes.fromhex("B00001")]
         decoded["adfRFMAccess"] = {
             "adfAID": bytes.fromhex("A0000000871002FF34FF0789312E30FF"),
             "adfAccessDomain": bytes.fromhex("02030104"),
             "adfAdminAccessDomain": bytes.fromhex("02030104"),
         }
-        return "RFM default access"
+        return "RFM: ADF RFM bound to ADF.USIM"
 
     valid = [
         row["preset_id"]
@@ -9209,25 +14803,73 @@ _IMPORT_PE_HEX_SUFFIXES: frozenset[str] = frozenset({".asn", ".asn1", ".txt", ".
 _IMPORT_PE_JSON_SUFFIXES: frozenset[str] = frozenset({".json"})
 
 
-def _build_default_pe(pe_type: str, preset: str = "") -> Any:
-    """Construct an empty pySim ``ProfileElement`` of the given type.
+def _bind_rfm_preset_to_profile_adf(handle: dict[str, Any], pe: Any) -> None:
+    """Point a preset's ``adfRFMAccess`` at the ADF.USIM the profile creates.
 
-    PEs that are valid ``ProfileElement`` CHOICE alternatives but lack a
-    dedicated pySim subclass (``csim``, ``opt-csim``, ``cdmaParameter``,
-    ``iot``, ``opt-iot``) are scaffolded via the generic ``ProfileElement``
-    fallback with a minimal header.  Only types that are absent from the
-    compiled ASN.1 schema entirely (e.g. ``ssim`` pending a schema upgrade
-    to v3.4+) raise ``ValueError``.
+    The preset ships an example USIM AID. A profile that carries a
+    PE-USIM or PE-IoT names its own ADF, and an RFM bound to any other
+    AID would select a directory the profile never creates (TCA SAIP
+    v3.4.1 §8.8). A profile without a USIM keeps the example.
+    """
+    from Tools.ProfilePackage.saip_rfm_edit import list_adf_bindings
+
+    decoded = getattr(pe, "decoded", None)
+    block = decoded.get("adfRFMAccess") if isinstance(decoded, dict) else None
+    if isinstance(block, dict) is False:
+        return
+    for row in list_adf_bindings(handle.get("decoded_document") or {}):
+        if row.get("adf") == "ADF.USIM":
+            block["adfAID"] = bytes.fromhex(str(row["aid_hex"]))
+            return
+
+
+# Blank PEs whose pySim scaffold leaves a mandatory member empty, so the
+# element would not encode: PE-RFM instanceAID (TCA SAIP v3.4.1 §8.8, page
+# 63), PE-CDMAParameter authenticationKey (§8.4.3, page 50) and
+# PE-NonStandard issuerID and content (§8.9, page 64). The TUI quick-add
+# factories seed those members; both surfaces insert the same element.
+_PE_ADD_QUICK_ADD_BLANKS: frozenset[str] = frozenset({"rfm", "cdmaParameter", "nonStandard"})
+
+# CHOICE alternatives the compiled module lists but no blank can build: a
+# PE-CSIM names the mandatory files of the CSIM "created by default" template
+# (§8.3.4.6.1, page 40) and pySim carries no CSIM template to create them.
+_PE_ADD_UNAVAILABLE: dict[str, str] = {
+    "csim": "pySim has no CSIM file-system template, so the PE-CSIM files "
+            "(TCA SAIP v3.4.1 page 40) cannot be created; CSIM is out of scope.",
+    "opt-csim": "pySim has no CSIM file-system template, so the optional CSIM "
+                "files cannot be created; CSIM is out of scope.",
+}
+
+
+def _build_default_pe(pe_type: str, preset: str = "") -> Any:
+    """Construct a blank pySim ``ProfileElement`` of the given type.
+
+    The PEs in ``_PE_ADD_QUICK_ADD_BLANKS`` come from the TUI quick-add
+    factories, which seed their mandatory members. A CHOICE alternative
+    without a dedicated pySim subclass gets the generic ``ProfileElement``
+    with a minimal header. ``_PE_ADD_UNAVAILABLE`` and types absent from
+    the compiled ASN.1 schema (``ssim`` needs a v3.4 module) raise
+    ``ValueError``.
     """
     _ensure_pysim_importable()
     from collections import OrderedDict
     from pySim.esim.saip import ProfileElement, asn1
 
+    if pe_type in _PE_ADD_UNAVAILABLE:
+        raise ValueError(
+            f"{pe_type} cannot be added from scratch: {_PE_ADD_UNAVAILABLE[pe_type]}"
+        )
     cls = ProfileElement.class_for_petype(pe_type)
-    if cls is None:
+    if pe_type in _PE_ADD_QUICK_ADD_BLANKS:
+        from Tools.ProfilePackage.saip_pe_quick_add import blank_pe
+
+        instance = blank_pe(pe_type)
+        if instance is None:
+            raise RuntimeError(f"the quick-add factories have no blank {pe_type}.")
+    elif cls is None:
         # The pySim class registry does not have a dedicated subclass
         # for this type.  It may still be a valid CHOICE alternative
-        # in the compiled ASN.1 schema — several PEs (csim, opt-csim,
+        # in the compiled ASN.1 schema -- several PEs (csim, opt-csim,
         # cdmaParameter, iot, opt-iot) encode correctly via the generic
         # fallback path.
         choice = asn1.types["ProfileElement"]._type
@@ -9254,8 +14896,44 @@ def _build_default_pe(pe_type: str, preset: str = "") -> Any:
         defaults = dict(_PE_ADD_DEFAULTS[pe_type])
         for key, value in defaults.items():
             instance.decoded[key] = value
+    # PE-SecurityDomain keyList is SEQUENCE (SIZE (1..MAX)) OPTIONAL (TCA
+    # SAIP v3.4.1 page 55): pySim's blank carries it empty, which no eUICC
+    # accepts, so the blank omits it until the first key is added.
+    if pe_type == "securityDomain" and instance.decoded.get("keyList") == []:
+        del instance.decoded["keyList"]
     _apply_pe_add_preset(instance, pe_type, preset)
     return instance
+
+
+def _dispatch_list_pe_types(ctx: ActionContext) -> dict[str, Any]:
+    """The profile element types ``saip.add_pe`` can insert, in schema order.
+
+    Read from the compiled ASN.1 ``ProfileElement`` CHOICE, so the list
+    follows the SAIP module in use; the header and PE-End are anchors the
+    package already has. ``has_class`` says whether pySim carries a
+    dedicated class or the generic scaffold builds the element.
+    """
+    _ensure_pysim_importable()
+    from pySim.esim.saip import ProfileElement, asn1
+
+    choice = asn1.types["ProfileElement"]._type
+    rows: list[dict[str, Any]] = []
+    for name in choice.name_to_member:
+        type_name = str(name)
+        # The header and PE-End are anchors; rfu1..rfu5 are PE-Dummy slots
+        # the module keeps so later tags stay numbered.
+        if type_name in ("header", "end") or type_name.startswith("rfu"):
+            continue
+        rows.append(
+            {
+                "pe_type": type_name,
+                "has_class": ProfileElement.class_for_petype(type_name) is not None,
+                "presets": len(_pe_add_preset_rows_for(type_name)),
+                "addable": type_name not in _PE_ADD_UNAVAILABLE,
+                "unavailable_reason": _PE_ADD_UNAVAILABLE.get(type_name, ""),
+            }
+        )
+    return {"rows": rows, "count": len(rows)}
 
 
 def _dispatch_list_pe_presets(
@@ -9272,6 +14950,17 @@ def _dispatch_list_pe_presets(
     }
 
 
+def _eap_df_fid(pe_type: str, df_fid: Any) -> bytes | None:
+    """The DF.EAP file ID a new PE-EAP needs (``eap_df_file_id``), else ``None``."""
+    from Tools.ProfilePackage.saip_pe_quick_add import eap_df_file_id
+
+    if pe_type != "eap":
+        if str(df_fid or "").strip():
+            raise ValueError("df_fid applies to a PE-EAP only.")
+        return None
+    return eap_df_file_id(df_fid)
+
+
 def _dispatch_add_pe(
     ctx: ActionContext,
     *,
@@ -9279,17 +14968,22 @@ def _dispatch_add_pe(
     pe_type: Any = None,
     insert_at: Any = None,
     preset: Any = None,
+    df_fid: Any = None,
 ) -> dict[str, Any]:
     """Insert a new PE of ``pe_type`` at the supplied index.
 
     ``insert_at`` is the 0-based slot the new PE will occupy after
-    the splice — pass ``1`` to land just after ProfileHeader.
+    the splice -- pass ``1`` to land just after ProfileHeader.
     Scaffolded payload defaults are wired up for the PE flavours the
     bench edits routinely (AKA / PIN / PUK / GFM / SecurityDomain);
     other pySim-registered types still resolve but come up empty.
 
     The ProfileHeader (index 0) and PE-End (last index) anchors are
-    immovable per TCA SAIP §A.2; both ends of the range are refused.
+    immovable per TCA SAIP v3.4.1 §8.2.1 / §8.10; both ends of the range are refused.
+
+    A PE-EAP takes ``df_fid``, the file ID of its DF.EAP, which no template
+    fixes. An insert pySim cannot build the profile with is refused, and
+    the history wrapper restores the session.
     """
     from yggdrasim_common.gui_server.sessions import get_manager
     from Tools.ProfilePackage.saip_json_codec import (
@@ -9298,6 +14992,7 @@ def _dispatch_add_pe(
 
     sid = str(session_id or "").strip()
     pe_type_text = str(pe_type or "").strip()
+    eap_fid = _eap_df_fid(pe_type_text, df_fid)
     if len(sid) == 0 or len(pe_type_text) == 0:
         raise ValueError("session_id and pe_type are required.")
     handle = get_manager().claim(sid)
@@ -9311,7 +15006,7 @@ def _dispatch_add_pe(
         raise ValueError(f"insert_at must be an integer: {insert_at!r}") from error
     if idx < 1:
         raise ValueError(
-            "insert_at must be >= 1 (index 0 is reserved for ProfileHeader, TCA SAIP §A.2).",
+            "insert_at must be >= 1 (index 0 is reserved for ProfileHeader, TCA SAIP v3.4.1 §8.2.1).",
         )
     if idx > n - 1:
         raise ValueError(
@@ -9320,11 +15015,15 @@ def _dispatch_add_pe(
 
     preset_text = str(preset or "").strip()
     new_pe = _build_default_pe(pe_type_text, preset_text)
+    if pe_type_text == "rfm":
+        _bind_rfm_preset_to_profile_adf(handle, new_pe)
+    if eap_fid is not None:
+        new_pe.decoded["df-eap"] = [("fileDescriptor", {"fileID": eap_fid})]
 
     # Auto-name the new PE so it shows up as e.g. ``akaParameter#5``
     # in the PE list without forcing the operator to immediately
     # type one in. The header dict has at most one ``*-header`` /
-    # ``*-Header`` slot — find it and stamp ``pe-name`` with the
+    # ``*-Header`` slot -- find it and stamp ``pe-name`` with the
     # type-suffixed default. Operators can rename via the existing
     # decoded-edit surface afterwards.
     if isinstance(getattr(new_pe, "decoded", None), dict):
@@ -9342,7 +15041,7 @@ def _dispatch_add_pe(
     pes.pe_list = new_list
 
     # Renumber identification across the whole sequence so the new
-    # PE picks up the lowest free integer (TCA SAIP §A.3 — header
+    # PE picks up the lowest free integer (TCA SAIP §A.3 -- header
     # identification fields are 1-based and contiguous).
     try:
         pes.renumber_identification()
@@ -9362,8 +15061,19 @@ def _dispatch_add_pe(
         handle["pes"] = build_profile_sequence_from_document(
             handle["decoded_document"], workspace_root=_workspace_root()
         )
-    except Exception as error:
-        warnings.append(f"Document mutated; re-encode failed: {error}")
+    except Exception as error:  # noqa: BLE001 -- refused with pySim's reason
+        # Kept, a document pySim cannot rebuild would refuse every later
+        # edit of every element in the session.
+        raise ValueError(
+            f"pySim cannot build the profile with the new {pe_type_text}, so it "
+            f"was not inserted: {error}"
+        ) from error
+    # A blank that rebuilds but cannot encode would only surface later, as a
+    # missing byte dump and a failing Save.
+    try:
+        handle["pes"].pe_list[idx].to_der()
+    except Exception as error:  # noqa: BLE001 -- any encoder failure is reported
+        warnings.append(f"The new {pe_type_text} does not encode yet: {error}")
     _mark_dirty(handle, idx)
 
     new_identification: int | None = None
@@ -9423,11 +15133,11 @@ def _dispatch_delete_pe(
     pe_type = str(getattr(pes.pe_list[idx], "type", ""))
     if pe_type == "header" or idx == 0:
         raise ValueError(
-            "Cannot delete the ProfileHeader (TCA SAIP §A.2 mandates index 0).",
+            "Cannot delete the ProfileHeader (TCA SAIP v3.4.1 §8.2.1 mandates index 0).",
         )
     if pe_type == "end" or idx == n - 1:
         raise ValueError(
-            "Cannot delete PE-End (TCA SAIP §A.2 mandates the last PE).",
+            "Cannot delete PE-End (TCA SAIP v3.4.1 §8.10 mandates the last PE).",
         )
 
     removed = pes.pe_list[idx]
@@ -9461,12 +15171,317 @@ def _dispatch_delete_pe(
     }
 
 
-def _decode_imported_pe_bytes(input_path: Path) -> Any:
-    """Decode the file at ``input_path`` into a single ProfileElement."""
+def _pe_header_dict(pe: Any) -> dict[str, Any] | None:
+    """Return the PEHeader dict of ``pe`` (``<type>-header`` / ``-Header``)."""
+    decoded = getattr(pe, "decoded", None)
+    if not isinstance(decoded, dict):
+        return None
+    header_name = getattr(pe, "header_name", None)
+    if isinstance(header_name, str) and isinstance(decoded.get(header_name), dict):
+        return decoded[header_name]
+    for key, value in decoded.items():
+        if str(key).lower().endswith("header") and isinstance(value, dict):
+            return value
+    return None
+
+
+def _pe_identification(pe: Any) -> int | None:
+    """The PEHeader identification of ``pe``, or None when it has none."""
+    header = _pe_header_dict(pe)
+    if header is None:
+        return None
+    value = header.get("identification")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _assign_free_identification(new_pe: Any, siblings: Iterable[Any]) -> int | None:
+    """Give an imported PE an identification no sibling uses.
+
+    TCA eUICC Profile Package v3.4.1 section 8.1.3 requires the value to be
+    unique within the profile, and a copy of a PE that already lives in the
+    package arrives with its sibling's number. The next free integer keeps
+    the numbering the issuer chose for every other PE; the codec's
+    sequence-wide renumber would rewrite all of them.
+    """
+    header = _pe_header_dict(new_pe)
+    if header is None:
+        return None
+    used: set[int] = set()
+    for sibling in siblings:
+        value = _pe_identification(sibling)
+        if value is not None:
+            used.add(value)
+    current = header.get("identification")
+    if (
+        isinstance(current, int)
+        and not isinstance(current, bool)
+        and 0 < current <= _PE_IDENTIFICATION_MAX
+        and current not in used
+    ):
+        return current
+    candidate = (max(used) if used else 0) + 1
+    if candidate > _PE_IDENTIFICATION_MAX:
+        return None
+    header["identification"] = candidate
+    return candidate
+
+
+def _known_pe_header_names() -> dict[str, str]:
+    """Map every PEHeader field name pySim knows (lower-cased) to its PE type."""
+    _ensure_pysim_importable()
+    from pySim.esim.saip import ProfileElement
+
+    types: set[str] = set(ProfileElement.FILE_BEARING)
+    pending = list(ProfileElement.__subclasses__())
+    while pending:
+        cls = pending.pop()
+        pending.extend(cls.__subclasses__())
+        pe_type = getattr(cls, "type", None)
+        if isinstance(pe_type, str) and pe_type:
+            types.add(pe_type)
+    translation = ProfileElement.header_name_translation_dict
+    types.update(key for key, value in translation.items() if value)
+    out: dict[str, str] = {}
+    for pe_type in sorted(types):
+        if pe_type.startswith("opt-"):
+            header_name = pe_type.replace("-", "") + "-header"
+        elif pe_type in translation:
+            header_name = translation[pe_type]
+        else:
+            header_name = pe_type + "-header"
+        if header_name:
+            out[str(header_name).lower()] = pe_type
+    return out
+
+
+def _tagged_placeholder_names(node: Any) -> list[str]:
+    """Placeholder literals still present in the ``hex`` nodes of a tagged tree.
+
+    Both spellings count: the compact ``{name}`` / ``[name]`` of the codec's
+    scan and the typed ``{name:TYPE:len[:modifier]}`` of the inline editors,
+    so a template exported in either form is recognised as one.
+    """
+    from Tools.ProfilePackage.saip_hex_template import iter_inline_placeholders
+    from Tools.ProfilePackage.saip_json_codec import _PLACEHOLDER_SCAN_RE
+
+    found: list[str] = []
+
+    def _walk(current: Any) -> None:
+        if isinstance(current, dict):
+            for key, value in current.items():
+                if key in ("hex", "__ygg_saip_bytes__") and isinstance(value, str):
+                    for match in _PLACEHOLDER_SCAN_RE.finditer(value):
+                        literal = match.group(0)
+                        if literal not in found:
+                            found.append(literal)
+                    for match in iter_inline_placeholders(value):
+                        literal = match.group(0)
+                        if literal not in found:
+                            found.append(literal)
+                    continue
+                _walk(value)
+        elif isinstance(current, list):
+            for item in current:
+                _walk(item)
+
+    _walk(node)
+    return found
+
+
+def _pe_document_summary(pe: Any) -> dict[str, Any]:
+    """JSON-safe facts about one PE for the document header and the log line.
+
+    PE-Application (TCA eUICC Profile Package v3.4.1 section 8.7) gets its
+    load block and instance inventory plus a CAP / IJC inspection of the
+    ``loadBlockObject`` bytes; every other PE lists its decoded keys.
+    """
+    pe_type = str(getattr(pe, "type", "") or "")
+    decoded = getattr(pe, "decoded", None)
+    summary: dict[str, Any] = {"pe_type": pe_type}
+    if not isinstance(decoded, dict):
+        return summary
+    summary["decoded_keys"] = [str(key) for key in decoded.keys()]
+    if pe_type != "application":
+        return summary
+    from Tools.ProfilePackage.saip_application_edit import application_summary
+
+    summary.update(application_summary(decoded))
+    load_block = decoded.get("loadBlock")
+    blob = load_block.get("loadBlockObject") if isinstance(load_block, dict) else None
+    if isinstance(blob, (bytes, bytearray)) and len(blob) > 0:
+        from Tools.ProfilePackage.saip_cap_import import parse_cap_or_ijc
+
+        try:
+            summary["load_block_inspection"] = parse_cap_or_ijc(bytes(blob))
+        except ValueError as error:
+            summary["load_block_inspection"] = {"error": str(error)}
+    return summary
+
+
+def _pe_from_der(der_bytes: bytes, origin: str) -> Any:
+    """Decode exactly one ProfileElement from DER."""
     _ensure_pysim_importable()
     from pySim.esim.saip import ProfileElementSequence
 
+    seq = ProfileElementSequence.from_der(der_bytes)
+    if len(seq.pe_list) == 0:
+        raise ValueError(f"{origin} contained no profile element.")
+    if len(seq.pe_list) > 1:
+        raise ValueError(
+            f"{origin} contains {len(seq.pe_list)} profile elements; "
+            "the loader only accepts one PE per file.",
+        )
+    return seq.pe_list[0]
+
+
+def _pe_from_tagged_sections(sections: Any, origin: str) -> Any:
+    """Build exactly one PE from a tagged ``sections`` object."""
+    from Tools.ProfilePackage.saip_json_codec import (
+        build_profile_sequence_from_document,
+    )
+
+    if not isinstance(sections, dict) or len(sections) == 0:
+        raise ValueError(f"{origin}: 'sections' must be a non-empty object.")
+    if len(sections) > 1:
+        raise ValueError(
+            f"{origin} contains {len(sections)} profile elements; "
+            "only one is allowed per import.",
+        )
+    placeholders = _tagged_placeholder_names(sections)
+    if placeholders:
+        raise ValueError(
+            f"{origin} is a template: it still carries the placeholder(s) "
+            + ", ".join(placeholders)
+            + ". Export the PE with its stored values substituted, or as "
+            "DER, before importing it here."
+        )
+    seq = build_profile_sequence_from_document(
+        {"sections": sections}, workspace_root=_workspace_root()
+    )
+    if len(seq.pe_list) != 1:
+        raise ValueError(f"{origin} did not decode to exactly one profile element.")
+    pe = seq.pe_list[0]
+    # The codec builds the PE without encoding it; prove the tree encodes
+    # before it can reach a session, naming the field that does not.
+    try:
+        pe.to_der()
+    except Exception as error:
+        raise ValueError(f"{origin} does not encode as a profile element: {error}") from error
+    return pe
+
+
+def _pe_from_decoded_projection(document: dict[str, Any], origin: str) -> Any:
+    """A PE from the plain-hex projection the JSON tab and older exports write.
+
+    The projection carries no type tags, so bytes are recovered from
+    even-length hex strings (the JSON tab's own inverse) and the PE type is
+    read off the PEHeader field name.
+    """
+    header_names = _known_pe_header_names()
+    pe_type = ""
+    for key in document.keys():
+        pe_type = header_names.get(str(key).lower(), "")
+        if pe_type:
+            break
+    if not pe_type:
+        raise ValueError(
+            f"{origin} does not look like a profile element: it has neither a "
+            "'sections' object nor a PEHeader field such as 'app-Header'."
+        )
+    from Tools.ProfilePackage.saip_json_codec import jsonify_saip_value
+
+    decoded = _empty_strings_to_bytes(_unjsonify_decoded(document))
+    return _pe_from_tagged_sections(
+        {pe_type: jsonify_saip_value(decoded, pe_type)}, origin
+    )
+
+
+def _empty_strings_to_bytes(value: Any) -> Any:
+    """Turn ``""`` back into ``b""`` throughout a decoded projection.
+
+    The projection prints an empty OCTET STRING (``applicationSpecificParametersC9``
+    is the common one) and an empty text field the same way; PE trees carry
+    far more octet strings than text, so the empty ones are read as bytes.
+    """
+    if isinstance(value, dict):
+        out: "OrderedDict[str, Any]" = OrderedDict()
+        for key, sub in value.items():
+            out[str(key)] = _empty_strings_to_bytes(sub)
+        return out
+    if isinstance(value, list):
+        return [_empty_strings_to_bytes(sub) for sub in value]
+    if isinstance(value, str) and value == "":
+        return b""
+    return value
+
+
+def _pe_from_document(
+    document: dict[str, Any],
+    meta: Any,
+    origin: str,
+    facts: dict[str, Any],
+) -> tuple[Any, dict[str, Any]]:
+    """Build the PE a ``ygg.pe_document.v1`` file carries.
+
+    The tagged tree is the editable truth. The export no longer records DER,
+    but an older document does: its ``der_hex`` is compared with the tree's
+    re-encoding so a hand edit after export is reported instead of being
+    overridden, and a document with bytes but no tree decodes the bytes.
+    """
+    if not isinstance(meta, dict):
+        raise ValueError(f"{origin}: {_PE_DOCUMENT_KEY} must be an object.")
+    schema = str(meta.get("schema") or "")
+    if schema != _PE_DOCUMENT_SCHEMA:
+        raise ValueError(
+            f"{origin}: unsupported PE document schema {schema!r}; "
+            f"expected {_PE_DOCUMENT_SCHEMA}."
+        )
+    facts["input_format"] = "pe_document"
+    facts["document_meta"] = {
+        key: meta.get(key) for key in ("pe_type", "template", "placeholders")
+    }
+    recorded_der = b""
+    if meta.get("der_hex"):
+        recorded_der = _bytes_from_strict_hex(meta.get("der_hex"), label="der_hex")
+    if "sections" in document:
+        pe = _pe_from_tagged_sections(document["sections"], f"PE document {origin}")
+        if recorded_der:
+            facts["der_matches"] = bytes(pe.to_der()) == recorded_der
+            if facts["der_matches"] is False:
+                facts["warnings"].append(
+                    "the document's decoded tree re-encodes to different bytes "
+                    "than its recorded DER (edited after export?); the decoded "
+                    "tree was used.",
+                )
+    elif recorded_der:
+        pe = _pe_from_der(recorded_der, f"PE document {origin}")
+        facts["der_matches"] = True
+    else:
+        raise ValueError(
+            f"PE document {origin} carries neither 'sections' nor 'der_hex'."
+        )
+    declared = str(meta.get("pe_type") or "")
+    actual = str(getattr(pe, "type", "") or "")
+    if declared and declared != actual:
+        facts["warnings"].append(
+            f"the document declares pe_type {declared!r} but its content is "
+            f"{actual!r}.",
+        )
+    return pe, facts
+
+
+def _decode_imported_pe(input_path: Path) -> tuple[Any, dict[str, Any]]:
+    """Decode the file at ``input_path`` into one ProfileElement plus facts.
+
+    Accepted forms: a PE document (``.pe.json``), a tagged single-section
+    JSON document, a bare ``{section_key: tagged payload}`` object, the plain
+    decoded projection, binary DER, and ASCII hex of the DER.
+    """
     suffix = input_path.suffix.lower()
+    origin = input_path.name
+    facts: dict[str, Any] = {"input_format": "", "warnings": []}
     if suffix == ".xml":
         raise ValueError(
             "XML imports (File Tree Express) are not implemented in this "
@@ -9477,32 +15492,31 @@ def _decode_imported_pe_bytes(input_path: Path) -> Any:
         label="Profile-element import",
     )
     if suffix in _IMPORT_PE_JSON_SUFFIXES:
-        # Treat as a single-PE JSON snippet — wrap it in a tiny
-        # document and re-encode to extract the PE.
-        from Tools.ProfilePackage.saip_json_codec import (
-            build_profile_sequence_from_document,
-        )
-        document = json.loads(raw.decode("utf-8"))
-        if isinstance(document, dict) and "sections" in document:
-            seq = build_profile_sequence_from_document(
-                document, workspace_root=_workspace_root()
+        try:
+            document = json.loads(raw.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"{origin} is not valid JSON: {error}") from error
+        if not isinstance(document, dict):
+            raise ValueError(f"{origin} must be a JSON object.")
+        meta = document.get(_PE_DOCUMENT_KEY)
+        if meta is not None:
+            return _pe_from_document(document, meta, origin, facts)
+        if "sections" in document:
+            facts["input_format"] = "tagged_json"
+            return _pe_from_tagged_sections(document["sections"], origin), facts
+        if any(str(key).lower().endswith("header") for key in document.keys()):
+            facts["input_format"] = "decoded_json"
+            facts["warnings"].append(
+                "plain decoded JSON carries no type tags; bytes were "
+                "recovered from its even-length hex strings.",
             )
-        else:
-            # Bare {section_key: payload} → wrap.
-            seq = build_profile_sequence_from_document(
-                {"sections": document}, workspace_root=_workspace_root()
-            )
-        if len(seq.pe_list) == 0:
-            raise ValueError("imported JSON contained no profile element.")
-        if len(seq.pe_list) > 1:
-            raise ValueError(
-                f"imported JSON contains {len(seq.pe_list)} profile elements; "
-                "only one is allowed per import.",
-            )
-        return seq.pe_list[0]
+            return _pe_from_decoded_projection(document, origin), facts
+        facts["input_format"] = "tagged_json"
+        return _pe_from_tagged_sections(document, origin), facts
 
     der_bytes: bytes
     if suffix in _IMPORT_PE_HEX_SUFFIXES:
+        facts["input_format"] = "hex"
         try:
             text = raw.decode("utf-8-sig")
         except UnicodeDecodeError as error:
@@ -9518,52 +15532,19 @@ def _decode_imported_pe_bytes(input_path: Path) -> Any:
                 f"file looks like hex text but bytes.fromhex failed: {error}",
             ) from error
     else:
+        facts["input_format"] = "der"
         der_bytes = raw
-
-    seq = ProfileElementSequence.from_der(der_bytes)
-    if len(seq.pe_list) == 0:
-        raise ValueError("imported file contained no profile element.")
-    if len(seq.pe_list) > 1:
-        raise ValueError(
-            f"imported file contains {len(seq.pe_list)} profile elements; "
-            "the loader only accepts one PE per file.",
-        )
-    return seq.pe_list[0]
+    return _pe_from_der(der_bytes, origin), facts
 
 
-def _dispatch_import_pe(
-    ctx: ActionContext,
-    *,
-    session_id: Any = None,
-    input_path: Any = None,
-    insert_at: Any = None,
-) -> dict[str, Any]:
-    """Insert a PE decoded from a file at ``insert_at``.
+def _decode_imported_pe_bytes(input_path: Path) -> Any:
+    """Decode the file at ``input_path`` into a single ProfileElement."""
+    return _decode_imported_pe(input_path)[0]
 
-    Accepted suffixes:
-      * ``.der`` — binary DER (default).
-      * ``.asn`` / ``.asn1`` / ``.txt`` / ``.hex`` — ASCII hex of DER.
-      * ``.json`` — single-PE JSON snippet (transcoded form).
-      * ``.xml`` — legacy File Tree Express container; not handled
-        in this release (no bundled converter).
-    """
-    from yggdrasim_common.gui_server.sessions import get_manager
-    from Tools.ProfilePackage.saip_json_codec import (
-        build_profile_sequence_from_document,
-    )
 
-    sid = str(session_id or "").strip()
-    in_text = str(input_path or "").strip()
-    if len(sid) == 0 or len(in_text) == 0:
-        raise ValueError("session_id and input_path are required.")
-    source = Path(os.path.expanduser(in_text)).resolve()
-    if source.is_file() is False:
-        raise FileNotFoundError(f"input_path not found: {source}")
-
-    handle = get_manager().claim(sid)
-    _ensure_session_state(handle)
-    pes = handle["pes"]
-    n = len(pes.pe_list)
+def _parse_insert_at(handle: dict[str, Any], insert_at: Any) -> int:
+    """The insertion index for a new PE: ``insert_at``, else just before PE-End."""
+    n = len(handle["pes"].pe_list)
     try:
         idx = int(insert_at) if insert_at is not None else n - 1
     except Exception as error:
@@ -9576,9 +15557,34 @@ def _dispatch_import_pe(
         raise ValueError(
             f"insert_at {idx} would displace PE-End; max allowed is {n - 1}.",
         )
+    return idx
 
-    new_pe = _decode_imported_pe_bytes(source)
-    _assert_handle_pe_type_allowed(handle, str(getattr(new_pe, "type", "")))
+
+def _insert_pe_into_session(
+    handle: dict[str, Any],
+    sid: str,
+    new_pe: Any,
+    facts: dict[str, Any],
+    *,
+    insert_at: Any,
+    origin_text: str,
+    verb: str,
+) -> dict[str, Any]:
+    """Splice a decoded PE into the session at ``insert_at`` and describe it.
+
+    Shared by the file import and the library load: the PE takes the next
+    free identification, the sequence is re-validated against the session's
+    policy, the document is rebuilt and the slot marked dirty.
+    """
+    from Tools.ProfilePackage.saip_json_codec import (
+        build_profile_sequence_from_document,
+    )
+
+    pes = handle["pes"]
+    idx = _parse_insert_at(handle, insert_at)
+    pe_type = str(getattr(new_pe, "type", "") or "")
+    _assert_handle_pe_type_allowed(handle, pe_type)
+    identification = _assign_free_identification(new_pe, pes.pe_list)
     new_list = list(pes.pe_list)
     new_list.insert(idx, new_pe)
     _assert_handle_sequence_allowed(handle, new_list)
@@ -9588,7 +15594,7 @@ def _dispatch_import_pe(
         pes,
         handle.get("decoded_document") or {},
     )
-    warnings: list[str] = []
+    warnings: list[str] = list(facts.get("warnings") or [])
     try:
         handle["pes"] = build_profile_sequence_from_document(
             handle["decoded_document"], workspace_root=_workspace_root()
@@ -9597,15 +15603,274 @@ def _dispatch_import_pe(
         warnings.append(f"Document mutated; re-encode failed: {error}")
     _mark_dirty(handle, idx)
 
+    summary_facts = _pe_document_summary(new_pe)
+    detail = ""
+    load_block = summary_facts.get("load_block")
+    if isinstance(load_block, dict):
+        detail += (
+            f", load block {load_block.get('load_block_object_size', 0)} bytes"
+            f" (AID {load_block.get('load_package_aid_hex', '')})"
+        )
+    instances = summary_facts.get("instances")
+    if isinstance(instances, list) and instances:
+        detail += f", {len(instances)} instance(s)"
     return {
         "session_id": sid,
-        "input_path": str(source),
+        "input_format": str(facts.get("input_format") or ""),
         "pe_index": idx,
-        "pe_type": str(getattr(new_pe, "type", "unknown")),
+        "pe_count": len(handle["pes"].pe_list),
+        "pe_type": pe_type or "unknown",
+        "identification": identification,
         "label": _pe_display_label(new_pe),
-        "summary": f"Imported {source.name} as PE[{idx}].",
+        "document_meta": facts.get("document_meta"),
+        "der_matches": facts.get("der_matches"),
+        "summary_facts": summary_facts,
+        "summary": (
+            f"{verb} {origin_text} as PE[{idx}] ({pe_type or 'unknown'}"
+            + (f", identification {identification}" if identification else "")
+            + detail
+            + ")."
+        ),
         "warnings": warnings,
     }
+
+
+def _dispatch_import_pe(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    input_path: Any = None,
+    insert_at: Any = None,
+) -> dict[str, Any]:
+    """Insert a PE decoded from a file at ``insert_at``.
+
+    Accepted suffixes:
+      * ``.der`` -- binary DER (default).
+      * ``.asn`` / ``.asn1`` / ``.txt`` / ``.hex`` -- ASCII hex of DER.
+      * ``.json`` -- single-PE JSON snippet (transcoded form).
+      * ``.xml`` -- legacy File Tree Express container; not handled
+        in this release (no bundled converter).
+    """
+    from yggdrasim_common.gui_server.sessions import get_manager
+
+    sid = str(session_id or "").strip()
+    in_text = str(input_path or "").strip()
+    if len(sid) == 0 or len(in_text) == 0:
+        raise ValueError("session_id and input_path are required.")
+    source = Path(os.path.expanduser(in_text)).resolve()
+    if source.is_file() is False:
+        raise FileNotFoundError(f"input_path not found: {source}")
+
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    _parse_insert_at(handle, insert_at)
+    new_pe, facts = _decode_imported_pe(source)
+    result = _insert_pe_into_session(
+        handle,
+        sid,
+        new_pe,
+        facts,
+        insert_at=insert_at,
+        origin_text=source.name,
+        verb="Imported",
+    )
+    result["input_path"] = str(source)
+    return result
+
+
+def _pe_sentinel_records(handle: Mapping[str, Any], der: bytes) -> list[Any]:
+    """The session's inline placeholder records whose sentinel sits in ``der``."""
+    records = list(handle.get("inline_placeholder_records") or [])
+    if not records or not der:
+        return []
+    from Tools.ProfilePackage.saip_hex_template import locate_sentinels_in_bytes
+
+    by_index = {int(getattr(record, "index", -1)): record for record in records}
+    seen: set[int] = set()
+    out: list[Any] = []
+    for entry in locate_sentinels_in_bytes(der, records):
+        index = int(entry.get("index", -1))
+        if index in seen:
+            continue
+        seen.add(index)
+        record = by_index.get(index)
+        if record is not None:
+            out.append(record)
+    return out
+
+
+def _materialized_pe(
+    handle: dict[str, Any],
+    pe: Any,
+    pe_index: int,
+    records_in_pe: list[Any],
+) -> tuple[Any, list[str]]:
+    """Return ``pe`` with its stored template values substituted.
+
+    The session keeps its template: the substitution runs on a copy of the
+    document. Every variable the PE uses needs a value; the materialiser
+    names the ones that have none.
+    """
+    if not records_in_pe:
+        return pe, []
+    from Tools.ProfilePackage.saip_json_codec import (
+        build_profile_sequence_from_document,
+    )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        SaipVariableMaterializationError,
+        materialize_inline_records,
+    )
+
+    _refresh_decoded_document(handle)
+    try:
+        document, _remaining, results = materialize_inline_records(
+            handle["decoded_document"],
+            records_in_pe,
+            dict(handle.get("applied_overrides") or {}),
+            raw_values=dict(handle.get("inline_raw_values") or {}),
+        )
+    except SaipVariableMaterializationError as error:
+        raise ValueError(str(error)) from error
+    document.pop("__ygg_inline_placeholders__", None)
+    from Tools.ProfilePackage.saip_ef_length_fields import (
+        reconcile_document,
+        record_sizes_from_sequence,
+    )
+
+    document, _length_edits = reconcile_document(
+        document, record_sizes=record_sizes_from_sequence(handle.get("pes"))
+    )
+    pes = build_profile_sequence_from_document(
+        document, workspace_root=_workspace_root()
+    )
+    return pes.pe_list[pe_index], [result.variable_name for result in results]
+
+
+def _verified_concrete_der(handle: Mapping[str, Any], pe: Any) -> bytes:
+    """DER of ``pe`` after checking that no template sentinel survived."""
+    der = bytes(pe.to_der())
+    records = list(handle.get("inline_placeholder_records") or [])
+    if records:
+        from Tools.ProfilePackage.saip_hex_template import locate_sentinels_in_bytes
+
+        leftover = locate_sentinels_in_bytes(der, records)
+        if leftover:
+            names = sorted({str(entry.get("variable") or "") for entry in leftover})
+            raise RuntimeError(
+                "PE export refused: template sentinel bytes remain for "
+                + ", ".join(names)
+                + " after substitution."
+            )
+    return der
+
+
+def _build_pe_document(
+    handle: dict[str, Any],
+    pe: Any,
+    pe_index: int,
+    *,
+    resolve: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Compose the ``ygg.pe_document.v1`` file for one PE.
+
+    Returns ``(document, facts)``. The file holds the schema, the PE type and
+    the tagged decoded tree without the codec's display labels: the importer
+    rebuilds the PE from that tree, so DER bytes or a summary would repeat
+    it, and the source package's name stays out of a file meant to move
+    between packages. A template PE keeps its placeholder literals, and says
+    so with ``template`` and ``placeholders``, unless ``resolve`` substitutes
+    the stored values. The summary and the DER digest go to ``facts`` for the
+    caller's response.
+    """
+    import copy as _copy
+
+    from Tools.ProfilePackage.saip_hex_template import (
+        splice_literals_into_tagged_document,
+    )
+    from Tools.ProfilePackage.saip_json_codec import jsonify_document
+
+    _refresh_decoded_document(handle)
+    section_key = _sections_by_pe_index(handle["decoded_document"])[pe_index]
+    pe_type = str(getattr(pe, "type", "") or "")
+    warnings: list[str] = []
+    facts: dict[str, Any] = {
+        "template": False,
+        "placeholders": [],
+        "materialized_variables": [],
+    }
+
+    raw_der = b""
+    try:
+        raw_der = bytes(pe.to_der())
+    except Exception as error:
+        # A PE straight out of add_pe may not encode until its fields
+        # are stamped; the document still carries the decoded tree.
+        warnings.append(f"PE bytes unavailable: {error}")
+    records_in_pe = _pe_sentinel_records(handle, raw_der)
+    placeholders: list[str] = []
+    for record in records_in_pe:
+        name = str(getattr(record, "variable_name", "") or "")
+        if name and name not in placeholders:
+            placeholders.append(name)
+    facts["placeholders"] = placeholders
+
+    concrete_blocked = ""
+    try:
+        _assert_export_policy_allows_concrete(handle)
+    except ValueError as error:
+        concrete_blocked = str(error)
+
+    pe_out = pe
+    der = b""
+    if records_in_pe and not resolve:
+        facts["template"] = True
+    elif records_in_pe and concrete_blocked:
+        # Without the substitution the tree would carry the sentinel bytes
+        # in place of the literals.
+        raise ValueError(
+            "The stored values cannot be substituted: " + concrete_blocked
+        )
+    elif raw_der and not concrete_blocked:
+        pe_out, facts["materialized_variables"] = _materialized_pe(
+            handle, pe, pe_index, records_in_pe
+        )
+        der = _verified_concrete_der(handle, pe_out)
+
+    section = _copy.deepcopy(getattr(pe_out, "decoded", {}))
+    tagged = jsonify_document({"sections": {section_key: section}})
+    if facts["template"]:
+        splice_literals_into_tagged_document(tagged, records_in_pe)
+    _drop_display_labels(tagged["sections"])
+
+    meta: dict[str, Any] = {"schema": _PE_DOCUMENT_SCHEMA, "pe_type": pe_type}
+    if facts["template"]:
+        meta["template"] = True
+        meta["placeholders"] = placeholders
+    facts["warnings"] = warnings
+    facts["der_sha256"] = hashlib.sha256(der).hexdigest() if der else ""
+    facts["summary"] = _pe_document_summary(pe_out)
+    document = {_PE_DOCUMENT_KEY: meta, "sections": tagged["sections"]}
+    return document, facts
+
+
+def _drop_display_labels(tree: Any) -> None:
+    """Remove the codec's display breadcrumbs from a tagged tree, in place.
+
+    ``jsonify_saip_value`` gives every bytes node a ``label`` such as
+    "Application PE / Load block / Load package AID"; ``dejsonify_saip_value``
+    skips that key wherever it sits, so the tree decodes the same without it.
+    """
+    from Tools.ProfilePackage.saip_json_codec import _LEGACY_TAG_LABEL, _TAG_LABEL
+
+    stack: list[Any] = [tree]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            node.pop(_TAG_LABEL, None)
+            node.pop(_LEGACY_TAG_LABEL, None)
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
 
 
 @_with_session_lock
@@ -9615,14 +15880,18 @@ def _dispatch_export_pe(
     session_id: Any = None,
     pe_index: Any = None,
     output_path: Any = None,
-    format: Any = None,
+    format: Any = None,  # noqa: A002 -- GUI facing param name
     overwrite: Any = None,
+    resolve_variables: Any = None,
 ) -> dict[str, Any]:
     """Serialise a single PE out to disk.
 
-    The caller is responsible for the destination filename — the GUI
-    typically composes one as ``<pe_type>-<name>.<ext>``. ``format``
-    matches ``saip.save_package``: ``der`` / ``hex`` / ``json``.
+    ``format`` is ``der`` / ``hex`` (the PE bytes, with the session's stored
+    template values substituted) or ``json`` (the PE document: the schema,
+    the PE type and the tagged decoded tree). A template PE keeps its
+    placeholder literals in the document unless ``resolve_variables``
+    substitutes the stored values. The caller picks the destination
+    filename; the GUI composes ``<type>-<name>``.
     """
     from yggdrasim_common.gui_server.sessions import get_manager
 
@@ -9640,11 +15909,10 @@ def _dispatch_export_pe(
             f"unknown format {format!r}; allowed: {', '.join(_EXPORT_PE_FORMATS)}",
         )
     overwrite_flag = bool(overwrite) if overwrite is not None else False
+    resolve = bool(resolve_variables) if resolve_variables is not None else False
 
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
-    if fmt in ("der", "hex"):
-        _assert_handle_concrete_export_allowed(handle)
     pes = handle["pes"]
     n = len(pes.pe_list)
     if idx < 0 or idx >= n:
@@ -9658,27 +15926,235 @@ def _dispatch_export_pe(
         raise FileExistsError(
             f"target already exists (pass overwrite=true to replace): {target}",
         )
-    if fmt == "der":
-        output_bytes = bytes(pe.to_der())
-    elif fmt == "hex":
-        der = pe.to_der()
-        output_bytes = (der.hex().upper() + "\n").encode("utf-8")
-    else:
-        decoded = _jsonify_decoded(getattr(pe, "decoded", {}))
-        text = json.dumps(decoded, indent=2, ensure_ascii=False) + "\n"
+    warnings: list[str] = []
+    facts: dict[str, Any]
+    if fmt == "json":
+        document, facts = _build_pe_document(handle, pe, idx, resolve=resolve)
+        warnings.extend(facts.get("warnings") or [])
+        text = json.dumps(document, indent=2, ensure_ascii=False) + "\n"
         output_bytes = text.encode("utf-8")
+    else:
+        _assert_export_policy_allows_concrete(handle)
+        records_in_pe = _pe_sentinel_records(handle, bytes(pe.to_der()))
+        pe_out, materialized = _materialized_pe(handle, pe, idx, records_in_pe)
+        der = _verified_concrete_der(handle, pe_out)
+        if fmt == "der":
+            output_bytes = der
+        else:
+            output_bytes = (der.hex().upper() + "\n").encode("utf-8")
+        facts = {
+            "template": False,
+            "placeholders": sorted(
+                {
+                    str(getattr(record, "variable_name", "") or "")
+                    for record in records_in_pe
+                }
+            ),
+            "materialized_variables": materialized,
+            "der_sha256": hashlib.sha256(der).hexdigest(),
+            "summary": _pe_document_summary(pe_out),
+        }
+        header = _pe_header_dict(pe) or {}
+        if header.get("pe-name"):
+            warnings.append(
+                f"{fmt.upper()} carries the PE bytes only; the PE name "
+                f"{str(header.get('pe-name'))!r} survives in the json PE document.",
+            )
     from yggdrasim_common.secure_files import atomic_write_bytes
 
     atomic_write_bytes(target, output_bytes, overwrite=overwrite_flag)
-    bytes_written = len(output_bytes)
 
     return {
         "session_id": sid,
         "pe_index": idx,
         "pe_type": str(getattr(pe, "type", "unknown")),
+        "label": _pe_display_label(pe),
         "output_path": str(target),
         "format": fmt,
-        "bytes_written": bytes_written,
+        "schema": _PE_DOCUMENT_SCHEMA if fmt == "json" else "",
+        "bytes_written": len(output_bytes),
+        "template": bool(facts.get("template")),
+        "placeholders": list(facts.get("placeholders") or []),
+        "materialized_variables": list(facts.get("materialized_variables") or []),
+        "der_sha256": str(facts.get("der_sha256") or ""),
+        "summary_facts": facts.get("summary") or {},
+        "warnings": warnings,
+    }
+
+
+# -- PE library: saved profile elements ---------------------------------
+#
+# ``Tools/ProfilePackage/saip_pe_library.py`` keeps one PE document per
+# entry (the file ``saip.export_pe`` writes) under the operator's
+# ``~/.yggdrasim/saip_pe_library/``; these dispatchers are the GUI's
+# Save PE button and PE library dialog.
+
+
+@_with_session_lock
+def _dispatch_save_pe(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    name: Any = None,
+    overwrite: Any = None,
+    resolve_variables: Any = None,
+) -> dict[str, Any]:
+    """Store one PE of the session in the library under ``name``."""
+    from yggdrasim_common.gui_server.sessions import get_manager
+    from Tools.ProfilePackage.saip_pe_library import (
+        normalise_entry_name,
+        saved_at_stamp,
+        write_entry,
+    )
+
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    try:
+        idx = int(pe_index)
+    except Exception as error:
+        raise ValueError(f"pe_index must be an integer: {pe_index!r}") from error
+    entry_name = normalise_entry_name(name)
+    overwrite_flag = bool(overwrite) if overwrite is not None else False
+    resolve = bool(resolve_variables) if resolve_variables is not None else False
+
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    pes = handle["pes"]
+    n = len(pes.pe_list)
+    if idx < 0 or idx >= n:
+        raise IndexError(f"pe_index {idx} out of range 0..{n - 1}")
+    pe = pes.pe_list[idx]
+
+    document, facts = _build_pe_document(handle, pe, idx, resolve=resolve)
+    meta = document[_PE_DOCUMENT_KEY]
+    meta["library_name"] = entry_name
+    meta["saved_at"] = saved_at_stamp()
+    target = write_entry(entry_name, document, overwrite=overwrite_flag)
+    pe_type = str(getattr(pe, "type", "unknown"))
+    placeholders = list(facts.get("placeholders") or [])
+    template = bool(facts.get("template"))
+    return {
+        "session_id": sid,
+        "pe_index": idx,
+        "pe_type": pe_type,
+        "label": _pe_display_label(pe),
+        "name": entry_name,
+        "path": str(target),
+        "saved_at": meta["saved_at"],
+        "template": template,
+        "placeholders": placeholders,
+        "materialized_variables": list(facts.get("materialized_variables") or []),
+        "bytes_written": int(target.stat().st_size),
+        "summary_facts": facts.get("summary") or {},
+        "warnings": list(facts.get("warnings") or []),
+        "summary": (
+            f"Saved PE[{idx}] ({pe_type}) to the library as {entry_name!r}"
+            + (f", keeping {', '.join(placeholders)}" if template and placeholders else "")
+            + "."
+        ),
+    }
+
+
+def _dispatch_list_pe_library(ctx: ActionContext) -> dict[str, Any]:
+    """The library's entries, read from each entry's metadata."""
+    from Tools.ProfilePackage.saip_pe_library import list_entries, pe_library_dir
+
+    entries = list_entries()
+    return {
+        "directory": str(pe_library_dir()),
+        "entries": entries,
+        "count": len([entry for entry in entries if "error" not in entry]),
+    }
+
+
+def _dispatch_load_pe(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    name: Any = None,
+    insert_at: Any = None,
+) -> dict[str, Any]:
+    """Insert the saved PE ``name`` into the session at ``insert_at``.
+
+    A saved template PE still carries its placeholder literals in its
+    tagged tree; they are registered in the session before the PE is built,
+    as a literal typed into an editor is, so the loaded PE keeps the
+    variables the operator standardised on.
+    """
+    import copy as _copy
+
+    from yggdrasim_common.gui_server.sessions import get_manager
+    from Tools.ProfilePackage.saip_json_codec import jsonify_document
+    from Tools.ProfilePackage.saip_pe_library import (
+        entry_path,
+        normalise_entry_name,
+        read_entry,
+    )
+
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    entry_name = normalise_entry_name(name)
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    _parse_insert_at(handle, insert_at)
+    document = read_entry(entry_name)
+    origin = f"library entry {entry_name!r}"
+    facts: dict[str, Any] = {"input_format": "", "warnings": []}
+
+    sections = document.get("sections")
+    placeholder_summary: dict[str, Any] | None = None
+    new_indexes: list[Any] = []
+    if isinstance(sections, dict) and _tagged_placeholder_names(sections):
+        placeholder_summary = _absorb_literals_in_tree(handle, sections)
+        new_indexes = list(placeholder_summary.get("_new_indexes") or [])
+    try:
+        new_pe, facts = _pe_from_document(
+            document, document.get(_PE_DOCUMENT_KEY), origin, facts
+        )
+        if placeholder_summary is not None:
+            # The sentinel bytes must sit in the PE that reaches the package.
+            probe = jsonify_document(
+                {
+                    "intro": [],
+                    "sections": {"pe": _copy.deepcopy(getattr(new_pe, "decoded", {}))},
+                }
+            )
+            _drop_placeholders_missing_from(
+                handle, placeholder_summary, probe, context=origin
+            )
+        result = _insert_pe_into_session(
+            handle,
+            sid,
+            new_pe,
+            facts,
+            insert_at=insert_at,
+            origin_text=origin,
+            verb="Loaded",
+        )
+    except Exception:
+        if new_indexes:
+            _withdraw_new_placeholders(handle, {"_new_indexes": new_indexes})
+        raise
+    if placeholder_summary is not None:
+        _merge_placeholder_fields(result, handle, placeholder_summary)
+    result["name"] = entry_name
+    result["path"] = str(entry_path(entry_name))
+    return result
+
+
+def _dispatch_delete_saved_pe(ctx: ActionContext, *, name: Any = None) -> dict[str, Any]:
+    """Remove the saved PE ``name`` from the library."""
+    from Tools.ProfilePackage.saip_pe_library import delete_entry, normalise_entry_name
+
+    entry_name = normalise_entry_name(name)
+    path = delete_entry(entry_name)
+    return {
+        "name": entry_name,
+        "path": str(path),
+        "summary": f"Deleted the saved profile element {entry_name!r}.",
     }
 
 
@@ -9687,15 +16163,15 @@ def _dispatch_export_pe(
 # Three smaller dispatchers that close out the operator-authoring
 # surface beyond the PE CRUD already covered:
 #
-#   * ``saip.create_package`` — bring up a new in-memory session
+#   * ``saip.create_package`` -- bring up a new in-memory session
 #     containing only ProfileHeader + PE-End so the operator can
 #     start building from a blank canvas (no file on disk required).
-#   * ``saip.open_package_with_variables`` — open a DER / JSON
+#   * ``saip.open_package_with_variables`` -- open a DER / JSON
 #     package together with a CSV variable-definitions sidecar in
 #     a single call, mirroring the convention of placing a
 #     ``profile.csv`` next to ``profile.der`` for personalisation.
 #   * ``saip.add_variable_definition`` /
-#     ``saip.remove_variable_definition`` — let the bench
+#     ``saip.remove_variable_definition`` -- let the bench
 #     pre-define / drop placeholder definitions on the variables
 #     surface independently of binding them to a PE field.
 
@@ -9857,6 +16333,8 @@ def open_saip_document_session(
         kind="saip",
         handle=handle,
         close=lambda: None,
+        idle_timeout_s=_AUTHORING_SESSION_IDLE_TIMEOUT_S,
+        max_of_kind=_AUTHORING_SESSION_CAP,
         metadata={
             "source_path": str(source_path or ""),
             "encoding": str(encoding or "json"),
@@ -9881,6 +16359,7 @@ def open_saip_document_session(
         "summary": str(intro_summary or "Generated SAIP authoring document"),
     }
     response.update(_generation_response_fields(handle))
+    response.update(_inline_template_response_fields(handle))
     response.update(_dirty_response_fields(handle))
     return response
 
@@ -9897,7 +16376,7 @@ def _dispatch_create_package(
     ``profile_version`` is a ``"M.m"`` string ("2.3", "3.3", ...);
     omit it for the conservative 2.3 default. ``iccid`` accepts
     20-digit hex (or empty for the all-zero placeholder pySim
-    plants by default — operators can fill it in afterwards via
+    plants by default -- operators can fill it in afterwards via
     ``saip.update_profile_header_field``). The returned shape is
     identical to ``saip.open_package`` so every workbench dispatcher
     works against the new session unchanged.
@@ -9954,13 +16433,15 @@ def _dispatch_create_package(
         "load_warnings": [],
     }
     _ensure_session_state(handle)
-    # New sessions are dirty from the start — there's nothing on disk yet to
+    # New sessions are dirty from the start -- there's nothing on disk yet to
     # compare against. Protect the live copy until its first successful save.
     _replace_dirty_pes(handle, {-1})
     session = get_manager().open(
         kind="saip",
         handle=handle,
         close=lambda: None,
+        idle_timeout_s=_AUTHORING_SESSION_IDLE_TIMEOUT_S,
+        max_of_kind=_AUTHORING_SESSION_CAP,
         metadata={
             "source_path": "",
             "encoding": "scaffold",
@@ -10022,7 +16503,7 @@ def _parse_sidecar_variables_csv(csv_path: Path) -> list[tuple[str, str]]:
 
     The bench convention places ``profile.csv`` next to ``profile.der``
     using the bare 2-column form (no header row). Blank lines and ``#``
-    comment lines split logical record sets — the first set is what
+    comment lines split logical record sets -- the first set is what
     the open dispatcher applies (mirrors the documented appendix
     "Profile Personalization of Variables"). This is intentionally a
     different parser to ``saip.import_variables_csv`` which uses a
@@ -10043,7 +16524,7 @@ def _parse_sidecar_variables_csv(csv_path: Path) -> list[tuple[str, str]]:
     reader = _csv.reader(_io.StringIO(text, newline=""))
     for raw_row in reader:
         row = [str(cell).strip() for cell in (raw_row or [])]
-        # Skip blank lines and comment lines — these are the
+        # Skip blank lines and comment lines -- these are the
         # separators between record sets in the manual's format.
         if len(row) == 0 or all(cell == "" for cell in row):
             if len(pairs) > 0:
@@ -10173,7 +16654,7 @@ def _resolve_token_mapping(pkg_path: Path) -> Path | None:
             ).resolve()
             if target.is_file():
                 return target
-            # File moved / deleted — surface the broken mapping by
+            # File moved / deleted -- surface the broken mapping by
             # returning the bad path; caller turns it into a warning.
             return target
         return None
@@ -10201,6 +16682,84 @@ def _touch_token_mapping(pkg_path: Path) -> None:
                 break
         if changed:
             _save_token_mappings(mappings)
+
+
+# ----------------------------------------------------------------------
+# Test-value list bindings (machine-local fallback)
+# ----------------------------------------------------------------------
+# A template's bound list travels in its sidecar or tagged JSON block once
+# the template is saved. Until then, and for templates in read-only
+# locations, ``<runtime>/state/saip_test_value_lists.json`` remembers the
+# binding per absolute path so reopening the template finds it again.
+# ----------------------------------------------------------------------
+
+_TEST_VALUE_BINDING_LOCK = threading.Lock()
+
+
+def _test_value_binding_store_path() -> Path:
+    from yggdrasim_common.runtime_paths import runtime_path
+
+    return Path(runtime_path("state", "saip_test_value_lists.json"))
+
+
+def _load_test_value_bindings() -> dict[str, dict[str, Any]]:
+    """Load ``{absolute path: {"list": selector, "last_used": ts}}``; ``{}`` when absent."""
+    store = _test_value_binding_store_path()
+    if store.is_file() is False:
+        return {}
+    try:
+        raw = json.loads(store.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    bindings = raw.get("bindings") if isinstance(raw, dict) else None
+    if not isinstance(bindings, dict):
+        return {}
+    cleaned: dict[str, dict[str, Any]] = {}
+    for key, entry in bindings.items():
+        if not isinstance(entry, dict):
+            continue
+        selector = str(entry.get("list") or "").strip()
+        if not selector:
+            continue
+        cleaned[str(key)] = {"list": selector, "last_used": entry.get("last_used")}
+    return cleaned
+
+
+def _save_test_value_bindings(bindings: dict[str, dict[str, Any]]) -> None:
+    from yggdrasim_common.secure_files import atomic_write_bytes
+
+    store = _test_value_binding_store_path()
+    store.parent.mkdir(parents=True, exist_ok=True)
+    encoded = (
+        json.dumps({"bindings": bindings}, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    atomic_write_bytes(store, encoded, overwrite=True)
+
+
+def _recall_test_value_binding(pkg_path: Path) -> str:
+    """Return the selector remembered for a template path, ``""`` when none."""
+    with _TEST_VALUE_BINDING_LOCK:
+        entry = _load_test_value_bindings().get(str(Path(pkg_path).resolve()))
+    return str(entry.get("list") or "") if isinstance(entry, dict) else ""
+
+
+def _remember_test_value_binding(pkg_path: Any, selector: str) -> None:
+    """Store (or, for an empty selector, forget) a template's bound list."""
+    import time
+
+    path_text = str(pkg_path or "").strip()
+    if not path_text:
+        return
+    key = str(Path(os.path.expanduser(path_text)).resolve())
+    with _TEST_VALUE_BINDING_LOCK:
+        bindings = _load_test_value_bindings()
+        if selector:
+            bindings[key] = {"list": selector, "last_used": int(time.time())}
+        elif key in bindings:
+            bindings.pop(key, None)
+        else:
+            return
+        _save_test_value_bindings(bindings)
 
 
 def _dispatch_list_token_mappings(
@@ -10235,8 +16794,8 @@ def _dispatch_set_token_mapping(
     Subsequent ``saip.open_package_with_variables`` calls will look
     up ``filename`` here before falling back to the sibling-CSV
     convention. ``tokens_path`` does not have to exist at the time
-    of the call — the operator might be defining the mapping ahead
-    of personalisation runs — but the open dispatcher will warn
+    of the call -- the operator might be defining the mapping ahead
+    of personalisation runs -- but the open dispatcher will warn
     when the target turns out to be missing on disk.
     """
     fname = str(filename or "").strip()
@@ -10307,12 +16866,12 @@ def _dispatch_open_package_with_variables(
     """Open a package and apply its token-list (CSV).
 
     Resolution order for ``variables_path`` when omitted:
-      1. **Pinned mapping** — first match in
+      1. **Pinned mapping** -- first match in
          ``saip.list_token_mappings`` keyed by absolute path /
          basename / stem of the package being opened. This is the
          operator-driven binding for token lists that don't sit
          next to the .der file.
-      2. **Sibling convention** — ``<package_basename>.csv`` next
+      2. **Sibling convention** -- ``<package_basename>.csv`` next
          to the package, as documented in the manual's "Importing a
          Variable Definitions File".
 
@@ -10546,7 +17105,7 @@ def _dispatch_remove_variable_definition(
 
     A bound definition (i.e. one whose name appears as ``[NAME]``
     inside a PE field) can still be removed by passing
-    ``force=true`` — the bound reference will then resolve to an
+    ``force=true`` -- the bound reference will then resolve to an
     undefined-variable error on next encode, which is sometimes
     what the operator wants when migrating to a different name.
     """
@@ -10647,7 +17206,7 @@ def _dispatch_compare_applications(
         raise FileNotFoundError(f"target_path not found: {target_resolved}")
 
     # Reuse list_applications by opening a throwaway session for the
-    # target — same dispatcher path as the in-memory side. Done via
+    # target -- same dispatcher path as the in-memory side. Done via
     # a temporary session_id that we release afterwards.
     target_session = _dispatch_open_package(ctx=ctx, path=str(target_resolved))
     target_sid = target_session["session_id"]
@@ -10661,7 +17220,7 @@ def _dispatch_compare_applications(
         except Exception:
             pass
 
-    # Join by (pe_type, primary AID) — the existing list_applications
+    # Join by (pe_type, primary AID) -- the existing list_applications
     # dispatcher emits ``instance_aid`` for SD / Application rows and
     # ``load_pkg_aid`` for executable load files. Fall back through
     # both before tagging the entry by its display label.
@@ -10733,7 +17292,7 @@ def _yggdrasim_version_info() -> dict[str, Any]:
     info["version"] = version
     info["workspace_root"] = str(repo_root)
 
-    # Loaded SAIP bits — useful for triage tickets.
+    # Loaded SAIP bits -- useful for triage tickets.
     try:
         import pySim  # noqa: F401
         import pySim.esim.saip as _saip  # noqa: F401
@@ -10966,6 +17525,16 @@ def _walk_decoded_value(
         raise ValueError("path is empty.")
     cursor = container
     for step in path_parts[:-1]:
+        if isinstance(cursor, tuple):
+            # A CHOICE in the native document is ``(alternative, payload)``;
+            # the tagged form addresses its payload as ``@.1``.
+            if step == "@":
+                continue
+            try:
+                cursor = cursor[int(step)]
+            except (ValueError, IndexError) as error:
+                raise LookupError(f"path step {step!r} not found in a CHOICE value") from error
+            continue
         if isinstance(cursor, list):
             try:
                 cursor = cursor[int(step)]
@@ -10990,6 +17559,185 @@ def _walk_decoded_value(
     raise LookupError(f"cannot resolve path tail at {type(cursor).__name__}")
 
 
+def _write_universal_list_entry(literal: str, value_hex: str) -> str:
+    """Set ``literal`` to ``value_hex`` (``""`` declares it) in the universal list."""
+    from Tools.ProfilePackage.saip_universal_tokens import (
+        UniversalTokensError,
+        load_universal_tokens,
+        set_token_list_entry,
+        universal_tokens_path,
+        write_universal_tokens,
+    )
+
+    path = universal_tokens_path()
+    try:
+        current = load_universal_tokens(path)
+        updated = set_token_list_entry(current.text, literal, value_hex)
+        write_universal_tokens(updated, path)
+    except UniversalTokensError as error:
+        raise ValueError(str(error)) from error
+    return str(path)
+
+
+def _bind_inline_placeholder_to_field(
+    handle: dict[str, Any],
+    sid: str,
+    pe_index: int,
+    section_key: str,
+    path_text: str,
+    parent: Any,
+    last: Any,
+    current_value: Any,
+    name_text: str,
+    placeholder_type: Any,
+    modifier: Any,
+    value: Any,
+    save_to_list: Any,
+    keep_value: Any,
+) -> dict[str, Any]:
+    """Replace a bytes field with a typed inline placeholder.
+
+    The field's bytes become the variable's value unless ``value`` names
+    another or ``keep_value`` is off; bytes no value of the type produces
+    are kept for this occurrence alone. ``save_to_list`` writes the value,
+    or a declaration when there is none, to the universal list so every
+    profile can insert the placeholder. A nine-byte EF.IMSI keeps its
+    length byte in front of the eight-byte IMSI placeholder (3GPP TS 31.102
+    section 4.2.2).
+    """
+    from Tools.ProfilePackage.saip_hex_template import (
+        format_placeholder_literal,
+        validate_inline_placeholder_parts,
+    )
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        decode_inline_placeholder_value,
+        inline_record_key,
+        validate_inline_raw_value,
+        variable_is_secret,
+    )
+
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name_text) is None:
+        raise ValueError(
+            "variable_name must be letters, digits and underscore, starting with a letter."
+        )
+    if isinstance(current_value, (bytes, bytearray)) is False:
+        raise ValueError(
+            f"{section_key}.{path_text} is not a bytes field; an inline placeholder "
+            "stands for bytes. Leave the placeholder type empty to bind a {NAME} token."
+        )
+    type_text = str(placeholder_type or "").strip().upper()
+    current_bytes = bytes(current_value)
+    prefix = b""
+    body = current_bytes
+    if type_text == "IMSI" and len(current_bytes) == 9:
+        prefix, body = current_bytes[:1], current_bytes[1:]
+    modifier_text = str(modifier or "").strip()
+    validate_inline_placeholder_parts(
+        type_text, len(body), modifier_text, literal=f"{section_key}.{path_text}"
+    )
+    spelt = "{" + f"{name_text}:{type_text}:{len(body)}"
+    spelt += (f":{modifier_text}" if modifier_text else "") + "}"
+    literal = format_placeholder_literal(spelt, "typed")
+    rewritten, absorbed, new_records = _absorb_inline_literals(
+        handle, [prefix.hex().upper() + literal], previous=current_bytes
+    )
+    if not new_records:
+        raise RuntimeError(f"{literal} was not registered; report this as a bug.")
+    record = new_records[0]
+    parent[last] = bytes.fromhex(str(rewritten[0]))
+    _mark_dirty(handle, pe_index)
+
+    secret = variable_is_secret(name_text)
+    summaries: list[str] = []
+    value_text = str(value or "").strip()
+    value_source = ""
+    already_typed = any(
+        str(item).casefold() == name_text.casefold()
+        for item in handle.get("applied_overrides") or {}
+    )
+    if value_text:
+        applied = _apply_variable_to_handle(handle, name_text, value_text)
+        summaries.extend(applied["summaries"])
+        value_source = "typed"
+    elif already_typed:
+        # Another occurrence already fixed the variable's value; this field
+        # follows it rather than overriding it with its own bytes.
+        value_source = "typed"
+        summaries.append(
+            f"{name_text}: this occurrence takes the value already stored for the variable."
+        )
+    elif keep_value is None or _coerce_bool(keep_value):
+        typed = decode_inline_placeholder_value(record, body)
+        if typed is not None:
+            applied = _apply_variable_to_handle(handle, name_text, typed)
+            summaries.extend(applied["summaries"])
+            value_source = "typed"
+        else:
+            key = inline_record_key(record)
+            validate_inline_raw_value(record, body.hex().upper())
+            handle.setdefault("inline_raw_values", {})[key] = body.hex().upper()
+            handle.setdefault("inline_raw_sources", {})[key] = ""
+            value_source = "stored"
+            summaries.append(
+                f"{name_text}: the field's bytes are kept for this occurrence; no "
+                f"{type_text} value produces them, so the row shows them as a list value."
+            )
+    list_path = ""
+    if _coerce_bool(save_to_list):
+        # The list carries what this occurrence exports: the stored typed
+        # value in wire form, or the bytes kept for it.
+        list_hex = body.hex().upper() if value_source else ""
+        if value_source == "typed":
+            from Tools.ProfilePackage.saip_variable_materialization import (
+                encode_inline_placeholder_value,
+            )
+
+            stored_value = next(
+                (
+                    str(stored)
+                    for item, stored in (handle.get("applied_overrides") or {}).items()
+                    if str(item).casefold() == name_text.casefold()
+                ),
+                "",
+            )
+            if stored_value:
+                list_hex = encode_inline_placeholder_value(record, stored_value).hex().upper()
+        list_path = _write_universal_list_entry(literal, list_hex)
+        summaries.append(
+            f"{literal} {'added to' if value_source else 'declared in'} the universal list."
+        )
+    state = _inline_template_state(handle)
+    resolved = name_text.casefold() not in {
+        str(item).casefold() for item in state["unresolved_variables"]
+    }
+    warnings = [
+        text
+        for text in absorbed["warnings"]
+        if not (resolved and str(text).startswith(f"{name_text}:"))
+    ]
+    response: dict[str, Any] = {
+        "session_id": sid,
+        "pe_index": pe_index,
+        "field_path": path_text,
+        "variable_name": name_text,
+        "grammar": "inline",
+        "literal": literal,
+        "placeholder_type": type_text,
+        "byte_length": len(body),
+        "modifier": modifier_text,
+        "captured_value": "" if secret else body.hex().upper(),
+        "captured_value_redacted": secret,
+        "value_source": value_source,
+        "resolved": resolved,
+        "list_path": list_path,
+        "summary": f"Replaced {section_key}.{path_text} with {literal}.",
+        "summaries": summaries,
+        "warnings": warnings,
+    }
+    response.update(_inline_template_response_fields(handle))
+    return response
+
+
 def _dispatch_add_variable_to_pe(
     ctx: ActionContext,
     *,
@@ -10999,14 +17747,24 @@ def _dispatch_add_variable_to_pe(
     field_path: Any = None,
     variable_name: Any = None,
     encoding: Any = None,
+    placeholder_type: Any = None,
+    modifier: Any = None,
+    value: Any = None,
+    save_to_list: Any = None,
+    keep_value: Any = None,
 ) -> dict[str, Any]:
     """Swap a concrete PE field value for a placeholder reference.
+
+    With ``placeholder_type`` the field becomes a typed inline placeholder
+    (``{name:TYPE:len[:modifier]}``), the grammar every template format
+    carries; see :func:`_bind_inline_placeholder_to_field`. Without it the
+    field is rebound to a ``[NAME]`` token of the tagged-JSON grammar:
 
     The captured value is parked in ``__ygg_token_defs__[NAME]``
     with the supplied ``encoding`` hint (default ``hex``) so the
     variables surface (``saip.export_variables_csv`` /
     ``saip.set_variable``) can round-trip it later. ``field_path``
-    is a dotted JSON path within the PE's decoded section — e.g.
+    is a dotted JSON path within the PE's decoded section -- e.g.
     ``iccid``, ``instance.applicationInstanceAID``, or
     ``algoConfiguration.1.key`` for an indexed slot.
 
@@ -11057,6 +17815,23 @@ def _dispatch_add_variable_to_pe(
 
     parent, last = _walk_decoded_value(section, path_text.split("."))
     current_value = parent[last]
+    if str(placeholder_type or "").strip():
+        return _bind_inline_placeholder_to_field(
+            handle,
+            sid,
+            idx,
+            section_key,
+            path_text,
+            parent,
+            last,
+            current_value,
+            name_text,
+            placeholder_type,
+            modifier,
+            value,
+            save_to_list,
+            keep_value,
+        )
 
     # Capture the current value as the token definition. Bytes-shaped
     # values are stored as hex; strings are stored verbatim.
@@ -11129,9 +17904,9 @@ def _dispatch_list_interpreted_efs(
     """Return every EF key with structured-editor support.
 
     Entries split into two tiers:
-      * ``round_trip`` — non-lossy editors that preserve original
+      * ``round_trip`` -- non-lossy editors that preserve original
         bytes when the decoded form was not modified.
-      * ``lossy_splice`` — editors that re-encode from the decoded
+      * ``lossy_splice`` -- editors that re-encode from the decoded
         form (record-based EFs where the upstream encoder cannot
         round-trip the original SFI / record-padding choices).
     """
@@ -11189,10 +17964,10 @@ def _dispatch_list_template_oids(
 # -- PE info + reorder ------------------------------------------------
 #
 # Two small UX dispatchers the manual references:
-#   * "PE Info" pane — describes the PE type, ASN.1 module, and the
+#   * "PE Info" pane -- describes the PE type, ASN.1 module, and the
 #     spec section that defines it.
-#   * "Reorder PEs" — moves a PE in the sequence. Header MUST stay at
-#     index 0 and end MUST stay at the last index (TCA SAIP §A.2),
+#   * "Reorder PEs" -- moves a PE in the sequence. Header MUST stay at
+#     index 0 and end MUST stay at the last index (TCA SAIP v3.4.1 §8.2.1 / §8.10),
 #     so the dispatcher refuses moves that would violate either
 #     anchor.
 
@@ -11201,7 +17976,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "header": {
         "title": "Profile Header",
         "asn1": "ProfileHeader",
-        "spec": "TCA SAIP §A.2",
+        "spec": "TCA SAIP v3.4.1 §8.2.1",
         "summary": (
             "Carries the profile-wide ICCID, profileType, mandatory "
             "services, GFSTE list, mandatory AIDs, connectivity "
@@ -11212,13 +17987,13 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "end": {
         "title": "Profile End",
         "asn1": "PE-End",
-        "spec": "TCA SAIP §A.2",
+        "spec": "TCA SAIP v3.4.1 §8.10",
         "summary": "Sentinel PE that terminates the sequence.",
     },
     "pinCodes": {
         "title": "PIN Codes",
         "asn1": "PE-PINCodes",
-        "spec": "TCA SAIP §A.2",
+        "spec": "TCA SAIP v3.4.1 §8.5.1",
         "summary": (
             "Carries either an explicit pinconfig list (1..26 PIN "
             "definitions) or a filePath pointing at the directory "
@@ -11228,13 +18003,13 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "pukCodes": {
         "title": "PUK Codes",
         "asn1": "PE-PUKCodes",
-        "spec": "TCA SAIP §A.2",
+        "spec": "TCA SAIP v3.4.1 §8.5.2",
         "summary": "List of PUK definitions. Referenced from PINConfiguration.unblockingPINReference.",
     },
     "akaParameter": {
         "title": "AKA Parameter",
         "asn1": "PE-AKAParameter",
-        "spec": "TCA SAIP §A.2 / 3GPP TS 35.205-208 (MILENAGE) / TS 35.231 (TUAK)",
+        "spec": "TCA SAIP v3.4.1 §8.4.2 / 3GPP TS 35.205-208 (MILENAGE) / TS 35.231 (TUAK)",
         "summary": (
             "Algorithm + sequence-number configuration for AKA. "
             "Choice between mappingParameter (test algorithm) and "
@@ -11244,7 +18019,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "cdmaParameter": {
         "title": "CDMA Parameter",
         "asn1": "PE-CDMAParameter",
-        "spec": "TCA SAIP §A.2 / 3GPP2 [S0016]",
+        "spec": "TCA SAIP v3.4.1 §8.4.3 / 3GPP2 [S0016]",
         "summary": (
             "A-Key (CAVE), optional SSD halves, and HRPD / SimpleIP "
             "/ MobileIP authentication data."
@@ -11253,7 +18028,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "securityDomain": {
         "title": "Security Domain",
         "asn1": "PE-SecurityDomain",
-        "spec": "GP CS v2.3 §11 / TCA SAIP §A.2",
+        "spec": "TCA SAIP v3.4.1 §8.6.1 / GP Card Specification v2.3.1 §7",
         "summary": (
             "GP Security Domain instance (AID, privileges, key "
             "list, perso-data DGI block). Privileges follow GP CS "
@@ -11263,7 +18038,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "genericFileManagement": {
         "title": "Generic File Management",
         "asn1": "PE-GFM",
-        "spec": "TCA SAIP §A.2",
+        "spec": "TCA SAIP v3.4.1 §8.3.5",
         "summary": (
             "Free-form file system PE. Each entry carries a filePath "
             "(MF-rooted concatenated FIDs) and a File body."
@@ -11272,49 +18047,59 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "usim": {
         "title": "USIM Application",
         "asn1": "PE-USIM",
-        "spec": "TCA SAIP §A.2 / 3GPP TS 31.102",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.4 / §9.5 / 3GPP TS 31.102",
         "summary": "USIM ADF + EFs. Bound to a SAIP profile template via templateID.",
     },
     "isim": {
         "title": "ISIM Application",
         "asn1": "PE-ISIM",
-        "spec": "TCA SAIP §A.2 / 3GPP TS 31.103",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.5 / §9.6 / 3GPP TS 31.103",
         "summary": "ISIM ADF + EFs. Bound to a SAIP profile template via templateID.",
     },
     "csim": {
         "title": "CSIM Application",
         "asn1": "PE-CSIM",
-        "spec": "TCA SAIP §A.2 / 3GPP2 C.S0065",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.6 / §9.7 / 3GPP2 C.S0065",
         "summary": "CSIM ADF + EFs. Bound to a SAIP profile template via templateID.",
     },
     "iot": {
-        "title": "IoT Application",
+        "title": "IoT Minimal Profile Files",
         "asn1": "PE-IoT",
-        "spec": "TCA SAIP §A.2 / 3GPP TS 31.102 IoT annex",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.8.1 / §9.10.1",
         "summary": (
-            "IoT ADF (5FE0 family). Slim USIM-derived application carrying "
-            "the EFs the IoT-UE service-table flags as mandatory "
-            "(EF.UMPC, EF.IMSI, EF.ARR, EF.threshold). Not constructable "
-            "via saip.add_pe in this build — use saip.import_pe with a "
-            "DER blob produced from a TCA-IoT template package."
+            "One element creates the MF with its files (EF.PL, EF.ICCID, "
+            "EF.DIR, EF.ARR, EF.UMPC) and the USIM ADF (7FF1) with its "
+            "mandatory files (EF.IMSI, EF.ARR, EF.Keys, EF.UST, EF.ACC, "
+            "EF.ECC, ...). It replaces PE-MF and PE-USIM in an IoT Minimal "
+            "Profile and follows the header directly."
+        ),
+    },
+    "opt-iot": {
+        "title": "IoT Minimal Profile Optional Files",
+        "asn1": "PE-OPT-IoT",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.8.2 / §9.10.2",
+        "summary": (
+            "USIM ADF files an IoT Minimal Profile uses less often "
+            "(EF.FDN, EF.SMS, EF.SMSP, EF.SPN, EF.EST, EF.EPSLOCI, DF.5GS, "
+            "DF.SAIP, ...). Used once, after PE-IoT."
         ),
     },
     "ssim": {
         "title": "SSIM Application",
         "asn1": "PE-SSIM",
-        "spec": "TCA SAIP §A.2 / 3GPP TS 31.102 §4.4.13 / GSMA SSIM",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.9 / §9.11 / 3GPP TS 31.105",
         "summary": (
-            "Standalone SIM application (SSIM) used with EAP-TLS 1.3 "
+            "SSIM application (Slice Subscriber Identity Module, 3GPP TS 31.105) used with EAP-TLS 1.3 "
             "based authentication (RFC 9190). Pairs with "
             "PE-SSIM-EAPTLSParameters for the certificate / key set. "
-            "Not constructable via saip.add_pe in this build — use "
+            "Not constructable via saip.add_pe in this build -- use "
             "saip.import_pe with a TCA-SSIM template DER blob."
         ),
     },
     "ssim-eaptls": {
         "title": "SSIM EAP-TLS Parameters",
         "asn1": "PE-SSIM-EAPTLSParameters",
-        "spec": "TCA SAIP §A.2 / RFC 9190 (EAP-TLS 1.3)",
+        "spec": "TCA SAIP v3.4.1 §8.4.4 / RFC 9190 (EAP-TLS 1.3)",
         "summary": (
             "TLS certificate + chain + CA + private key for the SSIM "
             "EAP-TLS authentication algorithm. Provided within an "
@@ -11326,36 +18111,25 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "opt-csim": {
         "title": "CSIM Optional Files",
         "asn1": "PE-OptionalCSIM",
-        "spec": "TCA SAIP §9.5 / 3GPP2 C.S0065",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.6 / §9.7.2 / 3GPP2 C.S0065",
         "summary": (
             "CSIM ADF EFs that are not part of the mandatory set "
             "(EF.SSCI, EF.SSFC, EF.MDN, EF.SIPCAP, EF.MIPCAP, "
-            "EF.HRPDCAP, EF.MMSN, …). Layered on top of PE-CSIM via "
+            "EF.HRPDCAP, EF.MMSN, ...). Layered on top of PE-CSIM via "
             "the same template. Not constructable via saip.add_pe; "
             "use saip.import_pe."
-        ),
-    },
-    "opt-iot": {
-        "title": "IoT Optional Files",
-        "asn1": "PE-OptionalIoT",
-        "spec": "TCA SAIP §9.5 / 3GPP TS 31.102 IoT annex",
-        "summary": (
-            "IoT ADF EFs beyond the mandatory IoT slim set "
-            "(EF.SUPI_NAI and the 3GPP TS 31.102 Rel-17 IoT extras). "
-            "Layered on top of PE-IoT via the same template. Use "
-            "saip.import_pe to inject a DER blob."
         ),
     },
     "telecom": {
         "title": "Telecom DF",
         "asn1": "PE-Telecom",
-        "spec": "TCA SAIP §A.2 / TS 11.11",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.3 / §9.4 / 3GPP TS 51.011",
         "summary": "DF.TELECOM (7F10) and its EFs.",
     },
     "mf": {
         "title": "Master File",
         "asn1": "PE-MF",
-        "spec": "TCA SAIP §A.2 / TS 102 221 §13.1",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.1 / §9.2 / ETSI TS 102 221 v18.4 §13",
         "summary": (
             "Master File (3F00) plus the EFs that live directly under it "
             "(EF.ICCID, EF.PL, EF.DIR, EF.ARR, EF.UMPC). Carries the "
@@ -11365,7 +18139,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "cd": {
         "title": "Card Directory DF",
         "asn1": "PE-CD",
-        "spec": "TCA SAIP §9.3",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.2 / §9.3",
         "summary": (
             "DF.CD (7F11). Contains EF.LAUNCHPAD and the optional EF.ICON "
             "range (6F40..6F7E). Created on demand."
@@ -11374,7 +18148,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "phonebook": {
         "title": "Phonebook DF",
         "asn1": "PE-PhoneBook",
-        "spec": "TCA SAIP §9.4 / TS 31.102 §4.4.2",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.4 / §9.5.3 / 3GPP TS 31.102 §4.4.2",
         "summary": (
             "DF.PHONEBOOK (5F3A) with EF.PBR, EF.AAS, EF.GAS, EF.ADN, "
             "EF.IAP, EF.PSC, EF.CC, EF.PUID, EF.EXT1. Lives under either "
@@ -11384,7 +18158,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "gsm-access": {
         "title": "GSM-ACCESS DF",
         "asn1": "PE-GSM-ACCESS",
-        "spec": "TCA SAIP §9.5.4 / TS 31.102 §5.3",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.4 / §9.5.4 / 3GPP TS 31.102 §4.4.3",
         "summary": (
             "DF.GSM-ACCESS (5F3B) with EF.Kc, EF.KcGPRS, EF.CPBCCH, "
             "EF.InvScan. GSM-bearing EFs accessed when the USIM falls "
@@ -11394,7 +18168,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "df-5gs": {
         "title": "5G-System DF",
         "asn1": "PE-DF-5GS",
-        "spec": "TCA SAIP §9.5.6 / TS 31.102 §4.4.11",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.4 / §9.5.11 / 3GPP TS 31.102 §4.4.11",
         "summary": (
             "DF.5GS (5FC0) carrying the 5G SUCI / 5G-GUTI / NSSAI / "
             "EF.UAC_AIC / EF.OPL5G family. Required when "
@@ -11404,7 +18178,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "eap": {
         "title": "EAP DF",
         "asn1": "PE-DF-EAP",
-        "spec": "TCA SAIP §9.5.5 / TS 31.102 §4.4.4",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.7 / §9.8 / ETSI TS 102 310",
         "summary": (
             "DF.EAP (5F40) holding EAP credentials and parameters. "
             "Optional; created when EAP-AKA / EAP-SIM authentication "
@@ -11414,7 +18188,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "df-saip": {
         "title": "SAIP DF",
         "asn1": "PE-DF-SAIP",
-        "spec": "TCA SAIP §9.5.10",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.4 / §9.5.12 / Annex D",
         "summary": (
             "DF.SAIP (6FD0). Holds SUCI calculation info "
             "(EF.SUCI_Calc_Info, AID 4F01) used by USIM-Service-Table "
@@ -11424,7 +18198,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "df-snpn": {
         "title": "SNPN DF",
         "asn1": "PE-DF-SNPN",
-        "spec": "TCA SAIP §9.5.12 / TS 31.102 §4.4.12",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.4 / §9.5.13 / 3GPP TS 31.102 §4.4.12",
         "summary": (
             "DF.SNPN (5FE0). Stand-alone Non-Public Network "
             "credentials. Optional; created for service 143."
@@ -11433,16 +18207,16 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "df-5gprose": {
         "title": "5G-ProSe DF",
         "asn1": "PE-DF-5G-ProSe",
-        "spec": "TCA SAIP §9.5.13 / TS 31.102 §4.4.14",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.4 / §9.5.14 / 3GPP TS 31.102 §4.4.13",
         "summary": (
             "DF.5G_ProSe holding 5G Proximity Services configuration "
-            "and credentials (EF.UEPC5G_PROSE, EF.UEPC5G_AKMA, …)."
+            "and credentials (EF.UEPC5G_PROSE, EF.UEPC5G_AKMA, ...)."
         ),
     },
     "application": {
         "title": "Application Instance",
         "asn1": "PE-Application",
-        "spec": "GP CS v2.3 §11.5 / TCA SAIP §A.2",
+        "spec": "TCA SAIP v3.4.1 §8.7 / GP Card Specification v2.3.1 §11.5",
         "summary": (
             "JavaCard application instance (INSTALL [for install] payload "
             "in PE form). Carries Class AID, Instance AID, Load Package "
@@ -11453,7 +18227,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "rfm": {
         "title": "Remote File Management",
         "asn1": "PE-RFM",
-        "spec": "TCA SAIP §A.2 / TS 102 226 §8",
+        "spec": "TCA SAIP v3.4.1 §8.8 / ETSI TS 102 226 v19 §7",
         "summary": (
             "Remote File Management application configuration: TAR, "
             "minimum security level, target ADF / DF, key reference "
@@ -11463,17 +18237,17 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "opt-usim": {
         "title": "USIM Optional Files",
         "asn1": "PE-OptionalUSIM",
-        "spec": "TCA SAIP §9.5.2 / TS 31.102",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.4 / §9.5.2 / 3GPP TS 31.102",
         "summary": (
             "USIM ADF EFs that are not part of the mandatory file set "
-            "(EF.MSISDN, EF.SPN, EF.ECC, EF.HPLMN, EF.OPLMNwACT, …). "
+            "(EF.MSISDN, EF.SPN, EF.ECC, EF.HPLMN, EF.OPLMNwACT, ...). "
             "Layered on top of PE-USIM via the same template."
         ),
     },
     "opt-isim": {
         "title": "ISIM Optional Files",
         "asn1": "PE-OptionalISIM",
-        "spec": "TCA SAIP §9.5.3 / TS 31.103",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.5 / §9.6.2 / 3GPP TS 31.103",
         "summary": (
             "ISIM ADF EFs beyond the mandatory IMS Public/Private "
             "User Identity / Home Network Domain Name set."
@@ -11482,9 +18256,9 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "ssd": {
         "title": "Supplementary Security Domain",
         "asn1": "PE-SSD",
-        "spec": "GP CS v2.3 §7.4 / TCA SAIP §A.2",
+        "spec": "TCA SAIP v3.4.1 §8.6.1-§8.6.2 / GP Card Specification v2.3.1 §7",
         "summary": (
-            "Supplementary Security Domain — child SD installed under "
+            "Supplementary Security Domain -- child SD installed under "
             "an ISD (typically MNO-SD or ISD-R). Carries its own AID, "
             "key set, privileges, and perso-data DGI block."
         ),
@@ -11492,7 +18266,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "mnoSD": {
         "title": "MNO Security Domain",
         "asn1": "PE-MNO-SD",
-        "spec": "SGP.02 §3.4 / GP CS v2.3 §7.4",
+        "spec": "TCA SAIP v3.4.1 §8.6.2 / GSMA SGP.02 v4.2 §2.2.4 / GP Card Specification v2.3.1 §7",
         "summary": (
             "Mobile Network Operator Security Domain. The application "
             "provider SD that owns the operator's keys and provisions "
@@ -11531,10 +18305,10 @@ def _dispatch_pe_info(
             {
                 "title": pe_type or "Unknown PE",
                 "asn1": pe_type,
-                "spec": "TCA SAIP §A.2 (catalog entry not registered locally)",
+                "spec": "TCA SAIP v3.4.1 §8 (catalog entry not registered locally)",
                 "summary": (
                     "No local documentation entry registered for this PE "
-                    "type. Refer to TCA SAIP §A.2 for the canonical "
+                    "type. Refer to TCA SAIP v3.4.1 §8 for the canonical "
                     "ASN.1 definition."
                 ),
             },
@@ -11567,7 +18341,7 @@ def _dispatch_reorder_pes(
     """Move a PE from one index to another within the sequence.
 
     Refuses moves that would displace the mandatory header / end
-    sentinels (TCA SAIP §A.2: header MUST be PE 0, end MUST be the
+    sentinels (TCA SAIP v3.4.1 §8.2.1 / §8.10: header MUST be PE 0, end MUST be the
     last PE). Re-encodes the sequence on success so subsequent
     ``saip.list_pes`` calls reflect the new order.
     """
@@ -11600,17 +18374,17 @@ def _dispatch_reorder_pes(
     dst_type = str(getattr(pes.pe_list[dst], "type", ""))
     if src_type == "header" or dst == 0:
         raise ValueError(
-            "ProfileHeader MUST stay at index 0 (TCA SAIP §A.2).",
+            "ProfileHeader MUST stay at index 0 (TCA SAIP v3.4.1 §8.2.1).",
         )
     if src_type == "end" or dst == n - 1:
         raise ValueError(
-            "PE-End MUST stay at the last index (TCA SAIP §A.2).",
+            "PE-End MUST stay at the last index (TCA SAIP v3.4.1 §8.10).",
         )
     # Refuse moving a body PE *into* the header/end anchors.
     if dst_type == "header":
-        raise ValueError("Cannot displace ProfileHeader (TCA SAIP §A.2).")
+        raise ValueError("Cannot displace ProfileHeader (TCA SAIP v3.4.1 §8.2.1).")
     if dst_type == "end":
-        raise ValueError("Cannot displace PE-End (TCA SAIP §A.2).")
+        raise ValueError("Cannot displace PE-End (TCA SAIP v3.4.1 §8.10).")
 
     if src == dst:
         return {
@@ -11714,8 +18488,23 @@ def _dispatch_export_variables_csv(
 
     handle = get_manager().claim(sid)
     _ensure_session_state(handle)
-    payload = _collect_variables(handle["decoded_document"])
+    payload = _collect_variables(
+        handle["decoded_document"],
+        handle.get("inline_placeholder_records") or [],
+        _inline_stored_values(handle),
+        _inline_raw_values(handle),
+    )
     rows = payload.get("variables") or []
+    # The listing shows sensitive values in full; an exported file is a
+    # different matter and keeps them out, as the JSON sidecar export does.
+    from Tools.ProfilePackage.saip_variable_materialization import variable_is_secret
+
+    rows = [
+        {**row, "value": ""}
+        if variable_is_secret(str(row.get("name") or ""), str(row.get("classification") or ""))
+        else row
+        for row in rows
+    ]
     fieldnames = ["name", "value", "kind", "defined", "used_in_document"]
     stream = _io.StringIO(newline="")
     writer = _csv.DictWriter(stream, fieldnames=fieldnames)
@@ -11808,6 +18597,11 @@ def _dispatch_import_variables_csv(
         value = _restore_spreadsheet_safe_csv_cell(
             row.get(value_col) or ""
         )
+        if len(value.strip()) == 0:
+            # An exported listing leaves unresolved and secret values blank;
+            # re-importing it must not wipe or reject those rows.
+            skipped.append({"row": row_index, "reason": "empty value"})
+            continue
         normalized_name = normalize_placeholder_name(name)
         folded_name = normalized_name.casefold()
         if folded_name in seen_assignment_names:
@@ -11817,14 +18611,41 @@ def _dispatch_import_variables_csv(
         seen_assignment_names.add(folded_name)
         assignments[normalized_name] = value
 
+    # Inline template variables are stored, not spliced into the sequence,
+    # so they take the per-name path; only legacy tokens go through the
+    # token-definition merge below.
+    inline_names = {
+        str(getattr(record, "variable_name", "") or "").casefold()
+        for record in handle.get("inline_placeholder_records") or []
+    }
+    inline_summaries: list[str] = []
+    inline_applied = 0
+    for name in [name for name in assignments if name.casefold() in inline_names]:
+        applied = _apply_variable_to_handle(handle, name, assignments.pop(name))
+        inline_summaries.extend(str(item) for item in applied["summaries"])
+        inline_applied += 1
+
     if len(assignments) == 0:
-        return {
+        variable_payload = _collect_variables(
+            handle["decoded_document"],
+            handle.get("inline_placeholder_records") or [],
+            _inline_stored_values(handle),
+            _inline_raw_values(handle),
+        )
+        response = {
             "session_id": sid,
             "input_path": str(source),
-            "applied_count": 0,
+            "applied_count": inline_applied,
             "skipped_rows": skipped,
-            "summaries": ["CSV contained no usable rows."],
+            "summaries": inline_summaries or ["CSV contained no usable rows."],
+            "overrides_applied": _redacted_applied_overrides(
+                dict(handle["applied_overrides"]),
+                variable_payload["variables"],
+            ),
+            "warnings": [],
         }
+        response.update(_inline_template_response_fields(handle))
+        return response
 
     candidate_document = _copy.deepcopy(handle["decoded_document"])
     try:
@@ -11852,20 +18673,24 @@ def _dispatch_import_variables_csv(
     variable_payload = _collect_variables(
         handle["decoded_document"],
         handle.get("inline_placeholder_records") or [],
+        _inline_stored_values(handle),
+        _inline_raw_values(handle),
     )
 
-    return {
+    response = {
         "session_id": sid,
         "input_path": str(source),
-        "applied_count": len(assignments),
+        "applied_count": len(assignments) + inline_applied,
         "skipped_rows": skipped,
-        "summaries": summaries,
+        "summaries": inline_summaries + list(summaries),
         "overrides_applied": _redacted_applied_overrides(
             dict(handle["applied_overrides"]),
             variable_payload["variables"],
         ),
         "warnings": [],
     }
+    response.update(_inline_template_response_fields(handle))
+    return response
 
 
 # -- Compare report HTML export ---------------------------------------
@@ -11876,7 +18701,7 @@ def _format_html_diff_report(report: dict[str, Any]) -> str:
 
     The CSS is intentionally inline so the artefact survives being
     e-mailed / opened on a spec-review laptop without an internet
-    connection. No JavaScript — the manual's PDF-style report works
+    connection. No JavaScript -- the manual's PDF-style report works
     the same way.
     """
     import html as _html
@@ -11966,7 +18791,7 @@ def _dispatch_compare_report_html(
 ) -> dict[str, Any]:
     """Run ``saip.compare_to_path`` and write the report as HTML.
 
-    Convenience wrapper around the JSON compare dispatcher — the GUI
+    Convenience wrapper around the JSON compare dispatcher -- the GUI
     calls this when the operator hits "Export HTML report" from the
     compare-results pane.
     """
@@ -12152,15 +18977,131 @@ def _dispatch_get_profile_header(
     """Return the ProfileHeader projection (no mutation)."""
     from Tools.ProfilePackage.saip_profile_header_edit import header_summary
 
-    sid, _handle, section_key, header_dict, pe_index = (
+    sid, handle, section_key, header_dict, pe_index = (
         _profile_header_dispatch_prelude(session_id)
     )
+    summary = header_summary(header_dict)
+    iccid_raw = header_dict.get("iccid")
+    if isinstance(iccid_raw, (bytes, bytearray)):
+        ranges = _inline_placeholder_ranges(handle, bytes(iccid_raw))
+        if ranges:
+            from Tools.ProfilePackage.saip_hex_template import (
+                splice_literals_into_hex_text,
+            )
+
+            spliced, _hits = splice_literals_into_hex_text(
+                bytes(iccid_raw).hex().upper(),
+                handle.get("inline_placeholder_records") or [],
+            )
+            # A placeholder has no digits to show; the literal is the value.
+            summary["iccid_hex"] = spliced
+            summary["iccid_digits"] = spliced
+            summary["iccid_placeholders"] = ranges
     return {
         "session_id": sid,
         "pe_index": pe_index,
         "section_key": section_key,
-        "header": header_summary(header_dict),
+        "header": summary,
     }
+
+
+def _record_by_index(handle: Mapping[str, Any], index: Any) -> Any:
+    for record in handle.get("inline_placeholder_records") or []:
+        if int(getattr(record, "index", -1)) == int(index):
+            return record
+    return None
+
+
+def _ef_iccid_placeholder_literal(handle: Mapping[str, Any]) -> tuple[str, Any] | None:
+    """``{var:ICCID:10}`` and the EF record when EF.ICCID's bytes are a sentinel."""
+    from Tools.ProfilePackage.saip_hex_template import locate_sentinels_in_bytes
+    from Tools.ProfilePackage.saip_profile_header_edit import _first_ef_iccid_content
+
+    records = list(handle.get("inline_placeholder_records") or [])
+    if not records:
+        return None
+    ef_bytes = _first_ef_iccid_content(handle["decoded_document"])
+    if not ef_bytes:
+        return None
+    hits = locate_sentinels_in_bytes(bytes(ef_bytes), records)
+    for hit in hits:
+        if str(hit.get("type") or "").upper() == "ICCID":
+            return "{" + f"{hit['variable']}:ICCID:10" + "}", _record_by_index(handle, hit["index"])
+    return None
+
+
+def _follow_source_value(
+    handle: dict[str, Any],
+    source_record: Any,
+    summary: dict[str, Any],
+) -> None:
+    """Give a following occurrence the value its source occurrence resolves to.
+
+    A header that follows EF.ICCID or EF.SMSP shares the variable but not
+    the occurrence key (another width or modifier), so a list that answers
+    the EF leaves the header unset. The source's bytes decoded as a typed
+    value then become the variable's value, which encodes for both.
+    """
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        decode_inline_placeholder_value,
+        inline_record_key,
+        lookup_raw_value,
+    )
+
+    if source_record is None:
+        return
+    name = str(getattr(source_record, "variable_name", "") or "")
+    if name.casefold() not in {str(item).casefold() for item in summary.get("unresolved") or []}:
+        return
+    raw_hex = lookup_raw_value(handle.get("inline_raw_values") or {}, inline_record_key(source_record))
+    if not raw_hex:
+        return
+    typed = decode_inline_placeholder_value(source_record, bytes.fromhex(str(raw_hex)))
+    if typed is None:
+        return
+    applied = _apply_variable_to_handle(handle, name, typed)
+    summary["unresolved"] = [item for item in summary.get("unresolved") or [] if str(item).casefold() != name.casefold()]
+    summary["warnings"] = [
+        text for text in summary.get("warnings") or [] if not str(text).startswith(f"{name}:")
+    ]
+    summary.setdefault("warnings", []).extend(applied.get("warnings") or [])
+    for item in summary.get("added") or []:
+        if str(item.get("variable") or "").casefold() == name.casefold():
+            item["resolved"] = True
+    summary.setdefault("summaries", []).append(
+        f"{name}: the value the file resolves to ({typed}) is stored for the variable, "
+        "so the header follows it."
+    )
+
+
+def _ef_smsp_placeholder_address(handle: Mapping[str, Any]) -> tuple[dict[str, Any], Any] | None:
+    """TON/NPI, the placeholder literal and the EF record when EF.SMSP's SMSC digits are a sentinel."""
+    from Tools.ProfilePackage.saip_connectivity_parameters import decode_address_bytes
+    from Tools.ProfilePackage.saip_hex_template import (
+        format_placeholder_literal,
+        locate_sentinels_in_bytes,
+    )
+    from Tools.ProfilePackage.saip_profile_header_edit import ef_smsp_service_centre_bytes
+
+    records = list(handle.get("inline_placeholder_records") or [])
+    if not records:
+        return None
+    _smsp, sca = ef_smsp_service_centre_bytes(handle["decoded_document"])
+    hits = locate_sentinels_in_bytes(bytes(sca[2:]), records)
+    if not hits:
+        return None
+    hit = hits[0]
+    if str(hit.get("type") or "").upper() != "MSISDN":
+        raise ValueError(
+            f"EF.SMSP's service centre digits hold {hit['literal']}, which is not an "
+            "MSISDN placeholder; the header cannot follow it."
+        )
+    ton_npi = decode_address_bytes(bytes(sca[1:2]))
+    return {
+        "ton": ton_npi["ton"],
+        "npi": ton_npi["npi"],
+        "digits": format_placeholder_literal(str(hit["literal"]), "typed"),
+    }, _record_by_index(handle, hit["index"])
 
 
 def _dispatch_update_profile_header_field(
@@ -12174,17 +19115,21 @@ def _dispatch_update_profile_header_field(
 
     Recognised ``field`` values:
 
-    * ``version`` — ``major.minor`` SAIP version pair.
-    * ``major_version`` — SAIP major-version UInt8.
-    * ``minor_version`` — SAIP minor-version UInt8.
-    * ``profile_type`` — UTF-8 label, 1..100 chars (clears on empty input).
-    * ``iccid_digits`` — 19 or 20 decimal digits in ProfileHeader order.
-    * ``iccid_hex`` — 20-nybble header-order hex (advanced override).
-    * ``iccid_from_ef`` — derive header ICCID from EF.ICCID fill content.
-    * ``pol_hex`` — policy-rules bitmask hex (clears on empty input).
-    * ``connectivity_parameters_hex`` — opaque BER-TLV blob hex
+    * ``version`` -- ``major.minor`` SAIP version pair.
+    * ``major_version`` -- SAIP major-version UInt8.
+    * ``minor_version`` -- SAIP minor-version UInt8.
+    * ``profile_type`` -- UTF-8 label, 1..100 chars (clears on empty input).
+    * ``iccid_digits`` -- 19 or 20 decimal digits in ProfileHeader order.
+    * ``iccid_hex`` -- 20-nybble header-order hex (advanced override).
+    * ``iccid_from_ef`` -- derive header ICCID from EF.ICCID fill content.
+    * ``smsc_from_ef_smsp`` -- set the SMS-PP bearer's SMSC address in
+      ``connectivityParameters`` from the EF.SMSP TS-Service Centre
+      Address; ``value`` is the bearer index (empty: the first SMS-PP
+      block).
+    * ``pol_hex`` -- policy-rules bitmask hex (clears on empty input).
+    * ``connectivity_parameters_hex`` -- opaque BER-TLV blob hex
       (clears on empty input).
-    * ``iot_pix_hex`` — IoT Minimal Profile PIX hex (7..11 bytes,
+    * ``iot_pix_hex`` -- IoT Minimal Profile PIX hex (7..11 bytes,
       clears on empty input).
     """
     from Tools.ProfilePackage.saip_profile_header_edit import (
@@ -12196,6 +19141,7 @@ def _dispatch_update_profile_header_field(
         set_pol_hex,
         set_profile_type,
         sync_header_iccid_from_ef,
+        sync_header_smsc_from_ef_smsp,
     )
 
     field_text = str(field or "").strip().lower()
@@ -12224,8 +19170,52 @@ def _dispatch_update_profile_header_field(
         summary = set_major_minor_version(header_dict, minor=value)
         return _profile_header_finish(sid, handle, pe_index, [summary])
     if field_text in ("iccid_from_ef", "sync_iccid_from_ef"):
-        summary = sync_header_iccid_from_ef(handle["decoded_document"])
-        return _profile_header_finish(sid, handle, pe_index, [summary])
+        followed = _ef_iccid_placeholder_literal(handle)
+        if followed is None:
+            summary = sync_header_iccid_from_ef(handle["decoded_document"])
+            return _profile_header_finish(sid, handle, pe_index, [summary])
+        # EF.ICCID stands for a variable: the header takes the same one in
+        # its own order, so one value drives both on export.
+        literal, source_record = followed
+        value_hex, placeholder_summary = _absorb_hex_input(
+            handle, literal, previous=header_dict.get("iccid")
+        )
+        header_dict["iccid"] = bytes.fromhex(str(value_hex))
+        _follow_source_value(handle, source_record, placeholder_summary)
+        response = _profile_header_finish(
+            sid,
+            handle,
+            pe_index,
+            [f"ProfileHeader iccid follows EF.ICCID's variable as {literal}."]
+            + list(placeholder_summary.pop("summaries", []) or []),
+        )
+        _merge_placeholder_fields(response, handle, placeholder_summary)
+        return response
+    if field_text in ("smsc_from_ef_smsp", "sms_dialing_number_from_ef_smsp"):
+        followed_address = _ef_smsp_placeholder_address(handle)
+        if followed_address is None:
+            summary = sync_header_smsc_from_ef_smsp(
+                handle["decoded_document"], bearer_index=value,
+            )
+            return _profile_header_finish(sid, handle, pe_index, [summary])
+        from Tools.ProfilePackage.saip_profile_header_edit import (
+            build_header_smsc_from_ef_smsp,
+        )
+
+        address, source_record = followed_address
+        encoded, summary = build_header_smsc_from_ef_smsp(
+            handle["decoded_document"], bearer_index=value, address=address
+        )
+        value_hex, placeholder_summary = _absorb_hex_input(
+            handle, encoded, previous=header_dict.get("connectivityParameters")
+        )
+        header_dict["connectivityParameters"] = bytes.fromhex(str(value_hex))
+        _follow_source_value(handle, source_record, placeholder_summary)
+        response = _profile_header_finish(
+            sid, handle, pe_index, [summary] + list(placeholder_summary.pop("summaries", []) or [])
+        )
+        _merge_placeholder_fields(response, handle, placeholder_summary)
+        return response
 
     dispatch = {
         "profile_type": set_profile_type,
@@ -12241,8 +19231,29 @@ def _dispatch_update_profile_header_field(
             f"unknown ProfileHeader field {field!r}; supported: "
             + ", ".join(sorted(dispatch.keys())),
         )
-    summary = handler(header_dict, value)
-    return _profile_header_finish(sid, handle, pe_index, [summary])
+    placeholder_summary: dict[str, Any] | None = None
+    if field_text in ("iccid_hex", "iccid_digits"):
+        # ``{iccid:ICCID:10}`` typed as the hex declares the header's ICCID
+        # as a variable; digits typed over a placeholder retire it.
+        value, placeholder_summary = _absorb_hex_input(
+            handle, value, previous=header_dict.get("iccid")
+        )
+    elif field_text == "connectivity_parameters_hex":
+        # An SMS dialing number given as a placeholder arrives as its literal
+        # inside the encoded blob (saip_connectivity_parameters).
+        value, placeholder_summary = _absorb_hex_input(
+            handle, value, previous=header_dict.get("connectivityParameters")
+        )
+    try:
+        summary = handler(header_dict, value)
+    except Exception:
+        if placeholder_summary is not None:
+            _withdraw_new_placeholders(handle, placeholder_summary)
+        raise
+    response = _profile_header_finish(sid, handle, pe_index, [summary])
+    if placeholder_summary is not None:
+        _merge_placeholder_fields(response, handle, placeholder_summary)
+    return response
 
 
 def _dispatch_set_profile_header_versions(
@@ -12322,7 +19333,7 @@ def _dispatch_set_mandatory_aids(
 
 # -- SecurityDomain symbolic decoders ---------------------------------
 #
-# Stateless helpers — operate on the raw byte values directly, no
+# Stateless helpers -- operate on the raw byte values directly, no
 # session lookup required. Useful for the GUI dropdown editors that
 # need to show "Security Domain | DAP Verification | Card Reset"
 # instead of "0x86 00 00", and round-trip the operator's selection
@@ -13043,8 +20054,16 @@ def _dispatch_get_security_domain(
     session_id: Any = None,
     pe_index: Any = None,
 ) -> dict[str, Any]:
-    """Project PE-SecurityDomain into the typed editor summary."""
-    from Tools.ProfilePackage.saip_security_domain_edit import security_domain_summary
+    """Project PE-SecurityDomain into the typed editor summary.
+
+    ``key_types`` lists the GP key types a KeyObject may carry (TCA SAIP
+    v3.4.1 §8.6.3 refers to GP Card Specification Table 11-16), so the key
+    editor offers the server's table rather than a copy of it.
+    """
+    from Tools.ProfilePackage.saip_security_domain_edit import (
+        KEY_TYPE_LABELS,
+        security_domain_summary,
+    )
 
     sid, _handle, section_key, section, idx = _security_domain_prelude(session_id, pe_index)
     payload = {
@@ -13053,6 +20072,9 @@ def _dispatch_get_security_domain(
         "pe_index": idx,
     }
     payload.update(security_domain_summary(section))
+    payload["key_types"] = [
+        {"value": value, "label": label} for value, label in sorted(KEY_TYPE_LABELS.items())
+    ]
     return payload
 
 
@@ -13256,7 +20278,54 @@ def _dispatch_get_application(
         "pe_index": idx,
     }
     payload.update(application_summary(section))
+    payload["load_block_inspection"] = _load_block_inspection(section)
     return payload
+
+
+def _load_block_inspection(application: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The package, applet and import AIDs the ``loadBlockObject`` declares.
+
+    The editor offers the applet AIDs as class AIDs for a new instance; a
+    load block that does not parse as a CAP or IJC answers ``error``.
+    """
+    from Tools.ProfilePackage.saip_cap_import import parse_cap_or_ijc
+
+    load_block = application.get("loadBlock")
+    blob = load_block.get("loadBlockObject") if isinstance(load_block, Mapping) else None
+    if isinstance(blob, (bytes, bytearray)) is False or len(blob) == 0:
+        return None
+    try:
+        return parse_cap_or_ijc(bytes(blob))
+    except ValueError as error:
+        return {"error": str(error)}
+
+
+def _load_block_from_file(path_text: str) -> tuple[bytes, dict[str, Any]]:
+    """The ``loadBlockObject`` a CAP or IJC file carries, and its AIDs.
+
+    TCA SAIP v3.4.1 §8.7.2 (page 59): the complete load block of the GP
+    LOAD command. pySim's ``javacard.CapFile`` concatenates the components
+    of a CAP archive into that load file; an IJC already is one.
+    """
+    import io
+
+    from Tools.ProfilePackage.saip_cap_import import parse_cap_or_ijc
+
+    source = Path(os.path.expanduser(path_text)).resolve()
+    if source.is_file() is False:
+        raise FileNotFoundError(f"load block file not found: {source}")
+    raw = _read_bounded_saip_file(source, label="load block file")
+    inspection = parse_cap_or_ijc(raw)
+    if inspection.get("format") != "cap":
+        return (raw, inspection)
+    _ensure_pysim_importable()
+    from pySim import javacard
+
+    try:
+        load_file = javacard.CapFile(io.BytesIO(raw)).get_loadfile()
+    except (ValueError, KeyError) as error:
+        raise ValueError(f"{source.name} is not a usable CAP file: {error}") from error
+    return (bytes(load_file), inspection)
 
 
 def _dispatch_add_application_instance(
@@ -13325,6 +20394,44 @@ def _dispatch_remove_application_instance(
     )
 
 
+def _dispatch_update_application_instance(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    instance_aid_hex: Any = None,
+    load_package_aid_hex: Any = None,
+    class_aid_hex: Any = None,
+    new_instance_aid_hex: Any = "",
+    privileges_hex: Any = None,
+    lifecycle_state: Any = 0x07,
+    application_specific_parameters_hex: Any = "",
+    extradite_sd_aid_hex: Any = "",
+) -> dict[str, Any]:
+    """Rewrite the INSTALL members of one ApplicationInstance in place."""
+    from Tools.ProfilePackage.saip_application_edit import (
+        application_summary,
+        update_instance,
+    )
+
+    sid, handle, section_key, section, idx = _application_prelude(session_id, pe_index)
+    summary = update_instance(
+        section,
+        str(instance_aid_hex or ""),
+        load_package_aid_hex=str(load_package_aid_hex or ""),
+        class_aid_hex=str(class_aid_hex or ""),
+        new_instance_aid_hex=str(new_instance_aid_hex or ""),
+        privileges_hex=str(privileges_hex or ""),
+        lifecycle_state=lifecycle_state,
+        application_specific_parameters_hex=str(application_specific_parameters_hex or ""),
+        extradite_sd_aid_hex=str(extradite_sd_aid_hex or ""),
+    )
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=application_summary,
+    )
+
+
 def _dispatch_set_application_load_block(
     ctx: ActionContext,
     *,
@@ -13337,18 +20444,36 @@ def _dispatch_set_application_load_block(
     volatile_data_limit_hex: Any = "",
     non_volatile_data_limit_hex: Any = "",
     hash_value_hex: Any = "",
+    load_block_path: Any = "",
 ) -> dict[str, Any]:
-    """Install or replace the PE-Application loadBlock."""
+    """Install or replace the PE-Application loadBlock.
+
+    ``load_block_path`` names a CAP or IJC file the load block is read
+    from instead of ``load_block_object_hex``; its package AID fills an
+    empty ``load_package_aid_hex``.
+    """
     from Tools.ProfilePackage.saip_application_edit import (
         application_summary,
         set_load_block,
     )
 
+    object_hex = str(load_block_object_hex or "")
+    package_hex = str(load_package_aid_hex or "").strip()
+    path_text = str(load_block_path or "").strip()
+    if len(path_text) > 0:
+        object_bytes, inspection = _load_block_from_file(path_text)
+        object_hex = object_bytes.hex()
+        if len(package_hex) == 0:
+            package_hex = str(inspection.get("package_aid_hex") or "")
+        if len(package_hex) == 0:
+            raise ValueError(
+                f"{Path(path_text).name} names no package AID; enter the load package AID."
+            )
     sid, handle, section_key, section, idx = _application_prelude(session_id, pe_index)
     summary = set_load_block(
         section,
-        load_package_aid_hex=str(load_package_aid_hex or ""),
-        load_block_object_hex=str(load_block_object_hex or ""),
+        load_package_aid_hex=package_hex,
+        load_block_object_hex=object_hex,
         security_domain_aid_hex=str(security_domain_aid_hex or ""),
         non_volatile_code_limit_hex=str(non_volatile_code_limit_hex or ""),
         volatile_data_limit_hex=str(volatile_data_limit_hex or ""),
@@ -13399,16 +20524,24 @@ def _dispatch_get_rfm(
     session_id: Any = None,
     pe_index: Any = None,
 ) -> dict[str, Any]:
-    """Project PE-RFM into the typed editor summary."""
-    from Tools.ProfilePackage.saip_rfm_edit import rfm_summary
+    """Project PE-RFM into the typed editor summary.
 
-    sid, _handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    ``adf_candidates`` lists the ADFs the profile creates (name, AID, PE
+    index) so a caller can bind the instance by name; ``default_directory``
+    and ``adf_access.adf_name`` describe the current binding against the
+    same catalogue (TCA SAIP v3.4.1 §8.8).
+    """
+    from Tools.ProfilePackage.saip_rfm_edit import list_adf_bindings, rfm_summary
+
+    sid, handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    bindings = list_adf_bindings(handle["decoded_document"])
     payload = {
         "session_id": sid,
         "section_key": section_key,
         "pe_index": idx,
     }
-    payload.update(rfm_summary(section))
+    payload.update(rfm_summary(section, bindings=bindings))
+    payload["adf_candidates"] = bindings
     return payload
 
 
@@ -13515,19 +20648,31 @@ def _dispatch_set_rfm_adf_access(
     adf_access_domain_hex: Any = "",
     adf_admin_access_domain_hex: Any = "",
 ) -> dict[str, Any]:
-    """Install or replace PE-RFM ADF access binding."""
-    from Tools.ProfilePackage.saip_rfm_edit import rfm_summary, set_adf_access
+    """Install or replace PE-RFM ADF access binding.
+
+    ``adf_aid_hex`` takes an AID or an ADF name the profile creates
+    (``USIM``, ``ADF.ISIM``); an empty access domain inherits the PE's
+    matching UICC domain.
+    """
+    from Tools.ProfilePackage.saip_rfm_edit import (
+        list_adf_bindings,
+        resolve_adf_reference,
+        rfm_summary,
+        set_adf_access,
+    )
 
     sid, handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    bindings = list_adf_bindings(handle["decoded_document"])
     summary = set_adf_access(
         section,
-        adf_aid_hex=str(adf_aid_hex or ""),
+        adf_aid_hex=resolve_adf_reference(str(adf_aid_hex or ""), bindings),
         adf_access_domain_hex=str(adf_access_domain_hex or ""),
         adf_admin_access_domain_hex=str(adf_admin_access_domain_hex or ""),
     )
     return _typed_pe_finish(
         sid, handle, section_key, section, idx,
-        summary=summary, projector=rfm_summary,
+        summary=summary,
+        projector=lambda current: rfm_summary(current, bindings=bindings),
     )
 
 
@@ -13537,14 +20682,20 @@ def _dispatch_remove_rfm_adf_access(
     session_id: Any = None,
     pe_index: Any = None,
 ) -> dict[str, Any]:
-    """Remove PE-RFM ADF access binding."""
-    from Tools.ProfilePackage.saip_rfm_edit import remove_adf_access, rfm_summary
+    """Remove PE-RFM ADF access binding, leaving an MF-rooted instance."""
+    from Tools.ProfilePackage.saip_rfm_edit import (
+        list_adf_bindings,
+        remove_adf_access,
+        rfm_summary,
+    )
 
     sid, handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    bindings = list_adf_bindings(handle["decoded_document"])
     summary = remove_adf_access(section)
     return _typed_pe_finish(
         sid, handle, section_key, section, idx,
-        summary=summary, projector=rfm_summary,
+        summary=summary,
+        projector=lambda current: rfm_summary(current, bindings=bindings),
     )
 
 
@@ -13568,7 +20719,7 @@ def _dispatch_list_mandatory_service_keys(
 
 
 # ----------------------------------------------------------------------
-# Stateless typed-edit dispatchers (round 9 — PE-parity helpers)
+# Stateless typed-edit dispatchers (round 9 -- PE-parity helpers)
 # ----------------------------------------------------------------------
 
 
@@ -13892,7 +21043,7 @@ def _dispatch_arr_list_records(
 ) -> dict[str, Any]:
     """Project the records of an EF.ARR for the rule-picker dropdown.
 
-    The dispatcher reuses the existing ``saip.show_file`` plumbing —
+    The dispatcher reuses the existing ``saip.show_file`` plumbing --
     callers supply either a section_key reference plus the on-disk
     file path inside that PE, or rely on the PE-walking machinery to
     resolve the file by path. Output is the projection from
@@ -14206,9 +21357,6 @@ def _dispatch_ssim_eaptls_inspect(
     else:
         raise ValueError("pem_or_der must be bytes or string.")
     info = parse_pem_or_der(raw)
-    if str(info.get("kind") or "").lower().startswith("private_key"):
-        info.pop("der_hex", None)
-        info["secret_outputs_redacted"] = ["der_hex"]
     role_text = str(role or "auto").strip().lower() or "auto"
     allowed_roles = {"auto", "device_certificate", "private_key", "ca"}
     if role_text not in allowed_roles:
@@ -14280,8 +21428,8 @@ OPEN_SPEC = ActionSpec(
         "Load a SAIP profile package (binary DER, ASCII hex-text, or "
         "decoded JSON) into a GUI session. Returns an opaque session_id "
         "you can feed into the other SAIP actions. Hex-text inputs "
-        "(.hex / .txt) are normalised — whitespace stripped, case "
-        "folded — before being handed to the DER parser."
+        "(.hex / .txt) are normalised -- whitespace stripped, case "
+        "folded -- before being handed to the DER parser."
     ),
     inputs=(
         ActionField(
@@ -14429,7 +21577,7 @@ SEARCH_FILES_SPEC = ActionSpec(
     title="Find files",
     description=(
         "Filter the unified filesystem tree by name, FID, description, "
-        "or translation — mirrors the eUICC Profile Creator's File "
+        "or translation -- mirrors the eUICC Profile Creator's File "
         "System tab Find dialog. Set ``regex`` to interpret ``query`` "
         "as a Python regex (case-insensitive)."
     ),
@@ -14480,7 +21628,7 @@ LIST_PE_TEMPLATE_SPEC = ActionSpec(
     subsystem="SAIP",
     title="List PE template files",
     description=(
-        "Return the TCA SAIP file template catalog for one PE — every "
+        "Return the TCA SAIP file template catalog for one PE -- every "
         "DF/EF defined by the PE's template, marked with whether it is "
         "currently materialised in the PE. Drives the eUICC Profile "
         "Creator-style 'File System Template' tree."
@@ -14605,7 +21753,7 @@ ADD_TEMPLATE_SUBTREE_SPEC = ActionSpec(
 GFM_ADD_FILE_ELEMENT_SPEC = ActionSpec(
     id="saip.gfm_add_file_element",
     subsystem="SAIP",
-    title="GFM — add file element",
+    title="GFM -- add file element",
     description=(
         "Append a ``filePath`` + ``createFCP`` pair to a PE-GenericFile"
         "Management section. Mirrors the eUICC Profile Creator's "
@@ -14647,8 +21795,9 @@ GFM_ADD_FILE_ELEMENT_SPEC = ActionSpec(
             label="File Descriptor Byte (hex)",
             kind="string",
             required=False,
-            help="FCP tag 82 — File Descriptor + coding bytes per "
-                 "ETSI TS 102 221 §11.1.1.4.3. Defaults to ``4121`` "
+            help="FCP tag 82 -- descriptor byte and data coding byte, plus "
+                 "the 2-byte record length of a linear fixed or cyclic EF "
+                 "(ETSI TS 102 222 V17.1.0 §6.3.2.2.2). Defaults to ``4121`` "
                  "(transparent EF) when omitted.",
         ),
         ActionField(
@@ -14656,35 +21805,38 @@ GFM_ADD_FILE_ELEMENT_SPEC = ActionSpec(
             label="Short EFID (hex)",
             kind="string",
             required=False,
-            help="Optional FCP tag 88 — 1-byte Short EF Identifier.",
+            help="Optional FCP tag 88 -- 1-byte Short EF Identifier.",
         ),
         ActionField(
             name="ef_size",
             label="EF size (hex)",
             kind="string",
             required=False,
-            help="Optional FCP tag 80 — total transparent EF size in hex.",
+            help="Optional FCP tag 80 -- EF size in bytes, hex. A linear "
+                 "fixed or cyclic EF takes a whole number of records.",
         ),
         ActionField(
             name="record_size",
             label="Record size (hex)",
             kind="string",
             required=False,
-            help="Optional proprietary record size (record-fixed EFs only).",
+            help="Optional record length of a linear fixed or cyclic EF; "
+                 "completes a 2-byte file descriptor.",
         ),
         ActionField(
             name="record_count",
             label="Record count (hex)",
             kind="string",
             required=False,
-            help="Optional proprietary record count (record-fixed EFs only).",
+            help="Optional number of records of a linear fixed or cyclic EF; "
+                 "sets EF size to record length x records.",
         ),
         ActionField(
             name="lcsi",
             label="LCSI (1 hex byte)",
             kind="string",
             required=False,
-            help="Life-cycle status (default ``05`` — operational/activated).",
+            help="Life-cycle status (default ``05`` -- operational/activated).",
         ),
         ActionField(
             name="transaction_index",
@@ -14742,7 +21894,7 @@ LIST_APPLICATIONS_SPEC = ActionSpec(
     subsystem="SAIP",
     title="List applications",
     description=(
-        "Enumerate every application-instance-bearing PE — Security "
+        "Enumerate every application-instance-bearing PE -- Security "
         "Domains, MNO-SD, SSDs, JavaCard applications, and remote "
         "management surfaces (RFM / RAM). Each row carries the "
         "Instance / Class / Load Package AIDs, decoded GP privileges, "
@@ -14766,7 +21918,8 @@ SHOW_FILE_SPEC = ActionSpec(
     description=(
         "Return FCP + payload for one file definition. Read-only. "
         "Takes the section key and dotted field path surfaced by "
-        "saip.list_files."
+        "saip.list_files. A link entry (Fcp.linkPath) answers with the "
+        "source file's body and layout under ``link_source``."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -14874,7 +22027,15 @@ UPDATE_FILE_FIELD_SPEC = ActionSpec(
         "package (SA-3 editor). Editable fields: shortEFID, "
         "fileDescriptor, efFileSize, fileID, linkPath, "
         "securityAttributesReferenced, lcsi, maximumFileSize, "
-        "pinStatusTemplateDO. Marks the owning PE dirty."
+        "pinStatusTemplateDO. Marks the owning PE dirty. A new file type, "
+        "record length or size returns the file to the content it is "
+        "created with (fill or repeat pattern, template default, or FF) "
+        "and drops the content it held. A linkPath makes the file a link "
+        "(TCA SAIP v3.4.1 page 30 note 1, page 46) and drops its own "
+        "content; an empty linkPath value removes the link. A fileDescriptor "
+        "is 2 bytes, or 4 for a linear fixed or cyclic EF (ETSI TS 102 222 "
+        "V17.1.0 §6.3.2.2.2); record_count beside it sets efFileSize to "
+        "record length x records in the same edit."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -14903,8 +22064,21 @@ UPDATE_FILE_FIELD_SPEC = ActionSpec(
             name="hex_value",
             label="Hex value",
             kind="string",
-            required=True,
-            help="New value as hex (e.g. '10' or '42 21 00 26').",
+            required=False,
+            help=(
+                "New value as hex (e.g. '10' or '42 21 00 26'). Required for "
+                "every sub-field but linkPath, where empty removes the link."
+            ),
+        ),
+        ActionField(
+            name="record_count",
+            label="Record count",
+            kind="int",
+            required=False,
+            help=(
+                "With a linear fixed or cyclic fileDescriptor: the number of "
+                "records, 1-254. efFileSize becomes record length x records."
+            ),
         ),
     ),
     output_kind="json",
@@ -14922,7 +22096,7 @@ UPDATE_FILE_DECODED_SPEC = ActionSpec(
     description=(
         "Replace ``pe.decoded[field_path]`` with a JSON-shaped CHOICE "
         "list. The inverse of the JSON projection emitted by "
-        "``saip.show_file`` — hex strings round-trip back to bytes "
+        "``saip.show_file`` -- hex strings round-trip back to bytes "
         "and dicts keep their key order. ``pe.files[field_path]`` is "
         "re-hydrated from the new tuple list so subsequent "
         "``show_file`` calls reflect the edit immediately. Companion "
@@ -14970,9 +22144,14 @@ UPDATE_FILE_CONTENT_SPEC = ActionSpec(
     subsystem="SAIP",
     title="Update file content",
     description=(
-        "Replace a transparent / BER-TLV EF body wholesale. The new "
-        "bytes are FF-padded to ``efFileSize`` when shorter. Companion "
-        "to ``saip.update_record_bytes`` for record-fixed EFs."
+        "Replace an EF body wholesale -- transparent, BER-TLV, linear "
+        "fixed or cyclic. A short value is padded to the declared size "
+        "(``efFileSize``; record length x record count for a "
+        "record-structured EF) with the file's fill / repeat pattern, "
+        "or with FF when its Fcp declares neither; the pattern restarts "
+        "in every record. Companion to ``saip.update_record_bytes``, "
+        "which splices one record. A write addressed to a link entry "
+        "(Fcp.linkPath) lands on the source file and says so."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -14995,7 +22174,11 @@ UPDATE_FILE_CONTENT_SPEC = ActionSpec(
             label="Hex value",
             kind="string",
             required=True,
-            help="New file body as hex (FF-padded to file_size if short).",
+            help=(
+                "New file body as hex; a short value is pattern-padded "
+                "to the declared size (file_size, or record length x "
+                "record count)."
+            ),
         ),
     ),
     output_kind="json",
@@ -15013,8 +22196,10 @@ UPDATE_RECORD_BYTES_SPEC = ActionSpec(
     description=(
         "Splice a record's bytes into a linear-fixed / cyclic EF in "
         "the in-memory package. The record is identified by its "
-        "1-based index; ``hex_value`` must be exactly ``record_size`` "
-        "bytes. The owning PE is marked dirty."
+        "1-based index; ``hex_value`` may be shorter than "
+        "``record_size`` and is padded with the file's fill / repeat "
+        "pattern, or with FF when its Fcp declares neither. The owning "
+        "PE is marked dirty."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -15044,7 +22229,10 @@ UPDATE_RECORD_BYTES_SPEC = ActionSpec(
             label="Hex value",
             kind="string",
             required=True,
-            help="New record bytes as hex (must equal record_size).",
+            help=(
+                "New record bytes as hex; a short value is pattern-padded "
+                "to record_size."
+            ),
         ),
     ),
     output_kind="json",
@@ -15062,12 +22250,15 @@ SAVE_PACKAGE_SPEC = ActionSpec(
     description=(
         "Persist the current in-memory package to disk. Supports DER "
         "(raw bytes), HEX (ASCII hex of the DER, round-trippable via "
-        "saip.open_package), ASN.1 value notation, unresolved varder "
-        "templates, and decoded JSON (preserves PE names, variable "
-        "bindings, and placeholder metadata the wire DER cannot carry). "
-        "Format-default "
+        "saip.open_package), ASN.1 value notation, varder templates, and "
+        "decoded JSON (preserves PE names, variable bindings, placeholder "
+        "metadata and stored variable values the wire DER cannot carry). "
+        "For an inline-template session DER/HEX write the test profile, every "
+        "placeholder replaced by its typed value or the test value of its "
+        "list (read again at save time), while varder/ASN.1/JSON keep the "
+        "placeholders. Format-default "
         "extension is appended when the supplied path has none. By "
-        "default refuses to overwrite an existing target — pass "
+        "default refuses to overwrite an existing target -- pass "
         "overwrite=true to replace. Clears the dirty flag on success "
         "unless 'clear_dirty' is explicitly false."
     ),
@@ -15113,12 +22304,83 @@ SAVE_PACKAGE_SPEC = ActionSpec(
             default=True,
             help="Clear the per-PE dirty set after writing.",
         ),
+        ActionField(
+            name="resolve_variables",
+            label="Resolve stored variables",
+            kind="bool",
+            required=False,
+            default=False,
+            help=(
+                "Substitute the stored inline-template values into the output "
+                "(a complete profile). DER and HEX always resolve; varder never "
+                "does; ASN.1 and JSON keep the placeholders unless this is set."
+            ),
+        ),
+        ActionField(
+            name="write_variable_sidecar",
+            label="Write variables sidecar",
+            kind="bool",
+            required=False,
+            default=True,
+            help=(
+                "For varder / ASN.1 template saves, write the stored values to "
+                "<stem>.variables.json beside the template so a later open "
+                "restores them."
+            ),
+        ),
     ),
     output_kind="json",
     dispatcher=_dispatch_save_package,
     requires_card=False,
     streams=False,
     tags=("saip", "editor", "save"),
+)
+
+
+GENERATE_TEST_PROFILE_SPEC = ActionSpec(
+    id="saip.generate_test_profile",
+    subsystem="SAIP",
+    title="Generate test profile",
+    description=(
+        "Write one DER or HEX profile with every placeholder replaced by its "
+        "value: a typed value, else the test value of the profile's list or the "
+        "universal one, read again now. The session keeps its template. The run "
+        "refuses, naming the variables, while one has no value anywhere, and "
+        "reports the value and source used for each variable."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        ActionField(
+            name="output_path",
+            label="Output path",
+            kind="save_path",
+            required=True,
+            help="Destination file (.der or .hex). Double-click to browse.",
+            placeholder="/path/to/profile.der",
+        ),
+        ActionField(
+            name="format",
+            label="Output format",
+            kind="enum",
+            required=False,
+            default="der",
+            choices=["der", "hex"],
+            help="'der' (raw DER) or 'hex' (ASCII hex of the DER).",
+        ),
+        ActionField(
+            name="overwrite",
+            label="Overwrite existing",
+            kind="bool",
+            required=False,
+            default=False,
+            help="When false, an existing target raises FileExistsError.",
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_dispatch_generate_test_profile,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "variables", "tokens", "save"),
 )
 
 
@@ -15245,6 +22507,18 @@ APPLY_DECODED_EDIT_SPEC = ActionSpec(
             required=False,
             help="Required byte width for raw-hex / round-trip encoders.",
         ),
+        ActionField(
+            name="append",
+            label="Append to list",
+            kind="bool",
+            required=False,
+            default=False,
+            help=(
+                "Append the value as a new list entry: rel_path ends in the "
+                "list's current length (an sdPersoData DGI record, checked as "
+                "whole DGI blocks); a list the PE does not carry yet is created."
+            ),
+        ),
     ),
     output_kind="json",
     dispatcher=_with_history(_dispatch_apply_decoded_edit),
@@ -15279,6 +22553,14 @@ UPDATE_SD_PARAMETERS_SPEC = ActionSpec(
             kind="json",
             required=True,
             help="Structured PE-SD parameter state from the GUI editor.",
+        ),
+        ActionField(
+            name="instance_index",
+            label="Instance index",
+            kind="int",
+            required=False,
+            min_value=0,
+            help="Entry of a PE-Application instanceList; empty for the PE's own instance.",
         ),
     ),
     output_kind="json",
@@ -15415,7 +22697,7 @@ DIFF_AGAINST_SOURCE_SPEC = ActionSpec(
         "the package's source file. The left side is the on-disk copy; "
         "the right side is the live session (with any unsaved edits + "
         "applied placeholder overrides). The same semantic ProfileDiffReport "
-        "shape as saip.diff_packages — useful for the GUI's \"What did "
+        "shape as saip.diff_packages -- useful for the GUI's \"What did "
         "I change?\" affordance."
     ),
     inputs=(_SESSION_FIELD,),
@@ -15433,7 +22715,7 @@ DIFF_AGAINST_PATH_SPEC = ActionSpec(
     title="Diff against file path",
     description=(
         "Compare a session against an arbitrary SAIP package on disk. "
-        "Accepts the same input formats as saip.open_package — DER "
+        "Accepts the same input formats as saip.open_package -- DER "
         "(.der/.bin/.upp), ASCII hex text (.hex/.txt), or decoded "
         "transcode JSON. Returns the semantic ProfileDiffReport "
         "(left = session, right = file)."
@@ -15487,7 +22769,10 @@ SET_VARIABLE_SPEC = ActionSpec(
         "Apply a placeholder override (currently ICCID / IMSI are "
         "recognised as structural injectors; arbitrary names are "
         "recorded in __ygg_token_defs__). Re-encodes the package to "
-        "keep the sequence in sync."
+        "keep the sequence in sync. For an inline template variable "
+        "([nameTYPElen] placeholder) the value is validated and stored: "
+        "the placeholder stays in the template and DER/HEX saves "
+        "substitute the stored value."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -15503,7 +22788,7 @@ SET_VARIABLE_SPEC = ActionSpec(
             label="Variable value",
             kind="string",
             required=True,
-            help="New value (BCD / hex / textual — depends on the variable).",
+            help="New value (BCD / hex / textual -- depends on the variable).",
         ),
     ),
     output_kind="json",
@@ -15540,7 +22825,8 @@ UPDATE_PROFILE_HEADER_FIELD_SPEC = ActionSpec(
     description=(
         "Mutate one scalar field on the ProfileHeader PE. Field names: "
         "version, major_version, minor_version, profile_type, iccid_digits, iccid_hex, "
-        "iccid_from_ef, pol_hex, connectivity_parameters_hex, iot_pix_hex. Empty value clears "
+        "iccid_from_ef, smsc_from_ef_smsp (value: SMS-PP bearer index), pol_hex, "
+        "connectivity_parameters_hex, iot_pix_hex. Empty value clears "
         "optional fields. Re-encodes the sequence on success."
     ),
     inputs=(
@@ -15550,7 +22836,7 @@ UPDATE_PROFILE_HEADER_FIELD_SPEC = ActionSpec(
             label="Header field",
             kind="string",
             required=True,
-            help="One of version / major_version / minor_version / profile_type / iccid_digits / iccid_hex / iccid_from_ef / pol_hex / connectivity_parameters_hex / iot_pix_hex.",
+            help="One of version / major_version / minor_version / profile_type / iccid_digits / iccid_hex / iccid_from_ef / smsc_from_ef_smsp / pol_hex / connectivity_parameters_hex / iot_pix_hex.",
         ),
         ActionField(
             name="value",
@@ -15607,7 +22893,7 @@ SET_MANDATORY_SERVICES_SPEC = ActionSpec(
     title="Set mandatory services",
     description=(
         "Replace the entire eUICC-Mandatory-services map. Pass a JSON "
-        "object {service_key: bool} — falsy entries are dropped. The "
+        "object {service_key: bool} -- falsy entries are dropped. The "
         "allowed key catalog comes from saip.list_mandatory_service_keys."
     ),
     inputs=(
@@ -15688,7 +22974,7 @@ DECODE_SD_PRIVILEGES_SPEC = ActionSpec(
     title="Decode SD privileges (GP CS Table 11-49)",
     description=(
         "Decode a 3-byte SecurityDomain ``applicationPrivileges`` blob "
-        "into named flags. Stateless — operates on the raw hex value."
+        "into named flags. Stateless -- operates on the raw hex value."
     ),
     inputs=(
         ActionField(
@@ -15990,7 +23276,7 @@ SET_CDMA_FIELD_SPEC = ActionSpec(
         "authenticationKey (mandatory), ssd, hrpdAccessAuthenticationData, "
         "simpleIPAuthenticationData, mobileIPAuthenticationData. "
         "Empty hex on optional fields drops the entry. Length "
-        "constraints come from TCA SAIP §A.2 / 3GPP2 S0016."
+        "constraints come from TCA SAIP v3.4.1 §8.4.3 / 3GPP2 S0016."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -16077,7 +23363,7 @@ LIST_CDMA_FIELD_CATALOG_SPEC = ActionSpec(
     title="List PE-CDMAParameter field catalog",
     description=(
         "Static catalog of PE-CDMAParameter fields with their "
-        "length constraints and mandatory flag (TCA SAIP §A.2)."
+        "length constraints and mandatory flag (TCA SAIP v3.4.1 §8.4.3)."
     ),
     inputs=(),
     output_kind="json",
@@ -16273,6 +23559,34 @@ REMOVE_APPLICATION_INSTANCE_SPEC = ActionSpec(
 )
 
 
+UPDATE_APPLICATION_INSTANCE_SPEC = ActionSpec(
+    id="saip.update_application_instance",
+    subsystem="SAIP",
+    title="Edit application instance",
+    description=(
+        "Rewrite the AIDs, privileges, life cycle state, C9 and extradite SD "
+        "of one ApplicationInstance; its other members and its place stay."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="instance_aid_hex", label="Instance AID", kind="string", required=True),
+        ActionField(name="load_package_aid_hex", label="Load package AID", kind="string", required=True),
+        ActionField(name="class_aid_hex", label="Class AID", kind="string", required=True),
+        ActionField(name="new_instance_aid_hex", label="New instance AID", kind="string", required=False, default=""),
+        ActionField(name="privileges_hex", label="Privileges", kind="string", required=True),
+        ActionField(name="lifecycle_state", label="Life cycle", kind="int", required=False, default=7, min_value=0),
+        ActionField(name="application_specific_parameters_hex", label="Parameters C9", kind="string", required=False, default=""),
+        ActionField(name="extradite_sd_aid_hex", label="Extradite SD AID", kind="string", required=False, default=""),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_update_application_instance),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "application", "write"),
+)
+
+
 SET_APPLICATION_LOAD_BLOCK_SPEC = ActionSpec(
     id="saip.set_application_load_block",
     subsystem="SAIP",
@@ -16281,8 +23595,15 @@ SET_APPLICATION_LOAD_BLOCK_SPEC = ActionSpec(
     inputs=(
         _SESSION_FIELD,
         _PE_INDEX_FIELD,
-        ActionField(name="load_package_aid_hex", label="Load package AID", kind="string", required=True),
-        ActionField(name="load_block_object_hex", label="Load block object", kind="string", required=True),
+        ActionField(
+            name="load_package_aid_hex", label="Load package AID", kind="string", required=False,
+            default="", help="Taken from the CAP / IJC file when empty.",
+        ),
+        ActionField(name="load_block_object_hex", label="Load block object", kind="string", required=False, default=""),
+        ActionField(
+            name="load_block_path", label="CAP / IJC file", kind="path", required=False, default="",
+            help="Read the load block from a CAP or IJC file instead of the hex field.",
+        ),
         ActionField(name="security_domain_aid_hex", label="Security Domain AID", kind="string", required=False, default=""),
         ActionField(name="non_volatile_code_limit_hex", label="NV code limit", kind="string", required=False, default=""),
         ActionField(name="volatile_data_limit_hex", label="Volatile data limit", kind="string", required=False, default=""),
@@ -16375,16 +23696,159 @@ SET_RFM_TAR_LIST_SPEC = ActionSpec(
 )
 
 
-SET_RFM_FIELD_SPEC = ActionSpec(
-    id="saip.set_rfm_field",
+SET_PE_MANDATED_SPEC = ActionSpec(
+    id="saip.set_pe_mandated",
     subsystem="SAIP",
-    title="Set RFM field",
-    description="Mutate one PE-RFM scalar field.",
+    title="Set PE mandated flag",
+    description=(
+        "Set or clear the mandated flag of one profile element's PEHeader "
+        "(TCA SAIP v3.4.1 §8.1.3): a mandated PE the eUICC does not support "
+        "aborts the installation."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(
+            name="mandated",
+            label="Mandated",
+            kind="bool",
+            required=False,
+            default=False,
+            help="True sets the mandated NULL, false removes it.",
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_set_pe_mandated),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "editor", "write"),
+)
+
+
+SET_NONSTANDARD_FIELD_SPEC = ActionSpec(
+    id="saip.set_nonstandard_field",
+    subsystem="SAIP",
+    title="Set PE-NonStandard field",
+    description=(
+        "Set issuer_id (a dotted object identifier) or content (hex, may be "
+        "empty) of a PE-NonStandard (TCA SAIP v3.4.1 §8.9)."
+    ),
     inputs=(
         _SESSION_FIELD,
         _PE_INDEX_FIELD,
         ActionField(name="field", label="Field", kind="string", required=True),
-        ActionField(name="value", label="Value", kind="string", required=True),
+        ActionField(name="value", label="Value", kind="string", required=False, default=""),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_set_nonstandard_field),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "editor", "write"),
+)
+
+
+AKA_CONFIGURE_SPEC = ActionSpec(
+    id="saip.aka_configure",
+    subsystem="SAIP",
+    title="Configure AKA algorithm",
+    description=(
+        "Set a PE-AKAParameter's algoParameter (TCA SAIP v3.4.1 §8.4.2): "
+        "MILENAGE, TUAK or the USIM test algorithm with its key and OPc / "
+        "TOPc, optional algorithmOptions, MILENAGE rotation and xoring "
+        "constants, TUAK Keccak count, authCounterMax, and an sqnInit seed "
+        "for all 32 slots. Same checks as the CLI's PROVISION-AKA."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(
+            name="algorithm", label="Algorithm", kind="enum", required=True,
+            choices=["milenage", "tuak", "usim-test-algorithm"],
+        ),
+        ActionField(name="key_hex", label="Key", kind="string", required=True),
+        ActionField(name="opc_hex", label="OPc / TOPc", kind="string", required=False, default=""),
+        ActionField(name="number_of_keccak", label="Keccak iterations", kind="int", required=False, min_value=1),
+        ActionField(name="auth_counter_max_hex", label="authCounterMax", kind="string", required=False, default=""),
+        ActionField(name="sqn_init_hex", label="sqnInit seed", kind="string", required=False, default=""),
+        ActionField(name="algorithm_options_hex", label="algorithmOptions", kind="string", required=False, default=""),
+        ActionField(name="rotation_constants_hex", label="rotationConstants", kind="string", required=False, default=""),
+        ActionField(name="xoring_constants_hex", label="xoringConstants", kind="string", required=False, default=""),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_aka_configure),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "aka", "edit"),
+)
+
+
+PE_STRUCTURE_SPEC = ActionSpec(
+    id="saip.pe_structure",
+    subsystem="SAIP",
+    title="Show PE structure",
+    description=(
+        "Every member the SAIP ASN.1 module gives one profile element, present "
+        "or not, with its type, OPTIONAL / DEFAULT, SIZE and value, and whether "
+        "the element encodes yet. Read-only."
+    ),
+    inputs=(_SESSION_FIELD, _PE_INDEX_FIELD),
+    output_kind="json",
+    # Locked like the edit: a read prunes stale drafts.
+    dispatcher=_with_session_lock(_dispatch_pe_structure),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "editor", "read-only"),
+)
+
+
+PE_STRUCTURE_EDIT_SPEC = ActionSpec(
+    id="saip.pe_structure_edit",
+    subsystem="SAIP",
+    title="Edit PE structure",
+    description=(
+        "One edit checked against the SAIP ASN.1 module: set a leaf, add or "
+        "remove an OPTIONAL / DEFAULT member, add or remove a list entry within "
+        "its SIZE, or switch a CHOICE alternative. The path names members, list "
+        "indices and alternatives from the element down. An edit pySim cannot "
+        "build the profile with yet is held as the element's draft until it "
+        "can; discard_draft drops the draft."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(
+            name="op", label="Edit", kind="enum", required=True,
+            choices=["set", "clear", "add", "remove", "add_entry", "remove_entry", "choice", "discard_draft"],
+        ),
+        ActionField(name="path", label="Path", kind="json", required=False, default=[]),
+        ActionField(name="name", label="Member", kind="string", required=False, default=""),
+        ActionField(name="value", label="Value", kind="string", required=False, default=""),
+        ActionField(name="index", label="Entry index", kind="int", required=False, min_value=0),
+        ActionField(name="alternative", label="Alternative", kind="string", required=False, default=""),
+    ),
+    output_kind="json",
+    # Lock only: the dispatcher takes its undo snapshot when an edit lands.
+    dispatcher=_with_session_lock(_dispatch_pe_structure_edit),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "editor", "write"),
+)
+
+
+SET_RFM_FIELD_SPEC = ActionSpec(
+    id="saip.set_rfm_field",
+    subsystem="SAIP",
+    title="Set RFM field",
+    description=(
+        "Mutate one PE-RFM scalar field: instance_aid, security_domain_aid "
+        "(empty clears it, associating the instance to the MNO-SD), "
+        "minimum_security_level, uicc_access_domain or uicc_admin_access_domain."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="field", label="Field", kind="string", required=True),
+        ActionField(name="value", label="Value", kind="string", required=False, default=""),
     ),
     output_kind="json",
     dispatcher=_with_history(_dispatch_set_rfm_field),
@@ -16434,7 +23898,7 @@ LIST_MANDATORY_SERVICE_KEYS_SPEC = ActionSpec(
     title="List mandatory-service keys",
     description=(
         "Static catalog of every key allowed in the ServicesList "
-        "(TCA SAIP §A.2). Returns {keys: [...], labels: {key: label}}."
+        "(TCA SAIP v3.4.1 §8.2.1). Returns {keys: [...], labels: {key: label}}."
     ),
     inputs=(),
     output_kind="json",
@@ -16442,6 +23906,317 @@ LIST_MANDATORY_SERVICE_KEYS_SPEC = ActionSpec(
     requires_card=False,
     streams=False,
     tags=("saip", "header", "catalog"),
+)
+
+
+def _wire_hex_for_placeholder(record: Any, value_text: str) -> str:
+    """The bytes a list entry stores for ``value_text``: typed input or exact hex."""
+    from Tools.ProfilePackage.saip_variable_materialization import (
+        SaipVariableMaterializationError,
+        placeholder_value_to_wire_hex,
+    )
+
+    try:
+        return placeholder_value_to_wire_hex(record, value_text)
+    except SaipVariableMaterializationError as error:
+        raise ValueError(str(error)) from error
+
+
+def _dispatch_define_variable(
+    ctx: ActionContext,
+    *,
+    name: Any = None,
+    variable: Any = None,
+    placeholder_type: Any = None,
+    byte_length: Any = None,
+    modifier: Any = None,
+    value: Any = None,
+    list: Any = None,
+    session_id: Any = None,
+) -> dict[str, Any]:
+    """Add a placeholder to a test-value list, with its value or declared alone.
+
+    ``name`` is the literal (``{smsc:MSISDN:6:nibble_swap}``); without it
+    the parts build one. The value is typed input (digits, text) or the
+    exact bytes as hex, stored in wire form; with no value the list gets a
+    ``name,`` declaration, listed everywhere and answering nothing, which
+    the panels and the listings flag. With ``session_id`` the open
+    package takes the new value for the occurrences it answers.
+    """
+    from Tools.ProfilePackage.saip_hex_template import (
+        InlinePlaceholderRecord,
+        format_placeholder_literal,
+        parse_placeholder_literal,
+        validate_inline_placeholder_parts,
+    )
+    from Tools.ProfilePackage.saip_universal_tokens import (
+        UniversalTokensError,
+        load_universal_tokens,
+        resolve_token_list_ref,
+        set_token_list_entry,
+        write_universal_tokens,
+    )
+    from Tools.ProfilePackage.saip_variable_materialization import inline_record_key
+
+    name_text = str(name or "").strip()
+    if name_text:
+        parts = parse_placeholder_literal(name_text)
+        if parts is None:
+            raise ValueError(
+                "name must be a placeholder literal such as {smsc:MSISDN:6:nibble_swap}."
+            )
+        variable_text = str(parts["variable"])
+        type_text = str(parts["type"]).upper()
+        width = int(parts["byte_length"])
+        modifier_text = str(parts["modifier"] or "")
+    else:
+        variable_text = str(variable or "").strip()
+        type_text = str(placeholder_type or "").strip().upper()
+        modifier_text = str(modifier or "").strip()
+        try:
+            width = int(byte_length)
+        except (TypeError, ValueError) as error:
+            raise ValueError("byte_length must be a whole number of bytes.") from error
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", variable_text) is None:
+            raise ValueError(
+                "variable must be letters, digits and underscore, starting with a letter."
+            )
+    validate_inline_placeholder_parts(
+        type_text, width, modifier_text, literal=name_text or variable_text
+    )
+    spelt = "{" + f"{variable_text}:{type_text}:{width}"
+    spelt += (f":{modifier_text}" if modifier_text else "") + "}"
+    literal = format_placeholder_literal(spelt, "typed")
+    record = InlinePlaceholderRecord(
+        index=0,
+        literal=literal,
+        variable_name=variable_text,
+        type_name=type_text,
+        byte_length=width,
+        modifier=modifier_text or None,
+        sentinel_hex="",
+    )
+    value_text = str(value or "").strip()
+    wire_hex = _wire_hex_for_placeholder(record, value_text) if value_text else ""
+    kept_existing = False
+    try:
+        ref = resolve_token_list_ref(str(list or "").strip())
+        current = load_universal_tokens(ref.path)
+        existing = current.lookup(literal)
+        if not wire_hex and existing is not None and existing.declared_only is False:
+            # A declaration never downgrades an entry that already answers.
+            wire_hex = existing.hex
+            kept_existing = True
+            written = current
+        else:
+            updated = set_token_list_entry(current.text, literal, wire_hex)
+            written = write_universal_tokens(updated, ref.path)
+    except UniversalTokensError as error:
+        raise ValueError(str(error)) from error
+    warnings: list[str] = []
+    if not wire_hex:
+        message = (
+            f"{literal} is declared without a value; a profile that uses it cannot "
+            "export completely until one is typed or added here."
+        )
+        if type_text in _LENGTH_COUNTED_PLACEHOLDER_TYPES:
+            message += " A length byte that counts it cannot be reconciled until then."
+        warnings.append(message)
+    response: dict[str, Any] = {
+        "literal": literal,
+        "key": inline_record_key(record),
+        "variable": variable_text,
+        "type": type_text,
+        "byte_length": width,
+        "modifier": modifier_text,
+        "value_hex": wire_hex,
+        "declared_only": not wire_hex,
+        "list": ref.name,
+        "path": str(ref.path),
+        "entry_count": len(written.entries),
+        "summaries": [
+            (
+                f"{literal} already in {ref.name} with the value {wire_hex}; kept."
+                if kept_existing
+                else f"{literal} {'set to ' + wire_hex if wire_hex else 'declared'} in "
+                f"{ref.name} ({ref.path})."
+            )
+        ],
+        "warnings": warnings,
+    }
+    sid = str(session_id or "").strip()
+    if sid:
+        from yggdrasim_common.gui_server.sessions import get_manager
+
+        handle = get_manager().claim(sid)
+        _ensure_session_state(handle)
+        records = builtins.list(handle.get("inline_placeholder_records") or [])
+        if records:
+            handle.setdefault("inline_raw_sources", {})
+            for warning in _seed_universal_defaults(
+                records,
+                handle["applied_overrides"],
+                handle["inline_raw_values"],
+                str(handle.get("test_value_list") or ""),
+                handle["inline_raw_sources"],
+            ):
+                warnings.append(str(warning.get("error") or warning))
+            response["session_id"] = sid
+            response.update(_inline_template_response_fields(handle))
+    return response
+
+
+def _dispatch_normalise_placeholder_spelling(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+) -> dict[str, Any]:
+    """Respell every inline placeholder of the session in the typed form.
+
+    ``[iccidICCID10NibbleSwap]`` becomes ``{iccid:ICCID:10:nibble_swap}`` in
+    every projection and in the next template save; the occurrence keys,
+    the stored values and the test values are untouched because the
+    record's parts stay the same. A template already in the typed form is
+    left alone.
+    """
+    import dataclasses
+
+    from yggdrasim_common.gui_server.sessions import get_manager
+    from Tools.ProfilePackage.saip_hex_template import (
+        format_placeholder_literal,
+        placeholder_literal_style,
+    )
+
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    records = list(handle.get("inline_placeholder_records") or [])
+    if not records:
+        raise ValueError("This session carries no inline placeholders to respell.")
+    rewritten: list[dict[str, str]] = []
+    updated: list[Any] = []
+    for record in records:
+        literal = str(getattr(record, "literal", "") or "")
+        style_name = placeholder_literal_style(literal)
+        if style_name in ("typed", None):
+            updated.append(record)
+            continue
+        typed = format_placeholder_literal(literal, "typed")
+        updated.append(dataclasses.replace(record, literal=typed))
+        rewritten.append({"from": literal, "to": typed})
+    if rewritten:
+        handle["inline_placeholder_records"] = updated
+        _mark_dirty(handle, -1)
+    response: dict[str, Any] = {
+        "session_id": sid,
+        "changed": len(rewritten),
+        "rewritten": rewritten,
+    }
+    response.update(_inline_template_response_fields(handle))
+    return response
+
+
+NORMALISE_PLACEHOLDER_SPELLING_SPEC = ActionSpec(
+    id="saip.normalise_placeholder_spelling",
+    subsystem="SAIP",
+    title="Typed placeholder spelling",
+    description=(
+        "Respell every inline placeholder of the open template in the typed "
+        "form ({var:TYPE:len[:modifier]}), the one the tool writes. The "
+        "values stay bound; the next template save writes the new spelling."
+    ),
+    inputs=(_SESSION_FIELD,),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_normalise_placeholder_spelling),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "variables", "tokens", "write"),
+)
+
+
+DEFINE_VARIABLE_SPEC = ActionSpec(
+    id="saip.define_variable",
+    subsystem="SAIP",
+    title="Define variable",
+    description=(
+        "Add a placeholder ({name:TYPE:len[:modifier]}) to a test-value list "
+        "with its value, or declared without one so it can be inserted "
+        "anywhere and is flagged until a value exists."
+    ),
+    inputs=(
+        ActionField(
+            name="name",
+            label="Placeholder",
+            kind="string",
+            required=False,
+            default="",
+            help="The literal, e.g. {smsc:MSISDN:6:nibble_swap}; or fill the parts below.",
+        ),
+        ActionField(
+            name="variable",
+            label="Variable name",
+            kind="string",
+            required=False,
+            default="",
+            help="Letters, digits and underscore (used when no literal is given).",
+        ),
+        ActionField(
+            name="placeholder_type",
+            label="Type",
+            kind="enum",
+            required=False,
+            default="BINARY",
+            choices=["BINARY", "ICCID", "IMSI", "MSISDN", "TEXT", "RI", "OPLMN"],
+            help="How the value encodes to bytes.",
+        ),
+        ActionField(
+            name="byte_length",
+            label="Bytes",
+            kind="int",
+            required=False,
+            min_value=2,
+            help="Width of the placeholder in bytes (ICCID 10, IMSI 8).",
+        ),
+        ActionField(
+            name="modifier",
+            label="Modifier",
+            kind="string",
+            required=False,
+            default="",
+            help="nibble_swap (ICCID, MSISDN) or encode_imsi (IMSI); empty otherwise.",
+        ),
+        ActionField(
+            name="value",
+            label="Value",
+            kind="string",
+            required=False,
+            default="",
+            help="Digits or text for a typed placeholder, or the exact bytes as hex; empty declares only.",
+        ),
+        ActionField(
+            name="list",
+            label="List",
+            kind="string",
+            required=False,
+            default="universal",
+            help="universal, a library list name or a .csv path.",
+        ),
+        ActionField(
+            name="session_id",
+            label="Package session",
+            kind="string",
+            required=False,
+            default="",
+            help="An open package takes the new value for the occurrences it answers.",
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_dispatch_define_variable,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "variables", "tokens", "write"),
 )
 
 
@@ -16502,6 +24277,7 @@ get_registry().register(UPDATE_FILE_CONTENT_SPEC)
 get_registry().register(UPDATE_FILE_DECODED_SPEC)
 get_registry().register(UPDATE_RECORD_BYTES_SPEC)
 get_registry().register(SAVE_PACKAGE_SPEC)
+get_registry().register(GENERATE_TEST_PROFILE_SPEC)
 get_registry().register(REVERT_CHANGES_SPEC)
 get_registry().register(LIST_DECODED_FIELDS_SPEC)
 get_registry().register(APPLY_DECODED_EDIT_SPEC)
@@ -16515,6 +24291,8 @@ get_registry().register(DIFF_AGAINST_PATH_SPEC)
 get_registry().register(LIST_VARIABLES_SPEC)
 get_registry().register(SET_VARIABLE_SPEC)
 get_registry().register(RESET_VARIABLE_SPEC)
+get_registry().register(NORMALISE_PLACEHOLDER_SPELLING_SPEC)
+get_registry().register(DEFINE_VARIABLE_SPEC)
 
 get_registry().register(GET_PROFILE_HEADER_SPEC)
 get_registry().register(UPDATE_PROFILE_HEADER_FIELD_SPEC)
@@ -16549,6 +24327,7 @@ get_registry().register(REMOVE_SECURITY_DOMAIN_PERSO_BLOCK_SPEC)
 get_registry().register(SET_SECURITY_DOMAIN_INSTANCE_FIELD_SPEC)
 get_registry().register(GET_APPLICATION_SPEC)
 get_registry().register(ADD_APPLICATION_INSTANCE_SPEC)
+get_registry().register(UPDATE_APPLICATION_INSTANCE_SPEC)
 get_registry().register(REMOVE_APPLICATION_INSTANCE_SPEC)
 get_registry().register(SET_APPLICATION_LOAD_BLOCK_SPEC)
 get_registry().register(REMOVE_APPLICATION_LOAD_BLOCK_SPEC)
@@ -16557,6 +24336,11 @@ get_registry().register(ADD_RFM_TAR_SPEC)
 get_registry().register(REMOVE_RFM_TAR_SPEC)
 get_registry().register(SET_RFM_TAR_LIST_SPEC)
 get_registry().register(SET_RFM_FIELD_SPEC)
+get_registry().register(SET_PE_MANDATED_SPEC)
+get_registry().register(SET_NONSTANDARD_FIELD_SPEC)
+get_registry().register(AKA_CONFIGURE_SPEC)
+get_registry().register(PE_STRUCTURE_SPEC)
+get_registry().register(PE_STRUCTURE_EDIT_SPEC)
 get_registry().register(SET_RFM_ADF_ACCESS_SPEC)
 get_registry().register(REMOVE_RFM_ADF_ACCESS_SPEC)
 
@@ -17009,12 +24793,12 @@ def _dispatch_sync_arr(
     session_id: Any = None,
     dry_run: Any = None,
 ) -> dict[str, Any]:
-    """SA-G3 — surface ARR-related cross-PE inconsistencies.
+    """SA-G3 -- surface ARR-related cross-PE inconsistencies.
 
     Runs the linter and filters its output to access-rule findings
     (``YRL-ARR-*`` plus the structural prefixes that touch
     ``securityAttributesReferenced`` / ``arrFileFid``). The dispatcher
-    intentionally does not mutate the document — automatic ARR repair
+    intentionally does not mutate the document -- automatic ARR repair
     is out of scope for this release; the caller can act on the
     findings via the regular decoded-form editor.
     """
@@ -17133,6 +24917,10 @@ def _history_apply_swap(
     handle["pes"] = target_pes
     handle["applied_overrides"] = target_overrides
     handle["inline_placeholder_records"] = target_inline_records
+    handle["inline_raw_values"] = _history_snapshot_raw_values(snapshot)
+    handle["test_value_list"] = _history_snapshot_test_value_list(
+        snapshot, handle.get("test_value_list")
+    )
     # We don't know exactly which PE changed (snapshots are document-
     # wide), so mark every PE dirty so the GUI reflects all changes.
     for index in range(len(handle["pes"].pe_list)):
@@ -17218,6 +25006,113 @@ LINT_PATH_SPEC = ActionSpec(
     requires_card=False,
     streams=False,
     tags=("saip", "lint", "one-shot"),
+)
+
+
+def _dispatch_trim_padded_content(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    apply: Any = None,
+    merge_gap: Any = None,
+) -> dict[str, Any]:
+    """Report, and on ``apply`` drop, file content the file's initial image already holds.
+
+    ``Tools/ProfilePackage/saip_fill_trim`` decides per file against the Fcp
+    fill / repeat pattern or the template default (SAIP V3.4.1 section 8.3.3)
+    and proves every result by replay before the package changes. A dry run
+    (the default) mutates nothing; an applied run marks the changed PEs dirty
+    and re-derives the decoded document.
+    """
+    from yggdrasim_common.gui_server.sessions import get_manager
+    from Tools.ProfilePackage.saip_fill_trim import MERGE_GAP, trim_sequence
+
+    sid = str(session_id or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required (run saip.open_package first).")
+    apply_flag = apply is True or str(apply or "").strip().lower() in ("1", "true", "yes", "on")
+    gap = MERGE_GAP
+    if merge_gap not in (None, ""):
+        try:
+            gap = int(merge_gap)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"merge_gap must be an integer: {merge_gap!r}") from error
+        if gap < 0:
+            raise ValueError("merge_gap must be zero or positive.")
+
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    pes = handle["pes"]
+
+    def _der_size() -> int | None:
+        try:
+            return len(bytes(pes.to_der()))
+        except Exception:  # noqa: BLE001 -- an authoring session with unbound placeholders cannot encode
+            return None
+
+    der_before = _der_size()
+    report = trim_sequence(pes, apply=apply_flag, merge_gap=gap)
+    gfm_changed = False
+    if apply_flag and report.changed_pe_indexes:
+        for pe_index in report.changed_pe_indexes:
+            _mark_dirty(handle, pe_index)
+            pe = pes.pe_list[pe_index]
+            if str(getattr(pe, "type", "") or "") == "genericFileManagement":
+                gfm_changed = True
+        _refresh_decoded_document(handle)
+    der_after = _der_size() if apply_flag else None
+    if der_after is None and der_before is not None:
+        der_after = der_before - report.totals()["saved"]
+
+    result = report.to_dict()
+    result["session_id"] = sid
+    result["merge_gap"] = gap
+    result["der_bytes_before"] = der_before
+    result["der_bytes_after"] = der_after
+    result["gfm_reindexed"] = gfm_changed
+    result["dirty_pe_count"] = len(handle.get("dirty_pes") or ())
+    return result
+
+
+TRIM_PADDED_CONTENT_SPEC = ActionSpec(
+    id="saip.trim_padded_content",
+    subsystem="SAIP",
+    title="Trim padded content",
+    description=(
+        "Drop the fillFileContent bytes a file's initial image already holds: "
+        "the Fcp fill / repeat pattern (ETSI TS 102 222 6.3.2.2.2) or the "
+        "template default (SAIP V3.4.1 section 8.3.3), record by record. A "
+        "file declaring neither, a BER-TLV file and a linked file are left "
+        "alone. The default is a dry run listing every file and the bytes it "
+        "would save; tick Apply to rewrite the open package in place."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        ActionField(
+            name="apply",
+            label="Apply",
+            kind="bool",
+            required=False,
+            default=False,
+            help="Rewrite the open package; unticked, only report what would change.",
+        ),
+        ActionField(
+            name="merge_gap",
+            label="Bytes carried inline between kept runs",
+            kind="int",
+            required=False,
+            default=6,
+            help=(
+                "Up to this many redundant bytes between two kept runs stay in "
+                "one fillFileContent; beyond it a fillFileOffset skips them."
+            ),
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_dispatch_trim_padded_content,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "package", "trim", "saip-ribbon-active-session-form"),
 )
 
 
@@ -17366,7 +25261,51 @@ ADD_VARIABLE_TO_PE_SPEC = ActionSpec(
             required=False,
             default="hex",
             choices=["hex", "utf8", "ascii"],
-            help="hex | utf8 | ascii — controls how the captured value is stored.",
+            help="hex | utf8 | ascii -- controls how the captured value is stored.",
+        ),
+        ActionField(
+            name="placeholder_type",
+            label="Placeholder type",
+            kind="enum",
+            required=False,
+            default="",
+            choices=["", "BINARY", "ICCID", "IMSI", "MSISDN", "TEXT", "RI", "OPLMN"],
+            help=(
+                "Typed inline placeholder ({name:TYPE:len[:modifier]}) the field "
+                "becomes; empty binds a [NAME] token of the tagged-JSON grammar."
+            ),
+        ),
+        ActionField(
+            name="modifier",
+            label="Modifier",
+            kind="string",
+            required=False,
+            default="",
+            help="nibble_swap (ICCID, MSISDN) or encode_imsi (IMSI); empty otherwise.",
+        ),
+        ActionField(
+            name="value",
+            label="Value",
+            kind="string",
+            required=False,
+            default="",
+            help="Value to store for the variable; empty keeps the field's bytes.",
+        ),
+        ActionField(
+            name="keep_value",
+            label="Keep the field's bytes as the value",
+            kind="bool",
+            required=False,
+            default=True,
+            help="Off leaves the placeholder without a value (the lists may answer it).",
+        ),
+        ActionField(
+            name="save_to_list",
+            label="Save to the universal list",
+            kind="bool",
+            required=False,
+            default=False,
+            help="Add the placeholder, with its value, to the universal test-value list.",
         ),
     ),
     output_kind="json",
@@ -17395,7 +25334,7 @@ LIST_DECODED_EFS_SPEC = ActionSpec(
     tags=("saip", "catalog", "ef"),
 )
 
-# Back-compat alias — older clients may still call the legacy id; keep
+# Back-compat alias -- older clients may still call the legacy id; keep
 # it routing to the same dispatcher for one release window.
 LIST_INTERPRETED_EFS_SPEC = ActionSpec(
     id="saip.list_interpreted_efs",
@@ -17465,7 +25404,7 @@ REORDER_PES_SPEC = ActionSpec(
     description=(
         "Move a PE from one index to another within the sequence. "
         "Refuses moves that would displace the mandatory ProfileHeader "
-        "(index 0) or PE-End (last index) anchors per TCA SAIP §A.2."
+        "(index 0) or PE-End (last index) anchors per TCA SAIP v3.4.1 §8.2.1 / §8.10."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -17572,6 +25511,256 @@ IMPORT_VARIABLES_CSV_SPEC = ActionSpec(
     requires_card=False,
     streams=False,
     tags=("saip", "variables", "import", "write"),
+)
+
+
+APPLY_UNIVERSAL_TOKENS_SPEC = ActionSpec(
+    id="saip.apply_universal_tokens",
+    subsystem="SAIP",
+    title="Apply test values",
+    description=(
+        "Store the bytes from the profile's test-value lists for every "
+        "placeholder occurrence they answer: the list bound to the profile "
+        "first, then the operator-wide universal list. A complete test "
+        "profile can then be exported before the template is signed off. "
+        "Placeholders stay in the template. A typed value already stored "
+        "for a variable is kept unless 'Replace typed values' is set; an "
+        "entry whose width does not match its name is reported and never "
+        "applied."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        ActionField(
+            name="path",
+            label="List file (optional)",
+            kind="path",
+            required=False,
+            help=(
+                "Apply this one list instead of the bound and universal lists."
+            ),
+        ),
+        ActionField(
+            name="overwrite",
+            label="Replace typed values",
+            kind="bool",
+            required=False,
+            default=False,
+            help="Drop a typed value the operator stored when a list also answers it.",
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_apply_universal_tokens),
+    requires_card=False,
+    streams=False,
+    tags=(
+        "saip",
+        "variables",
+        "tokens",
+        "write",
+    ),
+)
+
+
+UNIVERSAL_TOKENS_SPEC = ActionSpec(
+    id="saip.universal_tokens",
+    subsystem="SAIP",
+    title="Test-value lists",
+    description=(
+        "View or update the placeholder test-value lists: the operator-wide "
+        "universal list, which answers every template, and the library of "
+        "profile-specific lists a template can bind on top of it. Every "
+        "list is one 'name,hex' line per placeholder literal, in any "
+        "template spelling ({iccid:ICCID:10:nibble_swap}, "
+        "[iccidICCID10NibbleSwap] or iccidICCID10NibbleSwap), the value "
+        "already in wire form; a '# style: typed' line pins the spelling "
+        "new lines take. The files live outside the repository. Run without "
+        "Save to see a list and the lines the loader rejects; tick Save to "
+        "store the edited contents, or name a new library list to create one."
+    ),
+    inputs=(
+        ActionField(
+            name="list",
+            label="List",
+            kind="string",
+            required=False,
+            default="universal",
+            help=(
+                "'universal', a library name, or a file path. The form offers "
+                "the universal list and the library as a selector."
+            ),
+        ),
+        ActionField(
+            name="path",
+            label="Other file (optional)",
+            kind="path",
+            required=False,
+            help=(
+                "Read or write a list file outside the library. Default "
+                "library: YGGDRASIM_SAIP_TOKEN_LISTS, else "
+                "~/.yggdrasim/saip_token_lists/; universal list: "
+                "YGGDRASIM_SAIP_UNIVERSAL_TOKENS, else "
+                "~/.yggdrasim/saip_universal_tokens.csv."
+            ),
+        ),
+        ActionField(
+            name="contents",
+            label="List contents",
+            kind="text",
+            required=False,
+            multiline=True,
+            help=(
+                "One 'name,hex' pair per line; '#' starts a comment. A "
+                "'# style: typed|compact|brace|bracket' line sets the "
+                "spelling new lines and exports use for this list. The "
+                "field is read from the selected list when the form opens."
+            ),
+        ),
+        ActionField(
+            name="save",
+            label="Save",
+            kind="bool",
+            required=False,
+            default=False,
+            help="Write the contents above to the selected list.",
+        ),
+        ActionField(
+            name="save_as",
+            label="Save as new library list",
+            kind="string",
+            required=False,
+            placeholder="example: operator-a",
+            help=(
+                "Write the contents to a new list with this name in the "
+                "library and select it. Letters, digits, '.', '_' and '-'."
+            ),
+        ),
+        ActionField(
+            name="delete",
+            label="Delete the selected list",
+            kind="bool",
+            required=False,
+            default=False,
+            help="Remove a library list or file. The universal list cannot be deleted.",
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_dispatch_universal_tokens,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "variables", "tokens", "write", "saip-ribbon-tokens-form"),
+)
+
+
+SET_TEST_VALUE_LIST_SPEC = ActionSpec(
+    id="saip.set_test_value_list",
+    subsystem="SAIP",
+    title="Bind test-value list",
+    description=(
+        "Choose the test-value list an open profile uses on top of the "
+        "universal one: a library list or any list file. Its entries answer "
+        "a placeholder before the universal list does, so a profile-specific "
+        "list only needs the values that differ. 'universal' drops the "
+        "binding. The binding is remembered for the template and saved with "
+        "it."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        ActionField(
+            name="list",
+            label="List",
+            kind="string",
+            required=False,
+            default="universal",
+            help="'universal', a library name, or a list file path.",
+        ),
+        ActionField(
+            name="apply",
+            label="Apply now",
+            kind="bool",
+            required=False,
+            default=True,
+            help=(
+                "Store the lists' bytes for every occurrence without a typed "
+                "value right away."
+            ),
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_set_test_value_list),
+    requires_card=False,
+    streams=False,
+    tags=(
+        "saip",
+        "variables",
+        "tokens",
+        "write",
+    ),
+)
+
+
+EXPORT_TEST_VALUE_LIST_SPEC = ActionSpec(
+    id="saip.export_test_value_list",
+    subsystem="SAIP",
+    title="Export test-value list",
+    description=(
+        "Write the profile's current placeholder values as a reusable "
+        "'name,hex' list: a typed value in its wire form, a test value as "
+        "stored. Secret-classified names (PINs, PUKs, ADM, KI, SCP80 keys) "
+        "are included, since the list is what rebuilds this profile's "
+        "values. Export to a library name so any profile can bind it, or "
+        "to a file."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        ActionField(
+            name="list",
+            label="Library name or file",
+            kind="string",
+            required=True,
+            placeholder="example: operator-a",
+            help="A library name, or a path ending in .csv.",
+        ),
+        ActionField(
+            name="overwrite",
+            label="Overwrite existing",
+            kind="bool",
+            required=False,
+            default=False,
+            help="Replace a list that already exists under that name or path.",
+        ),
+        ActionField(
+            name="bind",
+            label="Bind to this profile",
+            kind="bool",
+            required=False,
+            default=False,
+            help="Use the exported list as this profile's bound list from now on.",
+        ),
+        ActionField(
+            name="style",
+            label="Name style",
+            kind="string",
+            required=False,
+            default="universal",
+            choices=["universal", "typed", "compact", "brace", "bracket"],
+            help=(
+                "Spelling of the placeholder names: 'universal' follows the "
+                "universal list's style; typed is {var:TYPE:len[:modifier]}, "
+                "compact varTYPElen[Modifier], brace and bracket wrap the "
+                "compact form. Recorded in the list as a '# style:' line."
+            ),
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_dispatch_export_test_value_list,
+    requires_card=False,
+    streams=False,
+    tags=(
+        "saip",
+        "variables",
+        "tokens",
+        "export",
+    ),
 )
 
 
@@ -17709,7 +25898,7 @@ ADD_PE_SPEC = ActionSpec(
         "pinCodes, pukCodes, genericFileManagement, securityDomain; "
         "other pySim-registered types still resolve but come up "
         "empty. The ProfileHeader (index 0) and PE-End (last index) "
-        "anchors are immovable per TCA SAIP §A.2."
+        "anchors are immovable per TCA SAIP v3.4.1 §8.2.1 / §8.10."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -17735,6 +25924,17 @@ ADD_PE_SPEC = ActionSpec(
             required=False,
             default="",
             help="Optional preset id from saip.list_pe_presets.",
+        ),
+        ActionField(
+            name="df_fid",
+            label="DF.EAP file ID",
+            kind="string",
+            required=False,
+            default="",
+            help=(
+                "PE-EAP only: the file ID (4 hex digits) of its DF.EAP, which "
+                "the application's EF.DIR record names (ETSI TS 102 310 v9.1 §5.2)."
+            ),
         ),
     ),
     output_kind="json",
@@ -17778,7 +25978,7 @@ DELETE_PE_SPEC = ActionSpec(
     description=(
         "Drop the PE at the supplied index from the sequence. The "
         "ProfileHeader (index 0) and PE-End (last index) anchors are "
-        "protected per TCA SAIP §A.2 and cannot be removed."
+        "protected per TCA SAIP v3.4.1 §8.2.1 / §8.10 and cannot be removed."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -17804,11 +26004,15 @@ IMPORT_PE_SPEC = ActionSpec(
     subsystem="SAIP",
     title="Load PE from file",
     description=(
-        "Decode a single-PE blob from disk and splice it into the "
-        "sequence. Accepts .der (binary), .asn / .asn1 / .txt / .hex "
-        "(ASCII hex of the same DER), and .json (transcoded single-PE "
-        "snippet). The legacy XML File-Tree-Express container has no "
-        "bundled converter and is rejected with a clear error."
+        "Decode a single-PE file from disk and splice it into the sequence. "
+        "Accepts the PE document saip.export_pe writes (.pe.json: decoded "
+        "tree plus DER bytes, load block and instances included), a tagged "
+        "single-section JSON document, the plain decoded JSON of one PE, "
+        ".der (binary) and .asn / .asn1 / .txt / .hex (ASCII hex of the "
+        "DER). The PE takes the next free identification so every other PE "
+        "keeps its own. A template PE that still carries placeholder "
+        "literals is refused; the legacy XML File-Tree-Express container "
+        "has no bundled converter."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -17817,7 +26021,7 @@ IMPORT_PE_SPEC = ActionSpec(
             label="Source file",
             kind="path",
             required=True,
-            help="Single-PE file (.der/.asn/.asn1/.txt/.hex/.json).",
+            help="Single-PE file (.pe.json/.json/.der/.asn/.asn1/.txt/.hex).",
         ),
         ActionField(
             name="insert_at",
@@ -18032,7 +26236,7 @@ ADD_VARIABLE_DEFINITION_SPEC = ActionSpec(
             required=False,
             default="hex",
             choices=["hex", "utf8", "ascii"],
-            help="hex | utf8 | ascii — controls how the value is interpreted.",
+            help="hex | utf8 | ascii -- controls how the value is interpreted.",
         ),
         ActionField(
             name="overwrite",
@@ -18058,7 +26262,7 @@ REMOVE_VARIABLE_DEFINITION_SPEC = ActionSpec(
     description=(
         "Drop a placeholder definition. Refuses if the placeholder "
         "is still bound to one or more PE fields (the encode would "
-        "fail on the next save) — pass force=true to drop the "
+        "fail on the next save) -- pass force=true to drop the "
         "definition anyway."
     ),
     inputs=(
@@ -18092,10 +26296,14 @@ EXPORT_PE_SPEC = ActionSpec(
     subsystem="SAIP",
     title="Write PE to file",
     description=(
-        "Serialise a single PE out to disk in der / hex / json. The "
-        "caller picks the destination filename — the bench typically "
-        "composes one as <pe_type>-<name>.<ext>. Refuses to overwrite "
-        "an existing target unless overwrite=true."
+        "Serialise a single PE out to disk. json writes the PE document "
+        "(ygg.pe_document.v1: the schema, the PE type and the tagged decoded "
+        "tree, nothing about the source package) that saip.import_pe reads "
+        "back complete, load block and instances included; der / hex "
+        "write the PE bytes with the stored template values substituted. "
+        "The caller picks the destination filename -- the bench composes "
+        "<pe_type>-<name>.<ext>. Refuses to overwrite an existing target "
+        "unless overwrite=true."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -18121,7 +26329,10 @@ EXPORT_PE_SPEC = ActionSpec(
             required=False,
             default="der",
             choices=["der", "hex", "json"],
-            help="der | hex | json",
+            help=(
+                "json = PE document (.pe.json, re-importable, keeps the PE "
+                "name and settings); der / hex = the PE bytes."
+            ),
         ),
         ActionField(
             name="overwrite",
@@ -18130,6 +26341,19 @@ EXPORT_PE_SPEC = ActionSpec(
             required=False,
             default=False,
             help="When false, an existing target raises FileExistsError.",
+        ),
+        ActionField(
+            name="resolve_variables",
+            label="Substitute stored values",
+            kind="bool",
+            required=False,
+            default=False,
+            help=(
+                "Template sessions: write the PE document with the stored "
+                "placeholder values substituted (concrete, bytes recorded) "
+                "instead of keeping the placeholder literals. DER / HEX "
+                "always substitute."
+            ),
         ),
     ),
     output_kind="json",
@@ -18236,7 +26460,151 @@ get_registry().register(LIST_PE_PRESETS_SPEC)
 get_registry().register(ADD_PE_SPEC)
 get_registry().register(DELETE_PE_SPEC)
 get_registry().register(IMPORT_PE_SPEC)
+_PE_LIBRARY_NAME_FIELD = ActionField(
+    name="name",
+    label="Saved PE name",
+    kind="string",
+    required=True,
+    help=(
+        "Entry name in the PE library: letters, digits, '.', '_' or '-' "
+        "(64 characters at most), starting with a letter or digit."
+    ),
+)
+
+SAVE_PE_SPEC = ActionSpec(
+    id="saip.save_pe",
+    subsystem="SAIP",
+    title="Save PE to library",
+    description=(
+        "Store the selected PE in the operator's PE library "
+        "(YGGDRASIM_SAIP_PE_LIBRARY, default ~/.yggdrasim/saip_pe_library/) "
+        "as the PE document saip.export_pe writes, under a name the PE "
+        "library dialog and saip.load_pe use later. A template PE keeps its "
+        "placeholder literals unless resolve_variables substitutes the "
+        "stored values. Refuses to replace an existing entry unless "
+        "overwrite=true."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        ActionField(
+            name="pe_index",
+            label="PE index",
+            kind="int",
+            required=True,
+            min_value=0,
+            help="Zero-based PE index to save.",
+        ),
+        _PE_LIBRARY_NAME_FIELD,
+        ActionField(
+            name="overwrite",
+            label="Overwrite existing",
+            kind="bool",
+            required=False,
+            default=False,
+            help="When false, an existing entry of that name raises FileExistsError.",
+        ),
+        ActionField(
+            name="resolve_variables",
+            label="Substitute stored values",
+            kind="bool",
+            required=False,
+            default=False,
+            help=(
+                "Template sessions: save the PE with the stored placeholder "
+                "values substituted instead of its placeholder literals."
+            ),
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_dispatch_save_pe,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "pe", "library", "export"),
+)
+
+LIST_PE_LIBRARY_SPEC = ActionSpec(
+    id="saip.list_pe_library",
+    subsystem="SAIP",
+    title="List saved PEs",
+    description=(
+        "The entries of the PE library: name, PE type, label, placeholders "
+        "and save time, read from each entry's metadata."
+    ),
+    inputs=(),
+    output_kind="json",
+    dispatcher=_dispatch_list_pe_library,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "pe", "library"),
+)
+
+LOAD_PE_SPEC = ActionSpec(
+    id="saip.load_pe",
+    subsystem="SAIP",
+    title="Load PE from library",
+    description=(
+        "Insert a saved PE into the open package, the way saip.import_pe "
+        "inserts a PE document from a file. A saved template PE brings its "
+        "placeholder literals along: they are registered in the package "
+        "(answered from the test-value lists where possible), so a standard "
+        "PE-SD keeps its {scp80_kic1:BINARY:16}-style keys. The PE takes "
+        "the next free identification."
+    ),
+    inputs=(
+        _SESSION_FIELD,
+        _PE_LIBRARY_NAME_FIELD,
+        ActionField(
+            name="insert_at",
+            label="Insert at index",
+            kind="int",
+            required=False,
+            min_value=1,
+            help="Zero-based insertion point. Defaults to just before PE-End.",
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_load_pe),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "pe", "library", "import", "write"),
+)
+
+DELETE_SAVED_PE_SPEC = ActionSpec(
+    id="saip.delete_saved_pe",
+    subsystem="SAIP",
+    title="Delete saved PE",
+    description="Remove one entry from the PE library. Open packages are not affected.",
+    inputs=(_PE_LIBRARY_NAME_FIELD,),
+    output_kind="json",
+    dispatcher=_dispatch_delete_saved_pe,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "pe", "library", "write"),
+)
+
 get_registry().register(EXPORT_PE_SPEC)
+LIST_PE_TYPES_SPEC = ActionSpec(
+    id="saip.list_pe_types",
+    subsystem="SAIP",
+    title="List insertable PE types",
+    description=(
+        "The ProfileElement CHOICE alternatives of the compiled SAIP module "
+        "that saip.add_pe can insert, in schema order, with whether pySim "
+        "carries a class for each and how many presets it has."
+    ),
+    inputs=(),
+    output_kind="json",
+    dispatcher=_dispatch_list_pe_types,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "pe"),
+)
+
+get_registry().register(SAVE_PE_SPEC)
+get_registry().register(LIST_PE_TYPES_SPEC)
+get_registry().register(LIST_PE_LIBRARY_SPEC)
+get_registry().register(LOAD_PE_SPEC)
+get_registry().register(DELETE_SAVED_PE_SPEC)
 get_registry().register(CREATE_PACKAGE_SPEC)
 get_registry().register(OPEN_PACKAGE_WITH_VARIABLES_SPEC)
 get_registry().register(LIST_TOKEN_MAPPINGS_SPEC)
@@ -18247,6 +26615,7 @@ get_registry().register(REMOVE_VARIABLE_DEFINITION_SPEC)
 get_registry().register(BATCH_PERSONALIZE_SPEC)
 get_registry().register(COMPARE_APPLICATIONS_SPEC)
 get_registry().register(PRODUCT_SUMMARY_SPEC)
+get_registry().register(TRIM_PADDED_CONTENT_SPEC)
 get_registry().register(LIST_VALIDATION_RULES_SPEC)
 get_registry().register(ADD_VARIABLE_TO_PE_SPEC)
 get_registry().register(LIST_DECODED_EFS_SPEC)
@@ -18256,6 +26625,10 @@ get_registry().register(PE_INFO_SPEC)
 get_registry().register(REORDER_PES_SPEC)
 get_registry().register(EXPORT_VARIABLES_CSV_SPEC)
 get_registry().register(IMPORT_VARIABLES_CSV_SPEC)
+get_registry().register(APPLY_UNIVERSAL_TOKENS_SPEC)
+get_registry().register(UNIVERSAL_TOKENS_SPEC)
+get_registry().register(SET_TEST_VALUE_LIST_SPEC)
+get_registry().register(EXPORT_TEST_VALUE_LIST_SPEC)
 get_registry().register(COMPARE_REPORT_HTML_SPEC)
 get_registry().register(SEARCH_PE_TEXT_SPEC)
 get_registry().register(DECODE_TO_JSON_SPEC)
@@ -18308,7 +26681,7 @@ SYNC_ARR_SPEC = ActionSpec(
     description=(
         "Walk every PE that owns access-control file IDs and surface "
         "ARR-related inconsistencies (rule-index out of range, missing "
-        "EF.ARR target, …). Read-only — automatic repair is out of "
+        "EF.ARR target, ...). Read-only -- automatic repair is out of "
         "scope for this release; the caller acts on the findings via "
         "the regular decoded-form editor."
     ),
@@ -18374,7 +26747,7 @@ get_registry().register(REDO_SPEC)
 
 
 # ----------------------------------------------------------------------
-# Round 9 — PE-parity action specs (PIN coding, AKA mappingParameter,
+# Round 9 -- PE-parity action specs (PIN coding, AKA mappingParameter,
 # SD catalog extras, ARR record picker, GFM single-DF context,
 # connectivityParameters BER-TLV breakdown, CAP/IJC import,
 # SSIM-EAPTLS bundle import).
@@ -18460,9 +26833,9 @@ AKA_MAPPING_OPTION_CATALOG_SPEC = ActionSpec(
     subsystem="SAIP",
     title="List AKA mapping-option flags",
     description=(
-        "Catalog of TCA SAIP §A.2 ``MappingOptions`` bits (share-K, "
-        "share-OPc, share-rotationConstants, …) that the GUI uses to "
-        "render the mappingParameter checkbox group."
+        "The four TCA SAIP v3.4.1 §8.4.2 ``mappingOptions`` values: one "
+        "2-bit SQN-sharing mode in b3-b2 (none, sqnInit and parameters, "
+        "parameters, parameters and the SQN array); the other bits are RFU."
     ),
     inputs=(),
     output_kind="json",
@@ -18507,8 +26880,8 @@ AKA_SET_MAPPING_PARAMETER_SPEC = ActionSpec(
     title="Switch AKA to mappingParameter CHOICE",
     description=(
         "Replace ``algoConfiguration`` with the ``mappingParameter`` "
-        "branch — reuse another NAA's authentication configuration via "
-        "its instance AID and a one-byte mapping-options bitmask. The "
+        "branch -- reuse another NAA's authentication configuration via "
+        "its instance AID and a one-byte mappingOptions. The "
         "previous algoParameter payload is stashed so flipping back "
         "via ``saip.aka_set_algo_parameter`` restores it."
     ),
@@ -18540,7 +26913,7 @@ AKA_SET_MAPPING_PARAMETER_SPEC = ActionSpec(
             label="Mapping option flags",
             kind="json",
             required=False,
-            help='JSON array of flag names, e.g. ["share-K", "share-OPc"].',
+            help='JSON array holding one mode name, e.g. ["share-sqn-parameters"].',
         ),
     ),
     output_kind="json",
@@ -18582,7 +26955,7 @@ AKA_SET_ALGO_PARAMETER_SPEC = ActionSpec(
             label="Restore stashed algoParameter payload",
             kind="bool",
             required=False,
-            help="Default true — restores the previous algoParameter payload.",
+            help="Default true -- restores the previous algoParameter payload.",
         ),
     ),
     output_kind="json",
@@ -18845,7 +27218,7 @@ CONNECTIVITY_ENCODE_SPEC = ActionSpec(
     subsystem="SAIP",
     title="Encode connectivityParameters bearers",
     description=(
-        "Inverse of ``saip.connectivity_decode`` — build the "
+        "Inverse of ``saip.connectivity_decode`` -- build the "
         "ProfileHeader bearer blob from a list of typed bearer dicts."
     ),
     inputs=(
@@ -18916,7 +27289,7 @@ SSIM_EAPTLS_INSPECT_SPEC = ActionSpec(
     title="Inspect SSIM-EAPTLS PEM / DER",
     description=(
         "Identify a single PEM-armoured or DER-encoded blob and "
-        "report its kind (certificate / private_key / …) plus "
+        "report its kind (certificate / private_key / ...) plus "
         "metadata extracted via ``cryptography`` when available "
         "(subject, issuer, public-key DER, fingerprints)."
     ),

@@ -86,8 +86,21 @@ class SecureChannelSetup(LayerTestBase):
                 self.assertIn(expected, values[0])
 
     def test_the_host_challenge_is_shown(self) -> None:
-        text = decode_text(self.capture, display_filter="frame.number==1")
-        self.assertIn("Host challenge", text)
+        """Both commands carry one, and each says so where it sits.
+
+        An INITIALIZE UPDATE body is the challenge and nothing else, so
+        it is named on the body's own line rather than printed again
+        beneath it. An EXTERNAL AUTHENTICATE puts a C-MAC after the
+        challenge, so there the sub-range is a line of its own. The field
+        is populated either way.
+        """
+        rows = decode_fields(self.capture, ["yapdu.gp.host_challenge"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(len(values), 2, "both commands carry a host challenge")
+        first = decode_text(self.capture, display_filter="frame.number==1")
+        self.assertIn("Command data: 0001020304050607 (host challenge)", first)
+        second = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertIn("Host challenge: 0001020304050607", second)
 
 
 class InstallCommand(LayerTestBase):
@@ -232,7 +245,20 @@ class ProactiveCommands(LayerTestBase):
 
     def test_the_info_column_names_the_command(self) -> None:
         rows = decode_fields(self.capture, ["_ws.col.Info"])
-        self.assertIn("FETCH", rows[0][0])
+        info = rows[0][0]
+        self.assertIn("FETCH", info)
+        # The overview must name the proactive command the FETCH pulled and
+        # the BIP endpoint, so a run of FETCH rows reads as the OPEN CHANNEL
+        # -> SEND DATA -> RECEIVE DATA -> CLOSE CHANNEL flow it is.
+        self.assertIn("OPEN CHANNEL", info)
+        self.assertIn("iot.example.test", info)
+
+    def test_the_detail_column_carries_the_proactive_reading(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.detail"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(
+            values, ["OPEN CHANNEL: iot.example.test, 192.0.2.1:80"]
+        )
 
 
 class Es10Functions(LayerTestBase):
@@ -340,6 +366,19 @@ class BipFailureCauseIsReported(LayerTestBase):
     def test_it_raises_an_expert_item(self) -> None:
         text = decode_text(self.capture)
         self.assertIn("BIP error", text)
+
+    def test_the_detail_names_the_command_and_its_result(self) -> None:
+        # A TERMINAL RESPONSE row reads as the command it answers and how it
+        # went, so the flow stays legible from the terminal side alone.
+        rows = decode_fields(self.capture, ["yapdu.detail"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(
+            values,
+            [
+                "OPEN CHANNEL: bearer independent protocol error "
+                "(channel identifier not valid)"
+            ],
+        )
 
 
 class GeneralResultTableIsNotShifted(LayerTestBase):
@@ -481,6 +520,11 @@ class EnvelopeIsDissected(LayerTestBase):
         rows = decode_fields(self.capture, ["yapdu.cat.event_name"])
         values = [row[0] for row in rows if row and row[0]]
         self.assertTrue(values, "the event list should be decoded")
+
+    def test_the_detail_names_the_envelope_and_event(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.detail"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["Event download: DATA-AVAILABLE"])
 
     def test_the_channel_status_is_broken_out(self) -> None:
         rows = decode_fields(
@@ -625,26 +669,118 @@ class DroppedLinkIsDistinguishableFromAHealthyOne(LayerTestBase):
         self.assertIn("link dropped", text)
 
 
+def _tlv(tag: str, value: bytes) -> bytes:
+    """One short-form TLV. Long form is not needed by these fixtures."""
+    body = bytes.fromhex(tag)
+    assert len(value) < 128
+    return body + bytes([len(value)]) + value
+
+
+class RspStructureMembers(LayerTestBase):
+    """ES10 members carry the field names SGP.22 gives them.
+
+    The generic BER table can only say "Tag 0x81", because a context tag
+    means nothing on its own -- the enclosing structure decides. These
+    names come from the ASN.1 of the converted specifications through
+    scripts/generate_apdu_dissector_tables.py, so they cannot drift from
+    the document they are read against.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        profile = b"".join(
+            [
+                _tlv("5A", bytes.fromhex("98880221436587092113")),
+                _tlv("4F", bytes.fromhex("A0000005591010FFFFFFFF8900001100")),
+                _tlv("9F70", bytes.fromhex("01")),
+                _tlv("90", b"Test"),
+                # 'BF22' is EUICCInfo2 at the top of an ES10b response and
+                # serviceSpecificDataStoredInEuicc here. Only the enclosing
+                # ProfileInfo separates the two.
+                _tlv("BF22", _tlv("80", bytes.fromhex("0102"))),
+            ]
+        )
+        listing = _tlv("BF2D", _tlv("A0", _tlv("E3", profile)))
+        info2 = _tlv(
+            "BF22",
+            _tlv("81", bytes.fromhex("020200"))
+            + _tlv("82", bytes.fromhex("020100"))
+            + _tlv("A9", _tlv("04", bytes.fromhex("01020304"))),
+        )
+        cls.build(
+            [
+                Exchange(bytes.fromhex("00A4040410") + ISDR_AID,
+                         bytes.fromhex("6120")),
+                Exchange(bytes.fromhex("80E29100") + bytes([len(listing)]) + listing,
+                         bytes.fromhex("9000")),
+                Exchange(bytes.fromhex("80E29100") + bytes([len(info2)]) + info2,
+                         bytes.fromhex("9000")),
+            ],
+            "rsp_members.pcap",
+        )
+
+    def names(self) -> str:
+        rows = decode_fields(self.capture, ["yapdu.tlv.name"])
+        return "\n".join(row[0] for row in rows if row and row[0])
+
+    def test_euicc_info2_members_are_named(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==3")
+        self.assertIn("baseProfilePackageVersion (0x81)", text)
+        self.assertIn("lowestSvn (0x82)", text)
+        self.assertIn("euiccCiPKIdListForVerification (0xA9)", text)
+
+    def test_a_sequence_of_names_its_elements_by_type(self) -> None:
+        """ASN.1 gives the elements of a SEQUENCE OF no field name."""
+        text = decode_text(self.capture, display_filter="frame.number==3")
+        self.assertIn("SubjectKeyIdentifier (0x4)", text)
+
+    def test_profile_records_are_walked_to_their_fields(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        for expected in (
+            "profileInfoListOk (0xA0)",
+            "ProfileInfo (0xE3)",
+            "iccid (0x5A)",
+            "isdpAid (0x4F)",
+            "profileState (0x9F70)",
+            "profileNickname (0x90)",
+        ):
+            with self.subTest(field=expected):
+                self.assertIn(expected, text)
+
+    def test_one_tag_reads_two_ways_by_enclosing_structure(self) -> None:
+        """'BF22' inside a ProfileInfo is not EUICCInfo2.
+
+        This is the whole reason the walker carries the structure rather
+        than the parent tag alone: both readings are correct, and only
+        the type they sit in tells them apart.
+        """
+        inside = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertIn("serviceSpecificDataStoredInEuicc (0xBF22)", inside)
+        self.assertNotIn("EUICCInfo2", inside)
+        at_root = decode_text(self.capture, display_filter="frame.number==3")
+        self.assertIn("EUICCInfo2", at_root)
+        self.assertNotIn("serviceSpecificDataStoredInEuicc", at_root)
+
+
 class BoundProfilePackage(LayerTestBase):
     """BF36 is the structure the retired EumDiag dissector dumped raw."""
 
     @classmethod
     def setUpClass(cls) -> None:
         # A miniature BoundProfilePackage, with short placeholder
-        # segments. GSMA SGP.22 clause 2.5.2 gives it five members, not
-        # four: 'BF23' initialiseSecureChannelRequest, then 'A0'
-        # firstSequenceOf87, 'A1' sequenceOf88, 'A2' sequenceOf86 and
-        # 'A3' secondSequenceOf87. Starting the implicit tags at the
-        # request shifts every name by one and loses the fifth, so a
-        # profile that fails installing the second run of '87' segments
-        # is reported as failing in the first.
+        # segments. GSMA SGP.22 Table 4 gives it five members: 'BF23'
+        # initialiseSecureChannelRequest, then 'A0' firstSequenceOf87,
+        # 'A1' sequenceOf88, 'A2' secondSequenceOf87 and 'A3'
+        # sequenceOf86. Each sequence holds TLVs of the tag its name
+        # ends in, which is what makes the order checkable from the
+        # bytes: 'A2' carries '87' segments and 'A3' carries '86'.
         inner = b"".join(
             [
                 bytes.fromhex("BF2304") + bytes.fromhex("80020102"),
                 bytes.fromhex("A004") + bytes.fromhex("87020304"),
                 bytes.fromhex("A104") + bytes.fromhex("88020506"),
-                bytes.fromhex("A204") + bytes.fromhex("86020708"),
-                bytes.fromhex("A304") + bytes.fromhex("87020910"),
+                bytes.fromhex("A204") + bytes.fromhex("87020708"),
+                bytes.fromhex("A304") + bytes.fromhex("86020910"),
             ]
         )
         bpp = bytes.fromhex("BF36") + bytes([len(inner)]) + inner
@@ -663,16 +799,24 @@ class BoundProfilePackage(LayerTestBase):
         self.assertIn("BOUND_PROFILE_PACKAGE", text)
 
     def test_the_five_sections_are_named(self) -> None:
+        """Each name is pinned to its tag, not merely present somewhere.
+
+        SGP.22 Table 4 puts secondSequenceOf87 at 'A2' and sequenceOf86
+        at 'A3'. Asserting only that all five strings appear cannot see
+        the two being swapped -- and swapped is what they were, so a
+        failed download reported the profile payload as the
+        ReplaceSessionKeys segment and the other way about.
+        """
         text = decode_text(self.capture, display_filter="frame.number==2")
-        for section in (
-            "initialiseSecureChannelRequest",
-            "firstSequenceOf87",
-            "sequenceOf88",
-            "sequenceOf86",
-            "secondSequenceOf87",
+        for tag, section in (
+            ("0xBF23", "initialiseSecureChannelRequest"),
+            ("0xA0", "firstSequenceOf87"),
+            ("0xA1", "sequenceOf88"),
+            ("0xA2", "secondSequenceOf87"),
+            ("0xA3", "sequenceOf86"),
         ):
             with self.subTest(section=section):
-                self.assertIn(section, text)
+                self.assertIn(f"{section} ({tag})", text)
 
     def test_the_section_names_only_apply_inside_a_BF36(self) -> None:
         """'A0' to 'A3' are ordinary constructed context tags.

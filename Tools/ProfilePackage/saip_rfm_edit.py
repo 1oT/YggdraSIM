@@ -1,15 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP ``PE-RFM`` structured edit helpers.
 
-The PE-RFM element (TCA SAIP §A.2 / ETSI TS 102 226 §8.4) binds one
+The PE-RFM element (TCA SAIP v3.4.1 §8.8 / ETSI TS 102 226 v19 §7) binds one
 RFM applet instance to its OTA dispatch parameters: a list of TAR
 values, the minimum security level, two access-domain bitmaps, and an
-optional ADF binding. Operators need to grow ``tarList`` whenever a
-new SMS OTA service is added; the generic decoded-edit panel cannot do
-that safely. This module exposes the spec-aware primitives.
+optional ADF binding. The binding decides the default directory of an
+RFM script: with ``adfRFMAccess`` the named ADF is selected by default
+(ADF RFM, TS 102 226 v19 §7.3), without it the MF is (UICC shared file
+system RFM, §7.2). Operators need to grow ``tarList`` whenever a new SMS
+OTA service is added and to move an instance between the two scopes; the
+generic decoded-edit panel can do neither safely. This module exposes
+the spec-aware primitives, and the ADF catalogue of a profile so both the
+GUI card and the shell verb can name an ADF instead of spelling its AID.
 
 Decoded shape post ``build_decoded_document_from_sequence``::
 
@@ -54,6 +58,17 @@ def _hex_to_bytes(value: Any, *, label: str = "value", expect_length: int | None
     return data
 
 
+def _bytes_or_empty(value: Any) -> bytes:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    if isinstance(value, str):
+        try:
+            return _hex_to_bytes(value)
+        except ValueError:
+            return b""
+    return b""
+
+
 def _byte_or_default(value: Any, default: int) -> int:
     if value is None:
         return default
@@ -78,7 +93,7 @@ def locate_rfm_sections(decoded_document: dict[str, Any]) -> list[tuple[str, dic
         if isinstance(key, str) is False or isinstance(value, dict) is False:
             continue
         # RFM sections always carry an instanceAID + minimumSecurityLevel
-        # per SAIP §A.2; sniff that combination to recognise them.
+        # per SAIP v3.4.1 §8.8; sniff that combination to recognise them.
         if "instanceAID" in value and "minimumSecurityLevel" in value:
             out.append((key, value))
     return out
@@ -211,17 +226,24 @@ def set_adf_access(
 ) -> str:
     """Install / replace the ``adfRFMAccess`` sub-section.
 
-    ETSI TS 102 226 §8.4 caps each RFM instance to one ADF binding so
+    TCA SAIP v3.4.1 §8.8 links each RFM instance to at most one ADF, so
     this function replaces the existing section rather than appending.
+    An empty access domain inherits the matching UICC domain of the same
+    PE, which keeps the field a TS 102 226 v19 §8.2.1.3.2.5 Access Domain
+    (an ADP byte, then its ADD) whenever the PE carries one.
     """
     aid = _hex_to_bytes(adf_aid_hex, label="adfAID")
     if not (5 <= len(aid) <= 16):
         raise ValueError(f"adfAID must be 5..16 bytes; got {len(aid)}.")
     block: dict[str, Any] = {"adfAID": aid}
-    block["adfAccessDomain"] = _hex_to_bytes(adf_access_domain_hex, label="adfAccessDomain")
-    block["adfAdminAccessDomain"] = _hex_to_bytes(
-        adf_admin_access_domain_hex, label="adfAdminAccessDomain"
-    )
+    access = _hex_to_bytes(adf_access_domain_hex, label="adfAccessDomain")
+    if len(access) == 0:
+        access = _bytes_or_empty(rfm.get("uiccAccessDomain"))
+    admin = _hex_to_bytes(adf_admin_access_domain_hex, label="adfAdminAccessDomain")
+    if len(admin) == 0:
+        admin = _bytes_or_empty(rfm.get("uiccAdminAccessDomain"))
+    block["adfAccessDomain"] = access
+    block["adfAdminAccessDomain"] = admin
     rfm["adfRFMAccess"] = block
     return f"adfRFMAccess set; ADF AID={aid.hex().upper()}."
 
@@ -235,12 +257,129 @@ def remove_adf_access(rfm: dict[str, Any]) -> str:
 
 
 # ----------------------------------------------------------------------
+# ADF catalogue of the profile
+# ----------------------------------------------------------------------
+
+# Section base key -> (member holding the ADF's file list, ADF name).
+# TCA SAIP v3.4.1 §8.3.4: PE-USIM carries ``adf-usim``, PE-ISIM
+# ``adf-isim`` and PE-CSIM ``adf-csim``; PE-IoT (§8.3.4.8.1) creates the
+# MF level and the USIM ADF in one element and reuses ``adf-usim``. The
+# ADF's AID is the ``dfName`` of the member's first file descriptor.
+_ADF_MEMBER_BY_NAA: dict[str, tuple[str, str]] = {
+    "usim": ("adf-usim", "ADF.USIM"),
+    "isim": ("adf-isim", "ADF.ISIM"),
+    "csim": ("adf-csim", "ADF.CSIM"),
+    "iot": ("adf-usim", "ADF.USIM"),
+}
+
+_ADF_REFERENCE_RE = re.compile(r"^(?:ADF\.)?(USIM|ISIM|CSIM)$", re.IGNORECASE)
+
+
+def _first_df_name(files: Any) -> bytes | None:
+    """The ``dfName`` of the first file descriptor of a SAIP file list."""
+    if isinstance(files, (list, tuple)) is False or len(files) == 0:
+        return None
+    first = files[0]
+    if isinstance(first, (list, tuple)) is False or len(first) != 2:
+        return None
+    descriptor = first[1]
+    if isinstance(descriptor, dict) is False:
+        return None
+    df_name = _bytes_or_empty(descriptor.get("dfName"))
+    if len(df_name) == 0:
+        return None
+    return df_name
+
+
+def list_adf_bindings(decoded_document: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every ADF the NAA elements of the document create, with its AID.
+
+    One row per PE-USIM / PE-ISIM / PE-CSIM / PE-IoT section:
+    ``section_key``, ``pe_index`` (the section's position, which is the
+    PE index of an ``all_pe`` document), ``naa``, ``adf`` (``ADF.USIM``
+    ...) and ``aid_hex``. A section whose first file carries no
+    ``dfName`` is skipped.
+    """
+    sections = decoded_document.get("sections")
+    if isinstance(sections, dict) is False:
+        return []
+    out: list[dict[str, Any]] = []
+    for pe_index, (key, value) in enumerate(sections.items()):
+        if isinstance(key, str) is False or isinstance(value, dict) is False:
+            continue
+        entry = _ADF_MEMBER_BY_NAA.get(re.sub(r"_\d+$", "", key))
+        if entry is None:
+            continue
+        member, adf_name = entry
+        aid = _first_df_name(value.get(member))
+        if aid is None:
+            continue
+        out.append(
+            {
+                "section_key": key,
+                "pe_index": pe_index,
+                "naa": re.sub(r"_\d+$", "", key),
+                "adf": adf_name,
+                "aid_hex": aid.hex().upper(),
+            }
+        )
+    return out
+
+
+def match_adf_binding(
+    aid_hex: str,
+    bindings: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """The catalogue row whose AID equals ``aid_hex``, or ``None``."""
+    wanted = re.sub(r"\s+", "", str(aid_hex or "")).upper()
+    if len(wanted) == 0:
+        return None
+    for row in bindings:
+        if str(row.get("aid_hex", "")).upper() == wanted:
+            return row
+    return None
+
+
+def resolve_adf_reference(text: str, bindings: list[dict[str, Any]]) -> str:
+    """Turn an ADF name (``USIM``, ``ADF.ISIM``) or an AID into AID hex.
+
+    A name resolves through the catalogue of the profile and fails when
+    the profile creates no such ADF; anything else must be a 5..16 byte
+    AID (ETSI TS 101 220 v19 §4).
+    """
+    reference = str(text or "").strip()
+    if len(reference) == 0:
+        raise ValueError("an ADF name (USIM, ISIM, CSIM) or an AID is required.")
+    named = _ADF_REFERENCE_RE.match(reference)
+    if named is not None:
+        adf_name = "ADF." + named.group(1).upper()
+        for row in bindings:
+            if row.get("adf") == adf_name:
+                return str(row["aid_hex"])
+        known = ", ".join(sorted({str(row.get("adf")) for row in bindings})) or "none"
+        raise ValueError(f"the profile creates no {adf_name} (ADFs present: {known}).")
+    aid = _hex_to_bytes(reference, label="adfAID")
+    if not (5 <= len(aid) <= 16):
+        raise ValueError(f"adfAID must be 5..16 bytes; got {len(aid)}.")
+    return aid.hex().upper()
+
+
+# ----------------------------------------------------------------------
 # Read-side summary
 # ----------------------------------------------------------------------
 
 
-def rfm_summary(rfm: dict[str, Any]) -> dict[str, Any]:
-    """Project the PE-RFM section to a JSON-safe summary."""
+def rfm_summary(
+    rfm: dict[str, Any],
+    *,
+    bindings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Project the PE-RFM section to a JSON-safe summary.
+
+    ``default_directory`` is ``"ADF"`` when ``adfRFMAccess`` is present
+    and ``"MF"`` otherwise (TCA SAIP v3.4.1 §8.8). With ``bindings`` (see
+    ``list_adf_bindings``) the bound AID is also named (``adf_name``).
+    """
 
     def _hex_or_empty(value: Any) -> str:
         if isinstance(value, (bytes, bytearray)):
@@ -264,8 +403,11 @@ def rfm_summary(rfm: dict[str, Any]) -> dict[str, Any]:
     adf = rfm.get("adfRFMAccess") if isinstance(rfm.get("adfRFMAccess"), dict) else None
     adf_summary: dict[str, str] | None = None
     if adf is not None:
+        aid_hex = _hex_or_empty(adf.get("adfAID"))
+        match = match_adf_binding(aid_hex, bindings or [])
         adf_summary = {
-            "adf_aid_hex": _hex_or_empty(adf.get("adfAID")),
+            "adf_aid_hex": aid_hex,
+            "adf_name": str(match["adf"]) if match is not None else "",
             "adf_access_domain_hex": _hex_or_empty(adf.get("adfAccessDomain")),
             "adf_admin_access_domain_hex": _hex_or_empty(adf.get("adfAdminAccessDomain")),
         }
@@ -277,15 +419,19 @@ def rfm_summary(rfm: dict[str, Any]) -> dict[str, Any]:
         "minimum_security_level": msl_int,
         "uicc_access_domain_hex": _hex_or_empty(rfm.get("uiccAccessDomain")),
         "uicc_admin_access_domain_hex": _hex_or_empty(rfm.get("uiccAdminAccessDomain")),
+        "default_directory": "ADF" if adf_summary is not None else "MF",
         "adf_access": adf_summary,
     }
 
 
 __all__ = [
     "add_tar",
+    "list_adf_bindings",
     "locate_rfm_sections",
+    "match_adf_binding",
     "remove_adf_access",
     "remove_tar",
+    "resolve_adf_reference",
     "rfm_summary",
     "set_adf_access",
     "set_instance_aid_hex",

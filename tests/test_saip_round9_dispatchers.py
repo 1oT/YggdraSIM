@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for round-9 PE-parity SAIP dispatchers.
 
-Covers the stateless action surfaces — the session-aware ones share
+Covers the stateless action surfaces -- the session-aware ones share
 their logic with the helper-module test suites.
 """
 
@@ -70,9 +69,10 @@ class StatelessPinTests(unittest.TestCase):
 
 class StatelessAkaTests(unittest.TestCase):
 
-    def test_mapping_option_catalog_has_eight_flags(self) -> None:
+    def test_mapping_option_catalog_has_the_four_sqn_modes(self) -> None:
+        # TCA SAIP v3.4.1 §8.4.2 (page 49): one 2-bit value in b3-b2.
         out = saip._dispatch_aka_mapping_option_catalog(ctx=None)
-        self.assertEqual(len(out["options"]), 8)
+        self.assertEqual(len(out["options"]), 4)
 
 
 class StatelessSdTests(unittest.TestCase):
@@ -98,12 +98,9 @@ class StatelessSdTests(unittest.TestCase):
     def test_encode_msl_kwargs(self) -> None:
         out = saip._dispatch_sd_encode_field(
             ctx=None, field="msl",
-            msl_kwargs={
-                "auth_response": "cryptographic_checksum",
-                "integrity": "no_integrity",
-            },
+            msl_kwargs={"integrity": "cryptographic_checksum", "counter": "counter_higher"},
         )
-        self.assertTrue(out["hex"].startswith("02"))
+        self.assertEqual(out["hex"], "12")
 
     def test_encode_unknown_field(self) -> None:
         with self.assertRaises(ValueError):

@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""``/api/backend/*`` — thin wrapper over ``yggdrasim_common.card_backend``.
+"""``/api/backend/*`` -- thin wrapper over ``yggdrasim_common.card_backend``.
 
 The GUI's top-bar card-backend switch routes through these endpoints.
 Setting the backend here is scoped to the server process

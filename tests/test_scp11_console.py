@@ -8,7 +8,7 @@ import io
 import contextlib
 from pathlib import Path
 
-CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "console.py"
+CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "live" / "console.py"
 LIVE_CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "live" / "console.py"
 TEST_CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "test" / "console.py"
 spec = importlib.util.spec_from_file_location("scp11_console_module", CONSOLE_PATH)
@@ -52,11 +52,20 @@ class DummyCfg:
 class DummyApduChannel:
     def __init__(self):
         self.send_calls = []
+        self.raw_apdu_logging = False
+        self.raw_logging_updates = []
         self.response = bytes.fromhex("BF3203800100")
         self.configured_data_response = tlv(
             bytes.fromhex("BF3C"),
             tlv(bytes.fromhex("80"), b"rsp.default.example"),
         )
+
+    def set_raw_apdu_logging(self, enabled: bool) -> None:
+        self.raw_apdu_logging = bool(enabled)
+        self.raw_logging_updates.append(bool(enabled))
+
+    def get_raw_apdu_logging(self) -> bool:
+        return bool(self.raw_apdu_logging)
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
         self.send_calls.append((log_name, apdu))
@@ -128,8 +137,8 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         additional_smds_2 = b"smds2.example.com"
         allowed_ci_pkid = b"\xAA\xBB\xCC\xDD"
 
-        nested_additional = tlv(bytes.fromhex("82"), additional_smds_1) + tlv(
-            bytes.fromhex("82"),
+        nested_additional = tlv(bytes.fromhex("0C"), additional_smds_1) + tlv(
+            bytes.fromhex("0C"),
             additional_smds_2,
         )
         inner = (
@@ -173,8 +182,8 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         self.assertIn("Forbidden Profile Policy Rules", rendered)
         self.assertIn("PP Version", rendered)
         self.assertIn("v255.255.255 (FFFFFF)", rendered)
-        self.assertIn("IPA Mode", rendered)
-        self.assertIn("Mode 1 active", rendered)
+        self.assertIn("LPA/IPA Mode", rendered)
+        self.assertIn("IPAe active", rendered)
         self.assertIn("IoT Specific Info", rendered)
         self.assertIn("eCall Supported", rendered)
         self.assertIn("SGP.32 Validation", rendered)
@@ -199,6 +208,21 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         self.assertIn("eUICC Cert Bytes", rendered)
         self.assertIn(f"EUM Cert DER Hex     : {eum.hex().upper()}", rendered)
         self.assertIn(f"eUICC Cert DER Hex   : {euicc.hex().upper()}", rendered)
+
+    def test_print_get_certs_compact_renders_the_certificate_view(self):
+        from tests.certificate_view_support import build_chain, get_certs_response
+
+        chain = build_chain()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.console._print_get_certs_compact(get_certs_response(chain.eum, chain.euicc))
+
+        rendered = output.getvalue()
+
+        self.assertIn("Permitted EINs", rendered)
+        self.assertIn("`-- eUICC Certificate", rendered)
+        self.assertIn("signature valid", rendered)
+        self.assertIn(f"EUM Cert DER Hex     : {chain.eum.hex().upper()}", rendered)
 
     def test_build_enable_profile_payload_matches_expected_shape(self):
         payload = self.console._build_profile_command_payload(
@@ -438,7 +462,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
 
         self.assertEqual(executed, [])
 
-    def test_delete_enabled_profile_auto_switches_before_delete(self):
+    def test_delete_enabled_profile_auto_disables_before_delete(self):
         profiles = [
             console_module.ProfileMetadataView(
                 iccid="8901000000000000001",
@@ -474,11 +498,14 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             command_name="DELETE-PROFILE",
         )
 
+        # SGP.22 v3.1 section 5.7.18 answers DeleteProfile on an enabled
+        # Profile with profileNotInDisabledState, so the shared profile_actions
+        # contract disables the target first and then deletes it; no other
+        # Profile is enabled on its behalf.
         self.assertEqual(
             executed,
             [
-                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001100"), self.console.TAG_DISABLE_PROFILE, "DisableProfile"),
-                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001200"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
+                ((self.console.TAG_ICCID, "981000000000000000F1"), self.console.TAG_DISABLE_PROFILE, "DisableProfile"),
                 ((self.console.TAG_ICCID, "981000000000000000F1"), self.console.TAG_DELETE_PROFILE, "DeleteProfile"),
             ],
         )
@@ -556,6 +583,31 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
 
         self.assertEqual(self.console.orchestrator.eim_poll_calls, [("MATCH-55", 0)])
 
+    def test_eim_download_selector_narrows_the_sweep_to_one_entry(self):
+        self.console._cmd_eim_download("--2")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [("", [1])])
+
+    def test_eim_download_selector_keeps_a_matching_id(self):
+        self.console._cmd_eim_download("MATCH-55 --1,2")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [("MATCH-55", [0, 1])])
+
+    def test_eim_download_selector_deduplicates_repeated_entries(self):
+        self.console._cmd_eim_download("--2,2,1")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [("", [1, 0])])
+
+    def test_eim_download_rejects_a_malformed_selector_instead_of_polling(self):
+        self.console._cmd_eim_download("--nope")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [])
+
+    def test_eim_download_rejects_entry_zero(self):
+        self.console._cmd_eim_download("--0")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [])
+
     def test_download_activation_code_updates_es9_base_url_from_server(self):
         self.console._download_activation_code("1$smdpplus2.smdpp.example.test$MATCH-55$1.2.3")
 
@@ -569,6 +621,195 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             self.console.orchestrator.profile_provider.base_url,
             "https://smdpplus2.smdpp.example.test",
         )
+
+
+class LiveConsoleCommandDebugFlagTests(unittest.TestCase):
+    """``--debug`` is consumed by the dispatcher, not by each handler.
+
+    Before this, ``DOWNLOAD --debug`` reached ``_cmd_eim_download`` as a
+    positional and was relayed upstream as a matchingId.
+    """
+
+    def setUp(self):
+        import os
+
+        self._os = os
+        self._env_key = "YGGDRASIM_GLOBAL_DEBUG"
+        self._previous_env = os.environ.get(self._env_key)
+        os.environ.pop(self._env_key, None)
+        module = _load_console_module("scp11_live_console_debug_flag", LIVE_CONSOLE_PATH)
+        self.console = module.SCP11Console(DummyClient())
+
+    def tearDown(self):
+        if self._previous_env is None:
+            self._os.environ.pop(self._env_key, None)
+        else:
+            self._os.environ[self._env_key] = self._previous_env
+
+    def test_debug_flag_is_stripped_instead_of_becoming_a_matching_id(self):
+        self.console._execute_command("DOWNLOAD", "--debug")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [("", 0)])
+
+    def test_debug_flag_preserves_a_real_matching_id(self):
+        self.console._execute_command("DOWNLOAD", "MATCH-55 --debug")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [("MATCH-55", 0)])
+
+    def test_entry_selector_survives_the_debug_flag_split(self):
+        self.console._execute_command("DOWNLOAD", "--1,3 --debug")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [("", [0, 2])])
+
+    def test_rejected_entry_selector_does_not_reach_the_card(self):
+        self.console._execute_command("DOWNLOAD", "--nope")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [])
+        self.assertEqual(self.console.orchestrator.sync_calls, [])
+        self.assertEqual(self.console.apdu_channel.send_calls, [])
+
+    def test_debug_flag_latches_raw_apdu_logging_only_for_the_command(self):
+        from yggdrasim_common.process_debug import is_global_debug_enabled
+
+        channel = self.console.apdu_channel
+        observed = {}
+
+        def recording_poll(matching_id: str = "", entry_index: int = 0) -> None:
+            observed["global_debug"] = is_global_debug_enabled()
+            observed["raw_apdu"] = channel.get_raw_apdu_logging()
+
+        self.console.orchestrator.run_eim_poll = recording_poll
+
+        self.console._execute_command("DOWNLOAD", "--debug")
+
+        self.assertTrue(observed["global_debug"])
+        self.assertTrue(observed["raw_apdu"])
+        self.assertFalse(channel.get_raw_apdu_logging())
+        self.assertIsNone(self._os.environ.get(self._env_key))
+
+    def test_absent_debug_flag_leaves_the_argument_and_the_flag_alone(self):
+        channel = self.console.apdu_channel
+
+        self.console._execute_command("DOWNLOAD", "MATCH-55")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [("MATCH-55", 0)])
+        self.assertEqual(channel.raw_logging_updates, [])
+        self.assertIsNone(self._os.environ.get(self._env_key))
+
+
+class LiveConsoleFallbackAttributeTests(unittest.TestCase):
+    """SGP.32 fallbackAttribute must survive into the profile listing.
+
+    ES10b.ExecuteFallbackMechanism answers fallbackNotAvailable unless some
+    Profile carries tag '9F26', so the listing is where an operator finds out
+    whether the Fallback Mechanism can run on a given card at all.
+    """
+
+    @staticmethod
+    def _tlv(tag_hex: str, value: bytes) -> bytes:
+        tag = bytes.fromhex(tag_hex)
+        return tag + bytes([len(value)]) + value
+
+    def _profile(self, iccid_hex: str, state: int, fallback) -> bytes:
+        body = (
+            self._tlv("5A", bytes.fromhex(iccid_hex))
+            + self._tlv("4F", bytes.fromhex("A0000005591010FFFFFFFF8900001100"))
+            + self._tlv("9F70", bytes([state]))
+            + self._tlv("95", bytes([2]))
+            + self._tlv("90", b"Profile")
+        )
+        if fallback is not None:
+            body += self._tlv("9F26", bytes([0xFF if fallback else 0x00]))
+        return self._tlv("E3", body)
+
+    def test_profile_rows_carry_the_fallback_attribute(self) -> None:
+        module = _load_console_module("scp11_live_console_fallback_attr", LIVE_CONSOLE_PATH)
+        console = object.__new__(module.SCP11Console)
+        console._profile_info_tag_list_honoured = True
+        raw = (
+            self._profile("8988201234567890123F", 1, None)
+            + self._profile("8988209876543210987F", 0, True)
+            + self._profile("8988205555555555555F", 0, False)
+        )
+
+        rows = module.SCP11Console._decode_profiles_with_local_parser(console, raw)
+
+        self.assertEqual([row.fallback for row in rows], [False, True, False])
+
+    def test_an_untagged_read_reports_the_attribute_as_unknown(self) -> None:
+        """A default-set response is silent about '9F26', not a denial of it.
+
+        SGP.22 v3.1 §5.7.15 omits every tag-gated member from an untagged
+        ProfileInfoListRequest, so absence there says nothing about whether a
+        Fallback Profile exists.
+        """
+        module = _load_console_module("scp11_live_console_fallback_untagged", LIVE_CONSOLE_PATH)
+        console = object.__new__(module.SCP11Console)
+        raw = self._profile("8988201234567890123F", 1, None)
+
+        rows = module.SCP11Console._decode_profiles_with_local_parser(console, raw)
+
+        self.assertIsNone(rows[0].fallback)
+
+    def test_the_profiles_request_names_the_fallback_tag(self) -> None:
+        """The '5C' tag list is the only way '9F26' can reach the listing."""
+        module = _load_console_module("scp11_live_console_fallback_request", LIVE_CONSOLE_PATH)
+        console = object.__new__(module.SCP11Console)
+        sent: list[bytes] = []
+
+        def _capture(payload: bytes, log_name: str) -> bytes:
+            sent.append(payload)
+            return b""
+
+        console._send_store_data_with_logical_fallback = _capture
+
+        module.SCP11Console._fetch_profiles_raw(console)
+
+        self.assertEqual(len(sent), 1)
+        request = sent[0].hex().upper()
+        self.assertTrue(request.startswith("BF2D"))
+        self.assertIn("5C", request)
+        self.assertIn("9F26", request)
+        self.assertTrue(console._profile_info_tag_list_honoured)
+
+    def test_a_refused_tag_list_falls_back_to_the_default_set(self) -> None:
+        module = _load_console_module("scp11_live_console_fallback_refused", LIVE_CONSOLE_PATH)
+        console = object.__new__(module.SCP11Console)
+        sent: list[bytes] = []
+
+        def _capture(payload: bytes, log_name: str) -> bytes:
+            sent.append(payload)
+            if len(sent) == 1:
+                raise RuntimeError("APDU Failed: 6A80")
+            return b""
+
+        console._send_store_data_with_logical_fallback = _capture
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            module.SCP11Console._fetch_profiles_raw(console)
+
+        self.assertEqual(sent[1], bytes.fromhex("BF2D00"))
+        self.assertFalse(console._profile_info_tag_list_honoured)
+
+    def test_the_listing_shows_a_fallback_column(self) -> None:
+        module = _load_console_module("scp11_live_console_fallback_table", LIVE_CONSOLE_PATH)
+        console = object.__new__(module.SCP11Console)
+        console._profile_info_tag_list_honoured = True
+        rows = module.SCP11Console._decode_profiles_with_local_parser(
+            console,
+            self._profile("8988209876543210987F", 0, True),
+        )
+        console._resolve_display_alias_for_aid = lambda aid: None
+        console._format_profile_state = lambda state, width: f"{state:<{width}}"
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            module.SCP11Console._print_profiles_table(console, rows, "Profiles")
+        output = buffer.getvalue()
+
+        self.assertIn("FB", output.splitlines()[2])
+        self.assertIn("yes", output)
 
 
 if __name__ == "__main__":

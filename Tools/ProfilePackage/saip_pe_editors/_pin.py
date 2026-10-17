@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 PE-PINCodes and PE-PUKCodes structured editors.
 
@@ -184,7 +183,7 @@ class _PinRowForm(Vertical):
             f"pin_{self._row_index}_max",
             "Max attempts:",
             mode="decimal",
-            placeholder="0–15",
+            placeholder="0-15",
             hint="Packed retry nibble (high) · Apply commits.",
             id=f"pin_slot_{self._row_index}_max",
         )
@@ -192,7 +191,7 @@ class _PinRowForm(Vertical):
             f"pin_{self._row_index}_remaining",
             "Remaining:",
             mode="decimal",
-            placeholder="0–15",
+            placeholder="0-15",
             hint="Packed retry nibble (low) · Apply commits.",
             id=f"pin_slot_{self._row_index}_remaining",
         )
@@ -375,7 +374,7 @@ class PinCodesEditor(BasePeEditor):
         if self._row_count == 0:
             host.mount(
                 Static(
-                    "(empty pinconfig — use '+ Add PIN' to create the first entry)",
+                    "(empty pinconfig -- use '+ Add PIN' to create the first entry)",
                     classes="pin_section_note",
                 ),
             )
@@ -592,7 +591,7 @@ class _PukRowForm(Vertical):
             f"puk_{self._row_index}_max",
             "Max attempts:",
             mode="decimal",
-            placeholder="0–15",
+            placeholder="0-15",
             hint="Packed retry nibble (high) · Apply commits.",
             id=f"puk_slot_{self._row_index}_max",
         )
@@ -600,7 +599,7 @@ class _PukRowForm(Vertical):
             f"puk_{self._row_index}_remaining",
             "Remaining:",
             mode="decimal",
-            placeholder="0–15",
+            placeholder="0-15",
             hint="Packed retry nibble (low) · Apply commits.",
             id=f"puk_slot_{self._row_index}_remaining",
         )
@@ -745,7 +744,7 @@ class PukCodesEditor(BasePeEditor):
         if self._row_count == 0:
             host.mount(
                 Static(
-                    "(empty pukCodes list — use '+ Add PUK' to create the first entry)",
+                    "(empty pukCodes list -- use '+ Add PUK' to create the first entry)",
                     classes="puk_section_note",
                 ),
             )

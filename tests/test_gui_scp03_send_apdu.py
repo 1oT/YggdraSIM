@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""Regression tests for ``scp03.send_apdu`` — the raw APDU console.
+"""Regression tests for ``scp03.send_apdu`` -- the raw APDU console.
 
 Pinned contract:
 
@@ -23,7 +23,7 @@ Pinned contract:
    * Retries 6Cxx once with the card-suggested Le and replaces the
      response buffer (same logical read, correct length).
    * Respects ``follow_61=False`` / ``retry_6c=False`` toggles.
-   * Does **not** restore MF afterwards — the whole point of this
+   * Does **not** restore MF afterwards -- the whole point of this
      dispatcher is to leave the card wherever the operator's APDU
      put it. The file-tree click will re-anchor MF later.
    * Returns a decoded breakdown, ASCII preview, SW meaning from
@@ -279,7 +279,7 @@ def test_corrected_le_case1_appends():
 def test_corrected_le_case2_replaces():
     from yggdrasim_common.gui_server.actions.scp03 import _apdu_with_corrected_le
 
-    # Case 2 APDU: CLA INS P1 P2 Le — retry replaces the trailing Le.
+    # Case 2 APDU: CLA INS P1 P2 Le -- retry replaces the trailing Le.
     assert _apdu_with_corrected_le("80CA5A0000", 0x30) == "80CA5A0030"
 
 
@@ -327,7 +327,7 @@ def test_corrected_le_refuses_malformed_framing():
 
 
 # ----------------------------------------------------------------------
-# _dispatch_send_apdu — happy path (no chain)
+# _dispatch_send_apdu -- happy path (no chain)
 # ----------------------------------------------------------------------
 
 
@@ -354,14 +354,14 @@ def test_send_apdu_happy_path_no_chain(monkeypatch):
     assert out["response_hex"] == "5A0998000000000000000F"
     assert out["response_length"] == 11
     assert out["chain"] == []
-    # Did NOT restore MF — the whole point of this dispatcher.
+    # Did NOT restore MF -- the whole point of this dispatcher.
     assert "00A40004023F00" not in tp.calls
     # Exactly one APDU on the wire.
     assert tp.calls == ["80CA5A00"]
 
 
 # ----------------------------------------------------------------------
-# _dispatch_send_apdu — 61xx auto-follow
+# _dispatch_send_apdu -- 61xx auto-follow
 # ----------------------------------------------------------------------
 
 
@@ -371,7 +371,7 @@ def test_send_apdu_follows_61xx_with_get_response(monkeypatch):
     tp = _FakeTransporter()
     fs = _FakeFsController()
     sess = _FakeSession(tp, fs)
-    # Initial returns 61 0A — 10 bytes ready to be fetched.
+    # Initial returns 61 0A -- 10 bytes ready to be fetched.
     tp.script["80F240020243C0000000"] = (b"", 0x61, 0x0A)
     # GET RESPONSE for 10 bytes returns the payload + 9000.
     tp.script["00C000000A"] = (bytes.fromhex("AABBCCDDEEFF00112233"), 0x90, 0x00)
@@ -453,7 +453,7 @@ def test_send_apdu_follow_61_false_leaves_it_to_caller(monkeypatch):
 
 
 # ----------------------------------------------------------------------
-# _dispatch_send_apdu — 6Cxx retry
+# _dispatch_send_apdu -- 6Cxx retry
 # ----------------------------------------------------------------------
 
 
@@ -463,7 +463,7 @@ def test_send_apdu_retries_6cxx_with_corrected_le(monkeypatch):
     tp = _FakeTransporter()
     fs = _FakeFsController()
     sess = _FakeSession(tp, fs)
-    # Initial READ BINARY with Le=00 — card says 6C10 (need Le=10).
+    # Initial READ BINARY with Le=00 -- card says 6C10 (need Le=10).
     tp.script["00B0000000"] = (b"", 0x6C, 0x10)
     # Retry replaces the Le byte: 00B0000010 returns 16 bytes + 9000.
     tp.script["00B0000010"] = (
@@ -656,7 +656,7 @@ def test_send_apdu_redacts_authenticate_response_material(monkeypatch):
 
 
 # ----------------------------------------------------------------------
-# _dispatch_send_apdu — result shape / metadata
+# _dispatch_send_apdu -- result shape / metadata
 # ----------------------------------------------------------------------
 
 
@@ -682,7 +682,7 @@ def test_send_apdu_returns_breakdown_and_sw_meaning(monkeypatch):
     assert bd["lc"] == "02"
     assert bd["data_hex"] == "3F00"
     assert out["sw_meaning"] == "Success"
-    # Printable-byte ASCII preview for FCP — mostly binary so most
+    # Printable-byte ASCII preview for FCP -- mostly binary so most
     # bytes decode to "."; just assert the length matches the hex.
     assert len(out["response_ascii"]) == len(bytes.fromhex(out["response_hex"]))
 
@@ -708,7 +708,7 @@ def test_send_apdu_ascii_preview_for_printable_response(monkeypatch):
 
 
 def test_send_apdu_no_mf_restore_after_call(monkeypatch):
-    """Dispatcher must NOT restore MF — operator owns the card state."""
+    """Dispatcher must NOT restore MF -- operator owns the card state."""
     from yggdrasim_common.gui_server.actions import scp03 as mod
 
     tp = _FakeTransporter()
@@ -731,7 +731,7 @@ def test_send_apdu_no_mf_restore_after_call(monkeypatch):
     )
 
     assert "00A40004023F00" not in tp.calls, (
-        "send_apdu must NOT restore MF — operator owns the card state; "
+        "send_apdu must NOT restore MF -- operator owns the card state; "
         f"got calls {tp.calls!r}"
     )
 

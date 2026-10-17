@@ -20,6 +20,9 @@ This page mirrors the grouped `HELP` surface from the SCP03 admin shell.
 - `CLS`: clear the terminal screen
 - `OTA`: switch into the SCP80 over-the-air toolkit
 - `STK [Commands]`: enter the SCP03 STK subsystem
+- `STK ON` / `STK OFF`: keep the STK bootstrap running in this shell -- every
+  command answers the card's proactive commands, and `STK <verb>` runs the
+  subsystem's EVENT / SMS / LOCATION / DATA verbs without leaving it
 
 ## GlobalPlatform execution wizards
 
@@ -114,6 +117,6 @@ SCP11 README pages.
 
 - Use [Guide Topics](scp03-guide-topics.md) for the deeper background material behind these commands.
 - Use [Source Library](../source-library.md) for the mirrored README and guide files that the wrapper menu also exposes.
-- Use [HIL Bridge — offline pcap replay](../subsystems/hil-bridge.md#offline-pcap-replay) and
+- Use [HIL Bridge -- offline pcap replay](../subsystems/hil-bridge.md#offline-pcap-replay) and
   [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md) for the
   `EXPORT-KEYBAG` consumer side.

@@ -73,6 +73,7 @@ card directly; its output is what the card-facing shells consume.
 | `TREE` | PE-level tree view |
 | `CHECK` | fast structural check |
 | `LINT` | full lint with strict mode, metadata, and gate preset support |
+| `TRIM` | report, or with `APPLY` drop, the `fillFileContent` bytes the fill pattern or template default already provides (TCA SAIP 8.3.3) |
 | `DUMP` | structured dump in decoded or raw form |
 
 ### Transform and transcode
@@ -83,6 +84,8 @@ card directly; its output is what the card-facing shells consume.
 | `SPLIT` | split a package into its PE segments |
 | `EXTRACT-APPS` | extract applets as `CAP` or `IJC` |
 | `REMOVE-NAA <USIM/ISIM/CSIM>` | remove a NAA from a profile |
+| `RFM [<pe_index> MF \| <pe_index> ADF <USIM\|ISIM\|CSIM\|aid>] [ACCESS=<hex>] [ADMIN=<hex>] [OUTPUT=<file.der> \| IN-PLACE]` | list the PE-RFM elements with their default directory, or drop (`MF`) / install (`ADF`) the `adfRFMAccess` binding of one (TCA SAIP 8.8; ETSI TS 102 226 7.2 / 7.3); without `OUTPUT=` or `IN-PLACE` the change is only shown |
+| `VARIABLES [SET \| CLEAR \| USE \| FILL \| GENERATE \| EXPORT \| EXPORT-LIST \| LISTS \| NORMALISE \| DEFINE ...]` | the one verb over the active template, inline typed placeholders or `{NAME}` tokens: the placeholders with the value each takes and its source; SET / CLEAR edit the typed values, USE binds a test-value list, FILL stores the lists' values, GENERATE (EXPORT is the same) writes the test profile with every placeholder replaced by its value (DER, or ASCII hex for a `.hex` target), EXPORT-LIST writes the values as a list, LISTS manages the lists, NORMALISE respells the placeholders in the typed form, DEFINE adds a placeholder to a test-value list with its value or declared alone |
 | `RAW <subcommand>` | pass-through to the external backend tool |
 
 ### Transcode TUI
@@ -104,7 +107,7 @@ The CSV format follows the TCA SAIP personalisation-data convention
 used across the SAIP ecosystem: one variable per line, `name,hex`,
 with optional `#`-prefix comment lines used to separate independent
 personalisation-data sets when multiple profile packages share one CSV
-file. The interop is symmetric — exporting and re-importing produces
+file. The interop is symmetric -- exporting and re-importing produces
 an identical sidecar payload modulo casing.
 
 ### Diff and simulator-pipeline
@@ -144,19 +147,19 @@ in the slot caption.
 
 Editor coverage today:
 
-- PE-PINCodes / PE-PUKCodes — per-row key-reference, retry counters, hex
+- PE-PINCodes / PE-PUKCodes -- per-row key-reference, retry counters, hex
   PIN / PUK value, attributes, unblocking-PIN reference, with add / remove
-- PE-AKAParameter / PE-AKAParameter2 — algorithm picker (Milenage,
+- PE-AKAParameter / PE-AKAParameter2 -- algorithm picker (Milenage,
   TUAK, XOR, etc.), key, OPc, rotation / xoring constants, SQN options,
   delta, age limit, and a dynamic SQN-init list
 - PE-USIM / PE-OPT-USIM / PE-ISIM / PE-OPT-ISIM / PE-CSIM / PE-OPT-CSIM /
-  PE-Telecom — header, template-ID dropdown of known OIDs, and EF presence
+  PE-Telecom -- header, template-ID dropdown of known OIDs, and EF presence
   toggles so operators can drop EFs from the PE
-- PE-SecurityDomain — instance parameters (load-package / class /
+- PE-SecurityDomain -- instance parameters (load-package / class /
   instance AID, privileges, life-cycle state), dynamic key list (key data,
   key type, MAC length, key access, key identifier, usage qualifier,
   version number), and a personalisation-blob list
-- everything else — `GenericPeEditor` falls back to the shared
+- everything else -- `GenericPeEditor` falls back to the shared
   `PeHeaderForm` so `mandated` and `identification` always round-trip
 
 All edits are committed back through `saip_decoded_edit`, so the JSON and

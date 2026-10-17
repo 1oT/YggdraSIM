@@ -56,7 +56,7 @@ Wireshark for post-mortem review.
       --usb-vidpid 1d50:60e3
     ```
 
-    See [Remote APDU Streaming](remote-apdu-streaming.md) for the Card
+    See [Card Bridge over SSH](remote-apdu-streaming.md) for the Card
     Bridge and SSH setup.
 
 3. Confirm healthy state.
@@ -122,7 +122,7 @@ Wireshark for post-mortem review.
 ## Related pages
 
 - [HIL Bridge](../subsystems/hil-bridge.md)
-- [Remote APDU Streaming](remote-apdu-streaming.md)
+- [Card Bridge over SSH](remote-apdu-streaming.md)
 - [Install RemSIM / APDU Streaming](install-remsim-apdu-streaming.md)
 - [Universal GUI Command Center](../subsystems/gui-command-center.md)
 - [HIL Model](../concepts/hil-model.md)

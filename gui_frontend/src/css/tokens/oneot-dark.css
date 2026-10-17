@@ -29,6 +29,12 @@ html[data-theme="oneot-dark"] {
   --warn-soft: rgba(254, 193, 7, 0.18);
   --fail: #ee5d1f;
   --fail-soft: rgba(238, 93, 31, 0.18);
+
+  /* The brand accent is the ok green, so files keep the neutral
+     hairline instead of a second green beside the ADF teal. */
+  --tree-ef-bg: transparent;
+  --tree-ef-fg: var(--fg-dim);
+  --tree-ef-edge: var(--border);
   --code-bg: #041a33;
   --kbd-bg: rgba(6, 36, 64, 0.9);
   --shadow-card: 0 14px 38px rgba(0, 0, 0, 0.35);

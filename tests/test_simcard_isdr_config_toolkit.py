@@ -105,7 +105,7 @@ class IsdrConfigToolkitWiringTests(unittest.TestCase):
 
     def test_load_isdr_config_file_applies_toolkit_section(self) -> None:
         payload = {
-            "eid": "89044045930000000000001492294428",
+            "eid": "89049032000000000000000000000101",
             "toolkit": {
                 "poll_strategy": "both",
                 "timer_management_seconds": 45,

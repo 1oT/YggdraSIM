@@ -17,7 +17,7 @@
   gap: 10px;
   padding: 8px 10px 6px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   align-items: stretch;
   min-height: 0;
@@ -38,7 +38,7 @@
 }
 
 .saip-ribbon::-webkit-scrollbar-thumb {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--border-strong);
 }
 
@@ -86,7 +86,7 @@
   padding: 5px 7px 4px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--fg);
   cursor: pointer;
   transition:
@@ -111,6 +111,12 @@
 }
 
 .saip-ribbon-btn:active:not(.is-disabled):not([disabled]) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* A toggle button (the Token editor dock) shows its open state. */
+.saip-ribbon-btn[aria-pressed="true"] {
   background: var(--accent-soft);
   border-color: var(--accent);
 }

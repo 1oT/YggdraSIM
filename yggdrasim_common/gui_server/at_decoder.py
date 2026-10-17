@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """AT-line decoder overlay for the GUI ``Advanced > Host shell`` tab.
 
 This module sits next to :mod:`yggdrasim_common.gui_server.host_shell`
 and is consumed by ``routes/host_shell.py``. The route reads bytes from
-the PTY, forwards them to the xterm-side WebSocket as raw frames, and —
-when the operator has flipped the *Decode AT lines* toggle — also tee's
+the PTY, forwards them to the xterm-side WebSocket as raw frames, and --
+when the operator has flipped the *Decode AT lines* toggle -- also tee's
 a copy through :class:`LineAccumulator`. Each terminated line that
 matches an AT-shape known to :mod:`Tools.HilBridge.at_simlink` produces
 one ``{"event": "at_decoded", ...}`` JSON frame on the same socket.
@@ -19,7 +18,7 @@ Design notes
   bounded :class:`bytearray`, splits on ``\\r`` / ``\\n`` boundaries,
   strips ANSI control sequences, and dispatches each completed line
   through :func:`decode_line`. Lines that don't match an AT shape are
-  silently dropped — they already exist verbatim in the xterm output,
+  silently dropped -- they already exist verbatim in the xterm output,
   so re-emitting them as JSON would just be noise.
 * The dispatch is deliberately additive and tolerant: a malformed
   ``+CSIM:`` line falls through and emits no decoded entry, so partial
@@ -53,7 +52,7 @@ _ANSI_RE = re.compile(
 )
 
 
-# Forward AT-shape recognisers — the request half is delegated to
+# Forward AT-shape recognisers -- the request half is delegated to
 # at_simlink which already lives in the repo. The response half is
 # parsed inline because at_simlink only formats outgoing responses.
 _PLUS_CSIM_RESPONSE_RE = re.compile(
@@ -88,7 +87,7 @@ _CRSM_COMMAND_LABELS = {
 
 
 # ISO 7816-4 INS labels used when expanding a raw AT+CSIM APDU header.
-# Kept tight on purpose — a full table lives elsewhere; this is just
+# Kept tight on purpose -- a full table lives elsewhere; this is just
 # the set commonly issued through AT+CSIM in practice.
 _INS_LABELS = {
     0xA4: "SELECT",
@@ -133,7 +132,7 @@ class LineAccumulator:
     :data:`_DEFAULT_LINE_MAX` is split at the boundary to keep one
     request from hogging the channel.
 
-    The instance is single-threaded — the route serialises calls in
+    The instance is single-threaded -- the route serialises calls in
     the asyncio loop. Wrap externally if needed.
     """
 
@@ -163,7 +162,7 @@ class LineAccumulator:
         if len(chunk) == 0:
             return
         if len(self._buffer) + len(chunk) > self._buffer_limit:
-            # Buffer overflow — drop everything we've accumulated and
+            # Buffer overflow -- drop everything we've accumulated and
             # this fragment too. The decoder is best-effort; the user
             # still sees the raw bytes in xterm.
             self._buffer.clear()
@@ -203,7 +202,7 @@ class LineAccumulator:
 
 
 # ---------------------------------------------------------------------------
-# Decoders — each returns either a JSON-serialisable dict or ``None``.
+# Decoders -- each returns either a JSON-serialisable dict or ``None``.
 # ---------------------------------------------------------------------------
 
 
@@ -212,7 +211,7 @@ def decode_line(line: str, direction: str) -> Optional[dict]:
 
     *direction* is ``"tx"`` for bytes the operator typed (modem-bound)
     and ``"rx"`` for bytes the modem replied with. The directionality
-    is informational — every decoder runs regardless — but the side
+    is informational -- every decoder runs regardless -- but the side
     panel uses it to pick the > / < glyph and colour.
     """
     request = _decode_csim_request(line)

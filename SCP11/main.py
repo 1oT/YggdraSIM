@@ -19,7 +19,8 @@
 
 from yggdrasim_common.quit_control import QuitAllRequested
 
-def _load_live_main ():
+
+def _load_live_main():
     try:
         from .live.main import SCP11StartupError, SGP22Client, entry
     except ImportError:
@@ -27,16 +28,16 @@ def _load_live_main ():
     return SCP11StartupError, SGP22Client, entry
 
 
-def entry ():
-    _, _, live_entry =_load_live_main ()
-    live_entry ()
+def entry():
+    _, _, live_entry = _load_live_main()
+    live_entry()
 
 
 if __name__ == "__main__":
-    startup_error_cls, _, live_entry =_load_live_main ()
+    startup_error_cls, _, live_entry = _load_live_main()
     try:
-        live_entry ()
+        live_entry()
     except QuitAllRequested:
         raise SystemExit(0)
     except startup_error_cls as error:
-        print (f"\n[STARTUP ERROR] {error}")
+        print(f"\n[STARTUP ERROR] {error}")

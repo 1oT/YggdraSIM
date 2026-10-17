@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from SCP11.console import SCP11Console as RelayConsole
+from SCP11.relay.console import SCP11Console as RelayConsole
 from SCP11.eim_local.main import EimLocalShell
 from SCP11.live.console import SCP11Console as LiveConsole
 from SCP11.local_access.main import LocalAccessShell

@@ -8,7 +8,7 @@ Background
 The first-pass Command Center nav rendered every backend subsystem as
 a flat alphabetised list. SCP03 alone carries 76 actions spanning the
 ETSI file system, GlobalPlatform registry, install / key management,
-eUICC telemetry and admin — one click landed the operator on a single
+eUICC telemetry and admin -- one click landed the operator on a single
 workbench with the whole kitchen sink exposed. Operator request
 verbatim:
 
@@ -27,7 +27,7 @@ verbatim:
 
 Pass landed:
 
-* Frontend-only ``CC_NAV_TREE`` — a GUI taxonomy decoupled from the
+* Frontend-only ``CC_NAV_TREE`` -- a GUI taxonomy decoupled from the
   backend subsystem list. Each leaf targets either a backend
   ``subsystem`` (optionally with a ``scope``) or an inspect view.
   Groups remember their open/closed state via localStorage so the
@@ -41,7 +41,7 @@ Pass landed:
   the FS tree + FCP preview in Applications mode to match the label.
 
 All tests are static-bundle contracts against ``app.js`` / ``app.css``
-— the nav is pure frontend and live browser behaviour is covered
+-- the nav is pure frontend and live browser behaviour is covered
 separately by the Playwright smoke lane. Pinning the contract here
 keeps the taxonomy from regressing silently during future refactors.
 """
@@ -68,7 +68,7 @@ def test_cc_nav_tree_defined_with_required_groups() -> None:
     """All four primary operator-facing groups must be registered."""
     js = _read("app.js")
     assert "var CC_NAV_TREE = [" in js
-    # Each group header is declared with a label — pin the four the
+    # Each group header is declared with a label -- pin the four the
     # operator asked for plus the Advanced escape hatch so the backend
     # subsystems we don't prominently surface stay reachable.
     for label in (
@@ -84,13 +84,13 @@ def test_cc_nav_tree_defined_with_required_groups() -> None:
 def test_scp03_is_split_into_filesystem_and_applications() -> None:
     """SCP03 appears under two leaves with distinct scopes."""
     js = _read("app.js")
-    # Filesystem leaf — scope: "filesystem".
+    # Filesystem leaf -- scope: "filesystem".
     assert 'id: "leaf-scp03-filesystem"' in js
     assert re.search(
         r'leaf-scp03-filesystem[\s\S]{0,400}?scope: "filesystem"',
         js,
     ), "Filesystem leaf must carry scope=filesystem"
-    # Applications leaf — scope: "applications".
+    # Applications leaf -- scope: "applications".
     assert 'id: "leaf-scp03-applications"' in js
     assert re.search(
         r'leaf-scp03-applications[\s\S]{0,400}?scope: "applications"',

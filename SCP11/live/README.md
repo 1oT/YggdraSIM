@@ -107,7 +107,7 @@ LPAd:
 IPAd:
 
 - `DISCOVER`
-- `DOWNLOAD`
+- `DOWNLOAD [matchingId] [--<n>[,<n>...]]` (`--n` polls only the n-th configured eIM entry)
 
 
 
@@ -182,7 +182,9 @@ operator-relevant fields are:
 - `ES9_VERIFY_TLS`
 - `ES9_CA_BUNDLE_PATH`
 - `EIM_BASE_URL`
-- `EIM_TRANSPORT_MODE`
+- `EIM_TRANSPORT_MODE` (`esipa_direct` for the ASN.1 binding, `esipa_json` for
+  the SGP.32 section 6.4 JSON binding, `rest_resource` for a plain resource)
+- `EIM_HTTP_PROTOCOL` (the `X-Admin-Protocol` value, `gsma/rsp/v1.3.0` by default)
 - `EIM_TIMEOUT_SECONDS`
 - `BPP_INSTALL_USE_SECTION_FRAMING`
 
@@ -197,8 +199,9 @@ Practical rule:
 ### BPP install framing
 
 `BPP_INSTALL_USE_SECTION_FRAMING` defaults to `True` and should stay there.
-It makes ES10b install emit the A1/A2/A3 container headers as their own
-StoreData chains ahead of their 86/88 members, per SGP.22 Annex M. Setting
+It makes ES10b install emit the A1 and A3 container headers as their own
+StoreData chains ahead of their 86/88 members, and the A2 header together
+with its first `87`, per SGP.22 v3.1 section 2.5.5 and Annex M. Setting
 it `False` selects the legacy flattened member-only mode, which sends the
 first bare `86` with no owning container. eUICCs have been observed to read
 that as a terminal `loadProfileElements` result and reply with a premature
@@ -208,9 +211,8 @@ and the SM-DP+ session pending.
 Only set it `False` for a physical card that is known to reject
 section-framed payloads, and confirm the install actually completed rather
 than trusting the first success-looking result. The install banner prints
-which mode is active. The flag is read only by `SCP11/live`; the segmenters
-in `SCP11/orchestrator.py` and `SCP11/local_access/session.py` are always
-section-framed.
+which mode is active. The flag is read only by `SCP11/live`; the segmenter
+in `SCP11/local_access/session.py` is always section-framed.
 
 ## Related guides
 

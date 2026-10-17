@@ -49,6 +49,20 @@ Interactive wizards must be tag-granular. Each nested TLV, ASN.1 field, or
 distinct conceptual step gets its own wizard stage. This keeps the operator
 path navigable and the wizard maintainable as the spec evolves.
 
+## Shell command lines
+
+- Every interactive shell hands each command line, typed or from `--cmd`
+  / `--stdin`, to `yggdrasim_common.command_log.run_with_command_log`
+  before it parses the line, so `--log <file>` works on every command.
+  Pass a `debug` context that switches the shell's own debug output on
+  (raw APDU logging, a debug mode) and back; the helper turns the global
+  debug flag on itself.
+- A path that reaches the same handlers without a terminal, such as a GUI
+  action, refuses `--log` (`command_log.log_flag_present`): a file path in
+  a web request would be written on the server host.
+- Swap `sys.stdout` / `sys.stderr` around one command, never across a
+  prompt, so every swap stays nested and readline keeps the terminal.
+
 ## APDU and crypto handling
 
 - ISO/IEC 7816-4 terminology is preferred: CLA, INS, P1, P2, Lc, Data, Le,
@@ -57,6 +71,23 @@ path navigable and the wizard maintainable as the spec evolves.
   `INSTALL FOR LOAD`, `INSTALL FOR INSTALL`, `PUT KEY`.
 - SCP11 payload shaping must respect the shared `SCP11/shared/` helpers
   instead of re-implementing the wheel per subsystem.
+
+## Reuse before building
+
+- Before writing a new decoder or encoder, an EF or ASN.1 definition, a
+  protocol stack, or a card, reader or network tool, check the osmocom
+  projects for one that exists: pySim first, then libosmocore and the
+  other projects on gitea.osmocom.org (simtrace2, osmo-remsim, osmo-epdg,
+  the osmo-ttcn3-hacks test suites).
+- Prefer importing it, then porting it, then using it as the reference
+  behaviour. Check its licence against GPL-3.0-or-later before copying
+  code.
+- When nothing fits, the change says what was checked and why it does
+  not fit.
+- A defect or gap found in a reused project is fixed twice: a patch with
+  its evidence under `upstream_patches/<name>/` (see the
+  `upstream_patches/osmocom-*` folders), and a compensation in this tree
+  that verifies its own effect.
 
 ## Python conventions
 
@@ -70,7 +101,7 @@ path navigable and the wizard maintainable as the spec evolves.
   covers operator-visible runtime failures, `ValueError` covers malformed
   user or card data, `TypeError` covers contract violations, and dedicated
   `OSError` subclasses cover transport issues. Avoid `raise Exception(...)`
-  entirely — the pre-release security sweep removed every
+  entirely -- the pre-release security sweep removed every
   remaining occurrence from the production tree, so new occurrences show
   up clearly in code review.
 - `except Exception:` catches are acceptable only in display / TLV-fallback
@@ -117,6 +148,24 @@ When you change a decoder, call it with `b""`, a single byte, a truncated
 TLV header, a length that over-claims its body (`b"\x62\xc8"`), a
 long-form length with no body, and an odd-nibble BCD run. Anything other
 than a clean rejection is a defect.
+
+## GUI frontend
+
+- `gui_frontend/src/` is the source; `yggdrasim_common/gui_server/static/`
+  is build output. Rebuild with `./scripts/build_gui_frontend.sh` after
+  every source change; `tests/test_gui_source_manifests.py` requires the
+  served bundle to be byte-identical to a fresh build.
+- One design system, 20 themes. Colour reaches a rule through a theme
+  token or not at all; the per-file literal budget in
+  `tests/test_gui_design_system_consistency.py` only shrinks. New floating
+  surfaces (`position: fixed`) are app chrome or transient overlays;
+  action output renders inline.
+- The page CSP forbids inline scripts, inline styles, inline handlers and
+  `eval`. Build DOM with `createElement` / `textContent`.
+- Every operator-visible label is anchored in a specification or marked
+  YggdraSIM-coined in `guides/NAMING_CONVENTIONS.md`.
+- The full contract, the CSS layer map and the theme registration steps
+  are in `gui_frontend/README.md`.
 
 ## Git and commits
 

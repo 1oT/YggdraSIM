@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Human-facing summaries for round-trip decoded SAIP field payloads.
 
 The wire editor still round-trips JSON-shaped ``payload`` dicts. This
@@ -19,11 +18,11 @@ def operator_field_heading(field_name: str, *, last_ef_key: str | None) -> str:
     base = str(field_name or "").strip()
     ef = str(last_ef_key or "").strip()
     if base.lower() == "fillfilecontent":
-        return f"File data — {ef}" if len(ef) > 0 else "File data"
+        return f"File data -- {ef}" if len(ef) > 0 else "File data"
     if base.lower() == "filedescriptor":
         return "File descriptor (FCP)"
     if len(ef) > 0:
-        return f"{base} — {ef}"
+        return f"{base} -- {ef}"
     return base or "Field"
 
 
@@ -40,11 +39,11 @@ def _format_scalar(value: Any) -> str:
         return str(value)
     if isinstance(value, str):
         text = value.strip()
-        return text[:45] + "…" if len(text) > 48 else text
+        return text[:45] + "..." if len(text) > 48 else text
     if isinstance(value, dict):
-        return f"{{… {len(value)} keys}}"
+        return f"{{... {len(value)} keys}}"
     if isinstance(value, list):
-        return f"[… {len(value)} items]"
+        return f"[... {len(value)} items]"
     return str(type(value).__name__)
 
 
@@ -73,7 +72,7 @@ def gentle_summary_rows(
         rows.append(("Value", _format_scalar(payload)))
         return rows
     if base == "filedescriptor":
-        rows.append(("Descriptor", "Same FCP bytes as the File System metadata column — edit there; SHOW JSON keeps the ASN.1-shaped dump for tooling."))
+        rows.append(("Descriptor", "Same FCP bytes as the File System metadata column -- edit there; SHOW JSON keeps the ASN.1-shaped dump for tooling."))
         return rows
     if base == "fillfilecontent":
         return _summarise_fill_file(payload)
@@ -85,7 +84,7 @@ def gentle_summary_rows(
         return _summarise_gfste(payload)
     if "mandatory-aids" in base or base == "euicc-mandatory-aids":
         return _summarise_aids(payload)
-    if base in ("iotoptions", "pix", "iot"):
+    if base in ("iotoptions", "pix"):
         return _summarise_iot(payload)
     if base in ("pol", "major-version", "minor-version", "profileversion",
                  "serialnumber", "notificationaddress", "iccid", "profiletype"):
@@ -94,7 +93,7 @@ def gentle_summary_rows(
         return _summarise_gfste(payload)
     kind = str(editor_kind or "").strip().lower()
     if kind == "readonly_json":
-        rows.append(("View", "Read-only decode — SHOW JSON for full structure."))
+        rows.append(("View", "Read-only decode -- SHOW JSON for full structure."))
     return _summarise_generic(payload)
 
 
@@ -199,7 +198,7 @@ def _summarise_services(payload: dict[str, Any]) -> list[tuple[str, str]]:
         return [("Services", "(none)")]
     preview = ", ".join(names[:8])
     if len(names) > 8:
-        preview += f" … +{len(names) - 8} more"
+        preview += f" ... +{len(names) - 8} more"
     return [("Services", f"{preview} ({len(names)} total)")]
 
 
@@ -212,7 +211,7 @@ def _summarise_gfste(payload: dict[str, Any]) -> list[tuple[str, str]]:
     oids = [str(i).strip() for i in items if len(str(i).strip()) > 0]
     preview = ", ".join(oids[:4])
     if len(oids) > 4:
-        preview += f" … +{len(oids) - 4} more"
+        preview += f" ... +{len(oids) - 4} more"
     return [("GFSTEList", preview)]
 
 
@@ -274,7 +273,7 @@ def _summarise_profile_scalar(field_name: str, payload: dict[str, Any]) -> list[
         return [(label, val[:48])]
     if isinstance(val, (int, float)):
         return [(label, str(val))]
-    # Generic dict — pick first scalar
+    # Generic dict -- pick first scalar
     for k in ("decimal", "hex", "raw", "iccid", "value"):
         v = payload.get(k)
         if v is not None and not isinstance(v, (dict, list)):

@@ -82,6 +82,10 @@ def test_esim_action_flavor_helper_covers_consumer_and_iot_paths() -> None:
         assert iot_suffix in helper
     assert 'id.indexOf(".eim_") !== -1' in helper
     assert 'return "sgp22"' in helper
+    # The live eUICC configuration tab is chosen by tag, so an action from
+    # any provider lands there without the bundle naming the provider.
+    assert 'flavorTags.indexOf("euicc-config") !== -1' in helper
+    assert 'return "euicc_config"' in helper
 
 
 def test_esim_action_rails_hide_get_all_data_duplicates() -> None:

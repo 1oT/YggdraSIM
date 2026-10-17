@@ -15,24 +15,35 @@ Every operator surface, every launch form, and every piping pattern the
 repository ships. Details live on each subsystem page; this table is the
 lookup.
 
-## Installed commands versus module forms
+## Installed command to documentation
 
-| Installed command | Module form | Subsystem |
-| --- | --- | --- |
-| `yggdrasim-scp03` | `python -m SCP03` | [SCP03 Admin Shell](../subsystems/scp03.md) |
-| `yggdrasim-scp80` | `python -m SCP80` | [SCP80 OTA Shell](../subsystems/scp80.md) |
-| `yggdrasim-scp11` | `python -m SCP11` | [SCP11 Family](../concepts/rsp-architecture.md) |
-| `yggdrasim-scp11-live` | `python -m SCP11.live` | [SCP11 eSIM Management Relay](../subsystems/scp11-live.md) |
-| `yggdrasim-scp11-relay` | `python -m SCP11.relay` | compatibility namespace |
-| `yggdrasim-scp11-local-access` | `python -m SCP11.local_access` | [SCP11 Local Access](../subsystems/scp11-local-access.md) |
-| `yggdrasim-scp11-eim-local` | `python -m SCP11.eim_local` | [SCP11 eIM Local](../subsystems/scp11-eim-local.md) |
-| `yggdrasim-hil-bridge` | `python -m Tools.HilBridge.main` | [HIL Bridge](../subsystems/hil-bridge.md) |
-| `yggdrasim-hil-supervisor` | `python -m Tools.HilBridge.supervisor` | [HIL Bridge](../subsystems/hil-bridge.md) |
-| `yggdrasim-profile-package` | `python -m Tools.ProfilePackage` | [Profile Package](../subsystems/profile-package.md) |
-| `yggdrasim-profile-autoload` | `python -m Tools.ProfilePackage.simcard_watch` | [Profile Package](../subsystems/profile-package.md) |
-| `yggdrasim-apdu-fuzzer` | `python -m Tools.ApduFuzz` | [APDU Fuzzer](../subsystems/apdu-fuzzer.md) |
-| `yggdrasim-eum-diag` | `python -m Tools.EumDiag` | [EUM Diagnostics](../subsystems/eum-diagnostics.md) |
-| `yggdrasim-suci-tool` | `python -m Tools.SuciTool` | [SUCI Tool](../subsystems/suci-tool.md) |
+Where each shipped command is written up. The module form and a one-line
+description of every command are in the generated table at the end of this
+page.
+
+| Installed command | Read about it in |
+| --- | --- |
+| `yggdrasim`, `yggdrasim-cli` | [Registry and Launcher](../internals/registry-and-launcher.md) |
+| `yggdrasim-gui`, `yggdrasim-desktop`, `yggdrasim-web-server` | [Universal GUI Command Center](../subsystems/gui-command-center.md) |
+| `yggdrasim-scp03` | [SCP03 Admin Shell](../subsystems/scp03.md) |
+| `yggdrasim-scp80` | [SCP80 OTA Shell](../subsystems/scp80.md) |
+| `yggdrasim-scp11` | [SCP11 Family](../concepts/rsp-architecture.md) |
+| `yggdrasim-scp11-live` | [SCP11 eSIM Management Relay](../subsystems/scp11-live.md) |
+| `yggdrasim-scp11-relay` | [SCP11 Test Compatibility Namespace](../subsystems/scp11-test.md) |
+| `yggdrasim-scp11-local-access` | [SCP11 Local Access](../subsystems/scp11-local-access.md) |
+| `yggdrasim-scp11-eim-local` | [SCP11 eIM Local](../subsystems/scp11-eim-local.md) |
+| `yggdrasim-hil-bridge`, `yggdrasim-hil-supervisor` | [HIL Bridge](../subsystems/hil-bridge.md) |
+| `yggdrasim-card-bridge` | [Card Bridge](../subsystems/card-bridge.md) |
+| `yggdrasim-lab-agent`, `yggdrasim-lab` | [Remote Lab](../subsystems/remote-lab.md) |
+| `yggdrasim-profile-package`, `yggdrasim-profile-autoload` | [Profile Package](../subsystems/profile-package.md) |
+| `yggdrasim-apdu-fuzzer` | [APDU Mutation Fuzzer](../subsystems/apdu-fuzzer.md) |
+| `yggdrasim-apdu-dissect` | [APDU Dissector](../subsystems/apdu-dissector.md) |
+| `yggdrasim-eum-diag` | [EUM Diagnostics](../subsystems/eum-diagnostics.md) |
+| `yggdrasim-suci-tool` | [SUCI Tool](../subsystems/suci-tool.md) |
+| `yggdrasim-asn1`, `yggdrasim-card-clone`, `yggdrasim-hil-reset` | [Command Suite section 12](command-suite.md#12-standalone-helper-commands) |
+| `yggdrasim-session-diff` | [Diff Two Session Recordings](../how-to/diff-two-session-recordings.md) |
+| `yggdrasim-mcp` | [Run the MCP Server](../how-to/run-the-mcp-server.md) |
+| `yggdrasim-yggdracore` | [3GPP NAA](../concepts/3gpp-naa.md), [Operator Surfaces](../operator-surfaces.md) |
 
 ## Non-interactive patterns
 
@@ -85,7 +96,7 @@ specifics.
 | SCP03 keybag export | SCP03 shell, after `AUTH-SD`: `EXPORT-KEYBAG [path.keys.json] [label]` |
 | SCP11 Local Access keybag export (shell) | `EXPORT-KEYBAG [path.keys.json] [label]` after any BSP-building verb |
 | SCP11 Local Access keybag export (CLI) | `python -m SCP11.local_access --dump-keybag path.keys.json` |
-| SCP11 relay keybag export | `python -m SCP11.live --dump-keybag …` is a **no-op stub** — relay-mode BSP keys never reach the host |
+| SCP11 relay keybag export | `python -m SCP11.live --dump-keybag ...` is a **no-op stub** -- relay-mode BSP keys never reach the host |
 
 ## One-shot examples
 
@@ -121,7 +132,7 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 
 - [Operator Surfaces](../operator-surfaces.md)
 - [Getting Started](../getting-started.md)
-- [HIL Bridge — offline pcap replay](../subsystems/hil-bridge.md#offline-pcap-replay)
+- [HIL Bridge -- offline pcap replay](../subsystems/hil-bridge.md#offline-pcap-replay)
 - [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md)
 - `guides/CLI_AND_PIPING_GUIDE.md`
 
@@ -129,23 +140,34 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 
 | Installed command | Module form | Description |
 | --- | --- | --- |
-| `yggdrasim-apdu-fuzzer` | _(manual module)_ |  |
-| `yggdrasim-asn1` | _(manual module)_ |  |
+| `yggdrasim` | `python main/main.py` | Launcher menu: subsystem dispatch, Card Bridge menu, guides, env-flag editor. |
+| `yggdrasim-apdu-dissect` | `python -m Tools.ApduDissector` | Bundled GSMTAP SIM dissector: decode a capture with tshark, install the Lua, print its path. |
+| `yggdrasim-apdu-fuzzer` | `python -m Tools.ApduFuzz` | Opt-in, allow-listed APDU mutation fuzzer for eUICC research. |
+| `yggdrasim-asn1` | `python -m Tools.Asn1TlvDecode` | ASN.1 / BER-TLV decoder; renders pasted hex as JSON and value notation. |
 | `yggdrasim-card-bridge` | `python -m Tools.CardBridge` | Loopback PC/SC-to-HTTP APDU bridge for SSH-forwarded remote-card workflows. |
-| `yggdrasim-eum-diag` | _(manual module)_ |  |
-| `yggdrasim-hil-bridge` | `python -m Tools.HilBridge.main` | SIMtrace2-backed HIL bridge (direct). |
-| `yggdrasim-yggdracore` | `python -m Tools.YggdraCore.http_app` | YggdraCore stub AUSF over loopback HTTP; bearer-authenticated. |
 | `yggdrasim-card-clone` | `python -m Tools.CardClone` | Chart a card's behaviour into a profile the simulator replays; read-only probe. |
+| `yggdrasim-cli` | `python main/main.py` | Alias of `yggdrasim`; the same launcher menu. |
+| `yggdrasim-desktop` | `python main/main.py --gui` | The same desktop GUI under `[project.gui-scripts]`, so Windows starts it without a console. |
+| `yggdrasim-eum-diag` | `python -m Tools.EumDiag` | EUM / SM-DP+ diagnostics: session-key staging and the BF36 BPP Lua dissector. |
+| `yggdrasim-gui` | `python main/main.py --gui` | Desktop GUI: the loopback server plus a pywebview window. |
+| `yggdrasim-hil-bridge` | `python -m Tools.HilBridge.main` | SIMtrace2-backed HIL bridge (direct). |
+| `yggdrasim-hil-reset` | `python -m Tools.HilBridge.device_reset` | Remote equivalent of the SIMtrace2 reset button. |
 | `yggdrasim-hil-supervisor` | `python -m Tools.HilBridge.supervisor` | HIL supervisor that manages the bridge and remsim-client lifecycle. |
-| `yggdrasim-profile-autoload` | _(manual module)_ |  |
+| `yggdrasim-lab` | _(installed command only)_ | Operator-side Remote Lab client: list rigs, reserve, release, heartbeat. |
+| `yggdrasim-lab-agent` | `python -m yggdrasim_common.remote_lab.agent` | Remote Lab agent: rig inventory, exclusive sessions, one session relay per rig. |
+| `yggdrasim-mcp` | `python -m Tools.YggdraMCP.server` | Domain MCP server: APDU, TLV, spec, identifier and PC/SC tools; needs the mcp extra. |
+| `yggdrasim-profile-autoload` | `python -m Tools.ProfilePackage.simcard_watch` | Polling watcher that auto-opens fresh SIMCARD profiles in the SAIP tooling. |
 | `yggdrasim-profile-package` | `python -m Tools.ProfilePackage` | SAIP / UPP shell, saip-tool bridge, lint engine, JSON↔DER transcode. |
 | `yggdrasim-scp03` | `python -m SCP03` | GlobalPlatform-style admin shell, card transport, TLV/CAP decoders, SGP.22 helpers. |
 | `yggdrasim-scp11` | `python -m SCP11` | Thin facade; live SGP.22 types re-exported from SCP11.live. |
 | `yggdrasim-scp11-eim-local` | `python -m SCP11.eim_local` | eIM-local package authoring, hotfolders, handover, and direct-card tooling. |
 | `yggdrasim-scp11-live` | `python -m SCP11.live` | eSIM management relay: orchestrator, PC/SC or relay APDU, ES9+, STK/proactive handling. |
 | `yggdrasim-scp11-local-access` | `python -m SCP11.local_access` | Local ISD-R / metadata codec / certificate helpers for on-card flows. |
-| `yggdrasim-scp11-relay` | `python -m SCP11.relay` | Compatibility SCP11 entry point built on direct PC/SC. |
+| `yggdrasim-scp11-relay` | `python -m SCP11.relay` | Compatibility namespace aliasing SCP11.live; opens the eSIM management relay. |
 | `yggdrasim-scp80` | `python -m SCP80` | OTA SMS-SC / CAT-TP style scripting and smart decoding. |
+| `yggdrasim-session-diff` | `python -m yggdrasim_common.session_diff` | Diffs the APDU traces of two shell session recordings. |
 | `yggdrasim-suci-tool` | `python -m Tools.SuciTool` | SUCI-related helper shell. |
+| `yggdrasim-web-server` | `python main/main.py --web-server` | The GUI server headless, no webview; a browser connects to it. |
+| `yggdrasim-yggdracore` | `python -m Tools.YggdraCore.http_app` | YggdraCore stub AUSF over loopback HTTP; bearer-authenticated. |
 
 <!-- cli-matrix:end -->

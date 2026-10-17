@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP profile linter: static analysis of decoded profile documents emitting YRL-* findings (TS.48 / SGP.22 / ETSI TS 102 221)."""
 import re
 from dataclasses import asdict, dataclass
@@ -72,6 +71,8 @@ class SaipProfileLinter:
         # originate from template-placeholder-bearing fields.
         self._placeholder_paths: frozenset[str] = frozenset()
         self._undefined_tokens: frozenset[str] = frozenset()
+        self._inline_sentinel_hexes: frozenset[str] = frozenset()
+        self._record_sizes: dict[tuple[str, str], int] = {}
         # Populated at the start of each ``lint_decoded_document`` call so
         # PE-level checks can reach into the wider profile (e.g. AKA
         # cross-references resolving against NAA AIDs).
@@ -88,6 +89,8 @@ class SaipProfileLinter:
         emit_missing_check_finding: bool = True,
         placeholder_paths: Optional[frozenset[str]] = None,
         undefined_tokens: Optional[frozenset[str]] = None,
+        inline_sentinel_hexes: Optional[frozenset[str]] = None,
+        record_sizes: Optional[dict[tuple[str, str], int]] = None,
     ) -> LintReport:
         """Run all lint passes against a decoded profile document.
 
@@ -97,8 +100,16 @@ class SaipProfileLinter:
         ``placeholder_paths`` names fields whose values are unresolved template
         tokens; findings that originate from those fields are suppressed so
         template profiles do not generate spurious FAILs.
+        ``inline_sentinel_hexes`` are the sentinel byte runs of inline
+        placeholders still in the document, so byte-level rules skip the
+        records they sit in; ``record_sizes`` maps ``(section_key, path)``
+        to a record size for files whose descriptor omits it.
         """
         self.findings = []
+        self._inline_sentinel_hexes = frozenset(
+            str(item).strip().upper() for item in (inline_sentinel_hexes or frozenset()) if str(item).strip()
+        )
+        self._record_sizes = dict(record_sizes or {})
         self._placeholder_paths = frozenset(
             str(path).strip() for path in (placeholder_paths or frozenset()) if str(path).strip()
         )
@@ -119,6 +130,7 @@ class SaipProfileLinter:
         self._check_parser_health(section_items)
         self._check_base_structure(ordered_types)
         self._check_singleton_types(ordered_types)
+        self._check_iot_exclusivity(ordered_types)
         self._check_pe_dependency_order(ordered_types)
         self._check_mandatory_services(sections)
         self._check_iccid(sections)
@@ -140,6 +152,7 @@ class SaipProfileLinter:
         self._check_ef_pnn_opl_encoding(section_items)
         self._check_ef_sms_cbmi_encoding(section_items)
         self._check_ef_msisdn_fplmn_ecc_encoding(section_items)
+        self._check_ef_length_fields(section_items)
         self._check_ef_suci_calc_info(section_items)
         self._check_profile_header_core_fields(sections)
         self._check_connectivity_parameters(sections)
@@ -147,6 +160,7 @@ class SaipProfileLinter:
         self._check_security_domain_integrity(sections)
         self._check_application_integrity(sections)
         self._check_fs_core_constraints(file_definitions)
+        self._check_fcp_record_geometry(section_items)
         self._check_arr_references(file_definitions)
         self._check_pin_puk_encoding(sections)
         self._check_pin_puk_cross_references(sections)
@@ -393,7 +407,7 @@ class SaipProfileLinter:
             spec="Template authoring",
             path="sections",
             message=(
-                "Profile parsed in template mode — placeholder fields are "
+                "Profile parsed in template mode -- placeholder fields are "
                 "excluded from strict hex/ICCID validation."
             ),
             recommendation="\n".join(recommendation_lines),
@@ -475,14 +489,17 @@ class SaipProfileLinter:
                 evidence={"first_pe": first_type},
             )
 
-        if second_type != "mf":
+        if second_type not in ("mf", "iot"):
             self._add(
                 code="YRL-SEQ-003",
                 severity="FAIL",
                 spec="TS.48 / SAIP",
                 path="PE-order",
-                message=f"Second PE is '{second_type}', expected 'mf'.",
-                recommendation="Keep MF PE as second element for interoperable profile structure.",
+                message=(
+                    f"Second PE is '{second_type}', expected 'mf' ('iot' for an IoT "
+                    "Minimal Profile, TCA SAIP v3.4.1 §7.5)."
+                ),
+                recommendation="Keep MF PE (or PE-IoT) as second element for interoperable profile structure.",
             )
         else:
             self._add(
@@ -490,7 +507,7 @@ class SaipProfileLinter:
                 severity="PASS",
                 spec="TS.48 / SAIP",
                 path="PE-order",
-                message="Second PE is mf (position 2; immediately after header).",
+                message=f"Second PE is {second_type} (position 2; immediately after header).",
                 recommendation="None.",
                 evidence={"second_pe": second_type},
             )
@@ -516,7 +533,7 @@ class SaipProfileLinter:
             )
 
     def _check_singleton_types(self, ordered_types: list[str]) -> None:
-        singleton_types = ("header", "mf", "end", "usim", "isim", "csim", "df-5gs", "df-saip")
+        singleton_types = ("header", "mf", "end", "usim", "isim", "csim", "df-5gs", "df-saip", "iot", "opt-iot")
         for item_type in singleton_types:
             count = ordered_types.count(item_type)
             if count > 1:
@@ -529,6 +546,32 @@ class SaipProfileLinter:
                     recommendation=f"Keep a single '{item_type}' PE instance.",
                 )
 
+    def _check_iot_exclusivity(self, ordered_types: list[str]) -> None:
+        """YRL-SEQ-011: PE-IoT replaces PE-MF and PE-USIM.
+
+        TCA SAIP v3.4.1 §7.5 / §8.3.4.8.1: an IoT Minimal Profile creates
+        the MF and the USIM ADF from PE-IoT alone, and PE-IoT shall not be
+        used in a Full Profile.
+        """
+        if "iot" not in ordered_types:
+            return
+        for clashing in ("mf", "usim"):
+            if clashing in ordered_types:
+                self._add(
+                    code="YRL-SEQ-011",
+                    severity="FAIL",
+                    spec="TCA SAIP v3.4.1 §7.5",
+                    path=f"PE-type:{clashing}",
+                    message=(
+                        f"PE-IoT is present together with PE-{clashing.upper()}; an IoT "
+                        "Minimal Profile creates the MF and the USIM ADF from PE-IoT alone."
+                    ),
+                    recommendation=(
+                        f"Drop PE-{clashing.upper()} from the IoT Minimal Profile, or drop "
+                        "PE-IoT from the Full Profile."
+                    ),
+                )
+
     def _check_pe_dependency_order(self, ordered_types: list[str]) -> None:
         index_map: dict[str, list[int]] = {}
         for index, item_type in enumerate(ordered_types):
@@ -536,36 +579,45 @@ class SaipProfileLinter:
                 index_map[item_type] = []
             index_map[item_type].append(index)
 
+        # The USIM ADF comes from PE-USIM in a Full Profile and from PE-IoT
+        # in an IoT Minimal Profile (TCA SAIP v3.4.1 §8.3.4.8.1).
+        usim_host = ("usim", "iot")
         self._check_dependency_after(index_map, "opt-usim", "usim", "YRL-DEP-OPTUSIM-001")
         self._check_dependency_after(index_map, "opt-isim", "isim", "YRL-DEP-OPTISIM-001")
-        self._check_dependency_after(index_map, "gsm-access", "usim", "YRL-DEP-GSM-001")
-        self._check_dependency_after(index_map, "phonebook", "usim", "YRL-DEP-PBOOK-001")
-        self._check_dependency_after(index_map, "df-5gs", "usim", "YRL-DEP-5GS-001")
-        self._check_dependency_after(index_map, "df-saip", "usim", "YRL-DEP-SAIP-001")
+        self._check_dependency_after(index_map, "opt-iot", "iot", "YRL-DEP-OPTIOT-001")
+        self._check_dependency_after(index_map, "gsm-access", usim_host, "YRL-DEP-GSM-001")
+        self._check_dependency_after(index_map, "phonebook", usim_host, "YRL-DEP-PBOOK-001")
+        self._check_dependency_after(index_map, "df-5gs", usim_host, "YRL-DEP-5GS-001")
+        self._check_dependency_after(index_map, "df-saip", usim_host, "YRL-DEP-SAIP-001")
         # TCA PP TS DF-SNPN-001 / DF-5GPROSE-001: both DF templates shall come
         # once after the creation of an ADF USIM.
-        self._check_dependency_after(index_map, "df-snpn", "usim", "YRL-DEP-SNPN-001")
-        self._check_dependency_after(index_map, "df-5gprose", "usim", "YRL-DEP-5GPROSE-001")
+        self._check_dependency_after(index_map, "df-snpn", usim_host, "YRL-DEP-SNPN-001")
+        self._check_dependency_after(index_map, "df-5gprose", usim_host, "YRL-DEP-5GPROSE-001")
 
     def _check_dependency_after(
         self,
         index_map: dict[str, list[int]],
         dependent: str,
-        required: str,
+        required: str | tuple[str, ...],
         code: str,
     ) -> None:
+        """``dependent`` needs one of ``required`` earlier in the sequence."""
         dependent_indexes = index_map.get(dependent, [])
         if len(dependent_indexes) == 0:
             return
-        required_indexes = index_map.get(required, [])
+        required_types = (required,) if isinstance(required, str) else tuple(required)
+        required_label = " or ".join(f"PE-{item.upper()}" for item in required_types)
+        required_indexes = sorted(
+            index for item in required_types for index in index_map.get(item, [])
+        )
         if len(required_indexes) == 0:
             self._add(
                 code=code,
                 severity="FAIL",
                 spec="TS.48 / SAIP",
                 path=f"dependency:{dependent}",
-                message=f"PE-{dependent.upper()} is present but PE-{required.upper()} is missing.",
-                recommendation=f"Add PE-{required.upper()} before PE-{dependent.upper()}.",
+                message=f"PE-{dependent.upper()} is present but {required_label} is missing.",
+                recommendation=f"Add {required_label} before PE-{dependent.upper()}.",
             )
             return
         first_required = required_indexes[0]
@@ -577,8 +629,8 @@ class SaipProfileLinter:
             severity="FAIL",
             spec="TS.48 / SAIP",
             path=f"dependency:{dependent}",
-            message=f"PE-{dependent.upper()} appears before PE-{required.upper()}.",
-            recommendation=f"Move PE-{dependent.upper()} after PE-{required.upper()}.",
+            message=f"PE-{dependent.upper()} appears before {required_label}.",
+            recommendation=f"Move PE-{dependent.upper()} after {required_label}.",
         )
 
     def _check_mandatory_services(self, sections: dict[str, Any]) -> None:
@@ -619,7 +671,8 @@ class SaipProfileLinter:
                 enabled_services.add(str(service_name))
 
         types = [self._base_type_from_key(key) for key in sections.keys()]
-        has_usim = "usim" in types
+        # PE-IoT creates the USIM ADF of an IoT Minimal Profile.
+        has_usim = "usim" in types or "iot" in types
         has_isim = "isim" in types
         has_csim = "csim" in types
 
@@ -720,7 +773,7 @@ class SaipProfileLinter:
             return
 
         # ICCID arrives as bytes from pySim's decoder, as a hex string
-        # from operator-edited JSON, or as a tagged ``{"hex": "…"}``
+        # from operator-edited JSON, or as a tagged ``{"hex": "..."}``
         # dict from the editor projection. Normalise via the shared
         # helper so all three shapes lint identically.
         iccid_hex = self._coerce_hex_string(iccid_value)
@@ -757,68 +810,58 @@ class SaipProfileLinter:
             )
             return
 
-        # ITU-T E.118 §3.3: BCD bytes are nibble-swapped on the wire.
-        # Un-swap to obtain the natural digit string d[0]..d[19].
-        natural = ""
-        for i in range(0, 20, 2):
-            natural += iccid_hex[i + 1] + iccid_hex[i]
-        natural = natural.upper()
+        # SAIP V3.4.1 §8.2.1: header.iccid is coded non-swapped as per ITU-T
+        # E.118 and padded with trailing 'F', so the hex is the digit string.
+        digits = self._iccid_digits_from_printable_hex(iccid_hex)
 
-        # Trailing filler nibble 'F' in position 19 means the IIN+serial is
-        # only 18 significant digits (+ Luhn check on 19 digits total).
-        # When the filler is present we still verify the Luhn on digits 0..18.
-        # When no filler we verify on all 20 digits.
-        if "F" in natural:
-            significant = natural.replace("F", "")
-        else:
-            significant = natural
-
-        if not all(c.isdigit() for c in significant):
-            invalid_chars = sorted({c for c in significant if not c.isdigit()})
+        if any(not c.isdigit() for c in digits):
+            invalid_chars = sorted({c for c in digits if not c.isdigit()})
             self._add(
                 code="YRL-ICC-004",
                 severity="WARN",
-                spec="ITU-T E.118 §3.3",
+                spec="SAIP V3.4.1 §8.2.1",
                 path="header.iccid",
                 message=(
-                    "ICCID natural digit string contains non-decimal characters "
-                    "after BCD un-swap; these are not valid ICCID digits."
+                    "header.iccid carries non-decimal nibbles; the header holds the "
+                    "ICCID digits in natural order with 'F' only as trailing filler."
                 ),
-                recommendation="Verify ICCID BCD encoding; each nibble must be 0–9 or trailing F.",
+                recommendation="Write one decimal digit per nibble, in order, padded with trailing F.",
                 evidence={"iccid": iccid_hex, "invalid_chars": invalid_chars},
             )
             return
 
-        # Luhn mod-10 over the significant digit string.
-        total = 0
-        for pos, digit_char in enumerate(reversed(significant)):
-            n = int(digit_char)
-            if pos % 2 == 1:
-                n *= 2
-                if n > 9:
-                    n -= 9
-            total += n
-        if total % 10 != 0:
+        remainder = self._luhn_remainder(digits)
+        if remainder != 0:
+            evidence: dict[str, Any] = {
+                "iccid": iccid_hex,
+                "natural_digits": digits,
+                "luhn_remainder": remainder,
+            }
+            message = (
+                f"ICCID fails Luhn mod-10 check digit validation "
+                f"(remainder {remainder}; expected 0)."
+            )
+            # A header written in EF.ICCID order reads as other digits; name
+            # that cause when the nibble-swapped reading passes instead.
+            swapped = self._iccid_digits_from_swapped_hex(iccid_hex)
+            if swapped.isdigit() and self._luhn_remainder(swapped) == 0:
+                evidence["swapped_digits"] = swapped
+                message += (
+                    " The nibble-swapped reading passes, so the header looks "
+                    "written in EF.ICCID order."
+                )
             self._add(
                 code="YRL-ICC-004",
                 severity="WARN",
-                spec="ITU-T E.118 §3.3 / ISO/IEC 7812-1",
+                spec="ITU-T E.118 (09/2025) §6 / ISO/IEC 7812-1 Annex B",
                 path="header.iccid",
-                message=(
-                    f"ICCID fails Luhn mod-10 check digit validation "
-                    f"(remainder {total % 10}; expected 0). "
-                    f"Check digit should produce remainder 0."
-                ),
+                message=message,
                 recommendation=(
-                    "Recalculate the ICCID check digit (digit 19 in natural order). "
+                    "Recalculate the ICCID check digit (the last digit). "
                     f"With the current body the check digit must make the total "
-                    f"divisible by 10 (current remainder: {total % 10})."
+                    f"divisible by 10 (current remainder: {remainder})."
                 ),
-                evidence={
-                    "iccid": iccid_hex,
-                    "natural_digits": significant,
-                    "luhn_remainder": total % 10,
-                },
+                evidence=evidence,
             )
 
     def _check_ef_ad_encoding(self, section_items: list[tuple[str, Any]]) -> None:
@@ -829,7 +872,7 @@ class SaipProfileLinter:
         A wrong value silently causes incorrect PLMN identification.
 
         - ``YRL-AD-001`` (FAIL): ``mnc_length`` byte (byte 4) is not 2 or 3.
-        - ``YRL-AD-002`` (WARN): EF.AD content is fewer than 4 bytes — the
+        - ``YRL-AD-002`` (WARN): EF.AD content is fewer than 4 bytes -- the
           mandatory ``mnc_length`` byte is missing.
         - ``YRL-AD-003`` (WARN): ``mnc_length`` is 3 but the IMSI MNC field
           in the same section has digit 6 (the third MNC digit) == 'F'
@@ -848,7 +891,7 @@ class SaipProfileLinter:
         # Group by section (USIM / OPT-USIM only).
         for section_key, payload in section_items:
             section_lo = self._base_type_from_key(section_key).lower()
-            if section_lo not in ("usim", "opt-usim"):
+            if section_lo not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
 
             ef_ad_hex: str | None = None
@@ -883,7 +926,7 @@ class SaipProfileLinter:
                     path=ad_path,
                     message=(
                         f"EF.AD is {ad_bytes} byte(s); the minimum is 4 bytes "
-                        "(bytes 1–3 adminData + byte 4 mnc_length)."
+                        "(bytes 1-3 adminData + byte 4 mnc_length)."
                     ),
                     recommendation="Ensure EF.AD has at least 4 bytes including the mnc_length indicator.",
                     evidence={"hex": ef_ad_hex, "byte_length": ad_bytes},
@@ -915,7 +958,7 @@ class SaipProfileLinter:
             if mnc_len_byte == 3 and ef_imsi_hex is not None and len(ef_imsi_hex) >= 18:
                 # IMSI BCD layout (9 bytes, nibble-swapped):
                 # Byte 1 = length (0x08), Byte 2 = parity|d1,
-                # Bytes 3–9: d2d3 d4d5 d6d7 d8d9 d10d11 d12d13 d14d15
+                # Bytes 3-9: d2d3 d4d5 d6d7 d8d9 d10d11 d12d13 d14d15
                 # MCC = d1 d2 d3, MNC starts at d4.
                 # MNC digit 3 is d6, which lives in the high nibble of
                 # byte 4 (index 8:10 in hex string, high nibble = [8]).
@@ -946,12 +989,12 @@ class SaipProfileLinter:
     def _check_ef_acc_encoding(self, section_items: list[tuple[str, Any]]) -> None:
         """YRL-ACC-*: EF.ACC byte-level checks (3GPP TS 31.102 §4.2.15).
 
-        EF.ACC (FID 6F78) is exactly 2 bytes encoding access class bits 0–15.
-        Bits 0–9 are user classes; bit 11 = class 11 (PLMN use), bits 12–15
+        EF.ACC (FID 6F78) is exactly 2 bytes encoding access class bits 0-15.
+        Bits 0-9 are user classes; bit 11 = class 11 (PLMN use), bits 12-15
         are operator/emergency classes.
 
         - ``YRL-ACC-001`` (FAIL): EF.ACC is not exactly 2 bytes.
-        - ``YRL-ACC-002`` (WARN): bits 0–9 are all zero — the UE belongs to
+        - ``YRL-ACC-002`` (WARN): bits 0-9 are all zero -- the UE belongs to
           no user access class, which prevents class-based access barring
           override and emergency class 10 call origination.
         """
@@ -960,7 +1003,7 @@ class SaipProfileLinter:
 
         for section_key, payload in section_items:
             section_lo = self._base_type_from_key(section_key).lower()
-            if section_lo not in ("usim", "opt-usim"):
+            if section_lo not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
 
             for fd in file_defs:
@@ -1001,12 +1044,12 @@ class SaipProfileLinter:
                         spec="3GPP TS 31.102 §4.2.15",
                         path=acc_path,
                         message=(
-                            f"EF.ACC user class bits 0–9 are all zero (value 0x{acc_hex[:4]}). "
-                            "The UE belongs to no user access class — "
+                            f"EF.ACC user class bits 0-9 are all zero (value 0x{acc_hex[:4]}). "
+                            "The UE belongs to no user access class -- "
                             "class-based access control cannot override barring."
                         ),
                         recommendation=(
-                            "Set at least one user class bit (0–9) appropriate "
+                            "Set at least one user class bit (0-9) appropriate "
                             "for the subscriber's access class."
                         ),
                         evidence={"hex": acc_hex, "user_class_bits": "0x0000"},
@@ -1017,7 +1060,7 @@ class SaipProfileLinter:
 
         EF.HPLMNwAcT (FID 6F62) carries a 5-byte structure; byte 1 is the
         HPLMN search timer in units of 6 minutes (value 0 = disable timer,
-        1–254 = 6–1524 min).  A value of 0 prevents the ME from ever
+        1-254 = 6-1524 min).  A value of 0 prevents the ME from ever
         searching for the HPLMN after it has camped on a VPLMN.
 
         - ``YRL-HPLMN-001`` (WARN): timer byte is 0x00 (search disabled).
@@ -1028,7 +1071,7 @@ class SaipProfileLinter:
 
         for section_key, payload in section_items:
             section_lo = self._base_type_from_key(section_key).lower()
-            if section_lo not in ("usim", "opt-usim"):
+            if section_lo not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
 
             for fd in file_defs:
@@ -1051,7 +1094,7 @@ class SaipProfileLinter:
                         severity="FAIL",
                         spec="3GPP TS 31.102 §4.2.6",
                         path=hplmn_path,
-                        message="EF.HPLMNwAcT content is empty — timer byte is absent.",
+                        message="EF.HPLMNwAcT content is empty -- timer byte is absent.",
                         recommendation="Provide at least the 1-byte HPLMN search timer.",
                         evidence={"hex": hplmn_hex},
                     )
@@ -1065,7 +1108,7 @@ class SaipProfileLinter:
                         spec="3GPP TS 31.102 §4.2.6",
                         path=hplmn_path,
                         message=(
-                            "EF.HPLMNwAcT timer byte is 0x00 — HPLMN search is disabled. "
+                            "EF.HPLMNwAcT timer byte is 0x00 -- HPLMN search is disabled. "
                             "The ME will not periodically search for the HPLMN after "
                             "camping on a VPLMN, which prevents automatic return to home network."
                         ),
@@ -1142,6 +1185,68 @@ class SaipProfileLinter:
                         recommendation="Set the number-length byte to ≤ 10.",
                         evidence={"fid": fid_hex.upper(), "num_len": num_len_byte},
                     )
+
+    def _check_ef_length_fields(self, section_items: list[tuple[str, Any]]) -> None:
+        """YRL-LEN-*: a length byte that disagrees with the BCD field it counts.
+
+        The dialling-number tail of EF.ADN, EF.FDN, EF.MSISDN, EF.SDN,
+        EF.BDN, EF.MBDN, EF.LND, EF.ICE_DN, EF.ICI, EF.OCI and EF.CFIS,
+        the two address lengths of EF.SMSP and the length byte of EF.IMSI
+        each count an F-padded BCD field. The field is read the way the
+        card reads it (``saip_ef_length_fields``): 'FF' never occurs inside
+        the counted span, so a length byte that reaches into filler, or
+        stops short of the digits, is wrong. Records that still hold an
+        inline template sentinel are skipped.
+
+        - ``YRL-LEN-001`` (WARN): dialling-number tail length byte.
+        - ``YRL-LEN-002`` (WARN): EF.IMSI length byte (3GPP TS 31.102 §4.2.2).
+        - ``YRL-LEN-003`` (WARN): EF.SMSP TP-Destination Address or
+          TS-Service Centre Address length (3GPP TS 31.102 §4.2.27).
+        - ``YRL-LEN-004`` (WARN): EF.EXT1..EXT7 additional-data length
+          (3GPP TS 31.102 §4.4.2.4).
+        """
+        from Tools.ProfilePackage.saip_ef_length_fields import reconcile_document
+
+        _document, found = reconcile_document(
+            {"sections": dict(section_items)},
+            apply=False,
+            sentinel_hexes=self._inline_sentinel_hexes,
+            record_sizes=self._record_sizes,
+        )
+        for item in found:
+            edit = item.edit
+            if edit.ef_name == "IMSI":
+                code = "YRL-LEN-002"
+            elif edit.ef_name == "SMSP":
+                code = "YRL-LEN-003"
+            elif edit.ef_name.startswith("EXT"):
+                code = "YRL-LEN-004"
+            else:
+                code = "YRL-LEN-001"
+            if edit.declared == 0xFF:
+                reason = "marks the field unused while it holds digits"
+            elif edit.declared > edit.derived:
+                reason = "counts FF filler behind the digits"
+            else:
+                reason = "stops short of the digits"
+            self._add(
+                code=code,
+                severity="WARN",
+                spec=edit.spec,
+                path=f"{item.section_key}.{item.path}.fillFileContent",
+                message=f"{edit.describe()}: the length byte {reason}.",
+                recommendation=(
+                    f"Set the length byte to 0x{edit.derived:02X}, or bind the field "
+                    "to a token so a complete export writes it."
+                ),
+                evidence={
+                    "record": edit.record,
+                    "offset": edit.offset,
+                    "declared": f"0x{edit.declared:02X}",
+                    "derived": f"0x{edit.derived:02X}",
+                    "digits": edit.digits,
+                },
+            )
 
     def _check_ef_pnn_opl_encoding(self, section_items: list[tuple[str, Any]]) -> None:
         """YRL-PNN-* / YRL-OPL-*: EF.PNN and EF.OPL shape checks.
@@ -1225,15 +1330,15 @@ class SaipProfileLinter:
         ADN record and list-alignment checks for five further EFs.
 
         - ``YRL-MSISDN-001`` (FAIL): EF.MSISDN record shorter than 14 bytes
-          (3GPP TS 31.102 §4.2.26 — ADN record minimum).
+          (3GPP TS 31.102 §4.2.26 -- ADN record minimum).
         - ``YRL-FPLMN-001`` (WARN): EF.FPLMN length not a multiple of 3 bytes
-          (3GPP TS 31.102 §4.2.20 — each entry is 3-byte PLMN BCD).
+          (3GPP TS 31.102 §4.2.20 -- each entry is 3-byte PLMN BCD).
         - ``YRL-ECC-001`` (WARN): EF.ECC record not a multiple of 4 bytes
-          (3GPP TS 31.102 §4.2.21 — each record is 3B BCD number + 1B category).
+          (3GPP TS 31.102 §4.2.21 -- each record is 3B BCD number + 1B category).
         - ``YRL-EHPLMN-001`` (WARN): EF.EHPLMN length not a multiple of 3 bytes
-          (3GPP TS 31.102 §4.2.84 — same encoding as EF.FPLMN).
+          (3GPP TS 31.102 §4.2.84 -- same encoding as EF.FPLMN).
         - ``YRL-GID-001`` (WARN): EF.GID1 or EF.GID2 content is all 0xFF bytes
-          (3GPP TS 31.102 §4.2.10 / §4.2.11 — not personalised).
+          (3GPP TS 31.102 §4.2.10 / §4.2.11 -- not personalised).
         """
         _LIST_CHECKS = {
             "6F7B": ("YRL-FPLMN-001",  "EF.FPLMN",  "WARN", 3, "3GPP TS 31.102 §4.2.20"),
@@ -1265,7 +1370,7 @@ class SaipProfileLinter:
                 byte_len = len(fill_hex) // 2
 
                 if fid_upper == "6F40":
-                    # EF.MSISDN — ADN minimum is 14 bytes.
+                    # EF.MSISDN -- ADN minimum is 14 bytes.
                     if byte_len < 14:
                         self._add(
                             code="YRL-MSISDN-001",
@@ -1306,7 +1411,7 @@ class SaipProfileLinter:
                             spec="3GPP TS 31.102 §4.2.10",
                             path=f"genericFileManagement.{ef_label}.fillFileContent",
                             message=(
-                                f"{ef_label} is all 0xFF — not personalised. "
+                                f"{ef_label} is all 0xFF -- not personalised. "
                                 f"Group identifier lock will not function."
                             ),
                             recommendation=f"Set {ef_label} to the intended group identifier byte(s).",
@@ -1318,9 +1423,9 @@ class SaipProfileLinter:
 
         - ``YRL-SMS-001`` (FAIL): EF.SMS record not 176 bytes (3GPP TS 31.102 §4.2.16).
         - ``YRL-CBMI-001`` (WARN): EF.CBMI content not a multiple of 2 bytes
-          (3GPP TS 31.102 §4.2.14 — each entry is a 2-byte message identifier).
+          (3GPP TS 31.102 §4.2.14 -- each entry is a 2-byte message identifier).
         - ``YRL-CBMI-002`` (WARN): EF.CBMIR content not a multiple of 4 bytes
-          (3GPP TS 31.102 §4.2.36 — each range is start 2B + end 2B).
+          (3GPP TS 31.102 §4.2.36 -- each range is start 2B + end 2B).
         """
         _TARGETS = {
             "6F3C": ("YRL-SMS-001",  "EF.SMS",   "FAIL", 176, 176, "3GPP TS 31.102 §4.2.16"),
@@ -1391,9 +1496,9 @@ class SaipProfileLinter:
 
         - ``YRL-SUCI-001`` (FAIL): Protection Scheme Identifier is not 0, 1, or 2.
         - ``YRL-SUCI-002`` (WARN): PSI ≠ 0 (non-null scheme) but file is shorter
-          than 3 bytes — home network public key absent; ME will fall back to
+          than 3 bytes -- home network public key absent; ME will fall back to
           null-scheme, defeating SUCI privacy.
-        - ``YRL-SUCI-003`` (INFO): PSI = 0 (null-scheme) — SUPI transmitted in
+        - ``YRL-SUCI-003`` (INFO): PSI = 0 (null-scheme) -- SUPI transmitted in
           the clear; acceptable for testing but inadvisable in production.
         """
         _EF_SUCI_FID = "4F07"
@@ -1401,7 +1506,7 @@ class SaipProfileLinter:
         file_defs = self._extract_file_definitions(section_items)
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fd in file_defs:
                 if fd.section_key != section_key:
@@ -1443,7 +1548,7 @@ class SaipProfileLinter:
                         path=suci_path,
                         message=(
                             f"EF.SUCI-CALC-INFO PSI=0x{psi:02X} (non-null scheme) "
-                            f"but file is only {suci_bytes} byte(s) — "
+                            f"but file is only {suci_bytes} byte(s) -- "
                             "home network public key is absent; ME will fall back to null-scheme."
                         ),
                         recommendation="Add the home network public key (bytes 3+) for the selected scheme.",
@@ -1457,7 +1562,7 @@ class SaipProfileLinter:
                         spec="3GPP TS 31.102 §4.4.11.3",
                         path=suci_path,
                         message=(
-                            "EF.SUCI-CALC-INFO PSI=0x00 (null-scheme) — "
+                            "EF.SUCI-CALC-INFO PSI=0x00 (null-scheme) -- "
                             "SUPI will be transmitted in the clear. "
                             "Acceptable for test profiles; not recommended for production."
                         ),
@@ -1483,7 +1588,7 @@ class SaipProfileLinter:
         file_defs = self._extract_file_definitions(section_items)
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fid, code, ef_name, ef_key in _targets:
                 for fd in file_defs:
@@ -1527,7 +1632,7 @@ class SaipProfileLinter:
         file_defs = self._extract_file_definitions(section_items)
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fd in file_defs:
                 if fd.section_key != section_key:
@@ -1561,7 +1666,7 @@ class SaipProfileLinter:
 
         EF.EPSNSC (FID 6FE4) must be exactly 54 bytes.  An incorrect size causes
         the ME to discard the EPS NAS security context, forcing full re-authentication
-        on every attach — a significant impact on IoT devices with large attach cycles.
+        on every attach -- a significant impact on IoT devices with large attach cycles.
 
         - ``YRL-EPSNSC-001`` (FAIL): EF.EPSNSC is not exactly 54 bytes.
         """
@@ -1570,7 +1675,7 @@ class SaipProfileLinter:
         file_defs = self._extract_file_definitions(section_items)
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fd in file_defs:
                 if fd.section_key != section_key:
@@ -1621,7 +1726,7 @@ class SaipProfileLinter:
         ]
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fid, code, ef_name, fid_label, ef_key in _targets:
                 for fd in file_defs:
@@ -1665,7 +1770,7 @@ class SaipProfileLinter:
         file_defs = self._extract_file_definitions(section_items)
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fd in file_defs:
                 if fd.section_key != section_key:
@@ -1708,7 +1813,7 @@ class SaipProfileLinter:
         file_defs = self._extract_file_definitions(section_items)
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fd in file_defs:
                 if fd.section_key != section_key:
@@ -1749,7 +1854,7 @@ class SaipProfileLinter:
 
         - ``YRL-EST-001`` (FAIL): EF.EST content is empty (no bytes).
         - ``YRL-EST-002`` (WARN): a bit is set in EF.EST for a UST service that
-          is not available (or cannot be determined from UST) — service will
+          is not available (or cannot be determined from UST) -- service will
           never activate on this profile.
         """
         _EF_EST_FID = "6F56"
@@ -1769,7 +1874,7 @@ class SaipProfileLinter:
         )
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fd in file_defs:
                 if fd.section_key != section_key:
@@ -1789,7 +1894,7 @@ class SaipProfileLinter:
                         severity="FAIL",
                         spec="3GPP TS 31.102 §4.2.46",
                         path=est_path,
-                        message="EF.EST content is empty — no enabled-service toggle bytes present.",
+                        message="EF.EST content is empty -- no enabled-service toggle bytes present.",
                         recommendation="Provide at least 1 byte for EF.EST (e.g. 0x00 if no services are enabled).",
                         evidence={"hex": est_hex},
                     )
@@ -1817,7 +1922,7 @@ class SaipProfileLinter:
                         path=est_path,
                         message=(
                             f"EF.EST bit {bit_index} (UST service {ust_service}) is set "
-                            f"but UST service {ust_service} is not available — "
+                            f"but UST service {ust_service} is not available -- "
                             "the ME will never activate this feature."
                         ),
                         recommendation=(
@@ -1835,18 +1940,18 @@ class SaipProfileLinter:
         """YRL-SPN-*: EF.SPN byte-level encoding checks (3GPP TS 31.102 §4.2.12).
 
         EF.SPN (FID 6F46) is exactly 17 bytes:
-          Byte 1: display-conditions bitmask (bits 0–1 defined, rest reserved/0).
-          Bytes 2–17: operator name, GSM7 or UCS2 default alphabet, unused bytes = 0xFF.
+          Byte 1: display-conditions bitmask (bits 0-1 defined, rest reserved/0).
+          Bytes 2-17: operator name, GSM7 or UCS2 default alphabet, unused bytes = 0xFF.
 
         - ``YRL-SPN-001`` (FAIL): EF.SPN is not exactly 17 bytes.
-        - ``YRL-SPN-002`` (WARN): display-conditions byte has reserved bits 2–7 set.
-        - ``YRL-SPN-003`` (WARN): bytes 2–17 are all 0xFF — operator name not configured.
+        - ``YRL-SPN-002`` (WARN): display-conditions byte has reserved bits 2-7 set.
+        - ``YRL-SPN-003`` (WARN): bytes 2-17 are all 0xFF -- operator name not configured.
         """
         _EF_SPN_FID = "6F46"
         file_defs = self._extract_file_definitions(section_items)
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fd in file_defs:
                 if fd.section_key != section_key:
@@ -1886,9 +1991,9 @@ class SaipProfileLinter:
                         path=spn_path,
                         message=(
                             f"EF.SPN display-conditions byte is 0x{disp_byte:02X}; "
-                            "bits 2–7 are reserved and should be zero."
+                            "bits 2-7 are reserved and should be zero."
                         ),
-                        recommendation="Clear reserved bits 2–7 in the display-conditions byte.",
+                        recommendation="Clear reserved bits 2-7 in the display-conditions byte.",
                         evidence={"display_conditions": f"0x{disp_byte:02X}"},
                     )
 
@@ -1900,11 +2005,11 @@ class SaipProfileLinter:
                         spec="3GPP TS 31.102 §4.2.12",
                         path=spn_path,
                         message=(
-                            "EF.SPN name bytes (2–17) are all 0xFF — "
+                            "EF.SPN name bytes (2-17) are all 0xFF -- "
                             "operator name is not configured."
                         ),
-                        recommendation="Set bytes 2–17 to the operator name in GSM7 or UCS2 encoding.",
-                        evidence={"name_hex": name_hex[:16] + "…"},
+                        recommendation="Set bytes 2-17 to the operator name in GSM7 or UCS2 encoding.",
+                        evidence={"name_hex": name_hex[:16] + "..."},
                     )
 
     def _check_ef_smsp_encoding(self, section_items: list[tuple[str, Any]]) -> None:
@@ -1924,7 +2029,7 @@ class SaipProfileLinter:
         file_defs = self._extract_file_definitions(section_items)
 
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim"):
+            if self._base_type_from_key(section_key).lower() not in ("usim", "opt-usim", "iot", "opt-iot"):
                 continue
             for fd in file_defs:
                 if fd.section_key != section_key:
@@ -1955,7 +2060,7 @@ class SaipProfileLinter:
                     continue
 
                 # Byte 2 (index 2) = SMSC address length in the service centre
-                # address field.  0xFF means "SC address not set" — skip.
+                # address field.  0xFF means "SC address not set" -- skip.
                 # Maximum valid E.164 SC address is 11 bytes (ToN/NPI + 10 BCD).
                 sc_len = int(smsp_hex[2:4], 16)
                 if sc_len != 0xFF and sc_len > 11:
@@ -2012,7 +2117,7 @@ class SaipProfileLinter:
         Validates ``(major-version, minor-version)`` against the TCA PP TS
         published version set and flags features that only exist in newer
         SAIP grammars when they appear under an older version. ``iotOptions``
-        is the only such gating field at the moment — it is grammar-defined
+        is the only such gating field at the moment -- it is grammar-defined
         only from TCA SAIP 3.3 onward.
         """
         major = header.get("major-version")
@@ -2042,7 +2147,7 @@ class SaipProfileLinter:
             self._add(
                 code="YRL-HDR-006",
                 severity="WARN",
-                spec="TCA PP TS §A.2 (iotOptions)",
+                spec="TCA SAIP v3.4.1 §8.2.1 (iotOptions)",
                 path="header.iotOptions",
                 message=(
                     f"iotOptions is set on a SAIP {version_pair[0]}.{version_pair[1]} "
@@ -2056,7 +2161,7 @@ class SaipProfileLinter:
             )
 
     def _check_profile_header_profile_type(self, header: dict[str, Any]) -> None:
-        """YRL-HDR-008: ``profileType`` UTF-8 length 1..100 (TCA SAIP §A.2)."""
+        """YRL-HDR-008: ``profileType`` UTF-8 length 1..100 (TCA SAIP v3.4.1 §8.2.1)."""
         value = header.get("profileType")
         if value is None:
             return
@@ -2070,7 +2175,7 @@ class SaipProfileLinter:
             self._add(
                 code="YRL-HDR-008",
                 severity="WARN",
-                spec="TCA SAIP §A.2",
+                spec="TCA SAIP v3.4.1 §8.2.1",
                 path="header.profileType",
                 message="profileType is set but empty; the operator-facing name is blank.",
                 recommendation="Set profileType to a 1..100 UTF-8 character description.",
@@ -2079,7 +2184,7 @@ class SaipProfileLinter:
             self._add(
                 code="YRL-HDR-008",
                 severity="FAIL",
-                spec="TCA SAIP §A.2",
+                spec="TCA SAIP v3.4.1 §8.2.1",
                 path="header.profileType",
                 message=(
                     f"profileType is {byte_length} UTF-8 bytes; SAIP grammar caps "
@@ -2094,7 +2199,7 @@ class SaipProfileLinter:
     def _check_mandatory_gfste_list(self, header: dict[str, Any]) -> None:
         """YRL-HDR-007: ``eUICC-Mandatory-GFSTEList`` dotted-OID validity.
 
-        TCA PP TS §A.2 declares the field as a SEQUENCE OF OBJECT
+        TCA SAIP v3.4.1 §8.2.1 declares the field as a SEQUENCE OF OBJECT
         IDENTIFIER. Each entry must be a syntactically valid dotted-OID
         (e.g. ``2.23.143.1.2.3``), with each component being a non-negative
         integer and no leading zeros except for the literal ``0``.
@@ -2110,7 +2215,7 @@ class SaipProfileLinter:
                 self._add(
                     code="YRL-HDR-007",
                     severity="FAIL",
-                    spec="TCA SAIP §A.2 / ITU-T X.660",
+                    spec="TCA SAIP v3.4.1 §8.2.1 / ITU-T X.660",
                     path=base_path,
                     message="GFSTE entry is empty.",
                     recommendation="Populate the OID or drop the entry.",
@@ -2121,7 +2226,7 @@ class SaipProfileLinter:
                 self._add(
                     code="YRL-HDR-007",
                     severity="FAIL",
-                    spec="TCA SAIP §A.2 / ITU-T X.660",
+                    spec="TCA SAIP v3.4.1 §8.2.1 / ITU-T X.660",
                     path=base_path,
                     message=f"GFSTE entry {text!r} is not a dotted OID.",
                     recommendation="Use a dotted-OID form such as 2.23.143.1.2.3.",
@@ -2134,7 +2239,7 @@ class SaipProfileLinter:
                     self._add(
                         code="YRL-HDR-007",
                         severity="FAIL",
-                        spec="TCA SAIP §A.2 / ITU-T X.660",
+                        spec="TCA SAIP v3.4.1 §8.2.1 / ITU-T X.660",
                         path=base_path,
                         message=(
                             f"GFSTE entry {text!r} has invalid OID component "
@@ -2152,7 +2257,7 @@ class SaipProfileLinter:
                 self._add(
                     code="YRL-HDR-007",
                     severity="WARN",
-                    spec="TCA SAIP §A.2",
+                    spec="TCA SAIP v3.4.1 §8.2.1",
                     path=base_path,
                     message=f"GFSTE OID {text} is declared more than once.",
                     recommendation="Keep each mandatory GFSTE OID listed once.",
@@ -2160,10 +2265,10 @@ class SaipProfileLinter:
             seen.add(text)
 
     def _check_mandatory_aids_entries(self, header: dict[str, Any]) -> None:
-        """YRL-HDR-005: ``eUICC-Mandatory-AIDs`` entry shape (TCA SAIP §A.2).
+        """YRL-HDR-005: ``eUICC-Mandatory-AIDs`` entry shape (TCA SAIP v3.4.1 §8.2.1).
 
         Each entry must declare both ``aid`` (5..16 bytes per ISO 7816-5
-        §8.5) and ``version`` (exactly 2 bytes per TCA SAIP §A.2). An
+        §8.5) and ``version`` (exactly 2 bytes per TCA SAIP v3.4.1 §8.2.1). An
         entry without an ``aid`` or ``version`` field cannot be encoded
         per the SAIP grammar and will be rejected by a conformant
         profile validator at load time.
@@ -2178,7 +2283,7 @@ class SaipProfileLinter:
                 self._add(
                     code="YRL-HDR-005",
                     severity="FAIL",
-                    spec="TCA SAIP §A.2",
+                    spec="TCA SAIP v3.4.1 §8.2.1",
                     path=base_path,
                     message="eUICC-Mandatory-AIDs entry is not a dict.",
                     recommendation="Encode each entry as {aid: <hex>, version: <2 bytes hex>}.",
@@ -2196,7 +2301,7 @@ class SaipProfileLinter:
                 self._add(
                     code="YRL-HDR-005",
                     severity="FAIL",
-                    spec="TCA SAIP §A.2 / ISO 7816-5 §8.5",
+                    spec="TCA SAIP v3.4.1 §8.2.1 / ISO 7816-5 §8.5",
                     path=f"{base_path}.aid",
                     message="eUICC-Mandatory-AIDs entry is missing the AID field.",
                     recommendation="Populate the AID (5..16 byte hex).",
@@ -2222,7 +2327,7 @@ class SaipProfileLinter:
                         self._add(
                             code="YRL-HDR-005",
                             severity="WARN",
-                            spec="TCA SAIP §A.2",
+                            spec="TCA SAIP v3.4.1 §8.2.1",
                             path=f"{base_path}.aid",
                             message=(
                                 f"Duplicate AID {key} declared in eUICC-Mandatory-AIDs."
@@ -2234,7 +2339,7 @@ class SaipProfileLinter:
                 self._add(
                     code="YRL-HDR-005",
                     severity="FAIL",
-                    spec="TCA SAIP §A.2",
+                    spec="TCA SAIP v3.4.1 §8.2.1",
                     path=f"{base_path}.version",
                     message="eUICC-Mandatory-AIDs entry is missing the version field.",
                     recommendation="Populate the package version (exactly 2 bytes hex).",
@@ -2243,7 +2348,7 @@ class SaipProfileLinter:
                 self._add(
                     code="YRL-HDR-005",
                     severity="FAIL",
-                    spec="TCA SAIP §A.2",
+                    spec="TCA SAIP v3.4.1 §8.2.1",
                     path=f"{base_path}.version",
                     message=(
                         f"eUICC-Mandatory-AIDs version byte length "
@@ -2294,7 +2399,7 @@ class SaipProfileLinter:
 
             lk = sub_key.lower().replace("-", "").replace("_", "")
 
-            # Port-number range check — TS 102 223 §8.52 encodes port as
+            # Port-number range check -- TS 102 223 §8.52 encodes port as
             # a 2-byte big-endian integer; valid IANA range 1..65535.
             if lk in ("port", "portnumber", "destinationport", "localport"):
                 if self._looks_like_hex(sub_hex):
@@ -2313,7 +2418,7 @@ class SaipProfileLinter:
                             evidence={"sub_key": sub_key, "port_value": port_int},
                         )
 
-            # Transport-protocol byte — TS 102 223 §8.52 table:
+            # Transport-protocol byte -- TS 102 223 §8.52 table:
             # 0x02 = UDP, 0x03 = TCP (most common for BIP OTA)
             if lk in ("transportprotocol", "protocol", "transportlayerprotocol"):
                 if self._looks_like_hex(sub_hex):
@@ -2347,7 +2452,7 @@ class SaipProfileLinter:
     # ``F`` filler in the trailing nibble. Both encodings are easy to
     # get wrong by hand-editing template scaffolding, and the failure
     # mode (eUICC rejecting the profile, or worse: MNO rejecting
-    # registration) is operationally expensive — the linter keeps the
+    # registration) is operationally expensive -- the linter keeps the
     # operator on the rails.
     # ------------------------------------------------------------------
 
@@ -2423,7 +2528,7 @@ class SaipProfileLinter:
     ) -> None:
         for section_key, payload in section_items:
             section_lo = self._base_type_from_key(section_key).lower()
-            if section_lo not in ("usim", "opt-usim", "isim", "opt-isim"):
+            if section_lo not in ("usim", "opt-usim", "isim", "opt-isim", "iot", "opt-iot"):
                 continue
             for path, value in self._walk_with_choice_paths(payload):
                 lowered = path.lower()
@@ -2442,6 +2547,15 @@ class SaipProfileLinter:
         field_path: str,
         hex_text: str,
     ) -> None:
+        """YRL-IMS-001..007: EF.IMSI byte checks.
+
+        3GPP TS 31.102 v18.4.0 §4.2.2: byte 1 counts the significant bytes
+        that follow it and unused nibbles are 'F'. 3GPP TS 24.008 v19.5.0
+        §10.5.1.4 codes byte 2 as digit 1 in the high nibble and, in the low
+        nibble, the odd/even indication (bit 4, 1 for an odd number of
+        digits) over the identity type 001: 9 for an odd digit count, 1 for
+        an even one. A 15-digit IMSI therefore reads ``08 x9 ...``.
+        """
         full_path = f"{section_key}.{field_path}"
         if len(hex_text) != 18:
             self._add(
@@ -2455,10 +2569,10 @@ class SaipProfileLinter:
                     f"(1 length byte + 8 body bytes)."
                 ),
                 recommendation=(
-                    "Re-encode EF.IMSI as 9 octets: first octet = 0x08, "
-                    "then byte = (first-digit << 4) | parity, then 7 "
-                    "nibble-swapped BCD bytes (filler nibble 0xF allowed "
-                    "in the trailing position)."
+                    "Re-encode EF.IMSI as 9 octets: first octet = number of "
+                    "significant bytes (0x08 for 15 digits), then byte = "
+                    "(first-digit << 4) | parity, then 7 nibble-swapped BCD "
+                    "bytes (filler nibble 0xF allowed in the trailing position)."
                 ),
                 evidence={"hex": hex_text.upper()},
             )
@@ -2466,22 +2580,6 @@ class SaipProfileLinter:
 
         body = hex_text.upper()
         length_byte = int(body[0:2], 16)
-        if length_byte != 0x08:
-            self._add(
-                code="YRL-IMS-002",
-                severity="FAIL",
-                spec="3GPP TS 31.102 §4.2.2",
-                path=full_path,
-                message=(
-                    f"EF.IMSI length-byte is 0x{length_byte:02X}; the "
-                    f"specification requires 0x08 (length of the body "
-                    f"that follows)."
-                ),
-                recommendation="Set the first octet of EF.IMSI to 0x08.",
-                evidence={"hex": body},
-            )
-            return
-
         parity_byte = int(body[2:4], 16)
         parity_nibble = parity_byte & 0x0F
         first_digit = (parity_byte >> 4) & 0x0F
@@ -2489,18 +2587,18 @@ class SaipProfileLinter:
             self._add(
                 code="YRL-IMS-003",
                 severity="FAIL",
-                spec="3GPP TS 31.102 §4.2.2",
+                spec="3GPP TS 31.102 §4.2.2 / 3GPP TS 24.008 §10.5.1.4",
                 path=full_path,
                 message=(
                     f"EF.IMSI parity nibble is 0x{parity_nibble:X}; the "
-                    f"specification only allows 0x1 (odd digit count) "
-                    f"or 0x9 (even digit count). A missing parity "
+                    f"specification only allows 0x9 (odd digit count) "
+                    f"or 0x1 (even digit count). A missing parity "
                     f"nibble is the most common cause of 'authentication "
                     f"failed' on first attach."
                 ),
                 recommendation=(
                     "Re-encode the parity-aware byte as "
-                    "(first_digit << 4) | (1 if odd_imsi_length else 9)."
+                    "(first_digit << 4) | (9 if odd_imsi_length else 1)."
                 ),
                 evidence={
                     "hex": body,
@@ -2528,11 +2626,19 @@ class SaipProfileLinter:
             )
             return
 
-        # Decode digits.
+        # Decode digits; count the significant bytes (the parity byte plus
+        # every digit byte before the first 'FF').
         rest_pairs = body[4:]
         digits = [str(first_digit)]
+        significant = 1
+        filler_seen = False
         for offset in range(0, len(rest_pairs), 2):
             byte_hex = rest_pairs[offset:offset + 2]
+            if byte_hex == "FF":
+                filler_seen = True
+                continue
+            if not filler_seen:
+                significant += 1
             high = int(byte_hex[0], 16)
             low = int(byte_hex[1], 16)
             for nibble in (low, high):
@@ -2555,12 +2661,36 @@ class SaipProfileLinter:
                 digits.append(str(nibble))
 
         digit_count = len(digits)
-        expected_parity = 0x1 if (digit_count % 2 == 1) else 0x9
+        if length_byte != significant:
+            self._add(
+                code="YRL-IMS-002",
+                severity="FAIL",
+                spec="3GPP TS 31.102 §4.2.2",
+                path=full_path,
+                message=(
+                    f"EF.IMSI length byte is 0x{length_byte:02X}; the "
+                    f"{digit_count}-digit IMSI takes {significant} "
+                    f"significant byte(s) (0x{significant:02X})."
+                ),
+                recommendation=(
+                    "Set the first octet of EF.IMSI to the number of "
+                    "significant bytes that follow it (0x08 for a 15-digit IMSI)."
+                ),
+                evidence={
+                    "hex": body,
+                    "length_byte": f"0x{length_byte:02X}",
+                    "significant_bytes": significant,
+                    "digit_count": digit_count,
+                },
+            )
+            return
+
+        expected_parity = 0x9 if (digit_count % 2 == 1) else 0x1
         if expected_parity != parity_nibble:
             self._add(
                 code="YRL-IMS-005",
                 severity="FAIL",
-                spec="3GPP TS 31.102 §4.2.2",
+                spec="3GPP TS 31.102 §4.2.2 / 3GPP TS 24.008 §10.5.1.4",
                 path=full_path,
                 message=(
                     f"EF.IMSI parity nibble 0x{parity_nibble:X} does "
@@ -2568,8 +2698,8 @@ class SaipProfileLinter:
                     f"(expected 0x{expected_parity:X})."
                 ),
                 recommendation=(
-                    "Set parity = 0x1 for odd digit counts (standard "
-                    "15-digit IMSIs) or 0x9 for even digit counts."
+                    "Set the low nibble of byte 2 to 0x9 for an odd digit "
+                    "count (a 15-digit IMSI) or 0x1 for an even one."
                 ),
                 evidence={
                     "hex": body,
@@ -2597,7 +2727,7 @@ class SaipProfileLinter:
             return
 
         if digit_count != 15:
-            # Common but unusual — keep as INFO so the operator sees
+            # Common but unusual -- keep as INFO so the operator sees
             # the surface without it raising the gate.
             self._add(
                 code="YRL-IMS-007",
@@ -2672,6 +2802,23 @@ class SaipProfileLinter:
         if not isinstance(hex_text, str) or len(hex_text) == 0:
             return ""
         return hex_text.replace(" ", "").upper().rstrip("F")
+
+    @staticmethod
+    def _luhn_remainder(digits: str) -> int:
+        """Luhn mod-10 remainder of a decimal string (0 = valid check digit).
+
+        ITU-T E.118 (09/2025) §6 computes the ICCID parity digit with the
+        Luhn formula of ISO/IEC 7812-1 Annex B.
+        """
+        total = 0
+        for position, digit_char in enumerate(reversed(digits)):
+            value = int(digit_char)
+            if position % 2 == 1:
+                value *= 2
+                if value > 9:
+                    value -= 9
+            total += value
+        return total % 10
 
     def _check_identification_uniqueness(self, section_items: list[tuple[str, Any]]) -> None:
         seen: set[int] = set()
@@ -2785,7 +2932,8 @@ class SaipProfileLinter:
             if isinstance(load_block, dict):
                 candidate = load_block.get("loadPackageAID")
                 if candidate is not None:
-                    load_aid = str(candidate).strip().upper()
+                    # A package decoded from DER carries AIDs as bytes.
+                    load_aid = self._normalize_aid_hex(candidate)
 
             if load_aid is None:
                 self._add(
@@ -2822,7 +2970,7 @@ class SaipProfileLinter:
             if isinstance(load_block, dict):
                 security_domain_aid_candidate = load_block.get("securityDomainAID")
                 if security_domain_aid_candidate is not None:
-                    security_domain_aid = str(security_domain_aid_candidate).strip().upper()
+                    security_domain_aid = self._normalize_aid_hex(security_domain_aid_candidate)
             if security_domain_aid is not None:
                 if self._looks_like_hex(security_domain_aid) is False:
                     self._add(
@@ -2976,10 +3124,10 @@ class SaipProfileLinter:
                                 ),
                                 message=(
                                     f"applicationModuleAID is {mod_bytes} byte(s); "
-                                    "valid AID range is 5–16 bytes."
+                                    "valid AID range is 5-16 bytes."
                                 ),
                                 recommendation=(
-                                    "Correct the module AID to a 5–16 byte value."
+                                    "Correct the module AID to a 5-16 byte value."
                                 ),
                                 evidence={"applicationModuleAID": mod_aid},
                             )
@@ -3163,14 +3311,14 @@ class SaipProfileLinter:
 
         - ``YRL-GFM-001`` (WARN): a ``fillFileContent`` or
           ``fillFileOffset`` op appears without a preceding ``filePath``
-          or ``createFCP`` op in the same command block — the target
+          or ``createFCP`` op in the same command block -- the target
           file is unspecified so the UICC cannot apply the write.
         - ``YRL-GFM-002`` (INFO): a ``createFCP`` op is followed by
           another ``createFCP`` in the same block without an intervening
-          ``fillFileContent`` — the second create will typically fail
+          ``fillFileContent`` -- the second create will typically fail
           because no data was written to the first file.
         - ``YRL-GFM-003`` (INFO): an empty command block (zero ops) is
-          present — it has no effect and can be removed.
+          present -- it has no effect and can be removed.
         """
         for section_key, payload in sections.items():
             if self._base_type_from_key(section_key) != "genericFileManagement":
@@ -3218,7 +3366,7 @@ class SaipProfileLinter:
                 severity="INFO",
                 spec="TS 102 222",
                 path=path_base,
-                message=f"GFM block [{blk_idx}] is empty (zero ops) — has no effect.",
+                message=f"GFM block [{blk_idx}] is empty (zero ops) -- has no effect.",
                 recommendation="Remove empty command blocks to keep the GFM PE compact.",
             )
             return
@@ -3241,7 +3389,7 @@ class SaipProfileLinter:
                         path=f"{path_base}[{op_idx}].{name}",
                         message=(
                             f"GFM block [{blk_idx}] op [{op_idx}] '{name}' "
-                            "has no preceding filePath or createFCP in the same block — "
+                            "has no preceding filePath or createFCP in the same block -- "
                             "the UICC has no target file for this write."
                         ),
                         recommendation=(
@@ -3262,7 +3410,7 @@ class SaipProfileLinter:
                 path=f"{path_base}[{len(real_ops) - 1}].{final_op_name}",
                 message=(
                     f"GFM block [{blk_idx}] ends with '{final_op_name}' "
-                    "but has no subsequent fillFileContent — the created file will be empty."
+                    "but has no subsequent fillFileContent -- the created file will be empty."
                 ),
                 recommendation=(
                     "Add a fillFileContent op after the createFCP to initialise "
@@ -3275,7 +3423,7 @@ class SaipProfileLinter:
         """YRL-RFM-*: TAR uniqueness and key-reference sanity for RFM PEs.
 
         - ``YRL-RFM-001`` (FAIL): two or more RFM PEs share the same TAR value.
-          Duplicate TARs cause ambiguous dispatch on the card — only the first
+          Duplicate TARs cause ambiguous dispatch on the card -- only the first
           matching RFM handler will be invoked (ETSI TS 102 226 §8.2).
         - ``YRL-RFM-002`` (WARN): a ``tarList`` entry is not exactly 3 bytes
           (6 hex nibbles).  SCP80 / BIP channel setup requires a 3-byte TAR
@@ -3382,7 +3530,7 @@ class SaipProfileLinter:
 
         MSL is a single byte; the upper nibble selects the encryption
         algorithm (DES / AES) and the lower nibble selects the integrity
-        algorithm. A zero byte means "no security required" — almost
+        algorithm. A zero byte means "no security required" -- almost
         always a personalisation error on a remote-management PE.
         """
         msl_candidates = self._find_key_values(payload, "minimumSecurityLevel")
@@ -3441,12 +3589,12 @@ class SaipProfileLinter:
     def _check_ram_sd_integrity(self, sections: dict[str, Any]) -> None:
         """YRL-RAM-*: Remote Application Management PE sanity checks.
 
-        - ``YRL-RAM-001`` (FAIL): ``securityDomainAID`` is absent — no target
+        - ``YRL-RAM-001`` (FAIL): ``securityDomainAID`` is absent -- no target
           SD, so the RAM handler cannot be dispatched (GP CPS §11.1.4).
         - ``YRL-RAM-002`` (WARN): ``securityDomainAID`` present but not a
-          valid AID length (5–16 bytes, ISO 7816-4 §8.2.1).
+          valid AID length (5-16 bytes, ISO 7816-4 §8.2.1).
         - ``YRL-RAM-003`` (WARN): ``applicationLoadPackageAID`` present but
-          not a valid AID length (5–16 bytes, ISO 7816-4 §8.2.1).
+          not a valid AID length (5-16 bytes, ISO 7816-4 §8.2.1).
         """
         for section_key, payload in sections.items():
             if self._base_type_from_key(section_key) != "ram":
@@ -3462,7 +3610,7 @@ class SaipProfileLinter:
                     spec="GP CPS v2.3 §11.1.4",
                     path=f"{section_key}.securityDomainAID",
                     message=(
-                        "RAM PE has no securityDomainAID — the OTA stack "
+                        "RAM PE has no securityDomainAID -- the OTA stack "
                         "cannot identify the target SD for remote installs."
                     ),
                     recommendation="Set securityDomainAID to the AID of the target Security Domain.",
@@ -3479,7 +3627,7 @@ class SaipProfileLinter:
                             path=f"{section_key}.securityDomainAID",
                             message=(
                                 f"securityDomainAID is {sd_bytes} byte(s); "
-                                "valid AID range is 5–16 bytes (ISO 7816-4 §8.2.1)."
+                                "valid AID range is 5-16 bytes (ISO 7816-4 §8.2.1)."
                             ),
                             recommendation="Correct the AID to a 5- to 16-byte value.",
                             evidence={"aid": sd_hex, "byte_length": sd_bytes},
@@ -3498,7 +3646,7 @@ class SaipProfileLinter:
                             path=f"{section_key}.applicationLoadPackageAID",
                             message=(
                                 f"applicationLoadPackageAID is {lpa_bytes} byte(s); "
-                                "valid AID range is 5–16 bytes (ISO 7816-4 §8.2.1)."
+                                "valid AID range is 5-16 bytes (ISO 7816-4 §8.2.1)."
                             ),
                             recommendation="Correct the load-package AID to a 5- to 16-byte value.",
                             evidence={"aid": lpa_hex, "byte_length": lpa_bytes},
@@ -3589,6 +3737,9 @@ class SaipProfileLinter:
 
     def _check_usim_core_expectations(self, sections: dict[str, Any]) -> None:
         usim_payload = self._first_section_by_type(sections, "usim")
+        if isinstance(usim_payload, dict) is False:
+            # An IoT Minimal Profile carries the USIM files in PE-IoT.
+            usim_payload = self._first_section_by_type(sections, "iot")
         if isinstance(usim_payload, dict) is False:
             return
         expected_markers = ("ef-imsi", "ef-ust")
@@ -3912,10 +4063,10 @@ class SaipProfileLinter:
             "YRL-SDM-002",
             "YRL-UCR-001",
             "YRL-MET-001",
-            # Key material — wrong K/OPc length makes the USIM non-functional.
+            # Key material -- wrong K/OPc length makes the USIM non-functional.
             "YRL-AKA-001",
             "YRL-AKA-002",
-            # PIN / PUK wrong value length — card will reject personalisation.
+            # PIN / PUK wrong value length -- card will reject personalisation.
             "YRL-PIN-002",
             "YRL-PIN-003",
             # SD key version 0 is spec-reserved; personalisation will fail.
@@ -4154,6 +4305,128 @@ class SaipProfileLinter:
             return
         seen_short_efids.add(short_efid)
 
+    # ETSI TS 102 221 V18.4.0 §11.1.1.4.3 Table 11.5: b3-b1 '010' linear
+    # fixed, '110' cyclic.
+    _RECORD_STRUCTURE_BITS = frozenset({0x02, 0x06})
+    _FCP_CHOICE_ARMS = frozenset({"fileDescriptor", "createFCP"})
+    _TRAILING_INDEX_RE = re.compile(r"\[\d+\]$")
+
+    def _record_length_from_descriptor(self, file_descriptor: Optional[str]) -> Optional[int]:
+        """Record length of a linear fixed or cyclic descriptor (hex), else ``None``."""
+        if file_descriptor is None or self._looks_like_hex(file_descriptor) is False:
+            return None
+        if len(file_descriptor) < 8 or len(file_descriptor) % 2 != 0:
+            return None
+        if (int(file_descriptor[0:2], 16) & 0x07) not in self._RECORD_STRUCTURE_BITS:
+            return None
+        record_length = int(file_descriptor[4:8], 16)
+        return record_length if record_length > 0 else None
+
+    def _iter_choice_fcps(self, payload: Any, base_path: str = "") -> list[tuple[str, dict[str, Any]]]:
+        """``(path, Fcp)`` for every ``(fileDescriptor | createFCP, {...})`` tuple.
+
+        The path names the tuple's list position: ``ef-pbc[0]`` in a
+        template PE, ``fileManagementCMD[3][1]`` in a GFM transaction.
+        """
+        rows: list[tuple[str, dict[str, Any]]] = []
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                key_part = str(key)
+                rows.extend(
+                    self._iter_choice_fcps(value, key_part if base_path == "" else f"{base_path}.{key_part}")
+                )
+            return rows
+        if isinstance(payload, list):
+            for index, value in enumerate(payload):
+                path = f"{base_path}[{index}]"
+                if (
+                    isinstance(value, tuple)
+                    and len(value) == 2
+                    and str(value[0]) in self._FCP_CHOICE_ARMS
+                    and isinstance(value[1], dict)
+                ):
+                    rows.append((path, value[1]))
+                    continue
+                rows.extend(self._iter_choice_fcps(value, path))
+        return rows
+
+    def _check_fcp_record_geometry(self, section_items: list[tuple[str, Any]]) -> None:
+        """Descriptor length and record geometry of the Fcps pySim decodes as tuples.
+
+        :meth:`_extract_file_definitions` walks dicts and lists only, so the
+        ``(choice, payload)`` tuples of a template PE or a GFM transaction
+        never reach the file rules. A card checks two things on creation
+        that this pass reads from them: TCA SAIP V3.4.1 §8.3.2 codes
+        ``Fcp.fileDescriptor`` as ``SIZE(2..4)`` per ETSI TS 102 222
+        V17.1.0 §6.3.2.2.2 Table 4 (2 bytes, 4 with the record length of a
+        linear fixed or cyclic EF, never a record count), and tag '80' is
+        record length x records, at most 254 records (TS 102 221 V18.4.0
+        §8.2.2.2 / §8.2.2.3). An Fcp without efFileSize keeps the
+        template's size, which this pass does not see.
+        """
+        for section_key, payload in section_items:
+            gfm = self._base_type_from_key(str(section_key)) == "genericFileManagement"
+            for fcp_path, fcp in self._iter_choice_fcps(payload):
+                file_key = fcp_path if gfm else self._TRAILING_INDEX_RE.sub("", fcp_path)
+                path = f"{section_key}::{file_key}"
+                descriptor = self._normalize_file_definition_value(fcp.get("fileDescriptor"))
+                if not descriptor or self._looks_like_hex(descriptor) is False or len(descriptor) % 2 != 0:
+                    continue
+                raw = bytes.fromhex(descriptor)
+                record = (raw[0] & 0x07) in self._RECORD_STRUCTURE_BITS
+                size_hex = self._normalize_file_definition_value(fcp.get("efFileSize"))
+                size = int(size_hex, 16) if size_hex and self._looks_like_hex(size_hex) else None
+                record_length = self._record_length_from_descriptor(descriptor)
+                expected = 4 if record else 2
+                if len(raw) != expected:
+                    evidence: dict[str, Any] = {"fileDescriptor": descriptor, "octets": len(raw)}
+                    message = (
+                        f"fileDescriptor is {len(raw)} octets; this file's createFCP "
+                        f"descriptor takes {expected}."
+                    )
+                    if record and len(raw) == 5:
+                        evidence["fifthOctetRecordCount"] = raw[4]
+                        if size is not None and record_length:
+                            evidence["efFileSizeRecords"] = size // record_length
+                        message = (
+                            f"fileDescriptor carries a record count ({raw[4]}) as a fifth "
+                            "octet; a createFCP descriptor is 2 or 4 octets and the card "
+                            "rejects the profile (invalid-request-format)."
+                        )
+                    self._add(
+                        code="YRL-FIL-002",
+                        severity="FAIL",
+                        spec="TCA SAIP V3.4.1 §8.3.2 / ETSI TS 102 222 §6.3.2.2.2",
+                        path=path,
+                        message=message,
+                        recommendation=(
+                            "Keep the descriptor byte, data coding byte and record length; "
+                            "give the record count as efFileSize = record length x records."
+                        ),
+                        evidence=evidence,
+                    )
+                if record_length is None or size is None:
+                    continue
+                if size % record_length != 0:
+                    self._add(
+                        code="YRL-FIL-067",
+                        severity="FAIL",
+                        spec="ETSI TS 102 222",
+                        path=path,
+                        message="efFileSize is not a multiple of record length for record-oriented EF.",
+                        recommendation="Set efFileSize as N * recordLength.",
+                        evidence={"efFileSize": size, "recordLength": record_length},
+                    )
+                elif size // record_length > 254:
+                    self._add(
+                        code="YRL-FIL-038",
+                        severity="FAIL",
+                        spec="ETSI TS 102 221",
+                        path=path,
+                        message=f"Record count is {size // record_length}; maximum allowed is 254.",
+                        recommendation="Reduce file size or record length to keep <=254 records.",
+                    )
+
     def _validate_ef_file_size(self, file_def: FileDefinition) -> None:
         ef_file_size = file_def.ef_file_size
         if ef_file_size is None:
@@ -4195,17 +4468,8 @@ class SaipProfileLinter:
         # runtime (ETSI TS 102 222 §6.4 requires the content to fit).
         self._validate_ef_fill_content_length(file_def, size_value, path)
 
-        file_descriptor = file_def.file_descriptor
-        if file_descriptor is None:
-            return
-        if self._looks_like_hex(file_descriptor) is False:
-            return
-        if len(file_descriptor) != 8:
-            return
-        if file_descriptor.startswith("42") is False and file_descriptor.startswith("46") is False:
-            return
-        record_length = int(file_descriptor[-2:], 16)
-        if record_length == 0:
+        record_length = self._record_length_from_descriptor(file_def.file_descriptor)
+        if record_length is None:
             return
         if (size_value % record_length) != 0:
             self._add(
@@ -4309,7 +4573,7 @@ class SaipProfileLinter:
         is_adf = False
         if "adf" in field_path_lower:
             is_adf = True
-        if section_lower.startswith(("usim", "isim", "csim", "ssim")):
+        if section_lower.startswith(("usim", "isim", "csim", "ssim", "iot")):
             if "adf" in field_path_lower or field_path_lower.endswith("adf"):
                 is_adf = True
         if is_adf is False:
@@ -4331,7 +4595,7 @@ class SaipProfileLinter:
         proprietary information from the link target. ``efFileSize``,
         ``maximumFileSize``, ``fillFileContent``, ``fillFilePattern``,
         and ``proprietaryEFInfo`` must therefore stay unset on the
-        linking entry — declaring them is either ignored by the loader
+        linking entry -- declaring them is either ignored by the loader
         or rejected as a duplicate / conflicting field.
         """
         link_path = file_def.link_path
@@ -4412,7 +4676,7 @@ class SaipProfileLinter:
     def _file_kind_from_field_path(field_path: str) -> str:
         """Classify a file-definition node as ADF / DF / EF / MF / unknown.
 
-        The pySim / saip-tool decoded shape uses lower-cased path tokens —
+        The pySim / saip-tool decoded shape uses lower-cased path tokens --
         ``adf`` for an ADF FCP, ``df`` for a DF FCP, ``ef`` for an EF
         FCP, ``mf`` for the master file. Walks the right-most non-index
         token of the path so nested ``ef[3]`` style entries are still
@@ -4432,7 +4696,7 @@ class SaipProfileLinter:
     # ETSI TS 102 222 §6.2 / ISO 7816-4 §5.4.2 Table 12 file-descriptor
     # byte 0 encodes the broad file class in bits b5..b3:
     #   0b111 (7) = DF / ADF (shareable variant 0x38 is the canonical value).
-    #   0b000 (0) = working EF (transparent/linear/cyclic/BER-TLV — bits
+    #   0b000 (0) = working EF (transparent/linear/cyclic/BER-TLV -- bits
     #              b2..b1 pick the structure).
     #   0b001 (1) = internal EF.
     # Bit b7 carries the shareable flag and is orthogonal to file class.
@@ -4538,7 +4802,7 @@ class SaipProfileLinter:
         exclusive on a single FCP.
 
         ETSI TS 102 221 §11.1.1.4 (Table 11.5) defines the FCP as
-        carrying *one* of the two forms — referenced via EF(ARR) or
+        carrying *one* of the two forms -- referenced via EF(ARR) or
         compact inline. Declaring both leaves the access-rule resolver
         with two conflicting sources of truth.
         """
@@ -4568,7 +4832,7 @@ class SaipProfileLinter:
         """YRL-FIL-043: dfName (AID) is restricted to ADF nodes.
 
         ETSI TS 102 222 §6.4 reserves the FCP ``dfName`` element for ADF
-        creation — it is the AID returned by SELECT BY NAME. EFs and MFs
+        creation -- it is the AID returned by SELECT BY NAME. EFs and MFs
         do not carry a `dfName`; some DFs may (TS 102 222 §6.5) but the
         common shape is ADF-only and the lint reflects that.
         """
@@ -4610,9 +4874,9 @@ class SaipProfileLinter:
                     path=f"{file_def.section_key}.{file_def.field_path}.dfName",
                     message=(
                         f"ADF dfName is {byte_length} byte(s); valid AID range is "
-                        "5–16 bytes."
+                        "5-16 bytes."
                     ),
-                    recommendation="Encode the ADF AID as a 5–16 byte value.",
+                    recommendation="Encode the ADF AID as a 5-16 byte value.",
                     evidence={"dfName": df_name_hex, "byte_length": byte_length},
                 )
 
@@ -4636,11 +4900,11 @@ class SaipProfileLinter:
         ``YRL-SDM-*`` shape checks, validate each entry:
 
         - ``YRL-SDK-001``: ``keyVersionNumber`` must be non-zero
-          (GP CPS §11.1.8 — version 0 is reserved / not issued).
+          (GP CPS §11.1.8 -- version 0 is reserved / not issued).
         - ``YRL-SDK-002``: every ``keyComponent`` ``keyType`` must be
           from the GP CPS §11.1.8 registered set.
         - ``YRL-SDK-003`` (WARN): ``keyUsageQualifier`` is absent or
-          zero — operator may have omitted the field.
+          zero -- operator may have omitted the field.
         """
         for section_key, payload in sections.items():
             if self._base_type_from_key(section_key) != "securityDomain":
@@ -4658,7 +4922,7 @@ class SaipProfileLinter:
                 self._lint_sd_key_entry(path_base, entry)
 
     def _lint_sd_key_entry(self, path_base: str, entry: dict[str, Any]) -> None:
-        # keyVersionNumber — non-zero check
+        # keyVersionNumber -- non-zero check
         kver_raw = entry.get("keyVersionNumber")
         if kver_raw is not None:
             kver_hex = None
@@ -4682,7 +4946,7 @@ class SaipProfileLinter:
                         evidence={"keyVersionNumber": kver_hex},
                     )
 
-        # keyUsageQualifier — absent or zero
+        # keyUsageQualifier -- absent or zero
         kuq_raw = entry.get("keyUsageQualifier")
         if kuq_raw is None:
             self._add(
@@ -4705,12 +4969,12 @@ class SaipProfileLinter:
                     severity="WARN",
                     spec="GP CPS v2.3 §11.1.8",
                     path=f"{path_base}.keyUsageQualifier",
-                    message="keyUsageQualifier is 0x00 — no usage bits set; key's authorised use is unspecified.",
+                    message="keyUsageQualifier is 0x00 -- no usage bits set; key's authorised use is unspecified.",
                     recommendation="Set keyUsageQualifier to the intended bit-mask.",
                     evidence={"keyUsageQualifier": kuq_hex},
                 )
 
-        # keyComponents — keyType validity
+        # keyComponents -- keyType validity
         comps = entry.get("keyComponents")
         if not isinstance(comps, list):
             return
@@ -4777,7 +5041,7 @@ class SaipProfileLinter:
         - ``YRL-AKA-003``: Fixed-length SGP.22 §B.3 fields out of spec
           (``algorithmOptions`` 1 B, ``authCounterMax`` 3 B, ``sqnDelta``
           6 B, ``sqnAgeLimit`` 6 B, ``rotationConstants`` 5 B).
-        - ``YRL-AKA-004`` (WARN): unknown ``algorithmID`` — cannot validate
+        - ``YRL-AKA-004`` (WARN): unknown ``algorithmID`` -- cannot validate
           key lengths against a known spec.
         """
         for section_key, payload in sections.items():
@@ -4987,7 +5251,7 @@ class SaipProfileLinter:
         out: set[str] = set()
         for section_key, payload in sections.items():
             base = self._base_type_from_key(section_key)
-            if base not in ("usim", "isim", "csim", "ssim"):
+            if base not in ("usim", "isim", "csim", "ssim", "iot"):
                 continue
             if not isinstance(payload, dict):
                 continue
@@ -5136,7 +5400,7 @@ class SaipProfileLinter:
         - ``YRL-PIN-002``: pinValue must be exactly 8 bytes (SGP.22 §B.2).
         - ``YRL-PIN-003``: pukValue must be exactly 8 bytes (SGP.22 §B.2).
         - ``YRL-PIN-004`` (WARN): retry byte's remaining count exceeds max
-          count — card will typically initialise remaining to max but a
+          count -- card will typically initialise remaining to max but a
           profile that ships remaining > max will cause runtime confusion.
         """
         for section_key, payload in sections.items():
@@ -5264,7 +5528,7 @@ class SaipProfileLinter:
                         )
                     elif remaining == 0:
                         # TCA PIN-006: remaining attempts of 0 ships the PIN /
-                        # PUK in a locked state — the card returns 6983 on the
+                        # PUK in a locked state -- the card returns 6983 on the
                         # very first attempt, which is almost never the
                         # operator's intent.
                         self._add(
@@ -5284,7 +5548,7 @@ class SaipProfileLinter:
                             evidence={"packed_byte": hex(n), "max_att": max_att, "remaining": remaining},
                         )
 
-            # PIN / PUK value length — must be exactly 8 bytes (SGP.22 §B.2)
+            # PIN / PUK value length -- must be exactly 8 bytes (SGP.22 §B.2)
             val_raw = rec.get(value_field)
             if val_raw is not None:
                 val_hex = None
@@ -5323,7 +5587,7 @@ class SaipProfileLinter:
         present in any PE-PINCodes entry name a PIN slot that is itself
         defined in a PE-PUKCodes block. A dangling reference produces a
         card that cannot be unblocked once the PIN attempts counter hits
-        zero — operationally indistinguishable from a hard-locked card.
+        zero -- operationally indistinguishable from a hard-locked card.
         """
         puk_key_refs: set[int] = set()
         pin_unblock_refs: list[tuple[str, int]] = []
@@ -5404,7 +5668,7 @@ class SaipProfileLinter:
         TELECOM are usually templates and should be flagged as not
         shippable.
         """
-        naa_types = ("usim", "csim", "isim", "ssim")
+        naa_types = ("usim", "csim", "isim", "ssim", "iot")
         has_naa = False
         for key_text in sections.keys():
             if self._base_type_from_key(key_text) in naa_types:
@@ -5428,8 +5692,8 @@ class SaipProfileLinter:
         """YRL-NAA-005: every NAA needs a set of AKA parameters.
 
         TCA PP TS §4.4.1 (PE-AKAParameter) binds the AKA algorithm
-        configuration — required by 3GPP TS 33.102 §6.3 for USIM /
-        ISIM access — to its parent NAA PE. SSIM may instead carry
+        configuration -- required by 3GPP TS 33.102 §6.3 for USIM /
+        ISIM access -- to its parent NAA PE. SSIM may instead carry
         ``SSIM-EAPTLSParameters`` per the TCA PP TS NAA rules covering
         EAP-TLS authentication (RFC 9190 / RFC 9048).
         """
@@ -5438,7 +5702,7 @@ class SaipProfileLinter:
         naa_keys: list[tuple[str, str]] = []
         for key_text, _ in sections.items():
             base_type = self._base_type_from_key(key_text)
-            if base_type in ("usim", "csim", "isim", "ssim"):
+            if base_type in ("usim", "csim", "isim", "ssim", "iot"):
                 naa_keys.append((key_text, base_type))
             elif base_type == "akaParameter":
                 aka_count += 1
@@ -5565,7 +5829,7 @@ class SaipProfileLinter:
                 continue
 
             if arr_key is None:
-                # EF.ARR not found in this scope — emit an informational finding.
+                # EF.ARR not found in this scope -- emit an informational finding.
                 self._add(
                     code="YRL-ARR-002",
                     severity="INFO",
@@ -5620,7 +5884,7 @@ class SaipProfileLinter:
             if len(load_blocks) == 0:
                 load_blocks = self._find_key_values(security_domain, "sdAID")
                 for aid_value in load_blocks:
-                    aid_text = str(aid_value).strip().upper()
+                    aid_text = self._normalize_aid_hex(aid_value)
                     if self._looks_like_hex(aid_text):
                         aids.add(aid_text)
                 continue
@@ -5631,7 +5895,7 @@ class SaipProfileLinter:
                     candidate = instance.get(field_name)
                     if candidate is None:
                         continue
-                    candidate_text = str(candidate).strip().upper()
+                    candidate_text = self._normalize_aid_hex(candidate)
                     if self._looks_like_hex(candidate_text):
                         aids.add(candidate_text)
         return aids
@@ -5657,7 +5921,7 @@ class SaipProfileLinter:
         marker = f"ef-{service_name.lower()}"
         candidate_hex_values: list[str] = []
         for section_key, payload in section_items:
-            if self._base_type_from_key(section_key) not in ("usim", "opt-usim", "isim", "opt-isim"):
+            if self._base_type_from_key(section_key) not in ("usim", "opt-usim", "isim", "opt-isim", "iot", "opt-iot"):
                 continue
             for field_path, value in self._walk_with_path(payload):
                 field_path_l = field_path.lower()
@@ -5812,7 +6076,7 @@ class SaipProfileLinter:
     ) -> list[tuple[str, Any]]:
         """Like ``_walk_with_path`` but treats ``(name, value)`` tuples as
         ASN.1 CHOICE entries (the form pySim emits for SAIP file
-        definitions: ``[("fillFileContent", b"…"), …]``).
+        definitions: ``[("fillFileContent", b"..."), ...]``).
 
         Yields ``(<base>.fillFileContent, value)`` so the IMSI / ICCID
         checks can address content fields by suffix without first

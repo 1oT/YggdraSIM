@@ -18,7 +18,40 @@
 # -----------------------------------------------------------------------------
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
+
+
+# A long-running session appends to the STK history lists on every cycle,
+# so an uncapped list grows for the life of the process. Mirrors
+# MAX_HISTORY_ENTRIES in SIMCARD/state.py.
+STK_HISTORY_CAP = 256
+
+
+class BoundedList(list):
+    """A list that drops its oldest entries past ``maxlen``.
+
+    Subclasses ``list`` so callers that slice, index ``[-1]``, take
+    ``len(...)`` or compare against a literal list keep working; only
+    entries older than the cap disappear. Reset a field with ``clear()``
+    rather than assigning ``[]``, which would replace the bound.
+    """
+
+    def __init__(self, iterable: Iterable[Any] = (), maxlen: int = STK_HISTORY_CAP) -> None:
+        super().__init__(iterable)
+        self._maxlen = int(maxlen)
+        self._trim()
+
+    def _trim(self) -> None:
+        if self._maxlen > 0 and len(self) > self._maxlen:
+            del self[: len(self) - self._maxlen]
+
+    def append(self, value: Any) -> None:
+        super().append(value)
+        self._trim()
+
+    def extend(self, values: Iterable[Any]) -> None:
+        super().extend(values)
+        self._trim()
 
 
 TRANSPORT_MODE_PCSC = "pcsc"
@@ -26,7 +59,10 @@ TRANSPORT_MODE_PCSC = "pcsc"
 BACKEND_MODE_REMOTE_DP = "remote_dp"
 BACKEND_MODE_LOCAL_SGP26 = "local_sgp26"
 
+# ESipa over the SGP.32 v1.3 section 6.1.1 ASN.1 binding (POST /gsma/rsp2/asn1).
 EIM_TRANSPORT_MODE_ESIPA = "esipa_direct"
+# ESipa over the SGP.32 v1.3 section 6.4 JSON binding (/gsma/rsp2/esipa/<function>).
+EIM_TRANSPORT_MODE_ESIPA_JSON = "esipa_json"
 EIM_TRANSPORT_MODE_REST_RESOURCE = "rest_resource"
 
 
@@ -164,23 +200,23 @@ class SCP11SessionState:
     load_bpp_sima_response: bytes = b""
     eim_package_response: bytes = b""
     stk_event_list: List[int] = field(default_factory=list)
-    stk_command_history: List[str] = field(default_factory=list)
+    stk_command_history: List[str] = field(default_factory=BoundedList)
     stk_poll_interval_seconds: int = 0
     stk_polling_off: bool = False
     stk_location_information: bytes = bytes.fromhex("00F11000010001")
     stk_access_technology: int = 0x08
     stk_imei: bytes = bytes.fromhex("0A68452354563412")
     stk_last_proactive_command: bytes = b""
-    stk_status_history: List[str] = field(default_factory=list)
-    stk_flow_events: List[str] = field(default_factory=list)
-    stk_timer_history: List[str] = field(default_factory=list)
-    stk_generic_ack_history: List[str] = field(default_factory=list)
-    stk_trigger_history: List[str] = field(default_factory=list)
-    stk_open_channel_history: List[str] = field(default_factory=list)
-    stk_open_channel_failure_history: List[str] = field(default_factory=list)
-    stk_dns_history: List[str] = field(default_factory=list)
-    stk_tls_history: List[str] = field(default_factory=list)
-    stk_alert_history: List[str] = field(default_factory=list)
+    stk_status_history: List[str] = field(default_factory=BoundedList)
+    stk_flow_events: List[str] = field(default_factory=BoundedList)
+    stk_timer_history: List[str] = field(default_factory=BoundedList)
+    stk_generic_ack_history: List[str] = field(default_factory=BoundedList)
+    stk_trigger_history: List[str] = field(default_factory=BoundedList)
+    stk_open_channel_history: List[str] = field(default_factory=BoundedList)
+    stk_open_channel_failure_history: List[str] = field(default_factory=BoundedList)
+    stk_dns_history: List[str] = field(default_factory=BoundedList)
+    stk_tls_history: List[str] = field(default_factory=BoundedList)
+    stk_alert_history: List[str] = field(default_factory=BoundedList)
     stk_timers: Dict[int, StkTimerState] = field(default_factory=dict)
     stk_open_channel_active: bool = False
     stk_open_channel_protocol: str = ""

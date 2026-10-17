@@ -49,12 +49,6 @@ Direct Auth:
 - send package content directly toward `ISD-R`
 - use this for precise command validation without relay transport
 
-Localized relay:
-
-- use the same relay download flow as the live/test shells
-- intercept the eIM / SM-DP+ target locally
-- terminate and acknowledge the relay exchange internally instead of externally
-
 Simulator card note:
 
 - `Workspace/LocalEIM/eim_identity.json` defines the local eIM / SM-DP+ side for this module
@@ -92,11 +86,9 @@ Direct Auth and eIM lifecycle:
 - `ISDR-DELETE-EIM`
 - `LOAD-EIM-PACKAGE`
 
-Localized relay and handover:
+IPAd discovery and handover:
 
 - `IPAD-DISCOVER`
-- `IPAD-LIVE [matchingId] [--debug]`
-- `IPAD-TEST [matchingId] [--debug]`
 - `HANDOVER-SET`
 - `HANDOVER-STATUS`
 - `PATHS`

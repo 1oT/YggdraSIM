@@ -49,7 +49,7 @@ class EuiccInfo2HelperTests(unittest.TestCase):
     def test_basic_decoders_render_human_readable_values(self) -> None:
         self.assertEqual(format_version_bytes(b"\x01\x02\x03"), "v1.2.3 (010203)")
         self.assertEqual(decode_ipa_mode(b"\x00"), "IPAd active (0)")
-        self.assertEqual(decode_ipa_mode(b"\x01"), "Mode 1 active (1)")
+        self.assertEqual(decode_ipa_mode(b"\x01"), "IPAe active (1)")
 
     def test_build_detail_lines_includes_iot_and_validation_sections(self) -> None:
         response = bytes.fromhex(
@@ -62,7 +62,7 @@ class EuiccInfo2HelperTests(unittest.TestCase):
 
         lines = build_euicc_info2_detail_lines(response)
 
-        self.assertTrue(any(label == "IPA Mode" and "Mode 1 active" in value for _, label, value in lines))
+        self.assertTrue(any(label == "LPA/IPA Mode" and "IPAe active" in value for _, label, value in lines))
         self.assertTrue(any(label == "IoT Specific Info" and value == "true" for _, label, value in lines))
         self.assertTrue(any(label == "eCall Supported" and value == "true" for _, label, value in lines))
         self.assertTrue(any(label == "Fallback Supported" and value == "true" for _, label, value in lines))

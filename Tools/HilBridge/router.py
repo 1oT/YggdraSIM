@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge APDU router: dispatches incoming C-APDUs to the registered handler (relay, recorder, or simulated card)."""
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from yggdrasim_common.card_backend import (
@@ -26,9 +26,17 @@ from yggdrasim_common.card_backend import (
     write_card_relay_marker,
 )
 
+from yggdrasim_common.card_bridge_auth import (
+    default_token_file_for_port,
+    generate_token,
+    is_loopback_host,
+    read_token_file,
+    write_token_file,
+)
+
 from .apdu_relay import ApduRelayConfig, HilBridgeApduRelayService
 from .pcsc import DEFAULT_APDU_TIMEOUT_MS, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
-from .proactive import ProactiveRefreshBroker
+from .proactive import FETCH_INS, ProactiveRefreshBroker
 from .remote_card import (
     RemoteRelayCardChannel,
     resolve_remote_card_token,
@@ -47,6 +55,9 @@ from .protocol import (
     IPA_MSGT_PONG,
     IPA_PROTO_CCM,
     IPA_PROTO_OSMO,
+    REFRESH_MODE_QUALIFIERS,
+    REFRESH_MODE_UICC_RESET,
+    SlotPhysStatus,
     build_client_slot,
     build_component_identity,
     build_config_client_bank_req,
@@ -58,18 +69,31 @@ from .protocol import (
     build_set_atr_req,
     build_tpdu_card_to_modem,
     decode_rspro_pdu,
+    decode_slot_phys_status,
     encode_rspro_pdu,
     ensure_bytes,
     get_pdu_message_body,
     get_pdu_message_name,
     get_pdu_tag,
     load_rspro_codec,
+    refresh_mode_from_fetch_response,
 )
 
 LOGGER = logging.getLogger(__name__)
 CARD_TRACE_ENV = "YGGDRASIM_HIL_CARD_TRACE"
 RELAY_SESSION_RESET_ENV = "YGGDRASIM_HIL_RELAY_SESSION_RESET"
 _MALFORMED_ENVELOPE_STATUS = b"\x6F\x00"
+# How long after a REFRESH in "UICC Reset" mode the modem gets to reset
+# the UICC before the bridge reports that no reset reached the card.
+UICC_RESET_GRACE_SECONDS = 10.0
+MODEM_RESET_EDGE_RST_ASSERTED = "RST asserted"
+MODEM_RESET_EDGE_VCC_REMOVED = "VCC removed"
+
+
+def _describe_flag(value: bool | None, when_true: str, when_false: str) -> str:
+    if value is None:
+        return "unreported"
+    return when_true if value else when_false
 
 
 class ConnectionRole(str, Enum):
@@ -211,11 +235,60 @@ def _malformed_envelope_rejection_reason(apdu: bytes) -> str | None:
     return f"invalid ENVELOPE BER-TLV: {tlv_error}"
 
 
+def _resolve_relay_auth_token(
+    *, host: str, port: int, token_file: str
+) -> tuple[str, str]:
+    """Return the bearer token for this bridge's own relay and its file.
+
+    A loopback bind with no token file stays unauthenticated, which is
+    what every single-machine deployment has always done and what the
+    in-tree consumers reading the relay marker expect.
+
+    Anything else gets a token. A named file is read when it exists and
+    written when it does not; a non-loopback bind with no file named
+    generates one at the conventional path for the port, because the
+    relay refuses to serve a routable address unauthenticated and an
+    operator asking for one means to be reachable, not to crash.
+    """
+    named = str(token_file or "").strip()
+    wants_token = len(named) > 0 or is_loopback_host(str(host or "")) is False
+    if wants_token is False:
+        return "", ""
+
+    path = (
+        Path(named).expanduser()
+        if len(named) > 0
+        else default_token_file_for_port(int(port or 0))
+    )
+    if path.is_file() is True:
+        try:
+            existing = read_token_file(path)
+        except OSError as read_error:
+            raise PcscBridgeError(
+                f"Cannot read the APDU relay token file {path}: {read_error}"
+            ) from read_error
+        if len(existing) == 0:
+            raise PcscBridgeError(
+                f"The APDU relay token file {path} is empty. Delete it or "
+                "name a different path."
+            )
+        return existing, str(path)
+
+    fresh = generate_token()
+    try:
+        written = write_token_file(path, fresh)
+    except OSError as write_error:
+        raise PcscBridgeError(
+            f"Cannot write the APDU relay token file {path}: {write_error}"
+        ) from write_error
+    return fresh, str(written)
+
+
 @dataclass(slots=True)
 class BackendCardChannel:
     reader_index: int = 0
     reader_name: str = ""
-    # Remote-relay overrides — when ``remote_card_url`` (or the matching
+    # Remote-relay overrides -- when ``remote_card_url`` (or the matching
     # env var, see :func:`resolve_remote_card_url`) resolves to a non-empty
     # value the channel switches from local PC/SC to a network-backed
     # :class:`RemoteRelayCardChannel`. The local-PC/SC + simulator paths
@@ -223,6 +296,7 @@ class BackendCardChannel:
     remote_card_url: str = ""
     remote_card_auth_token: str = ""
     remote_card_token_file: str = ""
+    remote_card_lease_file: str = ""
     apdu_timeout_ms: int = DEFAULT_APDU_TIMEOUT_MS
     _backend_name: str = field(default="", init=False, repr=False)
     _channel: Any = field(default=None, init=False, repr=False)
@@ -252,7 +326,7 @@ class BackendCardChannel:
           2. Remote relay configured (CLI flag or
              ``YGGDRASIM_HIL_REMOTE_CARD_URL``) → stream APDUs to a
              remote :class:`RemoteRelayCardChannel`. Local PC/SC is
-             not opened in this mode — the card lives elsewhere.
+             not opened in this mode -- the card lives elsewhere.
           3. Local PC/SC reader → :class:`PcscCardChannel`. The
              default; mirrors the existing physically-connected
              topology byte-for-byte. Transient reader-busy conditions
@@ -281,6 +355,7 @@ class BackendCardChannel:
                 url=remote_url,
                 auth_token=token,
                 timeout_seconds=max(1, (timeout_ms + 999) // 1000),
+                lease_token_file=self.remote_card_lease_file,
             )
             channel.connect()
             self._channel = channel
@@ -288,7 +363,7 @@ class BackendCardChannel:
             self._reader_label = str(channel.reader_label or "").strip() or remote_url
             return
 
-        # PC/SC reader — retry on transient sharing violations.
+        # PC/SC reader -- retry on transient sharing violations.
         last_exc: Exception | None = None
         for attempt in range(_PCSC_CONNECT_MAX_RETRIES):
             try:
@@ -299,7 +374,7 @@ class BackendCardChannel:
                 if attempt < _PCSC_CONNECT_MAX_RETRIES - 1:
                     delay = _PCSC_CONNECT_BACKOFF_BASE * (2 ** attempt)
                     LOGGER.warning(
-                        "PC/SC connect attempt %d/%d failed (%s), retrying in %.1fs…",
+                        "PC/SC connect attempt %d/%d failed (%s), retrying in %.1fs...",
                         attempt + 1,
                         _PCSC_CONNECT_MAX_RETRIES,
                         exc,
@@ -384,6 +459,7 @@ class BridgeConfig:
     apdu_relay_host: str = "127.0.0.1"
     apdu_relay_port: int = 0
     apdu_relay_enabled: bool = True
+    apdu_relay_token_file: str = ""
     reader_index: int = 0
     reader_name: str = ""
     # Streaming card-source: when set, the bridge consumes a remote
@@ -392,6 +468,7 @@ class BridgeConfig:
     # ``reader_index`` / ``reader_name`` are ignored in this mode.
     remote_card_url: str = ""
     remote_card_token_file: str = ""
+    remote_card_lease_file: str = ""
     apdu_timeout_ms: int = DEFAULT_APDU_TIMEOUT_MS
     client_id: int = 0
     client_slot: int = 0
@@ -431,6 +508,14 @@ class ConnectionContext:
         return f"{self.role.value}@{self.address[0]}:{self.address[1]}"
 
 
+@dataclass(frozen=True, slots=True)
+class SlotStatusTransition:
+    """What one ``clientSlotStatusInd`` changed: the reset edge, if any, and whether RST or VCC moved."""
+
+    edge: str = ""
+    changed: bool = False
+
+
 @dataclass(slots=True)
 class BridgeSession:
     config: BridgeConfig
@@ -443,6 +528,17 @@ class BridgeSession:
     atr_bytes: bytes = b""
     next_tag: int = 1
     proactive: ProactiveRefreshBroker = field(default_factory=ProactiveRefreshBroker)
+    # Last modem-side slot state the remsim client reported. A
+    # clientSlotStatusInd is acted on as an edge, the way osmo-remsim
+    # bankd does it: RST rising or VCC falling means the modem reset the
+    # emulated UICC, and the card in the reader has to follow.
+    modem_reset_active: bool = False
+    modem_vcc_present: bool | None = None
+    # Set when the card issued a REFRESH the terminal answers with a UICC
+    # reset (TS 102 223 V18.3.0 clause 6.4.7); cleared by the reset that
+    # follows, or reported when none comes.
+    pending_uicc_reset_reason: str = ""
+    pending_uicc_reset_deadline: float = 0.0
     client_slot: dict[str, Any] = field(init=False)
     bank_slot: dict[str, Any] = field(init=False)
 
@@ -463,6 +559,42 @@ class BridgeSession:
         self.bankd = None
         self.control_stage = "idle"
         self.atr_sent = False
+        self.modem_reset_active = False
+        self.modem_vcc_present = None
+        self.take_pending_uicc_reset()
+
+    def note_modem_slot_status(self, status: SlotPhysStatus) -> SlotStatusTransition:
+        """Record the modem-side slot state and name the reset edge it carries.
+
+        The rule is osmo-remsim bankd's: a VCC falling edge is a card
+        power-off, a RST rising edge with VCC present or unreported is a
+        warm reset, and a level that merely persists is no edge, so a
+        client repeating one state never resets the card twice.
+        """
+        edge = ""
+        if status.vcc_present is False:
+            if self.modem_vcc_present is True:
+                edge = MODEM_RESET_EDGE_VCC_REMOVED
+        elif status.reset_active and self.modem_reset_active is False:
+            edge = MODEM_RESET_EDGE_RST_ASSERTED
+        changed = status.reset_active != self.modem_reset_active or (
+            status.vcc_present is not None and status.vcc_present != self.modem_vcc_present
+        )
+        if status.vcc_present is not None:
+            self.modem_vcc_present = status.vcc_present
+        self.modem_reset_active = bool(status.reset_active)
+        return SlotStatusTransition(edge=edge, changed=changed)
+
+    def expect_uicc_reset(self, reason: str, *, deadline: float) -> None:
+        self.pending_uicc_reset_reason = str(reason or "").strip()
+        self.pending_uicc_reset_deadline = float(deadline)
+
+    def take_pending_uicc_reset(self) -> str:
+        """Clear the expected UICC reset and return what raised it."""
+        reason = self.pending_uicc_reset_reason
+        self.pending_uicc_reset_reason = ""
+        self.pending_uicc_reset_deadline = 0.0
+        return reason
 
     def server_identity(self) -> dict[str, Any]:
         """Return the server identity string (URL + session token) for logging purposes."""
@@ -506,7 +638,7 @@ class CardWorker:
     """Serializes physical card APDU access through a dedicated thread.
 
     The event-loop thread submits APDUs via :meth:`submit_async` and
-    picks up completed responses via :meth:`poll_responses` — it never
+    picks up completed responses via :meth:`poll_responses` -- it never
     blocks on card I/O.  The relay HTTP thread uses :meth:`submit_sync`
     which blocks its own thread (not the event loop) until the card
     responds.
@@ -739,6 +871,7 @@ class HilBridgeServer:
             reader_name=config.reader_name,
             remote_card_url=config.remote_card_url,
             remote_card_token_file=config.remote_card_token_file,
+            remote_card_lease_file=config.remote_card_lease_file,
             apdu_timeout_ms=config.apdu_timeout_ms,
         )
         self._card.connect()
@@ -774,11 +907,17 @@ class HilBridgeServer:
         )
         self._session = BridgeSession(config=config, card=self._card, gsmtap=self._gsmtap)
         self._refresh_card(reconnect=False)
+        self._relay_auth_token, self._relay_token_file = _resolve_relay_auth_token(
+            host=config.apdu_relay_host,
+            port=config.apdu_relay_port,
+            token_file=config.apdu_relay_token_file,
+        )
         self._apdu_relay = HilBridgeApduRelayService(
             ApduRelayConfig(
                 host=config.apdu_relay_host,
                 port=config.apdu_relay_port,
                 enabled=config.apdu_relay_enabled,
+                auth_token=self._relay_auth_token,
             ),
             exchange_callback=self._handle_relay_apdu,
             status_callback=self._build_relay_status_payload,
@@ -1059,7 +1198,20 @@ class HilBridgeServer:
             return
 
         if message_name == "clientSlotStatusInd":
+            status = decode_slot_phys_status(get_pdu_message_body(pdu))
+            transition = self._session.note_modem_slot_status(status)
+            LOGGER.log(
+                logging.INFO if transition.changed else logging.DEBUG,
+                "Modem slot status: RST %s, VCC %s, CLK %s, card %s",
+                "active" if status.reset_active else "inactive",
+                _describe_flag(status.vcc_present, "present", "absent"),
+                _describe_flag(status.clk_active, "active", "inactive"),
+                _describe_flag(status.card_present, "present", "absent"),
+            )
             if self._session.atr_sent is False:
+                # First indication on this bankd connection. The handshake
+                # power-cycles the card itself, so an edge it carries is
+                # served by that and not a second time.
                 self._reset_card_for_modem_session()
                 self._queue_rspro_pdu(
                     context,
@@ -1072,6 +1224,9 @@ class HilBridgeServer:
                 self._session.gsmtap.send_atr(self._session.atr_bytes)
                 self._session.atr_sent = True
                 LOGGER.info("Sent ATR %s", self._session.atr_bytes.hex().upper())
+                return
+            if len(transition.edge) > 0:
+                self._reset_card_for_modem_reset(context, transition.edge)
             return
 
         if message_name == "setAtrRes":
@@ -1107,6 +1262,7 @@ class HilBridgeServer:
             raise PcscBridgeError("Received empty tpduModemToCard payload.")
 
         LOGGER.info("Modem -> bridge APDU %s", request_data.hex().upper())
+        self._warn_if_uicc_reset_overdue()
 
         envelope_rejection_reason = _malformed_envelope_rejection_reason(request_data)
         if envelope_rejection_reason is not None:
@@ -1138,6 +1294,7 @@ class HilBridgeServer:
 
         if proactive_decision is not None:
             full_response = proactive_decision.response
+            self._note_card_response(request_data, full_response)
             LOGGER.info(
                 "Bridge -> modem proactive %s (%s, %d bytes)",
                 proactive_decision.action,
@@ -1196,6 +1353,7 @@ class HilBridgeServer:
                 )
                 return
             LOGGER.info("Card -> modem APDU %s", completed.response.hex().upper())
+            self._note_card_response(pending.request_apdu, completed.response)
             self._session.gsmtap.mirror_exchange(
                 pending.request_apdu, completed.response
             )
@@ -1235,11 +1393,105 @@ class HilBridgeServer:
             reset_payload = self._card.reset_card()
             self._session.atr_bytes = self._card.get_atr()
         self._session.proactive.clear()
+        # A handshake power-cycle is the reset a pending REFRESH asked for.
+        self._session.take_pending_uicc_reset()
         LOGGER.info(
             "Reset card for modem session; reader %s ATR %s reset=%s",
             self._card.reader_label,
             self._session.atr_bytes.hex().upper(),
             reset_payload,
+        )
+
+    def _reset_card_for_modem_reset(self, context: ConnectionContext, edge: str) -> None:
+        """Follow a modem-side UICC reset through to the card in the reader.
+
+        The cardem firmware answers the modem's RST with the ATR it was
+        given and reports the edge afterwards; nothing on the board
+        reaches the card. Without this the modem re-initialises against
+        a card that was never reset, which is how an eUICC kept serving
+        the profile a REFRESH in "UICC Reset" mode (TS 102 223 V18.3.0
+        clause 6.4.7, the mode SGP.02 uses for a profile switch) had just
+        disabled: the switch takes effect at the next reset, and that
+        reset stopped at the board. A cold reset is the one primitive
+        every card backend offers, and the eUICC applies the pending
+        switch on either kind.
+
+        Runs on the event-loop thread, ahead of the modem's first
+        post-reset TPDU, which arrives on this same connection behind
+        the indication.
+        """
+        previous_atr = self._session.atr_bytes
+        self._card_worker.drain(timeout=5.0)
+        with self._card_lock:
+            reset_payload = self._card.reset_card()
+            self._session.atr_bytes = self._card.get_atr()
+        self._session.proactive.clear()
+        pending = self._session.take_pending_uicc_reset()
+        LOGGER.info(
+            "Modem reset the UICC (%s%s); card power-cycled, reader %s ATR %s reset=%s",
+            edge,
+            f", after {pending}" if len(pending) > 0 else "",
+            self._card.reader_label,
+            self._session.atr_bytes.hex().upper(),
+            reset_payload,
+        )
+        # The board replays the ATR it holds, so that is what this
+        # activation put on the wire.
+        if len(previous_atr) > 0:
+            self._session.gsmtap.send_atr(previous_atr)
+        if self._session.atr_bytes == previous_atr:
+            return
+        self._queue_rspro_pdu(
+            context,
+            build_set_atr_req(
+                tag=self._session.allocate_tag(),
+                client_slot=self._session.client_slot,
+                atr=self._session.atr_bytes,
+            ),
+        )
+        LOGGER.warning(
+            "ATR changed across the reset (%s -> %s); the board answered this "
+            "activation with the previous ATR and holds the new one for the next reset",
+            previous_atr.hex().upper(),
+            self._session.atr_bytes.hex().upper(),
+        )
+
+    def _note_card_response(self, request_apdu: bytes, response: bytes) -> None:
+        """Watch FETCH responses for a REFRESH the terminal answers with a UICC reset."""
+        if len(request_apdu) < 2 or request_apdu[1] != FETCH_INS:
+            return
+        refresh = refresh_mode_from_fetch_response(response)
+        if refresh is None:
+            return
+        mode_name, qualifier = refresh
+        if qualifier != REFRESH_MODE_QUALIFIERS[REFRESH_MODE_UICC_RESET]:
+            LOGGER.info("Card issued REFRESH (%s); no UICC reset follows this mode", mode_name)
+            return
+        self._session.expect_uicc_reset(
+            f"REFRESH ({mode_name})",
+            deadline=time.monotonic() + UICC_RESET_GRACE_SECONDS,
+        )
+        LOGGER.info(
+            "Card issued REFRESH (%s): the terminal resets the UICC instead of "
+            "answering with TERMINAL RESPONSE; the card is power-cycled when the "
+            "remsim client reports that reset",
+            mode_name,
+        )
+
+    def _warn_if_uicc_reset_overdue(self) -> None:
+        """Report, once, a REFRESH whose UICC reset never reached the bridge."""
+        reason = self._session.pending_uicc_reset_reason
+        if len(reason) == 0 or time.monotonic() < self._session.pending_uicc_reset_deadline:
+            return
+        self._session.take_pending_uicc_reset()
+        LOGGER.warning(
+            "%s was served more than %.0f s ago and the remsim client reported no "
+            "UICC reset since; the modem is talking to a card that was never reset, "
+            "which still serves the pre-REFRESH profile. Check that "
+            "osmo-remsim-client-st2 forwards clientSlotStatusInd (osmo-remsim 1.2.0 "
+            "does), or reset the board with yggdrasim-hil-reset to force a re-attach.",
+            reason,
+            UICC_RESET_GRACE_SECONDS,
         )
 
     def _note_relay_session_activity(self, session_id: str) -> None:
@@ -1249,7 +1501,7 @@ class HilBridgeServer:
         the relay while a modem session may be live, and they leave
         real state behind: a selected AID, open logical channels, an
         established SCP03 / SCP11 secure channel, PIN verification
-        status. None of that is cleared by the SIMtrace2 board reset —
+        status. None of that is cleared by the SIMtrace2 board reset --
         the card lives in the PC/SC reader, not on the board -- so
         without this a shell session leaks its state into whatever
         touches the card next.
@@ -1423,6 +1675,12 @@ class HilBridgeServer:
 
         marker_payload = self._build_relay_status_payload()
         marker_payload["pid"] = os.getpid()
+        # Name the token file, never the token. The marker is how an
+        # in-tree consumer discovers this relay, and it has to keep
+        # working once the relay is authenticated; the consumer side
+        # already reads tokenFile, it was simply never written.
+        if len(self._relay_token_file) > 0:
+            marker_payload["tokenFile"] = self._relay_token_file
         write_card_relay_marker(marker_payload)
 
     def _remove_card_relay_marker(self) -> None:

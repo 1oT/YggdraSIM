@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Configuration dataclass for the YggdraSIM universal GUI server.
 
 The two entry points (:func:`run_desktop`, :func:`run_web_server` in
@@ -13,7 +12,7 @@ instance.
 
 Design rules honoured here:
 
-* No FastAPI / uvicorn / pywebview imports — this module is safe to
+* No FastAPI / uvicorn / pywebview imports -- this module is safe to
   import from anywhere, including ``main/main.py``'s argparse path,
   without dragging in the GUI optional dependencies.
 * Tokens are only ever held inside a ``GuiServerConfig`` for the
@@ -51,6 +50,8 @@ ENV_GUI_ALLOW_ORIGIN = "YGGDRASIM_GUI_ALLOW_ORIGIN"
 ENV_GUI_IDLE_SECONDS = "YGGDRASIM_GUI_IDLE_SECONDS"
 ENV_GUI_PATH_ALLOWLIST = "YGGDRASIM_GUI_PATH_ALLOWLIST"
 ENV_GUI_WEBVIEW_DEBUG = "YGGDRASIM_GUI_WEBVIEW_DEBUG"
+ENV_GUI_ZOOM = "YGGDRASIM_GUI_ZOOM"
+ENV_GUI_GPU = "YGGDRASIM_GUI_GPU"
 
 
 # --- defaults -----------------------------------------------------------
@@ -61,7 +62,20 @@ DEFAULT_SERVER_HOST = "0.0.0.0"
 DEFAULT_SERVER_PORT = 27854
 DEFAULT_IDLE_SECONDS = 1800
 
-# Entropy floor per §9.2 — any bearer that decodes smaller than this is
+# Desktop window page zoom (the ``YGGDRASIM_GUI_ZOOM`` env flag). ``1`` is
+# the layout's native size, drawn for a 1280 x 800 window; a decimal in
+# the fixed range pins another factor; ``auto`` fits the layout to the
+# window (see ``app.auto_zoom_factor``). Ctrl+plus / Ctrl+minus / Ctrl+0
+# in the window step through the ladder and write the factor back to
+# the flag, so it is remembered across launches.
+WEBVIEW_ZOOM_AUTO = "auto"
+WEBVIEW_ZOOM_NATIVE = "1"
+DEFAULT_WEBVIEW_ZOOM = WEBVIEW_ZOOM_NATIVE
+WEBVIEW_ZOOM_FIXED_MIN = 0.5
+WEBVIEW_ZOOM_FIXED_MAX = 3.0
+WEBVIEW_ZOOM_LADDER = (0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0)
+
+# Entropy floor per §9.2 -- any bearer that decodes smaller than this is
 # refused before the server is allowed to start.
 MIN_TOKEN_ENTROPY_CHARS = 32
 
@@ -77,7 +91,7 @@ class GuiServerConfig:
     """Resolved GUI server configuration.
 
     Values here carry the final merged result of argparse flags,
-    environment variables, and defaults — in that order of precedence.
+    environment variables, and defaults -- in that order of precedence.
     The dataclass is *not* frozen: :func:`app.run_desktop` needs to
     mutate ``port`` after a graceful fallback to an ephemeral port on
     ``EADDRINUSE``. All mutations happen inside the server module, never
@@ -94,7 +108,11 @@ class GuiServerConfig:
     tls_key_path: Optional[str] = None
     tls_self_signed: bool = False
     path_allowlist: tuple[str, ...] = field(default_factory=tuple)
+    # Files named on the command line (``yggdrasim --gui FILE``); the SPA
+    # opens them in the SAIP workbench once and the server forgets them.
+    startup_open_paths: tuple[str, ...] = field(default_factory=tuple)
     webview_debug: bool = False
+    webview_zoom: str = DEFAULT_WEBVIEW_ZOOM
     allow_ephemeral_port: bool = True
     token_source: str = ""
     token_strength: str = ""
@@ -129,7 +147,9 @@ class GuiServerConfig:
             "allow_origins": list(self.allow_origins),
             "idle_seconds": self.idle_seconds,
             "path_allowlist": list(self.path_allowlist),
+            "startup_open_paths": list(self.startup_open_paths),
             "webview_debug": self.webview_debug,
+            "webview_zoom": self.webview_zoom,
             "token_source": self.token_source,
             "token_strength": self.token_strength,
         }
@@ -145,6 +165,11 @@ def _env_text(name: str) -> str:
 def _env_bool(name: str) -> bool:
     raw = _env_text(name).lower()
     return raw in ("1", "true", "yes", "on", "y")
+
+
+def webview_gpu_enabled() -> bool:
+    """Whether the Qt desktop window may draw with the GPU (``YGGDRASIM_GUI_GPU``, off by default)."""
+    return _env_bool(ENV_GUI_GPU)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -283,7 +308,57 @@ def _coerce_origins(arg_origins: Optional[list[str]]) -> tuple[str, ...]:
     return tuple(collected)
 
 
+def normalize_webview_zoom(raw: Any, *, source: str = ENV_GUI_ZOOM) -> str:
+    """Normalise a desktop page-zoom setting.
+
+    Returns ``auto``, or a factor as text (``1``, ``1.25``). Blank,
+    ``off``, ``0`` and ``none`` all mean the native size. Anything else
+    logs once and falls back to the native size so a typo cannot leave
+    the window unreadable.
+    """
+    text = str(raw or "").strip().lower()
+    if text in ("", WEBVIEW_ZOOM_NATIVE, "off", "0", "none"):
+        return WEBVIEW_ZOOM_NATIVE
+    if text == WEBVIEW_ZOOM_AUTO:
+        return WEBVIEW_ZOOM_AUTO
+    try:
+        factor = float(text)
+    except ValueError:
+        factor = None
+    if factor is None or not (WEBVIEW_ZOOM_FIXED_MIN <= factor <= WEBVIEW_ZOOM_FIXED_MAX):
+        _LOGGER.warning(
+            "%s=%r is not %r or a factor between %s and %s; using the native size",
+            source, text, WEBVIEW_ZOOM_AUTO, WEBVIEW_ZOOM_FIXED_MIN, WEBVIEW_ZOOM_FIXED_MAX,
+        )
+        return WEBVIEW_ZOOM_NATIVE
+    return format(round(factor, 2), "g")
+
+
+def _env_zoom(name: str) -> str:
+    return normalize_webview_zoom(_env_text(name), source=name)
+
+
 # --- public builders ----------------------------------------------------
+
+
+def _resolve_startup_open_paths(args: Any) -> tuple[str, ...]:
+    """Absolute, de-duplicated form of the ``FILE`` arguments.
+
+    Existence is not checked here on purpose: the desktop launcher runs
+    without a console, so a missing file has to be reported where the
+    operator can see it, which is the GUI log dock when the open action
+    rejects the path.
+    """
+    raw_values = getattr(args, "open_paths", None) or []
+    resolved: list[str] = []
+    for raw in raw_values:
+        text = str(raw or "").strip()
+        if len(text) == 0:
+            continue
+        absolute = os.path.abspath(os.path.expanduser(text))
+        if absolute not in resolved:
+            resolved.append(absolute)
+    return tuple(resolved)
 
 
 def build_desktop_config(args: Any) -> GuiServerConfig:
@@ -309,6 +384,7 @@ def build_desktop_config(args: Any) -> GuiServerConfig:
     idle_seconds = _env_int(ENV_GUI_IDLE_SECONDS, DEFAULT_IDLE_SECONDS)
     path_allowlist = _env_paths(ENV_GUI_PATH_ALLOWLIST)
     webview_debug = _env_bool(ENV_GUI_WEBVIEW_DEBUG)
+    webview_zoom = _env_zoom(ENV_GUI_ZOOM)
 
     return GuiServerConfig(
         mode=MODE_DESKTOP,
@@ -321,7 +397,9 @@ def build_desktop_config(args: Any) -> GuiServerConfig:
         tls_key_path=None,
         tls_self_signed=False,
         path_allowlist=path_allowlist,
+        startup_open_paths=_resolve_startup_open_paths(args),
         webview_debug=webview_debug,
+        webview_zoom=webview_zoom,
         allow_ephemeral_port=True,
     )
 
@@ -376,6 +454,7 @@ def build_web_server_config(args: Any) -> GuiServerConfig:
         tls_key_path=tls_key,
         tls_self_signed=arg_tls_self_signed,
         path_allowlist=path_allowlist,
+        startup_open_paths=_resolve_startup_open_paths(args),
         webview_debug=False,
         allow_ephemeral_port=False,
     )

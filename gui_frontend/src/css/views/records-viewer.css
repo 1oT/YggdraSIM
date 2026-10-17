@@ -68,7 +68,7 @@
 
 .cc-record {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0;
   background: color-mix(in oklab, var(--bg-elev), transparent 44%);
   overflow: hidden;
@@ -178,7 +178,7 @@
 .cc-decoded {
   background: color-mix(in oklab, var(--bg-elev), transparent 35%);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
 }
 

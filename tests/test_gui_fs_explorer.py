@@ -11,14 +11,14 @@ The replacement is a proper modal explorer driven by a tiny read-only
 
 Two surfaces under test:
 
-* Backend (``yggdrasim_common/gui_server/routes/fs_browse.py``) — listing
+* Backend (``yggdrasim_common/gui_server/routes/fs_browse.py``) -- listing
   semantics, parent-pointer behaviour, file → parent promotion,
   shortcut sidebar contract, and Windows drive enumeration plumbing.
-* Frontend wiring (``app.js`` / ``app.css``) — pathPicker fallbacks
+* Frontend wiring (``app.js`` / ``app.css``) -- pathPicker fallbacks
   invoke ``openFsExplorer``, the modal class hooks exist, and the
   endpoint URL is queried with the right shape.
 
-All tests are pure-Python — no card, no live HTTP server.
+All tests are pure-Python -- no card, no live HTTP server.
 """
 
 from __future__ import annotations

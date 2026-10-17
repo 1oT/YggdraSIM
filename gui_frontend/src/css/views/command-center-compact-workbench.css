@@ -4,7 +4,7 @@
  */
 
 
-/* -- Compact workbench (SCP80 / eIM / eSIM Management / HIL / …) ---------------
+/* -- Compact workbench (SCP80 / eIM / eSIM Management / HIL / ...) ---------------
    Shared chrome for every subsystem that isn't SCP03 (workbench v2) or
    SAIP (package workbench). Mirrors the Filesystem/Applications visual
    idiom: slim action picker on the left, active card on the right. */
@@ -98,6 +98,9 @@
   overflow: hidden;
 }
 
+/* The module frame is canvas, not a raised slab: the panes, cards and
+   tool panels inside it are the raised surfaces, so they keep a visible
+   step against their container in the light palettes as well. */
 .main--module-workbench .cc-workbench {
   height: 100%;
   max-height: 100%;
@@ -108,7 +111,7 @@
   border-color: var(--border-soft);
   border-radius: var(--radius-md);
   box-shadow: none;
-  background: var(--surface);
+  background: var(--bg);
 }
 
 .main--module-workbench .cc-workbench.cc-workbench--compact {
@@ -318,7 +321,7 @@
   font-weight: 500;
   color: var(--fg-dim);
   background: var(--bg-hover);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 7px;
   min-width: 18px;
   text-align: center;
@@ -342,6 +345,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-elev);
+  box-shadow: var(--shadow-card);
 }
 
 .cc-reader-session-copy,
@@ -453,6 +457,118 @@
   padding-left: 8px;
 }
 
+.cc-hil-toolbar-group-label {
+  align-self: center;
+  padding: 0 4px 0 2px;
+  color: var(--fg-dim);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* Overflow menu for the backend HIL actions. A <details> element keeps
+ * the open/close state without script; the summary borrows the toolbar
+ * button look so the menu reads as one more control in the row. */
+.cc-hil-more {
+  position: relative;
+  display: inline-flex;
+}
+
+.cc-hil-more-summary {
+  list-style: none;
+  user-select: none;
+}
+
+.cc-hil-more-summary::-webkit-details-marker {
+  display: none;
+}
+
+.cc-hil-more-summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.cc-hil-more[open] > .cc-hil-more-summary {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent), transparent 45%);
+}
+
+.cc-hil-more-count {
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, currentColor, transparent 88%);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.cc-hil-more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 280px;
+  max-width: min(420px, 80vw);
+  max-height: min(60vh, 460px);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-card);
+}
+
+.cc-hil-more-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cc-hil-more-item:hover {
+  background: var(--bg-hover);
+}
+
+.cc-hil-more-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.cc-hil-more-item .cc-hil-action-icon {
+  margin-top: 1px;
+}
+
+.cc-hil-more-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cc-hil-more-item-title {
+  font-weight: 600;
+}
+
+.cc-hil-more-item-desc {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
 .cc-hil-action-btn {
   display: inline-flex;
   align-items: center;
@@ -610,6 +726,54 @@
   grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.1fr);
   gap: 0;
   overflow: hidden;
+}
+
+/* Drag handles between the dissector panes. Inline chrome, not a floating
+   surface: they sit in the grid and in the detail column's flow. The hit
+   area is wider than the visible line so the pointer does not have to be
+   precise. */
+.cc-hil-pane-divider {
+  flex: 0 0 auto;
+  position: relative;
+  background: var(--border);
+  border: none;
+  padding: 0;
+  touch-action: none;
+}
+
+.cc-hil-pane-divider--col {
+  width: 1px;
+  cursor: col-resize;
+}
+
+.cc-hil-pane-divider--row {
+  height: 1px;
+  cursor: row-resize;
+}
+
+/* The grab area, kept off the visible line so the panes keep their exact
+   widths and nothing shifts when the handle lights up. */
+.cc-hil-pane-divider::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.cc-hil-pane-divider--col::after {
+  left: -3px;
+  right: -3px;
+}
+
+.cc-hil-pane-divider--row::after {
+  top: -3px;
+  bottom: -3px;
+}
+
+.cc-hil-pane-divider:hover,
+.cc-hil-pane-divider:focus-visible,
+.cc-hil-pane-divider.is-dragging {
+  background: var(--accent);
+  outline: none;
 }
 
 .cc-hil-pane {
@@ -919,6 +1083,28 @@
   font-size: 12px;
 }
 
+.cc-hil-empty--guide {
+  max-width: 460px;
+  padding: 18px 16px;
+}
+
+.cc-hil-empty-title {
+  margin-bottom: 6px;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.cc-hil-empty-steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.cc-hil-empty-steps li + li {
+  margin-top: 3px;
+}
 .cc-hil-modem-shell {
   flex: 1 1 auto;
   min-height: 0;

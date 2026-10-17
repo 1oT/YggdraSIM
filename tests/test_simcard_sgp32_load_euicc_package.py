@@ -28,7 +28,7 @@ from SIMCARD.sgp32_packages import (
     package_result_seq_number,
     signature_payload,
 )
-from SIMCARD.state import SimCardState, SimEimEntry
+from SIMCARD.state import SimCardState, SimEimEntry, SimNotificationEntry
 from SIMCARD.utils import encode_iccid_ef, find_first_tlv, read_tlv, tlv
 
 
@@ -356,6 +356,85 @@ class Sgp32ResultListAndAckTests(_Sgp32TestBase):
         ack_response, _ack_sw1, _ack_sw2 = self.logic.handle_store_data(ack_payload)
         self.assertEqual(ack_response[:2], b"\xBF\x30")
         self.assertEqual(len(self.state.euicc_package_results), 0)
+
+    def test_wrapped_and_bare_euicc_package_results_criteria_agree(self) -> None:
+        target = self.state.profiles[0]
+        target.state = "enabled"
+        psmo_disable = tlv(b"\xA4", tlv(b"\x5A", encode_iccid_ef(target.iccid)))
+        request = _sign_euicc_package(
+            self.eim_key,
+            eim_id=self.eim_id,
+            eid_hex=self.state.eid,
+            counter_value=1,
+            inner_choice_tag=b"\xA0",
+            inner_items=psmo_disable,
+        )
+        self.logic.handle_store_data(request)
+
+        # SGP.32 §5.9.11 searchCriteria is an untagged CHOICE in an AUTOMATIC
+        # TAGS module, so 'A0 82 00' is the spec encoding; the bare '82 00'
+        # form that deployed IPAs emit resolves to the same result list.
+        wrapped, sw1, sw2 = self.logic.handle_store_data(bytes.fromhex("BF2B04A0028200"))
+        bare, _sw1, _sw2 = self.logic.handle_store_data(bytes.fromhex("BF2B028200"))
+
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        self.assertEqual(wrapped, bare)
+        _outer_tag, outer_value = self._peel_outer(wrapped)
+        a2_tag, _a2_value, _raw, _next = read_tlv(outer_value, 0)
+        self.assertEqual(a2_tag, b"\xA2")
+
+
+class Sgp32NotificationSearchCriteriaTests(_Sgp32TestBase):
+    def _seed_notifications(self) -> None:
+        self.state.notifications = [
+            SimNotificationEntry(
+                seq_number=1,
+                operation=SgpLogic.NOTIF_ENABLE,
+                address="rsp.example.test",
+                iccid=self.state.iccid,
+                payload=tlv(b"\xBF\x37", tlv(b"\x80", b"\x01")),
+            ),
+            SimNotificationEntry(
+                seq_number=2,
+                operation=SgpLogic.NOTIF_DELETE,
+                address="rsp.example.test",
+                iccid=self.state.iccid,
+                payload=tlv(b"\xBF\x37", tlv(b"\x80", b"\x02")),
+            ),
+        ]
+
+    def test_profile_management_operation_returns_only_matching_types(self) -> None:
+        self._seed_notifications()
+
+        # NotificationEvent with notificationLocalEnable(1) set.
+        response, sw1, sw2 = self.logic.handle_store_data(bytes.fromhex("BF2B06A00481020640"))
+
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        outer_tag, outer_value = self._peel_outer(response)
+        self.assertEqual(outer_tag, b"\xBF\x2B")
+        choice_tag, choice_value, _raw, _next = read_tlv(outer_value, 0)
+        self.assertEqual(choice_tag, b"\xA0")
+        self.assertEqual(choice_value, self.state.notifications[0].payload)
+
+    def test_profile_management_operation_with_no_match_returns_empty_list(self) -> None:
+        self._seed_notifications()
+
+        # NotificationEvent with notificationInstall(0) set only.
+        response, _sw1, _sw2 = self.logic.handle_store_data(bytes.fromhex("BF2B06A00481020780"))
+
+        # SGP.32 v1.2 §5.9.11: no match is the notificationList alternative 'A0' with no
+        # element, not a bare BF2B.
+        self.assertEqual(response, tlv(b"\xBF\x2B", tlv(b"\xA0", b"")))
+
+    def test_sequence_number_criteria_still_resolves_one_notification(self) -> None:
+        self._seed_notifications()
+
+        response, _sw1, _sw2 = self.logic.handle_store_data(bytes.fromhex("BF2B05A003800102"))
+
+        _outer_tag, outer_value = self._peel_outer(response)
+        choice_tag, choice_value, _raw, _next = read_tlv(outer_value, 0)
+        self.assertEqual(choice_tag, b"\xA0")
+        self.assertEqual(choice_value, self.state.notifications[1].payload)
 
 
 class Sgp32SeqNumberRecoveryTests(unittest.TestCase):

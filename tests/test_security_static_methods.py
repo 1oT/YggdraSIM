@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP03/logic/security.py pure static methods.
 
 Covers: derive_gsm_kc, build_usim_auth_payload, build_usim_auth_apdu,
@@ -26,7 +25,7 @@ _OP   = "63BFA50EE6523365FF14C1F45F88737D"
 
 
 # ---------------------------------------------------------------------------
-# derive_gsm_kc  (3GPP TS 33.102 Annex B.4 — pure XOR, no external deps)
+# derive_gsm_kc  (3GPP TS 33.102 Annex B.4 -- pure XOR, no external deps)
 # ---------------------------------------------------------------------------
 
 class DeriveGsmKcTests(unittest.TestCase):
@@ -142,7 +141,7 @@ class BuildUsimAuthResponseApduTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# build_auth_test_vector_report  (uses Milenage — may need pySim/Crypto)
+# build_auth_test_vector_report  (uses Milenage -- may need pySim/Crypto)
 # ---------------------------------------------------------------------------
 
 class BuildAuthTestVectorReportTests(unittest.TestCase):

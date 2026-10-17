@@ -43,3 +43,5 @@ reading can populate `docs/` themselves from the issuing body.
 ## Supporting Examples
 
 - `systemd/yggdrasim-hil-supervisor.service.example` - example `systemd --user` unit for the HIL supervisor
+- `systemd/yggdrasim-card-bridge.service.example` - example `systemd --user` unit for the Card Bridge on a reader host
+- `systemd/yggdrasim-lab-agent.service.example` - example `systemd --user` unit for the Remote Lab agent

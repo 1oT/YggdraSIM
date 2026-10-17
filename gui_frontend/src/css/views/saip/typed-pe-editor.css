@@ -129,7 +129,7 @@
 .saip-sd-param-summary-chip,
 .saip-sd-param-group-chip {
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--fg-muted);
   font-size: 10px;
   line-height: 1;
@@ -154,7 +154,7 @@
   grid-template-columns: minmax(220px, 28%) minmax(0, 1fr);
   height: clamp(320px, 58vh, 560px);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -194,7 +194,7 @@
   gap: 8px;
   min-height: 30px;
   padding: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .saip-sd-param-tree-row.depth-1 {
@@ -208,7 +208,7 @@
 .saip-sd-param-tree-label {
   appearance: none;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg);
   display: flex;
@@ -233,7 +233,7 @@
 }
 
 .saip-sd-param-dot {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fg-muted);
   flex: 0 0 auto;
   height: 7px;
@@ -306,6 +306,12 @@
   grid-template-columns: minmax(72px, 96px) minmax(0, 1fr) auto;
 }
 
+/* A menu entry: position and identifier side by side, then Remove. */
+.saip-sd-param-list-row--pair {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+}
+
 .saip-sd-param-list-row input[type="number"] {
   min-width: 84px;
 }
@@ -334,6 +340,19 @@
   color: var(--danger);
 }
 
+.saip-draft-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.saip-draft-chip-label {
+  color: var(--warn);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 900px) {
   .saip-sd-param-shell {
     grid-template-columns: 1fr;
@@ -347,7 +366,7 @@
   }
 }
 
-/* ── Add-file modal (Phase 3 wizard-parity) ─────────────────────────── */
+/* ── Add-file modal (wizard-parity) ─────────────────────────────────── */
 
 .saip-add-file-btn {
   margin-left: auto;
@@ -475,7 +494,7 @@
 
 .saip-chip {
   display: inline-block;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 8px;
   font-size: 10px;
   line-height: 1.5;
@@ -507,8 +526,8 @@ button.saip-chip:focus-visible {
 }
 
 .saip-row-flash {
-  outline: 1px solid rgba(123, 194, 255, 0.85);
-  background: rgba(88, 143, 196, 0.2);
+  outline: 1px solid color-mix(in oklab, var(--accent) 85%, transparent);
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
 }
 
 .saip-cell-sub {
@@ -518,7 +537,7 @@ button.saip-chip:focus-visible {
   font-style: italic;
 }
 
-/* Template catalog tree — TCA SAIP §9 file-template registry projected
+/* Template catalog tree -- TCA SAIP §9 file-template registry projected
    into a checkable tree. */
 
 .saip-template-tree,
@@ -554,7 +573,7 @@ button.saip-chip:focus-visible {
 }
 
 .saip-template-row--present {
-  color: var(--nord-frost-1, #8FBCBB);
+  color: var(--ok);
 }
 
 .saip-template-row--required:not(.saip-template-row--present) {
@@ -617,18 +636,18 @@ button.saip-chip:focus-visible {
 }
 
 .saip-template-badge--req {
-  color: var(--nord-aurora-3, #EBCB8B);
-  border-color: rgba(235, 203, 139, 0.3);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 30%, transparent);
 }
 
 .saip-template-badge--hu {
-  color: var(--nord-aurora-2, #D08770);
-  border-color: rgba(208, 135, 112, 0.3);
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
 }
 
 .saip-template-badge--arr {
-  color: var(--nord-frost-2, #88C0D0);
-  border-color: rgba(136, 192, 208, 0.3);
+  color: var(--fg-muted);
+  border-color: var(--border-strong);
 }
 
 .saip-tag-muted {
@@ -657,4 +676,50 @@ button.saip-chip:focus-visible {
   font-size: 10px;
   color: var(--fg-muted);
   max-width: 240px;
+}
+
+/* PE-Application load and install card (TCA SAIP v3.4.1 §8.7) and the
+   other from-scratch typed editors: a section title opens each block. */
+.saip-app-pe-card .saip-sd-param-subtitle {
+  margin-top: 10px;
+}
+
+.saip-app-instance-row {
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+/* One PE-Application instance: its INSTALL members as rows, then its
+   Edit and Remove buttons. */
+.saip-app-instance {
+  padding: 6px 0 2px;
+  border-top: 1px solid var(--border);
+}
+
+.saip-app-instance-text {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* One editable member of a typed PE: label, hex input, Apply; the decoded
+   caption sits under the input. */
+.saip-typed-field-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 190px) minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  margin: 4px 0;
+}
+
+.saip-typed-field-row .saip-form-row-hint {
+  grid-column: 2 / -1;
+  margin: 0;
+}
+
+.saip-typed-field-label {
+  color: var(--fg-muted);
+  font-size: 12px;
 }

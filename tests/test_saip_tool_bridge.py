@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``Tools.ProfilePackage.saip_tool.SaipToolBridge`` utility methods.
 
 Covers: is_transcode_sidecar, get_input_file, set_tool_command,
@@ -132,7 +131,7 @@ class DescribeToolCommandTests(unittest.TestCase):
 
     def test_graceful_when_tool_not_found(self) -> None:
         # No tool configured and no saip-tool binary on PATH in CI.
-        # describe_tool_command must not raise — it returns a "unavailable" string.
+        # describe_tool_command must not raise -- it returns a "unavailable" string.
         import os
         saved = os.environ.pop("YGGDRASIM_SAIP_TOOL", None)
         self._bridge._tool_command = None

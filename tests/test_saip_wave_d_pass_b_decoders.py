@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Wave D Pass B — CSIM MIP / SIP / BCSMS / 3GPD / WAP / OTA annotated
+Wave D Pass B -- CSIM MIP / SIP / BCSMS / 3GPD / WAP / OTA annotated
 opaque EFs.
 
 These 3GPP2 C.S0023 structures have fixed spec sections but their

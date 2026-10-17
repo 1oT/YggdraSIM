@@ -135,6 +135,6 @@
   padding-right: 38px;
 }
 
-/* Short status tooltip strip below the pill — rendered on :hover via
+/* Short status tooltip strip below the pill -- rendered on :hover via
    the ``title`` attribute instead of a floating tooltip to keep focus
    mgmt simple. Reserved class for future native tooltip styling. */

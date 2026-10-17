@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Process debug helpers: thread-dump signal handler and memory-usage reporter for long-running daemon processes."""
 import argparse
 import contextlib
@@ -33,16 +32,21 @@ def is_global_debug_enabled(default: bool = False) -> bool:
     return _parse_bool_text(os.environ.get(GLOBAL_DEBUG_ENV, ""), default=default)
 
 
-def set_global_debug(enabled: bool) -> None:
-    """Set the global debug flag and persist it across sessions.
+def set_global_debug(enabled: bool, *, persist: bool = True) -> None:
+    """Set the global debug flag, persisting it unless ``persist`` is False.
 
     The persistence path is controlled by the ``EnvFlag.persist_scope`` of
     ``YGGDRASIM_GLOBAL_DEBUG`` (currently ``PERSIST_FILE``, which writes to
-    ``<runtime_root>/state/env_overrides.json``). The import is lazy to
-    avoid adding a hard dependency from every early-import consumer.
+    ``<runtime_root>/state/env_overrides.json``). A per-invocation override --
+    a CLI ``--debug``, a single console command -- passes ``persist=False`` so
+    it cannot overwrite the value the operator stored from the menu or GUI.
+    The import is lazy to avoid adding a hard dependency from every
+    early-import consumer.
     """
     value = "1" if bool(enabled) else "0"
     os.environ[GLOBAL_DEBUG_ENV] = value
+    if persist is False:
+        return
     try:
         from yggdrasim_common import env_flags
     except ImportError:

@@ -26,7 +26,6 @@ from pathlib import Path
 
 from SCP11.live.orchestrator import SGP22Orchestrator as LiveOrchestrator
 from SCP11.test.orchestrator import SGP22Orchestrator as CompatibilityOrchestrator
-from SCP11.orchestrator import SGP22Orchestrator as MainOrchestrator
 from SCP11.local_access.session import LocalIsdrSession
 
 from tests.test_scp11_orchestrator import FakeApduChannel, FakeCfg, wrap_tlv
@@ -71,14 +70,15 @@ _VECTORS: tuple[tuple[str, bytes, tuple[bytes, ...]], ...] = (
         ),
     ),
     (
-        # A2 takes the same header-then-members treatment as A1 and A3.
+        # SGP.22 v3.1 section 2.5.5: the secondSequenceOf87 header is sent
+        # together with its first '87', unlike A1 and A3 whose header is a
+        # segment of its own.
         "a2_container",
         _bpp(_BF23 + wrap_tlv("A0", wrap_tlv("87", b"\xAA")) + wrap_tlv("A2", wrap_tlv("88", b"\x07\x08"))),
         (
             bytes.fromhex("BF3620") + _BF23,
             bytes.fromhex("A0038701AA"),
-            bytes.fromhex("A204"),
-            bytes.fromhex("88020708"),
+            bytes.fromhex("A20488020708"),
         ),
     ),
     (
@@ -150,10 +150,6 @@ def _segmenters() -> tuple[tuple[str, object], ...]:
 
     return (
         (
-            "SCP11.orchestrator",
-            MainOrchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None),
-        ),
-        (
             "SCP11.live.orchestrator",
             LiveOrchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None),
         ),
@@ -172,7 +168,6 @@ def _segmenters() -> tuple[tuple[str, object], ...]:
 # Modules that literally define the method. A shim that inherits it is an
 # entry point but not a copy, so it does not belong here.
 _DEFINING_MODULES = {
-    "SCP11/orchestrator.py",
     "SCP11/live/orchestrator.py",
     "SCP11/local_access/session.py",
 }
@@ -230,7 +225,7 @@ class ReferenceVectorShapeTests(unittest.TestCase):
     """Why the reference vector looks the way it does, per SGP.22 Annex M."""
 
     def setUp(self) -> None:
-        self.segments = MainOrchestrator(
+        self.segments = LiveOrchestrator(
             cfg=FakeCfg(),
             apdu_channel=FakeApduChannel(),
             profile_provider=None,

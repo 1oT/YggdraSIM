@@ -7,7 +7,7 @@
   // gets its own key (``ygg.scp03.tab.<readerName>``) so every pill on
   // the top-bar strip can remember the last tree, selection, FCP cache,
   // and APDU-console history independently. We deliberately do **not**
-  // persist ``sessionId`` — those expire on backend restart. On restore,
+  // persist ``sessionId`` -- those expire on backend restart. On restore,
   // the tab re-renders the cached tree + selection and surfaces a
   // "Resume session" button so the operator re-opens the secure channel
   // on demand instead of silently inheriting a stale ID.
@@ -26,7 +26,7 @@
     if (name.length === 0) return null;
     // "(default)" is a synthetic label for the first PC/SC reader when
     // no explicit name was requested. Persisting under that alias is
-    // fine — each host boots with a predictable default-reader slot.
+    // fine -- each host boots with a predictable default-reader slot.
     return SCP03_PERSIST_PREFIX + name;
   }
 
@@ -39,7 +39,7 @@
       var fcp = tab.fcpCache || {};
       var entries = Object.keys(fcp);
       if (entries.length > SCP03_PERSIST_MAX_CACHE) {
-        // Cache is not ordered — sort by capturedAt desc and keep the
+        // Cache is not ordered -- sort by capturedAt desc and keep the
         // N freshest. Dropped entries just force a fresh read next
         // time the operator clicks that path; no correctness impact.
         entries.sort(function (a, b) {
@@ -63,6 +63,7 @@
         previewCache: tab.previewCache || null,
         fcpCache: fcp,
         activeRibbonTab: tab.activeRibbonTab || "home",
+        ribbonCollapsed: !!tab.ribbonCollapsed,
         apduInputHex: tab.apduInputHex || "",
         apduFollow61: tab.apduFollow61 !== false,
         apduRetry6C: tab.apduRetry6C !== false,
@@ -73,7 +74,7 @@
       localStorage.setItem(key, JSON.stringify(payload));
     } catch (_err) {
       // QuotaExceededError / serialisation hiccup. Persistence is a
-      // nicety — we never want it to break the happy path. A single
+      // nicety -- we never want it to break the happy path. A single
       // oversized scan tree just means no save this round.
     }
   }
@@ -107,13 +108,14 @@
     tab.previewCache = persisted.previewCache || null;
     tab.fcpCache = persisted.fcpCache || {};
     tab.activeRibbonTab = persisted.activeRibbonTab || "home";
+    tab.ribbonCollapsed = !!persisted.ribbonCollapsed;
     tab.apduInputHex = persisted.apduInputHex || "";
     tab.apduFollow61 = persisted.apduFollow61 !== false;
     tab.apduRetry6C = persisted.apduRetry6C !== false;
     tab.apduHistory = Array.isArray(persisted.apduHistory)
       ? persisted.apduHistory.slice()
       : [];
-    // ``sessionId`` stays null — the backend session didn't survive
+    // ``sessionId`` stays null -- the backend session didn't survive
     // the reload. ``status`` stays "idle" so the welcome panel (which
     // now renders a "Resume" button when scanData is present) appears
     // on first paint. ``errorKind`` is ephemeral (tied to the live
@@ -123,7 +125,7 @@
     tab.error = null;
     tab.errorKind = "";
     tab.persistedAt = persisted.savedAt || 0;
-    // Auth state is inherently session-bound — once ``sessionId`` is
+    // Auth state is inherently session-bound -- once ``sessionId`` is
     // cleared, the secure channel is gone. Reset the cache so the
     // first ``requires_auth`` action after rehydration prompts (or,
     // if the Resume flow calls ``scp03RefreshTabAuthStatus`` once the
@@ -141,7 +143,7 @@
 
   function scp03HasPersistedState(tab) {
     // A hydrated tab is "has persisted state" when scanData survived
-    // the reload. fcpCache alone isn't enough — the welcome panel
+    // the reload. fcpCache alone isn't enough -- the welcome panel
     // needs the tree to render the "Resume" preview.
     if (!tab) return false;
     if (tab.sessionId) return false;
@@ -154,14 +156,14 @@
   //
   // Operators hit the "filesystem → other AID → filesystem" state
   // drift enough that the belt-and-suspenders pre-restore in
-  // ``_dispatch_read_selected`` isn't always enough — some loaders
+  // ``_dispatch_read_selected`` isn't always enough -- some loaders
   // push the card into a state where SELECT-by-FID returns 6A82 until
   // the card is power-cycled. Rather than keep piling pre-restore
   // retries on the backend, the frontend now treats every read as
   // optimistic:
   //
   //   1. If we have a cached ``read_selected`` response for this
-  //      path, render it **immediately** with a "refreshing…" chip.
+  //      path, render it **immediately** with a "refreshing..." chip.
   //      The user never stares at an empty preview pane during a
   //      context switch.
   //   2. Fire the fresh read in the background. On success, update
@@ -178,11 +180,11 @@
   //      this is stale" instead of a blank pane.
   //
   // The cache lives on the session tab (``tab.fcpCache``) and gets
-  // wiped on rescan / reset / close — recovery within the same session
+  // wiped on rescan / reset / close -- recovery within the same session
   // preserves it because that's the whole point.
   // Cap on how many decoded-FCP entries we keep per session tab. Each
   // entry holds the raw FCP TLV stream and a (potentially large) decoded
-  // payload — without a bound the cache balloons over a long browsing
+  // payload -- without a bound the cache balloons over a long browsing
   // session, especially because we mirror it into ``localStorage``. The
   // cap is generous enough to cover a deep walk of MF + USIM + ISIM
   // (~80 EFs) without thrashing, and the LRU eviction prefers freshly
@@ -215,7 +217,7 @@
     if (!tab || !tab.fcpCache) return;
     var keys = Object.keys(tab.fcpCache);
     if (keys.length <= SCP03_FCP_CACHE_MAX) return;
-    // Sort ascending by capturedAt — oldest first — and drop the
+    // Sort ascending by capturedAt -- oldest first -- and drop the
     // overflow. ``keys.length - cap`` is a small number in practice
     // (single digits) so the cost is negligible.
     keys.sort(function (a, b) {
@@ -250,9 +252,9 @@
     var spinner = document.createElement("span");
     spinner.className = "cc-stale-chip-spinner";
     if (kind === "stale") {
-      spinner.textContent = "\u26A0"; // warning triangle — static
+      spinner.textContent = "\u26A0"; // warning triangle -- static
     } else {
-      spinner.textContent = "\u21BB"; // reload arrow — css-spun
+      spinner.textContent = "\u21BB"; // reload arrow -- css-spun
     }
     banner.appendChild(spinner);
     var text = document.createElement("span");
@@ -280,7 +282,7 @@
   }
 
   async function scp03DoReadSelected(tab, path) {
-    // Bare read call. Returns ``{ok, data, error}`` — the caller
+    // Bare read call. Returns ``{ok, data, error}`` -- the caller
     // decides whether to promote a ``data.selected === false`` into
     // a recovery attempt.
     try {
@@ -311,7 +313,7 @@
     // Invokes the backend ``scp03.recover_session`` dispatcher (cold
     // reset + rescan) and updates ``tab.scanData`` in place on
     // success so the file tree stays consistent with the card.
-    // Returns ``{ok, error, noCard}`` — the caller chains the retry.
+    // Returns ``{ok, error, noCard}`` -- the caller chains the retry.
     if (!tab || !tab.sessionId) {
       return { ok: false, error: "no session to recover" };
     }
@@ -331,7 +333,7 @@
         };
       }
       var data = resp.data || {};
-      // Update the in-memory scan tree if the rewalk succeeded —
+      // Update the in-memory scan tree if the rewalk succeeded --
       // the tree view will re-render on the next paint. Keep the
       // ``session_id`` / ``atr_hex`` where they are (the session
       // handle is unchanged; only its underlying state was refreshed).
@@ -368,20 +370,20 @@
   }
 
   async function readSelectedForTab(tab, path, previewEl) {
-    // Phase 1 — optimistic render from cache.
+    // Phase 1 -- optimistic render from cache.
     //
     // If we've read this path before on this session, paint the
-    // cached response instantly. The "refreshing…" banner tells
+    // cached response instantly. The "refreshing..." banner tells
     // the operator the wire read is in-flight so they don't mistake
     // stale bytes for a live answer.
     var hadCache = scp03RenderFromCache(
-      tab, path, previewEl, "refresh", "showing cached data — refreshing"
+      tab, path, previewEl, "refresh", "showing cached data -- refreshing"
     );
     if (!hadCache) {
-      previewEl.innerHTML = '<p class="loading">reading ' + escapeHtml(path) + "…</p>";
+      previewEl.innerHTML = '<p class="loading">reading ' + escapeHtml(path) + "...</p>";
     }
 
-    // Phase 2 — fresh read.
+    // Phase 2 -- fresh read.
     var first = await scp03DoReadSelected(tab, path);
     var freshOk = first.ok && first.data && first.data.selected !== false;
     if (freshOk) {
@@ -405,18 +407,18 @@
     logBus.emit({
       level: errKind ? "warn" : "warn",
       source: "scp03.read_selected",
-      message: "fresh read failed for '" + path + "' — "
+      message: "fresh read failed for '" + path + "' -- "
         + (first.error || "selected=false; see trace")
         + (errKind ? " [kind=" + errKind + "]" : ""),
     });
 
     if (errKind === "no_card" || errKind === "session_gone") {
       var friendlyText = errKind === "no_card"
-        ? "card removed from reader — reinsert and re-scan"
-        : "session expired — re-scan this tab to open a new one";
+        ? "card removed from reader -- reinsert and re-scan"
+        : "session expired -- re-scan this tab to open a new one";
       if (hadCache) {
         scp03RenderFromCache(tab, path, previewEl, "stale",
-          "showing cached data (stale) — " + friendlyText);
+          "showing cached data (stale) -- " + friendlyText);
       } else {
         previewEl.innerHTML = "";
         previewEl.appendChild(renderErrorBlock(
@@ -425,7 +427,7 @@
       }
       // Mark the tab so the top-bar pill flips to red on the next
       // readerBarRender(). We deliberately don't drop the sessionId
-      // for "no_card" — the operator might just be swapping a card,
+      // for "no_card" -- the operator might just be swapping a card,
       // and keeping the session means the next click re-reads against
       // the same manager entry rather than stranding it.
       tab.errorKind = errKind;
@@ -439,13 +441,13 @@
       return;
     }
 
-    // Phase 3 — auto-recovery (cold reset + rescan) and retry.
+    // Phase 3 -- auto-recovery (cold reset + rescan) and retry.
     //
     // This is the whole point of the cache layer: a failed read
     // against a drifted DF used to leave the preview empty and
-    // the operator guessing. Now we keep the cached render (if any)
-    // visible, swap the banner over to "recovering…", and hope the
-    // card comes back clean enough for the retry.
+    // the operator guessing. The cached render stays visible, the
+    // banner switches to "recovering...", and the retry runs against
+    // whatever the card reports next.
     if (hadCache) {
       scp03RenderFromCache(
         tab, path, previewEl, "recover", "resetting card + rescanning tree"
@@ -453,13 +455,13 @@
     } else {
       previewEl.innerHTML = "";
       previewEl.appendChild(scp03BuildCacheBanner(
-        "recover", "read failed — resetting card + rescanning tree"
+        "recover", "read failed -- resetting card + rescanning tree"
       ));
     }
 
     var recovery = await scp03RecoverSession(tab);
     // Short-circuit retry when the recovery itself confirmed the card
-    // is gone — there is nothing productive to do until a card is
+    // is gone -- there is nothing productive to do until a card is
     // re-inserted. Surface the friendly "reinsert" banner instead of
     // a generic read-failed error and stamp the tab so the pill flips
     // red on the next repaint.
@@ -467,12 +469,12 @@
       tab.errorKind = "no_card";
       if (hadCache) {
         scp03RenderFromCache(tab, path, previewEl, "stale",
-          "showing cached data (stale) — card removed from reader, "
+          "showing cached data (stale) -- card removed from reader, "
           + "reinsert and re-scan");
       } else {
         previewEl.innerHTML = "";
         previewEl.appendChild(renderErrorBlock(
-          "card removed from reader — reinsert and re-scan.\n\n"
+          "card removed from reader -- reinsert and re-scan.\n\n"
             + "raw error: " + (recovery.error || first.error || "unknown")
         ));
       }
@@ -482,12 +484,12 @@
       return;
     }
     if (!recovery.ok) {
-      // Recovery itself failed — typically "no session" or a PC/SC
+      // Recovery itself failed -- typically "no session" or a PC/SC
       // layer error. Fall through to the stale banner + error block.
       if (hadCache) {
         scp03RenderFromCache(
           tab, path, previewEl, "stale",
-          "showing cached data (stale) — recovery failed: " + (recovery.error || "unknown")
+          "showing cached data (stale) -- recovery failed: " + (recovery.error || "unknown")
         );
       } else {
         previewEl.innerHTML = "";
@@ -499,7 +501,7 @@
       return;
     }
 
-    // Phase 4 — retry after recovery.
+    // Phase 4 -- retry after recovery.
     var second = await scp03DoReadSelected(tab, path);
     var retryOk = second.ok && second.data && second.data.selected !== false;
     if (retryOk) {
@@ -525,16 +527,16 @@
     logBus.emit({
       level: "error",
       source: "scp03.read_selected",
-      message: "retry after recovery failed for '" + path + "' — "
+      message: "retry after recovery failed for '" + path + "' -- "
         + (second.error || "selected=false; see trace"),
     });
 
-    // Phase 5 — give up gracefully. Keep cached render if we have one,
+    // Phase 5 -- give up gracefully. Keep cached render if we have one,
     // surface the error for forensics.
     if (hadCache) {
       scp03RenderFromCache(
         tab, path, previewEl, "stale",
-        "showing cached data (stale) — retry after reset still failed"
+        "showing cached data (stale) -- retry after reset still failed"
       );
       var errBlock = renderErrorBlock(
         "retry failed: " + (second.error || "selected=false; see trace")
@@ -616,7 +618,7 @@
   // field on every node so we trust that first; the prefix walk stays
   // as a safety net for older sessions or hand-rolled fids.txt entries
   // that pre-date the field. Returning the ETSI type as the icon label
-  // is the whole point of the fix — operators were seeing every
+  // is the whole point of the fix -- operators were seeing every
   // ``DF.*`` and any non-``ADF_`` ADF surfaced as an ``EF`` badge.
   function scp03ClassifyTreeNode(node) {
     var raw = String((node && node.kind) || "").toLowerCase();
@@ -679,7 +681,7 @@
     var list = document.createElement("ul");
     list.className = "cc-tree-list";
     // Separate MF/DF from ADF roots with a visual divider.
-    // ADFs are independent application roots — not children of MF.
+    // ADFs are independent application roots -- not children of MF.
     var mfDfNodes = [];
     var adfNodes = [];
     nodes.forEach(function (node) {
@@ -787,7 +789,7 @@
     }
     return list;
   }
-  // Expose for testing + DevTools poking — same pattern as the other
+  // Expose for testing + DevTools poking -- same pattern as the other
   // scp03 helpers.
   if (typeof window !== "undefined") {
     window.YggdraSimScp03ClassifyTreeNode = scp03ClassifyTreeNode;
@@ -800,19 +802,19 @@
   // ISO 7816-4 §5.3.3.2 file descriptor). Callers use this to gate
   // which FS-Admin actions make sense on the currently-selected node:
   //
-  //   "df"          — DF (MF counts as a DF). CREATE FILE is legal
+  //   "df"          -- DF (MF counts as a DF). CREATE FILE is legal
   //                   *under* this node; record-scoped reads aren't.
-  //   "application" — FCI (Application / Security Domain ADF). Treated
+  //   "application" -- FCI (Application / Security Domain ADF). Treated
   //                   as a directory for CREATE purposes but surfaces a
-  //                   softer warning — operators rarely create children
+  //                   softer warning -- operators rarely create children
   //                   under a loaded application.
-  //   "transparent" — EF Transparent. RESIZE and READ BINARY legal;
+  //   "transparent" -- EF Transparent. RESIZE and READ BINARY legal;
   //                   SEARCH RECORD rejected.
-  //   "linear"      — EF Linear Fixed. RESIZE / SEARCH RECORD legal.
-  //   "cyclic"      — EF Cyclic. RESIZE / SEARCH RECORD legal, but the
+  //   "linear"      -- EF Linear Fixed. RESIZE / SEARCH RECORD legal.
+  //   "cyclic"      -- EF Cyclic. RESIZE / SEARCH RECORD legal, but the
   //                   wizard copy points out that cyclic records are
   //                   write-through.
-  //   "unknown"     — FCP parser could not decide (Unknown structure or
+  //   "unknown"     -- FCP parser could not decide (Unknown structure or
   //                   non-FCP/FCI template). All mutating actions stay
   //                   hidden behind an advisory rather than exposing a
   //                   footgun. The raw FCP editor stays reachable from
@@ -830,14 +832,14 @@
 
     // Directory detection. ETSI TS 102 221: byte-1 & 0x38 == 0x38 for
     // DF/MF (the FCP parser flags this as type='DF', structure='Tree').
-    // MF is a DF at 3F00 — we don't distinguish in the action gate.
+    // MF is a DF at 3F00 -- we don't distinguish in the action gate.
     if (type === "df") {
       return { kind: "df", label: "DF" };
     }
 
     // FCI applications (ADF for SD / applet). We split these from DFs
     // because CREATE under a live application is an advanced operation
-    // and UICC loaders rarely want it — soft-warn instead of outright
+    // and UICC loaders rarely want it -- soft-warn instead of outright
     // disabling. Legal operation set still matches DF.
     if (template === "FCI" || type === "application/sd") {
       return { kind: "application", label: "ADF · application" };
@@ -862,7 +864,7 @@
     // to classify between transparent and records, which is what the
     // matrix actually needs. "records" is slightly imprecise (linear vs
     // cyclic is unresolvable from the payload alone), but gating on it
-    // as "linear" gives the right set of legal actions — SEARCH RECORD
+    // as "linear" gives the right set of legal actions -- SEARCH RECORD
     // works against both structures.
     if (payloadKind === "transparent") {
       return { kind: "transparent", label: "EF · transparent" };
@@ -881,7 +883,7 @@
   // Standards anchors: ETSI TS 102 222 §6.3 / §6.4 / §6.5 for
   // CREATE / DELETE / RESIZE scope; ETSI TS 102 221 §11.1.11 for the
   // record ops; ETSI TS 102 221 §11.1.22 for SUSPEND UICC (card-wide,
-  // not file-scoped — always enabled when a session is open).
+  // not file-scoped -- always enabled when a session is open).
   function scp03FsActionAvailability(kind) {
     var matrix = {
       create: { enabled: false, reason: "" },
@@ -903,61 +905,61 @@
     if (kind === "df") {
       matrix.create = { enabled: true, reason: "CREATE FILE under this DF" };
       matrix.delete = { enabled: true,
-        reason: "DELETE FILE — deletes a child of this DF (pick its FID in the wizard)" };
+        reason: "DELETE FILE -- deletes a child of this DF (pick its FID in the wizard)" };
       matrix.resize = { enabled: false,
-        reason: "RESIZE applies only to EFs — pick a transparent / linear / cyclic file first" };
+        reason: "RESIZE applies only to EFs -- pick a transparent / linear / cyclic file first" };
       matrix.update = { enabled: false,
-        reason: "UPDATE applies only to EFs — pick a transparent / linear / cyclic file first" };
+        reason: "UPDATE applies only to EFs -- pick a transparent / linear / cyclic file first" };
       matrix.activate = { enabled: true, reason: "ACTIVATE this DF" };
       matrix.deactivate = { enabled: true, reason: "DEACTIVATE this DF" };
       matrix.terminate = { enabled: true,
-        reason: "TERMINATE-DF — permanent, this DF and every child become unusable" };
+        reason: "TERMINATE-DF -- permanent, this DF and every child become unusable" };
       matrix.searchRecord = { enabled: false,
         reason: "SEARCH RECORD applies only to linear / cyclic EFs" };
       return matrix;
     }
     if (kind === "application") {
       matrix.create = { enabled: true,
-        reason: "CREATE FILE under this ADF — review children carefully" };
+        reason: "CREATE FILE under this ADF -- review children carefully" };
       matrix.delete = { enabled: true, reason: "DELETE FILE under this application" };
       matrix.resize = { enabled: false, reason: "RESIZE applies only to EFs" };
       matrix.update = { enabled: false,
-        reason: "UPDATE applies only to EFs — pick a transparent / linear / cyclic child first" };
+        reason: "UPDATE applies only to EFs -- pick a transparent / linear / cyclic child first" };
       matrix.activate = { enabled: true, reason: "ACTIVATE this ADF" };
       matrix.deactivate = { enabled: true, reason: "DEACTIVATE this ADF" };
       matrix.terminate = { enabled: true,
-        reason: "TERMINATE-DF — permanently disables this application" };
+        reason: "TERMINATE-DF -- permanently disables this application" };
       matrix.searchRecord = { enabled: false,
         reason: "SEARCH RECORD applies only to linear / cyclic EFs" };
       return matrix;
     }
     if (kind === "transparent") {
       matrix.create = { enabled: false,
-        reason: "CREATE FILE is issued under a DF — select MF / a DF / an ADF first" };
+        reason: "CREATE FILE is issued under a DF -- select MF / a DF / an ADF first" };
       matrix.delete = { enabled: true, reason: "DELETE this EF" };
       matrix.resize = { enabled: true, reason: "RESIZE this transparent EF" };
       matrix.update = { enabled: true, apdu: "binary",
-        reason: "UPDATE BINARY (00D6) — overwrite this transparent EF's body" };
+        reason: "UPDATE BINARY (00D6) -- overwrite this transparent EF's body" };
       matrix.activate = { enabled: true, reason: "ACTIVATE this EF" };
       matrix.deactivate = { enabled: true, reason: "DEACTIVATE this EF" };
       matrix.terminate = { enabled: true,
-        reason: "TERMINATE-EF — permanent, this file becomes unusable" };
+        reason: "TERMINATE-EF -- permanent, this file becomes unusable" };
       matrix.searchRecord = { enabled: false,
-        reason: "SEARCH RECORD applies only to linear / cyclic EFs — this is transparent" };
+        reason: "SEARCH RECORD applies only to linear / cyclic EFs -- this is transparent" };
       return matrix;
     }
     if (kind === "linear" || kind === "cyclic") {
       var label = (kind === "linear") ? "linear fixed" : "cyclic";
       matrix.create = { enabled: false,
-        reason: "CREATE FILE is issued under a DF — select MF / a DF / an ADF first" };
+        reason: "CREATE FILE is issued under a DF -- select MF / a DF / an ADF first" };
       matrix.delete = { enabled: true, reason: "DELETE this " + label + " EF" };
       matrix.resize = { enabled: true, reason: "RESIZE this " + label + " EF" };
       matrix.update = { enabled: true, apdu: "record",
-        reason: "UPDATE RECORD (00DC) — overwrite a record in this " + label + " EF" };
+        reason: "UPDATE RECORD (00DC) -- overwrite a record in this " + label + " EF" };
       matrix.activate = { enabled: true, reason: "ACTIVATE this EF" };
       matrix.deactivate = { enabled: true, reason: "DEACTIVATE this EF" };
       matrix.terminate = { enabled: true,
-        reason: "TERMINATE-EF — permanent, this file becomes unusable" };
+        reason: "TERMINATE-EF -- permanent, this file becomes unusable" };
       matrix.searchRecord = { enabled: true,
         reason: "SEARCH RECORD across this " + label + " EF's records" };
       return matrix;
@@ -976,7 +978,7 @@
 
   function scp03MakeFsActionButton(spec) {
     // Compact pill button used in the header action bar. ``spec`` is
-    // ``{label, title, danger, enabled, disabledReason, onClick}`` —
+    // ``{label, title, danger, enabled, disabledReason, onClick}`` --
     // disabled buttons render as greyed-out-but-visible with a reason
     // tooltip so operators learn *why* without hunting through docs.
     var btn = document.createElement("button");
@@ -1001,7 +1003,7 @@
     // FCP header so its visibility is tied to the current selection;
     // repaints on every ``renderFcpResult`` call, which fires on each
     // tree click + cached-restore. The strip replaces the old Files
-    // ribbon tab — each button hops into the existing wizard by
+    // ribbon tab -- each button hops into the existing wizard by
     // invoking ``scp03ShowFs*(tab)``, which renders into the extras
     // slot below the tree/preview layout.
     var bar = document.createElement("div");
@@ -1012,7 +1014,7 @@
     var info = scp03ClassifyFile(data);
     var avail = scp03FsActionAvailability(info.kind);
 
-    // Kind badge — makes the gating visible at a glance. Echoes the
+    // Kind badge -- makes the gating visible at a glance. Echoes the
     // human-readable label next to the fid chip so operators know
     // "yes, this is an EF · linear" without reading the FCP block.
     var kindChip = document.createElement("span");
@@ -1021,7 +1023,7 @@
     bar.appendChild(kindChip);
 
     // Guard: if the session or tab is missing, we still render the
-    // kind chip but skip the actions — no-op buttons would be worse
+    // kind chip but skip the actions -- no-op buttons would be worse
     // than absent ones.
     if (!tab || !tab.sessionId) {
       var hint = document.createElement("span");
@@ -1033,7 +1035,7 @@
 
     // Every button below is an ETSI TS 102 222 admin APDU (CREATE
     // FILE / DELETE FILE / RESIZE / ACTIVATE / DEACTIVATE / TERMINATE
-    // / SEARCH RECORD) or SUSPEND UICC — all require a live auth
+    // / SEARCH RECORD) or SUSPEND UICC -- all require a live auth
     // session. ``scp03GateOpen`` noops for unflagged actions, so the
     // kind-based gating already provided by ``avail`` still decides
     // whether the button is clickable; the auth gate only fires once
@@ -1085,7 +1087,7 @@
     });
     var suspendBtn = scp03MakeFsActionButton({
       label: "Suspend UICC",
-      title: "SUSPEND UICC (8076) — card-wide low-power state",
+      title: "SUSPEND UICC (8076) -- card-wide low-power state",
       disabledReason: "Open a session first",
       enabled: avail.suspend.enabled,
       danger: true,
@@ -1102,7 +1104,7 @@
     group.appendChild(searchBtn);
     bar.appendChild(group);
 
-    // SUSPEND UICC sits in its own micro-group — visually separated
+    // SUSPEND UICC sits in its own micro-group -- visually separated
     // so operators don't fat-finger it while clicking file-scoped
     // actions. It's a card-wide power command (ETSI TS 102 221 §11.1.22),
     // not file-scoped, so its gating is session-only, not kind-aware.
@@ -1144,10 +1146,10 @@
     fidChip.appendChild(fidCode);
     header.appendChild(fidChip);
     wrap.appendChild(header);
-    // Contextual FS-Admin bar — gated by the selected-file kind.
+    // Contextual FS-Admin bar -- gated by the selected-file kind.
     // Relocated from the ribbon's Files tab per operator request so
     // the actions sit next to the fid badge they target. Only wired
-    // when a tab is passed — preserves back-compat with the generic
+    // when a tab is passed -- preserves back-compat with the generic
     // action-result renderer (kind="fcp") that lacks session context.
     if (tab) {
       wrap.appendChild(scp03BuildFsActionBar(tab, data));
@@ -1161,7 +1163,7 @@
       var h4 = document.createElement("h4");
       h4.textContent = "FCP";
       fcpBlock.appendChild(h4);
-      // Pretty view — type-aware, hex grouping, nested objects open
+      // Pretty view -- type-aware, hex grouping, nested objects open
       // into their own dl. The toolbar gives operators a one-click
       // toggle to the raw JSON if they need byte-perfect output.
       var fcpPretty = document.createElement("dl");
@@ -1189,7 +1191,7 @@
 
     var payload = data.data || {};
     var h4body = document.createElement("h4");
-    h4body.textContent = "Body — " + (payload.kind || "?");
+    h4body.textContent = "Body -- " + (payload.kind || "?");
     wrap.appendChild(h4body);
 
     if (payload.kind === "none") {
@@ -1210,7 +1212,7 @@
         tab: tab || null,
       }));
     } else {
-      // Unknown kind — render the raw payload for transparency.
+      // Unknown kind -- render the raw payload for transparency.
       wrap.appendChild(renderDecodedBlock(payload, null, { omitHead: true }));
     }
     container.appendChild(wrap);
@@ -1275,7 +1277,7 @@
     box.appendChild(head);
     if (payload.decoded) {
       // Thread the raw EF body through to the decoded toolbar so the
-      // service-table renderer can wire its "Stage edit" affordance —
+      // service-table renderer can wire its "Stage edit" affordance --
       // staging needs both the current hex (to preserve sizing) and
       // the decoded checklist (so the popout can pre-tick the active
       // services without re-decoding client-side).
@@ -1296,8 +1298,8 @@
     // the SW that terminated its walk (typically ``6A83`` = "record not
     // found", sometimes ``6A82`` / ``6A86``) so API consumers can audit
     // *why* the loop stopped. Those sentinels carry ``ok: false`` and
-    // zero payload bytes — they're not file content, they're a loop
-    // epilogue — so the file system view filters them out. The
+    // zero payload bytes -- they're not file content, they're a loop
+    // epilogue -- so the file system view filters them out. The
     // ``stop_reason`` header chip ("stop: record_not_found") still
     // surfaces the information, just without a ghost row pretending to
     // be a record. Leaving the sentinel in the JSON (via ``payload.records``)
@@ -1343,7 +1345,7 @@
       var none = document.createElement("p");
       none.className = "hint";
       if (rawRecords.length > 0) {
-        // File is present but unreadable — e.g. very first READ RECORD
+        // File is present but unreadable -- e.g. very first READ RECORD
         // returned 6A83. Surface the stop reason explicitly so the
         // operator doesn't see a silent blank.
         none.textContent = "no readable records (stop: "
@@ -1441,7 +1443,7 @@
     }
 
     // Service-table payloads bypass the generic dl walk and render
-    // straight as a checklist — that path already handles ``active`` /
+    // straight as a checklist -- that path already handles ``active`` /
     // ``inactive`` columns, summary chip, and theme tints. We still
     // build the JSON view + toolbar so the operator can flip to the
     // raw payload for copy / inspection.
@@ -1451,7 +1453,7 @@
       pretty.className = "cc-decoded-body cc-decoded-body--svc";
       pretty.appendChild(renderPrettyServiceTable(decoded));
     } else {
-      // Polished view — type chips for primitives, byte-grouped hex
+      // Polished view -- type chips for primitives, byte-grouped hex
       // for hex-looking strings, nested dl for objects. Hidden raw-
       // JSON view is kept around so the operator can still grab a
       // copyable stringified payload from the toolbar without losing
@@ -1642,7 +1644,27 @@
           fn({ type: "append", bucket: bucket, row: row });
         } catch (_err) { /* never let a broken listener block the bus */ }
       });
-      try { setStatusActivity(formatTime(row.ts)); } catch (_err) {}
+      scheduleStatusActivity(row.ts);
+    }
+
+    // The status-bar "last activity" stamp is written once per frame,
+    // not once per emitted row: an APDU burst can emit hundreds of
+    // rows per second and the operator cannot read more than one.
+    var activityFlushPending = false;
+    var activityLatestTs = null;
+    function scheduleStatusActivity(ts) {
+      activityLatestTs = ts;
+      if (activityFlushPending) return;
+      activityFlushPending = true;
+      var flush = function () {
+        activityFlushPending = false;
+        try { setStatusActivity(formatTime(activityLatestTs)); } catch (_err) {}
+      };
+      if (window.requestAnimationFrame) {
+        window.requestAnimationFrame(flush);
+      } else {
+        setTimeout(flush, 16);
+      }
     }
 
     function clear(bucket) {
@@ -1847,9 +1869,9 @@
   }
 
   function _fsExplorerIcon(kind, name) {
-    if (kind === "dir") return "\u2632";  // ☲ — three lines, dir
+    if (kind === "dir") return "\u2632";  // ☲ -- three lines, dir
     if (kind === "symlink") return "\u21AA";  // ↪
-    return "\u2317";  // ⌗ — leaf icon for files
+    return "\u2317";  // ⌗ -- leaf icon for files
   }
 
   function _fsExplorerJoin(parent, name, sep) {
@@ -2434,7 +2456,7 @@
   }
 
   // Wrap a plain <input> into a path-picker row: adds the double-click
-  // handler, a trailing "Browse…" button, and the shared cc-path-*
+  // handler, a trailing "Browse..." button, and the shared cc-path-*
   // classes so CSS stays consistent with the Command Center fields.
   //
   //   mode:
@@ -2476,7 +2498,7 @@
     var browse = document.createElement("button");
     browse.type = "button";
     browse.className = "btn btn-small cc-path-browse";
-    browse.textContent = "Browse…";
+    browse.textContent = "Browse...";
     browse.title = (kind === "directory")
       ? "Pick a folder"
       : (kind === "save_path" ? "Pick a save location" : "Pick a file");
@@ -2502,7 +2524,7 @@
   // File extraction honours the three transports pywebview + Qt WebEngine
   // expose on drop:
   //   1. ``event.dataTransfer.files[].path``  (pywebview / Electron; the
-  //      most reliable on Linux — includes the absolute filesystem path)
+  //      most reliable on Linux -- includes the absolute filesystem path)
   //   2. ``text/uri-list`` entries starting with ``file://``
   //   3. ``text/plain`` as a last-resort fallback (useful when an operator
   //      drags a path string from a terminal)
@@ -2554,14 +2576,7 @@
         host.classList.remove("cc-path-drop-hover");
       }
     }
-    function onDrop(event) {
-      if (!event.dataTransfer) return;
-      event.preventDefault();
-      event.stopPropagation();
-      dragCounter = 0;
-      host.classList.remove("cc-path-drop-hover");
-      var path = extractPathFromDrop(event);
-      if (!path) return;
+    function applyPath(path) {
       input.value = path;
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -2570,6 +2585,26 @@
         try { onPath(path); } catch (_err) { /* swallow */ }
       }
     }
+    function onDrop(event) {
+      if (!event.dataTransfer) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dragCounter = 0;
+      host.classList.remove("cc-path-drop-hover");
+      announceNativeDrop(event);
+      var path = extractPathFromDrop(event);
+      if (path) {
+        applyPath(path);
+        return;
+      }
+      // No transport carried a location: the desktop process recorded
+      // the native drop; a browser tab has nothing to add.
+      var files = event.dataTransfer.files;
+      if (!files || files.length === 0) return;
+      resolveDroppedFilePaths([files[0]]).then(function (paths) {
+        if (paths[0]) applyPath(paths[0]);
+      });
+    }
 
     host.addEventListener("dragenter", onEnter);
     host.addEventListener("dragover", onOver);
@@ -2577,64 +2612,125 @@
     host.addEventListener("drop", onDrop);
   }
 
-  function extractPathFromDrop(event) {
-    var dt = event.dataTransfer;
-    if (!dt) return "";
-    // (1) Native File objects — pywebview + Electron expose ``.path`` on
+  // Every filesystem path a drop carries, in the order the file manager
+  // listed them. A single-path caller (a path input) takes the first;
+  // the SAIP workbench opens them all.
+  function extractPathsFromDrop(event) {
+    var dt = event && event.dataTransfer;
+    if (!dt) return [];
+    var paths = [];
+    // (1) Native File objects -- pywebview + Electron expose ``.path`` on
     // the File instance. Browsers that don't (i.e. a plain Chrome tab)
     // will fall through to the URI list.
     if (dt.files && dt.files.length > 0) {
-      var f = dt.files[0];
-      if (f) {
+      for (var i = 0; i < dt.files.length; i += 1) {
+        var f = dt.files[i];
+        if (!f) continue;
         if (typeof f.path === "string" && f.path.length > 0) {
-          return f.path;
-        }
-        // WebKit exposes ``webkitRelativePath`` on directory drops, which
-        // we accept as a best-effort fallback (operators drop a folder
-        // from a file manager, we land something usable in the field).
-        if (typeof f.webkitRelativePath === "string" && f.webkitRelativePath.length > 0) {
-          return f.webkitRelativePath;
+          paths.push(f.path);
+        } else if (typeof f.webkitRelativePath === "string" && f.webkitRelativePath.length > 0) {
+          // WebKit exposes ``webkitRelativePath`` on directory drops, which
+          // we accept as a best-effort fallback (operators drop a folder
+          // from a file manager, we land something usable in the field).
+          paths.push(f.webkitRelativePath);
         }
       }
+      if (paths.length > 0) return paths;
     }
-    // (2) URI list — ``file:///home/foo/bar.bin`` form, possibly with
-    // multiple entries separated by newlines. We keep the first non-
-    // comment entry and decode the pathname back into a filesystem path.
+    // (2) URI list -- ``file:///home/foo/bar.bin`` form, one entry per
+    // line. Every non-comment entry is kept; a ``file://`` entry decodes
+    // back into a filesystem path.
     var uriList = "";
     try { uriList = dt.getData("text/uri-list") || ""; } catch (_e) { /* no-op */ }
     if (uriList) {
       var lines = uriList.split(/\r?\n/);
-      for (var i = 0; i < lines.length; i += 1) {
-        var line = (lines[i] || "").trim();
+      for (var j = 0; j < lines.length; j += 1) {
+        var line = (lines[j] || "").trim();
         if (!line || line.charAt(0) === "#") continue;
         if (line.indexOf("file://") === 0) {
           try {
             var parsed = new URL(line);
             var decoded = decodeURIComponent(parsed.pathname || "");
-            if (decoded) return decoded;
+            if (decoded) paths.push(decoded);
           } catch (_err) {
-            return decodeURIComponent(line.replace(/^file:\/\//, ""));
+            paths.push(decodeURIComponent(line.replace(/^file:\/\//, "")));
           }
+          continue;
         }
-        return line;
+        paths.push(line);
       }
+      if (paths.length > 0) return paths;
     }
-    // (3) Plain text fallback — operators occasionally drag a path string
+    // (3) Plain text fallback -- operators occasionally drag a path string
     // out of a terminal. Accept it as-is; server-side validation will
     // reject anything bogus.
     var txt = "";
     try { txt = dt.getData("text/plain") || ""; } catch (_e) { /* no-op */ }
-    if (txt && txt.trim()) return txt.trim();
-    return "";
+    if (txt && txt.trim()) return [txt.trim()];
+    return [];
+  }
+
+  function extractPathFromDrop(event) {
+    var paths = extractPathsFromDrop(event);
+    return paths.length > 0 ? paths[0] : "";
+  }
+
+  // A dropped File carries no location in a browser and none in the
+  // desktop webview either. The desktop process records the paths of a
+  // native drop (gui_server/native_drops.py) and the page collects them
+  // right after its own ``drop`` event, one entry per File in drop
+  // order; a File the server cannot place resolves to null and its
+  // caller keeps the upload route. WebView2 learns the paths from the
+  // page itself, the way pywebview's own bridge posts them, so that
+  // message goes out before the request.
+  function announceNativeDrop(event) {
+    var dt = event && event.dataTransfer;
+    if (!dt || !dt.files || dt.files.length === 0) return;
+    var host = (typeof window !== "undefined" && window.chrome) ? window.chrome.webview : null;
+    if (host && typeof host.postMessageWithAdditionalObjects === "function") {
+      try {
+        host.postMessageWithAdditionalObjects("FilesDropped", dt.files);
+      } catch (_e) { /* no-op */ }
+    }
+  }
+
+  async function resolveDroppedFilePaths(files) {
+    var wanted = [];
+    for (var i = 0; i < files.length; i += 1) {
+      var f = files[i];
+      wanted.push({
+        name: String((f && f.name) || ""),
+        size: (f && typeof f.size === "number") ? f.size : null,
+      });
+    }
+    if (wanted.length === 0) return [];
+    var data = null;
+    try {
+      data = await apiFetch("/api/gui/native_drop/resolve", {
+        method: "POST",
+        body: JSON.stringify({ files: wanted }),
+      });
+    } catch (_err) {
+      data = null;
+    }
+    var paths = (data && Array.isArray(data.paths)) ? data.paths : [];
+    var resolved = [];
+    for (var j = 0; j < wanted.length; j += 1) {
+      var path = paths[j];
+      resolved.push((typeof path === "string" && path.length > 0) ? path : null);
+    }
+    return resolved;
   }
 
   // Expose so tests and third-party wiring (e.g. ad-hoc extensions) can
   // reuse the same drop semantics without re-implementing path extraction.
   window.YggdraSimEnableFilePathDrop = enableFilePathDrop;
   window.YggdraSimExtractPathFromDrop = extractPathFromDrop;
+  window.YggdraSimExtractPathsFromDrop = extractPathsFromDrop;
+  window.YggdraSimResolveDroppedFilePaths = resolveDroppedFilePaths;
 
   // Guard against pywebview / Qt WebEngine's default "navigate to
-  // file://…" behaviour when an operator misses the drop target. We
+  // file://..." behaviour when an operator misses the drop target. We
   // swallow file drops anywhere outside a ``.cc-path-drop-target``
   // so the SPA stays mounted; targeted drops still reach the
   // ``enableFilePathDrop`` handlers because their listeners call
@@ -2812,7 +2908,7 @@
     var note = $("reader-pane-note");
     if (note) {
       note.classList.remove("is-error");
-      note.textContent = "probing…";
+      note.textContent = "probing...";
     }
     try {
       var data = await apiFetch("/api/live/readers");
@@ -2865,22 +2961,60 @@
 
   // -- Reader context menu (G-3) ------------------------------------------
 
-  var contextMenuState = { open: false, root: null, dismiss: null };
+  var contextMenuState = {
+    open: false,
+    root: null,
+    dismiss: null,
+    returnFocus: null,
+  };
 
   function ensureContextMenuRoot() {
     if (contextMenuState.root) return contextMenuState.root;
     var menu = document.createElement("div");
     menu.className = "ctx-menu";
     menu.setAttribute("role", "menu");
+    menu.addEventListener("keydown", contextMenuArrowNavigation);
     document.body.appendChild(menu);
     contextMenuState.root = menu;
     return menu;
   }
 
+  // Arrow keys walk the enabled items so a menu opened from the
+  // keyboard (Shift+F10 / the Menu key) is operable without a pointer.
+  function contextMenuArrowNavigation(event) {
+    if (["ArrowDown", "ArrowUp", "Home", "End"].indexOf(event.key) < 0) {
+      return;
+    }
+    var items = Array.prototype.filter.call(
+      event.currentTarget.querySelectorAll(".ctx-menu-item"),
+      function (item) {
+        return !item.disabled;
+      },
+    );
+    if (!items.length) return;
+    event.preventDefault();
+    var index = items.indexOf(document.activeElement);
+    var next = 0;
+    if (event.key === "End") {
+      next = items.length - 1;
+    } else if (event.key === "ArrowDown") {
+      next = index < 0 ? 0 : (index + 1) % items.length;
+    } else if (event.key === "ArrowUp") {
+      next = index <= 0 ? items.length - 1 : index - 1;
+    }
+    items[next].focus();
+  }
+
   function hideContextMenu() {
-    if (contextMenuState.root) {
-      contextMenuState.root.classList.remove("is-open");
-      contextMenuState.root.innerHTML = "";
+    var root = contextMenuState.root;
+    var returnFocus = contextMenuState.returnFocus;
+    contextMenuState.returnFocus = null;
+    // Decide before the items are removed -- dropping the focused node
+    // would move focus to <body> and lose the answer.
+    var hadFocus = !!(root && root.contains(document.activeElement));
+    if (root) {
+      root.classList.remove("is-open");
+      root.innerHTML = "";
     }
     if (contextMenuState.dismiss) {
       document.removeEventListener("click", contextMenuState.dismiss, true);
@@ -2888,6 +3022,9 @@
       contextMenuState.dismiss = null;
     }
     contextMenuState.open = false;
+    if (hadFocus && returnFocus && typeof returnFocus.focus === "function") {
+      returnFocus.focus();
+    }
   }
 
   function positionContextMenu(menu, x, y) {
@@ -2913,11 +3050,17 @@
     var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "ctx-menu-item" + (spec.danger ? " ctx-menu-item--danger" : "");
-    btn.setAttribute("role", "menuitem");
+    var isRadio = typeof spec.checked === "boolean";
+    btn.setAttribute("role", isRadio ? "menuitemradio" : "menuitem");
+    if (isRadio) btn.setAttribute("aria-checked", spec.checked ? "true" : "false");
     if (spec.disabled) btn.disabled = true;
     var icon = document.createElement("span");
-    icon.className = "ctx-menu-icon";
-    ccSetActionIcon(icon, spec.icon || "action");
+    if (isRadio) {
+      icon.className = "ctx-menu-icon ctx-menu-icon--radio";
+    } else {
+      icon.className = "ctx-menu-icon";
+      ccSetActionIcon(icon, spec.icon || "action");
+    }
     var label = document.createElement("span");
     label.className = "ctx-menu-label";
     label.textContent = spec.label || "";
@@ -2930,9 +3073,18 @@
     return btn;
   }
 
-  function showContextMenu(items, x, y) {
+  function showContextMenu(items, x, y, opts) {
+    // A second right-click while a menu is open would otherwise
+    // overwrite the stored dismiss handler and orphan the previous
+    // capture-phase listener pair on document.
+    hideContextMenu();
     var menu = ensureContextMenuRoot();
     menu.innerHTML = "";
+    if (opts && opts.label) {
+      menu.setAttribute("aria-label", opts.label);
+    } else {
+      menu.removeAttribute("aria-label");
+    }
     items.forEach(function (item) {
       if (item && item.divider) {
         var sep = document.createElement("div");
@@ -2944,6 +3096,12 @@
     });
     positionContextMenu(menu, x, y);
     contextMenuState.open = true;
+    contextMenuState.returnFocus = (opts && opts.returnFocus) || null;
+    if (opts && opts.focus) {
+      var initial = menu.querySelector('.ctx-menu-item[aria-checked="true"]')
+        || menu.querySelector(".ctx-menu-item:not(:disabled)");
+      if (initial) initial.focus();
+    }
     var dismiss = function (event) {
       if (event.type === "keydown") {
         if (event.key === "Escape") hideContextMenu();
@@ -2955,6 +3113,7 @@
     };
     contextMenuState.dismiss = dismiss;
     setTimeout(function () {
+      if (contextMenuState.dismiss !== dismiss) return;
       document.addEventListener("click", dismiss, true);
       document.addEventListener("keydown", dismiss, true);
     }, 0);
@@ -3117,6 +3276,24 @@
     height: 180,
   };
 
+  // Tab badges and empty-state toggles are refreshed once per frame.
+  // Running them per emitted row cost four selector queries and a
+  // dozen DOM writes on the hottest path in the GUI.
+  var logCountsRefreshPending = false;
+  function scheduleLogCountsRefresh() {
+    if (logCountsRefreshPending) return;
+    logCountsRefreshPending = true;
+    var run = function () {
+      logCountsRefreshPending = false;
+      applyLogCounts(logBus.counts());
+    };
+    if (window.requestAnimationFrame) {
+      window.requestAnimationFrame(run);
+    } else {
+      setTimeout(run, 16);
+    }
+  }
+
   function applyLogCounts(counts) {
     ["messages", "warnings", "errors", "apdu"].forEach(function (bucket) {
       var n = counts[bucket] || 0;
@@ -3226,7 +3403,7 @@
 
   function wireLogDockRowDblclick(el) {
     el.addEventListener("dblclick", function (evt) {
-      // Don't override a user-driven text selection — only copy the
+      // Don't override a user-driven text selection -- only copy the
       // whole row when there isn't one.
       var sel = window.getSelection ? window.getSelection() : null;
       if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
@@ -3236,7 +3413,7 @@
     });
   }
 
-  // Single delegated click listener per host — installed lazily the first
+  // Single delegated click listener per host -- installed lazily the first
   // time we add a row to a bucket. The copy button is delegated to avoid
   // thousands of button listeners; double-click stays on the row because
   // older GUI contract tests and operator muscle memory pin that surface.
@@ -3266,7 +3443,7 @@
     var s = String(text == null ? "" : text);
     if (s.length <= LOG_DOCK_MAX_MSG_CHARS) return s;
     var keep = LOG_DOCK_MAX_MSG_CHARS - 32;
-    return s.slice(0, keep) + "… [+" + (s.length - keep) + " chars truncated]";
+    return s.slice(0, keep) + "... [+" + (s.length - keep) + " chars truncated]";
   }
 
   function appendLogDockRow(bucket, row) {
@@ -3315,7 +3492,7 @@
     var msg = document.createElement("span");
     msg.className = "log-dock-row-msg";
     msg.textContent = _truncateDockMessage(row.message);
-    // Per-row "copy" affordance — hidden until hover/focus via CSS.
+    // Per-row "copy" affordance -- hidden until hover/focus via CSS.
     // No per-row event listeners; the host-level delegation above
     // routes the click via ``.log-dock-row-copy``.
     var copyBtn = document.createElement("button");
@@ -3531,7 +3708,7 @@
       if (logDockState.collapsed) setLogDockCollapsed(false);
       setLogDockHeight(nextHeight);
     });
-    window.addEventListener("resize", function () {
+    addCoalescedResizeListener(function () {
       if (logDockState.height) {
         setLogDockHeight(logDockState.height, { persist: false });
       }
@@ -3584,7 +3761,7 @@
     var host = $("log-panel-" + bucket);
     if (!host) return;
     if (host.dataset.stale !== "1" && host.childElementCount > 0) {
-      // Already up to date — nothing to do.
+      // Already up to date -- nothing to do.
       return;
     }
     host.innerHTML = "";
@@ -3624,7 +3801,7 @@
     src.textContent = row.source || "";
     var msg = document.createElement("span");
     msg.className = "log-dock-row-msg";
-    msg.textContent = row.message || "";
+    msg.textContent = _truncateDockMessage(row.message);
     var copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "log-dock-row-copy";
@@ -3643,7 +3820,7 @@
   }
 
   // Resolve which bucket the operator means when they hit "Copy" or
-  // press Ctrl/Cmd+C — always the visible (active) tab, falling back
+  // press Ctrl/Cmd+C -- always the visible (active) tab, falling back
   // to "messages" if the dock is in some unexpected state.
   function copyActiveBucketToClipboard() {
     var bucket = logDockState.activeBucket || "messages";
@@ -3702,7 +3879,7 @@
       });
     }
     // Ctrl/Cmd+C while focus is inside the dock copies the active
-    // bucket — but only when the operator has NOT made a manual text
+    // bucket -- but only when the operator has NOT made a manual text
     // selection. If a selection exists we let the browser handle it
     // (so partial-row copies still work as expected).
     var dockEl = $("log-dock");
@@ -3729,7 +3906,7 @@
       } else if (event.type === "clear") {
         clearLogDockBucket(event.bucket);
       }
-      applyLogCounts(logBus.counts());
+      scheduleLogCountsRefresh();
     });
     applyLogCounts(logBus.counts());
     activateLogTab(logDockState.activeBucket);
@@ -3745,7 +3922,7 @@
   // append every subsequent live exchange to the bottom-dock APDU
   // bucket.
   //
-  // Failure modes — all silent so the GUI keeps working when the
+  // Failure modes -- all silent so the GUI keeps working when the
   // operator is offline / no card is connected:
   //   * Auth rejected     → recorder service goes dark; log a single
   //                          warn-level breadcrumb and stop trying.
@@ -3787,7 +3964,7 @@
     }
     var token = (typeof getStoredToken === "function") ? getStoredToken() : "";
     if (!token) {
-      // No token yet — the GUI will retry once the bootstrap finishes.
+      // No token yet -- the GUI will retry once the bootstrap finishes.
       return;
     }
     var scheme = window.location.protocol === "https:" ? "wss" : "ws";
@@ -3798,7 +3975,7 @@
       sock = new WebSocket(url, ["yggdrasim", "bearer." + token]);
     } catch (_err) {
       // Browser refused to construct the socket (e.g. CSP). Fall back
-      // to silent — we don't want to spam the user about this.
+      // to silent -- we don't want to spam the user about this.
       return;
     }
     apduStreamState.socket = sock;
@@ -3837,7 +4014,7 @@
       });
     };
     sock.onerror = function () {
-      // Don't spam the bus on every transient failure — onclose fires
+      // Don't spam the bus on every transient failure -- onclose fires
       // immediately after and that's where we surface the reconnect.
     };
     sock.onclose = function () {
@@ -3914,6 +4091,231 @@
     guides: null,
   };
 
+  // -- Mermaid diagrams in the guide viewer --------------------------------
+  //
+  // ``mermaid`` fences render to SVG through the vendored Mermaid build
+  // (gui_frontend/src/vendor/mermaid/NOTICE.md). Three measured costs
+  // shape how it is wired:
+  //
+  //   1. The UMD bundle is 3.5 MB and costs ~420 ms to parse, so it is
+  //      fetched on demand -- only once an opened document actually
+  //      contains a diagram -- and never from the concatenated bundle.
+  //   2. Rendering all twelve charts in ARCHITECTURE.md costs ~530 ms,
+  //      so each renders when it first scrolls into view, and the SVG is
+  //      cached against its source and the active palette.
+  //   3. Mermaid's own palette is fixed; colour is handed to it as theme
+  //      variables read from the design tokens, so a diagram follows the
+  //      active theme like every other surface.
+
+  var MERMAID_SRC = "/static/vendor/mermaid/mermaid.min.js";
+
+  // Source text of every mermaid fence in the document currently rendered
+  // by the viewer, indexed by the placeholder's data-mermaid-index.
+  var docMermaidSources = [];
+
+  var mermaidState = {
+    loading: null,
+    cache: Object.create(null),
+    observer: null,
+    renderSeq: 0,
+  };
+
+  function loadMermaid() {
+    if (window.mermaid) {
+      return Promise.resolve(window.mermaid);
+    }
+    if (mermaidState.loading) {
+      return mermaidState.loading;
+    }
+    var pending = new Promise(function (resolve, reject) {
+      var el = document.createElement("script");
+      el.src = MERMAID_SRC;
+      el.async = true;
+      el.addEventListener("load", function () {
+        if (window.mermaid) {
+          resolve(window.mermaid);
+        } else {
+          reject(new Error("mermaid loaded without exporting a global"));
+        }
+      });
+      el.addEventListener("error", function () {
+        reject(new Error("failed to load " + MERMAID_SRC));
+      });
+      document.head.appendChild(el);
+    });
+    pending.catch(function () {
+      // Let a later open retry a transient load failure.
+      mermaidState.loading = null;
+    });
+    mermaidState.loading = pending;
+    return pending;
+  }
+
+  // Map the design tokens onto Mermaid's ``base`` theme variables.
+  // Returns null when the palette cannot be read, which leaves Mermaid on
+  // its own defaults rather than feeding it empty colour strings.
+  function mermaidThemeVariables() {
+    var cs = window.getComputedStyle(document.documentElement);
+    function tok(name) {
+      var value = cs.getPropertyValue(name);
+      return value ? value.trim() : "";
+    }
+    var fg = tok("--fg");
+    var bgElev = tok("--bg-elev");
+    var node = tok("--bg-elev-2");
+    if (!fg || !bgElev || !node) {
+      return null;
+    }
+    var border = tok("--border");
+    var borderStrong = tok("--border-strong") || border;
+    var dim = tok("--fg-dim") || fg;
+    var cluster = tok("--bg") || bgElev;
+    return {
+      background: bgElev,
+      mainBkg: node,
+      primaryColor: node,
+      primaryTextColor: fg,
+      primaryBorderColor: borderStrong,
+      secondaryColor: tok("--surface") || node,
+      secondaryTextColor: fg,
+      secondaryBorderColor: border,
+      tertiaryColor: cluster,
+      tertiaryTextColor: fg,
+      tertiaryBorderColor: border,
+      nodeBorder: borderStrong,
+      nodeTextColor: fg,
+      lineColor: dim,
+      textColor: fg,
+      titleColor: fg,
+      clusterBkg: cluster,
+      clusterBorder: border,
+      edgeLabelBackground: bgElev,
+      fontFamily: tok("--font-sans") || "sans-serif",
+      fontSize: "14px",
+    };
+  }
+
+  function activeThemeName() {
+    return document.documentElement.getAttribute("data-theme") || "";
+  }
+
+  function stopMermaidObserver() {
+    if (mermaidState.observer) {
+      mermaidState.observer.disconnect();
+      mermaidState.observer = null;
+    }
+  }
+
+  // Replace a placeholder's fallback <pre> with the rendered diagram.
+  // Any failure leaves the <pre> in place -- a readable source block
+  // beats half a picture.
+  function renderMermaidInto(host, source, themeKey) {
+    var cacheKey = themeKey + "\u0000" + source;
+    var cached = mermaidState.cache[cacheKey];
+    if (cached) {
+      host.innerHTML = cached;
+      host.setAttribute("data-mermaid-state", "rendered");
+      return Promise.resolve(true);
+    }
+    var id = "cc-doc-mermaid-" + String(++mermaidState.renderSeq);
+    return window.mermaid
+      .render(id, source)
+      .then(function (result) {
+        var svg = result && result.svg ? String(result.svg) : "";
+        if (!svg) {
+          throw new Error("empty render result");
+        }
+        mermaidState.cache[cacheKey] = svg;
+        host.innerHTML = svg;
+        host.setAttribute("data-mermaid-state", "rendered");
+        return true;
+      })
+      .catch(function (err) {
+        host.setAttribute("data-mermaid-state", "failed");
+        if (window.console && window.console.warn) {
+          window.console.warn("mermaid render failed", err);
+        }
+        return false;
+      });
+  }
+
+  // Wire every mermaid placeholder in *bodyEl* for lazy rendering.
+  function hydrateMermaidDiagrams(bodyEl) {
+    stopMermaidObserver();
+    if (!bodyEl) {
+      return Promise.resolve(0);
+    }
+    var hosts = Array.prototype.slice.call(
+      bodyEl.querySelectorAll("[data-mermaid-index]")
+    );
+    if (hosts.length === 0) {
+      return Promise.resolve(0);
+    }
+    // Bind the sources these placeholders index. renderMarkdownToHtml
+    // reassigns docMermaidSources on its next call, so a hydration that
+    // read the live array could resolve an index against another
+    // document's diagrams.
+    var sources = docMermaidSources;
+    return loadMermaid()
+      .then(function (mermaid) {
+        var vars = mermaidThemeVariables();
+        var config = {
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: "base",
+          flowchart: { useMaxWidth: true, htmlLabels: true },
+        };
+        if (vars) {
+          config.themeVariables = vars;
+        }
+        mermaid.initialize(config);
+        var themeKey = activeThemeName();
+
+        function renderHost(host) {
+          if (host.getAttribute("data-mermaid-state")) {
+            return;
+          }
+          var index = parseInt(host.getAttribute("data-mermaid-index"), 10);
+          var source = sources[index];
+          if (typeof source !== "string") {
+            return;
+          }
+          host.setAttribute("data-mermaid-state", "pending");
+          renderMermaidInto(host, source, themeKey);
+        }
+
+        if (typeof window.IntersectionObserver !== "function") {
+          hosts.forEach(renderHost);
+          return hosts.length;
+        }
+        var observer = new window.IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (!entry.isIntersecting) {
+                return;
+              }
+              observer.unobserve(entry.target);
+              renderHost(entry.target);
+            });
+          },
+          { root: bodyEl, rootMargin: "200px 0px" }
+        );
+        mermaidState.observer = observer;
+        hosts.forEach(function (host) {
+          observer.observe(host);
+        });
+        return hosts.length;
+      })
+      .catch(function (err) {
+        // The vendored bundle is missing or blocked: every placeholder
+        // keeps its <pre>, which is exactly the pre-change behaviour.
+        if (window.console && window.console.warn) {
+          window.console.warn("mermaid unavailable", err);
+        }
+        return 0;
+      });
+  }
+
   function escapeHtml(str) {
     return String(str || "")
       .replace(/&/g, "&amp;")
@@ -3927,10 +4329,11 @@
   // tiny: only the constructs that show up in repository guides
   // (headings, fenced code, inline code, lists, links, blockquotes,
   // bold/italic, horizontal rules). Anything we don't recognise
-  // falls through as escaped text — safe by default.
+  // falls through as escaped text -- safe by default.
   function renderMarkdownToHtml(md) {
     var src = String(md || "");
     var out = [];
+    docMermaidSources = [];
     var lines = src.split(/\r?\n/);
     var inFence = false;
     var fenceLang = "";
@@ -3957,7 +4360,7 @@
       }
     }
     function renderInline(text) {
-      // Inline code ``…`` first so its contents are not formatted.
+      // Inline code ``...`` first so its contents are not formatted.
       var pieces = [];
       var rest = text;
       var safeRe = /`([^`]+)`/;
@@ -3993,13 +4396,29 @@
       var fenceMatch = /^```([A-Za-z0-9_+\-]*)\s*$/.exec(line);
       if (fenceMatch) {
         if (inFence) {
-          out.push(
-            '<pre class="cc-doc-pre"><code class="cc-doc-code'
-              + (fenceLang ? " language-" + escapeHtml(fenceLang) : "")
-              + '">'
-              + escapeHtml(fenceLines.join("\n"))
-              + "</code></pre>"
-          );
+          var fenceBody = fenceLines.join("\n");
+          var fencePre = '<pre class="cc-doc-pre"><code class="cc-doc-code'
+            + (fenceLang ? " language-" + escapeHtml(fenceLang) : "")
+            + '">'
+            + escapeHtml(fenceBody)
+            + "</code></pre>";
+          if (fenceLang === "mermaid") {
+            // The <pre> is the fallback: it is what shows until the
+            // diagram renders, and what stays if Mermaid never loads or
+            // the source does not parse. The placeholder carries an
+            // index into docMermaidSources rather than the source text,
+            // so no diagram syntax has to survive attribute escaping.
+            out.push(
+              '<div class="cc-doc-mermaid" data-mermaid-index="'
+                + String(docMermaidSources.length)
+                + '">'
+                + fencePre
+                + "</div>"
+            );
+            docMermaidSources.push(fenceBody);
+          } else {
+            out.push(fencePre);
+          }
           inFence = false;
           fenceLang = "";
           fenceLines = [];
@@ -4237,7 +4656,7 @@
     }
     aboutGuidesState.inflight = true;
     var statusEl = document.getElementById("about-guides-status");
-    if (statusEl) statusEl.textContent = "loading guides…";
+    if (statusEl) statusEl.textContent = "loading guides...";
     try {
       var resp = await apiFetch("/api/guides");
       var guides = (resp && resp.guides) || [];
@@ -4331,10 +4750,10 @@
     docViewerState.activeId = guideId;
     docViewerState.activeMarkdown = "";
     if (titleEl) titleEl.textContent = title || "Document";
-    if (pathEl) pathEl.textContent = "loading…";
+    if (pathEl) pathEl.textContent = "loading...";
     if (copyBtn) copyBtn.disabled = true;
     bodyEl.setAttribute("aria-busy", "true");
-    bodyEl.innerHTML = '<div class="cc-doc-loading" role="status">Loading guide…</div>';
+    bodyEl.innerHTML = '<div class="cc-doc-loading" role="status">Loading guide...</div>';
     setDocViewerVisible(true);
 
     apiFetch("/api/guides/" + encodeURIComponent(guideId))
@@ -4353,6 +4772,7 @@
         bodyEl.innerHTML = renderMarkdownToHtml(resp.markdown || "");
         bodyEl.setAttribute("aria-busy", "false");
         bodyEl.scrollTop = 0;
+        hydrateMermaidDiagrams(bodyEl);
       })
       .catch(function (err) {
         if (requestId !== docViewerState.requestId) return;
@@ -4365,6 +4785,7 @@
 
   function closeGuideViewer() {
     docViewerState.requestId += 1;
+    stopMermaidObserver();
     setDocViewerVisible(false);
     docViewerState.activeId = null;
     docViewerState.activeMarkdown = "";
@@ -4445,6 +4866,10 @@
     open: openGuideViewer,
     close: closeGuideViewer,
     renderMarkdown: renderMarkdownToHtml,
+    hydrateMermaid: hydrateMermaidDiagrams,
+    mermaidSources: function () {
+      return docMermaidSources.slice();
+    },
   };
 
   // -- Host shell (Advanced > Host shell) ----------------------------------
@@ -4574,7 +4999,7 @@
 
   function startHostShell() {
     if (!hostShellState.capability || !hostShellState.capability.enabled) {
-      setText("host-shell-status", "disabled — set YGGDRASIM_GUI_HOST_SHELL=1");
+      setText("host-shell-status", "disabled -- set YGGDRASIM_GUI_HOST_SHELL=1");
       return;
     }
     var term = ensureHostShellTerminal();
@@ -4583,11 +5008,11 @@
       hostShellState.socket.close();
     }
     term.clear();
-    term.writeln("[yggdrasim-gui] starting host shell …");
+    term.writeln("[yggdrasim-gui] starting host shell ...");
 
     var token = getStoredToken();
     if (!token) {
-      setText("host-shell-status", "missing token — reload the GUI.");
+      setText("host-shell-status", "missing token -- reload the GUI.");
       return;
     }
 
@@ -4603,7 +5028,7 @@
     var stopBtn = $("host-shell-stop");
     if (startBtn) startBtn.disabled = true;
     if (stopBtn) stopBtn.disabled = false;
-    setText("host-shell-status", "connecting…");
+    setText("host-shell-status", "connecting...");
 
     sock.onopen = function () {
       sock.send(JSON.stringify({
@@ -4754,7 +5179,7 @@
       clearBtn.addEventListener("click", clearHostShellDecoded);
     }
 
-    window.addEventListener("resize", function () {
+    addCoalescedResizeListener(function () {
       if (hostShellState.fitAddon) {
         try { hostShellState.fitAddon.fit(); } catch (_err) { /* xterm not ready */ }
         sendHostShellResize();
@@ -4764,6 +5189,40 @@
 
   // -- Init ----------------------------------------------------------------
 
+  // -- Startup file (Open With / ``yggdrasim --gui FILE``) ------------------
+  //
+  // The server holds the files named on its command line until the
+  // first ``/api/gui/startup`` read, so a reload never reopens them and
+  // a second tab finds nothing to do. Each path takes the route of a
+  // dropped file: the SAIP subsystem is mounted first, then
+  // ``saipDropOpenPath`` feeds the workbench's single open entry point,
+  // which keeps the log lines, the recents store and the spreadsheet
+  // routing identical to a ribbon Open. Runs after the catalogue load
+  // because the workbench cannot mount without it.
+  async function startupOpenBootstrap() {
+    var data;
+    try {
+      data = await apiFetch("/api/gui/startup");
+    } catch (err) {
+      return false;
+    }
+    var paths = (data && Array.isArray(data.open_paths)) ? data.open_paths : [];
+    if (paths.length === 0) return false;
+    if (typeof commandState === "undefined" || !commandState.catalogue) {
+      logBus.emit({
+        level: "warn",
+        source: "saip.open_package",
+        message: "startup file not opened -- action catalogue unavailable: " + paths.join(", "),
+      });
+      return false;
+    }
+    openCommandSubsystem("SAIP", { leafId: "leaf-tool-saip" });
+    paths.forEach(function (path) {
+      saipDropOpenPath(String(path || ""));
+    });
+    return true;
+  }
+
   function init() {
     captureTokenFromUrl();
     wireTopbar();
@@ -4772,6 +5231,7 @@
     wireLiveReadersPanel();
     wireCardBridgePanel();
     wireRemoteLabPanel();
+    wirePluginConsolePanel();
     wireCommandCenter();
     wireReaderPane();
     wireLogDock();
@@ -4781,26 +5241,27 @@
     }
     openApduEventStream();
     showView("overview");
-    setApiBadge("unknown", "probing…");
-    setStatusAction("initialising…");
-    setStatusReaders("–");
-    setStatusSessions("–");
-    setStatusActivity("–");
+    setApiBadge("unknown", "probing...");
+    setStatusAction("initialising...");
+    setStatusReaders("-");
+    setStatusSessions("-");
+    setStatusActivity("-");
 
     loadHealth();
     loadBackend();
-    loadCommandCatalogue();
+    loadCommandCatalogue().then(startupOpenBootstrap);
+    loadPluginConsoles();
     loadCardBridgeStatus();
     remoteLabRefreshSessionState();
     remoteLabStartSessionPoll();
     scheduleHealthPoll();
     refreshReaderPane();
-    // Top-bar reader strip — installs its own refresh button handler,
+    // Top-bar reader strip -- installs its own refresh button handler,
     // does the initial /api/live/readers fetch, and starts the 5 s
     // poll loop. Pauses when the page is hidden to spare PC/SC.
     readerBarBootstrap();
     // SA-G8: Command Center sidebar collapse handle. Mirrors the
-    // existing log-dock collapse pattern — persists across reloads
+    // existing log-dock collapse pattern -- persists across reloads
     // via localStorage["yggdrasim:cc-sidebar-collapsed"].
     sidebarCollapseBootstrap();
     // Top-bar collapse handle. Same pattern as the sidebar; lets the
@@ -4811,10 +5272,298 @@
     logBus.emit({
       level: "info",
       source: "system",
-      message: "GUI initialised — Command Center ready.",
+      message: "GUI initialised -- Command Center ready.",
     });
 
     document.getElementById("app").setAttribute("data-ready", "true");
+  }
+
+  // -- Chrome panel visibility (sidebar / top bar) -------------------------
+  //
+  // Both panels share one three-state model: "shown", "hidden" and
+  // "auto" (tucked away, revealed while the pointer rests on the
+  // panel's edge strip or keyboard focus is inside it). The state is
+  // persisted in each panel's existing localStorage key as "false",
+  // "true" and "auto" respectively, so a build that predates the
+  // auto-hide mode reads "auto" as shown. The chevron keeps its
+  // two-state feel: it hides a shown panel, shows a hidden one and
+  // pins an auto-hidden one open. Shift+click toggles auto-hide and
+  // the context menu (right-click / Shift+F10) exposes all three.
+
+  var PANEL_MODES = ["shown", "auto", "hidden"];
+  var PANEL_MODE_LABELS = {
+    shown: "Always show",
+    auto: "Auto-hide (reveal on hover)",
+    hidden: "Hidden",
+  };
+  var PANEL_REVEAL_DWELL_MS = 120;
+  var PANEL_HIDE_DELAY_MS = 260;
+  var PANEL_POINTER_SLACK_PX = 4;
+  // Upper bound on the "leaving" phase; the fade-out normally ends it
+  // through animationend well before this.
+  var PANEL_LEAVE_FALLBACK_MS = 400;
+
+  function panelModeFromStored(value) {
+    if (value === "true") return "hidden";
+    if (value === "false") return "shown";
+    if (value === "auto") return "auto";
+    return null;
+  }
+
+  function panelModeToStored(mode) {
+    if (mode === "hidden") return "true";
+    if (mode === "auto") return "auto";
+    return "false";
+  }
+
+  function panelAutoHideController(opts) {
+    var shell = opts.shell;
+    var panel = opts.panel;
+    var hotzone = opts.hotzone;
+    var revealedAttr = opts.revealedAttr;
+    var active = false;
+    var revealed = false;
+    var dwellTimer = null;
+    var hideTimer = null;
+    var leaveTimer = null;
+    var lastPointer = null;
+    var panelRect = null;
+
+    function _clearDwell() {
+      if (dwellTimer) {
+        clearTimeout(dwellTimer);
+        dwellTimer = null;
+      }
+    }
+
+    function _clearHide() {
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+    }
+
+    // The resting geometry of the revealed panel, read from the layout
+    // offsets rather than getBoundingClientRect(): offsets ignore the
+    // running transform, so the value is right from the first frame of
+    // the slide, and it is measured once per reveal instead of forcing
+    // a layout on every pointer move while the panel is animating.
+    function _measurePanel() {
+      var left = 0;
+      var top = 0;
+      var node = panel;
+      while (node && node !== document.body) {
+        left += node.offsetLeft;
+        top += node.offsetTop;
+        node = node.offsetParent;
+      }
+      panelRect = {
+        left: left,
+        top: top,
+        right: left + panel.offsetWidth,
+        bottom: top + panel.offsetHeight,
+      };
+    }
+
+    function _pointerInside() {
+      if (!lastPointer) return false;
+      if (!panelRect) _measurePanel();
+      return lastPointer.x >= panelRect.left - PANEL_POINTER_SLACK_PX
+        && lastPointer.x <= panelRect.right + PANEL_POINTER_SLACK_PX
+        && lastPointer.y >= panelRect.top - PANEL_POINTER_SLACK_PX
+        && lastPointer.y <= panelRect.bottom + PANEL_POINTER_SLACK_PX;
+    }
+
+    function _onResize() {
+      panelRect = null;
+    }
+
+    // A hold keeps a revealed panel open although the pointer has
+    // left it: an open context menu (the mode menu is positioned
+    // outside the panel), a form control mid-interaction (a native
+    // <select> popup takes the pointer away from the page, and hiding
+    // underneath it would close the popup) or visible keyboard focus.
+    function _hasHold() {
+      if (contextMenuState.open) return true;
+      var focused = document.activeElement;
+      if (!focused || focused === document.body) return false;
+      if (!panel.contains(focused)) return false;
+      if (focused.matches("select, input, textarea, [contenteditable]")) {
+        return true;
+      }
+      try {
+        return focused.matches(":focus-visible");
+      } catch (_err) {
+        return false;
+      }
+    }
+
+    function _attemptHide() {
+      hideTimer = null;
+      if (!revealed) return;
+      if (_pointerInside()) return;
+      if (_hasHold()) {
+        hideTimer = setTimeout(_attemptHide, PANEL_HIDE_DELAY_MS);
+        return;
+      }
+      conceal(true);
+    }
+
+    function _scheduleHide() {
+      _clearHide();
+      hideTimer = setTimeout(_attemptHide, PANEL_HIDE_DELAY_MS);
+    }
+
+    function _onPointerMove(event) {
+      lastPointer = { x: event.clientX, y: event.clientY };
+      if (_pointerInside()) {
+        _clearHide();
+      } else if (!hideTimer) {
+        _scheduleHide();
+      }
+    }
+
+    function _onPointerDown(event) {
+      var target = event.target;
+      if (!(target instanceof Node)) return;
+      if (panel.contains(target) || hotzone.contains(target)) return;
+      if (target instanceof Element && target.closest(".ctx-menu")) return;
+      conceal(true);
+    }
+
+    function _onWindowLeave() {
+      lastPointer = null;
+      _scheduleHide();
+    }
+
+    function _clearLeave() {
+      if (leaveTimer) {
+        clearTimeout(leaveTimer);
+        leaveTimer = null;
+      }
+    }
+
+    function _finishLeave() {
+      _clearLeave();
+      if (revealed) return;
+      if (shell.getAttribute(revealedAttr) === "leaving") {
+        shell.setAttribute(revealedAttr, "false");
+      }
+    }
+
+    // true -> leaving -> false: the leaving phase plays the fade-out in
+    // place (clicks already pass through), then the panel parks past
+    // the shell edge again once the animation has ended.
+    function _setRevealed(flag) {
+      revealed = flag;
+      _clearLeave();
+      if (flag) {
+        shell.setAttribute(revealedAttr, "true");
+      } else {
+        shell.setAttribute(revealedAttr, "leaving");
+        leaveTimer = setTimeout(_finishLeave, PANEL_LEAVE_FALLBACK_MS);
+      }
+      if (typeof opts.onChange === "function") opts.onChange(flag);
+    }
+
+    function reveal() {
+      _clearDwell();
+      _clearHide();
+      if (!active || revealed) return;
+      _measurePanel();
+      _setRevealed(true);
+      window.addEventListener("resize", _onResize);
+      document.addEventListener("pointermove", _onPointerMove, true);
+      document.addEventListener("pointerdown", _onPointerDown, true);
+      document.documentElement.addEventListener("mouseleave", _onWindowLeave);
+      window.addEventListener("blur", _onWindowLeave);
+    }
+
+    function conceal(force) {
+      _clearDwell();
+      _clearHide();
+      if (!revealed) return;
+      if (!force && _hasHold()) {
+        _scheduleHide();
+        return;
+      }
+      lastPointer = null;
+      panelRect = null;
+      _setRevealed(false);
+      window.removeEventListener("resize", _onResize);
+      document.removeEventListener("pointermove", _onPointerMove, true);
+      document.removeEventListener("pointerdown", _onPointerDown, true);
+      document.documentElement.removeEventListener("mouseleave", _onWindowLeave);
+      window.removeEventListener("blur", _onWindowLeave);
+    }
+
+    hotzone.addEventListener("pointerenter", function () {
+      if (!active || revealed) return;
+      _clearDwell();
+      dwellTimer = setTimeout(function () {
+        dwellTimer = null;
+        reveal();
+      }, PANEL_REVEAL_DWELL_MS);
+    });
+    hotzone.addEventListener("pointerleave", _clearDwell);
+    hotzone.addEventListener("pointerdown", function (event) {
+      if (!active) return;
+      event.preventDefault();
+      reveal();
+    });
+    panel.addEventListener("animationend", function (event) {
+      if (event.target !== panel) return;
+      if (shell.getAttribute(revealedAttr) === "leaving") _finishLeave();
+    });
+    panel.addEventListener("focusin", function () {
+      if (active) reveal();
+    });
+    panel.addEventListener("focusout", function (event) {
+      if (!active || !revealed) return;
+      var next = event.relatedTarget;
+      if (next instanceof Node && panel.contains(next)) return;
+      _scheduleHide();
+    });
+    panel.addEventListener("keydown", function (event) {
+      if (!active || !revealed || event.key !== "Escape") return;
+      var hadFocus = panel.contains(document.activeElement);
+      conceal(true);
+      var main = document.getElementById("main");
+      if (hadFocus && main) main.focus();
+    });
+
+    return {
+      setActive: function (flag) {
+        active = !!flag;
+        if (!active) {
+          conceal(true);
+        } else if (_hasHold()) {
+          // Switching to auto-hide from the keyboard leaves visible
+          // focus inside the panel; keep it on screen until focus moves.
+          reveal();
+        }
+      },
+      reveal: reveal,
+      conceal: conceal,
+    };
+  }
+
+  function showPanelModeMenu(opts) {
+    var items = PANEL_MODES.map(function (mode) {
+      return {
+        label: PANEL_MODE_LABELS[mode],
+        checked: mode === opts.current,
+        onClick: function () {
+          opts.onSelect(mode);
+        },
+      };
+    });
+    var rect = opts.anchor.getBoundingClientRect();
+    showContextMenu(items, rect.left, rect.bottom + 4, {
+      focus: true,
+      returnFocus: opts.anchor,
+      label: opts.label,
+    });
   }
 
   var SIDEBAR_COLLAPSED_KEY = "yggdrasim:cc-sidebar-collapsed";
@@ -4822,17 +5571,19 @@
   function sidebarCollapseBootstrap() {
     var btn = document.getElementById("sidebar-collapse-toggle");
     var shell = document.getElementById("app");
-    if (!btn || !shell) return;
+    var panel = document.getElementById("module-navigation");
+    var hotzone = document.getElementById("sidebar-hotzone");
+    if (!btn || !shell || !panel || !hotzone) return;
     function _stored() {
       try {
-        var value = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-        if (value === null) return null;
-        return value === "true";
+        return panelModeFromStored(
+          window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY),
+        );
       } catch (_err) {
         return null;
       }
     }
-    var storedPreference = _stored();
+    var storedMode = _stored();
     var narrowViewport = window.matchMedia
       ? window.matchMedia("(max-width: 760px)")
       : null;
@@ -4841,44 +5592,79 @@
         ? narrowViewport.matches
         : window.innerWidth <= 760;
     }
-    function _apply(collapsed, persist) {
+    function _currentMode() {
+      return shell.getAttribute("data-sidebar-mode") || "shown";
+    }
+    var autoHide = panelAutoHideController({
+      shell: shell,
+      panel: panel,
+      hotzone: hotzone,
+      revealedAttr: "data-sidebar-revealed",
+      onChange: function (isRevealed) {
+        if (_currentMode() !== "auto") return;
+        btn.setAttribute("aria-expanded", isRevealed ? "true" : "false");
+      },
+    });
+    var LABELS = {
+      shown: "Collapse Command Center sidebar",
+      hidden: "Show Command Center sidebar",
+      auto: "Pin Command Center sidebar open (auto-hide is on)",
+    };
+    var TITLES = {
+      shown: "Hide the Command Center sidebar. Click again to bring it "
+        + "back; Shift+click or right-click for auto-hide.",
+      hidden: "Show the Command Center sidebar. Shift+click or right-click "
+        + "to auto-hide it instead.",
+      auto: "Auto-hide is on: rest the pointer on the left edge to reveal "
+        + "the Command Center sidebar. Click to pin it open; right-click "
+        + "for options.",
+    };
+    function _apply(mode, persist) {
+      shell.setAttribute("data-sidebar-mode", mode);
       shell.setAttribute(
         "data-sidebar-collapsed",
-        collapsed ? "true" : "false",
+        mode === "hidden" ? "true" : "false",
       );
-      btn.setAttribute(
-        "aria-label",
-        collapsed
-          ? "Show Command Center sidebar"
-          : "Collapse Command Center sidebar",
-      );
-      btn.title = collapsed
-        ? "Show the Command Center sidebar."
-        : "Hide the Command Center sidebar. Click again to bring it back.";
-      btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      btn.setAttribute("aria-label", LABELS[mode]);
+      btn.title = TITLES[mode];
+      btn.setAttribute("aria-expanded", mode === "shown" ? "true" : "false");
+      autoHide.setActive(mode === "auto");
       if (persist) {
-        storedPreference = collapsed;
+        storedMode = mode;
         try {
           window.localStorage.setItem(
             SIDEBAR_COLLAPSED_KEY,
-            collapsed ? "true" : "false",
+            panelModeToStored(mode),
           );
         } catch (_err) {}
       }
     }
-    _apply(
-      storedPreference === null ? _isNarrow() : storedPreference,
-      false,
-    );
-    btn.addEventListener("click", function () {
-      var currently = shell.getAttribute("data-sidebar-collapsed") === "true";
-      _apply(!currently, true);
+    function _defaultMode() {
+      if (storedMode !== null) return storedMode;
+      return _isNarrow() ? "hidden" : "shown";
+    }
+    _apply(_defaultMode(), false);
+    btn.addEventListener("click", function (event) {
+      var mode = _currentMode();
+      if (event.shiftKey) {
+        _apply(mode === "auto" ? "shown" : "auto", true);
+        return;
+      }
+      _apply(mode === "shown" ? "hidden" : "shown", true);
+    });
+    btn.addEventListener("contextmenu", function (event) {
+      event.preventDefault();
+      showPanelModeMenu({
+        anchor: btn,
+        label: "Command Center sidebar visibility",
+        current: _currentMode(),
+        onSelect: function (mode) {
+          _apply(mode, true);
+        },
+      });
     });
     function _syncResponsiveDefault() {
-      _apply(
-        storedPreference === null ? _isNarrow() : storedPreference,
-        false,
-      );
+      _apply(_defaultMode(), false);
     }
     if (narrowViewport && narrowViewport.addEventListener) {
       narrowViewport.addEventListener("change", _syncResponsiveDefault);
@@ -4887,7 +5673,14 @@
     }
     window.YggdraSimSidebar = {
       closeOverlayAfterNavigation: function () {
-        if (_isNarrow()) _apply(true, false);
+        // Only the narrow-viewport overlay closes itself after a pick;
+        // a wide auto-hidden sidebar stays until the pointer leaves it.
+        if (!_isNarrow()) return;
+        if (_currentMode() === "auto") {
+          autoHide.conceal(true);
+        } else {
+          _apply("hidden", false);
+        }
       },
     };
   }
@@ -4897,37 +5690,73 @@
   function topbarCollapseBootstrap() {
     var btn = document.getElementById("topbar-collapse-toggle");
     var shell = document.getElementById("app");
-    if (!btn || !shell) return;
+    var panel = shell ? shell.querySelector(".topbar") : null;
+    var hotzone = document.getElementById("topbar-hotzone");
+    if (!btn || !shell || !panel || !hotzone) return;
     function _stored() {
       try {
-        return window.localStorage.getItem(TOPBAR_COLLAPSED_KEY) === "true";
+        return panelModeFromStored(
+          window.localStorage.getItem(TOPBAR_COLLAPSED_KEY),
+        ) || "shown";
       } catch (_err) {
-        return false;
+        return "shown";
       }
     }
-    function _apply(collapsed) {
+    function _currentMode() {
+      return shell.getAttribute("data-topbar-mode") || "shown";
+    }
+    var autoHide = panelAutoHideController({
+      shell: shell,
+      panel: panel,
+      hotzone: hotzone,
+      revealedAttr: "data-topbar-revealed",
+    });
+    var LABELS = {
+      shown: "Collapse top bar",
+      hidden: "Show top bar",
+      auto: "Pin top bar open (auto-hide is on)",
+    };
+    var TITLES = {
+      shown: "Hide the top bar to maximise the working area. Click again to "
+        + "bring it back; Shift+click or right-click for auto-hide.",
+      hidden: "Show the top bar. Shift+click or right-click to auto-hide it "
+        + "instead.",
+      auto: "Auto-hide is on: rest the pointer on the top edge to reveal "
+        + "the top bar. Click to pin it open; right-click for options.",
+    };
+    function _apply(mode) {
+      shell.setAttribute("data-topbar-mode", mode);
       shell.setAttribute(
         "data-topbar-collapsed",
-        collapsed ? "true" : "false",
+        mode === "hidden" ? "true" : "false",
       );
-      btn.setAttribute(
-        "aria-label",
-        collapsed ? "Show top bar" : "Collapse top bar",
-      );
-      btn.title = collapsed
-        ? "Show the top bar."
-        : "Hide the top bar to maximise the working area. Click again to bring it back.";
+      btn.setAttribute("aria-label", LABELS[mode]);
+      btn.title = TITLES[mode];
+      autoHide.setActive(mode === "auto");
       try {
         window.localStorage.setItem(
           TOPBAR_COLLAPSED_KEY,
-          collapsed ? "true" : "false",
+          panelModeToStored(mode),
         );
       } catch (_err) {}
     }
     _apply(_stored());
-    btn.addEventListener("click", function () {
-      var currently = shell.getAttribute("data-topbar-collapsed") === "true";
-      _apply(!currently);
+    btn.addEventListener("click", function (event) {
+      var mode = _currentMode();
+      if (event.shiftKey) {
+        _apply(mode === "auto" ? "shown" : "auto");
+        return;
+      }
+      _apply(mode === "shown" ? "hidden" : "shown");
+    });
+    btn.addEventListener("contextmenu", function (event) {
+      event.preventDefault();
+      showPanelModeMenu({
+        anchor: btn,
+        label: "Top bar visibility",
+        current: _currentMode(),
+        onSelect: _apply,
+      });
     });
   }
 

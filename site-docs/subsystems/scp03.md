@@ -117,11 +117,31 @@ These land under wizarded and direct commands inside the SCP03 shell.
 | `DUMP-FS` | full filesystem export |
 | gold-snapshot workflow | live-vs-gold diff against a stored snapshot |
 
+### Raw APDU entry
+
+A line that matches no command is transmitted as an APDU. A data field longer
+than a one-byte `Lc` can announce is carried as a STORE DATA block sequence
+instead of being rejected: P1 marks every block but the last as "more blocks"
+and P2 counts the blocks (GlobalPlatform Card Specification v2.3.1 Table
+11-89). The same applies to a line read from a `RUN` / `SCRIPT` file.
+
+| Input on the line | Sent |
+| --- | --- |
+| a command APDU that already fits | unchanged |
+| a command APDU with an extended `Lc` over 255 bytes | one STORE DATA block per 255 bytes |
+| a four-byte header followed by over 255 raw bytes | the same, reusing the header's CLA, P1 and starting block number |
+| a bare BER-TLV command payload with no header | wrapped as STORE DATA on the logical channel the session last used |
+
+Only STORE DATA and LOAD define a block sequence, so any other instruction
+carrying an extended length is passed to the card untouched.
+
 ### HIL / diagnostics
 
 | Command | Purpose |
 | --- | --- |
 | `EXPORT-KEYBAG [Path.keys.json] [Label]` | dump the active SCP03 session keys (S-ENC, S-MAC, S-RMAC, SSC, chaining value) and the active target AID into a keybag JSON for offline HIL pcap decryption |
+| `TRACE START [File]` / `TRACE STOP` / `TRACE STATUS` | copy every command from START to STOP, run with debug output, into a log file; the prompt reads `TRACE` meanwhile |
+| `<command> --log <File>` | the same for one command line (see [Capture commands to a file](../reference/cli-and-piping-cheatsheet.md#capture-commands-to-a-file)) |
 
 See [Session key export](#session-key-export) below and the HIL Bridge
 [offline replay flow](hil-bridge.md#offline-pcap-replay).
@@ -192,9 +212,9 @@ decoder.
 
 Arguments (both optional):
 
-- `OutputPath.keys.json` — destination file. Defaults to a
+- `OutputPath.keys.json` -- destination file. Defaults to a
   timestamped path under the SCP03 workspace when omitted.
-- `Label` — free-form identifier written to the entry for operator
+- `Label` -- free-form identifier written to the entry for operator
   cross-referencing (ticket id, serial, pcap name, etc.).
 
 The handler refuses cleanly if:
@@ -210,7 +230,7 @@ Written fields (per entry):
 - `ssc_hex` / `chaining_value_hex`: SCP03 state at time of export
 - `label`: the operator-provided label
 
-See [HIL Bridge — Keybag JSON schema](hil-bridge.md#keybag-json-schema)
+See [HIL Bridge -- Keybag JSON schema](hil-bridge.md#keybag-json-schema)
 for the complete file structure and
 [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md) for
 how the keybag feeds into the decoded-APDU TUI.
@@ -245,5 +265,5 @@ for reading outside the terminal.
 - [3GPP NAA](../concepts/3gpp-naa.md)
 - [CLI Matrix](../reference/cli-matrix.md)
 - [Troubleshooting](../reference/troubleshooting.md)
-- [HIL Bridge — offline pcap replay](hil-bridge.md#offline-pcap-replay)
+- [HIL Bridge -- offline pcap replay](hil-bridge.md#offline-pcap-replay)
 - [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md)

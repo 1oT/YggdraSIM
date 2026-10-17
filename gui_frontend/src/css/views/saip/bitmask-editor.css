@@ -4,21 +4,12 @@
  */
 
 
-/* ---- Bit-mask field editor (P1.8 / P1.9 / P2.11) -------------------- */
-.saip-form-bitmask-wrap {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 4px 12px;
-  align-items: center;
-}
-
+/* ---- Bit-mask field editor (P1.8 / P1.9 / P2.11) --------------------
+   One bit per row (flag-rows.css), then the hex the bits make and the raw
+   override below them. */
 .saip-form-bitmask-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
   color: var(--fg);
-  cursor: pointer;
 }
 
 .saip-form-bitmask-label {
@@ -26,17 +17,16 @@
 }
 
 .saip-form-bitmask-hex {
-  grid-column: 1 / -1;
   font-family: var(--mono);
   font-size: 12px;
   color: var(--fg-muted);
   border-top: 1px dashed var(--border);
-  padding-top: 4px;
+  padding: 4px 8px 0;
   margin-top: 4px;
 }
 
 .saip-form-bitmask-raw {
-  grid-column: 1 / -1;
+  margin-top: 4px;
 }
 
 .saip-form-keyusage-list {

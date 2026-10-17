@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 eIM-local Command Center actions.
 
 Registers the full operator surface that ``python -m SCP11.eim_local``
@@ -68,7 +67,7 @@ def _hex_preview(payload: Any, max_chars: int = 160) -> str:
     text = bytes(payload or b"").hex().upper()
     if len(text) <= max_chars:
         return text
-    return text[:max_chars] + "…"
+    return text[:max_chars] + "..."
 
 
 # ----------------------------------------------------------------------
@@ -103,7 +102,7 @@ async def _dispatch_hotfolder_campaign(
 
     def _worker() -> None:
         try:
-            _emit("info", "loading EimLocalSession…")
+            _emit("info", "loading EimLocalSession...")
             from SCP11.eim_local.session import EimLocalSession
 
             session = EimLocalSession()
@@ -146,7 +145,7 @@ async def _dispatch_hotfolder_campaign(
                 f"hotfolder campaign finished with {len(rows)} cycle(s).",
                 report=report,
             )
-        except Exception as error:  # noqa: BLE001 — surface every failure mode
+        except Exception as error:  # noqa: BLE001 -- surface every failure mode
             import traceback
 
             _emit("error", f"{type(error).__name__}: {error}")
@@ -426,7 +425,7 @@ HOTFOLDER_CAMPAIGN_SPEC = ActionSpec(
 
 
 def _dispatch_status(ctx: ActionContext) -> dict[str, Any]:
-    """Runtime snapshot — mirrors the shell STATUS command."""
+    """Runtime snapshot -- mirrors the shell STATUS command."""
     session = _build_eim_session()
     state = session.state
     eim_state = session.eim_state
@@ -493,7 +492,7 @@ def _dispatch_discover(ctx: ActionContext) -> dict[str, Any]:
         "profile_count": profile_count,
         "snapshot": scrubbed,
         "note": "; ".join(note_parts) if note_parts else (
-            f"discovery complete — EID={eid_value or '-'} · {profile_count} profile(s)"
+            f"discovery complete -- EID={eid_value or '-'} · {profile_count} profile(s)"
         ),
         "trace": _strip_ansi(trace_sink.getvalue()),
     }
@@ -897,7 +896,7 @@ def _dispatch_euicc_memory_reset(
     confirm: Any = None,
 ) -> dict[str, Any]:
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — eUICC memory reset is destructive.")
+        raise ValueError("confirm must be true -- eUICC memory reset is destructive.")
     session = _build_eim_session()
     path_s = str(package_path or "").strip()
     trace_sink = io.StringIO()
@@ -977,7 +976,7 @@ def _dispatch_scan(ctx: ActionContext) -> dict[str, Any]:
         "profile_count": len(profiles) if isinstance(profiles, list) else 0,
         "snapshot": scrubbed,
         "note": "; ".join(note_parts) if note_parts else (
-            f"scan complete — EID={eid_value or '-'}"
+            f"scan complete -- EID={eid_value or '-'}"
         ),
         "trace": _strip_ansi(trace_sink.getvalue()),
     }
@@ -1294,8 +1293,8 @@ def _dispatch_eim_package_issue_all(
         note_parts.append(f"{type(error).__name__}: {error}")
 
     rows = [
-        {"file": str(f), "type": str(t), "result_len": int(l)}
-        for f, t, l in results
+        {"file": str(name), "type": str(kind), "result_len": int(length)}
+        for name, kind, length in results
     ]
     return {
         "ok": len(note_parts) == 0,
@@ -1721,7 +1720,7 @@ ERROR_CODES_SPEC = ActionSpec(
     title="Error code reference",
     description=(
         "Render the SGP.02 / SGP.22 / SGP.32 error-code vocabulary as "
-        "grouped tables. Pure reference data — no card or file access."
+        "grouped tables. Pure reference data -- no card or file access."
     ),
     inputs=(
         ActionField(
@@ -1755,7 +1754,7 @@ ENABLE_PROFILE_SPEC = ActionSpec(
             label="ICCID / AID / alias",
             kind="string",
             required=True,
-            placeholder="89014104… or A0000005591010FFFFFFFF8900001100 or mnoA",
+            placeholder="89014104... or A0000005591010FFFFFFFF8900001100 or mnoA",
             help="Target profile; accepts iccid digits, hex AID, or alias from LIST.",
         ),
     ),
@@ -1883,7 +1882,7 @@ EUICC_MEMORY_RESET_SPEC = ActionSpec(
     title="eUICC memory reset",
     description=(
         "Issue eUICCMemoryReset using the current eIM package's reset "
-        "request / options. Destructive — requires confirm=true."
+        "request / options. Destructive -- requires confirm=true."
     ),
     inputs=(
         ActionField(
@@ -2102,7 +2101,7 @@ ISDR_DELETE_EIM_SPEC = ActionSpec(
     title="Delete eIM (ISD-R path)",
     description=(
         "Issue DeleteEim for a given eIM ID via the ISD-R select path. "
-        "Destructive — removes the eIM registration from the card."
+        "Destructive -- removes the eIM registration from the card."
     ),
     inputs=(
         ActionField(
@@ -2241,7 +2240,7 @@ EIM_PACKAGE_ISSUE_ALL_SPEC = ActionSpec(
     title="Issue all eIM packages",
     description=(
         "Iterate every eIM package file in the configured directory "
-        "and issue each one to the card. Error-tolerant — individual "
+        "and issue each one to the card. Error-tolerant -- individual "
         "failures are recorded in the results."
     ),
     inputs=(

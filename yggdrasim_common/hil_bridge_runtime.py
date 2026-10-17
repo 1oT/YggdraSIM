@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge runtime helpers: process lifecycle, signal handling, and supervisor IPC for the hardware-in-loop bridge."""
 from __future__ import annotations
 
@@ -167,8 +166,8 @@ def normalize_simtrace_reset_mode(value: Any) -> str:
     An empty result means "leave the supervisor on its own default"
     (``usb-reset``) so the rendered unit stays free of redundant flags.
     Validation is delegated to the HIL bridge module that owns the mode
-    vocabulary; when that module is unavailable — clean-flavor bundles
-    exclude it — nothing is emitted rather than a possibly bogus flag.
+    vocabulary; when that module is unavailable -- clean-flavor bundles
+    exclude it -- nothing is emitted rather than a possibly bogus flag.
     """
     text = str(value or "").strip().lower()
     if len(text) == 0:
@@ -356,7 +355,7 @@ def write_user_service_if_changed(
     When they already match, the file is left untouched (preserving
     mtime so ``systemctl --user daemon-reload`` keeps the existing
     fragment) and the second tuple element is ``False``. When they
-    differ — or when the file does not yet exist — the new content is
+    differ -- or when the file does not yet exist -- the new content is
     written and the second tuple element is ``True``. The flag lets
     the wizard decide between "no-op" and "restart so the new
     Environment= block takes effect".
@@ -396,7 +395,7 @@ def clear_supervisor_state() -> None:
     fields here as the reconcile loop progresses. When a previous
     invocation crashed mid-warm-up the file is left on disk with a
     transient ``restart-pending`` reason like
-    ``Waiting 1.0s before bridge restart…``. Without this clear, the
+    ``Waiting 1.0s before bridge restart...``. Without this clear, the
     next start of the wizard would surface that stale reason as if it
     were a fresh failure. Missing files are tolerated quietly.
     """
@@ -604,7 +603,7 @@ def wait_for_bridge_ready(
     last_reason_text = ""
     crash_observed = False
     relay_url_observed = False
-    # Readiness is an indeterminate poll loop — supervisor boot time
+    # Readiness is an indeterminate poll loop -- supervisor boot time
     # depends on USB detection, systemd warm-up, and the remsim
     # client init. The sticky footer gives operators a visible
     # heartbeat so a stalled bridge startup is obvious. Inactive on
@@ -654,7 +653,7 @@ def _compose_bridge_ready_failure(
     """Compose an actionable error message for ``wait_for_bridge_ready``.
 
     The supervisor publishes a ``status`` field (``running``,
-    ``restart-pending``, ``start-failed``, ``usb-detect-error`` …) and
+    ``restart-pending``, ``start-failed``, ``usb-detect-error`` ...) and
     a free-form ``reason``. Surfacing the raw ``reason`` on timeout --
     as the previous implementation did -- was misleading because a
     transient ``restart-pending`` reason like

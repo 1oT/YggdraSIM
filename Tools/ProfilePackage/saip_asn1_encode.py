@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pair-encoder module: inverse of ``saip_asn1_decode``.
 
@@ -10,7 +9,7 @@ losslessly, this module exports ``encode_<field>(decoded)`` which returns
 the byte (or scalar) form the SAIP JSON should carry.
 
 Lossy decoders (ADN records, SMSP, EF.ARR TLVs) are handled by the
-companion "splice" helpers in ``saip_decoded_edit`` — they take the
+companion "splice" helpers in ``saip_decoded_edit`` -- they take the
 decoded form plus the original raw bytes and substitute only the changed
 sub-fields. Encoders here assume the decoded payload came from the
 matching ``_decode_*`` function in the same repository.
@@ -21,7 +20,7 @@ Conventions:
   OCTET STRING.
 - Encoders return ``int`` for fields whose JSON form is an ASN.1 INTEGER
   (i.e. fields handled by ``_decode_scalar_special_field``'s int path).
-- Roundtrip is covered by ``tests/test_saip_asn1_encode.py`` — every
+- Roundtrip is covered by ``tests/test_saip_asn1_encode.py`` -- every
   encoder must satisfy ``decode(encode(decode(x))) == decode(x)``.
 """
 
@@ -30,14 +29,23 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from Tools.ProfilePackage.saip_asn1_decode import (
+    _OPAQUE_PASSTHROUGH_EF_CATALOG as _DECODE_OPAQUE_CATALOG,
+    ARR_SCOPE_DF,
+    ARR_SCOPE_EF,
+    arr_access_mode_flags,
+    _AD_OPERATION_MODE_NAMES,
     _AID_FIELD_NAMES,
     _AKA_ALGORITHM_ID_NAMES,
     _APPLICATION_PRIVILEGE_FLAGS,
+    _GSM7_DEFAULT_ALPHABET,
+    _GSM7_EXTENSION_TABLE,
     _KEY_ACCESS_NAMES,
     _KEY_TYPE_NAMES,
     _KEY_USAGE_FLAGS,
     _LIFE_CYCLE_STATE_NAMES,
     _MEMORY_LIMIT_FIELD_LABELS,
+    _decode_alpha_string_text,
+    arr_key_reference_name,
 )
 
 
@@ -247,7 +255,7 @@ def encode_pin_puk_adm_key_reference(payload: dict[str, Any]) -> int:
 
 
 def encode_algorithm_id(payload: dict[str, Any]) -> int:
-    """AKA algorithm ID — SAIP stores it as INTEGER."""
+    """AKA algorithm ID -- SAIP stores it as INTEGER."""
 
     if "decimal" in payload:
         return _require_int(payload, "decimal")
@@ -310,7 +318,7 @@ def encode_aka_option_octet(payload: dict[str, Any]) -> bytes:
 
 
 def encode_profile_policy_rules(payload: dict[str, Any]) -> bytes:
-    """Profile policy rules — byte-flag field, usually 1 byte."""
+    """Profile policy rules -- byte-flag field, usually 1 byte."""
 
     if "hex" in payload:
         return _hex_to_bytes(_require_hex(payload, "hex"))
@@ -500,22 +508,10 @@ _EHPLMNPI_NAME_TO_CODE: dict[str, int] = {
 }
 
 
+# TS 31.102 §4.2.18 UE operation mode names, mirrored from the decoder.
+_AD_MODE_CODE_ALIASES: dict[int, str] = dict(_AD_OPERATION_MODE_NAMES)
 _AD_MODE_NAME_TO_CODE: dict[str, int] = {
-    "Normal": 0x00,
-    "Type Approval": 0x01,
-    "Normal/Internal": 0x02,
-    "Proprietary": 0x80,
-}
-
-# Bytes whose decoder mode name is NOT the "canonical" value in the map
-# above. We only rewrite the first byte when the existing byte maps to a
-# different mode name than what the payload requests.
-_AD_MODE_CODE_ALIASES: dict[int, str] = {
-    0x00: "Normal",
-    0x01: "Type Approval",
-    0x02: "Normal/Internal",
-    0x04: "Normal/Internal",
-    0x80: "Proprietary",
+    name: code for code, name in _AD_OPERATION_MODE_NAMES.items()
 }
 
 
@@ -531,6 +527,26 @@ def _pad_ff(data: bytes, *, target_length: int | None) -> bytes:
     if len(data) == target_length:
         return data
     return data + b"\xFF" * (target_length - len(data))
+
+
+def _pad_00(data: bytes, *, target_length: int | None) -> bytes:
+    """Pad ``data`` with ``0x00`` to ``target_length`` when provided.
+
+    Service tables are bitmaps where a set bit means "available"/"enabled"
+    (3GPP TS 31.102 §4.2.8 EF.UST, §4.2.47 EF.EST). Bytes past the last
+    encoded service must read as all-zero, so they cannot use the 0xFF file
+    fill that suits opaque records.
+    """
+
+    if target_length is None:
+        return data
+    if len(data) > target_length:
+        raise RoundtripEncoderError(
+            f"encoded content ({len(data)} bytes) exceeds target length ({target_length})"
+        )
+    if len(data) == target_length:
+        return data
+    return data + b"\x00" * (target_length - len(data))
 
 
 def encode_ef_acc(
@@ -632,20 +648,37 @@ def encode_ef_ad(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    # EF.AD only decodes the first byte; raw carries the full multi-byte
-    # original (including MNC length + spare bytes) so prefer raw to keep
-    # those bytes intact. Rewrite byte 0 only when the requested mode name
-    # differs from what the existing byte already decodes to.
-    """Encode EF.AD content: administrative data including MNC length (3GPP TS 31.102 §4.2.18)."""
+    """Encode EF.AD (TS 31.102 §4.2.18): UE operation mode, additional
+    information and MNC length.
+
+    ``raw`` carries the full original (additional information, MNC length,
+    RFU tail) and is kept intact; byte 1 is rewritten only when the
+    requested mode name differs from what that byte already decodes to,
+    byte 4 when ``mncLengthDigits`` differs."""
     if "raw" in payload and isinstance(payload["raw"], str):
         data = _hex_to_bytes(_require_hex(payload, "raw"))
         mode_name = str(payload.get("administrativeMode", "") or "").strip()
-        if (
-            len(data) >= 1
-            and mode_name in _AD_MODE_NAME_TO_CODE
-            and _AD_MODE_CODE_ALIASES.get(data[0]) != mode_name
-        ):
-            data = bytes([_AD_MODE_NAME_TO_CODE[mode_name]]) + data[1:]
+        if len(data) >= 1 and mode_name != "":
+            if mode_name in _AD_MODE_NAME_TO_CODE:
+                mode_byte = _AD_MODE_NAME_TO_CODE[mode_name]
+            elif mode_name.lower().startswith("0x"):
+                mode_byte = _parse_hex_byte_text(mode_name.split(" ", 1)[0], label="EF.AD administrativeMode")
+            else:
+                raise RoundtripEncoderError(
+                    f"EF.AD: unknown administrativeMode {mode_name!r}"
+                )
+            if _AD_MODE_CODE_ALIASES.get(data[0]) != mode_name and data[0] != mode_byte:
+                data = bytes([mode_byte]) + data[1:]
+        if len(data) >= 4 and "mncLengthDigits" in payload:
+            mnc_length = _require_int(payload, "mncLengthDigits")
+            # A reserved nibble already on the card round-trips untouched;
+            # only a changed value has to be one the spec defines.
+            if (data[3] & 0x0F) != mnc_length:
+                if mnc_length not in (0, 2, 3):
+                    raise RoundtripEncoderError(
+                        "EF.AD: mncLengthDigits must be 0 (service n°130), 2 or 3"
+                    )
+                data = data[:3] + bytes([(data[3] & 0xF0) | mnc_length]) + data[4:]
         return _pad_ff(data, target_length=target_length)
     mode_name = str(payload.get("administrativeMode", "") or "").strip()
     if mode_name in _AD_MODE_NAME_TO_CODE:
@@ -665,16 +698,26 @@ def encode_ef_hpplmn_search_interval(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.HPPLMN content: higher-priority PLMN search interval byte (3GPP TS 31.102 §4.2.12)."""
+    """Encode EF.HPPLMN (TS 31.102 §4.2.6): one byte in units of n = 6 minutes.
+
+    ``interval`` is the byte itself; ``intervalMinutes`` is converted (must
+    be a multiple of 6, at most '50' = 480 minutes)."""
+    if "interval" in payload:
+        value = _require_int(payload, "interval")
+        if not 0 <= value <= 0xFF:
+            raise RoundtripEncoderError("EF.HPPLMN interval must fit in 1 byte")
+        return _pad_ff(bytes([value]), target_length=target_length)
     if "intervalMinutes" in payload:
         minutes = _require_int(payload, "intervalMinutes")
-        if not 0 <= minutes <= 0xFF:
-            raise RoundtripEncoderError("EF.HPPLMN interval must fit in 1 byte")
-        return _pad_ff(bytes([minutes]), target_length=target_length)
+        if minutes < 0 or minutes % 6 != 0 or minutes // 6 > 0x50:
+            raise RoundtripEncoderError(
+                "EF.HPPLMN intervalMinutes must be a multiple of 6 between 0 and 480"
+            )
+        return _pad_ff(bytes([minutes // 6]), target_length=target_length)
     if "raw" in payload and isinstance(payload["raw"], str):
         data = _hex_to_bytes(_require_hex(payload, "raw"))
         return _pad_ff(data, target_length=target_length)
-    raise RoundtripEncoderError("EF.HPPLMN: provide 'intervalMinutes' or 'raw'")
+    raise RoundtripEncoderError("EF.HPPLMN: provide 'interval', 'intervalMinutes' or 'raw'")
 
 
 def encode_ef_three_byte_counter(
@@ -761,6 +804,9 @@ _KNOWN_ACCESS_TECHNOLOGIES = {
     "E-UTRAN WB-S1",
     "E-UTRAN NB-S1",
     "NG-RAN",
+    "Satellite NG-RAN",
+    "Satellite E-UTRAN WB-S1",
+    "Satellite E-UTRAN NB-S1",
     "GSM",
     "GSM COMPACT",
     "EC-GSM-IoT",
@@ -770,12 +816,12 @@ _KNOWN_ACCESS_TECHNOLOGIES = {
 
 
 def _encode_access_technologies(act_names: list[str]) -> bytes:
-    """Encode an AcT name set to 2 bytes, matching the decoder's bit pattern.
+    """Encode an AcT name set to 2 bytes (TS 31.102 §4.2.5).
 
-    The decoder treats certain bit combinations as joint entries (e.g. GSM
-    family bits 0x008C have four legal encodings that map to different name
-    sets). This encoder picks the canonical encoding that round-trips through
-    the decoder without losing information.
+    The E-UTRAN (byte 1 b7-b5) and GSM (byte 2 b8, b4, b3) groups each have
+    two encodings for the "both modes" case (Tables 4.2.5.1 / 4.2.5.2); the
+    leading-bit-only form is emitted so the value round-trips through the
+    decoder unchanged.
     """
 
     names = {str(name or "").strip() for name in act_names}
@@ -795,6 +841,14 @@ def _encode_access_technologies(act_names: list[str]) -> bytes:
         value |= 0x5000
     elif has_wb:
         value |= 0x6000
+    if "NG-RAN" in names:
+        value |= 0x0800
+    if "Satellite NG-RAN" in names:
+        value |= 0x0400
+    if "Satellite E-UTRAN WB-S1" in names:
+        value |= 0x0200
+    if "Satellite E-UTRAN NB-S1" in names:
+        value |= 0x0100
     has_gsm = "GSM" in names
     has_ec_gsm = "EC-GSM-IoT" in names
     if has_gsm and has_ec_gsm:
@@ -802,15 +856,13 @@ def _encode_access_technologies(act_names: list[str]) -> bytes:
     elif has_gsm:
         value |= 0x0084
     elif has_ec_gsm:
-        value |= 0x0086
+        value |= 0x0088
     if "GSM COMPACT" in names:
         value |= 0x0040
     if "cdma2000 HRPD" in names:
         value |= 0x0020
     if "cdma2000 1xRTT" in names:
         value |= 0x0010
-    if "NG-RAN" in names:
-        value |= 0x0008
     return value.to_bytes(2, "big", signed=False)
 
 
@@ -970,7 +1022,7 @@ def encode_ef_wlrplmn(
 # The strategy is to carry the original bytes through the editor model under
 # the ``_ygg_original_hex`` key (populated by
 # ``build_decoded_value_roundtrip_model`` for these EFs). The splicer then
-# patches only the bytes whose decoded representation actually changed — any
+# patches only the bytes whose decoded representation actually changed -- any
 # user payload without ``_ygg_original_hex`` falls back to a best-effort
 # scratch rebuild.
 
@@ -1009,19 +1061,101 @@ def _parse_hex_byte_text(value: Any, *, label: str) -> int:
     return int(text, 16)
 
 
+_GSM7_DEFAULT_CODES: dict[str, int] = {
+    character: index for index, character in enumerate(_GSM7_DEFAULT_ALPHABET)
+}
+_GSM7_EXTENSION_CODES: dict[str, int] = {
+    character: code for code, character in _GSM7_EXTENSION_TABLE.items()
+}
+
+
+def _encode_alpha_identifier_bytes(alpha: str) -> bytes:
+    """Code an alpha identifier per TS 31.102 Annex A: one byte per
+    character of the TS 23.038 §6.2.1 GSM 7-bit default alphabet (bit 8 = 0,
+    extension characters as ``1B xx``), or the ``80`` UCS2 form when a
+    character has no 7-bit code."""
+
+    text = str(alpha or "")
+    gsm: bytearray = bytearray()
+    for character in text:
+        if character == "\x1b":
+            gsm = bytearray()
+            break
+        code = _GSM7_DEFAULT_CODES.get(character)
+        if code is not None:
+            gsm.append(code)
+            continue
+        extension = _GSM7_EXTENSION_CODES.get(character)
+        if extension is None:
+            gsm = bytearray()
+            break
+        gsm.extend((0x1B, extension))
+    else:
+        return bytes(gsm)
+    try:
+        return b"\x80" + text.encode("utf-16-be")
+    except UnicodeEncodeError as exc:
+        raise RoundtripEncoderError(f"alphaIdentifier: {exc}") from exc
+
+
+def _gsm7_septets(text: str) -> list[int] | None:
+    """GSM 7-bit default-alphabet septets for ``text`` (extension
+    characters as ``1B xx``), or None when a character has no code."""
+
+    septets: list[int] = []
+    for character in text:
+        if character == "\x1b":
+            return None
+        code = _GSM7_DEFAULT_CODES.get(character)
+        if code is not None:
+            septets.append(code)
+            continue
+        extension = _GSM7_EXTENSION_CODES.get(character)
+        if extension is None:
+            return None
+        septets.extend((0x1B, extension))
+    return septets
+
+
+def _encode_network_name_ie(text: str) -> bytes:
+    """Code a Network Name IE value per TS 24.008 §10.5.3.5a: octet 3
+    carries b8 = 1, b7-b5 the coding scheme, b4 Add CI = 0 and b3-b1 the
+    number of spare bits in the last octet; the text follows as GSM 7-bit
+    packed (TS 23.038 §6.1.2.1.1) or, when a character has no 7-bit code,
+    as UCS2 (coding scheme 001)."""
+
+    septets = _gsm7_septets(str(text or ""))
+    if septets is None:
+        try:
+            return b"\x90" + str(text or "").encode("utf-16-be")
+        except UnicodeEncodeError as exc:
+            raise RoundtripEncoderError(f"network name: {exc}") from exc
+    packed = bytearray()
+    buffer = 0
+    bits_in_buffer = 0
+    for septet in septets:
+        buffer |= septet << bits_in_buffer
+        bits_in_buffer += 7
+        while bits_in_buffer >= 8:
+            packed.append(buffer & 0xFF)
+            buffer >>= 8
+            bits_in_buffer -= 8
+    if bits_in_buffer > 0:
+        packed.append(buffer & 0xFF)
+    spare_bits = len(packed) * 8 - len(septets) * 7
+    return bytes([0x80 | (spare_bits & 0x07)]) + bytes(packed)
+
+
 def _encode_alpha_identifier(
     alpha: str,
     *,
     alpha_len: int,
 ) -> bytes:
-    """Best-effort alpha-id rewrite, padded with 0xFF."""
+    """Alpha identifier (TS 31.102 Annex A) padded with 0xFF to ``alpha_len``."""
 
     if alpha_len <= 0:
         return b""
-    try:
-        encoded = str(alpha or "").encode("utf-8")
-    except UnicodeEncodeError as exc:
-        raise RoundtripEncoderError(f"alphaIdentifier: {exc}") from exc
+    encoded = _encode_alpha_identifier_bytes(alpha)
     if len(encoded) > alpha_len:
         raise RoundtripEncoderError(
             f"alphaIdentifier: {len(encoded)} bytes exceeds alpha slot of {alpha_len}"
@@ -1030,16 +1164,15 @@ def _encode_alpha_identifier(
 
 
 def _decoded_alpha_equals_original(original_alpha_bytes: bytes, alpha_text: str) -> bool:
-    """Return ``True`` when the decoder's UTF-8 strip-and-trim of the alpha
-    bytes matches the text currently in the decoded payload.
+    """Return ``True`` when the decoder's rendering of the original alpha
+    bytes matches the text in the decoded payload.
 
     Used to avoid rewriting alpha bytes when the user didn't actually edit
-    them — UTF-8 decoding drops trailing ``0x00``/``0xFF`` padding which we
-    must preserve byte-for-byte otherwise.
+    them: the original may use a UCS2 shift form or specific filler
+    placement that a re-encode would not reproduce byte-for-byte.
     """
 
-    reference = original_alpha_bytes.decode("utf-8", "ignore").strip("\x00").strip()
-    return reference == str(alpha_text or "")
+    return _decode_alpha_string_text(original_alpha_bytes) == str(alpha_text or "")
 
 
 def encode_ef_adn_record(
@@ -1203,23 +1336,30 @@ def encode_ef_smsp_record(
     return spliced
 
 
-_ARR_ACCESS_MODE_FLAGS: tuple[tuple[int, str], ...] = (
-    (0x01, "READ"),
-    (0x02, "UPDATE"),
-    (0x04, "APPEND"),
-    (0x08, "DEACTIVATE"),
-    (0x10, "ACTIVATE"),
-    (0x40, "TERMINATE"),
-)
+def _encode_arr_access_mode_byte(
+    modes: Any,
+    *,
+    scope: str = ARR_SCOPE_EF,
+) -> bytes:
+    """Encode one AM byte against the table for ``scope``.
 
-
-def _encode_arr_access_mode_byte(modes: Any) -> bytes:
+    A DF and an EF read the low three bits differently, so a name belonging to
+    the other file kind is refused rather than silently mapped onto whatever
+    that bit means here -- an ``UPDATE`` written into a DF rule would grant
+    CREATE FILE (EF).
+    """
     if isinstance(modes, list) is False:
         raise RoundtripEncoderError(
             "ARR rule: accessModes must be a list (use [] for default)."
         )
     byte_value = 0
-    name_to_bit: dict[str, int] = {name: bit for bit, name in _ARR_ACCESS_MODE_FLAGS}
+    name_to_bit: dict[str, int] = {
+        name: bit for bit, name in arr_access_mode_flags(scope)
+    }
+    other_scope = ARR_SCOPE_EF if scope == ARR_SCOPE_DF else ARR_SCOPE_DF
+    foreign = {name for _bit, name in arr_access_mode_flags(other_scope)} - set(
+        name_to_bit
+    )
     for entry in modes:
         name = str(entry or "").strip()
         if len(name) == 0:
@@ -1233,6 +1373,11 @@ def _encode_arr_access_mode_byte(modes: Any) -> bytes:
                     f"ARR rule: invalid Proprietary token {name!r}"
                 ) from exc
             continue
+        if name in foreign:
+            raise RoundtripEncoderError(
+                f"ARR rule: access mode {name!r} belongs to a {other_scope.upper()} "
+                f"rule, not a {scope.upper()} one."
+            )
         if name not in name_to_bit:
             raise RoundtripEncoderError(
                 f"ARR rule: unknown access mode {name!r}"
@@ -1284,13 +1429,17 @@ def _encode_arr_items(items: Any) -> bytes:
     return bytes(accumulator)
 
 
+# Condition label -> key reference, the inverse of the decoder's
+# ``arr_key_reference_name`` (TS 102 221 Table 9.3).
 _ARR_CONDITION_KEY_REFERENCE: dict[str, int] = {
-    "PIN1": 0x01,
-    "PIN2": 0x81,
-    "ADM1": 0x0A,
-    "ADM2": 0x0B,
-    "ADM3": 0x0C,
-    "ADM4": 0x0D,
+    arr_key_reference_name(reference).upper(): reference
+    for reference in (
+        *range(0x01, 0x09),
+        *range(0x0A, 0x0F),
+        0x11,
+        *range(0x81, 0x89),
+        *range(0x8A, 0x8F),
+    )
 }
 
 
@@ -1301,13 +1450,19 @@ def _default_arr_items_for_condition(condition: str) -> list[dict[str, str]]:
     return [{"tag": "83", "raw": f"{key_ref:02X}"}]
 
 
-def _encode_arr_rules_from_scratch(rules: list[dict[str, Any]]) -> bytes:
+def _encode_arr_rules_from_scratch(
+    rules: list[dict[str, Any]],
+    *,
+    scope: str = ARR_SCOPE_EF,
+) -> bytes:
     accumulator = bytearray()
     last_access_byte: bytes | None = None
     for rule in rules:
         if isinstance(rule, dict) is False:
             raise RoundtripEncoderError("ARR rule: each rule must be a dict")
-        access_byte = _encode_arr_access_mode_byte(rule.get("accessModes", []))
+        access_byte = _encode_arr_access_mode_byte(
+            rule.get("accessModes", []), scope=scope
+        )
         if access_byte != last_access_byte:
             accumulator.extend(_encode_arr_tlv("80", access_byte))
             last_access_byte = access_byte
@@ -1335,14 +1490,32 @@ def encode_ef_arr_rules(
     payload: dict[str, Any],
     *,
     target_length: int | None = None,
+    scope: str | None = None,
 ) -> bytes:
     """Splice an EF.ARR record preserving original bytes when decoded stream
     hasn't changed, otherwise re-emitting the rule stream from the decoded
-    ``rules`` list and padding to ``target_length`` with ``0xFF``."""
+    ``rules`` list and padding to ``target_length`` with ``0xFF``.
+
+    ``scope`` names the access-mode reading (the ISO/IEC 7816-4 AM byte for
+    MF/DF/ADF or for an EF, TS 102 221 §9.2.2); left unset it follows the
+    ``accessModeScope`` the decoder stamped on the record.
+
+    ``rules`` describes one record. Handed a whole EF.ARR file, ``_decode_ef_arr``
+    walks out of the first record into the next and stops, reporting
+    ``parseErrorOffset`` -- so ``rules`` then covers a prefix, not the file.
+    Rebuilding from that prefix would drop every record the decode never
+    described, which is why a partial decode is refused outright.
+    """
 
     rules = payload.get("rules")
     if isinstance(rules, list) is False:
         raise RoundtripEncoderError("ARR splicer: 'rules' must be a list")
+
+    if scope is None:
+        # The decoder stamps the record with the scope it was read under, so an
+        # edited container record re-encodes against the same table it was
+        # named with instead of failing on CREATE_EF as a foreign mode.
+        scope = str(payload.get("accessModeScope") or "").strip() or ARR_SCOPE_EF
 
     original_hex = str(payload.get("_ygg_original_hex", "") or "").strip().upper()
     if len(original_hex) > 0:
@@ -1355,14 +1528,23 @@ def encode_ef_arr_rules(
             # rules exactly, preserve the original bytes byte-for-byte. This
             # avoids churn from non-canonical tag orderings in the source.
             from .saip_asn1_decode import _decode_ef_arr  # local import: avoid cycles
-            reference = _decode_ef_arr(original_hex)
+            reference = _decode_ef_arr(original_hex, scope=scope)
             if isinstance(reference, dict):
                 reference_rules = reference.get("rules") or []
                 if reference_rules == rules:
                     if target_length is None or len(original_bytes) == target_length:
                         return original_bytes
+                parse_error_offset = reference.get("parseErrorOffset")
+                if isinstance(parse_error_offset, int):
+                    raise RoundtripEncoderError(
+                        "ARR splicer: the decode described only the first "
+                        f"{parse_error_offset} of {len(original_bytes)} bytes "
+                        "(EF.ARR holds several linear-fixed records); rebuilding "
+                        "from the decoded rules would discard the records that "
+                        "follow. Edit the record through the ARR record picker."
+                    )
 
-    rebuilt = _encode_arr_rules_from_scratch(rules)
+    rebuilt = _encode_arr_rules_from_scratch(rules, scope=scope)
     if target_length is None:
         return rebuilt
     if len(rebuilt) > target_length:
@@ -1373,7 +1555,7 @@ def encode_ef_arr_rules(
 
 
 # ---------------------------------------------------------------------------
-# Tier 1 — straightforward roundtripable EFs (SPN, MSISDN, ECC, PUCT, LOCI,
+# Tier 1 -- straightforward roundtripable EFs (SPN, MSISDN, ECC, PUCT, LOCI,
 # OPL, PNN and the three service tables).
 
 
@@ -1389,8 +1571,18 @@ def encode_ef_spn(
     display_condition = payload.get("displayCondition")
     if display_condition is not None:
         display_byte = _parse_hex_byte_text(display_condition, label="EF.SPN displayCondition")
+    elif (
+        "displayPlmnNameRequiredOnHomePlmn" in payload
+        or "spnDisplayNotRequiredOnNonHomePlmn" in payload
+    ):
+        display_byte = 0
+        if bool(payload.get("displayPlmnNameRequiredOnHomePlmn", False)):
+            display_byte |= 0x01
+        if bool(payload.get("spnDisplayNotRequiredOnNonHomePlmn", False)):
+            display_byte |= 0x02
     else:
-        # Legacy payloads sometimes only carry the two decoded flags.
+        # Older decoder output carried ``displayInHplmnRequired`` with the
+        # polarity inverted (False meant b1 set); keep that payload encodable.
         display_byte = 0
         if bool(payload.get("displayInHplmnRequired", False)) is False:
             display_byte |= 0x01
@@ -1419,17 +1611,120 @@ def encode_ef_msisdn_record(
     return encode_ef_adn_record(payload, target_length=target_length)
 
 
+_EMERGENCY_SERVICE_CATEGORY_NAME_TO_BIT: dict[str, int] = {
+    "police": 0x01,
+    "ambulance": 0x02,
+    "fire brigade": 0x04,
+    "marine guard": 0x08,
+    "mountain rescue": 0x10,
+    "manually initiated ecall": 0x20,
+    "automatically initiated ecall": 0x40,
+}
+
+
+def _emergency_service_category_byte(
+    payload: dict[str, Any], *, original_category: int | None
+) -> int:
+    """Resolve the TS 24.008 §10.5.4.33 category byte from either the hex
+    field or the name list; when both are present the one that differs from
+    the original record wins, the names on a tie."""
+
+    hex_value = payload.get("emergencyServiceCategory")
+    names = payload.get("emergencyServiceCategories")
+    from_hex: int | None = None
+    if hex_value is not None:
+        from_hex = _parse_hex_byte_text(hex_value, label="EF.ECC emergencyServiceCategory")
+    from_names: int | None = None
+    if isinstance(names, list):
+        from_names = 0
+        for name in names:
+            key = str(name or "").strip().lower()
+            if key not in _EMERGENCY_SERVICE_CATEGORY_NAME_TO_BIT:
+                raise RoundtripEncoderError(
+                    f"EF.ECC: unknown emergency service category {name!r}"
+                )
+            from_names |= _EMERGENCY_SERVICE_CATEGORY_NAME_TO_BIT[key]
+        if bool(payload.get("emergencyServiceCategorySpareBitSet", False)):
+            from_names |= 0x80
+    if from_hex is None and from_names is None:
+        return 0 if original_category is None else original_category
+    if from_hex is None:
+        return int(from_names or 0)
+    if from_names is None:
+        return from_hex
+    if from_hex == from_names:
+        return from_hex
+    if original_category is not None and from_names == original_category:
+        return from_hex
+    return from_names
+
+
 def encode_ef_ecc(
     payload: dict[str, Any],
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.ECC (TS 31.102 §4.2.24): list of 3-byte BCD emergency
-    codes, padded with ``FFFFFF`` repeat blocks up to ``target_length``.
+    """Encode one EF.ECC record (TS 31.102 §4.2.21): 3-byte BCD emergency
+    call code, X-byte alpha identifier and the Emergency Service Category
+    byte (TS 24.008 §10.5.4.33). X comes from ``target_length`` (record
+    size - 4), else from ``_ygg_original_hex``, else from
+    ``alphaIdentifierLength``. The pre-record ``emergencyCodes`` list (the
+    3-byte-per-code TS 51.011 §10.3.27 layout) is still accepted."""
 
-    Note: the decoder exposes only the BCD digits; the 2-octet category
-    byte + alpha identifier per entry (R99+ format) are NOT preserved.
-    Pass ``_ygg_original_hex`` to preserve them alongside the edited codes."""
+    if "emergencyCallCode" in payload:
+        code_text = str(payload.get("emergencyCallCode", "") or "").strip()
+        if any(ch.isdigit() is False for ch in code_text):
+            raise RoundtripEncoderError(
+                f"EF.ECC: code {code_text!r} must contain decimal digits only"
+            )
+        if len(code_text) > 6:
+            raise RoundtripEncoderError(f"EF.ECC: code {code_text!r} exceeds 6 BCD digits")
+        original_hex = str(payload.get("_ygg_original_hex", "") or "").strip().upper()
+        original = b""
+        if len(original_hex) > 0:
+            try:
+                original = bytes.fromhex(original_hex)
+            except ValueError:
+                original = b""
+        if target_length is not None:
+            record_length = int(target_length)
+        elif len(original) >= 3:
+            record_length = len(original)
+        else:
+            alpha_length_value = payload.get("alphaIdentifierLength")
+            if isinstance(alpha_length_value, int) and isinstance(alpha_length_value, bool) is False:
+                record_length = 4 + max(0, int(alpha_length_value))
+            elif "alphaIdentifier" in payload or "emergencyServiceCategory" in payload:
+                record_length = 4 + len(
+                    _encode_alpha_identifier_bytes(str(payload.get("alphaIdentifier", "") or ""))
+                )
+            else:
+                record_length = 3
+        if record_length < 3:
+            raise RoundtripEncoderError("EF.ECC: record must be at least 3 bytes")
+        if code_text == "":
+            code_bytes = b"\xFF\xFF\xFF"
+        elif len(original) >= 3 and _decode_bcd_digits_local(original[0:3]) == code_text:
+            code_bytes = original[0:3]
+        else:
+            code_bytes = _encode_bcd_swapped_digits(code_text, byte_length=3)
+        if record_length == 3:
+            return code_bytes
+        alpha_len = record_length - 4
+        alpha_text = str(payload.get("alphaIdentifier", "") or "")
+        original_alpha = original[3:-1] if len(original) == record_length else b""
+        if len(original_alpha) == alpha_len and (
+            "alphaIdentifier" not in payload
+            or _decoded_alpha_equals_original(original_alpha, alpha_text)
+        ):
+            alpha_bytes = original_alpha
+        else:
+            alpha_bytes = _encode_alpha_identifier(alpha_text, alpha_len=alpha_len)
+        original_category = original[-1] if len(original) == record_length else None
+        category = _emergency_service_category_byte(
+            payload, original_category=original_category
+        )
+        return code_bytes + alpha_bytes + bytes([category])
 
     codes = payload.get("emergencyCodes")
     if isinstance(codes, list) is False:
@@ -1437,7 +1732,8 @@ def encode_ef_ecc(
             data = _hex_to_bytes(_require_hex(payload, "raw"))
             return _pad_ff(data, target_length=target_length)
         raise RoundtripEncoderError(
-            "EF.ECC: provide 'emergencyCodes' (list of decimal strings) or 'raw'"
+            "EF.ECC: provide 'emergencyCallCode' (+ alpha / category), "
+            "'emergencyCodes' (list of decimal strings) or 'raw'"
         )
 
     original_hex = str(payload.get("_ygg_original_hex", "") or "").strip().upper()
@@ -1467,7 +1763,7 @@ def encode_ef_ecc(
                 f"EF.ECC: code {code_text!r} exceeds 6 BCD digits"
             )
         # Preserve the original BCD block when the user didn't actually
-        # edit this entry — safer than re-packing padding nibbles.
+        # edit this entry -- safer than re-packing padding nibbles.
         if index < len(original_blocks):
             reference_digits = _decode_bcd_digits_local(original_blocks[index])
             if reference_digits == code_text:
@@ -1475,9 +1771,6 @@ def encode_ef_ecc(
                 continue
         accumulator.extend(_encode_bcd_swapped_digits(code_text, byte_length=3))
 
-    # Pad any untouched trailing blocks with the original bytes when we
-    # have them — preserves the vendor's category byte layout for the
-    # common R99+ MSISDN-style footer.
     consumed_blocks = len(codes)
     while consumed_blocks < len(original_blocks):
         accumulator.extend(original_blocks[consumed_blocks])
@@ -1505,7 +1798,7 @@ def encode_ef_puct(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.PUCT (TS 31.102 §4.2.18): 3-byte ASCII currency + 2-byte
+    """Encode EF.PUCT (TS 31.102 §4.2.13): 3-byte ASCII currency + 2-byte
     packed EPPU/exponent."""
 
     currency = str(payload.get("currency", "") or "").strip()
@@ -1699,13 +1992,14 @@ def encode_ef_pnn_record(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode an EF.PNN record (TS 31.102 §4.2.58): TLV stream containing
-    a 0x43 full-name TLV (network-coding-dependent) and an optional 0x45
-    short-name TLV.
+    """Encode an EF.PNN record (TS 31.102 §4.2.58): a '43' full-name TLV
+    and an optional '45' short-name TLV, each value a Network Name IE per
+    TS 24.008 §10.5.3.5a.
 
-    The decoded form does NOT preserve the full-name coding scheme byte
-    (0x80 / 0x81 prefix), so when ``_ygg_original_hex`` is provided we
-    preserve the original TLV bytes as-is unless the decoded text changed.
+    The decoded form keeps only the text, not the IE header (coding
+    scheme, Add CI, spare bits), so an unchanged record is returned from
+    ``_ygg_original_hex`` verbatim; a changed name is re-coded through
+    ``_encode_network_name_ie``.
     """
 
     original_hex = str(payload.get("_ygg_original_hex", "") or "").strip().upper()
@@ -1727,10 +2021,10 @@ def encode_ef_pnn_record(
 
     accumulator = bytearray()
     if "fullName" in payload:
-        full_bytes = str(payload.get("fullName", "") or "").encode("utf-8")
+        full_bytes = _encode_network_name_ie(str(payload.get("fullName", "") or ""))
         accumulator.extend(_encode_tlv_primitive("43", full_bytes))
     if "shortName" in payload:
-        short_bytes = str(payload.get("shortName", "") or "").encode("utf-8")
+        short_bytes = _encode_network_name_ie(str(payload.get("shortName", "") or ""))
         accumulator.extend(_encode_tlv_primitive("45", short_bytes))
     if len(accumulator) == 0:
         if "raw" in payload and isinstance(payload["raw"], str):
@@ -1798,8 +2092,8 @@ def encode_ef_service_table(
     """Encode an EF.UST / EF.EST / EF.IST service-table payload.
 
     Accepts either:
-      - ``raw`` / ``hex`` — used verbatim (useful for non-editable reloads).
-      - ``activeServices`` — list of ``"<number>: <name>"`` strings as
+      - ``raw`` / ``hex`` -- used verbatim (useful for non-editable reloads).
+      - ``activeServices`` -- list of ``"<number>: <name>"`` strings as
         produced by the decoder.
 
     The existing hand-written ``service_table`` editor in
@@ -1821,10 +2115,10 @@ def encode_ef_service_table(
             payload.get("activeServices"),
             original_bytes=original_bytes,
         )
-        return _pad_ff(data, target_length=target_length)
+        return _pad_00(data, target_length=target_length)
 
     if len(original_bytes) > 0:
-        return _pad_ff(original_bytes, target_length=target_length)
+        return _pad_00(original_bytes, target_length=target_length)
 
     raise RoundtripEncoderError(
         "service table: provide 'activeServices' or 'raw'"
@@ -1832,7 +2126,7 @@ def encode_ef_service_table(
 
 
 # ---------------------------------------------------------------------------
-# Tier 2 — TLV-structured EFs (PCSCF, SPDI, EPSNSC, SMS, SMSR, DIR).
+# Tier 2 -- TLV-structured EFs (PCSCF, SPDI, EPSNSC, SMS, SMSR, DIR).
 
 
 _PCSCF_ADDRESS_TYPE_CODES: dict[str, int] = {
@@ -1953,22 +2247,98 @@ def encode_ef_spdi(
     return _pad_ff(data, target_length=target_length)
 
 
+_EPSNSC_TLV_FIELDS = (
+    "ksiAsme",
+    "kAsmeHex",
+    "uplinkNasCount",
+    "downlinkNasCount",
+    "nasCipheringAlgorithm",
+    "nasIntegrityAlgorithm",
+)
+
+
+def _parse_nas_algorithm_identifier(value: Any, *, family: str, label: str) -> int:
+    """Accept ``2``, ``"128-EEA2"``, ``"EEA2"`` (or the EIA / 5G-EA / 5G-IA
+    spellings) and return the 3-bit TS 24.301 §9.9.3.23 identifier."""
+
+    if isinstance(value, bool):
+        raise RoundtripEncoderError(f"{label}: must be an integer or algorithm name")
+    if isinstance(value, int):
+        identifier = int(value)
+    else:
+        text = str(value or "").strip().upper()
+        prefix = family.upper()
+        if text.startswith("128-"):
+            text = text[4:]
+        if text.startswith(prefix) is False or text[len(prefix):].isdigit() is False:
+            raise RoundtripEncoderError(
+                f"{label}: expected {family}<n> / 128-{family}<n> or an integer, got {value!r}"
+            )
+        identifier = int(text[len(prefix):])
+    if identifier < 0 or identifier > 7:
+        raise RoundtripEncoderError(f"{label}: identifier must be 0..7, got {identifier}")
+    return identifier
+
+
+def _encode_nas_count(payload: dict[str, Any], key: str) -> bytes:
+    count = _require_int(payload, key)
+    if count < 0 or count > 0xFFFFFFFF:
+        raise RoundtripEncoderError(f"EF.EPSNSC: {key!r} must fit in 4 bytes")
+    return count.to_bytes(4, "big", signed=False)
+
+
 def encode_ef_eps_nas_security_context(
     payload: dict[str, Any],
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.EPSNSC (TS 31.102 §4.2.101): ``KSI header(1) + KASME(16)
-    + optional remainder``."""
+    """Encode EF.EPSNSC (TS 31.102 §4.2.92) as the ``A0`` EPS NAS Security
+    Context TLV: ``80`` KSI_ASME (1 byte), ``81`` K_ASME (32 bytes, or empty
+    for "no key"), ``82`` / ``83`` NAS COUNTs (4 bytes), ``84`` the selected
+    NAS algorithms byte. The pre-TLV ``ksiHeader`` + ``kasmeFirst16Bytes``
+    split is still accepted for records the decoder flagged as non-TLV."""
 
-    if "raw" in payload and "ksiHeader" not in payload:
+    has_tlv_fields = any(key in payload for key in _EPSNSC_TLV_FIELDS)
+    if "raw" in payload and has_tlv_fields is False and "ksiHeader" not in payload:
         return _pad_ff(
             _hex_to_bytes(_require_hex(payload, "raw")),
             target_length=target_length,
         )
+    if has_tlv_fields:
+        ksi = _require_int(payload, "ksiAsme")
+        if ksi < 0 or ksi > 7:
+            raise RoundtripEncoderError("EF.EPSNSC: 'ksiAsme' must be 0..7 ('07' = no key)")
+        kasme_text = str(payload.get("kAsmeHex", "") or "").strip().upper()
+        if len(kasme_text) == 0:
+            kasme_bytes = b""
+        else:
+            kasme_bytes = _hex_to_bytes(_require_hex(payload, "kAsmeHex"))
+        if len(kasme_bytes) not in (0, 32):
+            raise RoundtripEncoderError(
+                "EF.EPSNSC: 'kAsmeHex' must be 32 bytes (64 hex chars) or empty"
+            )
+        ciphering = _parse_nas_algorithm_identifier(
+            payload.get("nasCipheringAlgorithm", 0),
+            family="EEA",
+            label="EF.EPSNSC nasCipheringAlgorithm",
+        )
+        integrity = _parse_nas_algorithm_identifier(
+            payload.get("nasIntegrityAlgorithm", 0),
+            family="EIA",
+            label="EF.EPSNSC nasIntegrityAlgorithm",
+        )
+        inner = (
+            _encode_tlv_primitive("80", bytes([ksi]))
+            + _encode_tlv_primitive("81", kasme_bytes)
+            + _encode_tlv_primitive("82", _encode_nas_count(payload, "uplinkNasCount"))
+            + _encode_tlv_primitive("83", _encode_nas_count(payload, "downlinkNasCount"))
+            + _encode_tlv_primitive("84", bytes([(ciphering << 4) | integrity]))
+        )
+        return _pad_ff(_encode_tlv_primitive("A0", inner), target_length=target_length)
     if "ksiHeader" not in payload:
         raise RoundtripEncoderError(
-            "EF.EPSNSC: provide 'ksiHeader' + 'kasmeFirst16Bytes' or 'raw'"
+            "EF.EPSNSC: provide the 'ksiAsme' / 'kAsmeHex' / NAS count fields, "
+            "'ksiHeader' + 'kasmeFirst16Bytes', or 'raw'"
         )
     ksi_byte = _parse_hex_byte_text(payload["ksiHeader"], label="EF.EPSNSC ksiHeader")
     kasme_hex = str(payload.get("kasmeFirst16Bytes", "") or "").strip()
@@ -2182,10 +2552,17 @@ def encode_file_descriptor(payload: dict[str, Any]) -> bytes:
     """Inverse of ``_decode_file_descriptor``.
 
     The decoder exposes both structured fields (shareable/fileType/
-    structure + descriptor coding byte + optional recordLength /
-    numberOfRecords) and the raw ``hex``. We prefer the raw form when
-    present (byte-exact round-trip); otherwise we recompose the descriptor
-    byte from the structured fields.
+    structure + descriptor coding byte + optional recordLength) and the
+    raw ``hex``. We prefer the raw form when present (byte-exact
+    round-trip); otherwise we recompose the descriptor byte from the
+    structured fields.
+
+    TCA SAIP V3.4.1 §8.3.2 constrains ``Fcp.fileDescriptor`` to
+    ``SIZE(2..4)`` coded as ETSI TS 102 222 V17.1.0 §6.3.2.2.2 Table 4:
+    the record length is the last field, and the number of records is
+    efFileSize / record length. asn1tools does not check the size
+    constraint, so a 5-byte value (the TS 102 221 SELECT layout with a
+    record count) is refused here instead of reaching a card.
     """
 
     if "hex" in payload and isinstance(payload["hex"], str):
@@ -2201,6 +2578,12 @@ def encode_file_descriptor(payload: dict[str, Any]) -> bytes:
             if len(value_bytes) < 2:
                 raise RoundtripEncoderError(
                     "fileDescriptor: 'hex' must be at least 2 bytes"
+                )
+            if len(value_bytes) > 4:
+                raise RoundtripEncoderError(
+                    f"fileDescriptor: {len(value_bytes)} bytes; a profile carries "
+                    "2 or 4 (SAIP V3.4.1 §8.3.2 SIZE(2..4)). The record count "
+                    "is efFileSize / record length, not a descriptor byte."
                 )
             return value_bytes
     file_type = str(payload.get("fileType", "") or "").strip()
@@ -2233,20 +2616,19 @@ def encode_file_descriptor(payload: dict[str, Any]) -> bytes:
         label="fileDescriptor descriptorCodingByte",
     )
     buffer = bytearray([descriptor_byte, coding_byte])
+    if payload.get("numberOfRecords") is not None:
+        raise RoundtripEncoderError(
+            "fileDescriptor: numberOfRecords has no place in a profile's file "
+            "descriptor (SAIP V3.4.1 §8.3.2 SIZE(2..4)); set efFileSize to "
+            "recordLength x records instead."
+        )
     record_length = payload.get("recordLength")
-    number_of_records = payload.get("numberOfRecords")
     if isinstance(record_length, int) and isinstance(record_length, bool) is False:
         if not 0 <= record_length <= 0xFFFF:
             raise RoundtripEncoderError(
                 "fileDescriptor: recordLength must fit in 2 bytes"
             )
         buffer.extend(int(record_length).to_bytes(2, "big"))
-        if isinstance(number_of_records, int) and isinstance(number_of_records, bool) is False:
-            if not 0 <= number_of_records <= 0xFF:
-                raise RoundtripEncoderError(
-                    "fileDescriptor: numberOfRecords must fit in 1 byte"
-                )
-            buffer.append(int(number_of_records))
     return bytes(buffer)
 
 
@@ -2589,140 +2971,100 @@ def encode_sd_install_parameters(payload: dict[str, Any]) -> bytes:
     )
 
 
-def encode_uicc_toolkit_parameters(payload: dict[str, Any]) -> bytes:
-    """Inverse of ``_decode_uicc_toolkit_parameters``.
+def _payload_hex(payload: dict[str, Any], key: str, label: str) -> bytes:
+    """The bytes of a hex member; empty when it is absent, refused when malformed."""
+    value = payload.get(key)
+    if value is None:
+        return b""
+    text = str(value).strip()
+    if len(text) % 2 != 0 or any(ch not in "0123456789ABCDEFabcdef" for ch in text):
+        raise RoundtripEncoderError(f"{label}: {key!r} must be even-length hex")
+    return bytes.fromhex(text)
 
-    The decoder exposes a parsed view of the flat ETSI TS 102 226 record
-    but also keeps the original bytes under ``rawHex``; we prefer that
-    verbatim path. Callers wanting to edit individual fields should set
-    ``rawHex`` to an empty string and populate the structured fields; in
-    that case we re-pack the record end-to-end.
-    """
 
-    raw_hex = str(payload.get("rawHex", "") or "").strip()
-    if len(raw_hex) > 0:
-        if len(raw_hex) % 2 != 0 or any(
-            ch not in "0123456789ABCDEFabcdef" for ch in raw_hex
-        ):
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: 'rawHex' must be even-length hex"
-            )
-        return bytes.fromhex(raw_hex)
+def _length_prefixed(value: bytes, label: str, name: str) -> bytes:
+    if len(value) > 0xFF:
+        raise RoundtripEncoderError(f"{label}: {name} is longer than 255 bytes")
+    return bytes([len(value)]) + value
 
+
+def _encode_toolkit_resources(payload: dict[str, Any], label: str) -> bytes:
+    """Priority level through TAR values, ETSI TS 102 226 V19.0.0 §8.2.1.3.2.1
+    and §8.2.1.3.2.2.1: a menu entry is its position, then its identifier."""
     try:
-        access_domain_hex = str(payload.get("accessDomain", "") or "").strip()
-        if len(access_domain_hex) % 2 != 0 or any(
-            ch not in "0123456789ABCDEFabcdef" for ch in access_domain_hex
-        ):
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: 'accessDomain' must be hex"
-            )
-        access_domain = bytes.fromhex(access_domain_hex) if len(access_domain_hex) > 0 else b""
-        if len(access_domain) > 0xFF:
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: access domain > 255 bytes"
-            )
         priority = _require_byte_field(payload, "priorityLevelOfToolkitAppInstance")
         max_timers = _require_byte_field(payload, "maxNumberOfTimers")
         max_text = _require_byte_field(payload, "maxTextLengthForMenuEntry")
-        menu_entries = payload.get("menuEntries") or []
-        if isinstance(menu_entries, list) is False:
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: 'menuEntries' must be a list"
-            )
-        if len(menu_entries) > 0xFF:
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: menuEntries > 255"
-            )
         max_channels = _require_byte_field(payload, "maxNumberOfChannels")
-        msl_hex = str(payload.get("minimumSecurityLevelRaw", "") or "").strip()
-        if len(msl_hex) % 2 != 0 or any(
-            ch not in "0123456789ABCDEFabcdef" for ch in msl_hex
-        ):
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: 'minimumSecurityLevelRaw' must be hex"
-            )
-        msl_bytes = bytes.fromhex(msl_hex) if len(msl_hex) > 0 else b""
-        if len(msl_bytes) > 0xFF:
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: MSL length > 255 bytes"
-            )
-        tar_values = payload.get("tarValues") or []
-        if isinstance(tar_values, list) is False:
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: 'tarValues' must be a list"
-            )
-        tar_bytes = bytearray()
-        for tar in tar_values:
-            tar_hex = str(tar or "").strip()
-            if len(tar_hex) != 6 or any(
-                ch not in "0123456789ABCDEFabcdef" for ch in tar_hex
-            ):
-                raise RoundtripEncoderError(
-                    f"uiccToolkitApplicationSpecificParametersField: TAR {tar!r} must be 3 bytes (6 hex)"
-                )
-            tar_bytes.extend(bytes.fromhex(tar_hex))
-        if len(tar_bytes) > 0xFF:
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: TAR block > 255 bytes"
-            )
+    except RoundtripEncoderError as error:
+        raise RoundtripEncoderError(f"{label}: {error}") from error
+    menu_entries = payload.get("menuEntries") or []
+    if isinstance(menu_entries, list) is False or len(menu_entries) > 0xFF:
+        raise RoundtripEncoderError(f"{label}: 'menuEntries' must be a list of at most 255 entries")
+    menu = bytearray()
+    for index, entry in enumerate(menu_entries):
+        if isinstance(entry, dict) is False:
+            raise RoundtripEncoderError(f"{label}: menuEntries[{index}] must be an object")
+        pair = (entry.get("position"), entry.get("id"))
+        if any(isinstance(item, bool) or isinstance(item, int) is False or not 0 <= item <= 0xFF for item in pair):
+            raise RoundtripEncoderError(f"{label}: menuEntries[{index}] position and id must fit in one byte")
+        menu.extend(pair)
+    tar_values = payload.get("tarValues") or []
+    if isinstance(tar_values, list) is False:
+        raise RoundtripEncoderError(f"{label}: 'tarValues' must be a list")
+    tars = bytearray()
+    for index, tar in enumerate(tar_values):
+        tar_bytes = _payload_hex({"tar": tar}, "tar", f"{label}: tarValues[{index}]")
+        if len(tar_bytes) != 3:
+            raise RoundtripEncoderError(f"{label}: TAR {tar!r} must be 3 bytes (6 hex)")
+        tars.extend(tar_bytes)
+    msl = _payload_hex(payload, "minimumSecurityLevelRaw", label)
+    return (
+        bytes([priority, max_timers, max_text, len(menu_entries)])
+        + bytes(menu)
+        + bytes([max_channels])
+        + _length_prefixed(msl, label, "the MSL field")
+        + _length_prefixed(bytes(tars), label, "the TAR values")
+    )
 
-        menu_bytes = bytearray()
-        for entry in menu_entries:
-            if isinstance(entry, dict) is False:
-                raise RoundtripEncoderError(
-                    "uiccToolkitApplicationSpecificParametersField: each menu entry must be a dict"
-                )
-            entry_id = entry.get("id")
-            position = entry.get("position")
-            if (
-                isinstance(entry_id, bool)
-                or isinstance(entry_id, int) is False
-                or isinstance(position, bool)
-                or isinstance(position, int) is False
-            ):
-                raise RoundtripEncoderError(
-                    "uiccToolkitApplicationSpecificParametersField: menu entry id/position must be ints"
-                )
-            if not (0 <= int(entry_id) <= 0xFF and 0 <= int(position) <= 0xFF):
-                raise RoundtripEncoderError(
-                    "uiccToolkitApplicationSpecificParametersField: menu id/position must fit in 1 byte"
-                )
-            menu_bytes.append(int(entry_id))
-            menu_bytes.append(int(position))
 
-        trailing_hex = str(payload.get("trailingPadding", "") or "").strip()
-        if len(trailing_hex) % 2 != 0 or any(
-            ch not in "0123456789ABCDEFabcdef" for ch in trailing_hex
-        ):
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: 'trailingPadding' must be hex"
-            )
-        trailing_bytes = bytes.fromhex(trailing_hex) if len(trailing_hex) > 0 else b""
-        if any(byte_value != 0x00 for byte_value in trailing_bytes):
-            raise RoundtripEncoderError(
-                "uiccToolkitApplicationSpecificParametersField: trailingPadding must be zero bytes"
-            )
+def encode_uicc_toolkit_parameters(payload: dict[str, Any]) -> bytes:
+    """Inverse of ``_decode_uicc_toolkit_parameters``, ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.1.
 
-        buffer = bytearray()
-        buffer.append(len(access_domain))
-        buffer.extend(access_domain)
-        buffer.append(priority)
-        buffer.append(max_timers)
-        buffer.append(max_text)
-        buffer.append(len(menu_entries))
-        buffer.extend(menu_bytes)
-        buffer.append(max_channels)
-        buffer.append(len(msl_bytes))
-        buffer.extend(msl_bytes)
-        buffer.append(len(tar_bytes))
-        buffer.extend(tar_bytes)
-        buffer.extend(trailing_bytes)
-        return bytes(buffer)
-    except KeyError as exc:
+    A non-empty ``rawHex`` is written as is. Otherwise the toolkit resources
+    are packed, then ``maxNumberOfServices`` when it is set and the
+    ``additionalBytes`` after it. A non-empty ``accessDomain`` or
+    ``trailingPadding`` is refused: both belong to the SIM file access and
+    toolkit layout ('CA', §8.2.1.3.2.1) this field used to be read with.
+    """
+    label = "uiccToolkitApplicationSpecificParametersField"
+    raw = _payload_hex(payload, "rawHex", label)
+    if raw:
+        return raw
+    if _payload_hex(payload, "accessDomain", label):
         raise RoundtripEncoderError(
-            f"uiccToolkitApplicationSpecificParametersField: missing field {exc}"
-        ) from exc
+            f"{label}: the UICC toolkit parameters hold no access domain (ETSI TS 102 226 "
+            "V19.0.0 §8.2.1.3.2.2.1); the SIM file access and toolkit parameters ('CA') carry one"
+        )
+    if _payload_hex(payload, "trailingPadding", label):
+        raise RoundtripEncoderError(
+            f"{label}: the bytes after the TAR values are 'maxNumberOfServices' and "
+            "'additionalBytes' (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.1)"
+        )
+    out = bytearray(_encode_toolkit_resources(payload, label))
+    services = payload.get("maxNumberOfServices")
+    additional = _payload_hex(payload, "additionalBytes", label)
+    if services is None:
+        if additional:
+            raise RoundtripEncoderError(
+                f"{label}: 'additionalBytes' follow the maximum number of services; set 'maxNumberOfServices'"
+            )
+        return bytes(out)
+    if isinstance(services, bool) or isinstance(services, int) is False or not 0 <= services <= 0xFF:
+        raise RoundtripEncoderError(f"{label}: 'maxNumberOfServices' must fit in one byte")
+    out.append(services)
+    out.extend(additional)
+    return bytes(out)
 
 
 def _require_byte_field(payload: dict[str, Any], key: str) -> int:
@@ -2780,7 +3122,7 @@ def encode_ef_pkcs15_odf(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode a PKCS#15 ODF (EF 5031) — raw DER passthrough."""
+    """Encode a PKCS#15 ODF (EF 5031) -- raw DER passthrough."""
 
     return _encode_pkcs15_passthrough(
         payload,
@@ -2794,7 +3136,7 @@ def encode_ef_pkcs15_dodf(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode a PKCS#15 DODF (EF 5207) — raw DER passthrough."""
+    """Encode a PKCS#15 DODF (EF 5207) -- raw DER passthrough."""
 
     return _encode_pkcs15_passthrough(
         payload,
@@ -2808,7 +3150,7 @@ def encode_ef_pkcs15_acm(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode a PKCS#15 ACM (EF 4200) — raw DER passthrough."""
+    """Encode a PKCS#15 ACM (EF 4200) -- raw DER passthrough."""
 
     return _encode_pkcs15_passthrough(
         payload,
@@ -2822,7 +3164,7 @@ def encode_ef_pkcs15_accf(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode a PKCS#15 ACCF (EF 4310) — raw DER passthrough."""
+    """Encode a PKCS#15 ACCF (EF 4310) -- raw DER passthrough."""
 
     return _encode_pkcs15_passthrough(
         payload,
@@ -2844,9 +3186,9 @@ def encode_ef_group_identifier(
 ) -> bytes:
     """Encode EF.GID1 / EF.GID2. The payload may carry:
 
-    - ``hex``          — verbatim bytes (preferred).
-    - ``ascii``        — ASCII content; padded to ``target_length`` with 0xFF.
-    - ``_ygg_original_hex`` — fall back when no other field is present.
+    - ``hex``          -- verbatim bytes (preferred).
+    - ``ascii``        -- ASCII content; padded to ``target_length`` with 0xFF.
+    - ``_ygg_original_hex`` -- fall back when no other field is present.
     """
 
     if "hex" in payload and isinstance(payload["hex"], str):
@@ -3358,7 +3700,7 @@ def encode_ef_nasconfig(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.NASCONFIG — BER-TLV stream."""
+    """Encode EF.NASCONFIG -- BER-TLV stream."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -3384,7 +3726,7 @@ def encode_ef_suci_calc_info(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.SUCI_Calc_Info (TS 31.102 Annex N) — BER-TLV stream."""
+    """Encode EF.SUCI_Calc_Info (TS 31.102 Annex N) -- BER-TLV stream."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -3410,7 +3752,7 @@ def encode_ef_supinai(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.SUPI_NAI — ``80 LL <UTF-8 NAI>`` TLV."""
+    """Encode EF.SUPI_NAI -- ``80 LL <UTF-8 NAI>`` TLV."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -3673,11 +4015,15 @@ def encode_ef_uac_aic(
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
         if len(hex_text) > 0:
-            if len(hex_text) != 8 or any(
-                ch not in "0123456789ABCDEFabcdef" for ch in hex_text
+            # The decoder accepts any prefix of the 4-byte file, because a
+            # profile may fill only byte 1; accept the same range back.
+            if (
+                len(hex_text) % 2
+                or not 2 <= len(hex_text) <= 8
+                or any(ch not in "0123456789ABCDEFabcdef" for ch in hex_text)
             ):
                 raise RoundtripEncoderError(
-                    "EF.UAC_AIC: 'hex' must be 4 bytes (8 nibbles)"
+                    "EF.UAC_AIC: 'hex' must be 1 to 4 bytes"
                 )
             return _pad_ff(bytes.fromhex(hex_text), target_length=target_length)
     identities = payload.get("accessIdentities")
@@ -3756,16 +4102,18 @@ def encode_ef_mwis_record(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.MWIS record (5 bytes)."""
+    """Encode an EF.MWIS record (TS 31.102 §4.2.63): the indicator byte
+    and the four mandatory counters, plus the videomail counter when
+    ``videomailCount`` is given."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
         if len(hex_text) > 0:
-            if len(hex_text) != 10 or any(
+            if len(hex_text) < 10 or len(hex_text) % 2 != 0 or any(
                 ch not in "0123456789ABCDEFabcdef" for ch in hex_text
             ):
                 raise RoundtripEncoderError(
-                    "EF.MWIS: 'hex' must be 5 bytes (10 nibbles)"
+                    "EF.MWIS: 'hex' must be at least 5 bytes (10 nibbles)"
                 )
             return _pad_ff(bytes.fromhex(hex_text), target_length=target_length)
     indicator_raw = payload.get("indicatorByte")
@@ -3778,13 +4126,15 @@ def encode_ef_mwis_record(
             ("faxWaiting", 0x02),
             ("emailWaiting", 0x04),
             ("otherWaiting", 0x08),
+            ("videomailWaiting", 0x10),
         ):
             if bool(payload.get(bit_name, False)):
                 indicator |= mask
-    counters = bytearray(4)
-    for index, key_name in enumerate(
-        ("voicemailCount", "faxCount", "emailCount", "otherCount")
-    ):
+    counter_keys = ["voicemailCount", "faxCount", "emailCount", "otherCount"]
+    if "videomailCount" in payload:
+        counter_keys.append("videomailCount")
+    counters = bytearray()
+    for key_name in counter_keys:
         value = payload.get(key_name, 0)
         if isinstance(value, bool) or isinstance(value, int) is False:
             raise RoundtripEncoderError(
@@ -3794,8 +4144,15 @@ def encode_ef_mwis_record(
             raise RoundtripEncoderError(
                 f"EF.MWIS: {key_name!r} out of range"
             )
-        counters[index] = int(value)
-    result = bytes([indicator]) + bytes(counters)
+        counters.append(int(value))
+    trailer_hex = str(payload.get("trailerHex", "") or "").strip()
+    if len(trailer_hex) % 2 != 0 or any(
+        ch not in "0123456789ABCDEFabcdef" for ch in trailer_hex
+    ):
+        raise RoundtripEncoderError(
+            "EF.MWIS: 'trailerHex' must be an even-length hex string"
+        )
+    result = bytes([indicator]) + bytes(counters) + bytes.fromhex(trailer_hex)
     return _pad_ff(result, target_length=target_length)
 
 
@@ -3804,7 +4161,8 @@ def encode_ef_mbi_record(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.MBI record — one byte per slot (voicemail/fax/email/other/...)."""
+    """Encode an EF.MBI record (TS 31.102 §4.2.62) -- one EF.MBDN record
+    number per slot (voicemail/fax/email/other, optional videomail)."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -3819,7 +4177,7 @@ def encode_ef_mbi_record(
     slots = payload.get("slots")
     if isinstance(slots, dict) is False:
         raise RoundtripEncoderError("EF.MBI: provide 'hex' or 'slots'")
-    slot_order = ("voicemail", "fax", "email", "other")
+    slot_order = ("voicemail", "fax", "email", "other", "videomail")
     out = bytearray()
     for slot_name in slot_order:
         if slot_name in slots:
@@ -3852,9 +4210,9 @@ def encode_ef_cfis_record(
 ) -> bytes:
     """Encode EF.CFIS / EF.CFIS2 record.
 
-    Semantic fields: ``mspNumber`` (byte 0), ``cfIndicator`` or the four
-    ``*ForwardActive`` flags (byte 1). ``tailHex`` carries the remainder
-    verbatim for byte-identical round-trip.
+    Semantic fields: ``mspNumber`` (byte 0), ``cfIndicator`` or the five
+    ``*ForwardActive`` flags (byte 1, TS 31.102 §4.2.64). ``tailHex``
+    carries the remainder verbatim for byte-identical round-trip.
     """
 
     if "hex" in payload and isinstance(payload["hex"], str):
@@ -3884,6 +4242,7 @@ def encode_ef_cfis_record(
             ("faxForwardActive", 0x02),
             ("dataForwardActive", 0x04),
             ("smsForwardActive", 0x08),
+            ("bearerForwardActive", 0x10),
         ):
             if bool(payload.get(flag_name, False)):
                 indicator |= mask
@@ -4028,7 +4387,7 @@ def encode_ef_pbr(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.PBR — BER-TLV stream identical in shape to EF.NASCONFIG."""
+    """Encode EF.PBR -- BER-TLV stream identical in shape to EF.NASCONFIG."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -4108,7 +4467,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-cbmi": encode_ef_cbmi,
     "ef-cbmid": encode_ef_cbmi,
     "ef-cbmir": encode_ef_cbmir,
-    # 5x5 Pass A — call/phonebook family.
+    # 5x5 Pass A -- call/phonebook family.
     "ef-lnd": encode_ef_lnd_record,
     "ef-ici": encode_ef_ici_oci_record,
     "ef-oci": encode_ef_ici_oci_record,
@@ -4118,26 +4477,29 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-ccp1": encode_ef_ccp_record,
     "ef-ccp2": encode_ef_ccp_record,
     "ef-cmi": encode_ef_opaque,
-    # 5x5 Pass A — key material.
+    # 5x5 Pass A -- key material.
     "ef-keys": encode_ef_usim_keys_record,
+    # ``encode_decoded_roundtrip_ef_content`` lowercases before the lookup,
+    # so the SAIP ASN.1 spelling only resolves alongside a folded key.
     "ef-keysPS": encode_ef_usim_keys_record,
+    "ef-keysps": encode_ef_usim_keys_record,
     "ef-kc": encode_ef_gsm_kc_record,
     "ef-kcgprs": encode_ef_gsm_kc_record,
     "ef-hiddenkey": encode_ef_hidden_key,
-    # 5x5 Pass A — network config.
+    # 5x5 Pass A -- network config.
     "ef-netpar": encode_ef_opaque,
     "ef-nia": encode_ef_one_byte_indicator,
     "ef-lrplmnsi": encode_ef_one_byte_indicator,
     "ef-nasconfig": encode_ef_nasconfig,
     "ef-sume": encode_ef_opaque,
-    # 5x5 Pass A — 5G + obscure.
+    # 5x5 Pass A -- 5G + obscure.
     "ef-suci-calc-info-usim": encode_ef_suci_calc_info,
     "ef-supinai": encode_ef_supinai,
     "ef-pkcs15-acrf": encode_ef_opaque,
     "ef-cpbcch": encode_ef_opaque,
     "ef-invscan": encode_ef_one_byte_indicator,
     "ef-s7": encode_ef_opaque,
-    # 5x10 Pass A — 5G EFs (DF.5GS).
+    # 5x10 Pass A -- 5G EFs (DF.5GS).
     "ef-5gs3gpploci": encode_ef_opaque,
     "ef-5gsn3gpploci": encode_ef_opaque,
     "ef-5gs3gppnsc": encode_ef_opaque,
@@ -4148,11 +4510,11 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-opl5g": encode_ef_opl5g_record,
     "ef-routing-indicator": encode_ef_routing_indicator,
     "ef-ursp": encode_ef_opaque,
-    # 5x10 Pass C — 5G extras.
+    # 5x10 Pass C -- 5G extras.
     "ef-tn3gppsnn": encode_ef_uri_tlv,
     "ef-5gsedrx": encode_ef_opaque,
     "ef-5gnswo-conf": encode_ef_opaque,
-    # 5x10 Pass B / D — Phonebook family.
+    # 5x10 Pass B / D -- Phonebook family.
     "ef-pbr": encode_ef_pbr,
     "ef-iap": encode_ef_opaque,
     "ef-anr": encode_ef_adn_record,
@@ -4169,7 +4531,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-psc": encode_ef_opaque,
     "ef-cc": encode_ef_opaque,
     "ef-puid": encode_ef_opaque,
-    # 5x10 Pass C — additional 3GPP / legacy.
+    # 5x10 Pass C -- additional 3GPP / legacy.
     "ef-phase": encode_ef_one_byte_indicator,
     "ef-plmnsel": encode_ef_plmn_list_no_act,
     "ef-bcch": encode_ef_opaque,
@@ -4177,7 +4539,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-fdnuri": encode_ef_uri_tlv,
     "ef-sdnuri": encode_ef_uri_tlv,
     "ef-lnduri": encode_ef_uri_tlv,
-    # 5x10 Pass D — ISIM + multimedia extras.
+    # 5x10 Pass D -- ISIM + multimedia extras.
     "ef-pcscf-urn": encode_ef_pcscf_address,
     "ef-muddomain": encode_ef_uri_tlv,
     "ef-psismsc": encode_ef_opaque,
@@ -4188,7 +4550,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-earfcnlist": encode_ef_opaque,
     "ef-fcst": encode_ef_opaque,
     "ef-phist": encode_ef_opaque,
-    # 5x20 Pass A — Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL.
+    # 5x20 Pass A -- Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL.
     "ef-mbdn": encode_ef_adn_record,
     "ef-ext6": encode_ef_extension_record,
     "ef-mbi": encode_ef_mbi_record,
@@ -4209,7 +4571,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-mexe-st": encode_ef_opaque,
     "ef-prose-pfsr": encode_ef_opaque,
     "ef-vsuri": encode_ef_uri_tlv,
-    # 5x20 Pass B — CSIM family.
+    # 5x20 Pass B -- CSIM family.
     "ef-csim-spc": encode_ef_opaque,
     "ef-csim-smscap": encode_ef_opaque,
     "ef-csim-min": encode_ef_opaque,
@@ -4230,7 +4592,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-csim-ssci": encode_ef_opaque,
     "ef-csim-mlpl": encode_ef_opaque,
     "ef-csim-meruiid": encode_ef_opaque,
-    # 5x20 Pass C — Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
+    # 5x20 Pass C -- Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
     "ef-prose-pfidg": encode_ef_opaque,
     "ef-prose-pfddn": encode_ef_opaque,
     "ef-v2x-cfg": encode_ef_opaque,
@@ -4251,7 +4613,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-mcs-keyset": encode_ef_opaque,
     "ef-mcs-stat": encode_ef_opaque,
     "ef-mcs-sec-profile": encode_ef_opaque,
-    # 5x20 Pass D — Operator / vendor / auxiliary extensions.
+    # 5x20 Pass D -- Operator / vendor / auxiliary extensions.
     "ef-opcust1": encode_ef_opaque,
     "ef-opcust2": encode_ef_opaque,
     "ef-opcust3": encode_ef_opaque,
@@ -4285,15 +4647,12 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
 # accepts the same EF keys the decoder can read. The dispatcher lookup
 # normalises to lowercase, so catalog entries with mixed case (e.g.
 # ``ef-v2xp-Uu``) are stored under their lowercase form.
-from Tools.ProfilePackage.saip_asn1_decode import (
-    _OPAQUE_PASSTHROUGH_EF_CATALOG as _DECODE_OPAQUE_CATALOG,
-)
 
 
 def _register_opaque_passthrough_ef_dispatchers() -> None:
     """Extend ``_EF_CONTENT_DISPATCHER`` with every catalog entry.
 
-    Bespoke encoders already present in the dispatcher win — the catalog
+    Bespoke encoders already present in the dispatcher win -- the catalog
     is additive only, never overrides.
     """
 
@@ -4337,7 +4696,7 @@ def roundtrip_capable_ef_keys() -> tuple[str, ...]:
 
 
 # ---------------------------------------------------------------------------
-# 5x20 Pass D — PE-level subtag/field encoders.
+# 5x20 Pass D -- PE-level subtag/field encoders.
 #
 # These round-trip the ``{"hex": "..."}`` tagged-bytes form used throughout
 # the SAIP JSON for OCTET STRING fields that carry profile metadata or
@@ -4354,7 +4713,7 @@ def _encode_tagged_hex_passthrough(
     """Round-trip a ``{"hex": "..."}`` OCTET STRING field.
 
     Enforces optional length bounds in bytes when provided. The ``label``
-    key on the payload is ignored — it is UI metadata only.
+    key on the payload is ignored -- it is UI metadata only.
     """
 
     if "hex" not in payload:
@@ -4466,12 +4825,12 @@ def encode_notification_address_field(payload: dict[str, Any]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Wave A — generic tagged-bytes pass-through fields.
+# Wave A -- generic tagged-bytes pass-through fields.
 #
 # These fields are already carried as raw OCTET STRINGs in the SAIP JSON
 # (GlobalPlatform 9F70 / TS 102 226 / GSMA SAIP Annex D tagged bytes).
 # The decoded view and round-trip encoder both operate on the hex blob
-# without parsing the internal TLV — this is the "pass-through" contract
+# without parsing the internal TLV -- this is the "pass-through" contract
 # the user approved for Wave A (deeper TLV decoding is out of scope).
 #
 # Each entry here pairs with a ``_summarize_binary_blob`` dispatch entry
@@ -4495,7 +4854,7 @@ _PASSTHROUGH_BYTES_FIELD_NAMES: tuple[str, ...] = (
     "loadBlockObject",
     # PE-NonStandard opaque vendor content.
     "content",
-    # PE-CDMAParameter — GSMA SAIP Annex D authentication material.
+    # PE-CDMAParameter -- GSMA SAIP Annex D authentication material.
     # These are security credentials; we only pass-through the hex on
     # the editor surface. Any cryptographic use goes through the CDMA
     # personalisation path elsewhere in the toolkit.
@@ -4542,7 +4901,7 @@ def _make_passthrough_bytes_encoder(field_label: str):
 
 
 # ---------------------------------------------------------------------------
-# Round-6 Sweep 4 — structured round-trip encoders for the fields whose
+# Round-6 Sweep 4 -- structured round-trip encoders for the fields whose
 # Round-4 / Round-5 decoders surface a rich decoded view (OID dotted
 # string, single-byte bit flags, BER-TLV streams). Each encoder accepts
 # the pre-existing ``{"hex": ...}`` verbatim form so documents authored
@@ -4614,12 +4973,12 @@ def _encode_oid_dotted_to_bytes(oid_text: str) -> bytes:
 
 
 def encode_application_provider_identifier_field(payload: dict[str, Any]) -> bytes:
-    """SAIP §2.8.2 — re-encode the Application Provider OID.
+    """SAIP §2.8.2 -- re-encode the Application Provider OID.
 
     Preferred inputs (first non-empty wins):
-    1. ``hex`` — verbatim passthrough (keeps bytes identical even for
+    1. ``hex`` -- verbatim passthrough (keeps bytes identical even for
        non-canonical encodings found in deployed packages).
-    2. ``oid`` — dotted-decimal text; re-encoded per X.690 §8.19.
+    2. ``oid`` -- dotted-decimal text; re-encoded per X.690 §8.19.
     """
 
     hex_text = _hex_string_or_none(payload, "hex")
@@ -4646,14 +5005,14 @@ _GLOBAL_SERVICE_BITMAP: dict[str, int] = {
 
 
 def encode_global_service_parameters_field(payload: dict[str, Any]) -> bytes:
-    """SAIP §2.6.3 Table 2-6 — single-byte bitmap of global services.
+    """SAIP §2.6.3 Table 2-6 -- single-byte bitmap of global services.
 
     Accepts ``hex`` (any length; verbatim passthrough so non-canonical
     payloads authored before the Round-6 structured decoder still
     round-trip), ``bitmap`` (``"0xNN"`` or ``"NN"``), or
     ``activeServices`` (list of service names matching the decoder's
     ``_GLOBAL_SERVICE_BITS`` table). Length-1 constraints only apply to
-    the structured paths — the hex path stays lossless.
+    the structured paths -- the hex path stays lossless.
     """
 
     hex_text = _hex_string_or_none(payload, "hex")
@@ -4697,14 +5056,14 @@ def encode_global_service_parameters_field(payload: dict[str, Any]) -> bytes:
 
 
 def encode_implicit_selection_parameter_field(payload: dict[str, Any]) -> bytes:
-    """GlobalPlatform Card Spec Amd A §A.3 — single-byte selection flags.
+    """GlobalPlatform Card Spec Amd A §A.3 -- single-byte selection flags.
 
     Bit 8 (``defaultSelected``) distinguishes default-application
     selection from explicit AID selection; bits 1-5 carry the channel
     mask. Accepts ``hex`` (any length; verbatim passthrough) or
     structured ``defaultSelected`` (bool) + ``channelMask``
     (``"0xNN"`` / int). Length constraints only apply to the
-    structured path — the hex path stays lossless so legacy profiles
+    structured path -- the hex path stays lossless so legacy profiles
     round-trip unchanged.
     """
 
@@ -4754,7 +5113,7 @@ def encode_implicit_selection_parameter_field(payload: dict[str, Any]) -> bytes:
 
 
 def encode_contactless_protocol_parameters_field(payload: dict[str, Any]) -> bytes:
-    """GlobalPlatform Card Spec Amd C §5 — BER-TLV contactless protocol
+    """GlobalPlatform Card Spec Amd C §5 -- BER-TLV contactless protocol
     parameters.
 
     Preferred input is ``hex`` (verbatim). When ``hex`` is absent the
@@ -4779,7 +5138,7 @@ def encode_contactless_protocol_parameters_field(payload: dict[str, Any]) -> byt
 def encode_user_interaction_contactless_parameters_field(
     payload: dict[str, Any],
 ) -> bytes:
-    """GlobalPlatform Card Spec Amd C §6 — BER-TLV user-interaction
+    """GlobalPlatform Card Spec Amd C §6 -- BER-TLV user-interaction
     contactless parameters. Accepts ``hex`` (verbatim) or ``items``."""
 
     hex_text = _hex_string_or_none(payload, "hex")
@@ -4813,13 +5172,13 @@ _RESTRICT_PARAMETER_NAME_TO_BIT: dict[str, int] = {
 
 
 def encode_restrict_parameter_field(payload: dict[str, Any]) -> bytes:
-    """SAIP §8.6.6 / GlobalPlatform Amd F §A.4 — single-byte bitmap.
+    """SAIP §8.6.6 / GlobalPlatform Amd F §A.4 -- single-byte bitmap.
 
     Accepted inputs (first non-empty wins):
-    1. ``hex`` — verbatim passthrough (any length) so legacy profiles
+    1. ``hex`` -- verbatim passthrough (any length) so legacy profiles
        round-trip unchanged.
-    2. ``bitmap`` — ``"0xNN"`` or ``"NN"``; must fit in one byte.
-    3. ``activeRestrictions`` — list of labels from
+    2. ``bitmap`` -- ``"0xNN"`` or ``"NN"``; must fit in one byte.
+    3. ``activeRestrictions`` -- list of labels from
        :data:`_RESTRICT_PARAMETER_NAME_TO_BIT`.
     """
 
@@ -4922,97 +5281,89 @@ _GP_MEMORY_QUOTA_FIELD_NAMES: tuple[str, ...] = (
 def encode_ts102226_sim_file_access_toolkit_parameter_field(
     payload: dict[str, Any],
 ) -> bytes:
-    """TS 102 226 §8.2.1.3.2.3 — SIM File Access + Toolkit Application
-    combined parameters.
+    """Inverse of ``_decode_ts102226_sim_file_access_toolkit_parameter``, ETSI TS 102 226 V19.0.0 §8.2.1.3.2.1.
 
-    Structure: ``len(N1) || SIM Toolkit params || len(N2) || SIM File
-    Access params``. ``hex`` passthrough always wins; the structured
-    path re-emits from the ``simToolkitApplicationParameters.hex`` +
-    ``simFileAccessParameters.hex`` pair produced by the decoder.
-    Optional ``trailingBytes`` (also hex) is appended verbatim.
+    A non-empty ``hex`` is written as is. Otherwise the length-prefixed
+    access domain, the toolkit resources and ``additionalBytes``. The
+    two-section shape (``simToolkitApplicationParameters`` /
+    ``simFileAccessParameters``) this field used to be read with is refused.
     """
-
-    hex_text = _hex_string_or_none(payload, "hex")
-    if hex_text is not None:
-        return bytes.fromhex(hex_text)
-    toolkit_section = payload.get("simToolkitApplicationParameters")
-    file_access_section = payload.get("simFileAccessParameters")
-    if (
-        isinstance(toolkit_section, dict) is False
-        or isinstance(file_access_section, dict) is False
-    ):
+    label = "ts102226SIMFileAccessToolkitParameter"
+    raw = _payload_hex(payload, "hex", label)
+    if raw:
+        return raw
+    if "simToolkitApplicationParameters" in payload or "simFileAccessParameters" in payload:
         raise RoundtripEncoderError(
-            "ts102226SIMFileAccessToolkitParameter: provide 'hex' or both "
-            "'simToolkitApplicationParameters' and 'simFileAccessParameters'"
+            f"{label}: the field is one block, the access domain then the toolkit resources "
+            "(ETSI TS 102 226 V19.0.0 §8.2.1.3.2.1); provide 'hex' or those fields"
         )
-    toolkit_hex = _hex_string_or_none(toolkit_section, "hex") or ""
-    file_access_hex = _hex_string_or_none(file_access_section, "hex") or ""
-    toolkit_bytes = bytes.fromhex(toolkit_hex) if len(toolkit_hex) > 0 else b""
-    file_access_bytes = (
-        bytes.fromhex(file_access_hex) if len(file_access_hex) > 0 else b""
+    access_domain = _payload_hex(payload, "accessDomain", label)
+    if not access_domain:
+        raise RoundtripEncoderError(
+            f"{label}: provide 'hex', or an 'accessDomain' of 1 to p bytes and the toolkit "
+            "resources (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.1)"
+        )
+    return (
+        _length_prefixed(access_domain, label, "the access domain")
+        + _encode_toolkit_resources(payload, label)
+        + _payload_hex(payload, "additionalBytes", label)
     )
-    if len(toolkit_bytes) > 0xFF or len(file_access_bytes) > 0xFF:
-        raise RoundtripEncoderError(
-            "ts102226SIMFileAccessToolkitParameter: section lengths must fit in 1 byte"
-        )
-    accumulator = bytearray()
-    accumulator.append(len(toolkit_bytes))
-    accumulator.extend(toolkit_bytes)
-    accumulator.append(len(file_access_bytes))
-    accumulator.extend(file_access_bytes)
-    trailing_hex = _hex_string_or_none(payload, "trailingBytes")
-    if trailing_hex is not None:
-        accumulator.extend(bytes.fromhex(trailing_hex))
-    return bytes(accumulator)
 
 
-def _encode_uicc_access_records(
+def _encode_uicc_access_entries(
     field_label: str,
     payload: dict[str, Any],
 ) -> bytes:
-    """Shared body for the regular + administrative UICC access encoders.
+    """Entries of a length-prefixed AID, access domain and access domain DAP,
+    ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.2 (page 27).
 
-    Re-emits the length-prefixed Access Domain records produced by the
-    matching decoder. ``hex`` passthrough on the outer payload always
-    wins so legacy profiles round-trip verbatim.
+    The UICC file system's AID is empty, an ADF's is 5 to 16 bytes. A
+    non-empty ``hex`` is written as is; the ``accessDomainRecords`` shape
+    this field used to be read with is refused.
     """
 
-    hex_text = _hex_string_or_none(payload, "hex")
-    if hex_text is not None:
-        return bytes.fromhex(hex_text)
-    records = payload.get("accessDomainRecords")
-    if isinstance(records, list) is False or len(records) == 0:
+    raw = _payload_hex(payload, "hex", field_label)
+    if raw:
+        return raw
+    if "accessDomainRecords" in payload:
         raise RoundtripEncoderError(
-            f"{field_label}: provide 'hex' or a non-empty 'accessDomainRecords' list"
+            f"{field_label}: the field is entries of AID, access domain and DAP "
+            "(ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.2); provide 'hex' or 'entries'"
         )
-    accumulator = bytearray()
-    for index, record in enumerate(records):
-        if isinstance(record, dict) is False:
+    entries = payload.get("entries")
+    if isinstance(entries, list) is False or len(entries) == 0:
+        raise RoundtripEncoderError(f"{field_label}: provide 'hex' or a non-empty 'entries' list")
+    out = bytearray()
+    file_system_entries = 0
+    for index, entry in enumerate(entries):
+        where = f"{field_label}: entries[{index}]"
+        if isinstance(entry, dict) is False:
+            raise RoundtripEncoderError(f"{where} must be an object")
+        aid = _payload_hex(entry, "aid", where)
+        domain = _payload_hex(entry, "accessDomain", where)
+        dap = _payload_hex(entry, "dap", where)
+        if len(aid) == 0:
+            file_system_entries += 1
+        elif not 5 <= len(aid) <= 16:
+            raise RoundtripEncoderError(f"{where}: an ADF AID is 5 to 16 bytes, not {len(aid)}")
+        if len(domain) == 0:
             raise RoundtripEncoderError(
-                f"{field_label}: accessDomainRecords[{index}] must be an object"
+                f"{where}: an access domain holds at least its parameter byte (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.5)"
             )
-        record_hex = _hex_string_or_none(record, "hex")
-        if record_hex is None:
-            raise RoundtripEncoderError(
-                f"{field_label}: accessDomainRecords[{index}] must carry 'hex'"
-            )
-        record_bytes = bytes.fromhex(record_hex)
-        if len(record_bytes) > 0xFF:
-            raise RoundtripEncoderError(
-                f"{field_label}: accessDomainRecords[{index}] exceeds 255 bytes"
-            )
-        accumulator.append(len(record_bytes))
-        accumulator.extend(record_bytes)
-    return bytes(accumulator)
+        out.extend(_length_prefixed(aid, where, "the AID"))
+        out.extend(_length_prefixed(domain, where, "the access domain"))
+        out.extend(_length_prefixed(dap, where, "the DAP"))
+    if file_system_entries > 1:
+        raise RoundtripEncoderError(f"{field_label}: only one entry may carry the empty UICC file system AID")
+    return bytes(out)
 
 
 def encode_uicc_access_application_specific_parameters_field(
     payload: dict[str, Any],
 ) -> bytes:
-    """TS 102 226 §8.2.1.3.2.2 — UICC access application-specific
-    parameters (regular variant)."""
+    """UICC access parameters, ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.2."""
 
-    return _encode_uicc_access_records(
+    return _encode_uicc_access_entries(
         "uiccAccessApplicationSpecificParametersField",
         payload,
     )
@@ -5021,17 +5372,17 @@ def encode_uicc_access_application_specific_parameters_field(
 def encode_uicc_administrative_access_application_specific_parameters_field(
     payload: dict[str, Any],
 ) -> bytes:
-    """TS 102 226 §8.2.1.3.2.2 — UICC access application-specific
-    parameters (administrative variant)."""
+    """UICC administrative access parameters, coded as the access parameters
+    (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.4)."""
 
-    return _encode_uicc_access_records(
+    return _encode_uicc_access_entries(
         "uiccAdministrativeAccessApplicationSpecificParametersField",
         payload,
     )
 
 
 # ---------------------------------------------------------------------------
-# 5x20 Pass D — scalar field encoders (PE-level INTEGERs).
+# 5x20 Pass D -- scalar field encoders (PE-level INTEGERs).
 
 
 def encode_major_version_field(payload: dict[str, Any]) -> int:
@@ -5117,7 +5468,7 @@ _BYTES_DISPATCHER: dict[str, Any] = {
     "uiccAdminAccessDomain": encode_access_domain,
     "adfAccessDomain": encode_access_domain,
     "adfAdminAccessDomain": encode_access_domain,
-    # Round 1 — file-structure fields.
+    # Round 1 -- file-structure fields.
     "filePath": encode_file_path,
     "linkPath": encode_link_path,
     "fileDescriptor": encode_file_descriptor,
@@ -5125,16 +5476,16 @@ _BYTES_DISPATCHER: dict[str, Any] = {
     "fillPattern": encode_fill_pattern,
     "repeatPattern": encode_repeat_pattern,
     "fileDetails": encode_file_details,
-    # Round 3 — PIN/PUK/key-material.
+    # Round 3 -- PIN/PUK/key-material.
     "pinValue": encode_pin_secret_value,
     "pukValue": encode_pin_secret_value,
     "keyData": encode_key_data,
     "pinStatusTemplateDO": encode_pin_status_template_do,
-    # Round 4 — install/connectivity parameters.
+    # Round 4 -- install/connectivity parameters.
     "connectivityParameters": encode_connectivity_parameters,
     "applicationSpecificParametersC9": encode_sd_install_parameters,
     "uiccToolkitApplicationSpecificParametersField": encode_uicc_toolkit_parameters,
-    # 5x20 Pass D — PE-level OCTET STRING subtag encoders.
+    # 5x20 Pass D -- PE-level OCTET STRING subtag encoders.
     "iccid": encode_iccid_field,
     "hashValue": encode_hash_value_field,
     "lcsi": encode_lcsi_field,
@@ -5151,14 +5502,14 @@ _BYTES_DISPATCHER: dict[str, Any] = {
     "serialNumber": encode_serial_number_field,
     "notificationAddress": encode_notification_address_field,
     "shortEFID": encode_short_efid_field,
-    # Round-6 Sweep 4 — structured round-trip encoders paired with the
+    # Round-6 Sweep 4 -- structured round-trip encoders paired with the
     # Round-4/Round-5 semantic decoders.
     "applicationProviderIdentifier": encode_application_provider_identifier_field,
     "globalServiceParameters": encode_global_service_parameters_field,
     "implicitSelectionParameter": encode_implicit_selection_parameter_field,
     "contactlessProtocolParameters": encode_contactless_protocol_parameters_field,
     "userInteractionContactlessParameters": encode_user_interaction_contactless_parameters_field,
-    # Remaining-gap structured encoders — previously hex-only pass-through.
+    # Remaining-gap structured encoders -- previously hex-only pass-through.
     "restrictParameter": encode_restrict_parameter_field,
     "ts102226SIMFileAccessToolkitParameter": encode_ts102226_sim_file_access_toolkit_parameter_field,
     "uiccAccessApplicationSpecificParametersField": encode_uicc_access_application_specific_parameters_field,
@@ -5180,7 +5531,7 @@ for _aid_field in _AID_FIELD_NAMES:
 for _memory_field in _MEMORY_LIMIT_FIELD_LABELS:
     _BYTES_DISPATCHER[_memory_field] = encode_memory_limit_field
 
-# Wave A — register generic tagged-bytes pass-through encoders.
+# Wave A -- register generic tagged-bytes pass-through encoders.
 for _passthrough_field in _PASSTHROUGH_BYTES_FIELD_NAMES:
     _BYTES_DISPATCHER[_passthrough_field] = _make_passthrough_bytes_encoder(
         _passthrough_field
@@ -5196,7 +5547,7 @@ _SCALAR_DISPATCHER: dict[str, Any] = {
     "keyReference": encode_pin_puk_adm_key_reference,
     "maxNumOfAttemps-retryNumLeft": encode_pin_puk_retry_counter,
     "maxNumOfAttempts-retryNumLeft": encode_pin_puk_retry_counter,
-    # 5x20 Pass D — PE-level INTEGER subtag encoders.
+    # 5x20 Pass D -- PE-level INTEGER subtag encoders.
     "major-version": encode_major_version_field,
     "minor-version": encode_minor_version_field,
     "identification": encode_identification_field,
@@ -5289,9 +5640,9 @@ def roundtrip_capable_fields() -> dict[str, str]:
     """Return a mapping of field name -> natural output kind.
 
     ``kind`` is one of:
-    - ``"bytes"`` — field is stored as tagged-bytes OCTET STRING.
-    - ``"scalar"`` — field is stored as an ASN.1 INTEGER.
-    - ``"oid"`` — field is stored as an ASN.1 OBJECT IDENTIFIER string.
+    - ``"bytes"`` -- field is stored as tagged-bytes OCTET STRING.
+    - ``"scalar"`` -- field is stored as an ASN.1 INTEGER.
+    - ``"oid"`` -- field is stored as an ASN.1 OBJECT IDENTIFIER string.
     """
 
     kinds: dict[str, str] = {}

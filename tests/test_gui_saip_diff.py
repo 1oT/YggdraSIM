@@ -128,7 +128,7 @@ class TestDiffPackagesHappyPath:
     ) -> None:
         """``saip.set_variable`` stamps placeholder defs into
         ``__ygg_token_defs__`` (and the placeholder-style flag) rather
-        than rewriting in-place ICCID bytes — the resolution happens
+        than rewriting in-place ICCID bytes -- the resolution happens
         at encode time. The semantic diff therefore surfaces this as
         a ``variables`` change, not an identity rotation. Pinning the
         observable behaviour here so a future engine tweak doesn't
@@ -161,7 +161,7 @@ class TestDiffPackagesHappyPath:
         self, two_saip_sessions
     ) -> None:
         """Mutate the decoded document directly so the change shows
-        up under ``sections.<pe>.iccid`` — exercises the engine's
+        up under ``sections.<pe>.iccid`` -- exercises the engine's
         identity classifier through the live dispatcher path.
         """
         a, b = two_saip_sessions
@@ -183,7 +183,7 @@ class TestDiffPackagesHappyPath:
             session_b=b.id,
         )
         assert payload["is_empty"] is False
-        # The whole synthetic_header section was added — that lands
+        # The whole synthetic_header section was added -- that lands
         # as a pe_sequence entry (warning). Its child leaves don't
         # appear individually because the structural walker emits
         # one entry per added subtree root.
@@ -223,7 +223,7 @@ class TestDiffAgainstSourceArgumentValidation:
     def test_handle_without_source_path_raises(self) -> None:
         if not _REFERENCE_PROFILE.exists():
             pytest.skip(f"reference profile not present: {_REFERENCE_PROFILE}")
-        # Open a session via the loader path but DON'T stamp source_path —
+        # Open a session via the loader path but DON'T stamp source_path --
         # this mimics a corrupted/legacy handle that lost its on-disk
         # association.
         handle = _load_package_from_path(_REFERENCE_PROFILE)

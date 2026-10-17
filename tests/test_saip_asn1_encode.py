@@ -70,7 +70,9 @@ def _hex_to_bytes(hex_text: str) -> bytes:
 
 class SaipEncodeEnumRoundtripTests(unittest.TestCase):
     def test_life_cycle_state_roundtrips_for_every_named_state(self) -> None:
-        for code in (0x01, 0x03, 0x07, 0x0F, 0x83):
+        # 0x01 (an Executable Load File state, GP Card Spec v2.3.1 Table 11-3)
+        # and 0x87 (LOCKED over SELECTABLE, Table 11-4) carry no table name.
+        for code in (0x01, 0x03, 0x07, 0x0F, 0x83, 0x87):
             raw = bytes([code])
             decoded = _decode_life_cycle_state(raw)
             assert decoded is not None
@@ -248,7 +250,7 @@ class SaipEncodeFlagBitmaskTests(unittest.TestCase):
             decoded = _decode_profile_policy_rules(raw)
             assert decoded is not None
             encoded = encode_decoded_roundtrip_bytes("pol", decoded)
-            # pol has a canonical encoding — re-decoding must be stable.
+            # pol has a canonical encoding -- re-decoding must be stable.
             self.assertEqual(_decode_profile_policy_rules(encoded), _decode_profile_policy_rules(encoded))
             # Byte-identity only when input was canonical (minimal width).
             if len(raw) == 1:
@@ -445,7 +447,7 @@ class SaipEncodeEfContentRoundtripTests(unittest.TestCase):
         decoded = _decode_wlan_plmn_list(
             hex_fixture,
             format_name="User-controlled I-WLAN PLMN selector",
-            spec_reference="TS 31.102 §4.2.82",
+            spec_reference="TS 31.102 §4.4.5.2",
         )
         assert decoded is not None
         encoded = encode_decoded_roundtrip_ef_content(
@@ -458,7 +460,7 @@ class SaipEncodeEfContentRoundtripTests(unittest.TestCase):
         redecoded = _decode_wlan_plmn_list(
             encoded.hex().upper(),
             format_name="User-controlled I-WLAN PLMN selector",
-            spec_reference="TS 31.102 §4.2.82",
+            spec_reference="TS 31.102 §4.4.5.2",
         )
         self.assertEqual(decoded["entries"], redecoded["entries"])
 

@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for the decoded-view helpers in ``Tools.ProfilePackage.saip_diff_tui``.
 
-The Textual ``DiffApp`` itself is not exercised here — it is gated behind
+The Textual ``DiffApp`` itself is not exercised here -- it is gated behind
 the optional ``textual`` extra and would require a headless pilot. The
 helpers under test are pure functions that the app delegates to, so
 locking them in protects the diff-tui's decoded pane against silent
@@ -21,6 +20,8 @@ from Tools.ProfilePackage.saip_diff_tui import (
     _is_hex_string,
     _render_decoded_pane,
     _render_hex_with_byte_diff,
+    build_decoded_view_for_diff_path,
+    diff_path_to_components,
 )
 
 
@@ -134,7 +135,7 @@ class HexHelperTests(unittest.TestCase):
 class RenderDecodedPanePlainModeTests(unittest.TestCase):
     """Default mode (``show_hex_diff=False``) renders the original plain view.
 
-    No diff colouring inside the pane body — the side-by-side tree
+    No diff colouring inside the pane body -- the side-by-side tree
     above carries the diff signal. The pane content is whatever the
     decoder cascade produced, formatted as pretty-JSON.
     """
@@ -335,12 +336,6 @@ class BuildRelevantPathSetTests(unittest.TestCase):
     def test_non_string_inputs_are_skipped(self) -> None:
         result = _build_relevant_path_set(["sections.x", 42, None, "intro"])
         self.assertEqual(result, {"", "sections", "sections.x", "intro"})
-
-from Tools.ProfilePackage.saip_diff_tui import (
-    build_decoded_view_for_diff_path,
-    diff_path_to_components,
-)
-
 
 class DiffPathComponentsTests(unittest.TestCase):
     def test_empty_path_yields_no_components(self) -> None:

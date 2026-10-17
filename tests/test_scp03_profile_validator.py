@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
 
 import yaml
 
+from SCP03.logic.fs import FileSystemController
 from SCP03.logic.profile_validator import (
     POLICY_GROUPS,
     FileExpectation,
@@ -84,7 +87,70 @@ def _mf_meta(file_type, structure, size=0, sfi=None):
     }
 
 
+class _UsimByAidCard:
+    """A card that answers SELECT by AID with P2 '00' without any data.
+
+    The MF, ADF USIM (only under the TS 102 221 v18.4 table 11.2 coding
+    P2 '04') and EF_UST answer with their FCP; everything else is absent.
+    """
+
+    usim_aid = "A0000000871002FF34FF0789312E30FF"
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def transmit(self, apdu_hex: str, silent: bool = False):
+        del silent
+        command = apdu_hex.strip().upper()
+        self.calls.append(command)
+        if command == "00A40004023F00":
+            return bytes.fromhex("620782013883023F00"), 0x90, 0x00
+        if command == f"00A4040410{self.usim_aid}":
+            return bytes.fromhex(f"621D8202782183027FF08410{self.usim_aid}8A0105"), 0x90, 0x00
+        if command == f"00A4040010{self.usim_aid}":
+            return b"", 0x90, 0x00
+        if command == "00A40004026F38":
+            return bytes.fromhex("62128202412183026F388A01058002000A880120"), 0x90, 0x00
+        if command == "00B0000000":
+            return bytes.fromhex("FF" * 10), 0x90, 0x00
+        return b"", 0x6A, 0x82
+
+
 class ProfileValidatorTests(unittest.TestCase):
+    def test_adf_usim_is_validated_from_its_own_fcp(self):
+        # The ADF answers the undefined P2 '00' with SW 9000 and no data, so a
+        # controller that kept the previous EF's descriptor reported the ADF
+        # as a transparent EF. The FCP now comes from the P2 '04' SELECT.
+        card = _UsimByAidCard()
+        controller = FileSystemController(
+            card, aid_registry={"USIM": card.usim_aid, "ADF_USIM": card.usim_aid}
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            findings = ProfileValidator(controller).run(scope="USIM")
+
+        adf_findings = [finding for finding in findings if finding.path == "ADF_USIM"]
+        self.assertEqual(len(adf_findings), 1)
+        self.assertEqual(adf_findings[0].severity, "PASS")
+        self.assertIn(f"00A4040410{card.usim_aid}", card.calls)
+
+    def test_missing_fcp_is_reported_as_missing_not_as_the_previous_file(self):
+        fs_controller = DummyFsController(
+            {
+                "MF": {"fid": "3F00", "meta": _mf_meta("DF", "Tree")},
+                "ADF_USIM": {"fid": "7FFF", "meta": {"template": "Unknown", "raw": ""}},
+            }
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            findings = ProfileValidator(fs_controller).run(scope="USIM")
+
+        adf_findings = [finding for finding in findings if finding.path == "ADF_USIM"]
+        self.assertEqual(len(adf_findings), 1)
+        self.assertEqual(adf_findings[0].severity, "FAIL")
+        self.assertIn("no FCP template", adf_findings[0].message)
+        self.assertNotIn("type=", adf_findings[0].message)
+
     def test_validate_mf_passes_for_required_core_files(self):
         fs_controller = DummyFsController(
             {
@@ -129,7 +195,7 @@ class ProfileValidatorTests(unittest.TestCase):
                 },
                 "EF_PL": {
                     "fid": "2F05",
-                    "meta": _mf_meta("EF", "Transparent", size=6, sfi="28"),
+                    "meta": _mf_meta("EF", "Transparent", size=1, sfi="28"),
                 },
                 "EF_ICCID": {
                     "fid": "2FE2",
@@ -154,7 +220,7 @@ class ProfileValidatorTests(unittest.TestCase):
 
         ef_pl_findings = [finding for finding in findings if finding.path == "EF_PL"]
         self.assertEqual(ef_pl_findings[0].severity, "WARN")
-        self.assertIn("size=6, expected=2", ef_pl_findings[0].message)
+        self.assertIn("size=1, expected at least 2", ef_pl_findings[0].message)
         self.assertIn("sfi=28, expected=05", ef_pl_findings[0].message)
 
     def test_validate_strict_content_pattern_can_fail(self):
@@ -240,10 +306,6 @@ class ProfileValidatorTests(unittest.TestCase):
                     "fid": "2F05",
                     "meta": _mf_meta("EF", "Transparent", size=2, sfi="05"),
                 },
-                "EF_ICCID": {
-                    "fid": "2FE2",
-                    "meta": _mf_meta("EF", "Transparent", size=10),
-                },
                 "EF_DIR": {
                     "fid": "2F00",
                     "meta": _mf_meta("EF", "Linear Fixed", sfi="1E"),
@@ -258,7 +320,9 @@ class ProfileValidatorTests(unittest.TestCase):
         findings = ProfileValidator(fs_controller).run(scope="MF")
 
         fail_paths = [finding.path for finding in findings if finding.severity == "FAIL"]
-        self.assertIn("EF_ARR", fail_paths)
+        self.assertIn("EF_ICCID", fail_paths)
+        # TS 102 221 v18.4 Table 13.5: EF_ARR at MF level is optional.
+        self.assertNotIn("EF_ARR", fail_paths)
 
 
 class PolicyPackTests(unittest.TestCase):

@@ -3,6 +3,7 @@
 
 import unittest
 
+from SCP03.logic.sgp32_decode import decode_eim_acknowledgements
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entries
 from SCP03.logic.sgp32_decode import decode_euicc_info1_summary
 from SCP03.logic.sgp32_decode import decode_get_certs_response
@@ -40,10 +41,13 @@ class Sgp32DecodeHelperTests(unittest.TestCase):
         self.assertEqual(summary["ci_pk_sign_entries"], 1)
 
     def test_decode_notifications_response_decodes_notification_fields(self) -> None:
+        # SGP.22 v3.1 §5.7.9: NotificationMetadata.profileManagementOperation
+        # sets exactly one NotificationEvent bit -- '07 80' is
+        # notificationInstall(0) with seven unused bits.
         notification = b"".join(
             [
                 tlv("80", b"\x07"),
-                tlv("81", bytes.fromhex("04C0")),
+                tlv("81", bytes.fromhex("0780")),
                 tlv("0C", b"notify.example.com"),
                 tlv("5A", bytes.fromhex("981032547698103254F6")),
             ]
@@ -56,9 +60,27 @@ class Sgp32DecodeHelperTests(unittest.TestCase):
         first = decoded["notifications"][0]
         self.assertEqual(first["seqNumber"], "7")
         self.assertIn("notificationInstall", first["operation"])
-        self.assertIn("notificationLocalEnable", first["operation"])
+        self.assertNotIn("notificationParseError", first)
         self.assertEqual(first["notificationAddress"], '"notify.example.com"')
         self.assertEqual(first["iccid"], "8901234567890123456")
+
+    def test_multi_bit_profile_management_operation_is_reported_not_named(self) -> None:
+        # '04 C0' sets notificationInstall(0) and notificationLocalEnable(1),
+        # which SGP.22 v3.1 §5.7.9 forbids in NotificationMetadata.
+        notification = b"".join(
+            [
+                tlv("80", b"\x07"),
+                tlv("81", bytes.fromhex("04C0")),
+                tlv("0C", b"notify.example.com"),
+            ]
+        )
+        response = tlv("BF2B", tlv("A0", tlv("BF2F", notification)))
+
+        decoded = decode_notifications_response(response)
+
+        first = decoded["notifications"][0]
+        self.assertEqual(first["operation"], "04C0")
+        self.assertIn("one event bit", first["notificationParseError"])
 
     def test_decode_rat_rules_preserves_rule_structure(self) -> None:
         rule = tlv(
@@ -140,6 +162,32 @@ class Sgp32DecodeHelperTests(unittest.TestCase):
         self.assertEqual(first["association_token"], "16")
         self.assertIn("eimRetrieveHttps", first["supported_protocol"])
         self.assertEqual(first["indirect_profile_download"], "Present")
+
+    def test_decode_eim_acknowledgements_reads_bare_and_wrapped_lists(self) -> None:
+        acknowledgements = tlv("BF53", tlv("80", b"\x21") + tlv("80", b"\x22") + tlv("80", b"\x00\x80"))
+
+        self.assertEqual(decode_eim_acknowledgements(acknowledgements), [33, 34, 128])
+        self.assertEqual(decode_eim_acknowledgements(tlv("BF50", acknowledgements)), [33, 34, 128])
+
+    def test_decode_eim_acknowledgements_finds_nothing_in_the_other_response_alternatives(self) -> None:
+        self.assertEqual(decode_eim_acknowledgements(b""), [])
+        self.assertEqual(decode_eim_acknowledgements(tlv("BF50", tlv("30", b""))), [])
+        self.assertEqual(decode_eim_acknowledgements(tlv("BF50", tlv("02", b"\x7F"))), [])
+
+    def test_decode_eim_acknowledgements_refuses_malformed_input(self) -> None:
+        for sample in (
+            b"\xBF",
+            bytes.fromhex("BF53"),
+            bytes.fromhex("BF5305800121"),
+            tlv("A0", tlv("80", b"\x21")),
+            tlv("BF53", tlv("81", b"\x21")),
+            tlv("BF53", tlv("80", b"")),
+            tlv("BF53", tlv("80", b"\xFF")),
+            tlv("BF53", b"") + tlv("BF53", b""),
+        ):
+            with self.subTest(sample=sample.hex().upper()):
+                with self.assertRaises(ValueError):
+                    decode_eim_acknowledgements(sample)
 
 
 if __name__ == "__main__":

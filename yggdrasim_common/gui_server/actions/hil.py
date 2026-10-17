@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL bridge Command Center actions.
 
 These actions surface and control the existing ``Tools.HilBridge``
@@ -11,27 +10,27 @@ start / stop flow through the systemd user service.
 
 Actions registered:
 
-* ``hil.supervisor_status`` — synchronous snapshot of
+* ``hil.supervisor_status`` -- synchronous snapshot of
   ``runtime/state/hil_bridge_supervisor.json``. Returns the supervisor
   status, USB presence, bridge / REMSIM pids, and a compact summary the
   UI renders as key/value lines.
-* ``hil.bridge_status`` — synchronous HTTP probe of the live bridge
+* ``hil.bridge_status`` -- synchronous HTTP probe of the live bridge
   relay status URL (from ``hil_bridge_card_relay.json``). Degrades
   gracefully when the relay is not yet up.
-* ``hil.watch_supervisor`` — streaming action: poll the supervisor
+* ``hil.watch_supervisor`` -- streaming action: poll the supervisor
   state every N seconds and emit one ``{level, message, state}`` event
   per change. The UI renders this as a live status feed so operators
   can see the bridge come up / drop out without reloading the page.
-* ``hil.list_readers`` — enumerate the PC/SC readers the process can
+* ``hil.list_readers`` -- enumerate the PC/SC readers the process can
   see right now. Useful for picking ``YGGDRASIM_HIL_READER_INDEX``.
-* ``hil.service_status`` — systemd user service state for the bridge.
-* ``hil.service_control`` — start / stop / restart / enable-now /
+* ``hil.service_status`` -- systemd user service state for the bridge.
+* ``hil.service_control`` -- start / stop / restart / enable-now /
   disable the bridge user service. Destructive ones require the
   per-request ``confirm`` checkbox.
-* ``hil.session_start`` / ``hil.session_stop`` — start or stop the
+* ``hil.session_start`` / ``hil.session_stop`` -- start or stop the
   supervised HIL session using the same service-unit update flow as the
   terminal wrapper.
-* ``hil.decode_snapshot`` — read the active GSMTAP pcap with the same
+* ``hil.decode_snapshot`` -- read the active GSMTAP pcap with the same
   tshark-backed decoder used by the terminal decode view and return a
   bounded packet snapshot for the GUI HIL module.
 """
@@ -44,8 +43,12 @@ import logging
 import os
 import subprocess
 import sys
+import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from yggdrasim_common.frozen_dispatch import build_module_command
 
@@ -90,7 +93,7 @@ def _load_supervisor_snapshot() -> dict[str, Any]:
     if exists:
         try:
             mtime = float(os.path.getmtime(state_path))
-        except OSError:  # pragma: no cover — stat races
+        except OSError:  # pragma: no cover -- stat races
             mtime = 0.0
     return {
         "state_path": state_path,
@@ -140,7 +143,7 @@ def _summary_lines_from_state(state: dict[str, Any]) -> list[dict[str, str]]:
         reset_value = f"{str(reset_state.get('mode') or 'usb-reset')} ({int(reset_state.get('count', 0) or 0)}x)"
         last_reset = reset_state.get("last")
         if isinstance(last_reset, dict) and len(str(last_reset.get("error") or "").strip()) > 0:
-            reset_value += f" — last failed: {str(last_reset.get('error'))}"
+            reset_value += f" -- last failed: {str(last_reset.get('error'))}"
         lines.append({"key": "SIMtrace2 pre-session reset", "value": reset_value})
     reader_index = int(state.get("readerIndex", -1) or -1)
     if reader_index >= 0:
@@ -202,7 +205,7 @@ def _dispatch_bridge_status(ctx: ActionContext) -> dict[str, Any]:
 
     try:
         payload = read_bridge_status()
-    except Exception as error:  # noqa: BLE001 — relay not up is the common case
+    except Exception as error:  # noqa: BLE001 -- relay not up is the common case
         return {
             "ok": False,
             "error": f"{type(error).__name__}: {error}",
@@ -270,6 +273,61 @@ def _remote_decode_capture_metadata_path(local_capture_path: str) -> Path:
     return Path(str(local_capture_path) + ".remote.json")
 
 
+# Enough bytes to tell two captures apart at the same offset without
+# pulling the whole file back over SSH on every poll.
+_CAPTURE_BOUNDARY_PROBE_BYTES = 256
+
+
+def _remote_capture_continues_local(
+    *,
+    ssh_target: Any,
+    identity_file: Any,
+    remote_expr: str,
+    local_file: Path,
+    boundary: int,
+) -> bool:
+    """Do the remote and local captures still agree at the append boundary?
+
+    The writer truncates its capture in place, so a same-inode file of
+    growing size is not proof that the local copy is a prefix of it. The
+    bytes just before the boundary are compared instead; a mismatch means
+    the remote file was rewritten and the mirror has to be refetched.
+    """
+    window = min(_CAPTURE_BOUNDARY_PROBE_BYTES, max(0, int(boundary)))
+    if window <= 0:
+        return False
+    start = int(boundary) - window
+    try:
+        with local_file.open("rb") as handle:
+            handle.seek(start)
+            local_tail = handle.read(window)
+    except OSError:
+        return False
+    if len(local_tail) != window:
+        return False
+    from yggdrasim_common.gui_server.actions import card_bridge as cb
+
+    argv = cb._ssh_base_command(
+        ssh_target=ssh_target,
+        identity_file=identity_file,
+        connect_timeout=5,
+    )
+    argv.append(f"tail -c +{start + 1} {remote_expr} | head -c {window}")
+    try:
+        probe = subprocess.run(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if probe.returncode != 0:
+        return False
+    return bytes(probe.stdout or b"") == local_tail
+
+
 def _load_remote_decode_capture_metadata(local_capture_path: str) -> dict[str, Any]:
     metadata_path = _remote_decode_capture_metadata_path(local_capture_path)
     if metadata_path.is_file() is False:
@@ -288,6 +346,7 @@ def _write_remote_decode_capture_metadata(
     remote_path: str,
     remote_size: int,
     remote_mtime: float,
+    remote_inode: int = 0,
 ) -> None:
     metadata_path = _remote_decode_capture_metadata_path(local_capture_path)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -295,13 +354,39 @@ def _write_remote_decode_capture_metadata(
         "remote_path": str(remote_path or ""),
         "remote_size": int(remote_size),
         "remote_mtime": float(remote_mtime),
+        "remote_inode": int(remote_inode or 0),
     }
     with metadata_path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")
 
 
+# The GUI polls the decode snapshot every 700 ms; one ssh round trip per
+# poll is neither useful nor cheap, so the remote sync result is reused
+# for this long before the remote file is stat'ed again.
+_REMOTE_SYNC_MIN_INTERVAL_S = 3.0
+_REMOTE_SYNC_LOCK = threading.Lock()
+_REMOTE_SYNC_LAST: dict[str, Any] = {"at": 0.0, "result": None}
+
+
 def _sync_remote_decode_capture_if_available() -> dict[str, Any]:
+    """Rate-limited front for ``_sync_remote_decode_capture_uncached``."""
+    now = time.monotonic()
+    with _REMOTE_SYNC_LOCK:
+        cached = _REMOTE_SYNC_LAST.get("result")
+        if (
+            cached is not None
+            and (now - float(_REMOTE_SYNC_LAST.get("at") or 0.0)) < _REMOTE_SYNC_MIN_INTERVAL_S
+        ):
+            return dict(cached)
+    result = _sync_remote_decode_capture_uncached()
+    with _REMOTE_SYNC_LOCK:
+        _REMOTE_SYNC_LAST["at"] = time.monotonic()
+        _REMOTE_SYNC_LAST["result"] = dict(result)
+    return result
+
+
+def _sync_remote_decode_capture_uncached() -> dict[str, Any]:
     try:
         from yggdrasim_common.gui_server.actions import card_bridge as cb
     except Exception as error:  # noqa: BLE001
@@ -339,8 +424,8 @@ def _sync_remote_decode_capture_if_available() -> dict[str, Any]:
     remote_expr = cb._remote_shell_path_expr(remote_path)
     stat_command = (
         f"if [ ! -f {remote_expr} ]; then exit 3; fi; "
-        f"printf '%s\\t%s\\n' \"$(wc -c < {remote_expr})\" "
-        f"\"$(stat -c %Y {remote_expr})\""
+        f"printf '%s\\t%s\\t%s\\n' \"$(wc -c < {remote_expr})\" "
+        f"\"$(stat -c %Y {remote_expr})\" \"$(stat -c %i {remote_expr} 2>/dev/null || echo 0)\""
     )
     stat_argv = cb._ssh_base_command(
         ssh_target=ssh_target,
@@ -387,6 +472,11 @@ def _sync_remote_decode_capture_if_available() -> dict[str, Any]:
             "remote_capture_path": remote_path,
             "error": "remote capture stat output was not parseable",
         }
+    remote_inode = 0
+    try:
+        remote_inode = int(fields[2]) if len(fields) > 2 else 0
+    except (TypeError, ValueError):
+        remote_inode = 0
 
     metadata = _load_remote_decode_capture_metadata(local_path)
     local_file = Path(local_path)
@@ -406,21 +496,60 @@ def _sync_remote_decode_capture_if_available() -> dict[str, Any]:
             "copied": False,
         }
 
+    # A live GSMTAP pcap is append-only, so once the local copy holds the
+    # first N bytes of the same remote file only the bytes past N are
+    # fetched. Identity is not enough to prove that: the bridge's writer
+    # truncates the capture in place on every restart, keeping the inode,
+    # so a workbench closed across a restart and reopened after the file
+    # regrew would append the new capture's tail onto the old one's copy
+    # and produce a pcap whose second half starts mid-record. The bytes at
+    # the boundary are compared before trusting the fast path.
+    previous_size = int(metadata.get("remote_size", -1) or -1)
+    previous_inode = int(metadata.get("remote_inode", 0) or 0)
+    local_size = -1
+    if local_file.is_file():
+        try:
+            local_size = int(local_file.stat().st_size)
+        except OSError:
+            local_size = -1
+    append_only = (
+        local_size > 0
+        and local_size == previous_size
+        and remote_size > previous_size
+        and remote_inode > 0
+        and previous_inode == remote_inode
+        and str(metadata.get("remote_path") or "") == remote_path
+        and _remote_capture_continues_local(
+            ssh_target=ssh_target,
+            identity_file=identity_file,
+            remote_expr=remote_expr,
+            local_file=local_file,
+            boundary=previous_size,
+        )
+    )
     cat_argv = cb._ssh_base_command(
         ssh_target=ssh_target,
         identity_file=identity_file,
         connect_timeout=5,
     )
-    cat_argv.append(f"cat {remote_expr}")
+    if append_only:
+        cat_argv.append(f"tail -c +{previous_size + 1} {remote_expr}")
+    else:
+        cat_argv.append(f"cat {remote_expr}")
+
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    target_path = local_file if append_only else Path(local_path + ".tmp")
     try:
-        cat_result = subprocess.run(
-            cat_argv,
-            capture_output=True,
-            text=False,
-            timeout=20,
-            check=False,
-        )
+        with target_path.open("ab" if append_only else "wb") as handle:
+            cat_result = subprocess.run(
+                cat_argv,
+                stdout=handle,
+                stderr=subprocess.PIPE,
+                timeout=20,
+                check=False,
+            )
     except (OSError, subprocess.SubprocessError) as error:
+        _discard_partial_remote_copy(target_path, append_only=append_only, keep_bytes=previous_size)
         return {
             "configured": True,
             "ok": False,
@@ -429,6 +558,7 @@ def _sync_remote_decode_capture_if_available() -> dict[str, Any]:
             "error": f"{type(error).__name__}: {error}",
         }
     if cat_result.returncode != 0:
+        _discard_partial_remote_copy(target_path, append_only=append_only, keep_bytes=previous_size)
         stderr_text = bytes(cat_result.stderr or b"").decode("utf-8", errors="replace").strip()
         return {
             "configured": True,
@@ -439,15 +569,14 @@ def _sync_remote_decode_capture_if_available() -> dict[str, Any]:
             "error": stderr_text or "remote capture copy failed",
         }
 
-    tmp_path = Path(local_path + ".tmp")
-    local_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path.write_bytes(bytes(cat_result.stdout or b""))
-    tmp_path.replace(local_file)
+    if not append_only:
+        target_path.replace(local_file)
     _write_remote_decode_capture_metadata(
         local_path,
         remote_path=remote_path,
         remote_size=remote_size,
         remote_mtime=remote_mtime,
+        remote_inode=remote_inode,
     )
     return {
         "configured": True,
@@ -457,7 +586,20 @@ def _sync_remote_decode_capture_if_available() -> dict[str, Any]:
         "remote_capture_size": remote_size,
         "remote_capture_mtime": remote_mtime,
         "copied": True,
+        "appended": append_only,
     }
+
+
+def _discard_partial_remote_copy(target_path: Path, *, append_only: bool, keep_bytes: int) -> None:
+    """Undo a failed fetch: truncate an append back, or drop the temp file."""
+    try:
+        if append_only:
+            if keep_bytes >= 0:
+                os.truncate(target_path, keep_bytes)
+        else:
+            target_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _prepare_decode_capture(capture_path: Any = None) -> dict[str, Any]:
@@ -816,6 +958,7 @@ def _annotation_to_dict(annotation: Any) -> dict[str, Any]:
             getattr(annotation, "card_session_reset_reason", "") or ""
         ),
         "card_session_iccid": str(getattr(annotation, "card_session_iccid", "") or ""),
+        "card_session_imsi": str(getattr(annotation, "card_session_imsi", "") or ""),
     }
 
 
@@ -834,6 +977,7 @@ def _build_context_tree_payload(
             _summary_partition_channel_rows,
             _summary_partition_poll_cycles_with_targets,
             _summary_partition_poll_rows_with_labels,
+            _summary_frame_count_caption,
             _summary_partition_rows_by_card_session,
             _summary_poll_root_key,
             _summary_poll_root_title,
@@ -865,7 +1009,13 @@ def _build_context_tree_payload(
         group_name: str = "",
         kind: str = "header",
     ) -> None:
-        suffix = f" ({int(frame_count)} frames)" if int(frame_count) != 1 else " (1 frame)"
+        # A category group carries a bare count in the TUI and every
+        # structural node carries it in frames; the two trees read alike
+        # only while the GUI keeps that split.
+        if kind == "group":
+            suffix = f" ({int(frame_count)})"
+        else:
+            suffix = _summary_frame_count_caption(int(frame_count))
         items.append({
             "kind": kind,
             "depth": int(depth),
@@ -1011,15 +1161,27 @@ def _build_context_tree_payload(
     if len(rows) == 0:
         return []
 
-    card_session_rows, card_session_reasons, card_session_iccids = (
-        _summary_partition_rows_by_card_session(rows, annotations)
-    )
+    (
+        card_session_rows,
+        card_session_reasons,
+        card_session_iccids,
+        card_session_imsis,
+    ) = _summary_partition_rows_by_card_session(rows, annotations)
     if len(card_session_rows) <= 1:
-        _render_context_section(
-            card_session_rows[0][1] if len(card_session_rows) == 1 else rows,
-            "",
-            0,
-        )
+        # Use the card session's own key namespace even while it is the
+        # only one. Switching from "" to "CARDSESSION::n/" the moment a
+        # second session appears invalidates every key in the client's
+        # open/closed map, so the whole tree collapsed at exactly the
+        # moment a reset produced something worth looking at.
+        if len(card_session_rows) == 1:
+            only_index, only_rows = card_session_rows[0]
+            _render_context_section(
+                only_rows,
+                f"{_summary_card_session_key(only_index)}/",
+                0,
+            )
+        else:
+            _render_context_section(rows, "", 0)
         return items
 
     for card_session_index, session_rows in card_session_rows:
@@ -1028,6 +1190,7 @@ def _build_context_tree_payload(
             card_session_index,
             card_session_reasons.get(int(card_session_index), ""),
             card_session_iccids.get(int(card_session_index), ""),
+            card_session_imsis.get(int(card_session_index), ""),
         )
         _append_header(
             depth=0,
@@ -1039,6 +1202,36 @@ def _build_context_tree_payload(
         )
         _render_context_section(session_rows, f"{session_key}/", 1)
     return items
+
+
+def _prune_context_tree_to_frames(
+    items: list[dict[str, Any]],
+    visible_frames: set[int],
+) -> list[dict[str, Any]]:
+    """Keep the frames in ``visible_frames`` and the headers above them.
+
+    The tree is grouped over the whole retained capture so the poll
+    numbering and the card-session wrappers match the TUI; only the
+    window of frames the client asked for is sent.
+    """
+    pruned: list[dict[str, Any]] = []
+    header_stack: list[list[Any]] = []
+    for item in items:
+        depth = int(item.get("depth", 0) or 0)
+        while len(header_stack) > 0 and int(header_stack[-1][0]) >= depth:
+            header_stack.pop()
+        if str(item.get("kind", "")) == "frame":
+            if int(item.get("frame_number", 0) or 0) not in visible_frames:
+                continue
+            for entry in header_stack:
+                if bool(entry[2]):
+                    continue
+                pruned.append(entry[1])
+                entry[2] = True
+            pruned.append(item)
+            continue
+        header_stack.append([depth, item, False])
+    return pruned
 
 
 def _bounded_decode_limit(limit: Any = None) -> int:
@@ -1081,6 +1274,262 @@ def _build_replay_engine(keybag_path: str) -> tuple[Any, dict[str, Any]]:
         return None, summary_payload
 
 
+# ----------------------------------------------------------------------
+# Decode snapshot cache
+# ----------------------------------------------------------------------
+#
+# tshark cannot seek: every spawn parses the whole pcap. The GUI polls
+# ``hil.decode_snapshot`` every 700 ms, so without a cache a busy session
+# paid one full decode per poll for the summaries plus three more for the
+# selected frame's detail, hex and field ranges. The capture written by
+# the supervisor is append-only, so frames already parsed never change;
+# the cache re-reads only frames past the last one it holds and forgets
+# everything when the path changes or the file shrinks or is rewritten.
+
+_DECODE_ROWS_CACHE_MAX = 20000
+_DECODE_DETAIL_CACHE_MAX = 32
+
+
+@dataclass
+class _DecodeCaptureCache:
+    capture_path: str = ""
+    capture_size: int = -1
+    capture_mtime: float = -1.0
+    tshark_binary: str = ""
+    decode_rule: str = ""
+    rows: list[Any] = dataclass_field(default_factory=list)
+    summary_error: str = ""
+    annotations_key: tuple[Any, ...] = ()
+    annotations: dict[int, Any] = dataclass_field(default_factory=dict)
+    # One item per retained row plus its headers, so the tree is bounded
+    # by _DECODE_ROWS_CACHE_MAX the same way ``rows`` is.
+    context_tree_key: tuple[Any, ...] = ()
+    context_tree: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    detail: "OrderedDict[int, tuple[Any, ...]]" = dataclass_field(default_factory=OrderedDict)
+    replay_key: tuple[Any, ...] = ()
+    replay_engine: Any = None
+    replay_summary: dict[str, Any] = dataclass_field(default_factory=dict)
+
+
+_DECODE_CACHE_LOCK = threading.Lock()
+_DECODE_CACHE = _DecodeCaptureCache()
+
+
+def _decode_cache_matches(cache: _DecodeCaptureCache, path: str, tshark_binary: str, decode_rule: str) -> bool:
+    return (
+        cache.capture_path == path
+        and cache.tshark_binary == tshark_binary
+        and cache.decode_rule == decode_rule
+        and cache.capture_size >= 0
+    )
+
+
+def _decode_cache_reset(cache: _DecodeCaptureCache, path: str, tshark_binary: str, decode_rule: str) -> None:
+    cache.capture_path = path
+    cache.capture_size = -1
+    cache.capture_mtime = -1.0
+    cache.tshark_binary = tshark_binary
+    cache.decode_rule = decode_rule
+    cache.rows = []
+    cache.summary_error = ""
+    cache.annotations_key = ()
+    cache.annotations = {}
+    cache.context_tree_key = ()
+    cache.context_tree = []
+    cache.detail = OrderedDict()
+
+
+def _cached_packet_summaries(
+    path: str,
+    *,
+    capture_size: int,
+    capture_mtime: float,
+    tshark_binary: str,
+    decode_rule: str,
+    reader: Callable[..., tuple[list[Any], str]],
+) -> tuple[list[Any], str, bool]:
+    """Return ``(rows, summary_error, changed)`` for the capture.
+
+    ``changed`` is False when the cache already held this exact file
+    state, so callers can skip recomputing derived data.
+    """
+    with _DECODE_CACHE_LOCK:
+        cache = _DECODE_CACHE
+        same_capture = _decode_cache_matches(cache, path, tshark_binary, decode_rule)
+        if (
+            same_capture
+            and cache.capture_size == capture_size
+            and abs(cache.capture_mtime - capture_mtime) < 0.000001
+        ):
+            return list(cache.rows), cache.summary_error, False
+        # Incremental only while the file grows; a same-size mtime bump or
+        # a shrink means the capture was rewritten and nothing carries over.
+        incremental = same_capture and capture_size > cache.capture_size and len(cache.rows) > 0
+        if not incremental:
+            _decode_cache_reset(cache, path, tshark_binary, decode_rule)
+        after_frame = int(cache.rows[-1].number) if incremental else None
+        new_rows, summary_error = reader(
+            path,
+            tshark_binary=tshark_binary,
+            decode_rule=decode_rule,
+            after_frame=after_frame,
+        )
+        if incremental:
+            merged = list(cache.rows)
+            merged.extend(
+                row for row in new_rows if int(getattr(row, "number", 0) or 0) > after_frame
+            )
+        else:
+            merged = list(new_rows)
+        if len(merged) > _DECODE_ROWS_CACHE_MAX:
+            merged = merged[-_DECODE_ROWS_CACHE_MAX:]
+        cache.rows = merged
+        cache.summary_error = str(summary_error or "")
+        cache.capture_size = int(capture_size)
+        cache.capture_mtime = float(capture_mtime)
+        return list(merged), cache.summary_error, True
+
+
+def _cached_replay_engine(keybag_path: str) -> tuple[Any, dict[str, Any]]:
+    """Memoize ``_build_replay_engine`` on the keybag path and mtime."""
+    normalized = str(keybag_path or "").strip()
+    mtime = 0.0
+    if len(normalized) > 0:
+        try:
+            mtime = float(os.path.getmtime(normalized))
+        except OSError:
+            mtime = 0.0
+    key = (normalized, mtime)
+    with _DECODE_CACHE_LOCK:
+        cache = _DECODE_CACHE
+        if cache.replay_key == key:
+            return cache.replay_engine, dict(cache.replay_summary)
+    engine, summary = _build_replay_engine(normalized)
+    with _DECODE_CACHE_LOCK:
+        cache = _DECODE_CACHE
+        cache.replay_key = key
+        cache.replay_engine = engine
+        cache.replay_summary = dict(summary)
+    return engine, dict(summary)
+
+
+def _cached_packet_annotations(
+    rows: list[Any],
+    *,
+    replay_engine: Any,
+    builder: Callable[..., dict[int, Any]],
+) -> dict[int, Any]:
+    """Replay the stateful annotations only when the rows or keybag moved."""
+    last_number = int(getattr(rows[-1], "number", 0) or 0) if len(rows) > 0 else 0
+    with _DECODE_CACHE_LOCK:
+        cache = _DECODE_CACHE
+        key = (len(rows), last_number, cache.replay_key)
+        if cache.annotations_key == key:
+            return cache.annotations
+    annotations = builder(list(rows), replay_engine=replay_engine)
+    with _DECODE_CACHE_LOCK:
+        cache = _DECODE_CACHE
+        cache.annotations_key = key
+        cache.annotations = annotations
+    return annotations
+
+
+def _cached_context_tree(
+    rows: list[Any],
+    annotations: dict[int, Any],
+    *,
+    after_frame: int,
+) -> list[dict[str, Any]]:
+    """Group the retained capture once per annotation replay."""
+    last_number = int(getattr(rows[-1], "number", 0) or 0) if len(rows) > 0 else 0
+    with _DECODE_CACHE_LOCK:
+        cache = _DECODE_CACHE
+        key = (len(rows), last_number, int(after_frame), cache.annotations_key)
+        if cache.context_tree_key == key:
+            return cache.context_tree
+    context_tree = _build_context_tree_payload(rows, annotations)
+    with _DECODE_CACHE_LOCK:
+        cache = _DECODE_CACHE
+        cache.context_tree_key = key
+        cache.context_tree = context_tree
+    return context_tree
+
+
+def _cached_frame_detail(
+    path: str,
+    frame_number: int,
+    *,
+    tshark_binary: str,
+    decode_rule: str,
+    read_detail: Callable[..., tuple[str, str]],
+    read_hex: Callable[..., tuple[str, str]],
+    read_ranges: Callable[..., tuple[list[dict[str, Any]], str]],
+) -> tuple[str, str, str, str, list[dict[str, Any]], str]:
+    """Return the decoded detail, hex dump and field ranges for one frame.
+
+    A frame's bytes never change once written, so a hit is served without
+    spawning tshark; misses are stored in a small LRU that the summary
+    cache clears whenever the capture is reset.
+    """
+    with _DECODE_CACHE_LOCK:
+        cache = _DECODE_CACHE
+        if _decode_cache_matches(cache, path, tshark_binary, decode_rule):
+            hit = cache.detail.get(int(frame_number))
+            if hit is not None:
+                cache.detail.move_to_end(int(frame_number))
+                return hit
+    detail_text, detail_error = read_detail(
+        path, frame_number, tshark_binary=tshark_binary, decode_rule=decode_rule
+    )
+    bytes_text, bytes_error = read_hex(
+        path, frame_number, tshark_binary=tshark_binary, decode_rule=decode_rule
+    )
+    ranges, ranges_error = read_ranges(
+        path, frame_number, tshark_binary=tshark_binary, decode_rule=decode_rule
+    )
+    entry = (detail_text, detail_error, bytes_text, bytes_error, ranges, ranges_error)
+    if not (detail_error or bytes_error or ranges_error):
+        with _DECODE_CACHE_LOCK:
+            cache = _DECODE_CACHE
+            if _decode_cache_matches(cache, path, tshark_binary, decode_rule):
+                cache.detail[int(frame_number)] = entry
+                while len(cache.detail) > _DECODE_DETAIL_CACHE_MAX:
+                    cache.detail.popitem(last=False)
+    return entry
+
+
+def _decode_cache_unchanged_selection(
+    path: str,
+    *,
+    capture_size: int,
+    capture_mtime: float,
+    tshark_binary: str,
+    decode_rule: str,
+    known_capture_size: int | None,
+    known_capture_mtime: float | None,
+    requested_frame: int | None,
+) -> int | None:
+    """Return the frame a full pass would select if nothing changed.
+
+    Returns None whenever the caller's known file state or the warm cache
+    disagree with the file on disk, so the caller must take the full path.
+    """
+    if known_capture_size is None or known_capture_mtime is None:
+        return None
+    if known_capture_size != capture_size or abs(known_capture_mtime - capture_mtime) >= 0.000001:
+        return None
+    with _DECODE_CACHE_LOCK:
+        cache = _DECODE_CACHE
+        if not _decode_cache_matches(cache, path, tshark_binary, decode_rule):
+            return None
+        if cache.capture_size != capture_size or abs(cache.capture_mtime - capture_mtime) >= 0.000001:
+            return None
+        if len(cache.rows) == 0:
+            return None
+        if requested_frame is not None:
+            numbers = {int(getattr(row, "number", 0) or 0) for row in cache.rows}
+            return requested_frame if requested_frame in numbers else None
+        return int(getattr(cache.rows[-1], "number", 0) or 0)
 def _dispatch_decode_snapshot(
     ctx: ActionContext,
     *,
@@ -1094,6 +1543,7 @@ def _dispatch_decode_snapshot(
     context_after_frame: Any = None,
     known_capture_size: Any = None,
     known_capture_mtime: Any = None,
+    known_detail_frame: Any = None,
 ) -> dict[str, Any]:
     del ctx
     try:
@@ -1266,26 +1716,108 @@ def _dispatch_decode_snapshot(
             "note": "",
         }
 
-    summary_after_frame = after_frame_i if after_frame_i > 0 else None
-    if include_annotations_bool and after_frame_i > 0:
-        summary_after_frame = None
-    rows, summary_error = read_packet_summaries(
+    requested_frame_i: int | None = None
+    try:
+        if selected_frame is not None and str(selected_frame).strip() != "":
+            requested_frame_i = int(selected_frame)
+    except (TypeError, ValueError):
+        requested_frame_i = None
+    known_detail_frame_i = 0
+    try:
+        known_detail_frame_i = max(0, int(known_detail_frame or 0))
+    except (TypeError, ValueError):
+        known_detail_frame_i = 0
+    row_limit = _bounded_decode_limit(limit)
+    # Warm-cache fast path: the file is exactly what the caller and the
+    # cache already hold, and the caller already has the decoded detail
+    # for the frame a full pass would select. Nothing to decode.
+    unchanged_selection = _decode_cache_unchanged_selection(
         resolved_capture_path,
+        capture_size=capture_size,
+        capture_mtime=capture_mtime,
         tshark_binary=tshark_binary,
         decode_rule=DEFAULT_DECODE_RULE,
-        after_frame=summary_after_frame,
+        known_capture_size=known_capture_size_i,
+        known_capture_mtime=known_capture_mtime_f,
+        requested_frame=requested_frame_i,
     )
-    row_limit = _bounded_decode_limit(limit)
-    if include_annotations_bool and after_frame_i > 0:
+    if (
+        include_detail_bool
+        and unchanged_selection is not None
+        and known_detail_frame_i > 0
+        and unchanged_selection == known_detail_frame_i
+    ):
+        return {
+            "ok": True,
+            "capture_path": resolved_capture_path,
+            "capture_source": capture_source,
+            "remote_capture": remote_capture,
+            "capture_exists": True,
+            "capture_size": capture_size,
+            "capture_mtime": capture_mtime,
+            "tshark_binary": tshark_binary,
+            "decode_rule": DEFAULT_DECODE_RULE,
+            "row_count": 0,
+            "returned_count": 0,
+            "limit": row_limit,
+            "selected_frame": unchanged_selection,
+            "selected_auto": requested_frame_i is None,
+            "rows": [],
+            "annotations": {},
+            "context_tree": [],
+            "include_detail": include_detail_bool,
+            "include_annotations": include_annotations_bool,
+            "incremental": after_frame_i > 0,
+            "after_frame": after_frame_i,
+            "not_modified": True,
+            "detail": "",
+            "bytes": "",
+            "detail_ranges": [],
+            "keybag": {},
+            "note": "",
+        }
+
+    rows, summary_error, _ = _cached_packet_summaries(
+        resolved_capture_path,
+        capture_size=capture_size,
+        capture_mtime=capture_mtime,
+        tshark_binary=tshark_binary,
+        decode_rule=DEFAULT_DECODE_RULE,
+        reader=read_packet_summaries,
+    )
+    if after_frame_i > 0:
         returned_source_rows = [
             row for row in rows if int(getattr(row, "number", 0) or 0) > after_frame_i
         ]
     else:
         returned_source_rows = list(rows)
     returned_rows = list(returned_source_rows[-row_limit:])
-    context_rows = [
+    # A catch-up poll after a quiet tab can find far more new frames than
+    # the row limit. Tail-slicing them is the right thing to send, but
+    # dropping the oldest without saying so leaves a hole in the middle of
+    # the list that reads as a gap in the card's traffic.
+    # Only a catch-up delta has a gap to report. On a full fetch the tail
+    # window is the ordinary view of a long capture, not frames lost
+    # between polls, and reporting it turns every reload into a warning.
+    dropped_frames = (
+        max(0, len(returned_source_rows) - len(returned_rows))
+        if after_frame_i > 0
+        else 0
+    )
+    dropped_through_frame = 0
+    if dropped_frames > 0:
+        dropped_through_frame = int(
+            getattr(returned_source_rows[dropped_frames - 1], "number", 0) or 0
+        )
+    # Poll numbering, the DNS/eIM session titles and the card-session
+    # wrappers are all derived from the rows the grouping is handed, so a
+    # window narrower than the capture renumbers "Poll 7" to "Poll 1" and
+    # drops every wrapper the TUI shows. Group over everything retained
+    # past the live baseline and send only the window.
+    context_history_rows = [
         row for row in rows if int(getattr(row, "number", 0) or 0) > context_after_frame_i
-    ][-row_limit:]
+    ]
+    context_rows = context_history_rows[-row_limit:]
     keybag_summary: dict[str, Any] = {}
     annotations: dict[int, Any] = {}
     if include_annotations_bool:
@@ -1294,11 +1826,14 @@ def _dispatch_decode_snapshot(
             resolved_keybag_path = str(
                 try_autodiscover_sidecar_keybag(resolved_capture_path) or ""
             ).strip()
-        replay_engine, keybag_summary = _build_replay_engine(resolved_keybag_path)
-        annotation_rows = list(rows if after_frame_i > 0 else context_rows)
-        annotations = build_stateful_packet_annotations(
-            annotation_rows,
+        replay_engine, keybag_summary = _cached_replay_engine(resolved_keybag_path)
+        # Always replay from the first cached frame: secure-messaging and
+        # channel state established before a baseline still governs how
+        # later frames decode.
+        annotations = _cached_packet_annotations(
+            rows,
             replay_engine=replay_engine,
+            builder=build_stateful_packet_annotations,
         )
 
     rows_payload: list[dict[str, Any]] = []
@@ -1333,23 +1868,31 @@ def _dispatch_decode_snapshot(
                 annotations.get(frame_number)
             )
     context_tree = (
-        _build_context_tree_payload(context_rows, annotations)
+        _prune_context_tree_to_frames(
+            _cached_context_tree(
+                context_history_rows,
+                annotations,
+                after_frame=context_after_frame_i,
+            ),
+            {int(getattr(row, "number", 0) or 0) for row in context_rows},
+        )
         if include_annotations_bool
         else []
     )
 
-    selected_frame_i: int | None = None
-    try:
-        if selected_frame is not None:
-            selected_frame_i = int(selected_frame)
-    except (TypeError, ValueError):
-        selected_frame_i = None
+    selected_frame_i: int | None = requested_frame_i
     frame_numbers = {int(row.number) for row in returned_rows}
     if selected_frame_i not in frame_numbers:
         if include_detail_bool and len(returned_rows) > 0:
             selected_frame_i = int(returned_rows[-1].number)
+        elif include_detail_bool and requested_frame_i is None and len(rows) > 0:
+            # Incremental poll that brought no new frames while the caller
+            # follows the tail: it may still lack the tail frame's detail
+            # (deferred while frames were streaming), so serve that frame.
+            selected_frame_i = int(rows[-1].number)
         else:
             selected_frame_i = None
+    selected_auto = selected_frame_i is not None and selected_frame_i != requested_frame_i
 
     detail_text = ""
     detail_error = ""
@@ -1358,23 +1901,21 @@ def _dispatch_decode_snapshot(
     detail_ranges: list[dict[str, Any]] = []
     detail_ranges_error = ""
     if include_detail_bool and selected_frame_i is not None:
-        detail_text, detail_error = read_packet_detail(
+        (
+            detail_text,
+            detail_error,
+            bytes_text,
+            bytes_error,
+            detail_ranges,
+            detail_ranges_error,
+        ) = _cached_frame_detail(
             resolved_capture_path,
             selected_frame_i,
             tshark_binary=tshark_binary,
             decode_rule=DEFAULT_DECODE_RULE,
-        )
-        bytes_text, bytes_error = read_packet_hex(
-            resolved_capture_path,
-            selected_frame_i,
-            tshark_binary=tshark_binary,
-            decode_rule=DEFAULT_DECODE_RULE,
-        )
-        detail_ranges, detail_ranges_error = read_packet_field_ranges(
-            resolved_capture_path,
-            selected_frame_i,
-            tshark_binary=tshark_binary,
-            decode_rule=DEFAULT_DECODE_RULE,
+            read_detail=read_packet_detail,
+            read_hex=read_packet_hex,
+            read_ranges=read_packet_field_ranges,
         )
 
     note_parts: list[str] = []
@@ -1404,6 +1945,7 @@ def _dispatch_decode_snapshot(
         "returned_count": len(rows_payload),
         "limit": row_limit,
         "selected_frame": selected_frame_i,
+        "selected_auto": selected_auto,
         "rows": rows_payload,
         "annotations": annotations_payload,
         "context_tree": context_tree,
@@ -1411,6 +1953,8 @@ def _dispatch_decode_snapshot(
         "include_annotations": include_annotations_bool,
         "incremental": after_frame_i > 0,
         "after_frame": after_frame_i,
+        "dropped_frames": dropped_frames,
+        "dropped_through_frame": dropped_through_frame,
         "not_modified": False,
         "detail": detail_text,
         "bytes": bytes_text,
@@ -1652,6 +2196,18 @@ DECODE_SNAPSHOT_SPEC = ActionSpec(
             required=False,
             help="Capture modification time already held by the caller for not-modified checks.",
         ),
+        ActionField(
+            name="known_detail_frame",
+            label="Known detail frame",
+            kind="int",
+            required=False,
+            min_value=0,
+            help=(
+                "Frame whose decoded detail the caller already holds. With an "
+                "unchanged capture the snapshot returns not_modified instead of "
+                "re-decoding that frame."
+            ),
+        ),
     ),
     output_kind="json",
     dispatcher=_dispatch_decode_snapshot,
@@ -1779,7 +2335,7 @@ def _dispatch_service_control(
     service = str(service_name or "").strip() or DEFAULT_SERVICE_NAME
     destructive = action_s in _SERVICE_ACTIONS_DESTRUCTIVE
     if destructive and bool(confirm) is False:
-        raise ValueError(f"confirm must be true — '{action_s}' is destructive.")
+        raise ValueError(f"confirm must be true -- '{action_s}' is destructive.")
 
     def _clear_remote_attachment_state() -> None:
         try:
@@ -2007,7 +2563,7 @@ def _dispatch_session_stop(
 ) -> dict[str, Any]:
     """Stop the supervised HIL session."""
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — stopping HIL releases the bridge service.")
+        raise ValueError("confirm must be true -- stopping HIL releases the bridge service.")
 
     from yggdrasim_common.hil_bridge_runtime import (
         DEFAULT_SERVICE_NAME,
@@ -2295,7 +2851,7 @@ def _dispatch_bridge_config(
         },
         "applied": apply_b,
         "note": (
-            "Configuration applied — restart the bridge for changes to take effect."
+            "Configuration applied -- restart the bridge for changes to take effect."
             if apply_b
             else "Configuration snapshot (read-only)."
         ),
@@ -2371,7 +2927,7 @@ def _dispatch_bridge_launch(
     confirm: Any = None,
 ) -> dict[str, Any]:
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — launching the bridge starts a long-running subprocess.")
+        raise ValueError("confirm must be true -- launching the bridge starts a long-running subprocess.")
 
     import subprocess
     import shlex
@@ -2413,7 +2969,7 @@ BRIDGE_LAUNCH_SPEC = ActionSpec(
     description=(
         "Start the HIL bridge as a detached background subprocess. "
         "The bridge serves RSPRO + APDU relay on the configured ports. "
-        "Destructive if a bridge is already running — stop it first."
+        "Destructive if a bridge is already running -- stop it first."
     ),
     inputs=(
         ActionField(

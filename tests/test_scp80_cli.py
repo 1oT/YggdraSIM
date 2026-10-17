@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
+import importlib.util
 import io
+import os
 import sys
+import tempfile
 import types
 import unittest
 from contextlib import redirect_stdout
@@ -12,6 +15,11 @@ from unittest.mock import patch
 
 def _install_smartcard_stubs() -> None:
     if "smartcard" in sys.modules:
+        return
+    if importlib.util.find_spec("smartcard") is not None:
+        # pyscard is installed. The stub carries only the submodules this
+        # file needs, so leaving it in sys.modules would break every later
+        # test in the session that reaches smartcard.util.
         return
 
     smartcard_module = types.ModuleType("smartcard")
@@ -48,8 +56,10 @@ def _install_smartcard_stubs() -> None:
 
 _install_smartcard_stubs()
 
-import SCP80.cli as scp80_cli
-from SCP80.cli import OtaShell
+# The stubs installed above must be in sys.modules before the modules
+# under test import their smart-card dependencies.
+import SCP80.cli as scp80_cli  # noqa: E402
+from SCP80.cli import OtaShell  # noqa: E402
 
 
 class DummyConfig:
@@ -554,6 +564,227 @@ class OtaShellTests(unittest.TestCase):
 
         self.assertEqual(build_calls, [(True, "00A4040000")])
         self.assertEqual(shell.transport.send_calls, [(["A1B2"], True)])
+
+
+class _FakeReadline:
+    """GNU readline stand-in that records the completer wiring."""
+
+    def __init__(self, line_buffer: str = "", doc: str = "GNU readline stand-in") -> None:
+        self.__doc__ = doc
+        self.line_buffer = line_buffer
+        self.completer = None
+        self.delims = ""
+        self.bindings: list[str] = []
+        self.history_reads: list[str] = []
+        self.history_writes: list[str] = []
+        self.history_length = 0
+
+    def get_line_buffer(self) -> str:
+        return self.line_buffer
+
+    def set_completer(self, completer) -> None:
+        self.completer = completer
+
+    def set_completer_delims(self, delims: str) -> None:
+        self.delims = delims
+
+    def parse_and_bind(self, binding: str) -> None:
+        self.bindings.append(binding)
+
+    def read_history_file(self, path: str) -> None:
+        self.history_reads.append(path)
+
+    def set_history_length(self, length: int) -> None:
+        self.history_length = length
+
+    def write_history_file(self, path: str) -> None:
+        self.history_writes.append(path)
+
+
+class OtaShellCompletionTests(unittest.TestCase):
+    def _make_shell(self) -> OtaShell:
+        shell = OtaShell.__new__(OtaShell)
+        shell.config = DummyConfig()
+        shell.transport = DummyTransport()
+        shell.current_iccid = ""
+        shell.history_file = os.path.join(tempfile.gettempdir(), "scp80-completion-test-history")
+        return shell
+
+    @staticmethod
+    def _complete(shell: OtaShell, line: str) -> list[str]:
+        # readline hands the completer the word after the last delimiter.
+        text = line.rsplit(" ", 1)[-1]
+        options: list[str] = []
+        with patch.object(scp80_cli, "readline", _FakeReadline(line)):
+            state = 0
+            while True:
+                option = shell._completer(text, state)
+                if option is None:
+                    break
+                options.append(option)
+                state += 1
+        return options
+
+    def test_completer_lists_commands_for_the_first_word(self) -> None:
+        shell = self._make_shell()
+
+        self.assertEqual(
+            self._complete(shell, "s"),
+            ["script ", "send ", "sendraw ", "set ", "show "],
+        )
+
+    def test_completer_matches_case_insensitively_with_lowercase_result(self) -> None:
+        shell = self._make_shell()
+
+        self.assertEqual(self._complete(shell, "SHO"), ["show "])
+
+    def test_completer_lists_builtin_verbs_beside_do_handlers(self) -> None:
+        shell = self._make_shell()
+
+        self.assertEqual(self._complete(shell, "q"), ["q ", "qa ", "quit "])
+        self.assertEqual(self._complete(shell, "ad"), ["admin "])
+
+    def test_completer_offers_set_keys_without_legacy_spellings(self) -> None:
+        shell = self._make_shell()
+
+        self.assertEqual(
+            self._complete(shell, "set k"),
+            [
+                "kic ",
+                "kic_identifier ",
+                "kic_indicator ",
+                "kid ",
+                "kid_identifier ",
+                "kid_indicator ",
+            ],
+        )
+        self.assertEqual(self._complete(shell, "set COUNT"), ["counter "])
+
+    def test_completer_offers_set_values_for_enumerated_keys(self) -> None:
+        shell = self._make_shell()
+
+        self.assertEqual(self._complete(shell, "set transport "), ["print ", "reader "])
+        self.assertEqual(self._complete(shell, "set transport r"), ["reader "])
+        self.assertEqual(self._complete(shell, "set concat_sms o"), ["ON ", "OFF "])
+        self.assertEqual(self._complete(shell, "set cntr "), [])
+        self.assertEqual(self._complete(shell, "set transport print "), [])
+
+    def test_completer_offers_script_paths(self) -> None:
+        shell = self._make_shell()
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "alpha.txt"), "w", encoding="utf-8") as handle:
+                handle.write("00A40400\n")
+            with open(os.path.join(tmp, ".hidden"), "w", encoding="utf-8") as handle:
+                handle.write("")
+            os.mkdir(os.path.join(tmp, "Beta"))
+
+            self.assertEqual(
+                self._complete(shell, f"script {tmp}/"),
+                [f"{tmp}/alpha.txt ", f"{tmp}/Beta{os.sep}"],
+            )
+            self.assertEqual(self._complete(shell, f"script {tmp}/al"), [f"{tmp}/alpha.txt "])
+            self.assertEqual(self._complete(shell, f"script {tmp}/.h"), [f"{tmp}/.hidden "])
+            self.assertEqual(self._complete(shell, f"script {tmp}/missing/"), [])
+            self.assertEqual(self._complete(shell, f"script {tmp}/alpha.txt "), [])
+
+    def test_completer_offers_verbose_flag_only_after_a_dash(self) -> None:
+        shell = self._make_shell()
+
+        self.assertEqual(self._complete(shell, "send -"), ["-v "])
+        self.assertEqual(self._complete(shell, "build -v"), ["-v "])
+        self.assertEqual(self._complete(shell, "reset -"), ["-v "])
+        self.assertEqual(self._complete(shell, "send 00A4"), [])
+        self.assertEqual(self._complete(shell, "build -v -"), [])
+        self.assertEqual(self._complete(shell, "sendraw -"), [])
+
+    def test_completer_offers_inventory_iccids(self) -> None:
+        shell = self._make_shell()
+        kinds: list[str] = []
+        shell.config.inventory = SimpleNamespace(
+            list_identities=lambda kind: kinds.append(kind)
+            or [
+                {"identity_kind": "iccid", "identity_value": "8988209876543210987"},
+                {"identity_kind": "iccid", "identity_value": "NULL"},
+                {"identity_kind": "iccid", "identity_value": "8988201234567890123"},
+            ]
+        )
+
+        self.assertEqual(
+            self._complete(shell, "iccid "),
+            ["8988201234567890123 ", "8988209876543210987 "],
+        )
+        self.assertEqual(self._complete(shell, "iccid 89882012"), ["8988201234567890123 "])
+        self.assertEqual(self._complete(shell, "iccid 8988201234567890123 "), [])
+        self.assertEqual(kinds, ["iccid", "iccid"])
+
+    def test_completer_without_inventory_offers_no_iccids(self) -> None:
+        shell = self._make_shell()
+
+        self.assertEqual(self._complete(shell, "iccid "), [])
+
+    def test_completer_without_readline_returns_none(self) -> None:
+        shell = self._make_shell()
+
+        with patch.object(scp80_cli, "readline", None):
+            self.assertIsNone(shell._completer("s", 0))
+
+    def test_setup_readline_binds_tab_completion_and_registers_one_saver(self) -> None:
+        shell = self._make_shell()
+        fake = _FakeReadline()
+        registered: list[object] = []
+
+        with patch.object(scp80_cli, "readline", fake):
+            with patch.object(scp80_cli.atexit, "register", lambda saver: registered.append(saver)):
+                shell._setup_readline()
+                shell._setup_readline()
+
+        self.assertEqual(fake.completer, shell._completer)
+        self.assertEqual(fake.delims, " \t\n")
+        self.assertIn("tab: complete", fake.bindings)
+        self.assertNotIn("bind ^I rl_complete", fake.bindings)
+        self.assertIn("set show-all-if-ambiguous on", fake.bindings)
+        self.assertEqual(fake.history_length, 1000)
+        self.assertEqual(registered, [shell._save_history])
+
+    def test_setup_readline_uses_libedit_binding(self) -> None:
+        shell = self._make_shell()
+        fake = _FakeReadline(doc="This module is based on libedit.")
+
+        with patch.object(scp80_cli, "readline", fake):
+            with patch.object(scp80_cli.atexit, "register", lambda saver: None):
+                shell._setup_readline()
+
+        self.assertIn("bind ^I rl_complete", fake.bindings)
+        self.assertNotIn("tab: complete", fake.bindings)
+
+    def test_setup_readline_reads_an_existing_history_file(self) -> None:
+        shell = self._make_shell()
+        fake = _FakeReadline()
+        with tempfile.TemporaryDirectory() as tmp:
+            shell.history_file = os.path.join(tmp, "history")
+            with open(shell.history_file, "w", encoding="utf-8") as handle:
+                handle.write("show\n")
+
+            with patch.object(scp80_cli, "readline", fake):
+                with patch.object(scp80_cli.atexit, "register", lambda saver: None):
+                    shell._setup_readline()
+
+        self.assertEqual(fake.history_reads, [shell.history_file])
+
+    def test_save_history_writes_the_history_file(self) -> None:
+        shell = self._make_shell()
+        fake = _FakeReadline()
+
+        with patch.object(scp80_cli, "readline", fake):
+            shell._save_history()
+
+        self.assertEqual(fake.history_writes, [shell.history_file])
+
+    def test_save_history_without_readline_is_a_no_op(self) -> None:
+        shell = self._make_shell()
+
+        with patch.object(scp80_cli, "readline", None):
+            shell._save_history()
 
 
 if __name__ == "__main__":

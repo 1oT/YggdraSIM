@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Polling watcher that auto-opens fresh SIMCARD profiles in the SAIP tooling.
 
@@ -20,7 +19,7 @@ Architecture:
    ``saip-diff-tui`` or the transcode TUI at the fresh profile.
 
 Polling (rather than inotify / fsevents) keeps the module dependency
-light — no extra wheels, portable to macOS / Windows / Linux. The
+light -- no extra wheels, portable to macOS / Windows / Linux. The
 default poll interval (2 s) is aligned with the shell REPL ergonomics:
 slow enough not to burn CPU, fast enough that a new ES10b download is
 visible within a breath.
@@ -260,7 +259,7 @@ def _build_default_tui_command(arrival: ProfileArrival) -> list[str]:
         )
     # Previous iterations of this hook invoked the diff TUI with the
     # same profile on both sides, which always produced "no
-    # differences" — useless for an operator. Instead drop the new
+    # differences" -- useless for an operator. Instead drop the new
     # profile into the profile-package shell with a three-command
     # inspect batch so the operator sees profile_name/iccid/imsi plus
     # the TREE of PE sections immediately.
@@ -292,14 +291,14 @@ def _expand_launcher_template(
 
     The accepted tokens are:
 
-    * ``{iccid}``         — the newly seen ICCID.
-    * ``{profile}``       — the preferred profile file path.
-    * ``{profile_path}``  — alias of ``{profile}``; kept for callers that
+    * ``{iccid}``         -- the newly seen ICCID.
+    * ``{profile}``       -- the preferred profile file path.
+    * ``{profile_path}``  -- alias of ``{profile}``; kept for callers that
       still use the original placeholder name.
-    * ``{profile_dir}``   — the per-profile directory.
-    * ``{manifest}``      — the manifest JSON path (empty string if the
+    * ``{profile_dir}``   -- the per-profile directory.
+    * ``{manifest}``      -- the manifest JSON path (empty string if the
       arrival did not ship a manifest).
-    * ``{python}``        — the source interpreter or frozen application
+    * ``{python}``        -- the source interpreter or frozen application
       launcher. Frozen ``{python} -m ...`` templates are translated only for
       modules on YggdraSIM's internal child allow-list.
 

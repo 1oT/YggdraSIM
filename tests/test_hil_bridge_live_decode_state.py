@@ -680,6 +680,55 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         self.assertEqual(annotations[4].card_session_iccid, "98881111111111111121")
         self.assertEqual(annotations[1].card_session_index, 1)
 
+    def test_decode_imsi_bytes_reads_ef_imsi_and_refuses_anything_else(self) -> None:
+        """3GPP TS 31.102 v19.5 clause 4.2.2.
+
+        Byte 1 is the length of what follows and the low nibble of the
+        first IMSI byte carries the parity/format bits rather than a
+        digit, so the record is not simply swapped-nibble BCD.
+        """
+        from Tools.HilBridge.live_decode_state import _decode_imsi_bytes
+
+        self.assertEqual(
+            _decode_imsi_bytes(bytes.fromhex("080910100000000010")),
+            "001010000000001",
+        )
+        # TS 23.003 clause 2.2 caps an IMSI at 15 digits; a record that
+        # decodes to something else is not one, and renders as raw hex.
+        self.assertEqual(_decode_imsi_bytes(b""), "")
+        self.assertEqual(_decode_imsi_bytes(bytes.fromhex("08")), "")
+        self.assertEqual(_decode_imsi_bytes(bytes.fromhex("FFFFFFFFFFFFFFFFFF")), "")
+        self.assertEqual(_decode_imsi_bytes(bytes.fromhex("000000000000000000")), "")
+
+    def test_ef_imsi_read_binary_populates_card_session_imsi(self) -> None:
+        """The read happens once, thousands of frames before anyone looks."""
+        rows = [
+            _apdu_exchange_row(1, bytes.fromhex("00A40004023F00")),
+            _apdu_exchange_row(2, bytes.fromhex("00A40004027FFF")),
+            _apdu_exchange_row(3, bytes.fromhex("00A40004026F07")),
+            _apdu_exchange_row(
+                4,
+                bytes.fromhex("00B0000009"),
+                bytes.fromhex("0809101000000000109000"),
+            ),
+            _apdu_exchange_row(5, bytes.fromhex("00A40004023F00")),
+        ]
+
+        annotations = build_stateful_packet_annotations(rows)
+
+        # Backfilled onto every frame of the session, the earlier ones
+        # included, so the identity does not depend on where the operator
+        # happens to be looking.
+        self.assertEqual(annotations[1].card_session_imsi, "001010000000001")
+        self.assertEqual(annotations[4].card_session_imsi, "001010000000001")
+        self.assertEqual(annotations[5].card_session_imsi, "001010000000001")
+        # And the decoded value is named in the frame's own lines, not
+        # only carried on the annotation.
+        self.assertIn(
+            "IMSI decoded: 001010000000001",
+            "\n".join(annotations[4].context_lines),
+        )
+
     def test_card_session_iccid_resets_on_card_reset(self) -> None:
         first_open_fetch, first_open_response = self._open_channel_rows()
         read_ef_iccid_rows = [
@@ -829,7 +878,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         first_open_response = _terminal_response_row(
             2, first_open_payload, time_override_seconds=1.100
         )
-        # Frame 3 arrives ~45 s later — well beyond the 30 s idle threshold —
+        # Frame 3 arrives ~45 s later -- well beyond the 30 s idle threshold --
         # so the tracker must treat it as the opening of Card Session 2.
         post_reboot_select = _apdu_exchange_row(
             3,

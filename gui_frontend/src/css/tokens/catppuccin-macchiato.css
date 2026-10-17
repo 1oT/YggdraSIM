@@ -1,0 +1,43 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+
+/* -- Theme: Catppuccin · Macchiato (deep pastel dark, mauve accent) ------ */
+html[data-theme="catppuccin-macchiato"] {
+  --bg: #24273a;
+  --bg-elev: #1e2030;
+  --bg-elev-2: #363a4f;
+  --surface: #1e2030;
+  --surface-alt: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(202, 211, 245, 0.06);
+  --border: rgba(202, 211, 245, 0.12);
+  --border-strong: rgba(202, 211, 245, 0.28);
+  --fg: #cad3f5;
+  --fg-dim: #a5adcb;
+  --fg-muted: var(--fg-dim);
+  --accent: #c6a0f6;
+  --accent-strong: #b381f4;
+  --accent-soft: rgba(198, 160, 246, 0.14);
+  --accent-fg: #24273a;
+  --accent-glow: rgba(198, 160, 246, 0.46);
+  --gradient-accent: linear-gradient(135deg, #c6a0f6 0%, #8aadf4 60%, #91d7e3 100%);
+  --gradient-brand: linear-gradient(135deg, #c6a0f6 0%, #f5bde6 100%);
+  --ok: #a6da95;
+  --ok-soft: rgba(166, 218, 149, 0.16);
+  --warn: #eed49f;
+  --warn-soft: rgba(238, 212, 159, 0.16);
+  --fail: #ed8796;
+  --fail-soft: rgba(237, 135, 150, 0.16);
+  --code-bg: #181926;
+  --kbd-bg: rgba(24, 25, 38, 0.96);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.36);
+  --shadow-card-hover: 0 20px 46px rgba(0, 0, 0, 0.50);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 16px 42px -12px var(--accent-glow);
+  --topbar-bg: rgba(30, 32, 48, 0.82);
+  --theme-tint:
+    radial-gradient(circle at 90% 8%, rgba(198, 160, 246, 0.12), transparent 46%),
+    radial-gradient(circle at 6% 92%, rgba(245, 189, 230, 0.08), transparent 48%),
+    radial-gradient(circle at 50% 45%, rgba(138, 173, 244, 0.04), transparent 56%);
+}

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Tag-granular provisioning wizard for SAIP ``akaParameter`` profile elements.
 
@@ -182,12 +181,77 @@ def validate_auth_counter_max(value: Any) -> bytes | None:
     )
 
 
+# TCA SAIP v3.4.1 §8.4.2 (page 48): "maximum for any values within sqnInit is
+# '07FFFFFFFFFF'H".
+_SQN_MAX = 0x07FFFFFFFFFF
+
+
 def validate_sqn_init_seed(value: Any) -> bytes | None:
-    return _optional_hex_bytes(
+    seed = _optional_hex_bytes(
         value,
         label="sqnInit",
         allowed_byte_lengths=(6,),
     )
+    if seed is not None and int.from_bytes(seed, "big") > _SQN_MAX:
+        raise ValueError("sqnInit must not exceed 07FFFFFFFFFF (TCA SAIP v3.4.1 §8.4.2).")
+    return seed
+
+
+def configure_aka_section(
+    section: dict[str, Any],
+    *,
+    algorithm: str,
+    key_hex: Any,
+    opc_hex: Any = "",
+    number_of_keccak: Any = None,
+    auth_counter_max_hex: Any = "",
+    sqn_init_hex: Any = "",
+    algorithm_options_hex: Any = "",
+    rotation_constants_hex: Any = "",
+    xoring_constants_hex: Any = "",
+) -> str:
+    """Write a validated ``algoParameter`` into an akaParameter section.
+
+    TCA SAIP v3.4.1 §8.4.2 (pages 47-48): ``algorithmOptions`` is one byte,
+    ``rotationConstants`` (5 B) and ``xoringConstants`` (80 B) keep their
+    defaults when omitted; the eUICC ignores them for TUAK and the USIM test
+    algorithm, so they are written as given. A ``sqnInit`` seed is written to
+    all 32 slots. The CHOICE becomes ``algoParameter``, so a stashed payload
+    from a ``mappingParameter`` toggle is dropped.
+    """
+    algo = normalize_algorithm(algorithm)
+    key_bytes = validate_key_for_algorithm(algo, key_hex)
+    opc_bytes = validate_opc_for_algorithm(algo, opc_hex)
+    keccak_value = validate_number_of_keccak(number_of_keccak) if algo == "tuak" else None
+    auth_counter_bytes = validate_auth_counter_max(auth_counter_max_hex)
+    sqn_seed_bytes = validate_sqn_init_seed(sqn_init_hex)
+    options = _optional_hex_bytes(
+        algorithm_options_hex, label="algorithmOptions", allowed_byte_lengths=(1,),
+    )
+    rotation = _optional_hex_bytes(
+        rotation_constants_hex, label="rotationConstants", allowed_byte_lengths=(5,),
+    )
+    xoring = _optional_hex_bytes(
+        xoring_constants_hex, label="xoringConstants", allowed_byte_lengths=(80,),
+    )
+    name, payload = _algo_parameter_to_decoded(
+        algo,
+        key=key_bytes,
+        opc=opc_bytes,
+        number_of_keccak=keccak_value,
+        auth_counter_max=auth_counter_bytes,
+    )
+    if options is not None:
+        payload["algorithmOptions"] = options
+    if rotation is not None:
+        payload["rotationConstants"] = rotation
+    if xoring is not None:
+        payload["xoringConstants"] = xoring
+    section["algoConfiguration"] = (name, payload)
+    section.pop("_ygg_algo_parameter_stash", None)
+    if sqn_seed_bytes is not None:
+        section["sqnInit"] = [bytes(sqn_seed_bytes) for _ in range(32)]
+    return f"algoParameter set to {algo} (algorithmID {payload['algorithmID']})."
 
 
 def aka_wizard_steps(algorithm: str | None = None) -> list[dict[str, Any]]:
@@ -408,14 +472,15 @@ def apply_aka_configuration(
     """
     ensure_workspace_pysim_on_path(workspace_root)
 
+    # Validate before the document is rebuilt; configure_aka_section repeats
+    # the checks on the element it writes.
     algo = normalize_algorithm(algorithm)
-    key_bytes = validate_key_for_algorithm(algo, key_hex)
-    opc_bytes = validate_opc_for_algorithm(algo, opc_hex)
-    keccak_value = None
+    validate_key_for_algorithm(algo, key_hex)
+    validate_opc_for_algorithm(algo, opc_hex)
     if algo == "tuak":
-        keccak_value = validate_number_of_keccak(number_of_keccak)
-    auth_counter_bytes = validate_auth_counter_max(auth_counter_max_hex)
-    sqn_seed_bytes = validate_sqn_init_seed(sqn_init_hex)
+        validate_number_of_keccak(number_of_keccak)
+    validate_auth_counter_max(auth_counter_max_hex)
+    validate_sqn_init_seed(sqn_init_hex)
 
     sections = document.get("sections", {})
     if isinstance(sections, dict) is False:
@@ -437,16 +502,15 @@ def apply_aka_configuration(
         decoded = OrderedDict()
         pe.decoded = decoded
 
-    decoded["algoConfiguration"] = _algo_parameter_to_decoded(
-        algo,
-        key=key_bytes,
-        opc=opc_bytes,
-        number_of_keccak=keccak_value,
-        auth_counter_max=auth_counter_bytes,
+    configure_aka_section(
+        decoded,
+        algorithm=algo,
+        key_hex=key_hex,
+        opc_hex=opc_hex,
+        number_of_keccak=number_of_keccak,
+        auth_counter_max_hex=auth_counter_max_hex,
+        sqn_init_hex=sqn_init_hex,
     )
-
-    if sqn_seed_bytes is not None:
-        decoded["sqnInit"] = [bytes(sqn_seed_bytes) for _ in range(32)]
 
     pes._process_pelist()
     pes.renumber_identification()

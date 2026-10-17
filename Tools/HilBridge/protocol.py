@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge wire protocol: framing, message types, and (de)serialisation for the HIL-Bridge IPC channel."""
 from __future__ import annotations
 
@@ -311,6 +310,126 @@ def build_proactive_refresh_command(*, command_number: int, qualifier: int | str
     return build_simple_tlv(PROACTIVE_COMMAND_TAG, proactive_body)
 
 
+@dataclass(frozen=True, slots=True)
+class ProactiveCommandDetails:
+    """Command details of a proactive command (ETSI TS 102 223 V18.3.0 clause 8.6)."""
+
+    command_number: int
+    command_type: int
+    qualifier: int
+
+
+def _read_proactive_length(payload: bytes, offset: int) -> tuple[int, int] | None:
+    """Return ``(length, next_offset)`` for the BER length at *offset*, or ``None``.
+
+    A proactive command travels in one FETCH response, so its length and
+    the lengths of its objects use the one-byte form or ``81 xx`` (ETSI
+    TS 102 223 V18.3.0 clause 6.6 gives "1 or 2" for every command). Any
+    other first byte, and a header that runs past the payload, reads as
+    malformed.
+    """
+    if offset >= len(payload):
+        return None
+    first = payload[offset]
+    if first < 0x80:
+        return first, offset + 1
+    if first == 0x81 and offset + 1 < len(payload):
+        return payload[offset + 1], offset + 2
+    return None
+
+
+def parse_proactive_command_details(
+    payload: bytes | bytearray | list[int] | tuple[int, ...],
+) -> ProactiveCommandDetails | None:
+    """Read the Command details object out of a FETCH response body.
+
+    *payload* is the R-APDU as the modem receives it, with or without the
+    trailing status word. Anything that is not a complete proactive command
+    carrying a three-byte Command details object reads as ``None``: no
+    bytes, a bare tag, a truncated length, a length that claims more than
+    the payload holds. Wire data never raises here.
+    """
+    data = ensure_bytes(payload)
+    if len(data) < 2 or data[0] != PROACTIVE_COMMAND_TAG:
+        return None
+    header = _read_proactive_length(data, 1)
+    if header is None:
+        return None
+    body_length, offset = header
+    end = offset + body_length
+    if body_length == 0 or end > len(data):
+        return None
+    while offset < end:
+        tag = data[offset]
+        element = _read_proactive_length(data, offset + 1)
+        if element is None:
+            return None
+        value_length, value_offset = element
+        value_end = value_offset + value_length
+        if value_end > end:
+            return None
+        # b8 of a COMPREHENSION-TLV tag is the comprehension-required
+        # flag, not part of the tag number.
+        if (tag & 0x7F) == (PROACTIVE_TLV_COMMAND_DETAILS & 0x7F):
+            if value_length != 3:
+                return None
+            return ProactiveCommandDetails(
+                command_number=data[value_offset],
+                command_type=data[value_offset + 1],
+                qualifier=data[value_offset + 2],
+            )
+        offset = value_end
+    return None
+
+
+def refresh_mode_from_fetch_response(
+    payload: bytes | bytearray | list[int] | tuple[int, ...],
+) -> tuple[str, int] | None:
+    """Return ``(mode name, qualifier)`` when *payload* is a REFRESH proactive command."""
+    details = parse_proactive_command_details(payload)
+    if details is None or details.command_type != PROACTIVE_REFRESH_COMMAND_TYPE:
+        return None
+    return describe_refresh_mode(details.qualifier), details.qualifier
+
+
+@dataclass(frozen=True, slots=True)
+class SlotPhysStatus:
+    """Modem-side slot state as ``clientSlotStatusInd`` reports it (RSPRO ``SlotPhysStatus``).
+
+    ``reset_active`` is mandatory in the schema; the other three are
+    optional and read ``None`` when the client did not report them.
+    """
+
+    reset_active: bool = False
+    vcc_present: bool | None = None
+    clk_active: bool | None = None
+    card_present: bool | None = None
+
+
+def _optional_flag(value: Any) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
+
+
+def decode_slot_phys_status(body: Any) -> SlotPhysStatus:
+    """Read the ``slotPhysStatus`` member of a decoded ``clientSlotStatusInd`` body.
+
+    A missing or malformed member reads as "RST inactive, the rest
+    unknown", so the caller's edge detection sees no edge rather than an
+    invented one.
+    """
+    status = body.get("slotPhysStatus") if isinstance(body, dict) else None
+    if isinstance(status, dict) is False:
+        return SlotPhysStatus()
+    return SlotPhysStatus(
+        reset_active=bool(status.get("resetActive", False)),
+        vcc_present=_optional_flag(status.get("vccPresent")),
+        clk_active=_optional_flag(status.get("clkActive")),
+        card_present=_optional_flag(status.get("cardPresent")),
+    )
+
+
 @lru_cache(maxsize=1)
 def load_rspro_codec() -> Any:
     """Load and return the RSPRO ASN.1 codec module, or raise ImportError if unavailable."""
@@ -329,7 +448,18 @@ def load_rspro_codec() -> Any:
 
 def decode_rspro_pdu(payload: bytes) -> dict[str, Any]:
     codec = load_rspro_codec()
-    decoded = codec.decode("RsproPDU", payload)
+    # ``load_rspro_codec`` owns the "asn1tools is missing" case, so the
+    # import cannot fail once it has returned.
+    import asn1tools
+
+    try:
+        decoded = codec.decode("RsproPDU", payload)
+    except asn1tools.DecodeError as exc:
+        # Frames arrive from the network, so a payload that does not
+        # decode is an expected condition rather than a codec fault.
+        # Rejecting with ValueError keeps asn1tools out of the caller's
+        # except clause.
+        raise ValueError(f"Malformed RSPRO PDU: {exc}") from exc
     if isinstance(decoded, dict) is False:
         raise ValueError("Decoded RSPRO payload is not a mapping.")
     return decoded

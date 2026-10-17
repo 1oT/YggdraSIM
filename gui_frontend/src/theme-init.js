@@ -2,7 +2,7 @@
 // Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 /*
- * theme-init.js — applied synchronously in <head> before first paint.
+ * theme-init.js -- applied synchronously in <head> before first paint.
  *
  * Reads the persisted theme from localStorage and installs it as a
  * `data-theme` attribute on the root element so the CSS cascade does
@@ -32,9 +32,13 @@
     "tokyo-night": 1,
     "catppuccin-mocha": 1,
     "catppuccin-latte": 1,
+    "catppuccin-frappe": 1,
+    "catppuccin-macchiato": 1,
     "dracula": 1,
     "github-dark": 1,
     "github-light": 1,
+    "islands-light": 1,
+    "graphite-light": 1,
   };
   window.YGG_VALID_THEMES = VALID;
   var saved = null;

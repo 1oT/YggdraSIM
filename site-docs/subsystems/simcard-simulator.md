@@ -48,7 +48,7 @@ through the wrapper menu.
 - an ETSI TS 102 221-shaped filesystem covering MF, DFs, ADFs, and EFs
 - the full PIN lifecycle: VERIFY (`0x20`), CHANGE (`0x24`), DISABLE
   (`0x26`), ENABLE (`0x28`) and UNBLOCK (`0x2C`) with proper retry
-  bookkeeping per TS 102 221 §11.1.9–11.1.12
+  bookkeeping per TS 102 221 §11.1.9-11.1.12
 - ISO 7816-4 / TS 102 221 §11.1.7 `GET CHALLENGE` (`0x84`) returning
   `Le` random bytes (or 256 when `Le=0`) and persisting them in
   `state.last_challenge_bytes` for OTA / SCP03 freshness
@@ -166,20 +166,27 @@ through the wrapper menu.
   (record EFs grow / shrink in record-count units); when the
   body omits a `83` FID the simulator targets the current EF,
   matching commercial-card behaviour.
-- 3GPP TS 31.102 §7.1.2.1.2 / §7.1.2.1.3 `AUTHENTICATE` GBA
-  variants. `P2=0x84` (GBA Bootstrap) reuses the regular UMTS
-  AKA Milenage path, including AUTS / sync-failure recovery, and
-  on success caches `Ks = CK||IK` plus a synthesised B-TID of
-  the form `<rand-hex>@bsf.simulator` into `state.gba_ks` /
-  `state.gba_b_tid`. `state.gba_key_lifetime` is set to the
-  TS 33.220 §4.4.6 default of 86400 seconds. `P2=0x85` (GBA
-  Security Context) parses the `L_NAF || NAF_Id || L_IMPI || IMPI`
-  body, runs the TS 33.220 §B.0 KDF (HMAC-SHA-256 keyed with `Ks`,
-  static `gba-me` salt, RAND from the most recent bootstrap), and
-  returns `DB 20 || Ks_(ext)NAF`. The result is also stashed in
-  `state.gba_naf_records[NAF_Id|IMPI]` for offline introspection.
-  Calling `P2=0x85` without a prior bootstrap returns `69 85`;
-  malformed input returns `67 00`.
+- `AUTHENTICATE` in the GBA context (`P2=0x84`) on the ISIM and,
+  when EF_UST shows service n°68, the USIM: TS 31.102 v19.5
+  §7.1.1.4 / §7.1.1.5 / §7.1.2.3 / §7.1.2.4, TS 31.103 v19
+  §7.1.1.2 / §7.1.1.3 / §7.1.2.3 / §7.1.2.4. The first data byte
+  picks the mode. Bootstrapping Mode (`DD`, then RAND and AUTN*)
+  undoes the MAC modification of TS 33.220 v19.1 §5.3.2 (MAC* is
+  MAC XOR the first 64 bits of SHA-256(IK); the card supports
+  SHA-256), checks MAC and SQN as UMTS AKA does (AUTS on a stale
+  SQN), keeps `Ks = CK || IK` and RAND in
+  `state.gba_key_material[<ADF name>]`, writes RAND to EF_GBABP and
+  answers `DB L RES` with the least significant bit of RES flipped.
+  NAF Derivation Mode (`DE`, then NAF_ID and IMPI on the USIM, NAF_ID
+  alone on the ISIM, which reads IMPI from EF_IMPI) answers
+  `DB 20 Ks_ext_NAF`, keeps Ks_int_NAF with the B-TID the ME wrote to
+  EF_GBABP, and records the NAF_ID / B-TID pair in EF_GBANL: the
+  NAF_ID's own record, else a free one, else the one derived least
+  recently. Both keys follow TS 33.220 v19.1 Annex B (`gba-me`,
+  `gba-u`). No key material answers `69 85`, malformed data `67 00`,
+  a missing service or an unknown mode `98 64`, an EF_GBABP or
+  EF_GBANL too small for the data `98 66`. GBA runs over Milenage
+  only; a TUAK profile gets `69 85`.
 - a card-side GP registry, SCP03 / SCP80 secure-messaging, and ISD-R
   interaction
 - a profile store that tracks installed profiles and their lifecycle
@@ -305,7 +312,7 @@ These are dispatched outside the BF51 package envelope:
 | `BF65` | `SetDefaultDpAddress` (SGP.32 §5.9.25) | IoT-side counterpart of SGP.22 v3 `BF3F`. Updates `state.default_dp_address` from `[0] UTF8String`; an empty body resets the address. Returns `BF65 80 01 NN` with `ok(0)` or `undefinedError(127)` (oversized / malformed). |
 
 Each of the BF58/BF5B/BF5C/BF5D/BF5E/BF59/BF5A/BF65 responses follows
-the `[N] SEQUENCE { result [0] INTEGER }` shape from §5.9.15 – §5.9.25,
+the `[N] SEQUENCE { result [0] INTEGER }` shape from §5.9.15 - §5.9.25,
 encoded as `BFxx LL 80 01 NN`. `BF5F` is the only CHOICE in this group:
 the success branch wraps `httpParams` under context `81`, the error
 branch reuses `80 01 NN` for the `connectivityParametersError` enum.
@@ -327,17 +334,17 @@ branch reuses `80 01 NN` for the `connectivityParametersError` enum.
 `SIMCARD/state.py::SimCardState` carries the SGP.32 fields persisted
 through the eUICC manifest (`SIMCARD/euicc_store.py`):
 
-- `euicc_package_results: list[SimEuiccPackageResultEntry]` — signed
+- `euicc_package_results: list[SimEuiccPackageResultEntry]` -- signed
   result blobs awaiting IPA acknowledgement.
-- `association_token_counter: int` — monotonic counter used by
+- `association_token_counter: int` -- monotonic counter used by
   `addEim` to allocate fresh association tokens.
 - `immediate_enable_flag`, `immediate_enable_smdp_oid`,
-  `immediate_enable_smdp_address` — populated by
+  `immediate_enable_smdp_address` -- populated by
   `configureImmediateEnable` and read back by
   `GetEimConfigurationData`.
-- `previous_enabled_aid` — captured during a `enable.rollbackFlag`
+- `previous_enabled_aid` -- captured during a `enable.rollbackFlag`
   swap or a `BF5D` fallback swap so `BF58` / `BF5E` can revert.
-- `emergency_profile_active`, `emergency_pre_aid` — sticky
+- `emergency_profile_active`, `emergency_pre_aid` -- sticky
   bookkeeping for `BF5B` / `BF5C`. Spec-mandated: the Emergency
   Profile remains enabled across resets, so this state lives in the
   eUICC manifest rather than the volatile session.
@@ -345,13 +352,13 @@ through the eUICC manifest (`SIMCARD/euicc_store.py`):
 `SimProfileEntry` adds the following flags persisted by
 `SIMCARD/profile_store.py`:
 
-- `fallback_attribute: bool` — set by PSMO `setFallbackAttribute`.
-- `rollback_armed: bool` — set by `enable.rollbackFlag` and cleared on
+- `fallback_attribute: bool` -- set by PSMO `setFallbackAttribute`.
+- `rollback_armed: bool` -- set by `enable.rollbackFlag` and cleared on
   successful `ProfileRollback` / `ExecuteFallbackMechanism`.
-- `ecall_indication: bool` — marks the Profile that BF5B / BF5C
+- `ecall_indication: bool` -- marks the Profile that BF5B / BF5C
   operate on. Sourced from SAIP profile metadata at install time, or
   set explicitly by tooling/tests.
-- `connectivity_params_http: bytes` — TCA Profile Interoperability
+- `connectivity_params_http: bytes` -- TCA Profile Interoperability
   HTTP/CoAP parameters returned by `BF5F`.
 
 Each `SimEimEntry` keeps its own `counter_value` and
@@ -542,7 +549,7 @@ second is the ESipa exchange against the resolved eIM IP.
 5. **TIMER MANAGEMENT START** re-arms the cadence.
 
 The DNS and eIM legs share the same APN. APN priority is:
-1. SAIP profile EF.ACL (`6F57`) — set automatically by the
+1. SAIP profile EF.ACL (`6F57`) -- set automatically by the
    filesystem rebuild whenever a profile is enabled.
 3. `internet.apn` workspace fallback.
 
@@ -683,14 +690,14 @@ The Stage-1 plain-HTTP fallback is preserved for tests and lab
 restores the linear OPEN/SEND/RECEIVE/CLOSE queue from before
 the TLS engine was wired in.
 
-### ESipa request body — `BF4F` GetEimPackageRequest
+### ESipa request body -- `BF4F` GetEimPackageRequest
 
 SGP.32 v1.2 §6.5.2.1 `GetEimPackageRequest` (BF4F) wrapped in
 HTTP/1.1 framing:
 
 - `5A` 16-byte EID (mandatory).
 - `80` notifyStateChange flag, `81` stateChangeCause, `82` rPlmn
-  BCD — all optional, omitted by default.
+  BCD -- all optional, omitted by default.
 
 `Content-Type` is `application/x-gsma-rsp-asn1` and
 `X-Admin-Protocol` is `gsma/rsp/v2.2.0` so the modem's HTTP
@@ -727,7 +734,7 @@ is the only place that introduces the dependency. Failures from
 the dispatcher (raised exceptions, `6Axx` SW pairs) are isolated
 to their package and do not abort the rest of the chain.
 
-### LoadCRL — `BF35` (SGP.22 §5.7.13)
+### LoadCRL -- `BF35` (SGP.22 §5.7.13)
 
 The eUICC accepts CRL DER blobs pushed by the RSP server. Each
 non-empty `BF35` STORE DATA payload is appended to
@@ -739,7 +746,7 @@ without touching transport. The dispatcher allow-list includes
 `BF35` so an eIM-side push relayed over BIP forwards directly to
 the SGP layer.
 
-### ESipa result follow-up — `BF50` ProvideEimPackageResult
+### ESipa result follow-up -- `BF50` ProvideEimPackageResult
 
 After the dispatcher consumed at least one package and produced
 non-empty response bytes, the IPA injects a fresh **SEND DATA**
@@ -763,7 +770,7 @@ operator introspection; the latter survives the cycle teardown
 so a test can confirm "the IPA shipped the eIM the expected
 result for cycle N".
 
-#### Error CHOICE — `BF50` with `[0]` EimPackageResultErrorCode
+#### Error CHOICE -- `BF50` with `[0]` EimPackageResultErrorCode
 
 When *every* dispatched package failed (the SGP layer returned a
 non-9000 SW pair, or the dispatcher itself raised), the IPA
@@ -776,8 +783,8 @@ BF50 LL { 5A 10 <EID>  80 05 30 03 02 01 XX }
 
 where `XX` is the EimPackageResultErrorCode the IPA inferred.
 The `_sw_to_eim_package_error_code()` static maps the card's
-SW pair to `1` (invalidPackageFormat — `6A80`/`6A82`/`6985`),
-`2` (unknownPackage — `6A88`), or `127` (undefinedError —
+SW pair to `1` (invalidPackageFormat -- `6A80`/`6A82`/`6985`),
+`2` (unknownPackage -- `6A88`), or `127` (undefinedError --
 parallel `[(outer_tag, error_code), ...]` audit trail to the
 
 #### PendingNotification piggyback
@@ -991,8 +998,8 @@ The pipeline plumbs the field end-to-end:
    `[PRIVATE 7]` OCTET STRING from every FCP, splits it into 2-byte
    FIDs, and stores the upper-case hex tuple on
    `SimProfileFsNode.link_path`. Both the EF-section consumer (PE
-   `usim`, `opt-usim`, `isim`, `opt-isim`, `gsm-access`, `telecom`,
-   `mf`, `df-...`) and the `genericFileManagement` consumer go
+   `usim`, `opt-usim`, `isim`, `opt-isim`, `iot`, `opt-iot`, `gsm-access`,
+   `telecom`, `mf`, `df-...`) and the `genericFileManagement` consumer go
    through the same helper. Empty OCTET STRINGs are mapped to the
    empty tuple per §8.3.5 ("turn this template link file into an
    independent file"); odd-length payloads are dropped silently as
@@ -1260,7 +1267,7 @@ encrypting traffic with stale state.
 
 ### ISIM SMS-storage EFs (round 24)
 
-`EF.IST` byte 0 = `0xFF` also flips on **service 6 (SMS
+`EF.IST` byte 0 = `0xF3` also flips on **service 6 (SMS
 storage in ISIM)**, **service 7 (SMS status reports in ISIM)**,
 and **service 8 (SM-over-IP)** per 3GPP TS 31.103 §4.2.7. As
 with round-23's GBA pair, services 6 and 7 require dedicated
@@ -1278,23 +1285,23 @@ default record shape.
 
 ### ISIM GBA-supporting EFs (round 23)
 
-`EF.IST` (3GPP TS 31.103 §4.2.7) is seeded with byte 0 = `0xFF`,
-which advertises **service 2 (GBA)** as available + activated.
-A spec-conformant card with that bit set must also expose the
-two GBA storage EFs; previously the simulator was returning
-`6A 82` on both, which would stall every bootstrap a paired ME
-attempted.
+`EF.IST` (3GPP TS 31.103 v19 §4.2.7) is seeded with byte 0 =
+`0xF3`, which advertises **service 2 (GBA)** as available. A card
+with that bit set must also expose the two GBA storage EFs
+(§4.2.9, §4.2.10); without them every bootstrap a paired ME
+attempted would stall on `6A 82`.
 
 | FID | Name | Structure | Default | Spec |
 | --- | --- | --- | --- | --- |
-| `6FD5` | EF.GBABP | transparent, 6 bytes | `80 00 81 00 82 00` (empty B-TID / Ks_NAF / Lifetime TLVs) | TS 31.103 §4.2.10 |
-| `6FD7` | EF.GBANL | linear-fixed, 28 bytes per record | one all-FF placeholder row | TS 31.103 §4.2.11 |
+| `6FD5` | EF.GBABP | transparent, 128 bytes | all `FF` (Annex C) | TS 31.103 v19 §4.2.9 |
+| `6FD7` | EF.GBANL | linear-fixed, two 128-byte records, UPDATE ADM | all `FF` (Annex C) | TS 31.103 v19 §4.2.10 |
 
-The empty-TLV scaffold for EF.GBABP gives a deterministic
-6-byte read before any successful Ks_NAF derivation, then
-allows a normal UPDATE BINARY once the bootstrap completes.
-EF.GBANL is structured as a record EF so the modem can append
-per-NAF rows via UPDATE RECORD without resizing.
+EF.GBABP holds three length-prefixed fields, RAND, B-TID and key
+lifetime. The ISIM writes RAND when it bootstraps and leaves the
+other two empty; the ME writes the B-TID and lifetime the BSF sent.
+An EF.GBANL record is a `80` NAF_ID TLV and a `81` B-TID TLV; the
+ISIM fills the records in NAF Derivation Mode, and the ME cannot
+write them (UPDATE ADM).
 
 ### EF.EHPLMNPI + EF.CFIS seeds (round 22)
 
@@ -1576,7 +1583,7 @@ spec-mandated EFs:
 
 | FID | Name | Structure | Encoding |
 | --- | --- | --- | --- |
-| `6F07` | EF.IST | transparent | TS 31.103 §4.2.7 service table. Byte 0 advertises bits 1..8 = 0xFF (P-CSCF address, GBA, HTTP Digest, GBA local key establishment, P-CSCF discovery for IMS LBO, SM storage, SM status reports, SM-over-IP). |
+| `6F07` | EF.IST | transparent | TS 31.103 v19 §4.2.7 service table. Byte 0 = 0xF3: P-CSCF address, GBA, P-CSCF discovery for IMS LBO, SM storage, SM status reports, SM-over-IP. HTTP Digest (3) and GBA-based Local Key Establishment (4) stay clear because AUTHENTICATE implements neither. |
 | `6F09` | EF.PCSCF | linear-fixed | TS 31.103 §4.2.8 record format `80 LL <type><address>` where the type byte (`00`) marks the address as an FQDN. The seeded record advertises `pcscf.<realm>` derived from the IMPI. |
 
 The new EFs are registered for both fresh boots and downloaded
@@ -1600,20 +1607,23 @@ tenths-of-second. Failed TRs reset the duration cache so a
 subsequent test can distinguish "terminal accepted some
 cadence" from "terminal rejected the request".
 
-### IMS AKA via `AUTHENTICATE` P2=0x82 (round 12)
+### IMS AKA via `AUTHENTICATE` P2=0x81 under the ISIM (round 12)
 
-3GPP TS 31.103 §7.1 specifies that the ISIM application performs
-its own AKA challenge/response under the same Milenage parameters
-as the USIM. Round-12 wires `internal_authenticate(p2=0x82, ...)`
-in `SIMCARD/auth.py` so it delegates to `_run_usim_authentication`
-verbatim:
+The ISIM runs its own AKA under the same Milenage parameters as
+the USIM. IMS AKA is P2 `81` with ADF.ISIM selected (TS 31.103 v19
+§7.1.2 Table 1), the context code the USIM uses for 3G/EPS/5G
+(TS 31.102 v19.5 Table 7.1.2-1):
 
-- The card decodes RAND / AUTN, runs Milenage f1..f5, returns the
-  spec UMTS-AKA response (RES, CK, IK, optionally Kc).
-- A paired modem can therefore issue
-  `AUTHENTICATE` with P2=0x82 against ADF.ISIM during SIP REGISTER
-  challenge handling without a custom carve-out.
-- Unknown P2 values still return `6A 86`.
+- The card decodes RAND / AUTN, runs Milenage f1..f5 and answers
+  `DB` RES, CK and IK (TS 31.103 v19 §7.1.2.1); the USIM's answer
+  adds Kc.
+- P2 `82` is HTTP Digest on the ISIM and VGCS/VBS on the USIM;
+  neither is implemented, so both answer `98 64` (security
+  context not supported, TS 31.102 v19.5 §7.3.1). The ISIM has no
+  GSM context (`80` is reserved there), and the odd-INS contexts
+  `85` / `86` are RFU with INS `88`; all three answer `6A 86`.
+- `SIMCARD/auth.py` picks the coding from the selected application;
+  with no USIM or ISIM selected the USIM table applies.
 
 ### ISIM EFs (round 12)
 

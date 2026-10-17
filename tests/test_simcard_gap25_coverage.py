@@ -87,19 +87,22 @@ class DfGsmAccessSeedTests(_UsimEngineHarness):
         self._select_usim()
         self._select_ok("5F3B")
 
-    def test_ef_kc_default_is_zero_kc_plus_cksn_7(self) -> None:
+    # A fresh card holds no key: Kc is the unpersonalised 'FF' fill and
+    # the CKSN byte is 7, "no key available" (3GPP TS 24.008 section
+    # 10.5.1.2), so the modem runs AKA before it ciphers anything.
+    def test_ef_kc_default_is_blank_kc_plus_cksn_7(self) -> None:
         self._select_usim()
         self._select_ok("5F3B")
         self._select_ok("4F20")
         body = self._read_binary(0x09)
-        self.assertEqual(body, b"\x00" * 8 + bytes((0x07,)))
+        self.assertEqual(body, b"\xff" * 8 + bytes((0x07,)))
 
-    def test_ef_kcgprs_default_is_zero_kc_plus_cksn_7(self) -> None:
+    def test_ef_kcgprs_default_is_blank_kc_plus_cksn_7(self) -> None:
         self._select_usim()
         self._select_ok("5F3B")
         self._select_ok("4F52")
         body = self._read_binary(0x09)
-        self.assertEqual(body, b"\x00" * 8 + bytes((0x07,)))
+        self.assertEqual(body, b"\xff" * 8 + bytes((0x07,)))
 
     def test_ef_kc_update_round_trip(self) -> None:
         self._select_usim()

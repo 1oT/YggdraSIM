@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Environment preflight checks for the YggdraSIM suite.
 
 ``run_doctor`` prints a terminal-friendly report covering Python version,
 common optional runtime dependencies, workspace paths, pySim
 availability (either a developer checkout at ``<workspace>/pysim`` or
-a pip-installed ``pySim`` package — the latter is what the ``[saip]``
+a pip-installed ``pySim`` package -- the latter is what the ``[saip]``
 extra drops in), SQLite availability, PC/SC reader visibility, and
 presence of the ``gpg`` binary used by the optional inventory
 encryption provider. It is intentionally read-only: no SQLite rows are
@@ -97,7 +96,7 @@ def _format_check(check: DoctorCheck) -> str:
     marker = {"ok": "[+]", "warn": "[*]", "fail": "[-]", "info": "[*]"}.get(
         check.status, "[*]"
     )
-    detail = f" — {check.detail}" if len(check.detail) > 0 else ""
+    detail = f" -- {check.detail}" if len(check.detail) > 0 else ""
     return f"{colour}{marker} {check.name}: {check.status.upper()}{detail}{reset}"
 
 
@@ -140,7 +139,7 @@ def _probe_optional_pysim(report: DoctorReport, workspace_root: Path) -> None:
     1. A developer checkout at ``<workspace>/pysim`` (advanced
        upstream-branch workflow).
     2. A pip-installed ``pySim`` package (e.g. from the ``[saip]``
-       extra — ``pip install 'yggdrasim[saip]'`` — or a hand
+       extra -- ``pip install 'yggdrasim[saip]'`` -- or a hand
        ``pip install 'pySim @ git+https://github.com/osmocom/pysim.git'``).
 
     Either path is valid. The probe reports ``ok`` when any one of
@@ -265,7 +264,7 @@ def _probe_hil_bridge(report: DoctorReport) -> None:
     if len(reason) > 0:
         report.add(label, "info", reason)
         return
-    # Module presence check — the clean build strips the local HIL entrypoint,
+    # Module presence check -- the clean build strips the local HIL entrypoint,
     # but a ``full`` or ``source`` install should have it available.
     try:
         importlib.import_module("Tools.HilBridge.main")
@@ -288,7 +287,7 @@ def _probe_hil_bridge(report: DoctorReport) -> None:
         report.add(
             label,
             "warn",
-            "osmo-remsim-client-st2 not on PATH — see "
+            "osmo-remsim-client-st2 not on PATH -- see "
             "guides/SIMTRACE2_CARDEM_GUIDE.md",
         )
         return
@@ -334,7 +333,7 @@ def _probe_card_relay(report: DoctorReport) -> None:
       summary of the auth posture so operators can spot e.g. a
       non-loopback bind without an audit log enabled.
 
-    All probes use ``urllib.request`` with a tight timeout — we never
+    All probes use ``urllib.request`` with a tight timeout -- we never
     want the doctor to block on a wedged remote bridge.
     """
     try:
@@ -364,7 +363,7 @@ def _probe_card_relay(report: DoctorReport) -> None:
         report.add(
             "Remote card bridge",
             "info",
-            "Not configured — set YGGDRASIM_CARD_RELAY_URL or pass --remote-card-url to talk to a Card Bridge over SSH.",
+            "Not configured -- set YGGDRASIM_CARD_RELAY_URL or pass --remote-card-url to talk to a Card Bridge over SSH.",
         )
         return
     _ = relay_url_source  # reserved for future per-source diagnostics
@@ -493,7 +492,7 @@ def _probe_card_relay(report: DoctorReport) -> None:
             report.add(
                 "Remote card bridge",
                 "warn",
-                f"{base_url} reachable but auth disabled on non-loopback host '{bind_host}' — refuse to use it.",
+                f"{base_url} reachable but auth disabled on non-loopback host '{bind_host}' -- refuse to use it.",
             )
             return
         parts.append("loopback bridge (no token required)")
@@ -504,6 +503,56 @@ def _probe_card_relay(report: DoctorReport) -> None:
     report.add("Remote card bridge", "ok", "; ".join(parts))
 
 
+def _probe_remote_lab(report: DoctorReport) -> None:
+    """Report the Remote Lab rigs this host publishes, if any.
+
+    Silent-ish by design: most hosts run no agent, so an absent config is
+    an ``info`` line rather than a warning. When a config is present, the
+    useful facts are whether it parses at all and whether any rig would
+    start a process on this host when reserved.
+    """
+    label = "Remote Lab agent"
+    config_path = Path(
+        os.path.expanduser("~/.config/yggdrasim/remote-lab.yaml")
+    )
+    if config_path.is_file() is False:
+        report.add(
+            label,
+            "info",
+            "No agent config at ~/.config/yggdrasim/remote-lab.yaml; "
+            "this host publishes no rigs.",
+        )
+        return
+    try:
+        from yggdrasim_common.remote_lab.config import load_config
+    except ImportError as import_error:
+        report.add(label, "warn", f"Remote Lab module unavailable: {import_error}")
+        return
+    try:
+        config = load_config(str(config_path))
+    except Exception as parse_error:  # noqa: BLE001
+        report.add(
+            label,
+            "fail",
+            f"{config_path} does not parse: "
+            f"{type(parse_error).__name__}: {parse_error}",
+        )
+        return
+
+    card_rigs = [rig for rig in config.rigs if rig.serves_card]
+    modem_rigs = [rig for rig in config.rigs if rig.consumes_card]
+    parts = [f"agent {config.agent.id}", f"{len(card_rigs)} card rig(s)"]
+    if len(modem_rigs) > 0:
+        spawning = [rig for rig in modem_rigs if rig.consumer.enabled]
+        parts.append(f"{len(modem_rigs)} modem rig(s)")
+        parts.append(
+            f"{len(spawning)} may start a supervisor when reserved"
+            if len(spawning) > 0
+            else "none may start a supervisor"
+        )
+    report.add(label, "ok", "; ".join(parts))
+
+
 def _probe_hil_remote_card(report: DoctorReport) -> None:
     """Check the HIL-bridge-side remote card stream configuration.
 
@@ -511,7 +560,7 @@ def _probe_hil_remote_card(report: DoctorReport) -> None:
     ``YGGDRASIM_HIL_REMOTE_CARD_*`` env vars that the HIL bridge looks
     at when it consumes a remote ``yggdrasim-card-bridge`` instance
     over an SSH tunnel. Decision tree matches the global relay probe
-    — silent ``info`` when not configured, ``warn`` on unreachable /
+    -- silent ``info`` when not configured, ``warn`` on unreachable /
     token failures, ``ok`` with a one-line summary when the remote
     bridge answers.
     """
@@ -545,7 +594,7 @@ def _probe_hil_remote_card(report: DoctorReport) -> None:
         report.add(
             "HIL remote card stream",
             "info",
-            "Not configured — set "
+            "Not configured -- set "
             f"{REMOTE_CARD_URL_ENV} or pass --remote-card-url to the bridge to "
             "consume a remote yggdrasim-card-bridge over SSH.",
         )
@@ -658,10 +707,10 @@ def _detect_webview_backends() -> tuple[list[str], list[str]]:
     widget itself has its own dependency tree and must be installed
     separately:
 
-    * Linux — **GTK** (``gi`` + WebKit2 GObject introspection) or
+    * Linux -- **GTK** (``gi`` + WebKit2 GObject introspection) or
       **Qt** (``qtpy`` + QtWebEngine).
-    * macOS — **cocoa** (PyObjC / WKWebView).
-    * Windows — **EdgeChromium** (pythonnet + WebView2).
+    * macOS -- **cocoa** (PyObjC / WKWebView).
+    * Windows -- **EdgeChromium** (pythonnet + WebView2).
 
     The probe attempts the minimal import path for each candidate
     backend without instantiating a window, so ``--doctor`` can fail
@@ -732,14 +781,14 @@ def _probe_gui_stack(report: DoctorReport) -> None:
 
     Severity levels:
 
-    * ``ok``   — full desktop stack importable AND at least one
+    * ``ok``   -- full desktop stack importable AND at least one
       pywebview backend is importable (gtk / qt / cocoa / edgechromium).
-    * ``info`` — headless lab-server stack importable (fastapi +
+    * ``info`` -- headless lab-server stack importable (fastapi +
       uvicorn) but pywebview is not installed; only ``--web-server``
       is usable from this host.
-    * ``warn`` — pywebview is installed but no platform backend
+    * ``warn`` -- pywebview is installed but no platform backend
       resolves, or the configured desktop port is in use.
-    * ``fail`` — ``YGGDRASIM_GUI_TLS_CERT`` is set but unreadable.
+    * ``fail`` -- ``YGGDRASIM_GUI_TLS_CERT`` is set but unreadable.
     """
     from yggdrasim_common.gui_server import config as gui_config
 
@@ -750,7 +799,7 @@ def _probe_gui_stack(report: DoctorReport) -> None:
         report.add(
             "GUI server deps (fastapi + uvicorn)",
             "info",
-            f"not installed — run `pip install 'yggdrasim[gui-server]'` "
+            f"not installed -- run `pip install 'yggdrasim[gui-server]'` "
             f"(remote) or `pip install 'yggdrasim[gui]'` (desktop). "
             f"({type(import_error).__name__}: {import_error})",
         )
@@ -762,7 +811,7 @@ def _probe_gui_stack(report: DoctorReport) -> None:
         report.add(
             "GUI desktop stack (pywebview)",
             "info",
-            "pywebview not installed — desktop --gui disabled; --web-server "
+            "pywebview not installed -- desktop --gui disabled; --web-server "
             "still usable. Install with `pip install 'yggdrasim[gui]'`.",
         )
     else:
@@ -776,7 +825,7 @@ def _probe_gui_stack(report: DoctorReport) -> None:
         else:
             detail = (
                 "pywebview is installed but no platform backend could be "
-                "loaded — `--gui` will fail with `WebViewException`. "
+                "loaded -- `--gui` will fail with `WebViewException`. "
                 "Pick one of the options below and re-run `--doctor` "
                 "to confirm."
             )
@@ -784,7 +833,7 @@ def _probe_gui_stack(report: DoctorReport) -> None:
                 detail = detail + " " + " | ".join(hints)
             report.add("GUI desktop stack (pywebview)", "warn", detail)
 
-    # Port probe (desktop default). Warn only — operators may intend
+    # Port probe (desktop default). Warn only -- operators may intend
     # to use ephemeral fallback or to remap via YGGDRASIM_GUI_PORT.
     desktop_port = gui_config.DEFAULT_DESKTOP_PORT
     desktop_host = gui_config.DEFAULT_DESKTOP_HOST
@@ -803,7 +852,7 @@ def _probe_gui_stack(report: DoctorReport) -> None:
         report.add(
             "GUI desktop default port",
             "warn",
-            f"{desktop_host}:{desktop_port} already in use — desktop mode "
+            f"{desktop_host}:{desktop_port} already in use -- desktop mode "
             f"will fall back to an ephemeral port.",
         )
 
@@ -898,6 +947,7 @@ def run_doctor(
     _probe_hil_optional_helpers(report)
     _probe_card_relay(report)
     _probe_hil_remote_card(report)
+    _probe_remote_lab(report)
     _probe_gui_stack(report)
 
     try:
@@ -905,7 +955,7 @@ def run_doctor(
     except Exception:
         __version__ = "unknown"
 
-    emit(f"YggdraSIM doctor — suite version {__version__}")
+    emit(f"YggdraSIM doctor -- suite version {__version__}")
     emit(f"Workspace: {target_workspace}")
     emit("")
     for check in report.checks:

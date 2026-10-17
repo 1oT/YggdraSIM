@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP ``PE-SecurityDomain`` structured edit helpers.
 
-The PE-SecurityDomain element (TCA SAIP §A.2 / GP Card Spec v2.3.1
+The PE-SecurityDomain element (TCA SAIP v3.4.1 §8.6.1 / GP Card Spec v2.3.1
 §11.4) is one of the most edit-heavy PEs in any profile: operators
 routinely need to provision new SCP03 / SCP02 key sets, rotate
 existing keys, drop compromised key sets, and append issuer-personalised
@@ -44,45 +43,58 @@ from typing import Any
 _HEX_RE = re.compile(r"^[0-9A-Fa-f]+$")
 
 
-# GP Card Spec v2.3.1 §11.1.9 KeyUsageQualifier bits b1..b8.
-# Documented for the GUI to surface meaningful labels; the encoder
-# itself accepts any 1..2 byte OCTET STRING so the GUI is free to mix
-# bits per issuer policy.
+# GP Card Spec v2.3.1 §11.1.9 Tables 11-17 and 11-18 (page 156): the key
+# usage qualifier, masked over its two bytes; a one-byte qualifier is the
+# first byte with the second taken as '00'. The encoder accepts any 1..2
+# byte OCTET STRING, so the GUI is free to mix bits per issuer policy.
 KEY_USAGE_QUALIFIER_BITS: dict[int, str] = {
-    0x01: "VERIFY (MAC verification)",
-    0x02: "COMPUTE (MAC computation)",
-    0x04: "ENC (encryption)",
-    0x08: "DEC (decryption)",
-    0x10: "SENSITIVE (key is sensitive)",
-    0x20: "RFU",
-    0x40: "RFU",
-    0x80: "RFU",
+    0x8000: "Verification (DST, CCT, CAT) / Encipherment (CT)",
+    0x4000: "Computation (DST, CCT, CAT) / Decipherment (CT)",
+    0x2000: "Secure messaging in response data fields (CT, CCT)",
+    0x1000: "Secure messaging in command data fields (CT, CCT)",
+    0x0800: "Confidentiality (CT)",
+    0x0400: "Cryptographic checksum (CCT)",
+    0x0200: "Digital signature (DST)",
+    0x0100: "Cryptographic authorization (CAT)",
+    0x0080: "Key agreement (KAT)",
 }
 
 
-# GP Card Spec v2.3.1 §11.1.8 KeyType byte values, see also Amendment D §7.5.
+# GP Card Spec v2.3.1 §11.1.8 Table 11-16 (pages 154-155): the key type byte.
+# '00'-'7F' are for private use; '81'-'84' and '90'-'91' are reserved for
+# historical reasons and named so, as a profile may still carry them.
 KEY_TYPE_LABELS: dict[int, str] = {
-    0x80: "DES (legacy)",
-    0x82: "TDES_CBC (SCP02)",
-    0x84: "TDES_ECB (SCP02)",
-    0x88: "AES (SCP03 / SCP11)",
-    0x90: "HMAC_SHA1",
-    0x91: "HMAC_SHA1_160",
-    0x95: "HMAC_SHA256",
-    0xA1: "RSA_PUBLIC_EXP_E",
-    0xA0: "RSA_PUBLIC_MOD_N",
-    0xA2: "RSA_PRIVATE_MOD_N",
-    0xA3: "RSA_PRIVATE_EXP_D",
-    0xA4: "RSA_PRIVATE_CRT_P",
-    0xA5: "RSA_PRIVATE_CRT_Q",
-    0xA6: "RSA_PRIVATE_CRT_PQ",
-    0xA7: "RSA_PRIVATE_CRT_DP1",
-    0xA8: "RSA_PRIVATE_CRT_DQ1",
-    0xB0: "EC_PUBLIC",
-    0xB1: "EC_PRIVATE",
-    0xB2: "EC_KEY_PARAMETERS",
-    0xF0: "EXTENDED_TYPE",
-    0xFF: "NOT_AVAILABLE",
+    0x80: "DES, mode implicitly known (deprecated)",
+    0x81: "Reserved for historical reasons",
+    0x82: "Reserved for historical reasons",
+    0x83: "Reserved for historical reasons",
+    0x84: "Reserved for historical reasons",
+    0x85: "Pre-shared key for TLS",
+    0x88: "AES (16, 24 or 32-byte keys)",
+    0x89: "SM4 (16-byte key)",
+    0x90: "Reserved for historical reasons",
+    0x91: "Reserved for historical reasons",
+    0xA0: "RSA public key, public exponent e",
+    0xA1: "RSA public key, modulus N",
+    0xA2: "RSA private key, modulus N",
+    0xA3: "RSA private key, private exponent d",
+    0xA4: "RSA private key, CRT P",
+    0xA5: "RSA private key, CRT Q",
+    0xA6: "RSA private key, CRT PQ",
+    0xA7: "RSA private key, CRT DP1",
+    0xA8: "RSA private key, CRT DQ1",
+    0xB0: "ECC public key",
+    0xB1: "ECC private key",
+    0xB2: "ECC field parameter P",
+    0xB3: "ECC field parameter A",
+    0xB4: "ECC field parameter B",
+    0xB5: "ECC field parameter G",
+    0xB6: "ECC field parameter N",
+    0xB7: "ECC field parameter k",
+    0xB8: "SM2 public key",
+    0xB9: "SM2 private key",
+    0xF0: "ECC key parameters reference",
+    0xFF: "Extended format",
 }
 
 
@@ -145,7 +157,7 @@ def locate_security_domain_sections(decoded_document: dict[str, Any]) -> list[tu
         if not isinstance(value, dict):
             continue
         # SD-style sections always carry an "instance" sub-dict per
-        # SAIP §A.2; sniff that to recognise them whether they were
+        # SAIP v3.4.1 §8.6.1; sniff that to recognise them whether they were
         # decoded under "securityDomain", "mno-sd", "ssd", "isdr", etc.
         if "instance" in value and isinstance(value["instance"], dict):
             out.append((key, value))
@@ -304,7 +316,7 @@ def remove_key(sd: dict[str, Any], *, key_version: int | str, key_identifier: in
         if kvn_int == key_version_int and kid_int == key_identifier_int:
             del key_list[index]
             if len(key_list) == 0:
-                # SAIP §A.2 keyList is OPTIONAL — drop the empty list so
+                # SAIP v3.4.1 §8.6.1 keyList is OPTIONAL -- drop the empty list so
                 # the encoder does not emit an empty SEQUENCE OF.
                 sd.pop("keyList", None)
                 return f"removed key (KVN=0x{key_version_int:02X}, KID=0x{key_identifier_int:02X}); keyList now empty."
@@ -485,6 +497,9 @@ def security_domain_summary(sd: dict[str, Any]) -> dict[str, Any]:
         "load_package_aid_hex": _hex_or_empty(instance.get("applicationLoadPackageAID")),
         "privileges_hex": _hex_or_empty(instance.get("applicationPrivileges")),
         "lifecycle_state": lcs_int,
+        # False when the member is absent and the ApplicationInstance
+        # DEFAULT '07' applies (TCA SAIP v3.4.1 §8.7.3).
+        "lifecycle_state_set": isinstance(lcs_raw, (bytes, bytearray)) and len(lcs_raw) >= 1,
         "keys": keys_out,
         "perso_data_hex": perso_out,
     }

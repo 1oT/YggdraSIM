@@ -36,6 +36,8 @@ class HelpMenu :
         print ("  CLS            : Clear the terminal screen.")
         print ("  OTA            : Switch to SCP80 Over-The-Air toolkit.")
         print ("  STK [Commands] : Enter the SCP03 STK subsystem (INIT/SMS/CALL/DATA simulation shell).")
+        print ("  STK ON / OFF   : Keep STK running in this shell: every command answers the card's")
+        print ("                   proactive commands; STK <verb> runs EVENT/SMS/LOCATION/DATA here.")
 
         print (f"\n{Config.Colors.CYAN}[ GlobalPlatform Execution Wizards ]{Config.Colors.ENDC}")
         print ("  WIZARD         : Unified installer for Applets, Packages, and Extradition.")
@@ -57,7 +59,7 @@ class HelpMenu :
         print ("  REGISTRY-UPDATE: <AID> [Priv] [Params] - Send INSTALL [for registry update].")
         print ("  PERSONALIZE    : <AID> - Send INSTALL [for personalization].")
         print ("  LOCK <AID>     : Shortcut to set state to LOCKED (0x80).")
-        print ("  UNLOCK <AID>   : Shortcut to set state to SELECTABLE (0x07).")
+        print ("  UNLOCK <AID>   : Shortcut to clear the LOCKED bit (b8 = 0); the entity returns to its previous state.")
         print ("  DEL/DELETE <AID>: Shortcut to delete an object.")
         print ("  STORE-DATA     : <Hex> [P1] [P2] - Send raw STORE DATA payload.")
 
@@ -104,6 +106,8 @@ class HelpMenu :
         print ("  RUN / SCRIPT   : <File> [Out.yaml] - Execute a batch script of APDU commands.")
         print ("  EXPORT-KEYBAG  : [Path.keys.json] [Label] - Dump active SCP03 session keys for HIL offline replay.")
         print ("  DEBUG/VERBOSE  : Toggle raw APDU hex transmission logging.")
+        print ("  TRACE          : START [File] | STOP | STATUS - Copy every command's output, with debug detail, to a file until TRACE STOP.")
+        print ("  --log <File>   : Add to any command line to run it with debug output and append everything it prints to <File>.")
         print ("  HELP           : Display this menu.")
         print ("  EXIT / Q       : Disconnect reader and leave SCP03 shell.")
         print ("  QA             : Disconnect reader and exit YggdraSIM.")

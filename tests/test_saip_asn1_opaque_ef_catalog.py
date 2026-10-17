@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Wave B — opaque-passthrough round-trip guards for unmapped EF keys.
+Wave B -- opaque-passthrough round-trip guards for unmapped EF keys.
 
 Every EF key in ``_OPAQUE_PASSTHROUGH_EF_CATALOG`` is covered by the
 decode-side ``_decode_opaque_ef`` / encode-side ``encode_ef_opaque``
@@ -113,7 +113,7 @@ class OpaquePassthroughCatalogTests(unittest.TestCase):
 _SKIP_DECODE_SHAPE_KEYS: frozenset[str] = frozenset(
     {
         "ef-imsi",
-        # Wave C Pass A — keys promoted to length-strict semantic decoders.
+        # Wave C Pass A -- keys promoted to length-strict semantic decoders.
         # They reject the synthetic 9-byte sample because the spec fixes
         # their layout at a different length (PWS SNPN: 1 byte; DRI: 7
         # bytes; IPS: 4 bytes). Each has dedicated unit coverage in
@@ -121,7 +121,7 @@ _SKIP_DECODE_SHAPE_KEYS: frozenset[str] = frozenset(
         "ef-pws-snpn",
         "ef-dri",
         "ef-ips",
-        # Wave C Pass B — keys promoted to fixed-length / BER-TLV
+        # Wave C Pass B -- keys promoted to fixed-length / BER-TLV
         # semantic decoders. Each rejects the synthetic 9-byte sample
         # because their spec layout is either shorter (1-2 bytes for
         # flag / icon EFs) or requires well-formed BER-TLV content.
@@ -149,17 +149,17 @@ _SKIP_DECODE_SHAPE_KEYS: frozenset[str] = frozenset(
         "ef-ial",
         "ef-ncp-ip",
         "ef-3gpppsdataoffservicelist",
-        # Wave C Pass C — MMS storage mode has a strict 1-byte layout;
+        # Wave C Pass C -- MMS storage mode has a strict 1-byte layout;
         # the 9-byte synthetic sample is rejected. Dedicated unit
         # coverage lives in tests/test_saip_wave_c_pass_c_decoders.py.
         "ef-mmssmode",
-        # Wave C Pass C — GBABP uses three consecutive length-prefixed
+        # Wave C Pass C -- GBABP uses three consecutive length-prefixed
         # fields (rand / b_tid / key_lifetime). The first length byte
         # of the synthetic sample (0xDE = 222) exceeds the remaining
         # bytes, so the length-strict decoder rejects it. Dedicated
         # coverage lives in tests/test_saip_wave_c_pass_c_decoders.py.
         "ef-gbabp",
-        # Wave C Pass D — 1-byte CSIM capability/bitmap decoders
+        # Wave C Pass D -- 1-byte CSIM capability/bitmap decoders
         # strictly require exactly one byte; the 9-byte synthetic
         # sample is rejected. Dedicated coverage lives in
         # tests/test_saip_wave_c_pass_d_decoders.py.
@@ -168,18 +168,18 @@ _SKIP_DECODE_SHAPE_KEYS: frozenset[str] = frozenset(
         "ef-ipv6cap",
         "ef-smscap",
         "ef-sipcap",
-        # Wave C Pass E — ICE-DN uses the 14-byte ADN-like footer;
+        # Wave C Pass E -- ICE-DN uses the 14-byte ADN-like footer;
         # the 9-byte synthetic sample is shorter. Dedicated coverage
         # lives in tests/test_saip_wave_c_pass_e_decoders.py.
         "ef-ice-dn",
-        # Wave D Pass A — length-strict decoders rejecting the 9-byte
+        # Wave D Pass A -- length-strict decoders rejecting the 9-byte
         # synthetic sample. Dedicated coverage lives in
         # tests/test_saip_wave_d_pass_a_decoders.py.
         "ef-threshold",  # spec-fixed 1 byte
         "ef-eapstatus",  # spec-fixed 1 byte
         "ef-call-count",  # spec-fixed 2 bytes
         "ef-call-prompt",  # spec-fixed 1 byte
-        # Deep-sweep additions — pySim-aligned EFs with strict shape
+        # Deep-sweep additions -- pySim-aligned EFs with strict shape
         # requirements. Dedicated coverage lives in
         # tests/test_saip_deep_sweep_additions.py.
         "ef-nid",  # spec-fixed 6-byte record

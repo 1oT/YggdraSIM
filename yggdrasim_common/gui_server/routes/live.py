@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""``/api/live/*`` — hardware-adjacent routes (Milestone B-3).
+"""``/api/live/*`` -- hardware-adjacent routes (Milestone B-3).
 
 This router wraps the live PC/SC + SGP.22 surface. Unlike the pure-
 function routes in :mod:`.tools`, these endpoints touch real hardware
@@ -45,6 +44,10 @@ from yggdrasim_common.gui_server.auth import (
 
 _LOGGER = logging.getLogger("yggdrasim.gui.live")
 
+# A stalled websocket client must not let a long-running flow grow its event
+# queue without bound. Matches _QUEUE_CAP in routes/apdu_events.py.
+_FLOW_QUEUE_CAP = 512
+
 router = APIRouter(tags=["live"])
 
 
@@ -57,6 +60,17 @@ class ReaderInfo(BaseModel):
     status: str
     kind: str = "local"
     source_url: str = ""
+    # True only for a row published by a live session rather than probed
+    # from a reader. Such a row exists exactly as long as its session
+    # does, so an empty ``atr_hex`` on it means "not cached yet", never
+    # "no card" -- the reader bar has to tell the two apart before it
+    # decides a card was removed. A remote *bridge* row is probed, so it
+    # stays False and keeps the ordinary empty-ATR handling.
+    session_backed: bool = False
+    # Who is driving this card, when that is a consumer on another
+    # machine. Nothing on this host holds a session for such a card,
+    # so every local signal reads idle while the card is in fact busy.
+    leased_by: str = ""
 
 
 class ReadersResponse(BaseModel):
@@ -70,11 +84,15 @@ def _scp03_session_rows_by_reader_name() -> dict[str, list[dict[str, Any]]]:
     mapping: dict[str, list[dict[str, Any]]] = {}
     try:
         from yggdrasim_common.gui_server.sessions import get_manager
-    except Exception:  # noqa: BLE001 — import-safe in the test sandbox
+    except Exception:  # noqa: BLE001 -- import-safe in the test sandbox
         return mapping
     try:
         for entry in get_manager().list():
-            if entry.get("kind") != "scp03":
+            # A Remote Lab link reads the card's ATR at connect time and holds
+            # it in its metadata; listing it here is what lets a connected
+            # remote reader show a present card before any module has opened
+            # a session on it.
+            if entry.get("kind") not in ("scp03", "remote_lab_link"):
                 continue
             md = entry.get("metadata") or {}
             reader_name = str(md.get("reader_name") or "").strip()
@@ -91,7 +109,7 @@ def _session_atr_by_reader_name() -> dict[str, str]:
 
     The reader-bar polls ``/api/live/readers`` every 5 s. Before this
     helper existed, the poll opened a *second* PC/SC handle to each
-    reader, grabbed the ATR, and disconnected — which pyscard
+    reader, grabbed the ATR, and disconnected -- which pyscard
     translates to ``SCardDisconnect(hcard, SCARD_UNPOWER_CARD)`` by
     default. On ``SCARD_SHARE_SHARED`` setups that unpower is visible
     to the *first* handle (our live scan session): the card cold-
@@ -102,8 +120,8 @@ def _session_atr_by_reader_name() -> dict[str, str]:
     Symptoms the operator sees:
       * Every file click fails and triggers ``scp03.recover_session``
         (cold reset + rescan), so the tree "rescans on every click".
-      * The preview briefly shows "reading…", then falls into the
-        recovery banner, then eventually renders — ~2 s per click
+      * The preview briefly shows "reading...", then falls into the
+        recovery banner, then eventually renders -- ~2 s per click
         wasted.
 
     The fix is two-pronged:
@@ -122,6 +140,40 @@ def _session_atr_by_reader_name() -> dict[str, str]:
                 mapping[reader_name] = atr_hex
                 break
     return mapping
+
+
+# Session kinds that own a PC/SC handle. A SAIP authoring session holds
+# only a decoded document, so idling it out frees nothing and costs the
+# operator the package they were reading.
+_READER_BOUND_SESSION_KINDS = frozenset({"scp03"})
+
+
+def _holds_a_reader(session: Any) -> bool:
+    """Return whether idling this session out would release a reader."""
+    return str(getattr(session, "kind", "")) in _READER_BOUND_SESSION_KINDS
+
+
+def _reap_idle_card_sessions() -> int:
+    """Apply the idle timeout to card sessions on the reader poll.
+
+    This route already closes sessions whose card has left the reader;
+    a card left in an unattended reader keeps its handle held instead.
+    The 5 s reader poll is the surface that owns reader liveness, so the
+    idle sweep for card-holding kinds runs here rather than as a side
+    effect of an unrelated subsystem's listing endpoint.
+    """
+    try:
+        from yggdrasim_common.gui_server.sessions import get_manager
+    except Exception:  # noqa: BLE001 -- import-safe in the test sandbox
+        return 0
+    try:
+        closed = int(get_manager().reap_idle(select=_holds_a_reader))
+    except Exception as error:  # noqa: BLE001 -- the listing must still answer
+        _LOGGER.warning("idle card-session sweep failed: %s", error)
+        return 0
+    if closed:
+        _LOGGER.info("closed %d idle card session(s) holding a reader", closed)
+    return closed
 
 
 def _close_scp03_sessions_for_reader_name(reader_name: str) -> int:
@@ -153,11 +205,44 @@ def _is_no_card_probe_error(error: BaseException) -> bool:
     return "0x8010000C" in text or "No smart card inserted" in text
 
 
+def _registered_remote_reader_rows(session_atrs: dict[str, str]) -> list[ReaderInfo]:
+    """Return one row per registered remote reader.
+
+    These are the readers a Remote Lab session publishes; no PC/SC
+    enumeration can see them, so without a row here the reader bar has no
+    probe to derive status from and renders them as offline. The ATR is
+    read from the live session rather than fetched, because this route is
+    polled every 5 s and the card sits behind a relay.
+    """
+    try:
+        from yggdrasim_common.remote_readers import list_remote_readers
+    except ImportError:
+        return []
+    rows: list[ReaderInfo] = []
+    for binding in list_remote_readers():
+        atr_hex = str(session_atrs.get(binding.name, "") or "").strip()
+        rows.append(
+            ReaderInfo(
+                name=binding.name,
+                atr_hex=atr_hex.upper(),
+                status=(
+                    "card present (remote lab)"
+                    if len(atr_hex) > 0
+                    else "remote lab session open (ATR not cached)"
+                ),
+                kind="remote",
+                source_url=binding.relay_url,
+                session_backed=True,
+            )
+        )
+    return rows
+
+
 def _probe_remote_bridge_reader() -> ReaderInfo | None:
     """Return a ``ReaderInfo`` row for the configured remote card bridge.
 
     Returns ``None`` when no bridge is configured. Always returns a
-    populated row otherwise — even an unreachable bridge gets a row so
+    populated row otherwise -- even an unreachable bridge gets a row so
     operators can see *why* it isn't usable without leaving the GUI.
     The probe shells out to ``GET /status`` on the bridge with a tight
     2 s timeout so we never wedge the reader poll on a stuck remote.
@@ -300,10 +385,88 @@ def _should_suppress_remote_rows_for_stubbed_pcsc() -> bool:
     return len(str(os.environ.get(CARD_RELAY_URL_ENV, "") or "").strip()) == 0
 
 
+def _local_bridge_card_leases() -> dict[str, str]:
+    """Map reader name to lease holder for a Card Bridge running here.
+
+    A card this machine serves to another one is busy, and no local
+    signal says so: the consumer is a process on a different host, so
+    nothing here holds a session and every local view calls the reader
+    idle. The bridge knows, because it is the thing being asked.
+
+    Best effort and quiet. This sits in the reader poll, so a bridge that
+    is slow, gone, or older than the lease costs one short timeout and
+    nothing else.
+    """
+    try:
+        from pathlib import Path as _Path
+
+        from yggdrasim_common.card_backend import _request_card_relay_json
+        from yggdrasim_common.card_bridge_auth import (
+            default_token_file_for_port,
+            read_token_file,
+        )
+        from yggdrasim_common.gui_server.actions import card_bridge as _card_bridge
+    except ImportError:
+        return {}
+
+    try:
+        state = _card_bridge._load_remote_rig_state()
+        port = int(state.get("local_card_bridge_port") or 0)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return {}
+    if port <= 0:
+        return {}
+
+    # The bridge names its own token file after the port it serves, so
+    # that path is tried first: a recorded one can be left over from a
+    # bridge on a different port, and reading it succeeds while the
+    # request it authenticates does not. Whichever answers wins.
+    candidates = [
+        str(default_token_file_for_port(port)),
+        str(state.get("local_card_bridge_token_file") or "").strip(),
+    ]
+    payload: dict[str, Any] | None = None
+    for candidate in candidates:
+        if len(candidate) == 0:
+            continue
+        try:
+            token = read_token_file(_Path(candidate).expanduser())
+        except OSError:
+            continue
+        if len(token) == 0:
+            continue
+        try:
+            payload = _request_card_relay_json(
+                f"http://127.0.0.1:{port}/status",
+                method="GET",
+                timeout_seconds=1,
+                auth_token=token,
+            )
+        except Exception:  # noqa: BLE001 -- a reader poll never fails on this
+            continue
+        break
+    if payload is None:
+        return {}
+
+    lease = payload.get("cardLease")
+    if not isinstance(lease, dict) or bool(lease.get("held")) is False:
+        return {}
+    reader_name = str(payload.get("reader") or "").strip()
+    holder = str(lease.get("holder") or "").strip()
+    if len(reader_name) == 0 or len(holder) == 0:
+        return {}
+    return {reader_name: holder}
+
+
 @router.get("/api/live/readers", response_model=ReadersResponse)
 def list_readers() -> ReadersResponse:
     """Return a JSON list of available PCSC readers and simulated-card backends."""
+    _reap_idle_card_sessions()
     remote_row = None if _should_suppress_remote_rows_for_stubbed_pcsc() else _probe_remote_bridge_reader()
+    session_atrs = _session_atr_by_reader_name()
+    # Registered remote readers do not depend on PC/SC, so they are listed
+    # even when the local enumeration is missing or failing.
+    registered_remote_rows = _registered_remote_reader_rows(session_atrs)
 
     try:
         from smartcard.System import readers as list_pcsc_readers
@@ -311,16 +474,17 @@ def list_readers() -> ReadersResponse:
         rows: list[ReaderInfo] = []
         if remote_row is not None:
             rows.append(remote_row)
+        rows.extend(registered_remote_rows)
         if len(rows) > 0:
             return ReadersResponse(
                 backend="remote-only",
                 readers=rows,
-                note="pyscard not installed locally — only the configured remote card bridge is available.",
+                note="pyscard not installed locally -- only the configured remote card bridge is available.",
             )
         return ReadersResponse(
             backend="missing",
             readers=[],
-            note="pyscard is not installed — install it with `pip install pyscard` to enumerate PC/SC readers.",
+            note="pyscard is not installed -- install it with `pip install pyscard` to enumerate PC/SC readers.",
         )
 
     try:
@@ -329,20 +493,23 @@ def list_readers() -> ReadersResponse:
         rows = []
         if remote_row is not None:
             rows.append(remote_row)
+        rows.extend(registered_remote_rows)
         return ReadersResponse(
             backend="error" if remote_row is None else "remote-only",
             readers=rows,
             note=f"PC/SC enumeration failed: {error}",
         )
 
-    session_atrs = _session_atr_by_reader_name()
-
+    leases = _local_bridge_card_leases()
     rows: list[ReaderInfo] = []
     for reader in reader_list:
         cached_atr = session_atrs.get(str(reader), "")
         info = _probe_reader(reader, cached_atr=cached_atr)
         if cached_atr and len(info.atr_hex.strip()) == 0:
             _close_scp03_sessions_for_reader_name(str(reader))
+        holder = leases.get(str(reader), "")
+        if len(holder) > 0:
+            info.leased_by = holder
         rows.append(info)
 
     local_names = [str(reader) for reader in reader_list]
@@ -352,6 +519,8 @@ def list_readers() -> ReadersResponse:
         rows.append(remote_row)
 
     local_count = len(rows) - (1 if remote_row is not None and not remote_duplicate else 0)
+    listed_names = {row.name for row in rows}
+    rows.extend(row for row in registered_remote_rows if row.name not in listed_names)
     if remote_row is not None and not remote_duplicate:
         note = f"found {local_count} local reader(s) + 1 remote bridge."
     elif remote_duplicate:
@@ -359,7 +528,7 @@ def list_readers() -> ReadersResponse:
     else:
         note = "found " + str(local_count) + " reader(s)."
     if local_count == 0 and remote_row is None:
-        note = "no readers detected — check USB connection and pcscd service."
+        note = "no readers detected -- check USB connection and pcscd service."
     return ReadersResponse(backend="pyscard", readers=rows, note=note)
 
 
@@ -396,17 +565,17 @@ def _probe_reader(reader: Any, *, cached_atr: str = "") -> ReaderInfo:
 
     Two critical non-obvious behaviours:
 
-    * **Cached ATR is a fallback, not presence proof** — if
+    * **Cached ATR is a fallback, not presence proof** -- if
       ``cached_atr`` is non-empty (populated from a live scp03
       session's metadata in the caller), we still validate the reader.
       Otherwise a removed card can stay green forever in the top bar.
       The cache is only reused for non-presence probe errors.
 
-    * **``SCARD_LEAVE_CARD`` on disconnect** — pyscard's
+    * **``SCARD_LEAVE_CARD`` on disconnect** -- pyscard's
       ``CardConnection.connect()`` defaults ``disposition`` to
       ``SCARD_UNPOWER_CARD``, which is what ``disconnect()`` passes
       to ``SCardDisconnect``. On ``SCARD_SHARE_SHARED`` setups that
-      unpower propagates to the card regardless of other handles —
+      unpower propagates to the card regardless of other handles --
       the card cold-resets between GUI polls. The explicit
       ``disposition=SCARD_LEAVE_CARD`` keeps the card powered up so
       the primary scan session's APDU state (selected DF, secure
@@ -418,7 +587,7 @@ def _probe_reader(reader: Any, *, cached_atr: str = "") -> ReaderInfo:
     name = str(reader)
     # Lazy-import the PC/SC constant so this module stays importable
     # in environments without pyscard (tests, headless sandboxes).
-    leave_card = 0  # SCARD_LEAVE_CARD — numeric default, overridden below
+    leave_card = 0  # SCARD_LEAVE_CARD -- numeric default, overridden below
     try:
         from smartcard.scard import SCARD_LEAVE_CARD as _SCARD_LEAVE_CARD
         leave_card = _SCARD_LEAVE_CARD
@@ -497,13 +666,26 @@ async def download_profile_flow(websocket: WebSocket) -> None:
     await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
     _LOGGER.info("gui.flow.opened kind=download-profile token=%s", token_id(provided))
 
-    event_queue: asyncio.Queue = asyncio.Queue()
+    event_queue: asyncio.Queue = asyncio.Queue(maxsize=_FLOW_QUEUE_CAP)
     loop = asyncio.get_running_loop()
 
     async def _emit(level: str, message: str, **extra: Any) -> None:
-        await event_queue.put({"level": level, "message": message, **extra})
+        event = {"level": level, "message": message, **extra}
+        try:
+            event_queue.put_nowait(event)
+        except asyncio.QueueFull:
+            # Drop the oldest event rather than blocking the flow on a client
+            # that stopped reading; the newest tail is the useful part.
+            try:
+                event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                event_queue.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
 
-    await _emit("info", "waiting for start payload…")
+    await _emit("info", "waiting for start payload...")
 
     # Wait for start payload.
     try:
@@ -571,7 +753,7 @@ async def download_profile_flow(websocket: WebSocket) -> None:
                 continue
             if str(payload.get("type") or "") == "cancel":
                 ctx.cancel_event.set()
-                await _emit("warn", "cancel requested — orchestrator will stop at next phase boundary.")
+                await _emit("warn", "cancel requested -- orchestrator will stop at next phase boundary.")
     finally:
         # Let the worker finish emitting its final events, then close.
         worker.join(timeout=2.0)
@@ -616,7 +798,7 @@ def _run_flow_worker(ctx: FlowContext, loop: asyncio.AbstractEventLoop, event_qu
         _post("info", "dry-run: skipping GetBoundProfilePackage + install.")
 
     try:
-        _post("info", "connecting to reader…")
+        _post("info", "connecting to reader...")
         reader_index = _resolve_reader_index(ctx.reader)
 
         # Use the SCP11 live PC/SC channel directly: it implements the
@@ -629,7 +811,7 @@ def _run_flow_worker(ctx: FlowContext, loop: asyncio.AbstractEventLoop, event_qu
         from SCP11.live.transport import PcscApduChannel
 
         cfg = replace(SGPConfig(), READER_INDEX=int(reader_index))
-        apdu_channel = PcscApduChannel(reader_index=int(reader_index))
+        apdu_channel = PcscApduChannel(reader_index=int(reader_index), quiet_apdu_logging=True)
         _post("info", "card connected; ATR capture complete.")
 
         if ctx.dry_run:
@@ -637,10 +819,10 @@ def _run_flow_worker(ctx: FlowContext, loop: asyncio.AbstractEventLoop, event_qu
                 apdu_channel._conn.disconnect()
             except Exception:
                 pass
-            _post("done", "dry-run success — card reachable, flow not executed.")
+            _post("done", "dry-run success -- card reachable, flow not executed.")
             return
 
-        _post("info", "loading SCP11 live orchestrator…")
+        _post("info", "loading SCP11 live orchestrator...")
         from SCP11.live.orchestrator import SGP22Orchestrator
 
         _post("info", "orchestrator ready; launching run_flow()")
@@ -703,7 +885,7 @@ def _resolve_reader_index(reader_name: str) -> int:
 
 
 class _CapturingStream(io.TextIOBase):
-    """Line-oriented ``io.TextIOBase`` proxy — every newline-terminated
+    """Line-oriented ``io.TextIOBase`` proxy -- every newline-terminated
     chunk becomes a single WS event. Partial lines are buffered until
     the next ``\n`` so we don't flood the socket with per-character
     frames when the orchestrator uses ``\r`` to redraw progress bars.

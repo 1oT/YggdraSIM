@@ -10,6 +10,19 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+# What a rig offers, which decides which way APDUs travel for a session.
+# A card rig holds the card and serves it; the operator drives it through
+# the agent's stream proxy. A modem rig holds a modem and a SIMtrace2 and
+# has no card of its own; the operator supplies one at reservation time
+# and the rig consumes it. Absent ``kind`` means ``card``, so a config
+# written before modem rigs existed parses unchanged.
+RIG_KIND_CARD = "card"
+RIG_KIND_MODEM = "modem"
+RIG_KINDS = (RIG_KIND_CARD, RIG_KIND_MODEM)
+
+# Board-reset modes accepted by ``Tools/HilBridge/device_reset.py``.
+SIMTRACE_RESET_MODES = ("off", "usb-reset", "port-power", "auto")
+
 
 @dataclass(frozen=True, slots=True)
 class AccessTokenConfig:
@@ -51,6 +64,33 @@ class StreamProxyConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ModemConfig:
+    """The modem a modem rig puts in front of an operator-supplied card."""
+
+    label: str = ""
+    simtrace_vidpid: str = "1d50:60e3"
+
+
+@dataclass(frozen=True, slots=True)
+class ConsumerConfig:
+    """How a modem rig binds the card an operator offers it.
+
+    ``enabled`` is the opt-in that lets a reservation start a HIL
+    supervisor on the rig. It is off by default: granting a session the
+    right to spawn a process is a larger privilege than proxying bytes,
+    so it is declared per rig rather than inherited.
+    """
+
+    enabled: bool = False
+    supervisor: str = "yggdrasim-hil-supervisor"
+    simtrace_reset: str = "usb-reset"
+    bridge_host: str = "127.0.0.1"
+    bridge_port: int = 9997
+    apdu_timeout_ms: int = 30_000
+    extra_args: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class RigConfig:
     id: str
     name: str
@@ -63,6 +103,19 @@ class RigConfig:
     stream_proxy: StreamProxyConfig = StreamProxyConfig()
     upstream: UpstreamConfig = UpstreamConfig(url="")
     locks: tuple[str, ...] = ()
+    kind: str = RIG_KIND_CARD
+    modem: ModemConfig = ModemConfig()
+    consumer: ConsumerConfig = ConsumerConfig()
+
+    @property
+    def serves_card(self) -> bool:
+        """True when the rig holds the card and streams it to the operator."""
+        return self.kind == RIG_KIND_CARD
+
+    @property
+    def consumes_card(self) -> bool:
+        """True when the operator holds the card and the rig consumes it."""
+        return self.kind == RIG_KIND_MODEM
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +171,64 @@ def _normalize_bind_host(value: Any) -> str:
     if text.startswith("[") and text.endswith("]"):
         return text[1:-1].strip()
     return text
+
+
+def _positive_int(value: Any, field_name: str) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer") from exc
+    if number <= 0:
+        raise ValueError(f"{field_name} must be greater than zero")
+    return number
+
+
+def _modem_blocks(
+    modem_raw: dict[str, Any],
+    consumer_raw: dict[str, Any],
+    prefix: str,
+) -> tuple[ModemConfig, ConsumerConfig]:
+    """Parse a modem rig's ``modem`` and ``consumer`` blocks.
+
+    Both are absent on a card rig, where the caller has already rejected
+    them, so the defaults returned here are never reached by that path.
+    """
+    defaults = ConsumerConfig()
+    modem = ModemConfig(
+        label=str(modem_raw.get("label") or "").strip(),
+        simtrace_vidpid=str(modem_raw.get("simtrace_vidpid") or "").strip()
+        or ModemConfig().simtrace_vidpid,
+    )
+    simtrace_reset = (
+        str(consumer_raw.get("simtrace_reset") or defaults.simtrace_reset)
+        .strip()
+        .casefold()
+    )
+    if simtrace_reset not in SIMTRACE_RESET_MODES:
+        raise ValueError(
+            f"{prefix}.consumer.simtrace_reset must be one of "
+            f"{', '.join(SIMTRACE_RESET_MODES)}"
+        )
+    consumer = ConsumerConfig(
+        enabled=bool(consumer_raw.get("enabled", defaults.enabled)),
+        supervisor=str(
+            consumer_raw.get("supervisor") or defaults.supervisor
+        ).strip(),
+        simtrace_reset=simtrace_reset,
+        bridge_host=_normalize_bind_host(
+            consumer_raw.get("bridge_host") or defaults.bridge_host
+        ),
+        bridge_port=_port(
+            consumer_raw.get("bridge_port") or defaults.bridge_port,
+            f"{prefix}.consumer.bridge_port",
+        ),
+        apdu_timeout_ms=_positive_int(
+            consumer_raw.get("apdu_timeout_ms") or defaults.apdu_timeout_ms,
+            f"{prefix}.consumer.apdu_timeout_ms",
+        ),
+        extra_args=_str_list(consumer_raw.get("extra_args")),
+    )
+    return modem, consumer
 
 
 def _url_host(value: Any) -> str:
@@ -268,31 +379,44 @@ def parse_config(payload: dict[str, Any]) -> RemoteLabAgentConfig:
             raise ValueError(f"duplicate rig id: {rig_id}")
         rig_ids.add(normalized_rig_id)
 
+        rig_kind = str(item.get("kind") or RIG_KIND_CARD).strip().casefold()
+        if rig_kind not in RIG_KINDS:
+            raise ValueError(
+                f"rigs[{index}].kind must be one of {', '.join(RIG_KINDS)}"
+            )
+        serves_card = rig_kind == RIG_KIND_CARD
+
         proxy_raw = _as_dict(item.get("stream_proxy"), f"rigs[{index}].stream_proxy")
-        external_port = _port(
-            proxy_raw.get("external_port"),
-            f"rigs[{index}].stream_proxy.external_port",
-        )
+        raw_external_port = proxy_raw.get("external_port")
         bind_host = (
             _normalize_bind_host(proxy_raw.get("bind_host") or agent.bind_host)
             or agent.bind_host
         )
-        if any(
-            existing_port == external_port
-            and _binds_overlap(existing_host, bind_host)
-            for existing_host, existing_port in relay_ports
-        ):
-            raise ValueError(
-                f"duplicate stream proxy bind/port (including overlap): {bind_host}:{external_port}"
+        external_port = 0
+        # A modem rig serves no card, so it needs no listener. A card rig
+        # keeps the unconditional check, including its error text, so an
+        # existing config fails exactly where it failed before.
+        if serves_card is True or raw_external_port is not None:
+            external_port = _port(
+                raw_external_port,
+                f"rigs[{index}].stream_proxy.external_port",
             )
-        if external_port == agent.control_port and _binds_overlap(
-            bind_host, agent.bind_host
-        ):
-            raise ValueError(
-                "stream proxy bind/port conflicts with agent control port: "
-                f"{bind_host}:{external_port}"
-            )
-        relay_ports.append((bind_host, external_port))
+            if any(
+                existing_port == external_port
+                and _binds_overlap(existing_host, bind_host)
+                for existing_host, existing_port in relay_ports
+            ):
+                raise ValueError(
+                    f"duplicate stream proxy bind/port (including overlap): {bind_host}:{external_port}"
+                )
+            if external_port == agent.control_port and _binds_overlap(
+                bind_host, agent.bind_host
+            ):
+                raise ValueError(
+                    "stream proxy bind/port conflicts with agent control port: "
+                    f"{bind_host}:{external_port}"
+                )
+            relay_ports.append((bind_host, external_port))
         stream_proxy = StreamProxyConfig(
             bind_host=bind_host,
             external_port=external_port,
@@ -304,14 +428,28 @@ def parse_config(payload: dict[str, Any]) -> RemoteLabAgentConfig:
 
         upstream_raw = _as_dict(item.get("upstream"), f"rigs[{index}].upstream")
         upstream_url = _upstream_url_from_config(upstream_raw, f"rigs[{index}].upstream")
-        if not upstream_url:
+        if serves_card is True and not upstream_url:
             raise ValueError(f"rigs[{index}].upstream.url or host/port is required")
+        if serves_card is False and upstream_url:
+            raise ValueError(
+                f"rigs[{index}].upstream is not valid for a {RIG_KIND_MODEM} rig: "
+                "the operator supplies the card when the session is reserved"
+            )
         upstream = UpstreamConfig(
             url=upstream_url,
             token_file=str(upstream_raw.get("token_file") or "").strip(),
             token=str(upstream_raw.get("token") or "").strip(),
             health_check=str(upstream_raw.get("health_check") or "").strip(),
         )
+
+        modem_raw = _as_dict(item.get("modem"), f"rigs[{index}].modem")
+        consumer_raw = _as_dict(item.get("consumer"), f"rigs[{index}].consumer")
+        if serves_card is True and (len(modem_raw) > 0 or len(consumer_raw) > 0):
+            raise ValueError(
+                f"rigs[{index}].modem and .consumer are only valid for a "
+                f"{RIG_KIND_MODEM} rig"
+            )
+        modem, consumer = _modem_blocks(modem_raw, consumer_raw, f"rigs[{index}]")
 
         locks = _str_list(item.get("locks"))
         if len(locks) == 0:
@@ -330,6 +468,9 @@ def parse_config(payload: dict[str, Any]) -> RemoteLabAgentConfig:
                 stream_proxy=stream_proxy,
                 upstream=upstream,
                 locks=locks,
+                kind=rig_kind,
+                modem=modem,
+                consumer=consumer,
             )
         )
 

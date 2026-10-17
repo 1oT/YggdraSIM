@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge supervisor: manages child process lifecycle (modem, bridge, tshark) with restart policy and watchdog timers."""
 from __future__ import annotations
 
@@ -11,19 +10,22 @@ import logging
 import os
 import re
 import signal
+import shlex
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import Event
 from typing import Any, Protocol
 
-# ``signal.SIGKILL`` is POSIX-only and is evaluated at the call site, so it
-# cannot sit behind the platform guard inside the callee.
-_SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)
-
-from yggdrasim_common.card_backend import CARD_RELAY_MARKER_FILENAME, is_simulated_card_backend
+from yggdrasim_common.card_backend import (
+    CARD_RELAY_MARKER_FILENAME,
+    _request_card_relay_json,
+    is_simulated_card_backend,
+)
+from yggdrasim_common.card_bridge_auth import write_token_file
 from yggdrasim_common.frozen_dispatch import build_module_command
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
@@ -38,7 +40,16 @@ from .device_reset import (
     reset_simtrace_device,
 )
 from .main import add_bridge_runtime_arguments, build_bridge_config_from_args
+from .remote_card import (
+    build_card_relay_lease_url,
+    build_card_relay_status_url,
+    resolve_remote_card_token,
+)
 from .router import BridgeConfig
+
+# ``signal.SIGKILL`` is POSIX-only and is evaluated at the call site, so it
+# cannot sit behind the platform guard inside the callee.
+_SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,16 +57,55 @@ DEFAULT_USB_MATCH_TERMS: tuple[str, ...] = ("simtrace", "sysmocom")
 DEFAULT_POLL_INTERVAL_SECONDS = 2.0
 DEFAULT_RESTART_BACKOFF_SECONDS = 1.0
 DEFAULT_REMOTE_CARD_RESTART_BACKOFF_SECONDS = 15.0
+# How long the card path needs after the REMSIM client starts before a
+# modem asked to re-read the SIM will actually find one.
+MODEM_REFRESH_SETTLE_SECONDS = 8.0
+# Retries when the modem has not taken the card by then, with a growing
+# wait. Bounded so a modem that will never take it stops cycling its radio.
+MODEM_REFRESH_MAX_ATTEMPTS = 3
+# The refresh re-enumerates the AT port on this modem, so it disappears
+# and comes back. These bound the wait for it before the result is read.
+MODEM_PORT_RETURN_TIMEOUT_SECONDS = 20.0
+MODEM_PORT_SETTLE_SECONDS = 2.0
 DEFAULT_TERMINATION_TIMEOUT_SECONDS = 5.0
 DEFAULT_LSUSB_TIMEOUT_SECONDS = 5.0
 DEFAULT_REMSIM_USB_CONFIG_ID = "1"
 DEFAULT_REMSIM_USB_INTERFACE_ID = "0"
 DEFAULT_REMSIM_USB_ALTSETTING_ID = "0"
 SUPERVISOR_STATE_FILENAME = "hil_bridge_supervisor.json"
+CARD_LEASE_FILENAME = "hil_bridge_card_lease.token"
+# The supervisor renews on every reconcile, so this only decides how long
+# a remote card stays held after the supervisor dies without releasing.
+CARD_LEASE_TTL_SECONDS = 120.0
 REMSIM_USB_SELECTOR_FLAGS: tuple[str, ...] = ("-V", "-P", "-C", "-I", "-S", "-A", "-H")
+# osmo-remsim-client seeds the card emulator with '3B00' until bankd sends a
+# setAtrReq, and it activates the modem against that stub the moment it
+# attaches. Passing -a replaces the stub with the operator's real ATR.
+# Only an explicit ATR defers the seed: --atr-ignore-rspro pins the client
+# to whatever -a carries, so suppressing the seed for it would pin '3B00'.
+REMSIM_ATR_FLAGS: tuple[str, ...] = ("-a", "--atr")
 _USB_BUS_DEVICE_PATTERN = re.compile(r"\bBus\s+(\d+)\s+Device\s+(\d+):", re.IGNORECASE)
 _USB_ID_VIDPID_PATTERN = re.compile(r"\bID\s+([0-9a-f]{4}):([0-9a-f]{4})\b", re.IGNORECASE)
 _USB_PLAIN_VIDPID_PATTERN = re.compile(r"\b([0-9a-f]{4}):([0-9a-f]{4})\b", re.IGNORECASE)
+
+
+def _plausible_atr_hex(value: str) -> str:
+    """Return an uppercase ATR worth seeding, or "" when the relay gave none.
+
+    A UICC answers with TS '3B' or '3F' (ETSI TS 102 221 V18.4.0 Annex D),
+    so a payload failing that is a placeholder rather than a card, and
+    seeding it would swap one wrong ATR for another.
+    """
+    text = str(value or "").strip().upper()
+    if len(text) < 4 or len(text) % 2 != 0:
+        return ""
+    try:
+        raw = bytes.fromhex(text)
+    except ValueError:
+        return ""
+    if raw[0] not in (0x3B, 0x3F):
+        return ""
+    return text
 
 
 def _utc_timestamp() -> str:
@@ -472,6 +522,17 @@ class HilBridgeSupervisorConfig:
     remote_card_restart_backoff_seconds: float = DEFAULT_REMOTE_CARD_RESTART_BACKOFF_SECONDS
     termination_timeout_seconds: float = DEFAULT_TERMINATION_TIMEOUT_SECONDS
     state_path: str = field(default_factory=lambda: runtime_path("state", SUPERVISOR_STATE_FILENAME))
+    remote_card_lease_enabled: bool = True
+    card_lease_path: str = field(
+        default_factory=lambda: runtime_path("state", CARD_LEASE_FILENAME)
+    )
+    # A modem that was already powered has nothing to re-read when the card
+    # path comes back, so it keeps answering "no SIM" while this supervisor
+    # reports running with the lease held. The GUI sends this refresh when
+    # an operator starts a session; an automatic reconnect is a connect
+    # too, and nothing else will send it.
+    modem_at_device: str = ""
+    modem_refresh_min_interval_seconds: float = 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,11 +557,19 @@ class HilBridgeSupervisor:
     _stop_event: Event = field(default_factory=Event, init=False, repr=False)
     _next_start_not_before: float = field(default=0.0, init=False, repr=False)
     _next_remsim_start_not_before: float = field(default=0.0, init=False, repr=False)
+    _next_modem_refresh_not_before: float = field(default=0.0, init=False, repr=False)
+    _pending_modem_refresh_at: float = field(default=0.0, init=False, repr=False)
+    _modem_refresh_attempts: int = field(default=0, init=False, repr=False)
     _next_start_reason: str = field(default="", init=False, repr=False)
     _next_device_reset_not_before: float = field(default=0.0, init=False, repr=False)
     _device_reset_outcome: SimtraceResetOutcome | None = field(default=None, init=False, repr=False)
     _device_reset_at: str = field(default="", init=False, repr=False)
     _device_reset_count: int = field(default=0, init=False, repr=False)
+    _card_lease_token: str = field(default="", init=False, repr=False)
+    _card_lease_state: str = field(default="none", init=False, repr=False)
+    _card_lease_holder: str = field(default="", init=False, repr=False)
+    _card_lease_renew_after: float = field(default=0.0, init=False, repr=False)
+    _remote_card_atr_hex: str = field(default="", init=False, repr=False)
 
     def request_stop(self) -> None:
         self._stop_event.set()
@@ -525,6 +594,7 @@ class HilBridgeSupervisor:
         finally:
             self._stop_remsim_child("supervisor shutdown")
             self._stop_bridge_child("supervisor shutdown")
+            self.release_card_lease()
             self._write_state(
                 status="stopped",
                 snapshot=UsbPresenceSnapshot(source="supervisor", present=False),
@@ -544,9 +614,22 @@ class HilBridgeSupervisor:
         except Exception:  # noqa: BLE001 - card_backend resolver should never break the supervisor loop
             return False
 
+    def _service_pending_modem_refresh(self, now: float) -> None:
+        """Send an armed SIM refresh once the card path has had time to settle."""
+        if self._pending_modem_refresh_at <= 0.0 or now < self._pending_modem_refresh_at:
+            return
+        if self._bridge_is_running() is False or self._remsim_is_running() is False:
+            # The path fell over again before it settled; re-arm with the
+            # children rather than refresh a modem with nothing behind it.
+            self._pending_modem_refresh_at = 0.0
+            return
+        self._pending_modem_refresh_at = 0.0
+        self._refresh_modem_sim_interface()
+
     def reconcile(self) -> None:
         """Reconcile the desired-state channel config against the running connections."""
         now = float(self.monotonic())
+        self._service_pending_modem_refresh(now)
         sim_mode = self._sim_backend_active()
         snapshot = self.usb_monitor.snapshot()
         self._reconcile_child_exit(now)
@@ -584,6 +667,20 @@ class HilBridgeSupervisor:
                         reason=self._bridge_restart_pending_reason(remaining),
                     )
                     return
+                if self.claim_card_lease() is False:
+                    self._next_start_not_before = (
+                        now + self._bridge_restart_backoff_seconds()
+                    )
+                    self._write_state(
+                        status="card-leased",
+                        snapshot=snapshot,
+                        reason=(
+                            "The remote card is held by another consumer. "
+                            "Waiting for it to be released before starting "
+                            "the bridge."
+                        ),
+                    )
+                    return
                 # Clear the board before every new session generation.
                 # The reset re-enumerates the SIMtrace2 under a fresh USB
                 # address, so both children below must be started from the
@@ -594,10 +691,11 @@ class HilBridgeSupervisor:
                 bridge_running = self._bridge_is_running()
 
             if bridge_running:
+                self.renew_card_lease()
                 if remsim_allowed is False:
                     if self._remsim_is_running():
                         # Cable was pulled while sim mode remained
-                        # selected — bridge stays up, REMSIM goes.
+                        # selected -- bridge stays up, REMSIM goes.
                         self._stop_remsim_child("SIMtrace2 hardware disappeared.")
                     reason_text = self._sim_no_usb_reason() if sim_mode and snapshot.present is False else self._reader_no_remsim_reason(snapshot)
                     self._write_state(
@@ -653,6 +751,213 @@ class HilBridgeSupervisor:
             getattr(self.config.bridge, "remote_card_url", "") or ""
         ).strip()
         return len(remote_card_url) > 0
+
+    def _remote_card_lease_wanted(self) -> bool:
+        """True when this bridge should hold a lease on the remote card."""
+        if self.config.remote_card_lease_enabled is False:
+            return False
+        return self._bridge_uses_remote_card()
+
+    def _remote_card_endpoints(self) -> tuple[str, str]:
+        """Return the remote relay's lease URL and bearer token."""
+        bridge = self.config.bridge
+        url = str(getattr(bridge, "remote_card_url", "") or "").strip()
+        token = resolve_remote_card_token(
+            explicit_token_file=str(
+                getattr(bridge, "remote_card_token_file", "") or ""
+            ).strip()
+        )
+        return build_card_relay_lease_url(url), token
+
+    def refresh_remote_card_atr(self) -> str:
+        """Read the remote card's ATR so the REMSIM client can be seeded with it.
+
+        Returns "" when the bridge runs a local reader, when the relay
+        reports no usable ATR, or when it cannot be reached. The caller
+        then starts the client unseeded, which is what it did before.
+        """
+        self._remote_card_atr_hex = ""
+        if self._bridge_uses_remote_card() is False:
+            return ""
+        bridge = self.config.bridge
+        url = str(getattr(bridge, "remote_card_url", "") or "").strip()
+        if len(url) == 0:
+            return ""
+        token = resolve_remote_card_token(
+            explicit_token_file=str(
+                getattr(bridge, "remote_card_token_file", "") or ""
+            ).strip()
+        )
+        try:
+            payload = _request_card_relay_json(
+                build_card_relay_status_url(url),
+                method="GET",
+                timeout_seconds=5,
+                auth_token=token,
+            )
+        except Exception as status_error:  # noqa: BLE001
+            LOGGER.warning(
+                "Cannot read the remote card ATR (%s); the REMSIM client will "
+                "present its placeholder until bankd overrides it.",
+                status_error,
+            )
+            return ""
+        atr_hex = _plausible_atr_hex(str(payload.get("atr") or ""))
+        if len(atr_hex) == 0:
+            LOGGER.warning(
+                "Remote card relay reported no usable ATR; the REMSIM client "
+                "will present its placeholder until bankd overrides it."
+            )
+            return ""
+        self._remote_card_atr_hex = atr_hex
+        LOGGER.info("Seeding the REMSIM client with the remote card ATR %s", atr_hex)
+        return atr_hex
+
+    def _card_lease_holder_name(self) -> str:
+        return f"hil-supervisor@{os.uname().nodename}" if hasattr(os, "uname") else "hil-supervisor"
+
+    def claim_card_lease(self) -> bool:
+        """Take the lease on the operator's card before the bridge starts.
+
+        Returns False only when another consumer holds the card, which is
+        the one case where starting the bridge would interleave two
+        masters on one card. Every other outcome, including an upstream
+        that grants no lease at all, proceeds unleased so a relay without
+        a bearer token keeps working exactly as it did before.
+        """
+        if self._remote_card_lease_wanted() is False:
+            return True
+        if len(self._card_lease_token) > 0:
+            return True
+        lease_url, token = self._remote_card_endpoints()
+        try:
+            payload = _request_card_relay_json(
+                lease_url,
+                method="POST",
+                request_json={
+                    "holder": self._card_lease_holder_name(),
+                    "ttlSeconds": CARD_LEASE_TTL_SECONDS,
+                },
+                timeout_seconds=5,
+                auth_token=token,
+            )
+        except Exception as claim_error:  # noqa: BLE001
+            status = int(getattr(claim_error, "status", 0) or 0)
+            if status == 409:
+                self._card_lease_state = "held-elsewhere"
+                self._card_lease_holder = ""
+                LOGGER.warning(
+                    "Remote card is leased by another consumer; "
+                    "not starting the bridge child."
+                )
+                return False
+            self._card_lease_state = "unavailable"
+            LOGGER.info(
+                "Remote card relay grants no lease (%s); proceeding unleased.",
+                claim_error,
+            )
+            return True
+        lease_token = str(payload.get("leaseToken") or "").strip()
+        if len(lease_token) == 0:
+            self._card_lease_state = "unavailable"
+            return True
+        self._card_lease_token = lease_token
+        self._card_lease_state = "held"
+        self._card_lease_holder = self._card_lease_holder_name()
+        self._card_lease_renew_after = float(self.monotonic()) + (
+            CARD_LEASE_TTL_SECONDS / 3.0
+        )
+        self._write_card_lease_file(lease_token)
+        LOGGER.info("Holding the remote card lease for this bridge generation.")
+        return True
+
+    def renew_card_lease(self) -> None:
+        """Push the lease out by another TTL once it is a third spent."""
+        if len(self._card_lease_token) == 0:
+            return
+        now = float(self.monotonic())
+        if now < self._card_lease_renew_after:
+            return
+        self._card_lease_renew_after = now + (CARD_LEASE_TTL_SECONDS / 3.0)
+        lease_url, token = self._remote_card_endpoints()
+        try:
+            payload = _request_card_relay_json(
+                lease_url,
+                method="POST",
+                request_json={
+                    "leaseToken": self._card_lease_token,
+                    "holder": self._card_lease_holder_name(),
+                    "ttlSeconds": CARD_LEASE_TTL_SECONDS,
+                },
+                timeout_seconds=5,
+                auth_token=token,
+            )
+        except Exception as renew_error:  # noqa: BLE001
+            LOGGER.warning("Remote card lease renewal failed: %s", renew_error)
+            return
+        renewed = str(payload.get("leaseToken") or "").strip()
+        if len(renewed) > 0 and renewed != self._card_lease_token:
+            # The relay handed back a different token, so the lease was
+            # re-established rather than renewed. Adopt it, or every call
+            # that presents the old one is refused.
+            self._card_lease_token = renewed
+            self._write_card_lease_file(renewed)
+
+    def release_card_lease(self) -> None:
+        """Drop the lease and remove the file the bridge child reads."""
+        token = self._card_lease_token
+        self._card_lease_token = ""
+        self._card_lease_state = "none"
+        self._card_lease_holder = ""
+        self._card_lease_renew_after = 0.0
+        self._remove_card_lease_file()
+        if len(token) == 0:
+            return
+        lease_url, auth_token = self._remote_card_endpoints()
+        try:
+            _request_card_relay_json(
+                lease_url,
+                method="DELETE",
+                request_json={"leaseToken": token},
+                timeout_seconds=5,
+                auth_token=auth_token,
+            )
+        except Exception as release_error:  # noqa: BLE001
+            LOGGER.warning(
+                "Remote card lease release failed: %s; the TTL will free it.",
+                release_error,
+            )
+
+    def _write_card_lease_file(self, lease_token: str) -> None:
+        """Hand the lease to the bridge child through a 0600 file.
+
+        A command-line argument would put the lease in every process
+        listing on the host, which is the reason the bearer token already
+        travels as a file path rather than a value.
+        """
+        path = str(self.config.card_lease_path or "").strip()
+        if len(path) == 0:
+            return
+        try:
+            ensure_runtime_dir(os.path.dirname(path))
+            write_token_file(Path(path), lease_token)
+        except OSError as write_error:
+            LOGGER.warning(
+                "Cannot write the card lease file %s: %s", path, write_error
+            )
+
+    def _remove_card_lease_file(self) -> None:
+        path = str(self.config.card_lease_path or "").strip()
+        if len(path) == 0:
+            return
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            return
+        except OSError as remove_error:
+            LOGGER.warning(
+                "Cannot remove the card lease file %s: %s", path, remove_error
+            )
 
     def _bridge_restart_backoff_seconds(self) -> float:
         default_backoff = max(0.0, float(self.config.restart_backoff_seconds))
@@ -797,6 +1102,7 @@ class HilBridgeSupervisor:
     def _start_remsim_child(self, snapshot: UsbPresenceSnapshot) -> None:
         if self.config.remsim_client.enabled is False:
             return
+        self.refresh_remote_card_atr()
         command = self._build_remsim_command(snapshot=snapshot)
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
@@ -823,11 +1129,123 @@ class HilBridgeSupervisor:
         self._remsim_child = child
         self._next_remsim_start_not_before = 0.0
         LOGGER.info("Started REMSIM client pid=%s", getattr(child, "pid", 0))
+        # Arm rather than send: the client has only just been spawned and
+        # has not dialled in or presented the card yet, so a refresh now
+        # makes the modem look for a SIM that is not there yet and settle
+        # on "not inserted".
+        self._modem_refresh_attempts = 0
+        self._pending_modem_refresh_at = (
+            float(self.monotonic()) + MODEM_REFRESH_SETTLE_SECONDS
+        )
         self._write_state(
             status="running",
             snapshot=snapshot,
             reason="SIMtrace2 present; bridge and REMSIM client children are active.",
         )
+
+    def _refresh_modem_sim_interface(self) -> None:
+        """Tell the modem to re-read the SIM now the card path is up again.
+
+        Best effort and never fatal: the card is streaming either way, and
+        a rig whose AT port is held by something else must not lose its
+        session over it. Rate limited because a crash-looping child would
+        otherwise cycle the radio continuously.
+        """
+        device = str(getattr(self.config, "modem_at_device", "") or "").strip()
+        if len(device) == 0 or self._bridge_uses_remote_card() is False:
+            return
+        now = float(self.monotonic())
+        interval = float(
+            getattr(self.config, "modem_refresh_min_interval_seconds", 60.0)
+        )
+        if self._next_modem_refresh_not_before > now:
+            return
+        self._next_modem_refresh_not_before = now + max(0.0, interval)
+        quoted = shlex.quote(device)
+        command = (
+            f"test -c {quoted} && "
+            f"printf 'AT+CFUN=0;+CFUN=1\r' | "
+            f"timeout 8 socat -T6 - {quoted},b115200,raw,echo=0"
+        )
+        try:
+            subprocess.run(
+                ["/bin/sh", "-c", command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            LOGGER.warning("Modem SIM refresh could not be sent: %s", error)
+            return
+        LOGGER.info("Sent the SIM refresh to %s after the card path came up", device)
+        # The settle delay is a guess about how long the REMSIM client
+        # needs to present the card, and a busy rig or a USB
+        # re-enumeration can outlast it. A refresh that landed too early
+        # leaves the modem on "not inserted" for good, so the result is
+        # checked and the attempt re-armed rather than assumed.
+        if self._modem_reports_sim_ready(device):
+            self._modem_refresh_attempts = 0
+            return
+        self._modem_refresh_attempts += 1
+        if self._modem_refresh_attempts >= MODEM_REFRESH_MAX_ATTEMPTS:
+            LOGGER.warning(
+                "Modem still reports no SIM after %d refresh attempts on %s",
+                self._modem_refresh_attempts,
+                device,
+            )
+            self._modem_refresh_attempts = 0
+            return
+        backoff = MODEM_REFRESH_SETTLE_SECONDS * (self._modem_refresh_attempts + 1)
+        self._pending_modem_refresh_at = float(self.monotonic()) + backoff
+        LOGGER.info(
+            "Modem has not taken the SIM yet; retrying the refresh in %.0fs", backoff
+        )
+
+    def _modem_reports_sim_ready(self, device: str) -> bool:
+        """Ask the modem whether it now sees the card. Unknown counts as no.
+
+        AT+CFUN=0;+CFUN=1 makes this modem re-enumerate: the AT port is
+        destroyed and recreated a second or so later. Probing through the
+        gap finds no device, reads as "no SIM", and re-arms a refresh that
+        was in fact working -- and every extra refresh drops the port
+        again under anyone with a terminal open on it.
+        """
+        if self._wait_for_modem_port(device) is False:
+            return False
+        quoted = shlex.quote(device)
+        command = (
+            f"printf 'AT+CPIN?\r' | "
+            f"timeout 8 socat -T6 - {quoted},b115200,raw,echo=0"
+        )
+        try:
+            probe = subprocess.run(
+                ["/bin/sh", "-c", command],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return "+CPIN: READY" in str(probe.stdout or "")
+
+    def _wait_for_modem_port(self, device: str) -> bool:
+        """Wait for the AT port to come back after a re-enumeration."""
+        deadline = float(self.monotonic()) + MODEM_PORT_RETURN_TIMEOUT_SECONDS
+        while True:
+            try:
+                if os.path.exists(device):
+                    # Present is not the same as openable: udev has to
+                    # finish setting the mode before the probe can talk.
+                    time.sleep(MODEM_PORT_SETTLE_SECONDS)
+                    return True
+            except OSError:
+                pass
+            if float(self.monotonic()) >= deadline:
+                return False
+            time.sleep(0.25)
 
     def _stop_bridge_child(self, reason: str) -> None:
         child = self._child
@@ -999,7 +1417,7 @@ class HilBridgeSupervisor:
             command.append("--card-trace")
         if getattr(bridge, "relay_session_reset_enabled", True) is False:
             command.append("--no-relay-session-reset")
-        # Card-source overrides — when the operator has pinned a remote
+        # Card-source overrides -- when the operator has pinned a remote
         # ``yggdrasim-card-bridge`` URL on the supervisor, propagate it
         # to the spawned bridge subprocess so the card-stream feature
         # works under supervision too. Empty values are intentionally
@@ -1014,6 +1432,10 @@ class HilBridgeSupervisor:
             command.extend(
                 ["--remote-card-token-file", remote_card_token_file]
             )
+        if len(self._card_lease_token) > 0:
+            lease_path = str(self.config.card_lease_path or "").strip()
+            if len(lease_path) > 0:
+                command.extend(["--remote-card-lease-file", lease_path])
         capture_path = str(bridge.gsmtap_capture_path or "").strip()
         if len(capture_path) > 0:
             command.extend(
@@ -1037,10 +1459,26 @@ class HilBridgeSupervisor:
             "-n",
             str(self._remsim_client_slot()),
         ]
+        atr_hex = str(self._remote_card_atr_hex or "")
+        if len(atr_hex) > 0 and self._remsim_extra_args_include_atr(remsim.extra_args) is False:
+            command.extend(["-a", atr_hex])
         if self._remsim_extra_args_include_usb_selector(remsim.extra_args) is False:
             command.extend(list(self._auto_remsim_usb_args(snapshot)))
         command.extend(list(remsim.extra_args))
         return command
+
+    def _remsim_extra_args_include_atr(self, values: tuple[str, ...]) -> bool:
+        """True when the operator already decided the client's ATR handling."""
+        atr_flags = set(REMSIM_ATR_FLAGS)
+        for raw_value in values:
+            value_text = str(raw_value or "").strip()
+            if len(value_text) == 0:
+                continue
+            if value_text in atr_flags:
+                return True
+            if any(value_text.startswith(f"{flag}=") for flag in atr_flags):
+                return True
+        return False
 
     def _remsim_extra_args_include_usb_selector(self, values: tuple[str, ...]) -> bool:
         selector_flags = set(REMSIM_USB_SELECTOR_FLAGS)
@@ -1142,6 +1580,8 @@ class HilBridgeSupervisor:
             "readerName": str(self.config.bridge.reader_name),
             "remoteCardUrl": str(getattr(self.config.bridge, "remote_card_url", "") or ""),
             "remoteCardTokenFile": str(getattr(self.config.bridge, "remote_card_token_file", "") or ""),
+            "cardLease": self._card_lease_state,
+            "cardLeaseHolder": self._card_lease_holder,
             "apduTimeoutMs": int(getattr(self.config.bridge, "apdu_timeout_ms", 0) or 0),
             "cardTraceEnabled": bool(getattr(self.config.bridge, "card_trace_enabled", False)),
             "pollIntervalSeconds": float(self.config.poll_interval_seconds),
@@ -1270,6 +1710,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable supervisor management of the local osmo-remsim-client-st2 process.",
     )
     parser.add_argument(
+        "--modem-at-device",
+        default="",
+        help=(
+            "AT command port of the modem this rig feeds, e.g. /dev/ttyUSB2. "
+            "When set, the supervisor sends AT+CFUN=0;+CFUN=1 once the card "
+            "path is up so a modem that was already powered re-reads the "
+            "SIM. Without it an automatic reconnect leaves the modem "
+            "reporting no SIM while this supervisor reports running."
+        ),
+    )
+    parser.add_argument(
+        "--no-remote-card-lease",
+        action="store_true",
+        help=(
+            "Do not take a lease on the remote card. The bridge then "
+            "shares the card with anything else reaching it, which is the "
+            "behaviour before leases existed. Only useful when a second "
+            "consumer is expected to drive the same card deliberately."
+        ),
+    )
+    parser.add_argument(
         "--remsim-binary",
         type=str,
         default="osmo-remsim-client-st2",
@@ -1359,6 +1820,10 @@ def build_supervisor_config_from_args(args: argparse.Namespace) -> HilBridgeSupe
             float(args.termination_timeout or DEFAULT_TERMINATION_TIMEOUT_SECONDS),
         ),
         state_path=state_path,
+        remote_card_lease_enabled=not bool(
+            getattr(args, "no_remote_card_lease", False)
+        ),
+        modem_at_device=str(getattr(args, "modem_at_device", "") or "").strip(),
     )
 
 

@@ -7,14 +7,14 @@
 /* ============================================================
  * Contextual FS-Admin action bar
  *
- * Lives inside the FCP preview header (``.cc-fcp-header``) —
+ * Lives inside the FCP preview header (``.cc-fcp-header``) --
  * renders right after the ``path:`` and ``fid:`` chips, gated by
  * the selected-file kind. Replaces the old ribbon-hosted "Files"
  * tab: operators now see exactly the actions that apply to the
  * node they just clicked, and nothing else. Disabled buttons
  * stay visible (as opposed to hidden) so operators can *discover*
- * the rule — the tooltip explains *why* the button is greyed out
- * ("CREATE FILE is issued under a DF — select MF / a DF / an ADF
+ * the rule -- the tooltip explains *why* the button is greyed out
+ * ("CREATE FILE is issued under a DF -- select MF / a DF / an ADF
  * first").
  * ============================================================ */
 
@@ -33,21 +33,26 @@
   letter-spacing: 0.01em;
 }
 
+/* Same file-kind palette as the SAIP file-system tree so a DF, an ADF
+ * and an EF read the same colour on both surfaces. */
 .cc-fs-kind.cc-fs-kind--df {
-  background: rgba(74, 144, 226, 0.18);
-  border-color: rgba(74, 144, 226, 0.4);
+  background: var(--tree-df-bg);
+  border-color: var(--tree-df-edge);
+  color: var(--tree-df-fg);
 }
 
 .cc-fs-kind.cc-fs-kind--application {
-  background: rgba(170, 110, 220, 0.18);
-  border-color: rgba(170, 110, 220, 0.4);
+  background: var(--tree-adf-bg);
+  border-color: var(--tree-adf-edge);
+  color: var(--tree-adf-fg);
 }
 
 .cc-fs-kind.cc-fs-kind--transparent,
 .cc-fs-kind.cc-fs-kind--linear,
 .cc-fs-kind.cc-fs-kind--cyclic {
-  background: rgba(63, 185, 80, 0.15);
-  border-color: rgba(63, 185, 80, 0.35);
+  background: var(--tree-ef-bg);
+  border-color: var(--tree-ef-edge);
+  color: var(--tree-ef-fg);
 }
 
 .cc-fs-kind.cc-fs-kind--unknown {
@@ -56,7 +61,7 @@
   color: var(--fg-muted);
 }
 
-/* Action strip wrapper — pushes itself to the right when the
+/* Action strip wrapper -- pushes itself to the right when the
    header has room (margin-left:auto), otherwise wraps under the
    chips. Two sub-groups inside: file-scoped actions + a small
    "Card" group for SUSPEND so it can't be confused for a file op. */
@@ -92,7 +97,7 @@
 }
 
 /* The pill buttons themselves. Enabled state mirrors the compact
-   ``.btn`` small variant — tight padding, subtle hover. Danger
+   ``.btn`` small variant -- tight padding, subtle hover. Danger
    variants (DELETE / RESIZE / SUSPEND / TERMINATE-via-Lifecycle)
    tint red on hover so fat-fingering is visually loud. */
 .cc-fs-action-btn {
@@ -135,7 +140,7 @@
   color: var(--err);
 }
 
-/* Disabled state — greyed out but still visible. Keeping the
+/* Disabled state -- greyed out but still visible. Keeping the
    button in the DOM is deliberate: it's a teaching aid, not noise.
    Operators who used to hunt the ribbon for "where is CREATE FILE?"
    can now *see* the button sitting dimmed with a tooltip that
@@ -150,7 +155,7 @@
 }
 
 .cc-fs-action-btn.is-disabled.is-danger {
-  /* A disabled danger button has no "red" meaning — fall back
+  /* A disabled danger button has no "red" meaning -- fall back
      to the neutral dim look so the red doesn't falsely suggest
      it's armed. */
   color: var(--fg-muted);

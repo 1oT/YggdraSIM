@@ -20,8 +20,8 @@ from cryptography.x509.oid import NameOID
 import SCP11.live.pysim_support as live_pysim_support
 import SCP11.test.pysim_support as test_pysim_support
 from SCP11.asn1_registry import ASN1Registry
-from SCP11.models import BACKEND_MODE_LOCAL_SGP26, EimPollRequest, EimPollResponse
-from SCP11.orchestrator import SGP22Orchestrator
+from SCP11.live.models import BACKEND_MODE_LOCAL_SGP26, EimPollRequest, EimPollResponse
+from SCP11.live.orchestrator import SGP22Orchestrator
 from SCP11.shared.trace_dump import split_tlv_aware_chunks
 
 try:
@@ -41,6 +41,23 @@ def encode_der_length(value: int) -> bytes:
 def wrap_tlv(tag_hex: str, value: bytes) -> bytes:
     tag_bytes = bytes.fromhex(tag_hex)
     return tag_bytes + encode_der_length(len(value)) + value
+
+
+def _euicc_package_result_entry(seq_number: int) -> bytes:
+    """One SGP.32 §2.11.2.1 EuiccPackageResult carrying ``seqNumber [3]``."""
+    result_data_signed = wrap_tlv(
+        "30",
+        b"".join(
+            [
+                wrap_tlv("80", b"manager-1"),
+                wrap_tlv("81", b"\x01"),
+                wrap_tlv("83", bytes([seq_number])),
+                wrap_tlv("30", b""),
+            ]
+        ),
+    )
+    signed = wrap_tlv("A0", result_data_signed + wrap_tlv("5F37", bytes([seq_number]) * 64))
+    return wrap_tlv("BF51", signed)
 
 
 def _read_test_tlv(data: bytes, offset: int):
@@ -276,6 +293,64 @@ class StkBootstrapRetryApduChannel(FakeApduChannel):
         return super().send(apdu, log_name)
 
 
+class DecliningRelayApduChannel(FakeApduChannel):
+    """Raises ``declined_error`` for a relayed eIM package under ``declined_tag``.
+
+    Every other relayed package gets the configured ``eim_package_response``.
+    """
+
+    def __init__(self, declined_tag: bytes, declined_error: Exception, **kwargs):
+        super().__init__(**kwargs)
+        self.declined_tag = declined_tag
+        self.declined_error = declined_error
+
+    def send(self, apdu: bytes, log_name: str) -> bytes:
+        if "EIM: RelayPackage" in log_name and apdu[5:].startswith(self.declined_tag):
+            self.send_calls.append((log_name, apdu))
+            raise self.declined_error
+        return super().send(apdu, log_name)
+
+
+class NotificationQueueApduChannel(FakeApduChannel):
+    """An eUICC Pending Notifications List behind ES10b List / Retrieve / Remove (SGP.22 v3.1 §5.7.9-§5.7.11).
+
+    ``pending`` maps a seqNumber to the PendingNotification the card holds.
+    MANAGE CHANNEL OPEN returns CH1, so a flow that opens its own channel
+    can be told apart from one that inherited it.
+    """
+
+    def __init__(self, pending=None, **kwargs):
+        super().__init__(**kwargs)
+        self.pending = dict(pending or {})
+
+    def send(self, apdu: bytes, log_name: str) -> bytes:
+        if log_name == "INIT: OPEN LOGICAL CHANNEL":
+            self.send_calls.append((log_name, apdu))
+            return b"\x01"
+        if log_name == "DOWNLOAD: ListNotifications":
+            self.send_calls.append((log_name, apdu))
+            metadata = b""
+            for notification in self.pending.values():
+                metadata += _read_test_tlv(notification, notification.find(bytes.fromhex("BF2F")))[2]
+            return wrap_tlv("BF28", wrap_tlv("A0", metadata))
+        if log_name.startswith("DOWNLOAD: RetrieveNotification ["):
+            self.send_calls.append((log_name, apdu))
+            seq_number = int(log_name[len("DOWNLOAD: RetrieveNotification ["):-1])
+            return wrap_tlv("BF2B", wrap_tlv("A0", self.pending.get(seq_number, b"")))
+        if "RemoveNotificationFromList" in log_name:
+            self.send_calls.append((log_name, apdu))
+            _tag, request_value, _raw, _end = _read_test_tlv(apdu[5:], 0)
+            _tag, seq_bytes, _raw, _end = _read_test_tlv(request_value, 0)
+            if self.pending.pop(int.from_bytes(seq_bytes, "big"), None) is not None:
+                return bytes.fromhex("BF3003800100")
+            return bytes.fromhex("BF3003800101")
+        return super().send(apdu, log_name)
+
+
+# SGP.26 v3.0.2 test eUICC EID (page 11, the Test eUICC certificate serialNumber).
+TEST_EID = "89049032123451234512345678901235"
+
+
 @dataclass
 class FakeCfg:
     AID_ISD_R: bytes = bytes.fromhex("A0000005591010FFFFFFFF8900000100")
@@ -299,6 +374,7 @@ class FakeProvider:
         self._bpp_bytes = bpp_bytes
         self.cancel_session_calls = []
         self.handle_notification_calls = []
+        self.handle_notification_esipa_calls = []
         self.poll_eim_calls = []
         self.provide_eim_package_result_calls = []
         self._eim_poll_responses = list(eim_poll_responses or [])
@@ -335,6 +411,10 @@ class FakeProvider:
 
     def provide_eim_package_result(self, request_obj):
         self.provide_eim_package_result_calls.append(copy.deepcopy(request_obj))
+        return {}
+
+    def handle_notification_esipa(self, request_obj):
+        self.handle_notification_esipa_calls.append(copy.deepcopy(request_obj))
         return {}
 
     def poll_eim(self, request_obj):
@@ -447,11 +527,9 @@ class OrchestratorFlowTests(unittest.TestCase):
                 "HANDSHAKE: GetEuiccInfo1 [OPEN LOGICAL CHANNEL]",
                 "HANDSHAKE: GetEuiccInfo1 [STK MODE TERMINAL CAPABILITY]",
                 "HANDSHAKE: GetEuiccInfo1 [STK MODE SELECT ISD-R]",
-                "HANDSHAKE: GetEuiccInfo1 [STK MODE TERMINAL PROFILE]",
                 "HANDSHAKE: GetEuiccInfo1 [STK MODE BASIC]",
                 "HANDSHAKE: GetEuiccChallenge [STK MODE TERMINAL CAPABILITY]",
                 "HANDSHAKE: GetEuiccChallenge [STK MODE SELECT ISD-R]",
-                "HANDSHAKE: GetEuiccChallenge [STK MODE TERMINAL PROFILE]",
                 "HANDSHAKE: GetEuiccChallenge [STK MODE BASIC]",
             ],
         )
@@ -472,23 +550,31 @@ class OrchestratorFlowTests(unittest.TestCase):
 
         formatted = orchestrator._format_sima_response(bytes.fromhex("3007A0053003800100"))
 
+        # TCA eUICC Profile Package V3.4.1 section 8.11 EUICCResponse.
         self.assertIn("3007A0053003800100", formatted)
-        self.assertIn("30(len=7, simaResponse)", formatted)
-        self.assertIn("A0(len=5, finalResult.successResult)", formatted)
-        self.assertIn("30(len=3, resultData)", formatted)
-        self.assertIn("80(len=1, resultCode)=00", formatted)
-        self.assertIn("successResult.resultCode=0", formatted)
+        self.assertIn("30(len=7, EUICCResponse)", formatted)
+        self.assertIn("A0(len=5, peStatus)", formatted)
+        self.assertIn("30(len=3, PEStatus)", formatted)
+        self.assertIn("80(len=1, status)=00", formatted)
+        self.assertIn("peStatus[0].status=ok(0)", formatted)
 
     def test_format_sima_response_shows_failure_detail(self):
         orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
 
-        formatted = orchestrator._format_sima_response(bytes.fromhex("3008A106800105810108"))
+        formatted = orchestrator._format_sima_response(
+            bytes.fromhex("3026A016300980010381010583010C30098001068101078201028100820A6261642076616C756573")
+        )
 
-        self.assertIn("A1(len=6, finalResult.failureResult)", formatted)
-        self.assertIn("80(len=1, resultCode)=05", formatted)
-        self.assertIn("81(len=1, resultDetail)=08", formatted)
-        self.assertIn("failureResult.resultCode=5", formatted)
-        self.assertIn("failureResult.resultDetail=8", formatted)
+        self.assertIn("30(len=9, PEStatus)", formatted)
+        self.assertIn("80(len=1, status)=03", formatted)
+        self.assertIn("81(len=1, identification)=05", formatted)
+        self.assertIn("83(len=1, offset)=0C", formatted)
+        self.assertIn("81(len=0, profileInstallationAborted)=", formatted)
+        self.assertIn("82(len=10, statusMessage)=", formatted)
+        self.assertIn("peStatus[0].status=bad-values(3) identification=5 offset=12", formatted)
+        self.assertIn("peStatus[1].status=invalid-parameter(6) identification=7 additional-information=2", formatted)
+        self.assertIn("profileInstallationAborted", formatted)
+        self.assertIn("statusMessage='bad values'", formatted)
 
     def test_successful_terminal_profile_install_result_is_not_described_as_failure(self):
         orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
@@ -1111,7 +1197,7 @@ class OrchestratorFlowTests(unittest.TestCase):
                     IOError("APDU Failed: 6985")
                 )
 
-        self.assertEqual(result, b"")
+        self.assertEqual(result, bytes.fromhex("BF2802A000"))
         self.assertNotIn("ListNotifications rejected", buffer.getvalue())
 
     def test_list_notifications_bf2b_fallback_notice_surfaces_when_debug_on(self):
@@ -1131,18 +1217,20 @@ class OrchestratorFlowTests(unittest.TestCase):
                     IOError("APDU Failed: 6985")
                 )
 
-        self.assertEqual(result, b"")
+        self.assertEqual(result, bytes.fromhex("BF2802A000"))
         self.assertIn("ListNotifications rejected", buffer.getvalue())
 
     def test_list_notifications_recovery_notices_are_hidden_when_debug_off(self):
         from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
 
-        response = bytes.fromhex("BF2802A000")
+        response = bytes.fromhex("BF2B02A000")
 
         def fake_send(apdu: bytes, log_name: str = "") -> bytes:
-            if log_name == "DOWNLOAD: ListNotifications":
+            if log_name.startswith("DOWNLOAD: ListNotifications"):
                 raise IOError("APDU Failed: 6985")
-            if log_name == "DOWNLOAD: ListNotifications [ACTIVE CH1]":
+            if log_name == "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)":
+                raise IOError("APDU Failed: 6985")
+            if log_name.endswith("(BF28 fallback) [ACTIVE CH1]"):
                 return response
             return b""
 
@@ -1160,18 +1248,20 @@ class OrchestratorFlowTests(unittest.TestCase):
             with contextlib.redirect_stdout(buffer):
                 result = orchestrator._list_pending_notifications_with_context_recovery()
 
-        self.assertEqual(result, response)
+        self.assertEqual(result, bytes.fromhex("BF2802A000"))
         self.assertNotIn("priming active logical channel", buffer.getvalue())
 
     def test_list_notifications_recovery_notices_surface_when_debug_on(self):
         from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
 
-        response = bytes.fromhex("BF2802A000")
+        response = bytes.fromhex("BF2B02A000")
 
         def fake_send(apdu: bytes, log_name: str = "") -> bytes:
-            if log_name == "DOWNLOAD: ListNotifications":
+            if log_name.startswith("DOWNLOAD: ListNotifications"):
                 raise IOError("APDU Failed: 6985")
-            if log_name == "DOWNLOAD: ListNotifications [ACTIVE CH1]":
+            if log_name == "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)":
+                raise IOError("APDU Failed: 6985")
+            if log_name.endswith("(BF28 fallback) [ACTIVE CH1]"):
                 return response
             return b""
 
@@ -1189,7 +1279,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             with contextlib.redirect_stdout(buffer):
                 result = orchestrator._list_pending_notifications_with_context_recovery()
 
-        self.assertEqual(result, response)
+        self.assertEqual(result, bytes.fromhex("BF2802A000"))
         self.assertIn("priming active logical channel 1", buffer.getvalue())
 
     def test_retrieve_notification_reports_bf2b_result_error(self):
@@ -1225,48 +1315,39 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(payload, bytes.fromhex("BF2B06A004800200BC"))
 
     def test_notification_sync_recovers_from_6e00_via_fresh_logical_channel(self):
-        # Regression for the EnableProfile → ListNotifications cascade:
-        # ETSI TS 102 221 §11.1.17 + SGP.22 §5.7.10. The base-channel
-        # BF28 hits 6E00 because the supplementary CH was dropped during
-        # the profile state change. The orchestrator must reset the
-        # transport, reopen ISD-R on a fresh logical channel via
-        # MANAGE CHANNEL OPEN, replay the StoreData with the matching
-        # CLA, then close the channel.
+        # Regression for the EnableProfile → notification-read cascade:
+        # ETSI TS 102 221 §11.1.17 + SGP.22 §5.7.12. BF28 *and* BF2B both
+        # hit 6E00 because the supplementary CH was dropped during the
+        # profile state change, so the ES10b session is the suspect rather
+        # than the card's function set. Only that combination licenses the
+        # orchestrator to reset the transport, reopen ISD-R on a fresh
+        # logical channel via MANAGE CHANNEL OPEN, replay the StoreData
+        # with the matching CLA, then close the channel.
         cfg = FakeCfg()
         provider = FakeProvider(b"")
-        apdu_channel = FakeApduChannel(notification_list_response=bytes.fromhex("BF2802A000"))
+        apdu_channel = FakeApduChannel()
         original_send = apdu_channel.send
+        fallback_log = "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)"
         list_attempts = {"count": 0}
+        retrieve_attempts = {"count": 0}
         reset_calls = {"count": 0}
 
         def send_with_recovery(apdu: bytes, log_name: str) -> bytes:
             if log_name == "DOWNLOAD: ListNotifications":
                 apdu_channel.send_calls.append((log_name, apdu))
                 list_attempts["count"] += 1
-                if list_attempts["count"] == 1:
-                    raise IOError("APDU Failed: 6E00")
-            if "[OPEN LOGICAL CHANNEL]" in log_name:
-                apdu_channel.send_calls.append((log_name, apdu))
+                raise IOError("APDU Failed: 6E00")
+            if log_name.startswith(fallback_log) is False:
+                return original_send(apdu, log_name)
+            apdu_channel.send_calls.append((log_name, apdu))
+            if log_name == fallback_log:
+                retrieve_attempts["count"] += 1
+                raise IOError("APDU Failed: 6E00")
+            if log_name.endswith("[OPEN LOGICAL CHANNEL]"):
                 return b"\x01\x90\x00"
-            if "[SELECT ISD-R CH1]" in log_name:
-                apdu_channel.send_calls.append((log_name, apdu))
-                return b""
-            if log_name.endswith("[TERMINAL CAPABILITY]"):
-                apdu_channel.send_calls.append((log_name, apdu))
-                return b""
-            if "[STATUS CH1]" in log_name:
-                apdu_channel.send_calls.append((log_name, apdu))
-                return b""
-            if "[TERMINAL PROFILE CH1]" in log_name:
-                apdu_channel.send_calls.append((log_name, apdu))
-                return b""
-            if log_name.endswith("[CH1]") and "ListNotifications" in log_name:
-                apdu_channel.send_calls.append((log_name, apdu))
-                return apdu_channel.notification_list_response
-            if "[CLOSE LOGICAL CHANNEL 1]" in log_name:
-                apdu_channel.send_calls.append((log_name, apdu))
-                return b""
-            return original_send(apdu, log_name)
+            if log_name.endswith("[CH1]"):
+                return bytes.fromhex("BF2B02A000")
+            return b""
 
         def fake_reset() -> bool:
             reset_calls["count"] += 1
@@ -1284,28 +1365,37 @@ class OrchestratorFlowTests(unittest.TestCase):
         orchestrator._sync_pending_notifications()
 
         self.assertEqual(list_attempts["count"], 1)
-        self.assertEqual(reset_calls["count"], 1)
+        # One probe on the live channel, then the ladder's own first send.
+        self.assertEqual(retrieve_attempts["count"], 2)
+        # 6E00 is the card answering, so the ladder rebuilds the channel
+        # without power-cycling it.
+        self.assertEqual(reset_calls["count"], 0)
         self.assertEqual(orchestrator._es10b_logical_channel, 0)
         self.assertEqual(provider.handle_notification_calls, [])
         self.assertEqual(
             [name for name, _ in apdu_channel.send_calls],
             [
                 "DOWNLOAD: ListNotifications",
-                "DOWNLOAD: ListNotifications [OPEN LOGICAL CHANNEL]",
-                "DOWNLOAD: ListNotifications [SELECT ISD-R CH1]",
-                "DOWNLOAD: ListNotifications [TERMINAL CAPABILITY]",
-                "DOWNLOAD: ListNotifications [STATUS CH0]",
-                "DOWNLOAD: ListNotifications [TERMINAL PROFILE CH1]",
-                "DOWNLOAD: ListNotifications [CH1]",
-                "DOWNLOAD: ListNotifications [CLOSE LOGICAL CHANNEL 1]",
+                fallback_log,
+                fallback_log,
+                f"{fallback_log} [OPEN LOGICAL CHANNEL]",
+                f"{fallback_log} [SELECT ISD-R CH1]",
+                f"{fallback_log} [TERMINAL CAPABILITY]",
+                f"{fallback_log} [STATUS CH0]",
+                f"{fallback_log} [CH1]",
+                f"{fallback_log} [CLOSE LOGICAL CHANNEL 1]",
             ],
         )
         self.assertIs(orchestrator._last_notification_sync_succeeded, True)
+        # BF2B only answered after the session was rebuilt, which says
+        # nothing about whether the card implements BF28.
+        self.assertFalse(orchestrator._es10b_list_notifications_unsupported)
 
     def test_notification_sync_primes_active_logical_channel_before_opening_new_one(self):
         cfg = FakeCfg()
         provider = FakeProvider(b"")
-        apdu_channel = FakeApduChannel(notification_list_response=bytes.fromhex("BF2802A000"))
+        apdu_channel = FakeApduChannel()
+        fallback_log = "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)"
         list_attempts = {"count": 0}
         reset_calls = {"count": 0}
 
@@ -1314,10 +1404,12 @@ class OrchestratorFlowTests(unittest.TestCase):
             if log_name == "DOWNLOAD: ListNotifications":
                 list_attempts["count"] += 1
                 raise IOError("APDU Failed: 6985")
-            if log_name == "DOWNLOAD: ListNotifications [OPEN LOGICAL CHANNEL]":
+            if log_name == fallback_log:
+                raise IOError("APDU Failed: 6985")
+            if log_name.endswith("[OPEN LOGICAL CHANNEL]"):
                 raise AssertionError("active channel recovery should run before opening a new channel")
-            if log_name == "DOWNLOAD: ListNotifications [ACTIVE CH1]":
-                return apdu_channel.notification_list_response
+            if log_name == f"{fallback_log} [ACTIVE CH1]":
+                return bytes.fromhex("BF2B02A000")
             return b""
 
         def fake_reset() -> bool:
@@ -1343,14 +1435,131 @@ class OrchestratorFlowTests(unittest.TestCase):
             [name for name, _ in apdu_channel.send_calls],
             [
                 "DOWNLOAD: ListNotifications",
-                "DOWNLOAD: ListNotifications [TERMINAL CAPABILITY]",
-                "DOWNLOAD: ListNotifications [STATUS CH0]",
-                "DOWNLOAD: ListNotifications [TERMINAL PROFILE CH1]",
-                "DOWNLOAD: ListNotifications [ACTIVE CH1]",
+                fallback_log,
+                fallback_log,
+                f"{fallback_log} [TERMINAL CAPABILITY]",
+                f"{fallback_log} [STATUS CH0]",
+                f"{fallback_log} [ACTIVE CH1]",
             ],
         )
         self.assertEqual(apdu_channel.send_calls[-1][1][:2], bytes.fromhex("81E2"))
         self.assertIs(orchestrator._last_notification_sync_succeeded, True)
+
+    def test_notification_sync_falls_through_to_bf2b_without_touching_the_session(self):
+        # An SGP.32 ISD-R exposes RetrieveNotificationsList and no
+        # ListNotification at all, so BF28 draws 6985 while ES10b is
+        # healthy. That is a function-set fact, not a broken session: the
+        # read must fall straight through to BF2B on the same channel,
+        # without replaying TERMINAL PROFILE, opening a channel, or
+        # cold-resetting the card in the middle of an eIM poll.
+        cfg = FakeCfg()
+        provider = FakeProvider(b"")
+        apdu_channel = FakeApduChannel()
+        fallback_log = "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)"
+        reset_calls = {"count": 0}
+
+        def send_with_bf28_unsupported(apdu: bytes, log_name: str) -> bytes:
+            apdu_channel.send_calls.append((log_name, apdu))
+            if log_name == "DOWNLOAD: ListNotifications":
+                raise IOError("APDU Failed: 6985")
+            if log_name == fallback_log:
+                return bytes.fromhex("BF2B02A000")
+            return b""
+
+        apdu_channel.send = send_with_bf28_unsupported
+        apdu_channel.reset = lambda: reset_calls.__setitem__("count", reset_calls["count"] + 1) or True
+        orchestrator = SGP22Orchestrator(
+            cfg=cfg,
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+        orchestrator._es10b_logical_channel = 1
+
+        orchestrator._sync_pending_notifications()
+
+        self.assertEqual(reset_calls["count"], 0)
+        self.assertEqual(orchestrator._es10b_logical_channel, 1)
+        self.assertEqual(
+            [name for name, _ in apdu_channel.send_calls],
+            ["DOWNLOAD: ListNotifications", fallback_log],
+        )
+        self.assertTrue(orchestrator._es10b_list_notifications_unsupported)
+        self.assertIs(orchestrator._last_notification_sync_succeeded, True)
+
+        # The latch holds for the rest of the session: no second BF28.
+        apdu_channel.send_calls.clear()
+        orchestrator._sync_pending_notifications()
+        self.assertEqual([name for name, _ in apdu_channel.send_calls], [fallback_log])
+
+    def test_notification_sync_marks_failure_when_bf2b_reports_a_result_error(self):
+        # SGP.22 §5.6.4: a queue that could not be read must never be
+        # reported as a drained one, or the console's post-command
+        # auto-clear deletes notifications that were never forwarded.
+        cfg = FakeCfg()
+        provider = FakeProvider(b"")
+        apdu_channel = FakeApduChannel()
+        fallback_log = "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)"
+
+        def send_with_bf2b_result_error(apdu: bytes, log_name: str) -> bytes:
+            apdu_channel.send_calls.append((log_name, apdu))
+            if log_name == "DOWNLOAD: ListNotifications":
+                raise IOError("APDU Failed: 6985")
+            if log_name == fallback_log:
+                return bytes.fromhex("BF2B0381017F")
+            return b""
+
+        apdu_channel.send = send_with_bf2b_result_error
+        orchestrator = SGP22Orchestrator(
+            cfg=cfg,
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+
+        orchestrator._sync_pending_notifications()
+
+        self.assertIs(orchestrator._last_notification_sync_succeeded, False)
+
+    def test_notification_sync_marks_failure_when_bf2b_body_is_unwalkable(self):
+        cfg = FakeCfg()
+        provider = FakeProvider(b"")
+        apdu_channel = FakeApduChannel()
+        fallback_log = "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)"
+
+        def send_with_unknown_bf2b_shape(apdu: bytes, log_name: str) -> bytes:
+            apdu_channel.send_calls.append((log_name, apdu))
+            if log_name == "DOWNLOAD: ListNotifications":
+                raise IOError("APDU Failed: 6985")
+            if log_name == fallback_log:
+                return bytes.fromhex("BF2B03A10100")
+            return b""
+
+        apdu_channel.send = send_with_unknown_bf2b_shape
+        orchestrator = SGP22Orchestrator(
+            cfg=cfg,
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+
+        orchestrator._sync_pending_notifications()
+
+        self.assertIs(orchestrator._last_notification_sync_succeeded, False)
+
+    def test_repackage_accepts_the_application_60_notification_list_tag(self):
+        # SGP.22 §5.7.12 notificationList is reachable under the
+        # application-class 60 encoding as well as A0; the repackager must
+        # harvest both so a card using it is not read as an empty queue.
+        metadata = wrap_tlv("BF2F", wrap_tlv("80", bytes([0x00, 0x6A])))
+        pending = wrap_tlv("BF37", metadata)
+        bf2b_response = wrap_tlv("BF2B", wrap_tlv("60", pending))
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=FakeProvider(b""),
+        )
+
+        repackaged = orchestrator._repackage_retrieve_notifications_as_metadata_list(bf2b_response)
+
+        self.assertEqual(repackaged, wrap_tlv("BF28", wrap_tlv("A0", metadata)))
 
     def test_active_channel_recovery_failure_preserves_error_context(self):
         cfg = FakeCfg()
@@ -1461,12 +1670,11 @@ class OrchestratorFlowTests(unittest.TestCase):
             wrap_tlv("30", tls_key_material),
         )
 
-    def test_decode_eim_configuration_entries_extracts_spki_from_certificate_a6(self):
+    def test_decode_eim_configuration_entries_does_not_pin_tls_from_certificate_a6(self):
+        # SGP.32 v1.3 trustedPublicKeyDataTls [6] carries either an SPKI
+        # (trustedEimPkTls) or a Certificate (trustedCertificateTls) that may
+        # be the CA's rather than the eIM's, so only the SPKI form pins TLS.
         certificate_der = build_self_signed_cert().dump()
-        expected_spki = crypto_x509.load_der_x509_certificate(certificate_der).public_key().public_bytes(
-            serialization.Encoding.DER,
-            serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
         eim_entry = wrap_tlv(
             "A0",
             wrap_tlv(
@@ -1487,7 +1695,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         entries = orchestrator._decode_eim_configuration_entries(response)
 
         self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0]["trusted_tls_public_key_data"], expected_spki)
+        self.assertEqual(entries[0]["trusted_tls_public_key_data"], b"")
 
     def test_build_eim_poll_request_uses_tlv_eid_value(self):
         configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.com"))
@@ -1510,7 +1718,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         apdu_channel = FakeApduChannel(
             eim_configuration_response=eim_configuration,
             configured_data_response=configured_data,
-            eid_response=wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+            eid_response=wrap_tlv("5A", bytes.fromhex("89049032000000000000000000000101")),
         )
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(),
@@ -1523,7 +1731,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
         expected_body = orchestrator._build_get_eim_package_tlv(request.eid)
 
-        self.assertEqual(request.eid, "89044045930000000000001492294428")
+        self.assertEqual(request.eid, "89049032000000000000000000000101")
         self.assertEqual(request.raw_body, expected_body)
         self.assertEqual(request.euicc_challenge, "")
         self.assertFalse(any(call[0] == "EIM: GetEuiccChallenge" for call in apdu_channel.send_calls))
@@ -1553,7 +1761,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         apdu_channel = FakeApduChannel(
             eim_configuration_response=eim_configuration,
             configured_data_response=configured_data,
-            eid_response=wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+            eid_response=wrap_tlv("5A", bytes.fromhex("89049032000000000000000000000101")),
         )
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(EIM_REQUEST_VARIANT=1),
@@ -1592,7 +1800,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             profile_provider=FakeProvider(bpp_bytes=b""),
         )
         orchestrator.cache_eim_poll_metadata(
-            eid="89044045930000000000001492294428",
+            eid="89049032000000000000000000000101",
             euicc_configured_data=configured_data,
             eim_configuration_data=eim_configuration,
             euicc_info1=wrap_tlv("BF20", b"\x82\x03\x02\x05\x00"),
@@ -1604,6 +1812,467 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(request.eim_fqdn, "eim1.example.test")
         self.assertEqual(request.eim_id, "eim1.example.test")
         self.assertEqual(request.eim_id_type, "eimIdTypeFqdn (2)")
+
+    @staticmethod
+    def _eim_configuration_blob(*eim_ids: str) -> bytes:
+        rows = b"".join(
+            wrap_tlv(
+                "30",
+                wrap_tlv("80", eim_id.encode("utf-8"))
+                + wrap_tlv("81", eim_id.encode("utf-8"))
+                + wrap_tlv("82", b"\x01"),
+            )
+            for eim_id in eim_ids
+        )
+        return wrap_tlv("BF55", wrap_tlv("A0", rows))
+
+    def _orchestrator_with_stubbed_bf55(self, card_blob: bytes, cached_blob: bytes):
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+        orchestrator.cache_eim_poll_metadata(
+            eid="89049032000000000000000000000101",
+            euicc_configured_data=wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.test")),
+            eim_configuration_data=cached_blob,
+            euicc_info1=wrap_tlv("BF20", b"\x82\x03\x02\x05\x00"),
+            euicc_info2=wrap_tlv("BF22", b"\x81\x03\x02\x03\x01"),
+        )
+        reads: list[bytes] = []
+
+        def fake_retrieve(payload: bytes, log_name: str) -> bytes:
+            reads.append(bytes(payload))
+            if bytes(payload) == bytes.fromhex("BF5500"):
+                return card_blob
+            return b""
+
+        orchestrator._retrieve_es10b_data = fake_retrieve
+        return orchestrator, reads
+
+    def test_entry_index_sweep_and_entry_lookup_share_one_bf55_read(self):
+        # An eIM the init-banner snapshot never saw used to resolve to an
+        # in-range index and then fail the per-entry lookup against the
+        # stale cache.
+        card_blob = self._eim_configuration_blob("eim1.example.test", "eim2.example.test")
+        cached_blob = self._eim_configuration_blob("eim1.example.test")
+        orchestrator, _ = self._orchestrator_with_stubbed_bf55(card_blob, cached_blob)
+
+        indices = orchestrator._resolve_eim_poll_entry_indices(None)
+
+        self.assertEqual(indices, [0, 1])
+        request = orchestrator._build_eim_poll_request(matching_id="", entry_index=1)
+        self.assertEqual(request.eim_fqdn, "eim2.example.test")
+
+    @staticmethod
+    def _signed_eco_package(command: bytes) -> bytes:
+        return wrap_tlv(
+            "BF51",
+            wrap_tlv(
+                "30",
+                wrap_tlv("80", b"eim1.example.test") + wrap_tlv("A1", command),
+            )
+            + wrap_tlv("5F37", b"\xAA" * 64),
+        )
+
+    def test_add_eim_drops_the_cached_entry_list_without_a_card_read(self):
+        card_blob = self._eim_configuration_blob("eim1.example.test", "eim2.example.test")
+        cached_blob = self._eim_configuration_blob("eim1.example.test")
+        orchestrator, reads = self._orchestrator_with_stubbed_bf55(card_blob, cached_blob)
+        add_eim = wrap_tlv("A8", wrap_tlv("80", b"eim2.example.test"))
+
+        orchestrator._invalidate_eim_configuration_after_eco(self._signed_eco_package(add_eim))
+
+        self.assertEqual(reads, [])
+        self.assertEqual(orchestrator._cached_eim_poll_metadata["eim_configuration_data"], b"")
+        request = orchestrator._build_eim_poll_request(matching_id="", entry_index=1)
+        self.assertEqual(request.eim_fqdn, "eim2.example.test")
+
+    def test_list_eim_leaves_the_cached_entry_list_alone(self):
+        card_blob = self._eim_configuration_blob("eim1.example.test", "eim2.example.test")
+        cached_blob = self._eim_configuration_blob("eim1.example.test")
+        orchestrator, reads = self._orchestrator_with_stubbed_bf55(card_blob, cached_blob)
+
+        orchestrator._invalidate_eim_configuration_after_eco(
+            self._signed_eco_package(wrap_tlv("AB", b""))
+        )
+
+        self.assertEqual(reads, [])
+        self.assertEqual(
+            orchestrator._cached_eim_poll_metadata["eim_configuration_data"],
+            cached_blob,
+        )
+
+    def test_run_eim_poll_skips_an_entry_a_delete_eim_removed_during_the_sweep(self):
+        # The first eIM deletes the second one; its BF55 index no longer
+        # exists, and an index lookup reported "out of range" as a failure.
+        both = self._eim_configuration_blob("eim1.example.test", "eim2.example.test")
+        after_delete = self._eim_configuration_blob("eim1.example.test")
+        orchestrator, _reads = self._orchestrator_with_stubbed_bf55(both, both)
+        delete_eim = self._signed_eco_package(wrap_tlv("A9", wrap_tlv("80", b"eim2.example.test")))
+        provider = FakeProvider(
+            bpp_bytes=b"",
+            eim_poll_responses=[
+                EimPollResponse(
+                    transaction_id="tx-1",
+                    euicc_package_list=[delete_eim.hex().upper()],
+                    polling_complete=False,
+                ),
+                EimPollResponse(transaction_id="tx-2", polling_complete=True, eim_result_code=1),
+            ],
+        )
+        orchestrator.profile_provider = provider
+        orchestrator._phase_connect = lambda: None
+        orchestrator._sync_pending_notifications = lambda *args, **kwargs: None
+        card = {"bf55": both}
+        orchestrator._retrieve_es10b_data = lambda payload, log_name: (
+            card["bf55"] if bytes(payload) == bytes.fromhex("BF5500") else b""
+        )
+
+        def relay_delete_eim(package_bytes, poll_round, package_index):
+            card["bf55"] = after_delete
+            orchestrator._invalidate_eim_configuration_after_eco(package_bytes)
+            return wrap_tlv("BF51", wrap_tlv("A0", wrap_tlv("30", wrap_tlv("83", b"\x22"))))
+
+        orchestrator._relay_eim_package_to_card = relay_delete_eim
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            orchestrator.run_eim_poll(matching_id="")
+
+        rendered = output.getvalue()
+        self.assertEqual(
+            [call.eim_fqdn for call in provider.poll_eim_calls],
+            ["eim1.example.test", "eim1.example.test"],
+        )
+        self.assertIn("eimId eim2.example.test is no longer in the card's eIM configuration", rendered)
+        self.assertIn("1 entry(s) left the card's eIM configuration during the sweep", rendered)
+        self.assertIn("config_index=1 eimId=eim2.example.test: removed by an eCO, not polled", rendered)
+        self.assertNotIn("out of range", rendered)
+        self.assertNotIn("[!] eIM entry failed", rendered)
+
+    def test_provide_eim_package_result_removes_what_the_eim_acknowledged(self):
+        acknowledgements = base64.b64encode(bytes.fromhex("BF5306800121800122")).decode("ascii")
+        for answer in (
+            {"packageFormat": "eimAcknowledgements", "eimAcknowledgements": acknowledgements},
+            {"provideEimPackageResultResponse": {"eimAcknowledgements": acknowledgements}},
+        ):
+            with self.subTest(answer=answer):
+                provider = FakeProvider(bpp_bytes=b"")
+                provider.provide_eim_package_result = lambda request_obj, answer=answer: answer
+                apdu_channel = FakeApduChannel()
+                orchestrator = SGP22Orchestrator(
+                    cfg=FakeCfg(),
+                    apdu_channel=apdu_channel,
+                    profile_provider=provider,
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()):
+                    orchestrator._provide_eim_package_result(self._minimal_eim_poll_request())
+
+                removals = [apdu for log_name, apdu in apdu_channel.send_calls if "RemoveNotificationFromList" in log_name]
+                self.assertEqual(len(removals), 2)
+                self.assertIn(bytes.fromhex("BF3003800121"), removals[0])
+                self.assertIn(bytes.fromhex("BF3003800122"), removals[1])
+
+    def test_provide_eim_package_result_removes_nothing_without_a_decodable_acknowledgement(self):
+        for answer in (
+            {"packageFormat": "emptyResponse"},
+            {"eimAcknowledgements": base64.b64encode(bytes.fromhex("BF5305800121")).decode("ascii")},
+            {"eimAcknowledgements": "not base64!"},
+        ):
+            with self.subTest(answer=answer):
+                provider = FakeProvider(bpp_bytes=b"")
+                provider.provide_eim_package_result = lambda request_obj, answer=answer: answer
+                apdu_channel = FakeApduChannel()
+                orchestrator = SGP22Orchestrator(
+                    cfg=FakeCfg(),
+                    apdu_channel=apdu_channel,
+                    profile_provider=provider,
+                )
+
+                with contextlib.redirect_stdout(io.StringIO()):
+                    orchestrator._provide_eim_package_result(self._minimal_eim_poll_request())
+
+                self.assertEqual(
+                    [log_name for log_name, _apdu in apdu_channel.send_calls if "RemoveNotificationFromList" in log_name],
+                    [],
+                )
+
+    @staticmethod
+    def _profile_installation_result(seq_number: int) -> bytes:
+        """ProfileInstallationResult (SGP.22 v3.1 page 439) whose NotificationMetadata carries ``seq_number``."""
+        result_data = wrap_tlv(
+            "BF27",
+            wrap_tlv("80", b"\x10" * 8)
+            + wrap_tlv(
+                "BF2F",
+                wrap_tlv("80", bytes([seq_number]))
+                + wrap_tlv("81", b"\x07\x80")
+                + wrap_tlv("0C", b"rsp.example.com"),
+            )
+            + wrap_tlv("06", bytes.fromhex("2B0601040183A40F0004"))
+            + wrap_tlv(
+                "A2",
+                wrap_tlv(
+                    "A0",
+                    wrap_tlv("4F", bytes.fromhex("A0000005591010FFFFFFFF8900001100"))
+                    + wrap_tlv("04", bytes.fromhex("3007A0053003800100")),
+                ),
+            ),
+        )
+        return wrap_tlv("BF37", result_data + wrap_tlv("5F37", b"\x22" * 64))
+
+    def _run_eim_triggered_download_round(self, handle_notification):
+        """One eIM poll round whose ProfileDownloadTrigger installs a profile (PIR seqNumber 0x21) on CH1.
+
+        run_flow is real down to its phases; the install phase hands the
+        card's ProfileInstallationResult to the notification sync the way
+        _phase_install_package does.
+        """
+        seq_number = 0x21
+        installation_result = self._profile_installation_result(seq_number)
+        trigger = wrap_tlv(
+            "BF54",
+            wrap_tlv("A0", wrap_tlv("80", b"1$rsp.example.com$MATCH-54"))
+            + wrap_tlv("82", b"\x01\x02\x03\x04"),
+        )
+        provider = FakeProvider(
+            bpp_bytes=b"",
+            eim_poll_responses=[
+                EimPollResponse(
+                    transaction_id="tx-1",
+                    euicc_package_list=[trigger.hex().upper()],
+                    polling_complete=False,
+                ),
+                EimPollResponse(transaction_id="tx-2", polling_complete=True, eim_result_code=1),
+            ],
+        )
+        provider.handle_notification = handle_notification
+        apdu_channel = NotificationQueueApduChannel()
+        orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=apdu_channel, profile_provider=provider)
+        # The poll's _phase_connect has opened CH1 and selected ISD-R on it.
+        orchestrator._es10b_logical_channel = 1
+        orchestrator._phase_connect_complete = True
+        orchestrator._phase_load_credentials = lambda: None
+        orchestrator._phase_authentication_seed = lambda **kwargs: {}
+        orchestrator._phase_authenticate_server = lambda auth_seed, matching_id="": None
+        orchestrator._phase_prepare_download = lambda smdp_address=None: None
+        orchestrator._phase_get_bound_profile_package = lambda smdp_address=None: True
+
+        def install(progress_bar=None):
+            # The last LoadBoundProfilePackage block answers the PIR, which
+            # the eUICC also keeps in its Pending Notifications List.
+            apdu_channel.pending[seq_number] = installation_result
+            orchestrator.state.load_bpp_response = installation_result
+            orchestrator._sync_pending_notifications(installation_result)
+            return True
+
+        orchestrator._phase_install_package = install
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            orchestrator._run_single_eim_poll_round(self._minimal_eim_poll_request())
+            orchestrator._sync_pending_notifications()
+        expected_body = wrap_tlv(
+            "BF3D",
+            wrap_tlv(
+                "BF50",
+                wrap_tlv("5A", bytes.fromhex("89049032123451234512345678901235"))
+                + wrap_tlv("BF54", wrap_tlv("82", b"\x01\x02\x03\x04") + installation_result),
+            ),
+        )
+        return orchestrator, apdu_channel, provider, output.getvalue(), expected_body
+
+    def test_eim_triggered_download_reports_its_result_by_esipa_handle_notification(self):
+        # SGP.32 v1.3 §3.2.3.1 step 13. The download used to close the poll's
+        # CH1 on its way out, and the result went by ProvideEimPackageResult,
+        # whose acknowledgement then drew 6D00 on the basic channel.
+        def delivered(request_obj):
+            return {}
+
+        orchestrator, apdu_channel, provider, rendered, expected_body = self._run_eim_triggered_download_round(delivered)
+
+        self.assertEqual(provider.provide_eim_package_result_calls, [])
+        self.assertEqual([call.raw_body for call in provider.handle_notification_esipa_calls], [expected_body])
+        self.assertEqual(len(provider.poll_eim_calls), 2)
+        self.assertEqual(orchestrator._es10b_logical_channel, 1)
+        self.assertFalse(any("CLOSE LOGICAL CHANNEL" in name for name, _apdu in apdu_channel.send_calls))
+        removals = [apdu for name, apdu in apdu_channel.send_calls if "RemoveNotificationFromList" in name]
+        self.assertEqual(removals, [bytes.fromhex("81E2910006BF3003800121")])
+        list_reads = [apdu for name, apdu in apdu_channel.send_calls if name == "DOWNLOAD: ListNotifications"]
+        self.assertEqual(list_reads, [bytes.fromhex("81E2910003BF2800")] * 2)
+        self.assertEqual(apdu_channel.pending, {})
+        self.assertIn("removed seq=33 from the eUICC (ok(0))", rendered)
+        self.assertIn(
+            "Sending ProfileDownloadTriggerResult to the eIM (ESipa.HandleNotification) for package 1 in poll round 1.",
+            rendered,
+        )
+        self.assertNotIn("eIM acknowledged", rendered)
+        self.assertNotIn("failed", rendered)
+
+    def test_installation_result_the_smdp_did_not_take_stays_on_the_card(self):
+        # Only the SM-DP+'s acknowledgement deletes the PIR (SGP.32 v1.3 §3.7
+        # step 3); the eIM gets the result by HandleNotification all the same.
+        def unreachable(request_obj):
+            raise RuntimeError("ES9+ HandleNotification: connection refused")
+
+        orchestrator, apdu_channel, provider, rendered, expected_body = self._run_eim_triggered_download_round(unreachable)
+
+        self.assertEqual([call.raw_body for call in provider.handle_notification_esipa_calls], [expected_body])
+        self.assertEqual(
+            [name for name, _apdu in apdu_channel.send_calls if "RemoveNotificationFromList" in name],
+            [],
+        )
+        self.assertEqual(list(apdu_channel.pending), [0x21])
+        # The closing sync tried the SM-DP+ again and reports the entry as unforwarded.
+        self.assertIn("DOWNLOAD: RetrieveNotification [33]", [name for name, _apdu in apdu_channel.send_calls])
+        self.assertIs(orchestrator._last_notification_sync_succeeded, False)
+
+    def test_triggered_download_without_an_installation_result_reports_a_download_error(self):
+        # SGP.32 v1.3 §2.11.2.3: no PIR from this download, so profileDownloadError,
+        # never a PIR an earlier download left in the session state.
+        orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=FakeProvider(bpp_bytes=b""))
+        orchestrator.state.load_bpp_response = self._profile_installation_result(0x20)
+        orchestrator.run_flow = lambda matching_id="", smdp_address="": None
+        trigger = wrap_tlv(
+            "BF54",
+            wrap_tlv("A0", wrap_tlv("80", b"1$rsp.example.com$MATCH-55"))
+            + wrap_tlv("82", b"\x05\x06"),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            response = orchestrator._relay_eim_package_to_card(trigger, poll_round=1, package_index=1)
+
+        self.assertEqual(response, bytes.fromhex("BF540982020506300380017F"))
+
+    def test_malformed_download_trigger_answers_invalid_package_format(self):
+        # SGP.32 v1.3 §3.2.3.1 steps 3 and 4. The answer keeps the eIM's
+        # transaction id and goes by ProvideEimPackageResult (§3.1.1.1 step 6).
+        transaction_id = b"\x11\x22"
+        for label, download_data in (
+            ("activation code with AC_Format 2", wrap_tlv("A0", wrap_tlv("80", b"2$rsp.example.com$MATCH-1"))),
+            ("contactDefaultSmdp without a default SM-DP+", wrap_tlv("A0", wrap_tlv("81", b""))),
+            ("no profileDownloadData", b""),
+        ):
+            with self.subTest(trigger=label):
+                orchestrator = SGP22Orchestrator(
+                    cfg=FakeCfg(),
+                    apdu_channel=FakeApduChannel(),
+                    profile_provider=FakeProvider(bpp_bytes=b""),
+                )
+                orchestrator.run_flow = mock.Mock(side_effect=AssertionError("no download for a malformed trigger"))
+                trigger = wrap_tlv("BF54", download_data + wrap_tlv("82", transaction_id))
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    response = orchestrator._relay_eim_package_to_card(trigger, poll_round=1, package_index=1)
+                    result = orchestrator._build_provide_eim_package_result_tlv(
+                        response,
+                        eid="89049032123451234512345678901235",
+                        package_bytes=trigger,
+                    )
+
+                self.assertEqual(response, bytes.fromhex("A00780021122020101"))
+                self.assertEqual(
+                    result,
+                    wrap_tlv("BF50", wrap_tlv("5A", bytes.fromhex("89049032123451234512345678901235")) + response),
+                )
+                self.assertIn("invalidPackageFormat(1)", output.getvalue())
+                self.assertNotIn("not a valid SGP.32 EimPackageResult", output.getvalue())
+
+    def test_eim_package_result_response_error_shape_is_checked(self):
+        orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
+
+        for valid in ("A003020101", "A00780021122020101"):
+            with self.subTest(valid=valid):
+                self.assertTrue(orchestrator._is_eim_package_result_response_error(bytes.fromhex(valid)))
+        for invalid in (
+            "",
+            "A0",
+            "A000",
+            "A005020101",
+            "A003020101FF",
+            "A003040101",
+            "3003020101",
+            "A006020101020101",
+            "A0028000",
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertFalse(orchestrator._is_eim_package_result_response_error(bytes.fromhex(invalid)))
+
+    def test_top_level_run_flow_closes_the_channel_it_opened(self):
+        cfg = FakeCfg()
+        cfg.ES10B_USE_LOGICAL_CHANNEL = True
+        apdu_channel = NotificationQueueApduChannel()
+        orchestrator = SGP22Orchestrator(cfg=cfg, apdu_channel=apdu_channel, profile_provider=FakeProvider(bpp_bytes=b""))
+        orchestrator._phase_load_credentials = lambda: None
+        orchestrator._phase_authentication_seed = lambda **kwargs: {}
+        orchestrator._phase_authenticate_server = lambda auth_seed, matching_id="": None
+        orchestrator._phase_prepare_download = lambda smdp_address=None: None
+        orchestrator._phase_get_bound_profile_package = lambda smdp_address=None: False
+        orchestrator._phase_install_package = lambda progress_bar=None: False
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            orchestrator.run_flow(matching_id="MATCH-1", smdp_address="rsp.example.com")
+
+        self.assertEqual(orchestrator._es10b_logical_channel, 0)
+        self.assertIn(
+            ("FLOW: CLOSE LOGICAL CHANNEL 1", bytes.fromhex("0070800100")),
+            apdu_channel.send_calls,
+        )
+
+    def test_decode_notification_sent_status_refuses_malformed_answers(self):
+        orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
+
+        self.assertEqual(orchestrator._decode_notification_sent_status(bytes.fromhex("BF3003800100")), 0)
+        self.assertEqual(orchestrator._decode_notification_sent_status(bytes.fromhex("BF3003800101")), 1)
+        self.assertEqual(orchestrator._decode_notification_sent_status(bytes.fromhex("BF300380017F")), 127)
+        for answer in (
+            b"",
+            b"\xBF",
+            bytes.fromhex("BF30"),
+            bytes.fromhex("BF3000"),
+            bytes.fromhex("BF3005800100"),
+            bytes.fromhex("BF30038005"),
+            bytes.fromhex("BF30028000"),
+            bytes.fromhex("3003800100"),
+            None,
+        ):
+            with self.subTest(answer=answer):
+                self.assertIsNone(orchestrator._decode_notification_sent_status(answer))
+
+    def test_remove_notification_reports_the_delete_notification_status(self):
+        for answer, expected_status, expected_text in (
+            (bytes.fromhex("BF3003800100"), 0, "removed seq=7 from the eUICC (ok(0))"),
+            (bytes.fromhex("BF3003800101"), 1, "seq=7 was already gone from the eUICC (nothingToDelete(1))"),
+            (bytes.fromhex("BF300380017F"), 127, "removeNotificationFromList failed for seq=7 (undefinedError(127))"),
+            (b"", None, "removeNotificationFromList for seq=7 answered without a deleteNotificationStatus (no data)"),
+        ):
+            with self.subTest(answer=answer):
+                orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
+                orchestrator._send_es10b_store_data = lambda payload, log_name, allow_stk_retry=False, answer=answer: answer
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    status = orchestrator._remove_notification_from_list(7)
+
+                self.assertEqual(status, expected_status)
+                self.assertIn(expected_text, output.getvalue())
+
+    @staticmethod
+    def _minimal_eim_poll_request() -> EimPollRequest:
+        return EimPollRequest(
+            eim_fqdn="eim1.example.test",
+            eim_id="eim1.example.test",
+            eim_id_type="2",
+            counter_value="0",
+            association_token="",
+            supported_protocol="3",
+            euicc_ci_pkid="",
+            indirect_profile_download="0",
+            euicc_configured_data="",
+            eim_configuration_data="",
+            eid="89049032123451234512345678901235",
+            raw_body=bytes.fromhex("BF5000"),
+        )
 
     def test_build_eim_poll_request_omits_challenge_for_vendor_quirk_endpoint(self):
         configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.com"))
@@ -1626,7 +2295,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         apdu_channel = FakeApduChannel(
             eim_configuration_response=eim_configuration,
             configured_data_response=configured_data,
-            eid_response=wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+            eid_response=wrap_tlv("5A", bytes.fromhex("89049032000000000000000000000101")),
         )
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(),
@@ -1638,7 +2307,17 @@ class OrchestratorFlowTests(unittest.TestCase):
         orchestrator.state.card_challenge = bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
         request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
 
-        self.assertEqual(request.raw_body, orchestrator._build_get_eim_package_tlv(request.eid))
+        # A vendor-quirk endpoint gets notifyStateChange and stateChangeCause
+        # in the initial GetEimPackage (SGP.32 v1.3 GetEimPackageRequest
+        # [0] NULL / [1] StateChangeCause) but never an eUICC challenge.
+        self.assertEqual(
+            request.raw_body,
+            orchestrator._build_get_eim_package_tlv(
+                request.eid,
+                notify_state_change=True,
+                state_change_cause=3,
+            ),
+        )
         self.assertEqual(request.euicc_challenge, "")
         self.assertFalse(any(call[0] == "EIM: GetEuiccChallenge" for call in apdu_channel.send_calls))
 
@@ -1650,16 +2329,16 @@ class OrchestratorFlowTests(unittest.TestCase):
         )
 
         payload = orchestrator._build_get_eim_package_tlv(
-            "89044045930000000000001492294428",
+            "89049032000000000000000000000101",
             notify_state_change=True,
-            # 3GPP TS 23.003 §2.2 test PLMN: MCC=001, MNC=01 → BCD 00 F1 10.
+            # Test PLMN MCC=001, MNC=01 (3GPP TS 31.124 v18.7 §27.22.2A) → BCD 00 F1 10.
             rplmn_bytes=bytes.fromhex("00F110"),
         )
 
         self.assertEqual(
             payload,
             bytes.fromhex(
-                "BF4F195A1089044045930000000000001492294428"
+                "BF4F195A1089049032000000000000000000000101"
                 "8000"
                 "820300F110"
             ),
@@ -1675,12 +2354,193 @@ class OrchestratorFlowTests(unittest.TestCase):
 
         payload = orchestrator._build_provide_eim_package_result_tlv(
             card_response,
-            eid="89044045930000000000001492294428",
+            eid="89049032000000000000000000000101",
         )
 
         self.assertEqual(
             payload,
-            bytes.fromhex("BF50185A1089044045930000000000001492294428BF5103800101"),
+            bytes.fromhex("BF50185A1089049032000000000000000000000101BF5103800101"),
+        )
+
+    def test_relay_answers_unknown_package_when_card_declines_it(self):
+        # SGP.32 v1.3 §6.3.2.7: eimPackageResultResponseError [0] carrying
+        # unknownPackage(2), sent with the EID so the eIM can place it.
+        package = bytes.fromhex("CA0401020304")
+        apdu_channel = DecliningRelayApduChannel(
+            declined_tag=b"\xCA",
+            declined_error=IOError("APDU Failed: 6A80"),
+        )
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=apdu_channel,
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            response = orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
+        payload = orchestrator._build_provide_eim_package_result_tlv(
+            response,
+            eid=TEST_EID,
+            package_bytes=package,
+        )
+
+        self.assertEqual(response, bytes.fromhex("A003020102"))
+        self.assertEqual(payload, bytes.fromhex("BF50175A10" + TEST_EID + "A003020102"))
+        relay_apdus = [apdu for name, apdu in apdu_channel.send_calls if name.startswith("EIM: RelayPackage")]
+        self.assertEqual(relay_apdus, [bytes([0x80, 0xE2, 0x91, 0x00, len(package)]) + package])
+
+    def test_relay_passes_on_card_answer_to_unknown_package_under_its_tag(self):
+        package = bytes.fromhex("CA0401020304")
+        answer = bytes.fromhex("CA0100")
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(eim_package_response=answer),
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            response = orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
+        payload = orchestrator._build_provide_eim_package_result_tlv(
+            response,
+            eid=TEST_EID,
+            package_bytes=package,
+        )
+
+        self.assertEqual(response, answer)
+        self.assertEqual(payload, bytes.fromhex("BF50155A10" + TEST_EID + "CA0100"))
+
+    def test_relay_answers_unknown_package_when_card_returns_nothing(self):
+        package = bytes.fromhex("CA0401020304")
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(eim_package_response=b""),
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            response = orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
+
+        self.assertEqual(response, bytes.fromhex("A003020102"))
+
+    def test_relay_leaves_unknown_package_unanswered_when_the_link_fails(self):
+        # No status word means the card never saw the package; the poll
+        # entry fails and the next DOWNLOAD fetches it again.
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=DecliningRelayApduChannel(
+                declined_tag=b"\xCA",
+                declined_error=IOError("PC/SC transmit failed: card removed"),
+            ),
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(IOError):
+                orchestrator._relay_eim_package_to_card(
+                    bytes.fromhex("CA0401020304"),
+                    poll_round=1,
+                    package_index=1,
+                )
+
+    def test_build_provide_eim_package_result_refuses_other_answers(self):
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+        invalid_package_format = bytes.fromhex("BF50175A10" + TEST_EID + "A003020101")
+        cases = (
+            # An answer under a foreign tag is no result for the package.
+            ("foreign tag", bytes.fromhex("BF3700"), bytes.fromhex("CA0401020304")),
+            ("trailing octets", bytes.fromhex("CA0100FF"), bytes.fromhex("CA0401020304")),
+            ("truncated answer", bytes.fromhex("CA05"), bytes.fromhex("CA0401020304")),
+            # The error alternative passes only as the answer to a package
+            # outside SGP.32, never for one the IPA handles itself.
+            ("error for a known package", bytes.fromhex("A003020102"), wrap_tlv("BF51", wrap_tlv("30", b""))),
+            ("error without its package", bytes.fromhex("A003020102"), b""),
+        )
+        for label, answer, package in cases:
+            with self.subTest(label):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    payload = orchestrator._build_provide_eim_package_result_tlv(
+                        answer,
+                        eid=TEST_EID,
+                        package_bytes=package,
+                    )
+
+                self.assertEqual(payload, invalid_package_format)
+
+    def test_run_eim_poll_answers_unknown_package_then_reaches_the_queued_one(self):
+        # A package left without a result stays pending ahead of the rest of
+        # the eIM's queue; the unknownPackage(2) answer lets the eIM manage
+        # it (SGP.32 v1.3 §5.14.6) and the next poll delivers the package
+        # queued behind it.
+        configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.com"))
+        eim_configuration = wrap_tlv(
+            "BF55",
+            wrap_tlv(
+                "A0",
+                wrap_tlv(
+                    "30",
+                    wrap_tlv("80", b"manager-1")
+                    + wrap_tlv("81", b"eim.example.com")
+                    + wrap_tlv("82", b"\x01"),
+                ),
+            ),
+        )
+        unknown_package = bytes.fromhex("CA0401020304")
+        queued_package = wrap_tlv(
+            "BF51",
+            wrap_tlv(
+                "30",
+                wrap_tlv("80", b"manager-1")
+                + wrap_tlv("5A", bytes.fromhex(TEST_EID))
+                + wrap_tlv("81", b"\x01")
+                + wrap_tlv("A0", wrap_tlv("BF2D", b"")),
+            )
+            + wrap_tlv("5F37", b"\x33" * 64),
+        )
+        package_result = _euicc_package_result_entry(1)
+        provider = FakeProvider(
+            bpp_bytes=b"",
+            eim_poll_responses=[
+                EimPollResponse(
+                    euicc_package_list=[base64.b64encode(unknown_package).decode("ascii")],
+                    polling_complete=False,
+                ),
+                EimPollResponse(
+                    euicc_package_list=[base64.b64encode(queued_package).decode("ascii")],
+                    polling_complete=False,
+                ),
+                EimPollResponse(polling_complete=True, eim_result_code=1),
+            ],
+        )
+        apdu_channel = DecliningRelayApduChannel(
+            declined_tag=b"\xCA",
+            declined_error=IOError("APDU Failed: 6A80"),
+            eim_configuration_response=eim_configuration,
+            configured_data_response=configured_data,
+            eid_response=wrap_tlv("5A", bytes.fromhex(TEST_EID)),
+            eim_package_response=package_result,
+        )
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            orchestrator.run_eim_poll()
+
+        relayed = [apdu[5:] for name, apdu in apdu_channel.send_calls if name.startswith("EIM: RelayPackage")]
+        self.assertEqual(relayed, [unknown_package, queued_package])
+        provide_bodies = [call.raw_body for call in provider.provide_eim_package_result_calls]
+        self.assertEqual(
+            provide_bodies,
+            [
+                bytes.fromhex("BF50175A10" + TEST_EID + "A003020102"),
+                wrap_tlv("BF50", wrap_tlv("5A", bytes.fromhex(TEST_EID)) + package_result),
+            ],
         )
 
     def test_run_eim_poll_builds_request_and_relays_package(self):
@@ -1731,7 +2591,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         apdu_channel = FakeApduChannel(
             eim_configuration_response=eim_configuration,
             configured_data_response=configured_data,
-            eid_response=wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+            eid_response=wrap_tlv("5A", bytes.fromhex("89049032000000000000000000000101")),
             eim_package_response=bytes.fromhex("BF3700"),
         )
         orchestrator = SGP22Orchestrator(
@@ -1742,7 +2602,9 @@ class OrchestratorFlowTests(unittest.TestCase):
 
         orchestrator.run_eim_poll(matching_id="MATCH-1")
 
-        self.assertEqual(len(provider.poll_eim_calls), 1)
+        # The package result is provided once, then the eIM is polled again
+        # until it reports noEimPackageAvailable(1).
+        self.assertEqual(len(provider.poll_eim_calls), 2)
         self.assertEqual(len(provider.provide_eim_package_result_calls), 1)
         first_request = provider.poll_eim_calls[0]
         self.assertEqual(first_request.eim_fqdn, "eim.example.com")
@@ -1764,7 +2626,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(provide_request.euicc_package_result, "")
         self.assertEqual(
             provide_request.raw_body,
-            bytes.fromhex("BF50195A108904404593000000000000149229442880053003020101"),
+            bytes.fromhex("BF50175A1089049032000000000000000000000101A003020101"),
         )
 
         relay_calls = [call for call in apdu_channel.send_calls if call[0].startswith("EIM: RelayPackage")]
@@ -1774,7 +2636,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             bytes([0x80, 0xE2, 0x91, 0x00, len(card_package)]) + card_package,
         )
 
-    def test_poll_eim_timeout_does_not_retry(self):
+    def test_poll_eim_timeout_probes_one_variant_then_raises(self):
         provider = FakeProvider(
             bpp_bytes=b"",
             eim_poll_errors=[TimeoutError("The read operation timed out")],
@@ -1795,18 +2657,23 @@ class OrchestratorFlowTests(unittest.TestCase):
             indirect_profile_download="0",
             euicc_configured_data="",
             eim_configuration_data="",
-            eid="89044045930000000000001492294428",
+            eid="89049032000000000000000000000101",
             euicc_challenge="stale-eim-challenge",
-            raw_body=bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+            raw_body=bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
         )
 
         with self.assertRaises(RuntimeError) as raised:
             orchestrator._poll_eim(request)
 
+        # A timed-out GetEimPackage is retried once with the next request
+        # variant before the failure surfaces; neither attempt carries the
+        # stale eUICC challenge.
         self.assertIn("Provider getEimPackage failed", str(raised.exception))
-        self.assertEqual(len(provider.poll_eim_calls), 1)
+        self.assertEqual(len(provider.poll_eim_calls), 2)
         self.assertEqual(provider.poll_eim_calls[0].raw_body, request.raw_body)
+        self.assertNotEqual(provider.poll_eim_calls[1].raw_body, request.raw_body)
         self.assertEqual(provider.poll_eim_calls[0].euicc_challenge, "")
+        self.assertEqual(provider.poll_eim_calls[1].euicc_challenge, "")
 
     def test_build_get_eim_package_variant_requests_includes_alternatives(self):
         orchestrator = SGP22Orchestrator(
@@ -1814,8 +2681,10 @@ class OrchestratorFlowTests(unittest.TestCase):
             apdu_channel=FakeApduChannel(),
             profile_provider=FakeProvider(bpp_bytes=b""),
         )
+        # eim1.example.com does not match the FakeCfg vendor-quirk suffix, so
+        # no stateChangeCause variant is offered; a quirk endpoint adds one.
         request = EimPollRequest(
-            eim_fqdn="eim1.example.test",
+            eim_fqdn="eim1.example.com",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -1826,10 +2695,10 @@ class OrchestratorFlowTests(unittest.TestCase):
             euicc_configured_data="",
             eim_configuration_data="",
             euicc_info2=base64.b64encode(bytes.fromhex("BF2208810302600116840100")).decode("utf-8"),
-            eid="89044045930000000000001492294428",
+            eid="89049032000000000000000000000101",
             euicc_challenge="",
             raw_body=bytes.fromhex(
-                "BF4F195A1089044045930000000000001492294428"
+                "BF4F195A1089049032000000000000000000000101"
                 "8000"
                 "8203260116"
             ),
@@ -1868,10 +2737,10 @@ class OrchestratorFlowTests(unittest.TestCase):
             euicc_configured_data="",
             eim_configuration_data="",
             euicc_info2=base64.b64encode(bytes.fromhex("BF2208810302600116840100")).decode("utf-8"),
-            eid="89044045930000000000001492294428",
+            eid="89049032000000000000000000000101",
             euicc_challenge="",
             raw_body=bytes.fromhex(
-                "BF4F195A1089044045930000000000001492294428"
+                "BF4F195A1089049032000000000000000000000101"
                 "8000"
                 "8203260116"
             ),
@@ -1904,10 +2773,10 @@ class OrchestratorFlowTests(unittest.TestCase):
             euicc_configured_data="",
             eim_configuration_data="",
             euicc_info2=base64.b64encode(bytes.fromhex("BF2208810302600116840100")).decode("utf-8"),
-            eid="89044045930000000000001492294428",
+            eid="89049032000000000000000000000101",
             euicc_challenge="",
             raw_body=bytes.fromhex(
-                "BF4F1C5A1089044045930000000000001492294428"
+                "BF4F1C5A1089049032000000000000000000000101"
                 "80008101038203260116"
             ),
         )
@@ -1917,7 +2786,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(response.eim_result_code, 1)
         self.assertEqual(len(provider.poll_eim_calls), 2)
 
-    def test_run_eim_poll_raises_on_explicit_undefined_error_127(self):
+    def test_run_eim_poll_reports_explicit_undefined_error_127_without_raising(self):
         provider = FakeProvider(
             bpp_bytes=b"",
             eim_poll_responses=[
@@ -1931,8 +2800,10 @@ class OrchestratorFlowTests(unittest.TestCase):
         )
         orchestrator._phase_connect = lambda: None
         orchestrator._resolve_eim_poll_entry_indices = lambda entry_index=None: [0]
-        orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0: EimPollRequest(
-            eim_fqdn="eim1.example.test",
+        # eim1.example.com is not a vendor-quirk endpoint, so the 127 probe
+        # tries exactly one request variant after the initial poll.
+        orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0, expected_eim_id="": EimPollRequest(
+            eim_fqdn="eim1.example.com",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -1942,14 +2813,19 @@ class OrchestratorFlowTests(unittest.TestCase):
             indirect_profile_download="0",
             euicc_configured_data="",
             eim_configuration_data="",
-            eid="89044045930000000000001492294428",
-            raw_body=bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+            eid="89049032000000000000000000000101",
+            raw_body=bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
         )
 
-        with self.assertRaises(RuntimeError) as raised:
+        # A failed entry is reported and the sweep finishes, so the command
+        # flow around it (notification sync, auto-clear) can still run.
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
             orchestrator.run_eim_poll(matching_id="MATCH-1")
 
-        self.assertIn("undefinedError(127)", str(raised.exception))
+        rendered = output.getvalue()
+        self.assertIn("[!] eIM entry failed", rendered)
+        self.assertIn("undefinedError(127)", rendered)
         self.assertEqual(len(provider.poll_eim_calls), 2)
 
     def test_relay_profile_download_trigger_runs_profile_download_flow(self):
@@ -1959,12 +2835,12 @@ class OrchestratorFlowTests(unittest.TestCase):
             apdu_channel=FakeApduChannel(),
             profile_provider=provider,
         )
-        orchestrator.state.load_bpp_response = bytes.fromhex("BF3700")
         captured = {}
 
         def fake_run_flow(matching_id: str = "", smdp_address: str = ""):
             captured["matching_id"] = matching_id
             captured["smdp_address"] = smdp_address
+            orchestrator.state.load_bpp_response = bytes.fromhex("BF3700")
 
         orchestrator.run_flow = fake_run_flow
         package = wrap_tlv(
@@ -2123,7 +2999,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             if "RetrieveEuiccPackageResults" in call[0]
         ]
         self.assertEqual(len(package_result_calls), 1)
-        self.assertEqual(package_result_calls[0][1], bytes.fromhex("80E2910005BF2B028200"))
+        self.assertEqual(package_result_calls[0][1], bytes.fromhex("80E2910007BF2B04A0028200"))
 
     def test_relay_package_data_request_uses_requesting_eim_association_token(self):
         eim_configuration = wrap_tlv(
@@ -2225,11 +3101,12 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn(bytes.fromhex("870800000000000004A4"), response)
 
     def test_relay_package_data_request_filters_package_results_by_sequence_number(self):
-        euicc_package_result = wrap_tlv("BF51", bytes.fromhex("010203"))
+        wanted = _euicc_package_result_entry(2)
+        other = _euicc_package_result_entry(3)
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(),
             apdu_channel=FakeApduChannel(
-                euicc_package_result_list_response=wrap_tlv("BF2B", wrap_tlv("A2", euicc_package_result)),
+                euicc_package_result_list_response=wrap_tlv("BF2B", wrap_tlv("A2", wanted + other)),
             ),
             profile_provider=FakeProvider(bpp_bytes=b""),
         )
@@ -2242,14 +3119,44 @@ class OrchestratorFlowTests(unittest.TestCase):
 
         response = orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
 
-        self.assertIn(wrap_tlv("A2", euicc_package_result), response)
+        self.assertIn(wrap_tlv("A2", wanted), response)
+        self.assertNotIn(other, response)
         package_result_calls = [
             call
             for call in orchestrator.apdu_channel.send_calls
             if "RetrieveEuiccPackageResults" in call[0]
         ]
         self.assertEqual(len(package_result_calls), 1)
-        self.assertEqual(package_result_calls[0][1], bytes.fromhex("80E2910008BF2B05A003800102"))
+        # ES10b has no sequence-filtered euiccPackageResults variant, so the
+        # IPA always asks for the whole list and filters it itself.
+        self.assertEqual(package_result_calls[0][1], bytes.fromhex("80E2910007BF2B04A0028200"))
+
+    def test_relay_package_data_request_selects_notifications_by_management_operation(self):
+        notification_item = wrap_tlv("A0", wrap_tlv("BF2F", wrap_tlv("80", b"\x02")))
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(
+                notification_retrieve_response=wrap_tlv("BF2B", notification_item),
+            ),
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+        package = wrap_tlv(
+            "BF52",
+            wrap_tlv("5C", bytes.fromhex("A0"))
+            + wrap_tlv("A1", wrap_tlv("81", bytes.fromhex("0640")))
+            + wrap_tlv("83", bytes.fromhex("00000000000004A6")),
+        )
+
+        response = orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
+
+        self.assertIn(notification_item, response)
+        notification_calls = [
+            call
+            for call in orchestrator.apdu_channel.send_calls
+            if "RetrieveNotificationsList" in call[0]
+        ]
+        self.assertEqual(len(notification_calls), 1)
+        self.assertEqual(notification_calls[0][1], bytes.fromhex("80E2910009BF2B06A00481020640"))
 
     def test_run_eim_poll_finishes_on_no_package_result(self):
         configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.com"))
@@ -2283,7 +3190,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         apdu_channel = FakeApduChannel(
             eim_configuration_response=eim_configuration,
             configured_data_response=configured_data,
-            eid_response=wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+            eid_response=wrap_tlv("5A", bytes.fromhex("89049032000000000000000000000101")),
         )
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(),
@@ -2353,7 +3260,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         apdu_channel = FakeApduChannel(
             eim_configuration_response=eim_configuration,
             configured_data_response=configured_data,
-            eid_response=wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+            eid_response=wrap_tlv("5A", bytes.fromhex("89049032000000000000000000000101")),
         )
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(),

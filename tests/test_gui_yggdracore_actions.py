@@ -8,7 +8,7 @@ Locks the six Phase-1c actions registered by
 
 * ``yggdracore.subscription_upsert`` validates inputs and pushes the
   record into the in-process :class:`SubscriptionStore`.
-* ``yggdracore.subscription_list`` redacts secret material.
+* ``yggdracore.subscription_list`` returns K / OPc with the public fields.
 * ``yggdracore.subscription_delete`` and ``subscription_clear``
   prune state correctly.
 * ``yggdracore.status`` returns a stable diagnostics shape.
@@ -102,9 +102,8 @@ class SubscriptionDispatchTests(unittest.TestCase):
         self.assertEqual(listing["count"], 1)
         view = listing["subscriptions"][0]
         self.assertEqual(view["supi"], _SUPI)
-        # Secret material must not leak through the public view.
-        self.assertNotIn("k", view)
-        self.assertNotIn("opc", view)
+        self.assertEqual(view["k_hex"], _K_HEX)
+        self.assertEqual(view["opc_hex"], _OPC_HEX)
 
     def test_upsert_rejects_short_k(self) -> None:
         with self.assertRaises(ValueError):

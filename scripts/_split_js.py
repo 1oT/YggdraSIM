@@ -33,8 +33,8 @@ SPDX_HEADER = (
 CHUNK_MARKERS: tuple[tuple[str, str | None], ...] = (
     ("__head.js", None),
     ("core.js", "  // -- Token management "),
-    ("command-center.js", "  // -- Command Center (R2-004 Phase C) "),
-    ("saip-workbench.js", "  // -- SAIP Workbench (SA-2) "),
+    ("command-center.js", "  // -- Command Center "),
+    ("saip-workbench.js", "  // -- SAIP Workbench "),
     (
         "trailing.js",
         "  // -- Per-reader tab persistence (localStorage) ",

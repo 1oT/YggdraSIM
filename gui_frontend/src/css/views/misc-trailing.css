@@ -17,8 +17,8 @@
   background: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
   padding: 12px 14px 14px;
   font-size: 13px;
   display: flex;
@@ -54,7 +54,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--fg-muted);
@@ -149,7 +149,7 @@
   padding: 7px 10px;
   font-size: 12.5px;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   border: 1px solid var(--border);
   transition: background 120ms ease, border-color 120ms ease,
@@ -158,7 +158,7 @@
 
 .topbar-reader-popover-actions .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   border-color: var(--accent);
 }
 
@@ -345,9 +345,6 @@
   margin: 14px 0 10px;
 }
 
-.cb-rig-primary-actions .btn {
-  min-height: 36px;
-}
 
 .cb-rig-manual {
   margin-top: 8px;
@@ -364,10 +361,56 @@
   margin: 14px 0;
 }
 
-.cb-rig-actions .btn {
-  min-height: 32px;
+
+.cb-steps {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  color: var(--fg-dim);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
+.cb-steps li + li {
+  margin-top: 3px;
+}
+
+.cb-steps li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cb-rig-manual .hint {
+  margin: 8px 0 10px;
+}
+
+.cb-rig-action-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.cb-rig-action-group-label {
+  margin-right: 2px;
+  color: var(--fg-dim);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cb-subhead {
+  margin: 18px 0 8px;
+  color: var(--fg-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 .cb-rig-status-grid {
   display: grid;
   grid-template-columns: repeat(
@@ -414,7 +457,7 @@
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -465,7 +508,7 @@
   color: var(--fg-dim);
 }
 
-/* Manual probe override panel — collapsed by default so the common
+/* Manual probe override panel -- collapsed by default so the common
  * case (no overrides) keeps the panel compact.
  */
 .cb-override {
@@ -564,8 +607,8 @@
   line-height: 1.4;
 }
 
-/* Latency history sparkline. Two polylines — ``--cb-history-ping``
- * and ``--cb-history-status`` — share the same SVG. We plot from the
+/* Latency history sparkline. Two polylines -- ``--cb-history-ping``
+ * and ``--cb-history-status`` -- share the same SVG. We plot from the
  * left so the freshest sample is on the right edge, matching the
  * convention of the SCP03 throughput chart.
  */
@@ -617,10 +660,6 @@
   font-family: var(--font-mono);
 }
 
-.btn-small {
-  padding: 4px 10px;
-  font-size: 0.78rem;
-}
 
 @media (max-width: 640px) {
   .cb-panel {

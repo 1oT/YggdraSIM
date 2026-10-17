@@ -4,9 +4,9 @@
 """Regression tests for the FS-state restore contract.
 
 Pinned bug: after the operator loaded the file-system (scan tree + read
-on load), then invoked any action that SELECTed a different AID — e.g.
+on load), then invoked any action that SELECTed a different AID -- e.g.
 Card info (ICCID + EID probe -> ECASD + ISD-R), Cert info (ECASD),
-SELECT... prompt against an arbitrary AID, ISD-R profile actions —
+SELECT... prompt against an arbitrary AID, ISD-R profile actions --
 the card's current DF drifted away from MF. A subsequent file-tree
 click arrived at ``_dispatch_read_selected`` with the card sitting on
 ISD-R / ECASD / ADF-X, and although ``fs_controller.select()`` does a
@@ -30,7 +30,7 @@ Fix contract (what these tests pin):
 3. ``_dispatch_card_info`` MUST call ``_restore_fs_root_best_effort`` in
    a finally-block so the ICCID / EID probe (which punches through to
    EF.ICCID, ECASD and ISD-R via raw SELECT-by-AID) can't leave the FS
-   view stale — regardless of whether the dispatcher succeeds or raises.
+   view stale -- regardless of whether the dispatcher succeeds or raises.
 
 4. ``_dispatch_cert_info`` MUST call ``_restore_fs_root_best_effort`` in
    a finally-block for the same reason (it SELECTs ECASD and then GET-
@@ -59,7 +59,7 @@ class _FakeTransporter:
         # Scripted replies keyed by the APDU hex string.
         self.script: dict[str, tuple[bytes, int, int]] = {}
         # Default reply (SW=9000, empty body) for any APDU we didn't
-        # pre-script — keeps the dispatchers unblocked.
+        # pre-script -- keeps the dispatchers unblocked.
         self.default_reply: tuple[bytes, int, int] = (b"", 0x90, 0x00)
 
     def transmit(self, cmd: str, silent: bool = False) -> tuple[bytes, int, int]:
@@ -129,7 +129,7 @@ def _install_fake_manager(monkeypatch, session: _FakeSession) -> None:
 
 
 # ----------------------------------------------------------------------
-# _dispatch_read_selected — pre-restore guarantees
+# _dispatch_read_selected -- pre-restore guarantees
 # ----------------------------------------------------------------------
 
 
@@ -151,14 +151,14 @@ def test_read_selected_preselects_mf_for_slash_rooted_path(monkeypatch):
     mod._dispatch_read_selected(_Ctx(), session_id=sess.id, path="MF/EF.ICCID")
 
     assert "00A40004023F00" in tp.calls, (
-        "expected an explicit SELECT MF before fs_controller.select() — "
+        "expected an explicit SELECT MF before fs_controller.select() -- "
         f"transporter calls were {tp.calls!r}"
     )
     mf_idx = tp.calls.index("00A40004023F00")
     # fs_controller.select was called exactly once
     assert len(fs.select_calls) == 1
     assert fs.select_calls[0] == "MF/EF.ICCID"
-    # And the select() happened AFTER the pre-restore APDU — the fake
+    # And the select() happened AFTER the pre-restore APDU -- the fake
     # fs controller doesn't touch the transporter, so the only trace we
     # have is that the pre-restore APDU landed and fs_controller.select
     # then ran. The presence of the APDU in the calls list before any
@@ -174,7 +174,7 @@ def test_read_selected_preselects_mf_for_slash_rooted_path(monkeypatch):
 
 
 def test_read_selected_skips_preselect_for_bare_hex(monkeypatch):
-    """Bare hex FIDs stay card-state-aware — no pre-restore."""
+    """Bare hex FIDs stay card-state-aware -- no pre-restore."""
     from yggdrasim_common.gui_server.actions import scp03 as mod
 
     tp = _FakeTransporter()
@@ -189,7 +189,7 @@ def test_read_selected_skips_preselect_for_bare_hex(monkeypatch):
 
     # No raw SELECT MF should be issued for bare hex.
     assert "00A40004023F00" not in tp.calls, (
-        "pre-restore must not fire for bare hex FIDs — CLI parity "
+        "pre-restore must not fire for bare hex FIDs -- CLI parity "
         "relies on relative SELECT semantics"
     )
     assert fs.select_calls == ["2FE2"]
@@ -217,7 +217,7 @@ def test_read_selected_skips_preselect_for_bare_aid(monkeypatch):
 
 
 # ----------------------------------------------------------------------
-# _dispatch_select_only — pre-restore mirror
+# _dispatch_select_only -- pre-restore mirror
 # ----------------------------------------------------------------------
 
 
@@ -258,7 +258,7 @@ def test_select_only_skips_preselect_for_bare_hex(monkeypatch):
 
 
 # ----------------------------------------------------------------------
-# _dispatch_card_info — finally-block restore
+# _dispatch_card_info -- finally-block restore
 # ----------------------------------------------------------------------
 
 
@@ -280,12 +280,12 @@ def test_card_info_restores_mf_after_icc_and_eid_probe(monkeypatch):
 
     mod._dispatch_card_info(_Ctx(), session_id=sess.id)
 
-    # The final APDU MUST be an explicit SELECT MF — that's the
+    # The final APDU MUST be an explicit SELECT MF -- that's the
     # finally-block restore. Without it, the next FS click lands on a
     # drifted card.
     assert tp.calls, "expected at least one transmit call"
     assert tp.calls[-1] == "00A40004023F00", (
-        "card_info must end on SELECT MF — transporter calls: "
+        "card_info must end on SELECT MF -- transporter calls: "
         + repr(tp.calls)
     )
     # fs controller bookkeeping snapped back to MF too.
@@ -323,7 +323,7 @@ def test_card_info_restores_mf_even_if_probe_raises(monkeypatch):
 
 
 # ----------------------------------------------------------------------
-# _dispatch_cert_info — finally-block restore
+# _dispatch_cert_info -- finally-block restore
 # ----------------------------------------------------------------------
 
 
@@ -336,7 +336,7 @@ def test_cert_info_restores_mf_after_ecasd_walk(monkeypatch):
     _install_fake_manager(monkeypatch, sess)
 
     # Default reply returns SW=9000 with empty data for every GET DATA
-    # tag lookup — the dispatcher records them as "present=True, hex=''".
+    # tag lookup -- the dispatcher records them as "present=True, hex=''".
     # We only care about the trailing restore APDU here.
     class _Ctx:
         pass
@@ -351,7 +351,7 @@ def test_cert_info_restores_mf_after_ecasd_walk(monkeypatch):
         + repr(tp.calls[0])
     )
     assert tp.calls[-1] == "00A40004023F00", (
-        "cert_info must end on SELECT MF — transporter calls: "
+        "cert_info must end on SELECT MF -- transporter calls: "
         + repr(tp.calls)
     )
     assert fs.current_fid == "3F00"

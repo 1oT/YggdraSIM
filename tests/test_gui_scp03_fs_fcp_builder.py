@@ -6,7 +6,7 @@
 The GUI CREATE FILE wizard composes its FCP via this helper so the GUI
 wire is byte-for-byte identical to the CLI
 ``SCP03.interface.shell_wizards._build_fcp_template``. The helper is
-pure — no card, no pySim, no PC/SC — so these tests exercise it
+pure -- no card, no pySim, no PC/SC -- so these tests exercise it
 directly.
 
 Reference vectors are cross-checked against ETSI TS 102 222 §6.1
@@ -100,7 +100,7 @@ def test_df_with_adf_aid_includes_tag_84():
 # ----------------------------------------------------------------------
 
 
-def test_transparent_ef_default_sfi_is_88_00():
+def test_transparent_ef_without_sfi_omits_tag_88():
     build = _build()
     out = build(
         file_type="TRANSPARENT_EF",
@@ -114,10 +114,24 @@ def test_transparent_ef_default_sfi_is_88_00():
     assert "82024121" in out["fcp_hex"]
     # Tag 80 size (transparent uses 80).
     assert "80020020" in out["fcp_hex"]
-    # No SFI → 88 00.
-    assert "8800" in out["fcp_hex"]
-    # Should NOT have 88 01 ... (the explicit-SFI wire).
-    assert "8801" not in out["fcp_hex"]
+    # TS 102 222 v17.1 §6.3.2.2.2: with tag 88 absent the EF uses the low
+    # five bits of its FID as SFI; "88 00" would disable the SFI instead.
+    assert "88" not in [row["tag"] for row in out["breakdown"]]
+    assert out["fcp_hex"].endswith("80020020")
+
+
+def test_transparent_ef_sfi_zero_disables_sfi():
+    build = _build()
+    out = build(
+        file_type="TRANSPARENT_EF",
+        full_path="3F002F00",
+        sec_attr_hex="8C0140",
+        file_size_hex="0020",
+        sfi_hex="00",
+    )
+    # TS 102 222 v17.1 §6.3.2.2.2: tag 88 present without a value = SFI not
+    # supported by the EF.
+    assert out["fcp_hex"].endswith("800200208800")
 
 
 def test_transparent_ef_with_explicit_sfi():
@@ -129,7 +143,10 @@ def test_transparent_ef_with_explicit_sfi():
         file_size_hex="0010",
         sfi_hex="05",
     )
-    assert "880105" in out["fcp_hex"]
+    # TS 102 222 v17.1 §6.3.2.2.2 / TS 102 221 v18.4 §11.1.1.4.8: the SFI is
+    # coded in b8-b4 with b3-b1 = 000, so SFI 5 is the byte 28.
+    assert "880128" in out["fcp_hex"]
+    assert "880105" not in out["fcp_hex"]
 
 
 def test_transparent_ef_rejects_two_byte_sfi():
@@ -140,7 +157,7 @@ def test_transparent_ef_rejects_two_byte_sfi():
             full_path="3F002F05",
             sec_attr_hex="8C0140",
             file_size_hex="0010",
-            sfi_hex="0005",  # 2 bytes — should reject
+            sfi_hex="0005",  # 2 bytes -- should reject
         )
 
 
@@ -175,8 +192,11 @@ def test_linear_fixed_ef_computes_total_from_rec_len_times_num_rec():
     assert out["rec_len"] == 0x14
     assert out["num_rec"] == 0x0A
     assert out["file_size"] == 0x14 * 0x0A  # 200 = 0xC8
-    # Tag 82 linear = descriptor/coding + RECLEN_16 + NUM_RECORDS_8.
-    assert "8205422100140A" in out["fcp_hex"]
+    # TS 102 222 v17.1 §6.3.2.2.2 Table 4: the CREATE FILE descriptor is
+    # 4 bytes (descriptor, coding byte, 2-byte record length); the record
+    # count comes from tag 80 = record length x number of records.
+    assert "820442210014" in out["fcp_hex"]
+    assert "8205" not in out["fcp_hex"]
     # Tag 80 size = 2 bytes carrying 0x00C8.
     assert "800200C8" in out["fcp_hex"]
 
@@ -226,16 +246,31 @@ def test_breakdown_contains_every_emitted_tlv_with_description():
 
 
 # ----------------------------------------------------------------------
-# Input hardening — the GUI forwards raw strings, so garbage in → clear
+# Input hardening -- the GUI forwards raw strings, so garbage in → clear
 # ValueError out (the dispatcher layer maps these onto API 400s).
 # ----------------------------------------------------------------------
 
 
+def test_security_attribute_is_mandatory():
+    build = _build()
+    # TS 102 222 v17.1 §6.3.2.2 Tables 3 and 4: exactly one security
+    # attribute TLV (8C, AB or 8B) is a mandatory part of every CREATE FILE.
+    with pytest.raises(ValueError, match="sec_attr_hex is required"):
+        build(
+            file_type="TRANSPARENT_EF",
+            full_path="3F002F00",
+            file_size_hex="0010",
+        )
+
+
 def test_unknown_file_type_raises():
     build = _build()
+    # TS 102 221 v18.4 Table 11.5 also defines an internal EF, which this
+    # builder does not offer; an unknown selector must be refused before any
+    # field is parsed.
     with pytest.raises(ValueError, match="file_type must be one of"):
         build(
-            file_type="CYCLIC_EF",
+            file_type="INTERNAL_EF",
             full_path="3F002F00",
             sec_attr_hex="8C0140",
             file_size_hex="0010",
@@ -244,7 +279,7 @@ def test_unknown_file_type_raises():
 
 def test_full_path_must_be_2_byte_aligned():
     build = _build()
-    # 10 hex chars = 5 bytes — even-length so it clears _normalize_hex,
+    # 10 hex chars = 5 bytes -- even-length so it clears _normalize_hex,
     # but not a multiple of 4 (one FID) so the 2-byte alignment check
     # must fire from _build_fcp_template_fields itself.
     with pytest.raises(ValueError, match="2-byte aligned"):
@@ -259,7 +294,7 @@ def test_full_path_must_be_2_byte_aligned():
 def test_full_path_empty_rejected():
     build = _build()
     # ``_normalize_hex`` rejects empty required hex before the alignment
-    # check — the wizard relies on that early error so the preview UI
+    # check -- the wizard relies on that early error so the preview UI
     # highlights the first missing field rather than downstream ones.
     with pytest.raises(ValueError, match="full_path is required"):
         build(
@@ -299,7 +334,7 @@ def test_a5_value_longer_than_127_bytes_uses_canonical_long_form():
 
 
 # ----------------------------------------------------------------------
-# CLI wire-level parity — the key reason this helper exists.
+# CLI wire-level parity -- the key reason this helper exists.
 # ----------------------------------------------------------------------
 
 
@@ -307,8 +342,9 @@ def test_wire_matches_cli_wizard_for_transparent_ef():
     """Cross-check a representative DER against the CLI wizard output.
 
     The CLI wizard's ``_build_fcp_template`` emits
-    ``62 XX 82 02 41 21 83 02 <FID> 8A 01 05 <sec> <80 02 <size>> <88 00>
-    <tag_c6=''> <tag_a5=''>`` for a Transparent EF with no SFI / no A5.
+    ``62 XX 82 02 41 21 83 02 <FID> 8A 01 05 <sec> <80 02 <size>>
+    <tag_c6=''> <tag_a5=''>`` for a Transparent EF with no SFI / no A5
+    (TS 102 222 v17.1 Table 4 order; tag 88 absent = SFI from the FID).
     Any drift between the CLI and GUI here would silently send different
     FCP wires to the card, which we absolutely do not want.
     """
@@ -320,7 +356,7 @@ def test_wire_matches_cli_wizard_for_transparent_ef():
         file_size_hex="0010",
     )
     # Body: 82 02 41 21 | 83 02 2F 00 | 8A 01 05 | 8C 01 40 |
-    #       80 02 00 10 | 88 00
+    #       80 02 00 10
     # Body length is recomputed from the hex rather than tracked by hand.
     expected_body = (
         "82024121"     # tag 82 transparent EF descriptor
@@ -328,7 +364,6 @@ def test_wire_matches_cli_wizard_for_transparent_ef():
         + "8A0105"     # tag 8A LCS
         + "8C0140"     # tag 8C sec attr
         + "80020010"   # tag 80 size
-        + "8800"       # tag 88 no SFI
     )
     expected_len = len(expected_body) // 2
     expected = f"62{expected_len:02X}{expected_body}"

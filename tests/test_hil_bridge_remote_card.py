@@ -6,7 +6,7 @@
 Verifies the streaming-card path that lets the rig consume APDUs from
 an operator's laptop running ``yggdrasim-card-bridge``. Goes through:
 
-* ``resolve_remote_card_url`` / ``resolve_remote_card_token`` — env
+* ``resolve_remote_card_url`` / ``resolve_remote_card_token`` -- env
   var + explicit-arg precedence, file expansion, missing-file errors.
 * ``RemoteRelayCardChannel`` proxies a real round-trip through an
   in-process Card Bridge daemon backed by a fake card channel.
@@ -14,7 +14,7 @@ an operator's laptop running ``yggdrasim-card-bridge``. Goes through:
   remote URL is configured and falls back to local PC/SC otherwise.
 * ``proactive_status_payload`` is empty for remote physical-card relays.
 
-Pyscard is intentionally never imported — the tests stub out the local
+Pyscard is intentionally never imported -- the tests stub out the local
 PC/SC channel via ``BackendCardChannel.remote_card_url`` so the suite
 runs on hosts without smartcard drivers installed.
 """
@@ -128,7 +128,7 @@ class _RunningBridge:
             if "apdu URL" in self.captured_output.getvalue():
                 break
             time.sleep(0.05)
-        else:  # pragma: no cover — safety net
+        else:  # pragma: no cover -- safety net
             self.stop_event.set()
             raise RuntimeError("card-bridge banner never appeared")
         url_line = next(

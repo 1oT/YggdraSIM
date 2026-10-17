@@ -5,7 +5,7 @@
 
 Covers 100 additional EF tokens across:
 - Pass A (20): Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL family.
-- Pass B (20): CSIM (CDMA SIM) EFs — opaque namespace ``ef-csim-*``.
+- Pass B (20): CSIM (CDMA SIM) EFs -- opaque namespace ``ef-csim-*``.
 - Pass C (20): Specialized (ISIM / MCPTT / V2X / ProSe / MCS) EFs.
 - Pass D (20): Operator / vendor customs + SCP/OTA auxiliary EFs.
 - Pass E: registration + structured-recomposition integration.
@@ -44,7 +44,7 @@ def _roundtrip(
 
 
 # ---------------------------------------------------------------------------
-# Pass A — Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL.
+# Pass A -- Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL.
 
 
 class MwisTests(unittest.TestCase):
@@ -257,7 +257,7 @@ class VsuriTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass B — CSIM.
+# Pass B -- CSIM.
 
 
 class CsimOpaqueTests(unittest.TestCase):
@@ -302,7 +302,7 @@ class CsimOpaqueTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass C — Specialized (ProSe / V2X / MCS / MCPTT).
+# Pass C -- Specialized (ProSe / V2X / MCS / MCPTT).
 
 
 class SpecializedOpaqueTests(unittest.TestCase):
@@ -347,7 +347,7 @@ class SpecializedOpaqueTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass D — Operator / vendor / auxiliary.
+# Pass D -- Operator / vendor / auxiliary.
 
 
 class OperatorCustomTests(unittest.TestCase):
@@ -392,7 +392,7 @@ class OperatorCustomTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Integration — registration + hex-hint sweep.
+# Integration -- registration + hex-hint sweep.
 
 
 class SweepIntegrationTests(unittest.TestCase):

@@ -81,7 +81,7 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 700;
@@ -101,48 +101,18 @@
 }
 
 /*
- * Icon family colours — non-semantic deliberate choices so the eye
- * groups USIM/ISIM/CSIM as one family even when several PE-OPT
- * variants are sprinkled in. ``default`` carries the same accent
- * tone as the rest of the workbench so unknown PE types still feel
- * native.
+ * Icon family treatment. The six family chips carried literal Nord values,
+ * so on any light theme they rendered pastel-on-white at roughly 1.5:1 --
+ * and they were, by the previous comment's own admission, non-semantic.
+ * Every chip now shares one neutral treatment and the mono glyph inside it
+ * names the family, which leaves colour free to mean status.
  */
-.saip-pe-icon--template {
-  background: rgba(94, 129, 172, 0.18);
-  border-color: rgba(94, 129, 172, 0.45);
-  color: #8fa6cc;
-}
-
-.saip-pe-icon--domain {
-  background: rgba(163, 190, 140, 0.16);
-  border-color: rgba(163, 190, 140, 0.45);
-  color: #b4cf99;
-}
-
-.saip-pe-icon--security {
-  background: rgba(208, 135, 112, 0.16);
-  border-color: rgba(208, 135, 112, 0.45);
-  color: #e2a288;
-}
-
-.saip-pe-icon--auth {
-  background: rgba(180, 142, 173, 0.18);
-  border-color: rgba(180, 142, 173, 0.45);
-  color: #c5a4be;
-}
-
-.saip-pe-icon--fs {
-  background: rgba(136, 192, 208, 0.16);
-  border-color: rgba(136, 192, 208, 0.45);
-  color: #9fc8d6;
-}
-
-.saip-pe-icon--remote {
-  background: rgba(235, 203, 139, 0.16);
-  border-color: rgba(235, 203, 139, 0.45);
-  color: #ddc485;
-}
-
+.saip-pe-icon--template,
+.saip-pe-icon--domain,
+.saip-pe-icon--security,
+.saip-pe-icon--auth,
+.saip-pe-icon--fs,
+.saip-pe-icon--remote,
 .saip-pe-icon--meta,
 .saip-pe-icon--app,
 .saip-pe-icon--access,
@@ -192,27 +162,24 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-alt);
   border: 1px solid var(--border);
   color: var(--fg-muted);
   font-family: var(--mono);
 }
 
-.saip-pe-chip--fs {
-  border-color: rgba(136, 192, 208, 0.45);
-  color: #9fc8d6;
-}
-
+.saip-pe-chip--fs,
 .saip-pe-chip--app {
-  border-color: rgba(163, 190, 140, 0.45);
-  color: #b4cf99;
+  border-color: var(--border-strong);
+  color: var(--fg-muted);
 }
 
+/* Unsaved edits are a state, not a category, so it takes the warn token. */
 .saip-pe-chip--dirty {
-  border-color: rgba(208, 135, 112, 0.5);
-  color: #e2a288;
-  background: rgba(208, 135, 112, 0.08);
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 
 .saip-pe-chip--lint-fail {
@@ -239,7 +206,7 @@
   color: var(--fg-muted);
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px 8px;
   min-width: 28px;
   text-align: center;

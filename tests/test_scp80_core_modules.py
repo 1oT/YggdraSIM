@@ -2,6 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 import contextlib
+import importlib.util
 import io
 import sys
 import tempfile
@@ -14,6 +15,11 @@ from unittest import mock
 
 def _install_smartcard_stubs() -> None:
     if "smartcard" in sys.modules:
+        return
+    if importlib.util.find_spec("smartcard") is not None:
+        # pyscard is installed. The stub carries only the submodules this
+        # file needs, so leaving it in sys.modules would break every later
+        # test in the session that reaches smartcard.util.
         return
 
     smartcard_module = types.ModuleType("smartcard")
@@ -50,11 +56,14 @@ def _install_smartcard_stubs() -> None:
 
 _install_smartcard_stubs()
 
-import SCP80.builder as scp80_builder
-import SCP80.config as scp80_config
-import SCP80.crypto as scp80_crypto
-import SCP80.transport as scp80_transport
-from SCP80.utils import Utils
+# The stubs installed above must be in sys.modules before the modules
+# under test import their smart-card dependencies.
+import SCP80.builder as scp80_builder  # noqa: E402
+import SCP80.config as scp80_config  # noqa: E402
+import SCP80.crypto as scp80_crypto  # noqa: E402
+import SCP80.transport as scp80_transport  # noqa: E402
+from SCP80.utils import Utils  # noqa: E402
+from yggdrasim_common.stk_terminal import terminal_profile_apdu  # noqa: E402
 
 
 class DummyInventory:
@@ -114,6 +123,13 @@ class ConfigManagerTests(unittest.TestCase):
         manager.inventory = DummyInventory()
         manager.active_iccid = ""
         return manager
+
+    def test_default_tp_pid_is_usim_data_download(self) -> None:
+        # TS 23.040 §9.2.3.9: '7F' is the TP-PID the ME routes to the UICC.
+        self.assertEqual(scp80_config.ConfigManager.DEFAULTS["pid"], "7F")
+        self.assertEqual(scp80_config.ConfigManager.DEFAULTS["dcs"], "F6")
+        self.assertEqual(scp80_builder.OtaPacketBuilder.SMS_TPDU_PREFIX[6], 0x7F)
+        self.assertEqual(scp80_builder.OtaPacketBuilder.SMS_TPDU_PREFIX[7], 0xF6)
 
     def test_resolve_config_path_uses_runtime_dir(self) -> None:
         manager = self._make_manager()
@@ -304,6 +320,37 @@ class OtaPacketBuilderTests(unittest.TestCase):
             1,
         )
 
+    def test_segment_estimate_matches_build_plan_at_the_single_sms_boundary(self) -> None:
+        """The estimate and the plan agree on the last payload that fits one SMS.
+
+        A 140-octet TP-UD less the 3-octet UDH and the 10 clear header
+        octets leaves 127 for the ciphered part, which pads to 112 (AES) or
+        120 (3DES); CNTR, PCNTR and the CC take 14 of those. The estimate
+        once counted a 1-octet UDH and let a 107-octet LOAD through as a
+        single segment that ``build_plan`` then refused.
+        """
+        builder_cls = scp80_builder.OtaPacketBuilder
+        self.assertEqual(builder_cls.single_sms_payload_limit("AES"), 98)
+        self.assertEqual(builder_cls.single_sms_payload_limit("3DES2"), 106)
+        for cipher_mode, indicator in (("AES", "22"), ("3DES2", "15")):
+            limit = builder_cls.single_sms_payload_limit(cipher_mode)
+            self.assertEqual(builder_cls.estimate_segment_count(limit, cipher_mode), 1)
+            self.assertEqual(builder_cls.estimate_segment_count(limit + 1, cipher_mode), 2)
+            for payload_len, expected_segments in ((limit, 1), (limit + 1, 2)):
+                config = DummyBuilderConfig(
+                    {
+                        "payload": "AA" * payload_len,
+                        "kic_indicator": indicator,
+                        "kid_indicator": indicator,
+                        "concat_sms": "ON",
+                        "tp_ud_max": "140",
+                    }
+                )
+                plan = builder_cls(config).build_plan()
+                self.assertEqual(plan.cipher_mode, cipher_mode)
+                self.assertEqual(len(plan.apdus), expected_segments)
+                self.assertLessEqual(plan.apdus[0].tp_ud_length, 140)
+
     def test_wrap_sms_tpdu_uses_extended_form_when_needed(self) -> None:
         builder = scp80_builder.OtaPacketBuilder(DummyBuilderConfig())
         short_apdu = builder._wrap_sms_tpdu(b"\x01" * 8)
@@ -325,7 +372,7 @@ class OtaPacketBuilderTests(unittest.TestCase):
         self.assertEqual(plan.payload_hex, "AA" * 10)
         self.assertIn("02028381060280018B", plan.apdus[0].apdu_hex)
         self.assertNotIn("820283818B", plan.apdus[0].apdu_hex)
-        self.assertIn("4005811250F341F62222222222222225027000", plan.apdus[0].apdu_hex)
+        self.assertIn("4005811250F37FF62222222222222225027000", plan.apdus[0].apdu_hex)
 
     def test_build_plan_uses_configured_pid_and_dcs(self) -> None:
         config = DummyBuilderConfig({"payload": "AA" * 10, "pid": "7F", "dcs": "F5"})
@@ -350,7 +397,7 @@ class OtaPacketBuilderTests(unittest.TestCase):
         self.assertTrue(plan.is_concatenated)
         self.assertGreater(len(plan.apdus), 1)
         self.assertEqual(len(plan.reader_apdus), 1)
-        self.assertIn("4005811250F341F6", plan.apdus[0].apdu_hex)
+        self.assertIn("4005811250F37FF6", plan.apdus[0].apdu_hex)
         with self.assertRaisesRegex(ValueError, "concatenated SMS"):
             builder.build()
 
@@ -565,7 +612,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                "8010000015FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00",
+                terminal_profile_apdu().hex().upper(),
                 "801200000F",
                 "801400000C810301050082028281030100",
             ],

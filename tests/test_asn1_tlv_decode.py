@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ASN.1/TLV decoder tests."""
 from __future__ import annotations
 
@@ -36,6 +35,37 @@ class Asn1TlvDecodeTests(unittest.TestCase):
         self.assertEqual(root["items"][0]["decoded"], 5)
         self.assertEqual(root["items"][1]["decoded"]["hex"], "41")
         self.assertIn("ASN1_SEQUENCE [30]", decoded["asn1Notation"])
+
+    def test_encapsulated_der_renders_as_nested_notation(self) -> None:
+        # An X.509 extension: extnValue is an OCTET STRING holding the DER of the value.
+        extension = _tlv("30", _tlv("06", bytes.fromhex("551D0E")) + _tlv("04", _tlv("04", bytes.fromhex("8D475EBA"))))
+
+        notation = decode_bytes(extension)["asn1Notation"]
+
+        # The gitignored tag index names a universal tag ASN1_OCTET_STRING and the
+        # built-in table OCTET STRING, so the label is matched without the prefix.
+        self.assertIn("OCTET_STRING [04] encapsulates {", notation)
+        self.assertIn("OCTET_STRING [04] = '8D475EBA'H", notation)
+        self.assertNotIn("embeddedAsn1", notation)
+        self.assertNotIn("headerLength", notation)
+
+    def test_bit_string_is_encapsulating_only_with_a_constructed_first_element(self) -> None:
+        ec_point = decode_bytes(_tlv("03", b"\x00\x04\x3F" + b"\xAA" * 63))["asn1Notation"]
+        signature = decode_bytes(_tlv("03", b"\x00" + _tlv("30", _tlv("02", b"\x01") + _tlv("02", b"\x02"))))["asn1Notation"]
+
+        self.assertIn('payloadHex "043FAA', ec_point)
+        self.assertNotIn("encapsulates", ec_point)
+        self.assertNotIn("embeddedAsn1", ec_point)
+        self.assertIn("BIT_STRING [03] ::= encapsulates {", signature)
+        self.assertIn("[02] = 2", signature)
+
+    def test_undecoded_printable_primitive_shows_its_text(self) -> None:
+        uri = b"http://crl.example.test/ci.crl"
+
+        notation = decode_bytes(_tlv("30", _tlv("86", uri) + _tlv("88", bytes.fromhex("2B0601040183BB14"))))["asn1Notation"]
+
+        self.assertIn(f"'{uri.hex().upper()}'H (\"{uri.decode()}\")", notation)
+        self.assertIn("= '2B0601040183BB14'H\n", notation)
 
     def test_gsma_tag_names_load_from_registry(self) -> None:
         decoded = decode_bytes(bytes.fromhex("BF2203810102"))

@@ -7,7 +7,7 @@ Operators asked for the reader selector to move out of the sidebar
 and into the top-bar runtime controls: one pill per PC/SC reader,
 with a traffic-light status dot (green = active session, yellow =
 card present / no session, red = empty / no session). Pills behave
-like session tabs — the reader picked in the top bar is pre-set
+like session tabs -- the reader picked in the top bar is pre-set
 across every subsystem for that session.
 
 Because the reader strip is pure frontend wiring (HTML markup + a
@@ -165,7 +165,7 @@ def test_reader_bar_bootstraps_at_init() -> None:
     js = _read("app.js")
     # init() must kick the reader bar so the pills appear on page load.
     init_start = js.index("function init()")
-    # Widen to the whole init body — the braces nested inside catch
+    # Widen to the whole init body -- the braces nested inside catch
     # blocks mean a naive index('}') would return early. Scan forward
     # until we reach a line containing 'logBus.emit' at init-level.
     init_body = js[init_start : init_start + 2000]
@@ -208,8 +208,13 @@ def test_reader_bar_traffic_light_logic() -> None:
         "readerBarDeriveStatus must treat reader-scoped eSIM modules as "
         "active reader sessions."
     )
-    assert "atr.length > 0 && (hasRealSession || hasReaderScopedBinding)" in window, (
-        "reader-scoped modules must not stay green after the reader reports no ATR."
+    # A card is an ATR, or a session-backed Remote Lab row (that route
+    # caches the ATR lazily, so the row is what says a card is there).
+    assert "var hasCard = atr.length > 0 || !!probe.session_backed;" in window, (
+        "readerBarDeriveStatus must derive card presence from the ATR or a session-backed row."
+    )
+    assert "hasCard && (hasRealSession || hasReaderScopedBinding)" in window, (
+        "reader-scoped modules must not stay green after the reader reports no card."
     )
     assert "readerBarPruneEmptyReaderBindings()" in js, (
         "reader polling must release stale active-reader bindings when a card disappears."
@@ -241,7 +246,7 @@ def test_reader_bar_render_keeps_reader_scoped_orphan_pill() -> None:
 
 def test_topbar_reader_pill_css_tokens() -> None:
     css = _read("app.css")
-    # Core selectors the renderer depends on — removing any of these
+    # Core selectors the renderer depends on -- removing any of these
     # would silently break the top-bar visuals.
     for selector in (
         ".topbar-readers",

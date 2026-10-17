@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """DGI (Data Grouping Identifier) decoder for SAIP / GlobalPlatform.
 
 A SAIP ``securityDomain`` PE carries personalization payloads under
@@ -10,7 +9,7 @@ DGI block formatted as::
 
     DGI(2 bytes)  L(1 byte, or 0xFF + 2 bytes BE)  V(L bytes)
 
-where the value V is itself a TLV stream — typically the simple
+where the value V is itself a TLV stream -- typically the simple
 1-byte-tag / 1-byte-length encoding used for SCP80 connectivity
 parameters (3GPP TS 31.111 §6.6, ETSI TS 102 226 §8) wrapped inside
 GlobalPlatform Amendment A "Confidential Card Content Management"
@@ -85,7 +84,7 @@ DEFAULT_NESTED_TAG_NAMES: dict[str, dict[str, str]] = {
 
 
 # Common GlobalPlatform Amendment A DGI codes seen in SAIP profile
-# personalization. The tag list is intentionally short — anything not
+# personalization. The tag list is intentionally short -- anything not
 # in this map renders as a bare DGI hex with no name annotation,
 # which is how operators expect the output to read for vendor-private
 # DGIs.
@@ -143,7 +142,7 @@ def value_to_hex_strings(value: Any) -> list[str]:
 
     Accepts a single hex string, raw bytes, or a (possibly nested)
     list of either. Tagged-bytes wrappers (``{"hex": "..."}``) are
-    *not* unwrapped here — call sites that handle SAIP-shape
+    *not* unwrapped here -- call sites that handle SAIP-shape
     documents need to convert those to plain strings beforehand.
     """
     if isinstance(value, str) is True:
@@ -511,6 +510,50 @@ def decode_dgi_stream(
     return items
 
 
+def validate_dgi_stream(data: bytes) -> list[tuple[str, int]]:
+    """Walk ``data`` as whole ``DGI || L || V`` blocks and return ``(dgi, length)`` per block.
+
+    The length rule is the one :func:`decode_dgi_stream` reads (one byte
+    below 'FF', else 'FF' and two bytes). Where the decoder drops a
+    truncated tail so a broken profile stays diagnosable, this refuses the
+    buffer: an empty buffer, a trailing fragment or a block declaring more
+    bytes than follow raises ``ValueError`` naming the offending block.
+    """
+    total = len(data)
+    if total == 0:
+        raise ValueError("DGI record is empty.")
+    blocks: list[tuple[str, int]] = []
+    offset = 0
+    while offset < total:
+        if offset + 3 > total:
+            raise ValueError(
+                f"{total - offset} trailing byte(s) at offset {offset} do not form a "
+                "DGI block (a block needs a two-byte DGI and a length byte)."
+            )
+        dgi_hex = data[offset:offset + 2].hex().upper()
+        length_octet = data[offset + 2]
+        header_size = 3
+        if length_octet == 0xFF:
+            if offset + 5 > total:
+                raise ValueError(
+                    f"DGI {dgi_hex} at offset {offset}: 'FF' announces a two-byte "
+                    "length that is missing."
+                )
+            length_value = int.from_bytes(data[offset + 3:offset + 5], "big", signed=False)
+            header_size = 5
+        else:
+            length_value = length_octet
+        available = total - offset - header_size
+        if length_value > available:
+            raise ValueError(
+                f"DGI {dgi_hex} at offset {offset} declares {length_value} value "
+                f"byte(s) but {available} follow."
+            )
+        blocks.append((dgi_hex, length_value))
+        offset += header_size + length_value
+    return blocks
+
+
 def decode_dgi_records(value: Any) -> list[dict[str, Any]] | None:
     """High-level entry point used by SAIP shell ``INFO`` and TUI panes.
 
@@ -558,6 +601,7 @@ __all__ = [
     "decode_dgi_stream",
     "decode_simple_tlv_payload",
     "decode_stk_value",
+    "validate_dgi_stream",
     "describe_bearer_description",
     "describe_transport_level",
     "decode_compact_binary_value",

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Simulated UICC/eUICC engine: process-wide singleton owning the in-memory file-system and authentication state."""
 from __future__ import annotations
 
@@ -10,6 +9,7 @@ import logging
 import os
 import sys
 import traceback
+from typing import Callable
 
 from SIMCARD.auth import AuthLogic
 from SIMCARD.euicc_store import (
@@ -27,9 +27,11 @@ from SIMCARD.naa import NaaLogic
 from SIMCARD.profile_store import (
     load_profiles_from_store,
     profile_store_has_entries,
+    profile_store_is_initialized,
     sync_profiles_to_store,
 )
 from SIMCARD.behaviour_profile import (
+    build_behaviour_hooks,
     resolve_behaviour_profile,
     install_behaviour_profile,
 )
@@ -138,8 +140,20 @@ class SimulatedSimCardEngine:
         euicc_store_root: str = "",
         profile_store_path: str = "",
         behaviour_profile_path: str = "",
+        *,
+        private: bool = False,
     ) -> None:
+        """Build the card from the six configuration paths.
+
+        An empty path falls back to the environment, the persisted setting and then the
+        Workspace default; ``"none"`` switches quirks and the behaviour profile off.
+
+        A ``private`` engine belongs to its caller rather than the process: no plugin
+        extends its toolkit, and its behaviour profile is bound to it directly instead of
+        following the process-wide live profile, which it neither reads nor changes.
+        """
         self.state = build_default_state()
+        self._apdu_observers: list[Callable[[bytes, ApduResult], None]] = []
         self._seed_euicc_store_after_init = False
         selected_isdr_config_path = (
             str(isdr_config_path or "").strip() or get_sim_isdr_config_path()
@@ -175,9 +189,15 @@ class SimulatedSimCardEngine:
             str(behaviour_profile_path or "").strip() or get_sim_behaviour_profile_path()
         )
         loaded_profile = resolve_behaviour_profile(selected_behaviour_profile_path)
-        # Installed unconditionally so a profile activated later reaches
-        # this engine too, including through an already-open connection.
-        install_behaviour_profile(self.quirks, loaded_profile)
+        if private:
+            if loaded_profile is not None:
+                before_apdu, state_hook = build_behaviour_hooks(loaded_profile)
+                self.quirks.add_before_apdu(before_apdu)
+                self.quirks.add_state_hook(state_hook)
+        else:
+            # Installed unconditionally so a profile activated later reaches
+            # this engine too, including through an already-open connection.
+            install_behaviour_profile(self.quirks, loaded_profile)
         self.behaviour_profile = loaded_profile
         self.quirks.apply_state_hooks(self.state)
         rebuild_runtime_filesystem(self.state)
@@ -188,8 +208,10 @@ class SimulatedSimCardEngine:
         self.scp03 = Scp03CardLogic(self.state)
         self.gp = GpLogic(self.state)
         self.sgp = SgpLogic(self.state, sim_eim_identity_path=selected_sim_eim_identity_path)
-        self.scp80 = Scp80Logic(self.state, self.transmit)
-        self.toolkit = ToolkitLogic(self.state)
+        # Commands an OTA envelope carries run inside the card, so they bypass the APDU
+        # observers that record the card interface.
+        self.scp80 = Scp80Logic(self.state, self._transmit_command)
+        self.toolkit = ToolkitLogic(self.state, extend_with_plugins=not private)
         self._fault_ring: "collections.deque[dict[str, str]]" = collections.deque(maxlen=32)
         self._sync_all_stores()
 
@@ -219,6 +241,12 @@ class SimulatedSimCardEngine:
                         if str(profile.state).strip().lower() == "enabled":
                             self.state.active_profile_aid = profile.aid
                             break
+                return
+            if profile_store_is_initialized(store_path):
+                # Every Profile was deleted; the card stays empty instead of re-seeding the
+                # built-in Profiles.
+                self.state.profiles = []
+                self.state.active_profile_aid = ""
                 return
             sync_profiles_to_store(store_path, self.state.profiles)
         except Exception:
@@ -295,7 +323,7 @@ class SimulatedSimCardEngine:
         current = self._known_iccids()
         previous = getattr(self, "_last_profile_iccids", None)
         if previous is None:
-            # First sync after construction — seed the snapshot without
+            # First sync after construction -- seed the snapshot without
             # firing (the profiles loaded at boot were not "downloaded").
             self._last_profile_iccids = current
             return
@@ -344,12 +372,42 @@ class SimulatedSimCardEngine:
     def get_atr(self) -> bytes:
         return bytes(self.state.atr)
 
+    def add_apdu_observer(self, observer: Callable[[bytes, ApduResult], None]) -> None:
+        """Call *observer* with ``(command, result)`` after every APDU the card answers.
+
+        The result is the one returned to the caller, after quirk hooks. An observer that
+        raises is logged and skipped; registering the same callable twice is a no-op.
+        """
+        if callable(observer) is False:
+            raise TypeError("APDU observer must be callable")
+        if observer not in self._apdu_observers:
+            self._apdu_observers.append(observer)
+
+    def remove_apdu_observer(self, observer: Callable[[bytes, ApduResult], None]) -> None:
+        """Unregister an observer added with ``add_apdu_observer``; unknown ones are ignored."""
+        if observer in self._apdu_observers:
+            self._apdu_observers.remove(observer)
+
     def transmit(self, apdu: bytes) -> ApduResult:
         """Submit one raw APDU and return ``(response_bytes, SW1, SW2)``.
 
         Applies before/after hooks, transparent SCP03 unwrap/wrap, and
         routes to the appropriate command handler in ``_dispatch``.
         """
+        command = bytes(apdu or b"")
+        result = self._transmit_command(command)
+        for observer in list(self._apdu_observers):
+            try:
+                observer(command, result)
+            except Exception as observer_error:
+                _LOGGER.warning(
+                    "SIMCARD: APDU observer raised: %s: %s",
+                    observer_error.__class__.__name__,
+                    observer_error,
+                )
+        return result
+
+    def _transmit_command(self, apdu: bytes) -> ApduResult:
         command = bytes(apdu or b"")
         self.state.apdu_count += 1
 

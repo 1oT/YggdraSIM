@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """SCP03 parity oracle: cross-check our session against pySIM.
 
 GPC v2.3 Amendment D specifies SCP03 down to the byte. This suite uses
 ``pySim.global_platform.scp`` as an independent oracle and pins:
 
-* GPC §6.2.1 — ``Scp03SessionKeys`` derivation against our ``_kdf``.
-* GPC §6.2.2.2 / §6.2.2.3 — host and card cryptograms.
-* GPC §6.2.6 — C-DEC ICV and ciphertext bytes for the first user APDU
+* GPC §6.2.1 -- ``Scp03SessionKeys`` derivation against our ``_kdf``.
+* GPC §6.2.2.2 / §6.2.2.3 -- host and card cryptograms.
+* GPC §6.2.6 -- C-DEC ICV and ciphertext bytes for the first user APDU
   after EXTERNAL AUTHENTICATE.
-* GPC §6.2.5 — C-MAC trailer for an SM-wrapped command on logical
+* GPC §6.2.5 -- C-MAC trailer for an SM-wrapped command on logical
   channel 0.
 
 The implementation additionally binds a Secure Channel Session to the
@@ -38,7 +37,7 @@ except ModuleNotFoundError:
 from SCP03.crypto.session import Scp03Session
 
 
-# Fixed synthetic vectors. These are NOT real card secrets — they exist
+# Fixed synthetic vectors. These are NOT real card secrets -- they exist
 # only so the oracle has a deterministic state to derive from.
 KENC = bytes.fromhex("404142434445464748494A4B4C4D4E4F")
 KMAC = bytes.fromhex("505152535455565758595A5B5C5D5E5F")
@@ -87,15 +86,15 @@ class Scp03PrimitiveParityTests(unittest.TestCase):
         )
 
     def test_session_key_s_enc_matches(self) -> None:
-        # GPC §6.2.1 / Annex D 4.1.5 — DERIV_CONST_S_ENC = 0x04.
+        # GPC §6.2.1 / Annex D 4.1.5 -- DERIV_CONST_S_ENC = 0x04.
         self.assertEqual(self.ours.s_enc, self.pysim_keys.s_enc)
 
     def test_session_key_s_mac_matches(self) -> None:
-        # GPC §6.2.1 — DERIV_CONST_S_MAC = 0x06.
+        # GPC §6.2.1 -- DERIV_CONST_S_MAC = 0x06.
         self.assertEqual(self.ours.s_mac, self.pysim_keys.s_mac)
 
     def test_session_key_s_rmac_matches(self) -> None:
-        # GPC §6.2.1 — DERIV_CONST_S_RMAC = 0x07.
+        # GPC §6.2.1 -- DERIV_CONST_S_RMAC = 0x07.
         self.assertEqual(self.ours.s_rmac, self.pysim_keys.s_rmac)
 
     def test_kdf_constant_function_matches(self) -> None:
@@ -109,7 +108,7 @@ class Scp03PrimitiveParityTests(unittest.TestCase):
                 self.assertEqual(ours, theirs)
 
     def test_host_cryptogram_matches(self) -> None:
-        # GPC §6.2.2.3 — host cryptogram derived from S-MAC.
+        # GPC §6.2.2.3 -- host cryptogram derived from S-MAC.
         pysim_host = scp03_key_derivation(
             PysimScp03Keys.DERIV_CONST_AUTH_CGRAM_HOST,
             HOST_CHAL + CARD_CHAL,
@@ -140,13 +139,13 @@ class Scp03WrappedApduParityTests(unittest.TestCase):
 
         # Bring both sides through EXTERNAL AUTHENTICATE so chaining state
         # aligns. Our wrap_apdu does not generate the EXT AUTH header
-        # itself — callers (see SCP03/logic/gp.py) compose CLA/INS/...
+        # itself -- callers (see SCP03/logic/gp.py) compose CLA/INS/...
         host_crypto = self.ours.calculate_host_cryptogram()
         ours_ext = bytes(
             self.ours.wrap_apdu([0x80, 0x82, 0x33, 0x00, 0x08] + list(host_crypto))
         )
         pysim_ext = self.pysim.gen_ext_auth_apdu(0x33)
-        # Pin EXT AUTH parity here — both must produce the same bytes.
+        # Pin EXT AUTH parity here -- both must produce the same bytes.
         self.assertEqual(ours_ext, pysim_ext)
 
     def test_lchan0_proprietary_command_matches(self) -> None:

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for the 55 encode_* functions in saip_asn1_encode not covered by prior suites.
 
 Groups:
@@ -84,9 +83,12 @@ from Tools.ProfilePackage.saip_asn1_encode import (
 
 class EnumNameEncoderTests(unittest.TestCase):
 
-    def test_life_cycle_state_loaded(self) -> None:
-        result = encode_life_cycle_state({"state": "Loaded"})
-        self.assertEqual(result, bytes([1]))
+    def test_life_cycle_state_loaded_is_refused(self) -> None:
+        # LOADED is an Executable Load File state (GP Card Spec v2.3.1
+        # Table 11-3); an instance takes the states of Tables 11-4 and 11-5.
+        with self.assertRaises(RoundtripEncoderError):
+            encode_life_cycle_state({"state": "Loaded"})
+        self.assertEqual(encode_life_cycle_state({"state": "Unknown", "hex": "01"}), bytes([1]))
 
     def test_life_cycle_state_personalized(self) -> None:
         result = encode_life_cycle_state({"state": "Personalized"})
@@ -437,7 +439,7 @@ class BitmapEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Complex structured encoders — hex passthrough path
+# Complex structured encoders -- hex passthrough path
 # ---------------------------------------------------------------------------
 
 class ComplexStructuredEncoderTests(unittest.TestCase):

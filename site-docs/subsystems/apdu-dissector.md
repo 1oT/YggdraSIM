@@ -44,6 +44,13 @@ writer on TShark 4.2.2:
 - **BER-TLV and COMPREHENSION-TLV** -- recursive, with multi-byte tags,
   long-form and indefinite lengths, and tag names from the same tables
   `Tools/Asn1TlvDecode` uses.
+- **RSP structures by ASN.1 field name** -- an ES10 response is walked with
+  the structure it belongs to, so `'81'` inside a `BF22` is
+  `baseProfilePackageVersion` and a profile listing reads
+  `profileInfoListOk` / `ProfileInfo` / `iccid` / `isdpAid` / `profileState`.
+  The structure travels with the walk rather than the parent tag alone,
+  which is what lets `BF22` be `EUICCInfo2` at the top of a response and
+  `serviceSpecificDataStoredInEuicc` inside a `ProfileInfo`.
 - **File control templates** -- FCP, FCI and FMD with their TS 102 221
   clause 11.1.1.3 sub-tags.
 - **Elementary files** -- EF.ICCID, EF.IMSI, EF.UST and EF.AD, attributed to
@@ -127,6 +134,42 @@ name and Wireshark would otherwise refuse the whole plugin.
     and you get a stock decode that looks like a broken dissector. Run as a
     normal user. The CLI prints a warning when it detects this.
 
+## How the tree reads
+
+The layout follows Wireshark's `gsm_sim`: a byte appears once, and what the
+instruction makes of it is on that byte's own line rather than repeated
+below it as a second field.
+
+- **Bit fields are rendered as bit fields.** The class and constructed bits
+  of a BER tag show their masks -- `..1. .... = Constructed: True` -- the
+  way Wireshark's own BER dissector renders them.
+- **A reading hangs off the byte it decodes.** `P1: 0x91 (last block,
+  BER-TLV format)`, not a `P1` line followed by three more naming the same
+  byte. A COMPREHENSION-TLV's meaning sits under that TLV, not in a block
+  collected after the run.
+- **Framing is one collapsed node.** How the payload was cut into a command
+  and a response is dissector bookkeeping, so it lives under `Framing`
+  rather than above the APDU.
+- **A field that only restates the line above it is filterable but not
+  printed.** `yapdu.sw_meaning`, `yapdu.detail`, `yapdu.command_name`,
+  `yapdu.tlv.name`, `yapdu.tlv.uint`, `yapdu.frame_kind`, `yapdu.case`,
+  `yapdu.command_source`, `yapdu.split.command_len`,
+  `yapdu.split.response_len`, `yapdu.split.method`, `yapdu.cla.type`,
+  `yapdu.tlv.comprehension_required`, `yapdu.cat.type`,
+  `yapdu.cat.type_name`, `yapdu.cat.source`, `yapdu.cat.destination` and
+  `yapdu.cat.result` all still resolve in a display filter, a custom column
+  and `-T fields`; they no longer each cost a line in every frame of a
+  capture.
+- **A default value is not a finding.** The class-byte breakdown prints
+  `Logical channel`, `Secure messaging` and `Command chaining` only where
+  one of them departs from channel 0, no secure messaging and no chaining
+  -- which is also where the CLA line itself names it. `Split confidence`
+  and `Cross-frame context available` print when they carry a warning and
+  stay filter-only when they do not.
+
+Those last two points matter when a field seems missing from the detail
+pane: query it rather than looking for it.
+
 ## Display filters worth knowing
 
 ```
@@ -136,6 +179,9 @@ yapdu.command_name == "STORE_DATA"  eUICC traffic
 yapdu.split.ambiguous == 1          exchanges the decoder could not resolve
 yapdu.ef.iccid                      frames that revealed an ICCID
 yapdu.cla.secure_messaging > 0      SCP-wrapped traffic
+yapdu.command_source contains "GlobalPlatform"
+                                    commands the GlobalPlatform card
+                                    specification defines
 ```
 
 ## How it attaches
@@ -223,6 +269,14 @@ Sources are `yggdrasim_common/apdu_risk.py`, `yggdrasim_common/apdu_tables.py`,
 the Lua tree works standalone with no Python present, and
 `tests/test_apdu_dissector_tables.py` fails when it drifts.
 
+The RSP member names are read straight from the ASN.1 of the converted
+specifications under `docs/tel-docs/converted/` -- SGP.22 first, then SGP.32
+for what SGP.22 does not define. The reader computes each tag from the class
+and number in the declaration and checks it against the `-- Tag 'XX'` the
+document states beside it; a disagreement fails generation rather than
+producing a name on the wrong tag. Where a body cannot be read unambiguously
+-- two members landing on one tag -- the type contributes no names at all.
+
 ## Testing
 
 ```bash
@@ -262,7 +316,7 @@ implementation gets backwards:
 | COMPREHENSION-TLV | ETSI TS 101 220 clause 7.1 | Not BER. Two tag forms only, no `'1F'` escape, no class and no constructed bit. |
 | ENVELOPE tags | 3GPP TS 31.111 clause 9.1 | The run is not gapless: `'D8'` is reserved for intra-UICC communication, so USSD download is `'D9'`, Geographical Location Reporting `'DD'` and ProSe Report `'DF'`. Numbering straight through the gap shifts every tag from `'D9'` up and loses `'DF'`. |
 | `'DF'` ProSe Report | ETSI TS 101 220 clause 7.2 | A single-byte tag whose low five bits are all set, which is BER's multi-byte introducer. Read as BER it swallows the length byte and the envelope vanishes, so the wrapper byte is matched directly. |
-| BoundProfilePackage | GSMA SGP.22 clause 2.5.2 | Five members: `BF23`, then `A0`--`A3` ending in `secondSequenceOf87`. |
+| BoundProfilePackage | GSMA SGP.22 Table 4 | Five members: `BF23` initialiseSecureChannelRequest, then `A0` firstSequenceOf87, `A1` sequenceOf88, `A2` secondSequenceOf87 and `A3` sequenceOf86. Each sequence holds TLVs of the tag its name ends in. |
 
 ### Deliberate divergences
 

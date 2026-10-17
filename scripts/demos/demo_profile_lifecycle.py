@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""YggdraSIM — SGP.32 profile lifecycle live demo.
+"""YggdraSIM -- SGP.32 profile lifecycle live demo.
 
 Exercises the simulator's ISD-R surface end-to-end: GetEuiccInfo1
 (BF20) → GetEuiccChallenge (BF2E) → GetProfilesInfo (BF2D) →
@@ -34,9 +34,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from SIMCARD.engine import SimulatedSimCardEngine
-from SIMCARD.utils import find_first_tlv, read_tlv, tlv
-from yggdrasim_common.nord_palette import NORD
+# These imports resolve against the path inserted above, so they
+# cannot be hoisted to the top of the module.
+from SIMCARD.engine import SimulatedSimCardEngine  # noqa: E402
+from SIMCARD.utils import find_first_tlv, read_tlv, tlv  # noqa: E402
+from yggdrasim_common.nord_palette import NORD  # noqa: E402
 
 
 COLOUR = sys.stdout.isatty() and os.environ.get("NO_COLOR", "") == ""
@@ -172,12 +174,12 @@ def parse_profiles_info(response: bytes) -> list[dict]:
 
 
 def main() -> int:
-    banner("YggdraSIM SGP.32 profile lifecycle — live demo")
+    banner("YggdraSIM SGP.32 profile lifecycle -- live demo")
     print(f"  {C_DIM}A virtual eUICC, the ISD-R surface, and a flick through")
     print(f"  the SGP.32 profile state machine -- end to end.{C_RESET}")
     pause(1.0)
 
-    banner("Step 1 — Cold-boot the simulated eUICC")
+    banner("Step 1 -- Cold-boot the simulated eUICC")
     workdir = Path(tempfile.mkdtemp(prefix="yggdrasim_lifecycle_demo_"))
     profile_store = workdir / "profiles"
     profile_store.mkdir(parents=True, exist_ok=True)
@@ -193,14 +195,14 @@ def main() -> int:
          f"active = {engine.state.active_profile_aid or '(none)'}")
     pause(0.6)
 
-    banner("Step 2 — ES10b GetEuiccInfo1 (BF20)")
+    banner("Step 2 -- ES10b GetEuiccInfo1 (BF20)")
     info1 = store_data(engine, "BF2000", "ES10b GetEuiccInfo1")
     step("Card returned the SGP.22 §5.7.7 EuiccInfo1 TLV",
          "(SVN, supported curves, supported PKI versions)")
     hexline("BF20 ", info1, max_len=80)
     pause(0.6)
 
-    banner("Step 3 — ES10b GetEuiccChallenge (BF2E)")
+    banner("Step 3 -- ES10b GetEuiccChallenge (BF2E)")
     challenge_response = store_data(engine, "BF2E00", "ES10b GetEuiccChallenge")
     chal_tlv = find_first_tlv(challenge_response, "80")
     if len(chal_tlv) > 0:
@@ -210,7 +212,7 @@ def main() -> int:
         hexline("challenge", chal_value)
     pause(0.6)
 
-    banner("Step 4 — ES10c GetProfilesInfo (BF2D)")
+    banner("Step 4 -- ES10c GetProfilesInfo (BF2D)")
     info_d = store_data(engine, "BF2D00", "ES10c GetProfilesInfo")
     profiles = parse_profiles_info(info_d)
     step(f"Decoded {len(profiles)} profile entries from BF2D body")
@@ -220,14 +222,14 @@ def main() -> int:
         nickname = profile.get("nickname", "")
         print(
             f"    {C_BOLD}#{index}{C_RESET}  ICCID {profile.get('iccid', '?'):<22}"
-            f" AID {profile.get('aid', '?')[:16]}…  "
+            f" AID {profile.get('aid', '?')[:16]}...  "
             f"{state_colour}{state_text:<8}{C_RESET}  "
             f"{C_DIM}{nickname}{C_RESET}"
         )
     pause(0.8)
 
     if len(profiles) < 2:
-        step("Need at least two profiles for the enable/disable swing — adjust the seed",
+        step("Need at least two profiles for the enable/disable swing -- adjust the seed",
              colour=C_YELLOW)
     else:
         active_iccid = next(
@@ -237,11 +239,11 @@ def main() -> int:
             (p for p in profiles if p.get("state") != "ENABLED" and p.get("iccid")), None
         )
         if target is None:
-            step("No idle profile to switch to — skipping enable/disable demo",
+            step("No idle profile to switch to -- skipping enable/disable demo",
                  colour=C_YELLOW)
         else:
             target_iccid = target.get("iccid", "")
-            banner(f"Step 5 — EnableProfile (BF31) → switch to ICCID {target_iccid}")
+            banner(f"Step 5 -- EnableProfile (BF31) → switch to ICCID {target_iccid}")
             ref = encode_profile_reference_iccid(target_iccid)
             payload = tlv("BF31", ref)
             store_data(engine, payload.hex(), f"EnableProfile target={target_iccid}")
@@ -250,7 +252,7 @@ def main() -> int:
                  "the runtime filesystem so the modem sees the new ICCID/IMSI tree")
             pause(0.6)
 
-            banner(f"Step 6 — DisableProfile (BF32) → roll back to ICCID {active_iccid}")
+            banner(f"Step 6 -- DisableProfile (BF32) → roll back to ICCID {active_iccid}")
             if active_iccid:
                 ref_back = encode_profile_reference_iccid(target_iccid)
                 payload_back = tlv("BF32", ref_back)
@@ -263,7 +265,7 @@ def main() -> int:
                 )
             pause(0.6)
 
-    banner("Step 7 — Drain the notification queue (BF2B 00 = retrieve all)")
+    banner("Step 7 -- Drain the notification queue (BF2B 00 = retrieve all)")
     notif_response = store_data(engine, "BF2B00", "ES10b RetrieveNotificationsList")
     step(f"Notification chunk size: {len(notif_response)} bytes",
          f"(state.notifications now has {len(engine.state.notifications)} pending entries)")
@@ -271,7 +273,7 @@ def main() -> int:
         hexline("BF2B response", notif_response, max_len=72)
     pause(0.6)
 
-    banner("Step 8 — LoadCRL (BF35) — eIM pushes a revocation list (SGP.22 §5.7.13)")
+    banner("Step 8 -- LoadCRL (BF35) -- eIM pushes a revocation list (SGP.22 §5.7.13)")
     ci_private_key = engine.sgp._ci_private_key
     ci_certificate_der = bytes(engine.sgp._ci_certificate_der or b"")
     if ci_private_key is None or not ci_certificate_der:
@@ -305,7 +307,7 @@ def main() -> int:
             )
     pause(0.6)
 
-    banner("Done — what just happened")
+    banner("Done -- what just happened")
     print(f"  {C_GREEN}✓{C_RESET} ES10b GetEuiccInfo1 → SGP.22 EuiccInfo1 TLV.")
     print(f"  {C_GREEN}✓{C_RESET} ES10b GetEuiccChallenge → fresh 16-byte challenge.")
     print(f"  {C_GREEN}✓{C_RESET} ES10c GetProfilesInfo decoded into a profile table.")

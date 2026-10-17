@@ -18,50 +18,63 @@
 # -----------------------------------------------------------------------------
 
 import argparse
-import sys 
-import os 
+import sys
+import os
 
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 
-def run_standalone ():
+
+def run_standalone():
     """Parse CLI arguments and start the SCP80 interactive OTA shell."""
-    current_dir =os .path .dirname (os .path .abspath (__file__ ))
-    if current_dir not in sys .path :
-        sys .path .insert (0 ,current_dir )
-
-    if __package__ :
-        from .cli import OtaShell 
-    else :
-        from cli import OtaShell 
-    parser =argparse .ArgumentParser (description ="YggdraSIM SCP80 OTA Shell")
-    parser .add_argument ("--cmd",type =str ,help ="Semicolon-separated commands for non-interactive execution")
-    parser .add_argument ("--stdin",action ="store_true",help ="Read newline-separated commands from stdin for non-interactive execution")
-    add_debug_argument (
-    parser ,
-    help_text ="Enable verbose debug output for this SCP80 session.",
+    if __package__:
+        from .cli import OtaShell
+    else:
+        # Bare-script launch (``python SCP80/main.py``). The repo root
+        # goes on the path, never this directory: ``SCP80/main.py`` at
+        # the front of ``sys.path`` shadows the top-level ``main``
+        # package that every console entry point resolves through.
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        from SCP80.cli import OtaShell
+    parser = argparse.ArgumentParser(description="YggdraSIM SCP80 OTA Shell")
+    parser.add_argument(
+        "--cmd",
+        type=str,
+        help="Semicolon-separated commands for non-interactive execution",
     )
-    args =parser .parse_args ()
-    set_global_debug (bool (getattr (args ,"debug",False )))
-    shell =OtaShell ()
-    if args .cmd :
-        shell .run_commands (args .cmd )
+    parser.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read newline-separated commands from stdin for non-interactive execution",
+    )
+    add_debug_argument(
+        parser,
+        help_text="Enable verbose debug output for this SCP80 session.",
+    )
+    args = parser.parse_args()
+    set_global_debug(bool(getattr(args, "debug", False)))
+    shell = OtaShell()
+    if args.cmd:
+        shell.run_commands(args.cmd)
         return
-    if args .stdin :
-        command_lines =[]
-        for raw_line in sys .stdin .read ().splitlines ():
-            command_text =str (raw_line or "").strip ()
-            if len (command_text )==0 :
+    if args.stdin:
+        command_lines = []
+        for raw_line in sys.stdin.read().splitlines():
+            command_text = str(raw_line or "").strip()
+            if len(command_text) == 0:
                 continue
-            if command_text .startswith ("#"):
+            if command_text.startswith("#"):
                 continue
-            command_lines .append (command_text )
-        shell .run_commands ("; ".join (command_lines ))
+            command_lines.append(command_text)
+        shell.run_commands("; ".join(command_lines))
         return
-    shell .run ()
+    shell.run()
 
-if __name__ =="__main__":
-    try :
-        run_standalone ()
-    except QuitAllRequested :
-        raise SystemExit (0 )
+
+if __name__ == "__main__":
+    try:
+        run_standalone()
+    except QuitAllRequested:
+        raise SystemExit(0)

@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 local-access shell: operator REPL for SGP.26 profile delivery without a live SM-DP+ server."""
 import argparse
 import atexit
+import glob
 import io
 import os
 import re
@@ -12,9 +12,10 @@ import shlex
 import shutil
 import sys
 import textwrap
-from contextlib import redirect_stdout
-from typing import Any, Callable, List, Optional, Tuple
+from contextlib import contextmanager, redirect_stdout
+from typing import Any, Callable, Iterable, Iterator, List, Optional, Tuple
 
+from yggdrasim_common.command_log import LOG_FLAG_HELP, run_with_command_log
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.process_debug import (
     add_debug_argument,
@@ -24,7 +25,7 @@ from yggdrasim_common.process_debug import (
 from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.session_recording import ShellSessionRecorder
 from yggdrasim_common.structured_output import dump_structured_payload
-from yggdrasim_common.nord_palette import NORD
+from yggdrasim_common.cli_theme import ThemedColorsMeta as _ThemedColorsMeta
 from SCP11.shared.discovery_snapshot import (
     render_card_overview_snapshot,
     render_consolidated_discovery_snapshot,
@@ -35,6 +36,8 @@ from SCP11.shared.profile_actions import (
     run_disable_profile as shared_run_disable_profile,
     run_enable_profile as shared_run_enable_profile,
 )
+from SCP11.transport import complete_response_data
+from SCP11.transport import exchange_with_length_correction
 
 try:
     from SCP03.logic.sgp22 import Sgp22Manager
@@ -66,22 +69,25 @@ class _LocalAccessTransportAdapter:
 
     def transmit(self, apdu_hex: str, silent: bool = False) -> Tuple[bytes, int, int]:
         """Forward a raw APDU to the simulated or physical card and return (data, SW1, SW2)."""
-        apdu = bytes.fromhex(apdu_hex)
-        response, sw1, sw2 = self._exchange(apdu, "SCP03", silent)
-        if sw1 == 0x6C:
-            corrected = apdu[:-1] + bytes([sw2])
-            return self.transmit(corrected.hex().upper(), silent=silent)
-        if sw1 in (0x61, 0x9F):
-            accumulated = response
-            get_response_cla = 0x00
-            if len(apdu) > 0:
-                get_response_cla = apdu[0] & 0x03
-            while sw1 in (0x61, 0x9F):
-                get_response = bytes([get_response_cla, 0xC0, 0x00, 0x00, sw2])
-                chunk, sw1, sw2 = self._exchange(get_response, "SCP03 [GET RESPONSE]", silent)
-                accumulated += chunk
-            return accumulated, sw1, sw2
-        return response, sw1, sw2
+
+        def exchange(command: bytes, log_name: str) -> Tuple[bytes, int, int]:
+            return self._exchange(command, log_name, silent)
+
+        command, response, sw1, sw2 = exchange_with_length_correction(
+            exchange,
+            bytes.fromhex(apdu_hex),
+            "SCP03",
+        )
+        # '9Fxx' announces response data the way '61xx' does for SIM-class commands.
+        return complete_response_data(
+            exchange,
+            command,
+            response,
+            sw1,
+            sw2,
+            "SCP03",
+            continuation_sw1=(0x61, 0x9F),
+        )
 
     def _exchange(self, apdu: bytes, log_name: str, silent: bool) -> Tuple[bytes, int, int]:
         exchange_method = getattr(self._apdu_channel, "exchange", None)
@@ -98,22 +104,22 @@ class _LocalAccessTransportAdapter:
             response = send_method(apdu, log_name)
         return response, 0x90, 0x00
 
-class ShellStyle:
-    """Local-access shell colour roles, sourced from the Nord palette.
+class ShellStyle(metaclass=_ThemedColorsMeta):
+    """Local-access shell colour roles, read from the active theme.
 
     Field order intentionally mirrors the legacy ``Colors`` classes
     so existing call-sites such as ``ShellStyle.HEADER`` continue to
     work without modification.
     """
 
-    HEADER = NORD.HEADER
-    BLUE = NORD.BLUE
-    CYAN = NORD.CYAN
-    GREEN = NORD.GREEN
-    WARNING = NORD.WARNING
-    WHITE = NORD.WHITE
-    BOLD = NORD.BOLD
-    END = NORD.RESET
+    _ROLE_MAP = {
+        "HEADER": "HEADER",
+        "BLUE": "BLUE",
+        "CYAN": "CYAN",
+        "GREEN": "GREEN",
+        "WARNING": "WARNING",
+        "WHITE": "WHITE",
+    }
 
 
 _COMMANDS = (
@@ -171,6 +177,32 @@ _COMMAND_ALIASES = {
     "?": "HELP",
 }
 
+# Argument vocabularies the completer offers after a command name. Path
+# arguments complete from the filesystem, profile targets from the last
+# profile list the shell decoded.
+_DEBUG_FLAG = "--debug"
+_OUTPUT_MODE_FLAGS = ("--json", "--yaml")
+_OUTPUT_MODE_COMMANDS = ("CERTS", "EXPLAIN-LAST", "METADATA-LINT")
+_PROFILE_TARGET_COMMANDS = ("ENABLE-PROFILE", "DISABLE-PROFILE", "DELETE-PROFILE")
+_PATH_ARGUMENT_COMMANDS = (
+    "LOAD-PROFILE",
+    "PROFILE",
+    "METADATA",
+    "METADATA-LINT",
+    "STORE-METADATA",
+    "STORE-METADATA-CUSTOM-ALL",
+    "UPDATE-METADATA",
+    "EXPORT-KEYBAG",
+)
+_RECORD_VERBS = ("STATUS", "START", "STOP", "CANCEL")
+_RECORD_PATH_VERBS = ("START", "STOP")
+
+
+def _prefix_matches(values: Iterable[str], prefix: str) -> List[str]:
+    wanted = str(prefix or "").upper()
+    return [str(value) for value in values if str(value).upper().startswith(wanted)]
+
+
 _COMMAND_DOCS = {
     "CERTS": {
         "usage": "CERTS [--json|--yaml]",
@@ -198,7 +230,7 @@ _COMMAND_DOCS = {
     },
     "LOAD-PROFILE": {
         "usage": "LOAD-PROFILE [path]",
-        "summary": "Run one-shot open, prepare, load, and close for the active profile.",
+        "summary": "Run one-shot open, prepare, load, and close for the active profile, then enable the installed profile.",
     },
     "ENABLE-PROFILE": {
         "usage": "ENABLE-PROFILE <id>",
@@ -210,7 +242,7 @@ _COMMAND_DOCS = {
     },
     "DELETE-PROFILE": {
         "usage": "DELETE-PROFILE <id>",
-        "summary": "Delete a profile by ICCID, AID, or alias.",
+        "summary": "Delete a profile by ICCID, AID, or alias; an enabled target is disabled first.",
     },
     "STORE-METADATA": {
         "usage": "STORE-METADATA [path]",
@@ -288,10 +320,22 @@ def _load_local_runtime():
 class LocalAccessShell:
     """Minimal interactive shell for local SCP11 bring-up."""
 
-    def __init__(self):
+    def __init__(self, reader_name: str = ""):
         config_cls, session_cls = _load_local_runtime()
         self._session_cls = session_cls
         self.cfg = config_cls()
+        chosen = str(reader_name or "").strip()
+        if chosen:
+            from dataclasses import replace as dataclass_replace
+
+            from yggdrasim_common.remote_readers import REMOTE_READER_INDEX, resolve_reader_name
+
+            reader_index, resolved = resolve_reader_name(chosen)
+            self.cfg = dataclass_replace(
+                self.cfg,
+                READER_INDEX=reader_index,
+                READER_NAME=resolved if reader_index == REMOTE_READER_INDEX else "",
+            )
         self.session = None
         self._global_debug = is_global_debug_enabled()
         self._recorder = ShellSessionRecorder(
@@ -301,6 +345,7 @@ class LocalAccessShell:
         self._history_file = os.path.join(
             os.path.expanduser("~"), ".yggdrasim_local_scp11_history"
         )
+        self._profile_identifier_cache: List[str] = []
 
     def _setup_readline(self) -> None:
         if readline is None:
@@ -334,33 +379,98 @@ class LocalAccessShell:
     def _completer(self, text: str, state: int) -> Optional[str]:
         if readline is None:
             return None
-        line_buffer = readline.get_line_buffer().lstrip()
-        if " " in line_buffer and not line_buffer.startswith(" "):
-            first = line_buffer.split(None, 1)[0].upper()
-            if first in _COMMANDS and first in (
-                "LOAD-PROFILE",
-                "ENABLE-PROFILE",
-                "DISABLE-PROFILE",
-                "DELETE-PROFILE",
-                "ENABLE",
-                "DISABLE",
-                "DELETE",
-                "STORE-METADATA",
-                "STORE-METADATA-CUSTOM",
-                "STORE-METADATA-CUSTOM-ALL",
-                "UPDATE-METADATA",
-                "PROFILE",
-                "METADATA",
-                "METADATA-LINT",
-            ):
-                return None
-        typed = (text or "").upper()
-        options: List[str] = [c for c in _COMMANDS if c.startswith(typed)]
+        options = self._completion_options(readline.get_line_buffer(), text)
         if state >= len(options):
             return None
-        if len(options) == 1:
-            return options[state] + " "
+        if len(options) == 1 and not options[0].endswith(os.sep):
+            return options[0] + " "
         return options[state]
+
+    def _completion_options(self, line_buffer: str, text: str) -> List[str]:
+        """Completion candidates for ``text`` given the line typed so far.
+
+        Kept free of readline so the vocabulary is testable. The first
+        token completes to any canonical command or alias; later tokens
+        follow the command's own argument grammar: ``RECORD`` verbs,
+        ``HELP`` command names, structured-output and debug flags, file
+        paths, and the profile identifiers of the last decoded list for
+        the profile-state commands.
+        """
+        typed = str(text or "")
+        tokens = str(line_buffer or "").split()
+        if len(typed) > 0 and len(tokens) > 0:
+            tokens = tokens[:-1]
+        if len(tokens) == 0:
+            return self._complete_command_name(typed)
+
+        canonical = self._canonical_command(tokens[0])
+        if typed.startswith("-"):
+            flags = [_DEBUG_FLAG]
+            if canonical in _OUTPUT_MODE_COMMANDS:
+                flags.extend(_OUTPUT_MODE_FLAGS)
+            return [flag for flag in flags if flag.startswith(typed.lower())]
+
+        positional = [argument for argument in tokens[1:] if not argument.startswith("-")]
+        if canonical == "HELP":
+            if len(positional) == 0:
+                return self._complete_command_name(typed)
+            return []
+        if canonical == "RECORD":
+            if len(positional) == 0:
+                return _prefix_matches(_RECORD_VERBS, typed)
+            if len(positional) == 1 and positional[0].upper() in _RECORD_PATH_VERBS:
+                return self._complete_path(typed)
+            return []
+        if canonical in _PROFILE_TARGET_COMMANDS:
+            if len(positional) == 0:
+                return _prefix_matches(self._profile_identifier_cache, typed)
+            return []
+        if canonical == "STORE-METADATA-CUSTOM":
+            if len(positional) == 1:
+                return self._complete_path(typed)
+            return []
+        if canonical in _PATH_ARGUMENT_COMMANDS:
+            if len(positional) == 0:
+                return self._complete_path(typed)
+            return []
+        return []
+
+    @staticmethod
+    def _complete_command_name(typed: str) -> List[str]:
+        names = sorted(set(_COMMANDS) | set(_COMMAND_ALIASES))
+        return _prefix_matches(names, typed)
+
+    @staticmethod
+    def _complete_path(prefix: str) -> List[str]:
+        """Filesystem candidates for ``prefix``; a directory keeps its separator so completion can continue into it."""
+        expanded = os.path.expanduser(prefix)
+        options: List[str] = []
+        for candidate in sorted(glob.glob(glob.escape(expanded) + "*")):
+            shown = candidate
+            if prefix.startswith("~"):
+                shown = prefix + candidate[len(expanded):]
+            if os.path.isdir(candidate):
+                shown += os.sep
+            options.append(shown)
+        return options
+
+    def _remember_profile_identifiers(self, profiles: List[Any]) -> None:
+        """Keep the identifiers of the last decoded profile list for tab completion.
+
+        Reassigned on every decode, so it holds one card's worth of rows
+        and never grows. A name containing whitespace cannot be typed as
+        one token and is left out.
+        """
+        identifiers: List[str] = []
+        for entry in profiles:
+            for attribute in ("iccid", "aid", "nickname", "profile_name"):
+                value = str(getattr(entry, attribute, "") or "").strip()
+                if len(value) == 0 or any(char.isspace() for char in value):
+                    continue
+                if value in identifiers:
+                    continue
+                identifiers.append(value)
+        self._profile_identifier_cache = identifiers
 
     def _build_session(self) -> None:
         if self.session is not None:
@@ -997,10 +1107,12 @@ class LocalAccessShell:
         if self.session is None:
             return []
         try:
-            return list(self.session.collect_profile_metadata())
+            profiles = list(self.session.collect_profile_metadata())
         except Exception as error:
             print(f"[*] Profile metadata lookup unavailable: {error}")
             return []
+        self._remember_profile_identifiers(profiles)
+        return profiles
 
     def _find_profile_metadata(self, entries: List[Any], identifier: str) -> Optional[Any]:
         target = identifier.strip().upper()
@@ -1185,7 +1297,43 @@ class LocalAccessShell:
         print(f"Last response  : {len(response)} bytes")
         if len(response) > 0:
             print(f"Response head  : {self._hex_preview(response, max_chars=80)}")
+        auto_enable_summary = self._auto_enable_summary()
+        if len(auto_enable_summary) > 0:
+            print(f"Auto-enable    : {auto_enable_summary}")
         print(line)
+
+    def _auto_enable_summary(self) -> str:
+        """One line on the EnableProfile that followed the load; empty when none ran."""
+        state = getattr(self.session, "state", None)
+        status = str(getattr(state, "auto_enable_status", "") or "")
+        if len(status) == 0:
+            return ""
+        target_kind = str(getattr(state, "auto_enable_target_kind", "") or "")
+        target = str(getattr(state, "auto_enable_target", "") or "")
+        detail = str(getattr(state, "auto_enable_detail", "") or "")
+        target_text = f"{target_kind} {target}".strip()
+        if status == "enabled":
+            return f"enabled {target_text}"
+        if status == "failed":
+            return f"FAILED for {target_text}: {detail}"
+        return f"skipped: {detail}"
+
+    def _print_auto_enable_outcome(self) -> None:
+        """Report the post-load EnableProfile the way a manual ENABLE-PROFILE would."""
+        state = getattr(self.session, "state", None)
+        status = str(getattr(state, "auto_enable_status", "") or "")
+        detail = str(getattr(state, "auto_enable_detail", "") or "")
+        if status == "enabled":
+            response = bytes(getattr(state, "auto_enable_response", b"") or b"")
+            self._print_profile_state_response("EnableProfile", response)
+        elif status == "failed":
+            print(f"[!] EnableProfile after load failed: {detail}")
+            print(
+                "    The profile is installed; run ENABLE-PROFILE <id> once the "
+                "cause is cleared."
+            )
+        elif status == "skipped":
+            print(f"[*] EnableProfile after load skipped: {detail}")
 
     def _print_status(self) -> None:
         if self.session is None:
@@ -1235,6 +1383,7 @@ class LocalAccessShell:
             raise
         self._print_last_bpp_layout()
         self._print_load_success_banner(response)
+        self._print_auto_enable_outcome()
 
     def _build_profile_action_adapter(self) -> ProfileActionAdapter:
         """Return a ``ProfileActionAdapter`` wired to this shell's session.
@@ -1361,7 +1510,7 @@ class LocalAccessShell:
         Mirrors ``_print_start_snapshot`` from ``SCP11/live/console.py`` so
         operators get the same header card across all four SCP11 shells.
         Only the lightweight ES10 reads happen here (EID, profiles,
-        EuiccConfiguredData, EimConfigurationData) — the full SGP.32
+        EuiccConfiguredData, EimConfigurationData) -- the full SGP.32
         consolidated dump still lives behind ``DISCOVER``.
         """
         snapshot = self.session.collect_quick_overview()
@@ -1382,7 +1531,7 @@ class LocalAccessShell:
 
         Equivalent to ``LIST`` in eSIM Live/Test (which calls
         ``_print_profiles``). Operators who only want the profile inventory
-        — without the EID / configured-data header — get a focused output.
+        -- without the EID / configured-data header -- get a focused output.
         """
         profiles = self._safe_collect_profile_metadata()
         if len(profiles) == 0:
@@ -1712,8 +1861,10 @@ class LocalAccessShell:
         print(f"\n{ShellStyle.BOLD}{ShellStyle.HEADER}Local SMDPP Command Groups{ShellStyle.END}")
         print("  Use HELP <command> for usage and alias details.")
         print("  Add --debug to card-facing commands for full raw APDU hex tracing.")
+        print(f"  {LOG_FLAG_HELP}")
         print("  Use --yaml when you want structured output without defaulting to JSON.")
         print("  Use RECORD START/STOP to capture replayable commands plus APDU trace to file.")
+        print("  Tab completes commands, aliases, flags, RECORD verbs, file paths and the profile identifiers of the last LIST.")
         print("  Canonical command names are listed here; compatibility aliases still resolve.\n")
 
         self._print_help_section(
@@ -1774,17 +1925,8 @@ class LocalAccessShell:
                 if len(raw_line) == 0:
                     continue
 
-                parts = raw_line.split()
-                command = parts[0].upper()
-                arguments = parts[1:]
-
                 try:
-                    keep_running = self._execute_command(
-                        command,
-                        arguments,
-                        raw_command=raw_line,
-                        source="interactive",
-                    )
+                    keep_running = self._execute_command_line(raw_line, source="interactive")
                     if keep_running is False:
                         return
                 except Exception as error:
@@ -1798,18 +1940,8 @@ class LocalAccessShell:
         had_error = False
         try:
             for raw_command in self._split_batch_commands(cmd_line):
-                parts = raw_command.split()
-                if len(parts) == 0:
-                    continue
-                command = parts[0].upper()
-                arguments = parts[1:]
                 try:
-                    keep_running = self._execute_command(
-                        command,
-                        arguments,
-                        raw_command=raw_command,
-                        source="batch",
-                    )
+                    keep_running = self._execute_command_line(raw_command, source="batch")
                 except QuitAllRequested:
                     raise
                 except Exception as error:
@@ -1822,6 +1954,46 @@ class LocalAccessShell:
             self._finalize_recording_on_exit()
         if had_error:
             raise SystemExit(1)
+
+    def _execute_command_line(self, raw_line: str, *, source: str = "interactive") -> bool:
+        """Run one typed or batch command line; a ``--log <file>`` comes off it here."""
+        return run_with_command_log(
+            raw_line,
+            lambda line: self._execute_split_line(line, source=source),
+            shell="Local SMDPP",
+            refused=True,
+            debug=self._command_log_debug,
+            raise_refusal=True,
+        )
+
+    def _execute_split_line(self, raw_line: str, *, source: str) -> bool:
+        parts = str(raw_line or "").split()
+        if len(parts) == 0:
+            return True
+        return self._execute_command(
+            parts[0].upper(),
+            parts[1:],
+            raw_command=raw_line,
+            source=source,
+        )
+
+    @contextmanager
+    def _command_log_debug(self) -> Iterator[None]:
+        """Debug output for a ``--log`` command.
+
+        Raw APDU logging is the switch ``--debug`` flips; ``_global_debug``
+        gives a session built during the command the same setting.
+        """
+        previous_transport = self._set_transport_debug(True)
+        previous_global = bool(getattr(self, "_global_debug", False))
+        self._global_debug = True
+        try:
+            yield
+        finally:
+            self._global_debug = previous_global
+            if previous_transport is None:
+                previous_transport = previous_global
+            self._restore_transport_debug(previous_transport)
 
     @staticmethod
     def _split_batch_commands(cmd_line: str) -> list[str]:
@@ -1961,13 +2133,13 @@ class LocalAccessShell:
             pass
 
 
-def entry() -> None:
-    shell = LocalAccessShell()
+def entry(reader_name: str = "") -> None:
+    shell = LocalAccessShell(reader_name=reader_name)
     shell.run()
 
 
-def entry_cmd(cmd_line: str) -> None:
-    shell = LocalAccessShell()
+def entry_cmd(cmd_line: str, reader_name: str = "") -> None:
+    shell = LocalAccessShell(reader_name=reader_name)
     shell.run_commands(cmd_line)
 
 
@@ -2001,8 +2173,8 @@ def _read_stdin_command_text() -> str:
     return "; ".join(commands)
 
 
-def entry_stdin() -> None:
-    entry_cmd(_read_stdin_command_text())
+def entry_stdin(reader_name: str = "") -> None:
+    entry_cmd(_read_stdin_command_text(), reader_name=reader_name)
 
 
 def run_standalone() -> None:
@@ -2023,6 +2195,15 @@ def run_standalone() -> None:
         help="Read newline-separated commands from stdin for non-interactive execution",
     )
     parser.add_argument(
+        "--reader",
+        type=str,
+        default="",
+        help=(
+            "Reader to open: an exact PC/SC reader name, or a Remote Lab reader "
+            "name (\"Remote Lab: <device>\") connected from the GUI. Default: the first PC/SC reader."
+        ),
+    )
+    parser.add_argument(
         "--dump-keybag",
         dest="dump_keybag",
         type=str,
@@ -2035,24 +2216,25 @@ def run_standalone() -> None:
     )
     args = parser.parse_args()
     set_global_debug(bool(getattr(args, "debug", False)))
+    reader_name = str(getattr(args, "reader", "") or "")
     keybag_path = str(getattr(args, "dump_keybag", "") or "").strip()
     if args.cmd:
         cmd_line = args.cmd
         if len(keybag_path) > 0:
             cmd_line = _append_keybag_dump_command(cmd_line, keybag_path)
-        entry_cmd(cmd_line)
+        entry_cmd(cmd_line, reader_name=reader_name)
         return
     if args.stdin:
         if len(keybag_path) > 0:
             base_cmd = _append_keybag_dump_command(_read_stdin_command_text(), keybag_path)
-            entry_cmd(base_cmd)
+            entry_cmd(base_cmd, reader_name=reader_name)
             return
-        entry_stdin()
+        entry_stdin(reader_name=reader_name)
         return
     if len(keybag_path) > 0:
-        entry_cmd(_append_keybag_dump_command("", keybag_path))
+        entry_cmd(_append_keybag_dump_command("", keybag_path), reader_name=reader_name)
         return
-    entry()
+    entry(reader_name=reader_name)
 
 
 if __name__ == "__main__":

@@ -16,211 +16,227 @@
 # -----------------------------------------------------------------------------
 
 """Custom key-binding store and interactive management wizard for the SCP03 shell."""
-import json 
-import os 
-import sys 
 
-current_dir =os .path .dirname (os .path .abspath (__file__ ))
-root_dir =os .path .abspath (os .path .join (current_dir ,'../../'))
-is_missing =False 
-if root_dir not in sys .path :
-    is_missing =True 
-if is_missing :
-    sys .path .insert (0 ,root_dir )
+import json
+import os
+import sys
 
-from SCP03 .interface .wizards_ui import InteractiveWizard 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
+is_missing = False
+if root_dir not in sys.path:
+    is_missing = True
+if is_missing:
+    sys.path.insert(0, root_dir)
 
-class CommandBinder :
-    def __init__ (self ,filepath ="binds.json"):
-        self .filepath =filepath 
-        self .binds ={}
-        self ._load ()
+# These imports resolve against the path inserted above, so they
+# cannot be hoisted to the top of the module.
+from SCP03.interface.wizards_ui import InteractiveWizard  # noqa: E402
 
-    def _load (self ):
-        has_file =False 
-        if os .path .exists (self .filepath ):
-            has_file =True 
 
-        if has_file :
-            try :
-                with open (self .filepath ,'r',encoding ="utf-8")as f :
-                    self .binds =json .load (f )
-            except Exception as e :
-                print (f"[-] Failed to load binds: {e}")
+class CommandBinder:
+    def __init__(self, filepath="binds.json"):
+        self.filepath = filepath
+        self.binds = {}
+        self._load()
 
-        is_missing =False 
-        if has_file ==False :
-            is_missing =True 
+    def _load(self):
+        has_file = False
+        if os.path.exists(self.filepath):
+            has_file = True
 
-        if is_missing :
-            self .binds ={
-            "adm":"manage-pin verify 0a {0}"
-            }
-            self ._save ()
+        if has_file:
+            try:
+                with open(self.filepath, "r", encoding="utf-8") as f:
+                    self.binds = json.load(f)
+            except Exception as e:
+                print(f"[-] Failed to load binds: {e}")
 
-    def _save (self ):
-        try :
-            with open (self .filepath ,'w',encoding ="utf-8")as f :
-                json .dump (self .binds ,f ,indent =4 )
-        except Exception :
-            pass 
+        is_missing = False
+        if not has_file:
+            is_missing = True
 
-    def add_bind (self ,trigger ,sequence ):
-        self .binds [trigger .lower ()]=sequence 
-        self ._save ()
+        if is_missing:
+            self.binds = {"adm": "manage-pin verify 0a {0}"}
+            self._save()
 
-    def del_bind (self ,trigger ):
+    def _save(self):
+        try:
+            with open(self.filepath, "w", encoding="utf-8") as f:
+                json.dump(self.binds, f, indent=4)
+        except Exception:
+            pass
+
+    def add_bind(self, trigger, sequence):
+        self.binds[trigger.lower()] = sequence
+        self._save()
+
+    def del_bind(self, trigger):
         """Delete the bind entry identified by *bind_id* from the store."""
-        trigger_key =trigger .lower ()
-        has_key =False 
-        if trigger_key in self .binds :
-            has_key =True 
+        trigger_key = trigger.lower()
+        has_key = False
+        if trigger_key in self.binds:
+            has_key = True
 
-        if has_key :
-            del self .binds [trigger_key ]
-            self ._save ()
+        if has_key:
+            del self.binds[trigger_key]
+            self._save()
 
-    def resolve (self ,command_line ):
+    def resolve(self, command_line):
         """Resolve and return the target command string for *bind_id*."""
-        parts =command_line .strip ().split ()
+        parts = command_line.strip().split()
 
-        is_empty =False 
-        if len (parts )==0 :
-            is_empty =True 
+        is_empty = False
+        if len(parts) == 0:
+            is_empty = True
 
-        if is_empty :
-            return [command_line ]
+        if is_empty:
+            return [command_line]
 
-        base_cmd =parts [0 ].lower ()
+        base_cmd = parts[0].lower()
 
-        has_bind =False 
-        if base_cmd in self .binds :
-            has_bind =True 
+        has_bind = False
+        if base_cmd in self.binds:
+            has_bind = True
 
-        is_unbound =False 
-        if has_bind ==False :
-            is_unbound =True 
+        is_unbound = False
+        if not has_bind:
+            is_unbound = True
 
-        if is_unbound :
-            return [command_line ]
+        if is_unbound:
+            return [command_line]
 
-        if has_bind :
-            template =self .binds [base_cmd ]
-            args =parts [1 :]
-            resolved_cmd =template 
+        if has_bind:
+            template = self.binds[base_cmd]
+            args = parts[1:]
+            resolved_cmd = template
 
-            idx =0 
-            for arg in args :
-                target ="{"+str (idx )+"}"
+            idx = 0
+            for arg in args:
+                target = "{" + str(idx) + "}"
 
-                has_target =False 
-                if target in resolved_cmd :
-                    has_target =True 
+                has_target = False
+                if target in resolved_cmd:
+                    has_target = True
 
-                if has_target :
-                    resolved_cmd =resolved_cmd .replace (target ,arg )
+                if has_target:
+                    resolved_cmd = resolved_cmd.replace(target, arg)
 
-                idx +=1 
+                idx += 1
 
-            has_sequence =False 
-            if ";"in resolved_cmd :
-                has_sequence =True 
+            has_sequence = False
+            if ";" in resolved_cmd:
+                has_sequence = True
 
-            if has_sequence :
-                raw_cmds =resolved_cmd .split (";")
-                clean_cmds =[]
-                for c in raw_cmds :
-                    clean_cmds .append (c .strip ())
-                return clean_cmds 
+            if has_sequence:
+                raw_cmds = resolved_cmd.split(";")
+                clean_cmds = []
+                for c in raw_cmds:
+                    clean_cmds.append(c.strip())
+                return clean_cmds
 
-            is_single =False 
-            if has_sequence ==False :
-                is_single =True 
+            is_single = False
+            if not has_sequence:
+                is_single = True
 
-            if is_single :
-                return [resolved_cmd ]
+            if is_single:
+                return [resolved_cmd]
 
 
-def manage_binds_wizard (colors_ref ,binder ):
+def manage_binds_wizard(colors_ref, binder):
     """Run the interactive custom key-binding management wizard."""
-    wiz =InteractiveWizard ("Manage Custom Binds",colors_ref ,"Add, remove, or list command macros.")
-    wiz .add_step (
-    "action","Action (ADD, DEL, LIST) [Default: LIST]:",
-    default ="LIST",choices =("ADD","DEL","LIST"),
+    wiz = InteractiveWizard(
+        "Manage Custom Binds", colors_ref, "Add, remove, or list command macros."
+    )
+    wiz.add_step(
+        "action",
+        "Action (ADD, DEL, LIST) [Default: LIST]:",
+        default="LIST",
+        choices=("ADD", "DEL", "LIST"),
     )
 
-    def trigger_cond (values ):
-        return values .get ("action")in ("ADD","DEL")
+    def trigger_cond(values):
+        return values.get("action") in ("ADD", "DEL")
 
-    def sequence_cond (values ):
-        return values .get ("action")=="ADD"
+    def sequence_cond(values):
+        return values.get("action") == "ADD"
 
-    wiz .add_step (
-    "trigger","Trigger word (for ADD/DEL):",default ="",
-    condition =trigger_cond,is_mandatory =True,input_kind ="text",
+    wiz.add_step(
+        "trigger",
+        "Trigger word (for ADD/DEL):",
+        default="",
+        condition=trigger_cond,
+        is_mandatory=True,
+        input_kind="text",
     )
-    wiz .add_step (
-    "sequence","Command sequence (for ADD):",default ="",
-    condition =sequence_cond,is_mandatory =True,input_kind ="text",
+    wiz.add_step(
+        "sequence",
+        "Command sequence (for ADD):",
+        default="",
+        condition=sequence_cond,
+        is_mandatory=True,
+        input_kind="text",
     )
 
-    res =wiz .run ()
-    if res is None :
+    res = wiz.run()
+    if res is None:
         return
 
-    action =""
-    has_action =False 
-    if res .get ("action"):
-        has_action =True 
+    action = ""
+    has_action = False
+    if res.get("action"):
+        has_action = True
 
-    if has_action :
-        action =res .get ("action").upper ()
+    if has_action:
+        action = res.get("action").upper()
 
-    is_list =False 
-    if action =="LIST":
-        is_list =True 
+    is_list = False
+    if action == "LIST":
+        is_list = True
 
-    if is_list :
-        print (f"\n{colors_ref.HEADER}--- Current Binds ---{colors_ref.ENDC}")
-        for k ,v in binder .binds .items ():
-            print (f"  {colors_ref.CYAN}{k}{colors_ref.ENDC} -> {v}")
+    if is_list:
+        print(f"\n{colors_ref.HEADER}--- Current Binds ---{colors_ref.ENDC}")
+        for k, v in binder.binds.items():
+            print(f"  {colors_ref.CYAN}{k}{colors_ref.ENDC} -> {v}")
 
-    is_add =False 
-    if action =="ADD":
-        is_add =True 
+    is_add = False
+    if action == "ADD":
+        is_add = True
 
-    if is_add :
-        trigger =res .get ("trigger")
-        seq =res .get ("sequence")
+    if is_add:
+        trigger = res.get("trigger")
+        seq = res.get("sequence")
 
-        valid_add =False 
-        if trigger !="SKIP":
-            valid_add =True 
+        valid_add = False
+        if trigger != "SKIP":
+            valid_add = True
 
-        is_seq_valid =False 
-        if seq !="SKIP":
-            is_seq_valid =True 
+        is_seq_valid = False
+        if seq != "SKIP":
+            is_seq_valid = True
 
-        valid_complete =False 
-        if valid_add :
-            if is_seq_valid :
-                valid_complete =True 
+        valid_complete = False
+        if valid_add:
+            if is_seq_valid:
+                valid_complete = True
 
-        if valid_complete :
-            binder .add_bind (trigger ,seq )
-            print (f"{colors_ref.GREEN}[+] Added bind: {trigger} -> {seq}{colors_ref.ENDC}")
+        if valid_complete:
+            binder.add_bind(trigger, seq)
+            print(
+                f"{colors_ref.GREEN}[+] Added bind: {trigger} -> {seq}{colors_ref.ENDC}"
+            )
 
-    is_del =False 
-    if action =="DEL":
-        is_del =True 
+    is_del = False
+    if action == "DEL":
+        is_del = True
 
-    if is_del :
-        trigger =res .get ("trigger")
+    if is_del:
+        trigger = res.get("trigger")
 
-        valid_del =False 
-        if trigger !="SKIP":
-            valid_del =True 
+        valid_del = False
+        if trigger != "SKIP":
+            valid_del = True
 
-        if valid_del :
-            binder .del_bind (trigger )
-            print (f"{colors_ref.GREEN}[+] Removed bind: {trigger}{colors_ref.ENDC}")
+        if valid_del:
+            binder.del_bind(trigger)
+            print(f"{colors_ref.GREEN}[+] Removed bind: {trigger}{colors_ref.ENDC}")

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Central gate for insecure / introspection TLS contexts used by SCP11.
 
 Two distinct trust-posture needs exist in the SCP11 tree:
@@ -16,27 +15,27 @@ Two distinct trust-posture needs exist in the SCP11 tree:
    client needs to fetch the server's certificate chain so it can
    auto-learn a trust anchor for a freshly-seen FQDN and persist it
    under ``SCP11/<tree>/dynamic_ca/``. No request body is ever sent
-   over this context — only the TLS handshake runs, and the socket is
+   over this context -- only the TLS handshake runs, and the socket is
    closed immediately after the peer cert is read. Because an active
    attacker can control the first contact, this path is disabled by
    default and requires an explicit operator opt-in.
 
 The two gates are:
 
-- ``YGGDRASIM_SCP11_ALLOW_INSECURE_TLS`` — opts in to full unpinned
+- ``YGGDRASIM_SCP11_ALLOW_INSECURE_TLS`` -- opts in to full unpinned
   request traffic. Default: refused. Controls
   :func:`create_insecure_context` and :func:`configure_unpinned_context`.
 
-- ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS`` — hard-lock that also refuses
+- ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS`` -- hard-lock that also refuses
   unpinned request traffic even if the ``ALLOW_INSECURE_TLS`` flag is
   set. Intended for CI / fleet deployments where nobody should ever
   downgrade a request.
 
-- ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION`` — separate
+- ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION`` -- separate
   hard-lock that disables the read-only TOFU bootstrap even if its
   opt-in is present.
 
-- ``YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION`` — explicit opt-in for a
+- ``YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION`` -- explicit opt-in for a
   read-only first-contact certificate-chain fetch. Default: refused.
 
 Call sites choose the correct gate based on what they intend to do:
@@ -55,8 +54,6 @@ import ssl
 import sys
 import threading
 
-from yggdrasim_common.process_debug import is_global_debug_enabled
-
 __all__ = [
     "INSECURE_TLS_ENV",
     "REQUIRE_PINNED_TLS_ENV",
@@ -67,6 +64,8 @@ __all__ = [
     "create_insecure_context",
     "configure_unpinned_context",
     "create_introspection_context",
+    "pinning_required",
+    "PinnedTlsMismatchError",
 ]
 
 
@@ -79,6 +78,14 @@ _BANNER_LOCK = threading.Lock()
 _BANNER_SEEN: set[str] = set()
 _INTROSPECTION_NOTE_LOCK = threading.Lock()
 _INTROSPECTION_NOTE_SEEN: set[str] = set()
+
+
+class PinnedTlsMismatchError(IOError):
+    """Presented TLS key differs from the pin carried in eIM configuration data.
+
+    Subclasses ``IOError`` so transports that cannot rebuild the
+    connection keep treating it as a plain connection failure.
+    """
 
 
 def _env_flag(name: str) -> bool:
@@ -98,7 +105,8 @@ def introspection_tls_allowed() -> bool:
     )
 
 
-def _pinning_required() -> bool:
+def pinning_required() -> bool:
+    """Return True when unpinned request traffic is hard-locked off."""
     return _env_flag(REQUIRE_PINNED_TLS_ENV)
 
 
@@ -117,13 +125,15 @@ def _emit_banner(caller: str) -> None:
 
 def _emit_introspection_note(caller: str) -> None:
     """
-    The TOFU chain introspection note is informational and fires once
-    per call site. Keep it behind the global debug flag so nominal
-    operator runs stay quiet; debug sessions still see the trail plus
-    the hard-lock instructions.
+    Announce a first-contact chain read, once per call site.
+
+    This is the point where a chain nothing has vouched for becomes a
+    persisted local anchor, so it is not gated on the debug flag: with
+    the opt-in left set in env_overrides.json the reads continue for
+    every later run, and a silent one leaves no trace that the trust
+    decision was made at all. Once per call site keeps a polling loop
+    from repeating it.
     """
-    if is_global_debug_enabled() is False:
-        return
     label = str(caller or "<unknown>")
     with _INTROSPECTION_NOTE_LOCK:
         if label in _INTROSPECTION_NOTE_SEEN:
@@ -163,7 +173,7 @@ def create_insecure_context(caller: str) -> ssl.SSLContext:
     For request-carrying transports only. Use
     :func:`create_introspection_context` for read-only chain fetches.
     """
-    if _pinning_required():
+    if pinning_required():
         _refuse(caller)
     if insecure_tls_allowed() is False:
         _refuse(caller)
@@ -173,7 +183,7 @@ def create_insecure_context(caller: str) -> ssl.SSLContext:
 
 def configure_unpinned_context(context: ssl.SSLContext, caller: str) -> ssl.SSLContext:
     """Downgrade an existing context to unpinned, honouring the same gate."""
-    if _pinning_required():
+    if pinning_required():
         _refuse(caller)
     if insecure_tls_allowed() is False:
         _refuse(caller)

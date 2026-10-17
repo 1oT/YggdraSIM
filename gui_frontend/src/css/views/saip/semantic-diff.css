@@ -209,13 +209,13 @@
 }
 
 .cc-chip--a {
-  background: rgba(255, 154, 106, 0.18);
-  color: #ff9a6a;
-  border-color: rgba(255, 154, 106, 0.35);
+  background: var(--fail-soft);
+  color: var(--fail);
+  border-color: color-mix(in oklab, var(--fail) 45%, transparent);
 }
 
 .cc-chip--b {
-  background: rgba(120, 220, 130, 0.18);
-  color: #78dc82;
-  border-color: rgba(120, 220, 130, 0.35);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
 }

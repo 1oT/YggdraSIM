@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Offline-tool Command Center actions.
 
 Wraps the pure-function engine panels (BER-TLV parse, ASN.1/TLV decode,
@@ -157,6 +156,24 @@ def _dispatch_asn1_tlv_decode(
         raise ValueError(f"ASN.1/TLV decode failed: {error}") from error
 
 
+def _dispatch_context_decode(
+    ctx: ActionContext,
+    *,
+    input_text: Any = None,
+    context: Any = None,
+) -> dict[str, Any]:
+    from Tools.Asn1TlvDecode.context import decode_context_text
+    from Tools.Asn1TlvDecode.main import DecodeError
+
+    text = str(input_text or "")
+    if len(text.strip()) == 0:
+        raise ValueError("input_text is empty.")
+    try:
+        return decode_context_text(text, hint=str(context or "auto"))
+    except DecodeError as error:
+        raise ValueError(f"Context decode failed: {error}") from error
+
+
 def _dispatch_sw_lookup(ctx: ActionContext, *, sw: Any = None) -> dict[str, Any]:
     from yggdrasim_common import registry as yggdrasim_registry
 
@@ -196,10 +213,12 @@ def _dispatch_euicc_info2(ctx: ActionContext, *, hex: Any = None) -> dict[str, A
         raise ValueError(f"EUICCInfo2 validation failed: {error}") from error
 
     detail = [
-        {"indent": int(i), "label": str(l), "value": str(v)} for i, l, v in detail_tuples
+        {"indent": int(i), "label": str(label), "value": str(v)}
+        for i, label, v in detail_tuples
     ]
     validation = [
-        {"indent": int(i), "label": str(l), "value": str(v)} for i, l, v in validation_tuples
+        {"indent": int(i), "label": str(label), "value": str(v)}
+        for i, label, v in validation_tuples
     ]
     return {
         "detail_lines": detail,
@@ -278,6 +297,12 @@ def _dispatch_gsma_codes(ctx: ActionContext) -> dict[str, Any]:
 
     wanted = [
         ("es10b_profile_state", "SGP22_ES10B_PROFILE_STATE_RESULT"),
+        # SGP.22 v3.1 §5.7.16 to §5.7.18 give each of the three functions its
+        # own enumeration; the merged table above cannot name a value whose
+        # meaning differs between them.
+        ("enable_profile", "SGP22_ENABLE_PROFILE_RESULT"),
+        ("disable_profile", "SGP22_DISABLE_PROFILE_RESULT"),
+        ("delete_profile", "SGP22_DELETE_PROFILE_RESULT"),
         ("notification_sent", "SGP22_NOTIFICATION_SENT_RESULT"),
         ("download_error", "SGP22_DOWNLOAD_ERROR_CODE"),
         ("profile_installation", "SGP22_PROFILE_INSTALLATION_RESULT_REASON"),
@@ -313,7 +338,7 @@ TLV_DECODE_SPEC = ActionSpec(
             kind="hex",
             required=True,
             multiline=True,
-            placeholder="6F 16 84 08 A0 00 00 01 51 00 00 00 …",
+            placeholder="6F 16 84 08 A0 00 00 01 51 00 00 00 ...",
             help="Compact or spaced hex; mixed case allowed.",
         ),
     ),
@@ -374,6 +399,45 @@ ASN1_TLV_DECODE_SPEC = ActionSpec(
 )
 
 
+CONTEXT_DECODE_SPEC = ActionSpec(
+    id="tool.decoder.context",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
+    title="Context decoder",
+    description=(
+        "Decode an APDU, a response, a bare TLV or a whole exchange trace "
+        "against the specification the CLA/INS pair selects: UICC file "
+        "commands, CAT, GlobalPlatform, ES10 and 3GPP authentication."
+    ),
+    inputs=(
+        ActionField(
+            name="input_text",
+            label="APDU, response, TLV or trace",
+            kind="text",
+            required=True,
+            multiline=True,
+            placeholder="00A4040407A0000000871002\n< 6F...9000",
+            help=(
+                "One hex string, or one exchange per line. Lines may start "
+                "with >, <, ->, <-, C:, R: or carry sw=XXXX; separators and "
+                "0x prefixes are ignored."
+            ),
+        ),
+        ActionField(
+            name="context",
+            label="Context",
+            kind="enum",
+            required=False,
+            default="auto",
+            choices=["auto", "apdu", "response", "es10", "gp", "uicc", "cat", "tlv", "sw"],
+            help="Auto detects from CLA/INS and the leading tag; pick a domain to force it.",
+        ),
+    ),
+    output_kind="context_decode",
+    dispatcher=_dispatch_context_decode,
+    tags=("decode", "apdu", "tlv", "es10", "gp", "cat"),
+)
+
+
 SW_LOOKUP_SPEC = ActionSpec(
     id="tool.sw.lookup",
     subsystem=OFFLINE_TOOLS_SUBSYSTEM,
@@ -407,7 +471,7 @@ EUICC_INFO2_SPEC = ActionSpec(
             kind="hex",
             required=True,
             multiline=True,
-            placeholder="BF 22 81 …",
+            placeholder="BF 22 81 ...",
             help="Compact hex of the EUICCInfo2 response.",
         ),
     ),
@@ -488,7 +552,7 @@ EIM_LINT_SPEC = ActionSpec(
             kind="text",
             required=True,
             multiline=True,
-            placeholder="{ \"header\": { … }, \"body\": { … } }",
+            placeholder="{ \"header\": { ... }, \"body\": { ... } }",
         ),
     ),
     output_kind="json",
@@ -509,6 +573,7 @@ GSMA_CODES_SPEC = ActionSpec(
 )
 
 
+get_registry().register(CONTEXT_DECODE_SPEC)
 get_registry().register(TLV_DECODE_SPEC)
 get_registry().register(ASN1_TLV_DECODE_SPEC)
 get_registry().register(SW_LOOKUP_SPEC)

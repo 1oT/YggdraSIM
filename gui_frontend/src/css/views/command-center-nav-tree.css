@@ -97,7 +97,7 @@
 }
 
 #command-center-nav .cc-nav-leaf.is-stub {
-  /* Reserved-but-not-wired surfaces — hint at it without making the
+  /* Reserved-but-not-wired surfaces -- hint at it without making the
      entry look broken. Still clickable; shows a placeholder card. */
   opacity: 0.65;
   font-style: italic;

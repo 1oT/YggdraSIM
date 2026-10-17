@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for advanced file, AKA, APDU, service, and tool-check lint rules.
 
 Covers: YRL-AKA-003, YRL-APD-001..003, YRL-CHK-001/002, YRL-DEP-5GS,
@@ -82,7 +81,7 @@ def _codes(doc: dict, **kw) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# YRL-CHK-001 / YRL-CHK-002 — saip-tool check result
+# YRL-CHK-001 / YRL-CHK-002 -- saip-tool check result
 # ---------------------------------------------------------------------------
 
 class ToolCheckResultTests(unittest.TestCase):
@@ -110,7 +109,7 @@ class ToolCheckResultTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-IMS-007 — short but valid IMSI (6..14 digits)
+# YRL-IMS-007 -- short but valid IMSI (6..14 digits)
 # ---------------------------------------------------------------------------
 
 class ImsiShortTests(unittest.TestCase):
@@ -132,20 +131,21 @@ class ImsiShortTests(unittest.TestCase):
         })
 
     def test_ims007_12_digit_imsi(self) -> None:
-        # 12-digit IMSI (even count -> parity nibble 0x9), padded to 9 bytes.
-        # digits: 001010000001, parity byte: (0<<4)|0x9=0x09
-        # body: 09 10 10 00 00 00 F1 FF (pad 0xFF to fill 8 body bytes)
-        codes = _codes(self._doc_with_imsi("08091010000000f1ff"))
+        # 12-digit IMSI (even count -> parity nibble 0x1, TS 24.008
+        # §10.5.1.4), padded to 9 bytes; 7 significant bytes follow the
+        # length byte. digits: 001010000001, parity byte: (0<<4)|0x1=0x01
+        # body: 01 10 10 00 00 00 F1 FF (pad 0xFF to fill 8 body bytes)
+        codes = _codes(self._doc_with_imsi("07011010000000f1ff"))
         self.assertIn("YRL-IMS-007", codes)
 
     def test_ims007_not_triggered_for_15_digit_imsi(self) -> None:
-        # 15-digit valid IMSI (odd -> parity 0x1)
-        codes = _codes(self._doc_with_imsi("080110100000000010"))
+        # 15-digit valid IMSI (odd -> parity 0x9)
+        codes = _codes(self._doc_with_imsi("080910100000000010"))
         self.assertNotIn("YRL-IMS-007", codes)
 
 
 # ---------------------------------------------------------------------------
-# YRL-N5G-001 — df-5gs without usim
+# YRL-N5G-001 -- df-5gs without usim
 # ---------------------------------------------------------------------------
 
 class FiveGsWithoutUsimTests(unittest.TestCase):
@@ -166,7 +166,7 @@ class FiveGsWithoutUsimTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-SVC-010/011/012 — mandatory service without matching PE
+# YRL-SVC-010/011/012 -- mandatory service without matching PE
 # ---------------------------------------------------------------------------
 
 class MandatoryServicePeTests(unittest.TestCase):
@@ -219,7 +219,7 @@ class MandatoryServicePeTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-UCR-001 — USIM missing ef-imsi or ef-ust marker
+# YRL-UCR-001 -- USIM missing ef-imsi or ef-ust marker
 # ---------------------------------------------------------------------------
 
 class UsimCoreRequirementsTests(unittest.TestCase):
@@ -246,7 +246,7 @@ class UsimCoreRequirementsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-APD-001/002/003 — APDU field encoding
+# YRL-APD-001/002/003 -- APDU field encoding
 # ---------------------------------------------------------------------------
 
 class ApduFieldTests(unittest.TestCase):
@@ -283,7 +283,7 @@ class ApduFieldTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-HEX-001 — oversized hex field
+# YRL-HEX-001 -- oversized hex field
 # ---------------------------------------------------------------------------
 
 class LargeHexFieldTests(unittest.TestCase):
@@ -316,7 +316,7 @@ class LargeHexFieldTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-012 — securityAttributesReferenced bad length
+# YRL-FIL-012 -- securityAttributesReferenced bad length
 # ---------------------------------------------------------------------------
 
 class SecurityAttrRefTests(unittest.TestCase):
@@ -337,7 +337,7 @@ class SecurityAttrRefTests(unittest.TestCase):
         })
 
     def test_fil012_too_long(self) -> None:
-        # 4 bytes — max is 3
+        # 4 bytes -- max is 3
         codes = _codes(self._gfm_with_sec_attr("01020304"))
         self.assertIn("YRL-FIL-012", codes)
 
@@ -347,7 +347,7 @@ class SecurityAttrRefTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-013 / YRL-FIL-014 / YRL-FIL-016 — efFileSize checks
+# YRL-FIL-013 / YRL-FIL-014 / YRL-FIL-016 -- efFileSize checks
 # ---------------------------------------------------------------------------
 
 class EfFileSizeTests(unittest.TestCase):
@@ -389,7 +389,7 @@ class EfFileSizeTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-023 / YRL-FIL-037 — linkPath checks
+# YRL-FIL-023 / YRL-FIL-037 -- linkPath checks
 # ---------------------------------------------------------------------------
 
 class LinkPathTests(unittest.TestCase):
@@ -416,7 +416,7 @@ class LinkPathTests(unittest.TestCase):
     def test_fil037_link_path_too_long(self) -> None:
         # 9 bytes > 8 byte limit
         codes = _codes(self._gfm_with_link("3F007FFF6F070000000000"))
-        # Note: 11 hex chars is odd, so use 18 hex chars = 9 bytes
+        # 11 hex chars is odd, so use 18 hex chars = 9 bytes
         codes = _codes(self._gfm_with_link("3F007FFF6F07000000"))
         self.assertIn("YRL-FIL-037", codes)
 
@@ -427,7 +427,7 @@ class LinkPathTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-027 — duplicate shortEFID within same scope
+# YRL-FIL-027 -- duplicate shortEFID within same scope
 # ---------------------------------------------------------------------------
 
 class ShortEfidDuplicateTests(unittest.TestCase):
@@ -456,7 +456,7 @@ class ShortEfidDuplicateTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-031 / YRL-FIL-032 — maximumFileSize checks
+# YRL-FIL-031 / YRL-FIL-032 -- maximumFileSize checks
 # ---------------------------------------------------------------------------
 
 class MaxFileSizeTests(unittest.TestCase):
@@ -491,7 +491,7 @@ class MaxFileSizeTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-035 — fileDetails bad encoding
+# YRL-FIL-035 -- fileDetails bad encoding
 # ---------------------------------------------------------------------------
 
 class FileDetailsTests(unittest.TestCase):
@@ -526,23 +526,18 @@ class FileDetailsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-067 — efFileSize not multiple of record length
+# YRL-FIL-067 -- efFileSize not multiple of record length
 # ---------------------------------------------------------------------------
 
 class RecordLengthAlignmentTests(unittest.TestCase):
     """YRL-FIL-067: efFileSize not multiple of recordLength for linear-fixed EF."""
 
     def test_fil067_size_not_multiple_of_record_length(self) -> None:
-        # 4-byte fileDescriptor: type=linear-fixed(0x42), DF indicator,
-        # max record count=5, record length=10 -> size=53 is not a multiple of 10
-        # fileDescriptor format: type 0x42, info, max_records, record_len
-        # Use 0x42 0x21 0x05 0x0A = "42210A" (wrong — need 4 bytes)
-        # linear-fixed: startswith 42 or 46, last 2 nibbles = record length
-        # Check: fileDescriptor.startswith("42") and len==8
-        # 0x42 0x21 0x05 0x0A: "4221050A"
-        # size=0x35 = 53, record_length=0x0A=10 -> 53 % 10 != 0 -> YRL-FIL-067
+        # ETSI TS 102 222 V17.1.0 §6.3.2.2.2 Table 4: descriptor byte 0x42
+        # (linear fixed), data coding byte 0x21, 2-byte record length 0x000A.
+        # size=0x35 = 53, record_length=10 -> 53 % 10 != 0 -> YRL-FIL-067
         fcp: dict = {
-            "fileDescriptor": {"hex": "4221050A"},
+            "fileDescriptor": {"hex": "4221000A"},
             "fileID": {"hex": "6F07"},
             "efFileSize": {"hex": "35"},
         }
@@ -559,7 +554,7 @@ class RecordLengthAlignmentTests(unittest.TestCase):
     def test_fil067_not_triggered_when_aligned(self) -> None:
         # size=50, record_length=10 -> 50 % 10 == 0 -> passes
         fcp: dict = {
-            "fileDescriptor": {"hex": "4221050A"},
+            "fileDescriptor": {"hex": "4221000A"},
             "fileID": {"hex": "6F07"},
             "efFileSize": {"hex": "32"},
         }
@@ -575,7 +570,7 @@ class RecordLengthAlignmentTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-038 — record count exceeds 254
+# YRL-FIL-038 -- record count exceeds 254
 # ---------------------------------------------------------------------------
 
 class RecordCountTests(unittest.TestCase):
@@ -584,7 +579,7 @@ class RecordCountTests(unittest.TestCase):
     def test_fil038_too_many_records(self) -> None:
         # record_length=1, efFileSize=255 -> 255 records > 254 limit
         fcp: dict = {
-            "fileDescriptor": {"hex": "42210101"},
+            "fileDescriptor": {"hex": "42210001"},
             "fileID": {"hex": "6F07"},
             "efFileSize": {"hex": "FF"},
         }
@@ -601,7 +596,7 @@ class RecordCountTests(unittest.TestCase):
     def test_fil038_not_triggered_for_valid_count(self) -> None:
         # record_length=10, efFileSize=250 -> 25 records
         fcp: dict = {
-            "fileDescriptor": {"hex": "4221050A"},
+            "fileDescriptor": {"hex": "4221000A"},
             "fileID": {"hex": "6F07"},
             "efFileSize": {"hex": "FA"},
         }
@@ -617,7 +612,7 @@ class RecordCountTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-AKA-003 — fixed-length AKA field out of spec
+# YRL-AKA-003 -- fixed-length AKA field out of spec
 # ---------------------------------------------------------------------------
 
 class AkaFixedFieldTests(unittest.TestCase):
@@ -651,7 +646,7 @@ class AkaFixedFieldTests(unittest.TestCase):
         self.assertIn("YRL-AKA-003", codes)
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-028 / YRL-FIL-029 — BER-TLV file content constraints
+# YRL-FIL-028 / YRL-FIL-029 -- BER-TLV file content constraints
 # ---------------------------------------------------------------------------
 
 class BerTlvContentTests(unittest.TestCase):

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """SCP80 parity oracle: cross-check our 03.48 primitives against pySIM.
 
@@ -12,14 +11,15 @@ suite uses ``pySim.ota`` as an independent oracle and pins:
 * AES-CMAC, 3DES-MAC, DES-MAC signature bytes.
 * The ``compute_pcntr`` padding length helper.
 
-Two known wire-format divergences from pySIM are intentional and asserted
-here so they cannot regress silently:
+The SMS-PP command packet is pinned against pySIM's ``OtaDialectSms`` as
+well (TS 31.115 §4.2 table 1: 2-octet CPL, null CHI, 1-octet CHL). For a
+cryptographic-checksum SPI the two blocks are byte-identical; the one
+deliberate divergence is asserted so it cannot drift silently:
 
-1. **§5.1 Command Packet outer layout.** Our envelope carries a leading
-   ``CHI=0x00`` byte and a 1-octet ``CPL``; pySIM emits a 2-octet ``CPL``
-   immediately followed by ``CHL`` (no CHI byte). Both encode the same
-   ciphered payload but the framing differs. This test pins both shapes.
-2. **§5.2 Response Packet** — only the inner cryptographic fields are
+1. **CC regardless of SPI.** The builder always emits an 8-octet CC and
+   CHL '15'; pySIM honours an SPI that asks for a redundancy check and
+   emits a CRC-32 with CHL '11'.
+2. **§5.2 Response Packet** -- only the inner cryptographic fields are
    cross-checked here; the outer SMS/UDH framing is YggdraSIM-specific
    and not represented in pySIM's ``decode_resp``.
 """
@@ -100,7 +100,7 @@ class Scp80TripleDesPrimitiveParityTests(unittest.TestCase):
         padded = PAYLOAD + b"\x00" * ((-len(PAYLOAD)) % 8)
         ours = CryptoEngine.encrypt_ct("3DES2", KEY_3DES_2K, padded)
         # pySIM's ``triple_des_cbc2`` uses the keyset directly. Ours
-        # internally pads to 24-byte 3DES-K3 by repeating K1 — match
+        # internally pads to 24-byte 3DES-K3 by repeating K1 -- match
         # that here for like-for-like comparison.
         key_eff = Utils.pad_key_3des(KEY_3DES_2K)
         otak = _otak("triple_des_cbc2", key_eff, "triple_des_cbc2", key_eff)
@@ -136,120 +136,92 @@ class Scp80SinglePrimitiveParityTests(unittest.TestCase):
         self.assertEqual(len(theirs), 8)
 
 
+class _BuilderConfig:
+    """The keys ``OtaPacketBuilder`` reads, without touching the on-disk inventory."""
+
+    def __init__(self, spi_hex: str) -> None:
+        self.values = {
+            "spi": spi_hex,
+            "kic_indicator": "12",
+            "kid_indicator": "12",
+            "tar": "B00010",
+            "cntr": "0000000001",
+            "kic": KEY_AES.hex().upper(),
+            "kid": KEY_AES.hex().upper(),
+            "pid": "7F",
+            "dcs": "F6",
+            "cla": "80",
+            "payload": PAYLOAD.hex().upper(),
+            "concat_sms": "ON",
+            "tp_ud_max": "140",
+        }
+
+    def get(self, key: str) -> str:
+        return self.values.get(key, "")
+
+    def get_int(self, key: str) -> int:
+        return int(self.values.get(key, "0"), 10)
+
+
 @unittest.skipUnless(PYSIM_AVAILABLE, "pySim not installed (saip extra)")
-class Scp80WireFormatDivergenceTests(unittest.TestCase):
-    """Pin the deliberate §5.1 framing divergence between us and pySIM.
+class Scp80WireFormatParityTests(unittest.TestCase):
+    """Pin the §5.1 command packet against pySIM's SMS dialect.
 
-    YggdraSIM emits an SMS-PP envelope shaped like::
-
-        CHI(00) | CPL(1B) | CHL(15) | SPI(2) | KIc(1) | KID(1) | TAR(3)
-                | enc(CNTR(5) | PCNTR(1) | CC(8) | SecData | pad)
-
-    pySIM's ``OtaDialectSms.encode_cmd`` instead produces::
-
-        CPL(2B)            | CHL(1B) | SPI(2) | KIc(1) | KID(1) | TAR(3)
-                | enc(CNTR(5) | PCNTR(1) | CC(8) | SecData | pad)
-
-    Both encode the same ciphered payload using identical key derivation
-    and identical primitives. Only the outer framing differs.
+    TS 31.115 §4.2 table 1 frames the packet as a 2-octet CPL, a null
+    CHI, a 1-octet CHL, then SPI, KIc, KID, TAR and the ciphered part
+    (CNTR, PCNTR, CC, secured data, padding). For a cryptographic-checksum
+    SPI our block and pySIM's ``OtaDialectSms.encode_cmd`` are identical
+    byte for byte. The builder always emits an 8-octet CC, so an SPI that
+    asks for a redundancy check is the one shape where the two diverge.
     """
 
-    def test_our_envelope_uses_shell_layout(self) -> None:
-        # Validate the v1-compatible YggdraSIM shell layout.
+    @staticmethod
+    def _our_block(spi_hex: str) -> bytes:
         from SCP80.builder import OtaPacketBuilder
-        from SCP80.config import ConfigManager
-        import os
-        os.environ["YGGDRASIM_ALLOW_DEMO_KEYS"] = "1"
-        cfg = ConfigManager()
-        cfg.set("kic", KEY_AES.hex())
-        cfg.set("kid", KEY_AES.hex())
-        cfg.set("spi", "1521")
-        cfg.set("kic_indicator", "12")
-        cfg.set("kid_indicator", "12")
-        cfg.set("tar", "B00010")
-        cfg.set("cntr", "0000000001")
-        block = OtaPacketBuilder(cfg).build_plan(
-            override_payload=PAYLOAD.hex().upper()
-        ).block_0348
 
-        # YggdraSIM layout: CHI(1) | CPL(1) | CHL(1) | SPI(2) | KIC(1) | KID(1) | TAR(3) | ct
-        self.assertEqual(block[0], 0x00, "CHI marker")
-        cpl = block[1]
-        self.assertEqual(cpl, len(block) - 2, "CPL covers all bytes after CHI+CPL")
-        chl = block[2]
-        self.assertEqual(chl, 0x15, "CHL = 13 + len_sig(8) = 21 = 0x15")
-        self.assertEqual(block[3:5], bytes.fromhex("1521"), "SPI mirrored")
-        self.assertEqual(block[5:6], bytes.fromhex("12"), "KIc indicator")
-        self.assertEqual(block[6:7], bytes.fromhex("12"), "KID indicator")
-        self.assertEqual(block[7:10], bytes.fromhex("B00010"), "TAR mirrored")
+        return OtaPacketBuilder(_BuilderConfig(spi_hex)).build_plan().block_0348
 
-    def test_pysim_envelope_uses_two_byte_cpl(self) -> None:
+    def _pysim_block(self, spi_hex: str) -> bytes:
         from pySim.ota import OtaDialectSms, SPI
+
         otak = _otak("aes_cbc", KEY_AES, "aes_cmac", KEY_AES)
-        # Round-trip a representative SPI through pySIM's own construct
-        # so the dict shape matches whatever vocabulary pySIM expects on
-        # the version we have installed. SPI=0x1521 == ciphered + RC +
-        # PoR required + PoR plain.
-        spi = dict(SPI.parse(bytes.fromhex("1521")))
+        # Round-trip the SPI through pySIM's own construct so the dict
+        # shape matches the vocabulary of the installed version.
+        spi = dict(SPI.parse(bytes.fromhex(spi_hex)))
         spi.pop("_io", None)
         try:
-            block = OtaDialectSms().encode_cmd(otak, bytes.fromhex("B00010"), spi, PAYLOAD)
+            return OtaDialectSms().encode_cmd(otak, bytes.fromhex("B00010"), spi, PAYLOAD)
         except (KeyError, ValueError, TypeError) as exc:
             self.skipTest(f"pySIM encode_cmd surface drifted: {exc!r}")
 
-        # Build our equivalent envelope from the same logical inputs.
-        from SCP80.builder import OtaPacketBuilder
-        from SCP80.config import ConfigManager
-        import os
-        os.environ["YGGDRASIM_ALLOW_DEMO_KEYS"] = "1"
-        cfg = ConfigManager()
-        cfg.set("kic", KEY_AES.hex())
-        cfg.set("kid", KEY_AES.hex())
-        cfg.set("spi", "1521")
-        cfg.set("kic_indicator", "12")
-        cfg.set("kid_indicator", "12")
-        cfg.set("tar", "B00010")
-        cfg.set("cntr", "0000000001")
-        ours_block = OtaPacketBuilder(cfg).build_plan(
-            override_payload=PAYLOAD.hex().upper()
-        ).block_0348
+    def test_cc_spi_block_is_byte_identical_to_pysim(self) -> None:
+        # SPI 1621: CC, ciphering, counter mode 10; PoR required over SMS-SUBMIT.
+        self.assertEqual(self._our_block("1621"), self._pysim_block("1621"))
 
-        # CPL field semantics. pySIM stores a 2-octet CPL covering all
-        # bytes after itself.
-        pysim_cpl = int.from_bytes(block[:2], "big")
+    def test_command_packet_opens_with_two_octet_cpl_then_chl(self) -> None:
+        block = self._our_block("1621")
         self.assertEqual(
-            pysim_cpl, len(block) - 2,
-            "pySIM CPL is a 2-octet length-of-rest field",
+            int.from_bytes(block[:2], "big"),
+            len(block) - 2,
+            "CPL counts every octet after itself",
         )
-        # Ours stores a 1-octet CPL preceded by a CHI=00 marker; the CPL
-        # covers CHL + params + ct (everything after the CHI/CPL pair).
-        self.assertEqual(ours_block[0], 0x00, "ours: first byte is CHI=00")
-        ours_cpl = ours_block[1]
         self.assertEqual(
-            ours_cpl, len(ours_block) - 2,
-            "ours: 1-octet CPL covers everything after CHI+CPL",
+            block[2],
+            0x15,
+            "CHL = SPI(2) + KIc(1) + KID(1) + TAR(3) + CNTR(5) + PCNTR(1) + CC(8)",
         )
+        self.assertEqual(block[3:5], bytes.fromhex("1621"), "SPI mirrored")
+        self.assertEqual(block[5:7], bytes.fromhex("1212"), "KIc and KID indicators")
+        self.assertEqual(block[7:10], bytes.fromhex("B00010"), "TAR mirrored")
 
-        # CHL field diverges too. Ours always emits 0x15 (21 = SPI(2)
-        # + KIc(1) + KID(1) + TAR(3) + CNTR(5) + PCNTR(1) + CC(8)) since
-        # we always run CMAC. pySIM honours the SPI's rc_cc_ds bits and
-        # emits CHL=13+len_sig accordingly (here SPI=0x1521 maps to RC
-        # = CRC-32, len_sig=4, CHL=17).
-        self.assertEqual(
-            ours_block[2], 0x15,
-            "ours: CHL fixed at 0x15 because we always emit 8-byte CMAC",
-        )
-        self.assertEqual(
-            block[2], 0x11,
-            "pySIM: CHL=0x11 for CRC-32 RC variant per TS 102 225",
-        )
-
-        # Ciphered payload bytes diverge as well — pySIM places a 4-byte
-        # CRC-32 in the position where we place an 8-byte CMAC.
-        self.assertNotEqual(
-            ours_block, block,
-            "wire-format must differ: confirm divergence is preserved",
-        )
+    def test_rc_spi_still_carries_an_eight_octet_cc(self) -> None:
+        # SPI 1521 asks for a redundancy check: pySIM emits a CRC-32
+        # (CHL 0x11) where the builder keeps its CC (CHL 0x15).
+        ours = self._our_block("1521")
+        theirs = self._pysim_block("1521")
+        self.assertEqual(ours[2], 0x15, "ours: CHL fixed at 0x15, 8-octet CMAC")
+        self.assertEqual(theirs[2], 0x11, "pySIM: CHL 0x11 for the CRC-32 variant")
+        self.assertNotEqual(ours, theirs, "the RC shape is the pinned divergence")
 
 
 if __name__ == "__main__":

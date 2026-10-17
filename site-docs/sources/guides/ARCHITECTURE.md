@@ -473,9 +473,43 @@ Persistence:
   `exec`'d, so the trust model is "operator owns the file"; treat it
   the same as a per-host config script.
 - `Workspace/SIMCARD/profile_store/` holds per-card profile artifacts
-  imported via `--sim-import-profile` or the SAIP tooling.
+  imported via `--sim-import-profile` or the SAIP tooling. A store the
+  card has written carries a `store.json` marker, so a card whose
+  every Profile was deleted (or memory-reset) stays empty after a
+  restart; removing the store directory brings the built-in Profiles
+  back.
 - `Workspace/SIMCARD/euicc_store/` holds per-EID eUICC state so the
   simulator survives launcher restarts cleanly.
+
+Private cards:
+
+- `SIMCARD/persona.py` builds a card that belongs to its caller rather
+  than the process. `PersonaCard(source, work_directory)` copies a
+  persona directory (`isdr_config.json`, `eim_identity.json`,
+  `euicc_store/`), bakes it once (the first build mints what the store
+  lacks and writes it back), and every `reset()` rebuilds the card from
+  that baked copy. A rebuild fails closed unless the EID, EUICCInfo1 and
+  EUICCInfo2, the profile list, the eIM configuration and the
+  certificates come back byte for byte. `connection()` returns a
+  pyscard-style facade with its own lock, so a validation reservation
+  of the shared card does not reach it.
+- The engine behind it is `SimulatedSimCardEngine(..., private=True)`:
+  no plugin extends its toolkit, and its behaviour profile is bound to
+  it directly instead of following the process-wide live profile. The
+  shared card stays the only engine `create_card_connection` returns.
+- `engine.add_apdu_observer(callback)` reports every APDU the card
+  answers together with the final result, and
+  `engine.sgp.register_extension(extension)` lets the owner of a card
+  answer or replace a reassembled STORE DATA command
+  (`before_store_data` / `after_store_data`). Neither is attached to
+  any card unless its owner registers it.
+- `conformance_strict` (in `isdr_config.json` or the eUICC store) makes
+  the card verify an RSP Server certificate chain up to an eSIM CA
+  RootCA it holds (its own CI and those listed in
+  `ci_certificates_der_hex`) and require the role OID, makes
+  ES10b.AddInitialEim follow SGP.32 v1.2 §5.9.4 without the simulator's
+  upsert convenience, and makes the `enable` PSMO answer an already
+  Enabled Profile with profileNotInDisabledState(2) instead of ok(0).
 
 ## 12. HIL bridge architecture
 
@@ -609,29 +643,29 @@ Responsibilities:
 The transcode TUI no longer surfaces decoded payloads only as JSON. Each pane
 slot can be flipped between four modes:
 
-- `asn1` — the existing JSON-tagged decode stream backed by `saip_decoded_edit`
-- `pe_editor` — a structured form for the currently selected Profile Element
-- `filesystem` — an MF/DF/EF tree reconstructed from PE-DF, PE-MF, PE-USIM,
+- `asn1` -- the existing JSON-tagged decode stream backed by `saip_decoded_edit`
+- `pe_editor` -- a structured form for the currently selected Profile Element
+- `filesystem` -- an MF/DF/EF tree reconstructed from PE-DF, PE-MF, PE-USIM,
   PE-ISIM, PE-CSIM, PE-Telecom, PE-PhoneBook and PE-GenericFileManagement
-- `applications` — an ISD + applications tree derived from PE-SecurityDomain
+- `applications` -- an ISD + applications tree derived from PE-SecurityDomain
   and PE-Application
 
 Editor classes live in `Tools/ProfilePackage/saip_pe_editors/` and are
 selected through `PE_EDITOR_REGISTRY` / `lookup_pe_editor`:
 
-- `_base.BasePeEditor` — abstract Textual `Vertical` host that owns the
+- `_base.BasePeEditor` -- abstract Textual `Vertical` host that owns the
   `PeHeaderForm` (mandated/identification round-trip), guards initial paint
   with a deferred `_suppress_emit` window, and emits
   `BasePeEditor.Changed` once an operator commits a change
-- `_header.PeHeaderForm` — reusable header form bound to every PE root
-- `_pin.PinCodesEditor` / `PukCodesEditor` — per-row PIN / PUK forms
-- `_aka.AkaParameterEditor` — algorithm picker, key material, SQN options
-- `_naa.NaaPeEditor` / `TelecomPeEditor` — header + template ID dropdown
+- `_header.PeHeaderForm` -- reusable header form bound to every PE root
+- `_pin.PinCodesEditor` / `PukCodesEditor` -- per-row PIN / PUK forms
+- `_aka.AkaParameterEditor` -- algorithm picker, key material, SQN options
+- `_naa.NaaPeEditor` / `TelecomPeEditor` -- header + template ID dropdown
   + EF presence toggles for USIM / OPT-USIM / ISIM / OPT-ISIM / CSIM /
   OPT-CSIM / Telecom
-- `_security_domain.SecurityDomainEditor` — instance parameters, key list
+- `_security_domain.SecurityDomainEditor` -- instance parameters, key list
   rows, and personalisation blob list
-- `_filesystem.FileSystemView` / `_applications.ApplicationsView` — read-only
+- `_filesystem.FileSystemView` / `_applications.ApplicationsView` -- read-only
   navigation views that emit `FileSelected` / `ApplicationSelected` so the
   JSON outline can jump to the matching PE
 
@@ -648,10 +682,10 @@ Adding a new structured editor:
 1. Subclass `BasePeEditor` and implement `compose`, `_refresh_widgets`, and
    the collect-and-emit path.
 2. Register the class in `PE_EDITOR_REGISTRY` (or call
-   `register_pe_editor`) keyed by the PE section type — duplicates such as
+   `register_pe_editor`) keyed by the PE section type -- duplicates such as
    `pinCodes_2` are resolved through `base_pe_type_for_section_key`.
 3. Add a unit test under `tests/test_saip_pe_editors.py`. Use
-   `_drive_with_callback` so assertions run while the editor is mounted —
+   `_drive_with_callback` so assertions run while the editor is mounted --
    queries against widget DOM state must execute inside the active pilot.
 
 ## 16. Dependencies

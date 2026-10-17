@@ -7,7 +7,7 @@ The suites below complement ``test_simcard_sgp32_load_euicc_package`` by
 exercising the surfaces that surfaced during the v1.2 audit:
 
 - Wire-format result tags for ``deleteEim`` (``[9]``) and ``updateEim``
-  (``[10]``) — primitive ``89`` / ``8A`` per AUTOMATIC TAGS, not the
+  (``[10]``) -- primitive ``89`` / ``8A`` per AUTOMATIC TAGS, not the
   constructed forms used on the eCO command side.
 - Package-level constraints from §2.11.1.1: at most one ``enable`` per
   package, at most one ``disable`` per package, ``listProfileInfo`` must
@@ -301,6 +301,22 @@ class Sgp32EnableRollbackFlagTests(_Sgp32GapBase):
         self.assertTrue(secondary.rollback_armed)
         self.assertFalse(primary.rollback_armed)
         self.assertEqual(self.state.previous_enabled_aid, primary.aid)
+
+
+class Sgp32StrictEnableTests(_Sgp32GapBase):
+    def _enable_enabled_primary(self) -> bytes:
+        primary = self.state.profiles[0]
+        primary.state = "enabled"
+        return self.logic._psmo_enable(tlv(b"\x5A", encode_iccid_ef(primary.iccid)))
+
+    def test_enabled_profile_answers_ok_outside_strict_mode(self) -> None:
+        self.assertEqual(self._enable_enabled_primary(), tlv(b"\x83", b"\x00"))
+
+    def test_enabled_profile_is_not_in_disabled_state_in_strict_mode(self) -> None:
+        # SGP.32 v1.2 EnableProfileResult profileNotInDisabledState(2) (p.39).
+        self.state.conformance_strict = True
+
+        self.assertEqual(self._enable_enabled_primary(), tlv(b"\x83", b"\x02"))
 
 
 class Sgp32ProfileRollbackTests(_Sgp32GapBase):

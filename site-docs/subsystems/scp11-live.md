@@ -143,14 +143,6 @@ python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
 [eSIM Management] > DOWNLOAD-PROFILE LPA:1$example.smdp.example.com$ABCDEF123456
 ```
 
-
-```text
-[eSIM Management] > POLL 5 60s -t 20s -s 5
-```
-
-Without the plugin, the `POLL` verb is either hidden or emits a clean runtime
-error explaining that the capability is optional.
-
 ## Pitfalls
 
 - An expired or untrusted ES9+ certificate fails at `InitiateAuthentication`
@@ -169,4 +161,4 @@ error explaining that the capability is optional.
 - [RSP Architecture](../concepts/rsp-architecture.md)
 - [SCP11 Local Access](scp11-local-access.md)
 - [Download a Profile (Live Relay)](../how-to/download-a-profile-live.md)
-- [HIL Bridge — offline pcap replay](hil-bridge.md#offline-pcap-replay)
+- [HIL Bridge -- offline pcap replay](hil-bridge.md#offline-pcap-replay)

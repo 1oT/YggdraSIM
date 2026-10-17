@@ -21,7 +21,7 @@ reference profile to guarantee:
    marks the owning PE dirty so Save picks it up.
 3. The tagged-path splicer refuses to create missing nodes (any such
    call means the editor model is out of date).
-4. The frontend bundle ships the expected decoded-edit plumbing —
+4. The frontend bundle ships the expected decoded-edit plumbing --
    we keep a light assertion on the public JS symbols so missing
    wiring fails CI instead of silently landing a broken GUI.
 """
@@ -29,7 +29,10 @@ reference profile to guarantee:
 from __future__ import annotations
 
 import importlib
+import json
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -75,6 +78,37 @@ class DecodedEditSplicerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.saip._splice_tagged_value_at_rel_path(doc, ["x", 0], 99)
 
+    def test_splice_append_extends_list_at_its_length(self) -> None:
+        doc = {"sdPersoData": [{"hex": "AA"}]}
+        self.saip._splice_tagged_value_at_rel_path(
+            doc, ["sdPersoData", 1], {"hex": "BB"}, append=True
+        )
+        self.assertEqual(doc["sdPersoData"], [{"hex": "AA"}, {"hex": "BB"}])
+
+    def test_splice_append_creates_a_missing_list(self) -> None:
+        doc = {"keyList": []}
+        self.saip._splice_tagged_value_at_rel_path(
+            doc, ["sdPersoData", 0], {"hex": "BB"}, append=True
+        )
+        self.assertEqual(doc["sdPersoData"], [{"hex": "BB"}])
+
+    def test_splice_append_refuses_a_gap_and_a_missing_key_elsewhere(self) -> None:
+        doc = {"sdPersoData": [{"hex": "AA"}]}
+        with self.assertRaises(ValueError):
+            self.saip._splice_tagged_value_at_rel_path(
+                doc, ["sdPersoData", 2], {"hex": "BB"}, append=True
+            )
+        with self.assertRaises(ValueError):
+            self.saip._splice_tagged_value_at_rel_path(
+                doc, ["other", 1], {"hex": "BB"}, append=True
+            )
+        self.assertEqual(doc, {"sdPersoData": [{"hex": "AA"}]})
+
+    def test_splice_without_append_still_refuses_extension(self) -> None:
+        doc = {"sdPersoData": [{"hex": "AA"}]}
+        with self.assertRaises(ValueError):
+            self.saip._splice_tagged_value_at_rel_path(doc, ["sdPersoData", 1], {"hex": "BB"})
+
 
 class DecodedEditProjectionTests(unittest.TestCase):
     """Unit tests for the wire-shape projector."""
@@ -97,7 +131,7 @@ class DecodedEditProjectionTests(unittest.TestCase):
             "read_only": False,
             "model": {
                 "title": "Decoded editor: Life Cycle Status Integer",
-                "note": "Supported states: …",
+                "note": "Supported states: ...",
                 "editor_kind": "lcsi_state",
                 "payload": {"state": "operational_activated"},
                 "target_length": None,
@@ -160,7 +194,10 @@ class DecodedEditProjectionTests(unittest.TestCase):
             pe,
             "fileManagementCMD[0][1]",
         )
-        self.assertIs(choice_list, pe.decoded["fileManagementCMD"][0])
+        # The addressed createFCP alone, as the live tuple: a transaction
+        # creates several files, and the edit belongs to this one.
+        self.assertEqual(len(choice_list), 1)
+        self.assertIs(choice_list[0], pe.decoded["fileManagementCMD"][0][1])
         applied = self.saip._apply_hex_mutation(
             choice_list,
             "fileID",
@@ -175,7 +212,7 @@ class DecodedEditProjectionTests(unittest.TestCase):
 
 @unittest.skipUnless(
     _REFERENCE_PROFILE.exists(),
-    "reference profile sample missing — skipping end-to-end test",
+    "reference profile sample missing -- skipping end-to-end test",
 )
 class DecodedEditEndToEndTests(unittest.TestCase):
     """Drive the dispatchers against the reference profile."""
@@ -227,6 +264,60 @@ class DecodedEditEndToEndTests(unittest.TestCase):
                 return key
         self.fail("reference profile missing a USIM-style section with ef-imsi")
 
+    def _pick_sd_section(self) -> str:
+        sections = self.handle["decoded_document"].get("sections") or {}
+        for key, value in sections.items():
+            if isinstance(value, dict) and "keyList" in value:
+                return key
+        self.fail("reference profile missing a securityDomain section with keyList")
+
+    def test_apply_decoded_edit_appends_sd_perso_record(self) -> None:
+        section = self._pick_sd_section()
+        before = list(self.handle["decoded_document"]["sections"][section].get("sdPersoData") or [])
+        self.assertEqual(len(before), 1)
+
+        resp = self.saip._dispatch_apply_decoded_edit(
+            self.ctx,
+            session_id=self.session_id,
+            section_key=section,
+            rel_path=["sdPersoData", len(before)],
+            field_name="sdPersoData",
+            editor_kind="raw_hex_decoded",
+            editor_payload={"hex": "007003AABBCC"},
+            append=True,
+        )
+
+        self.assertEqual(resp["rel_path"], ["sdPersoData", 1])
+        after = self.handle["decoded_document"]["sections"][section]["sdPersoData"]
+        self.assertEqual(len(after), 2)
+        shown = self.saip._dispatch_show_pe(
+            self.ctx, session_id=self.session_id, pe_index=resp["pe_index"]
+        )
+        records = shown["decoded"].get("_dgi_decoded")
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[1]["items"][0]["dgi"], "0070")
+        self.assertEqual(records[1]["items"][0]["raw"], "aabbcc")
+
+    def test_apply_decoded_edit_refuses_a_partial_dgi_record(self) -> None:
+        section = self._pick_sd_section()
+        count = len(self.handle["decoded_document"]["sections"][section].get("sdPersoData") or [])
+        with self.assertRaises(ValueError) as caught:
+            self.saip._dispatch_apply_decoded_edit(
+                self.ctx,
+                session_id=self.session_id,
+                section_key=section,
+                rel_path=["sdPersoData", count],
+                field_name="sdPersoData",
+                editor_kind="raw_hex_decoded",
+                editor_payload={"hex": "007004AABBCC"},
+                append=True,
+            )
+        self.assertIn("sdPersoData record", str(caught.exception))
+        self.assertEqual(
+            len(self.handle["decoded_document"]["sections"][section].get("sdPersoData") or []),
+            count,
+        )
+
     def test_list_decoded_fields_surfaces_lcsi_editor(self) -> None:
         section = self._pick_usim_section()
         resp = self.saip._dispatch_list_decoded_fields(
@@ -238,7 +329,6 @@ class DecodedEditEndToEndTests(unittest.TestCase):
         lcsi = [f for f in resp["fields"] if f["editor_kind"] == "lcsi_state"]
         self.assertGreater(len(lcsi), 0, "reference profile should expose at least one LCSI state")
         # Every entry must be wire-serialisable.
-        import json
         json.dumps(resp)
 
     def test_apply_decoded_edit_roundtrips_lcsi_state(self) -> None:
@@ -332,6 +422,25 @@ class DecodedEditBundleWiringTests(unittest.TestCase):
     def test_frontend_calls_both_backend_actions(self) -> None:
         self.assertIn("saip.list_decoded_fields/run", self.app_js)
         self.assertIn("saip.apply_decoded_edit/run", self.app_js)
+
+    def test_frontend_ships_sd_dgi_table_and_add_record_control(self) -> None:
+        for symbol in (
+            "saipRenderSdDgiDecoded",
+            "saipRenderSdPersoAddControl",
+            "saipSdPersoRecordProblem",
+            "Decoded DGI blocks",
+            "Add DGI record",
+            "append: true",
+        ):
+            self.assertIn(symbol, self.app_js, f"missing JS symbol: {symbol}")
+        for css_class in (".saip-dgi-table", ".saip-dgi-row-depth-1", ".saip-sd-perso-add"):
+            self.assertIn(css_class, self.app_css, f"missing CSS rule: {css_class}")
+
+    def test_json_tab_fills_the_detail_pane(self) -> None:
+        self.assertIn('bodyHost.classList.add("saip-detail-body--json")', self.app_js)
+        self.assertIn('bodyHost.classList.remove("saip-detail-body--json")', self.app_js)
+        self.assertIn(".saip-detail-body--json .saip-pe-json-card", self.app_css)
+        self.assertIn(".saip-pe-json-card .saip-pe-json-text", self.app_css)
 
     def test_decoded_edit_auto_apply_is_session_only(self) -> None:
         for token in (
@@ -466,7 +575,7 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
         for token in (
             '.saip-workbench input[type="checkbox"]',
             '.saip-modal-host input[type="checkbox"]',
-            "border-radius: 999px",
+            "border-radius: var(--radius-pill)",
             "radial-gradient(circle at center, var(--accent",
             "color-mix(in srgb, var(--accent",
         ):
@@ -515,7 +624,7 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
     def test_data_hex_dump_has_copy_toolbar(self) -> None:
         # The wholesale ``saip-hexdump-tools`` block was removed when
         # the Data tab dropped the trailing FF-flood hex dump (operator
-        # feedback — sparse fillFileContent layouts hid the decoded
+        # feedback -- sparse fillFileContent layouts hid the decoded
         # cards behind a wall of FF). Per-record Copy hex affordances
         # now live on each record card; the wholesale Raw bytes editor
         # carries its own Copy hex button for transparent EFs.
@@ -551,11 +660,11 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
         self.assertIn(".saip-decoded-hex-tools", self.app_css)
 
     def test_loading_messages_are_capitalized(self) -> None:
-        self.assertIn("Loading file…", self.app_js)
-        self.assertIn("Loading PE…", self.app_js)
-        self.assertIn("Loading applications…", self.app_js)
-        self.assertIn("Loading diff vs saved…", self.app_js)
-        self.assertIn("Comparing…", self.app_js)
+        self.assertIn("Loading file...", self.app_js)
+        self.assertIn("Loading PE...", self.app_js)
+        self.assertIn("Loading applications...", self.app_js)
+        self.assertIn("Loading diff vs saved...", self.app_js)
+        self.assertIn("Comparing...", self.app_js)
 
     def test_pe_detail_tabs_have_tooltips(self) -> None:
         # Two-tab world: "Decoded view" (typed editor + hex) and "JSON".
@@ -582,27 +691,30 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
         self.assertIn(".saip-decoded-hex-tools", self.app_css)
 
     def test_validation_dock_copy_is_sentence_case(self) -> None:
-        self.assertIn("Running linter…", self.app_js)
-        self.assertIn("Preparing linter…", self.app_js)
+        self.assertIn("Running linter...", self.app_js)
+        self.assertIn("Preparing linter...", self.app_js)
         self.assertIn('score.textContent = "Score "', self.app_js)
         self.assertIn('score.textContent = "Error"', self.app_js)
-        self.assertIn('? "Running…" : "Not run yet"', self.app_js)
+        self.assertIn('? "Running..." : "Not run yet"', self.app_js)
 
     def test_save_status_messages_are_sentence_case(self) -> None:
         # The save form left the drawer in the workbench rebuild;
         # save / revert status now lives on the package object so the
         # ribbon Save / Revert buttons can surface progress chips.
-        # The "Output path required" guard moved into Save as… input
+        # The "Output path required" guard moved into Save as... input
         # validation rather than a saveStatus assignment.
-        self.assertIn('pkg.saveStatus = "Saving…"', self.app_js)
-        self.assertIn('pkg.saveStatus = "Saved " +', self.app_js)
+        self.assertIn('pkg.saveStatus = "Saving..."', self.app_js)
+        # A plain save reports the byte count; a materialized template export
+        # says so, both through one ternary on ``materialized``.
+        self.assertIn("pkg.saveStatus = materialized", self.app_js)
+        self.assertIn(': "Saved " + (data.size_bytes || 0) + " bytes."', self.app_js)
         self.assertIn('pkg.saveStatus = "Error: "', self.app_js)
-        self.assertIn('pkg.saveStatus = "Reverting…"', self.app_js)
+        self.assertIn('pkg.saveStatus = "Reverting..."', self.app_js)
         self.assertIn('pkg.saveStatus = "Reverted to source."', self.app_js)
 
     def test_ribbon_action_buttons_have_tooltips(self) -> None:
         # The save/revert/compare actions moved from the left drawer
-        # onto the ribbon in the SAIP workbench rebuild — these
+        # onto the ribbon in the SAIP workbench rebuild -- these
         # tooltips are now the ones the operator sees.
         self.assertIn("Save back to the source path", self.app_js)
         self.assertIn("Drop in-memory edits and reload", self.app_js)
@@ -610,18 +722,18 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
 
     def test_open_package_ribbon_path_is_wired(self) -> None:
         # The open-package form left the drawer in the workbench
-        # rebuild — Open is a ribbon button, drag-drop drop, or
+        # rebuild -- Open is a ribbon button, drag-drop drop, or
         # Ctrl+O. The handler funnels through saipRibbonOpenPackage,
         # so pin its existence and the drag-drop wiring helper.
         self.assertIn("saipRibbonOpenPackage", self.app_js)
         self.assertIn("wireSaipWorkbenchDrop", self.app_js)
         self.assertIn(
-            "Open a SAIP package from disk — drag-and-drop also works",
+            "Open a SAIP package from disk -- drag-and-drop also works",
             self.app_js,
         )
 
     def test_decoded_apply_status_copy(self) -> None:
-        self.assertIn('manual ? "Applying…" : "Auto-applying…"', self.app_js)
+        self.assertIn('manual ? "Applying..." : "Auto-applying..."', self.app_js)
         self.assertIn('manual ? "Applied." : "Auto-applied."', self.app_js)
         self.assertIn('"Apply failed."', self.app_js)
 
@@ -651,24 +763,30 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
         self.assertIn('Reset all (" + overrideNames.length + ")', self.app_js)
 
     def test_variables_state_chips_are_capitalized(self) -> None:
-        self.assertIn('>Override</span>', self.app_js)
-        self.assertIn('>Defined</span>', self.app_js)
-        self.assertIn('>Used</span>', self.app_js)
+        # One Source badge per row, capitalised like the other chips.
+        self.assertIn('text: "Typed"', self.app_js)
+        self.assertIn('text: "Catalog default"', self.app_js)
+        self.assertIn('text: "Unset"', self.app_js)
+        self.assertIn('>Sensitive</span>', self.app_js)
 
     def test_pe_and_file_list_rows_have_navigation_tooltips(self) -> None:
         self.assertIn('card.title = "Show PE #" + row.index', self.app_js)
-        self.assertIn('row.title = hasChildren', self.app_js)
-        self.assertIn('"Open " + node.label + " — "', self.app_js)
+        # Backed rows open the file; synthetic parents only toggle.
+        self.assertIn('row.title = "Open " + node.label + " -- "', self.app_js)
+        self.assertIn('row.title = (collapsed ? "Expand " : "Collapse ") + node.label', self.app_js)
 
     def test_compare_and_diff_errors_are_operator_facing(self) -> None:
         self.assertIn("The other package is no longer open.", self.app_js)
         self.assertIn("That number is not in the list.", self.app_js)
         self.assertIn("Diff vs saved failed.", self.app_js)
 
-    def test_variable_modal_chrome(self) -> None:
-        # "Variable editor" was renamed to "Token editor" so the surface
-        # text is YggdraSIM's own and not copied from a third-party editor.
-        self.assertIn("Close token editor (same as Esc).", self.app_js)
+    def test_token_dock_chrome(self) -> None:
+        # The panel is named after what it lists (Variables), in
+        # YggdraSIM's own words, and docks beside the profile instead of
+        # floating over it.
+        self.assertIn('setAttribute("aria-label", "Close variables panel")', self.app_js)
+        self.assertIn('closeBtn.title = "Close (Esc while the dock has focus)";', self.app_js)
+        self.assertNotIn("Close token editor (same as Esc).", self.app_js)
         self.assertIn("overrideWord", self.app_js)
         self.assertIn("placeholderWord", self.app_js)
         self.assertIn("Leave diff vs saved and return to the normal detail view.", self.app_js)
@@ -758,7 +876,7 @@ class PeLevelDecodedPanelWiringTests(unittest.TestCase):
         # the panel skips the per-EF filter and surfaces every
         # decodable field for the section. Match flexibly because
         # the host variable is named differently in each call site
-        # (`inlineHost`, `decodedHost`, `panelA`, …).
+        # (`inlineHost`, `decodedHost`, `panelA`, ...).
         import re
         pattern = re.compile(
             r'saipRenderDecodedEditPanel\(\s*\w+,\s*pkg,\s*\w+,\s*"\*",\s*peList'
@@ -766,31 +884,29 @@ class PeLevelDecodedPanelWiringTests(unittest.TestCase):
         matches = pattern.findall(self.app_js)
         self.assertGreaterEqual(
             len(matches), 1,
-            "saipRenderDecodedEditPanel(host, pkg, sectionKey, '*', peList, …) "
-            "invocation missing — the PE-level decoded panel may have lost "
+            "saipRenderDecodedEditPanel(host, pkg, sectionKey, '*', peList, ...) "
+            "invocation missing -- the PE-level decoded panel may have lost "
             "its wildcard fieldPath.",
         )
 
-    def test_decoded_panel_is_default_on(self) -> None:
-        # Default policy: every PE gets the decoded panel unless the
-        # type explicitly opts out (file-bearing application
-        # templates). This guards against future refactors that
-        # accidentally flip the default and silently strip the panel
-        # from header / GFM / RFM / gsm-access PEs.
-        self.assertIn("var supportsDecodedPanel = true;", self.app_js)
+    def test_every_element_ends_in_its_fields(self) -> None:
+        # Every PE gets its fields (saipRenderPeFieldTree), open unless a
+        # workbench of its own edits the files. This guards against a
+        # refactor that strips them from header / GFM / RFM / gsm-access.
+        self.assertIn("var fieldsCollapsed = false;", self.app_js)
+        self.assertIn(
+            "saipRenderPeFieldTree(data, pkg, peList, validation, { collapsed: fieldsCollapsed })",
+            self.app_js,
+        )
 
-    def test_application_templates_opt_out(self) -> None:
-        # USIM / ISIM / CSIM PEs already have a typed template + files
-        # editor and route per-EF edits through the Files tab. The
-        # decoded panel must remain disabled here to avoid showing the
-        # same fields three times.
+    def test_application_templates_fold_their_fields(self) -> None:
+        # USIM / ISIM / CSIM PEs edit their files in the template
+        # workbench; their fields come folded beneath it.
         marker = "saipEditorRenderTemplateFilesWorkbenchCard("
         anchor = self.app_js.find(marker)
         self.assertGreater(anchor, 0, "USIM/ISIM/CSIM template workbench invocation missing")
-        # Window covers the whole template-catalog + filesystem-wizards
-        # block that follows, ending at the ``supportsDecodedPanel`` flip.
         window = self.app_js[anchor: anchor + 600]
-        self.assertIn("supportsDecodedPanel = false", window)
+        self.assertIn("fieldsCollapsed = true", window)
 
     def test_generic_roundtrip_kept_for_direct_pe_families(self) -> None:
         self.assertIn("function saipDirectPeAllowsGenericDecoded(", self.app_js)
@@ -829,6 +945,55 @@ class PeLevelDecodedPanelWiringTests(unittest.TestCase):
         self.assertIn('document.createElement("summary")', body)
         self.assertIn("forceCollapsible: true", body)
         self.assertIn("startCollapsed: true", body)
+
+    def test_security_domain_key_list_opens_with_an_overview(self) -> None:
+        """One table row per KeyObject above the groups, with a jump.
+
+        Nine collapsed groups of eight collapsed rows hid every value two
+        clicks deep. The overview reads the same decoded payloads the
+        editors edit, and a divider per run of equal key version numbers
+        keeps the groups readable as key sets without a third level.
+        """
+        self.assertIn("function saipDecodedSdRenderKeyListHeader(", self.app_js)
+        self.assertIn("function saipDecodedSdKeyRowModel(", self.app_js)
+        self.assertIn("function saipDecodedSdRenderKeyVersionDivider(", self.app_js)
+        self.assertIn("function saipDecodedSdJumpToKeyGroup(", self.app_js)
+        anchor = self.app_js.find("} else if (directIsSecurityDomain) {")
+        self.assertGreater(anchor, 0)
+        body = self.app_js[anchor: anchor + 5200]
+        self.assertIn("saipDecodedSdRenderKeyListHeader(directPane, sdModels)", body)
+        self.assertIn("saipDecodedSdRenderKeyVersionDivider(model, runLength)", body)
+        self.assertIn("group.dataset.sdKeyIndex = String(entryIdx)", body)
+        self.assertIn("previewText: saipDecodedSdFieldPreview(field)", body)
+        self.assertIn("pathTrimSegments: 2", body)
+        css = Path("yggdrasim_common/gui_server/static/app.css").read_text(encoding="utf-8")
+        for selector in (
+            ".saip-sd-keytable",
+            ".saip-sd-keytable-row",
+            ".saip-sd-keyset-divider",
+            ".saip-decoded-row-preview",
+        ):
+            self.assertIn(selector, css)
+
+    def test_security_domain_key_group_names_the_counter_state(self) -> None:
+        """The group meta says whether keyCounterValue is present.
+
+        SAIP v3.4.1 section 8.6.3 makes the counter OPTIONAL and has the
+        eUICC apply the protocol default when it is absent; a bare field
+        count ("7 fields" next to "8 fields") read as a defect instead.
+        """
+        self.assertIn("function saipDecodedSdKeyGroupMeta(", self.app_js)
+        self.assertIn('"initial counter: protocol default"', self.app_js)
+        self.assertIn("SAIP v3.4.1 section 8.6.3", self.app_js)
+        self.assertNotIn(
+            'fields.length + " field" + (fields.length === 1 ? "" : "s")',
+            self.app_js,
+        )
+
+    def test_decoded_row_preview_and_path_trim_are_opt_in(self) -> None:
+        self.assertIn("rowOpts.previewText", self.app_js)
+        self.assertIn("rowOpts.pathTrimSegments", self.app_js)
+        self.assertIn('"saip-decoded-row-preview"', self.app_js)
 
     def test_direct_pe_dropdowns_cover_manual_constrained_fields(self) -> None:
         self.assertIn("var _SAIP_PE_TYPES_BY_HINT = {", self.app_js)
@@ -873,7 +1038,7 @@ class PeLevelDecodedPanelWiringTests(unittest.TestCase):
 
 @unittest.skipUnless(
     _REFERENCE_PROFILE.exists(),
-    "reference profile sample missing — skipping end-to-end test",
+    "reference profile sample missing -- skipping end-to-end test",
 )
 class ShowPeSectionKeyTests(unittest.TestCase):
     """Pins the ``section_key`` field that ``saip.show_pe`` exposes so
@@ -980,7 +1145,7 @@ class FilesTabParityWiringTests(unittest.TestCase):
 
     def test_template_card_skips_when_empty(self) -> None:
         # Template card must opt out when there is neither a template
-        # OID nor any root descriptor data — otherwise non-template
+        # OID nor any root descriptor data -- otherwise non-template
         # PEs render an empty card with one blank row.
         self.assertIn(
             "if (!hasTemplate && !hasRoot) return;",
@@ -1431,17 +1596,86 @@ class RfmCardWiringTests(unittest.TestCase):
         window = self.app_js[anchor: anchor + 240]
         self.assertIn("pkg, sectionKey, peList, validation", window)
 
-    def test_key_reference_rendered(self) -> None:
+    def test_card_names_the_instance_and_its_security_domain(self) -> None:
         anchor = self.app_js.find("function saipEditorRenderRfmCard(")
         end = self.app_js.find("\n  function ", anchor + 100)
         body = self.app_js[anchor: end if end > anchor else anchor + 4000]
-        self.assertIn("keyReference", body)
+        # The identity rows render through a helper, editable through
+        # saip.set_rfm_field while a session is open.
+        self.assertIn("saipRfmRenderIdentityRows(card, decoded, rfmFields);", body)
+        start = self.app_js.find("function saipRfmRenderIdentityRows(")
+        self.assertGreater(start, 0)
+        identity = self.app_js[start: self.app_js.find("\n  function ", start + 50)]
+        self.assertIn('"Instance AID"', identity)
+        self.assertIn('"Security domain AID"', identity)
+        self.assertIn("MNO-SD (associated by default)", identity)
+        self.assertIn('"instance_aid"', identity)
+        self.assertIn('"security_domain_aid"', identity)
+        # PE-RFM carries no key reference or loop count (TCA SAIP v3.4.1
+        # section 8.8); the card must not look for them.
+        self.assertNotIn("keyReference", body)
+        self.assertNotIn("rfmLoopCount", body)
+        self.assertIn("saipRfmRenderScope(card, decoded, pkg, sectionKey, peIndex, peList, validation)", body)
 
-    def test_msl_bits_table_defined(self) -> None:
-        self.assertIn("var _MSL_BITS =", self.app_js)
+    def test_scope_block_binds_and_unbinds_the_adf(self) -> None:
+        anchor = self.app_js.find("function saipRfmRenderScope(")
+        self.assertGreater(anchor, 0)
+        end = self.app_js.find("\n  function saipEditorRenderRfmCard(", anchor)
+        body = self.app_js[anchor:end]
+        self.assertIn('"Default directory"', body)
+        self.assertIn('"Selected by default"', body)
+        self.assertIn("MF -- UICC shared file system", body)
+        self.assertIn('"Bind ADF"', body)
+        self.assertIn('"Edit binding"', body)
+        self.assertIn('"Unbind ADF (MF only)"', body)
+        self.assertIn('"Apply binding"', body)
+        self.assertIn("adf_candidates", body)
+        self.assertIn("decoded.adfRFMAccess", body)
+        self.assertIn("saipRfmBindAdf(", body)
+        self.assertIn("saipRfmUnbindAdf(", body)
+        self.assertIn("saip.set_rfm_adf_access", self.app_js)
+        self.assertIn("saip.remove_rfm_adf_access", self.app_js)
+        self.assertIn("saip.get_rfm", self.app_js)
+        self.assertNotIn("function saipEditorRenderRfmWizard(", self.app_js)
 
-    def test_access_domain_bits_table_defined(self) -> None:
-        self.assertIn("var _ACCESS_DOMAIN_BITS =", self.app_js)
+    def test_editors_keep_drafts_on_the_package(self) -> None:
+        for symbol in (
+            "function saipDraftKey(",
+            "function saipDraftGet(",
+            "function saipDraftSet(",
+            "function saipDraftClear(",
+            "function saipDraftClearPrefix(",
+            "function saipDraftCount(",
+            "function saipDraftChip(",
+        ):
+            self.assertIn(symbol, self.app_js)
+        anchor = self.app_js.find("function saipEditorRenderRfmCard(")
+        end = self.app_js.find("\n  function ", anchor + 100)
+        body = self.app_js[anchor: end if end > anchor else anchor + 4000]
+        self.assertIn('saipDraftKey(sectionKey, "rfm.tar")', body)
+        self.assertIn("rememberTarDraft()", body)
+        scope = self.app_js[self.app_js.find("function saipRfmRenderScope("):anchor]
+        self.assertIn('saipDraftKey(sectionKey, "rfm.adf")', scope)
+        self.assertIn("rememberDraft()", scope)
+        apply_anchor = self.app_js.find("async function saipRfmApplyTarList(")
+        self.assertIn(
+            'saipDraftClear(pkg, saipDraftKey(sectionKey, "rfm.tar"))',
+            self.app_js[apply_anchor: apply_anchor + 1600],
+        )
+
+    def test_msl_reads_the_first_spi_octet(self) -> None:
+        # ETSI TS 102 225 V19.0.0 §5.1.1; a toolkit MSL field is the MSL
+        # parameter and its data (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.4).
+        self.assertIn("var _MSL_INTEGRITY =", self.app_js)
+        self.assertIn("var _MSL_COUNTER =", self.app_js)
+        self.assertIn("function saipDecodeMslField(", self.app_js)
+
+    def test_access_domain_decoder_reads_the_access_domain_data(self) -> None:
+        # ETSI TS 102 226 V19.0.0 §8.2.1.3.2.5: the parameter, then three bytes.
+        start = self.app_js.index("function saipDecodeAccessDomain(")
+        body = self.app_js[start:self.app_js.index("\n  }\n", start)]
+        self.assertIn("_SAIP_ACCESS_DOMAIN_ADD_BITS", body)
+        self.assertIn("data.length !== 6", body)
 
 
 class TemplatePinAidArrDecodeWiringTests(unittest.TestCase):
@@ -1628,7 +1862,10 @@ class RecordCardCollapsibleWiringTests(unittest.TestCase):
     def test_arr_wizard_button_expands_row_context(self) -> None:
         anchor = self.app_js.find("function saipRenderArrRecordRow(")
         self.assertGreater(anchor, 0)
-        body = self.app_js[anchor: anchor + 9000]
+        # The whole function, not a fixed window: an unrelated line added
+        # above the handler must not push it out of view.
+        end = self.app_js.find("\n  function ", anchor + 1)
+        body = self.app_js[anchor: end]
         click_anchor = body.find('wizBtn.addEventListener("click"')
         self.assertGreater(click_anchor, 0)
         click_body = body[click_anchor: click_anchor + 700]
@@ -1637,7 +1874,7 @@ class RecordCardCollapsibleWiringTests(unittest.TestCase):
 
 
 class DispatcherCoverageManifestTests(unittest.TestCase):
-    """The Phase 1 manifest publishes routed ef-keys for the audit."""
+    """The dispatcher manifest publishes routed ef-keys for the audit."""
 
     def test_known_dispatcher_ef_keys_exposed(self) -> None:
         from Tools.ProfilePackage.saip_asn1_decode import (
@@ -1654,7 +1891,7 @@ class DispatcherCoverageManifestTests(unittest.TestCase):
 
 
 class AddFileModalWiringTests(unittest.TestCase):
-    """The Phase 3 Add-file modal is gated, fetched, and rendered."""
+    """The Add-file modal is gated, fetched, and rendered."""
 
     def setUp(self) -> None:
         self.app_js = Path("yggdrasim_common/gui_server/static/app.js").read_text(
@@ -1835,7 +2072,12 @@ class BackendDecodedTreeAndDecodedTabEditWiringTests(unittest.TestCase):
         anchor = self.app_js.find("function saipFileRenderData(")
         self.assertGreater(anchor, 0)
         window = self.app_js[anchor: anchor + 24000]
-        self.assertIn("saipSynthesizeRecordRowsFromLayout(image.bytes, layout)", window)
+        # The rows come from the image as the hex pane shows it (placeholder
+        # values in), and a backend list shorter than the layout is extended.
+        self.assertIn("saipSynthesizeRecordRowsFromLayout(shownImageBytes, layout)", window)
+        self.assertIn(
+            "saipExtendRecordRowsToLayout(backendRecords, shownImageBytes, layout)", window
+        )
 
     def test_data_tab_renders_record_navigator_for_record_fixed_files(self) -> None:
         anchor = self.app_js.find("function saipFileRenderData(")
@@ -1843,6 +2085,22 @@ class BackendDecodedTreeAndDecodedTabEditWiringTests(unittest.TestCase):
         window = self.app_js[anchor: anchor + 24000]
         self.assertIn("saipBuildRecordNavigator({", window)
         self.assertIn("isRecordFixedForRaw", window)
+
+    def test_whole_file_hex_card_carries_record_geometry(self) -> None:
+        # The "Whole file" hex scope of a record-structured EF writes through
+        # ``saip.update_file_content`` like a transparent one; the card names
+        # the record geometry, because a short write pads record by record.
+        anchor = self.app_js.find("function saipFileRenderData(")
+        self.assertGreater(anchor, 0)
+        window = self.app_js[anchor: anchor + 30000]
+        call = window.find("hexCard = saipBuildRawBytesCard({")
+        self.assertGreater(call, 0)
+        call_body = window[call: call + 800]
+        self.assertIn("recordSize: canScopeRecord ? layout.recordSize : 0", call_body)
+        self.assertIn("recordCount: canScopeRecord ? recordsForNav.length : 0", call_body)
+        card = self.app_js.find("function saipBuildRawBytesCard(")
+        self.assertGreater(card, 0)
+        self.assertIn("records of", self.app_js[card: card + 1600])
 
     def test_decoded_ef_wizards_are_registered(self) -> None:
         # The 42 EFs listed below close out the residual coverage gap
@@ -1870,7 +2128,7 @@ class BackendDecodedTreeAndDecodedTabEditWiringTests(unittest.TestCase):
 
     def test_record_fixed_check_accepts_space_separated_structure(self) -> None:
         # saipDecodeFileDescriptor returns ``structure: "linear fixed"``
-        # (with a space) — the Decoded / Data tabs used to compare
+        # (with a space) -- the Decoded / Data tabs used to compare
         # against ``"linear-fixed"`` (with a dash) which made
         # ``isRecordFixed`` permanently false for every linear-fixed EF,
         # so neither tab entered its records-rendering branch.
@@ -1930,7 +2188,8 @@ class GfmWizardBucketWiringTests(unittest.TestCase):
         self.assertGreater(anchor, 0)
         window = self.app_js[anchor: anchor + 300]
         self.assertIn("saipEditorRenderGfmCard", window)
-        self.assertIn("supportsDecodedPanel = false", window)
+        # Its fields come folded under the two-pane card.
+        self.assertIn("fieldsCollapsed = true", window)
         self.assertIn("saipFileRenderGeneral(", self.app_js)
 
 
@@ -2025,12 +2284,19 @@ class PeEditorFilesystemDispatchTests(unittest.TestCase):
         anchor = self.app_js.find('|| t === "isdr"')
         self.assertGreater(anchor, 0)
 
-    def test_filesystem_branch_mounts_decoded_wizard_cards(self) -> None:
-        self.assertIn("function saipEditorRenderFilesystemDecodedWizards(", self.app_js)
-        cat_at = self.app_js.find("saipEditorRenderTemplateCatalogCard(")
-        wiz_at = self.app_js.find("saipEditorRenderFilesystemDecodedWizards();")
-        self.assertGreater(cat_at, 0)
-        self.assertGreater(wiz_at, cat_at)
+    def test_filesystem_branch_omits_decoded_wizard_cards(self) -> None:
+        # The template workbench edits every EF leaf in its per-file tabs,
+        # so the PE-level bucketed wizard cards only repeated them.
+        self.assertNotIn("saipEditorRenderFilesystemDecodedWizards", self.app_js)
+        self.assertGreater(self.app_js.find("saipEditorRenderTemplateCatalogCard("), 0)
+
+    def test_nonstandard_branch_renders_the_typed_card(self) -> None:
+        # TCA SAIP v3.4.1 §8.9: issuerID and content, both edited in place.
+        self.assertIn(
+            "saipEditorRenderNonStandardCard(wrap, decoded, pkg, data, peList, validation);",
+            self.app_js,
+        )
+        self.assertIn('"saip.set_nonstandard_field"', self.app_js)
 
 
 class ProfileHeaderConnectivityEditorWiringTests(unittest.TestCase):
@@ -2056,6 +2322,67 @@ class ProfileHeaderConnectivityEditorWiringTests(unittest.TestCase):
         self.assertIn('"iccid_from_ef"', self.app_js)
         self.assertIn("saipConnectivityHeaderIccidDigits", self.app_js)
 
+    def test_connectivity_sms_bearer_smsc_sync_control(self) -> None:
+        self.assertIn("Sync from EF.SMSP", self.app_js)
+        self.assertIn('"smsc_from_ef_smsp"', self.app_js)
+        self.assertIn(
+            "state.syncSmscFromEfSmsp = async function (bearerIndex, statusEl)",
+            self.app_js,
+        )
+        self.assertIn(
+            "function saipConnectivityRenderSmsFields(body, entry, opts)",
+            self.app_js,
+        )
+        # A bearer added or edited in the form is not in the stored header
+        # yet; the sync applies the form first so the backend finds it.
+        anchor = self.app_js.find("state.syncSmscFromEfSmsp = async function")
+        self.assertGreater(anchor, 0)
+        body = self.app_js[anchor: anchor + 1200]
+        self.assertIn("if (state.dirty)", body)
+        self.assertIn("await applyStructuredForm(statusEl)", body)
+        self.assertIn("async function applyStructuredForm(statusEl)", self.app_js)
+
+    def test_connectivity_form_is_a_draft_of_the_package(self) -> None:
+        anchor = self.app_js.find("function saipEditorRenderConnectivityParametersCard(")
+        self.assertGreater(anchor, 0)
+        body = self.app_js[anchor: anchor + 12000]
+        self.assertIn('saipDraftKey(sectionKey, "header.connectivity")', body)
+        self.assertIn("state.onRendered = rememberDraft", body)
+        self.assertIn('formHost.addEventListener("input", rememberDraft)', body)
+        self.assertIn("if (draft && Array.isArray(draft.bearers))", body)
+        self.assertIn('if (typeof state.onRendered === "function") state.onRendered();', self.app_js)
+
+    def test_decoded_form_editor_is_a_draft_of_the_package(self) -> None:
+        anchor = self.app_js.find("function saipRenderEditorJsonFallback(")
+        self.assertGreater(anchor, 0)
+        body = self.app_js[anchor: anchor + 9000]
+        self.assertIn('saipDraftKey(sectionKey, "decoded", saipDecodedRelPathKey(field.rel_path))', body)
+        self.assertIn("opts.onApplied = function ()", body)
+        self.assertIn("onRefresh: rememberDraft", body)
+        self.assertIn('form.addEventListener("input", rememberDraft)', body)
+        apply_anchor = self.app_js.find("function saipMakeApplyBar(")
+        self.assertIn(
+            'if (opts && typeof opts.onApplied === "function") opts.onApplied();',
+            self.app_js[apply_anchor: apply_anchor + 6000],
+        )
+
+    def test_tlv_items_render_as_one_section_with_their_value(self) -> None:
+        for symbol in (
+            "function saipFormTlvItemInfo(",
+            "function saipFormRenderTlvItemBody(",
+            "function saipFormTlvAidDecoded(",
+            "function saipFormTlvAsciiToHex(",
+        ):
+            self.assertIn(symbol, self.app_js)
+        anchor = self.app_js.find("function saipFormRenderTlvItemBody(")
+        body = self.app_js[anchor: anchor + 6000]
+        self.assertIn('saipFormFieldRow("AID", "")', body)
+        self.assertIn('saipFormFieldRow("Text",', body)
+        self.assertIn('saipFormFieldRow("Value",', body)
+        self.assertIn("inlineList: true", body)
+        self.assertIn("var tlvItem = saipFormTlvItemInfo(host, item);", self.app_js)
+        self.assertIn('if (opts.inlineList === true) {', self.app_js)
+
     def test_profile_header_pol_bitmask_control(self) -> None:
         self.assertIn('saipFormBitmaskDef("pol")', self.app_js)
         self.assertIn("Profile policy rules", self.app_js)
@@ -2071,7 +2398,7 @@ class SaipSecurityDomainApplicationRfmFormWiringTests(unittest.TestCase):
         self.assertIn("function saipFormAccessDomainRow(", self.app_js)
         self.assertIn("_SAIP_ACCESS_DOMAIN_PARAMETER_OPTIONS", self.app_js)
         self.assertIn("Application PIN 1", self.app_js)
-        self.assertIn("ADM 10", self.app_js)
+        self.assertIn('label: "ADM10"', self.app_js)
 
     def test_sd_parameter_dropdown_and_bitmask_fields_wired(self) -> None:
         self.assertIn("Global Service Parameters", self.app_js)
@@ -2101,42 +2428,49 @@ class SaipSecurityDomainApplicationRfmFormWiringTests(unittest.TestCase):
         self.assertIn("saipEditorTarListNode", self.app_js)
         self.assertIn("function saipSdParamBuildState(", self.app_js)
         self.assertIn("function saipSdParamApply(", self.app_js)
-        self.assertIn("function saipSdIsParameterField(", self.app_js)
-        self.assertIn("function saipRenderDirectPeDecodedBlock(", self.app_js)
         self.assertIn("saip.update_sd_parameters", self.app_js)
         self.assertIn("UICC Toolkit App. Specific Parameters (80)", self.app_js)
         self.assertIn("+ TAR", self.app_js)
         self.assertIn("Remove TAR", self.app_js)
         self.assertIn("Use structured fields", self.app_js)
-        self.assertIn("SIM Toolkit application parameters", self.app_js)
-        self.assertIn("SIM file access parameters", self.app_js)
+        # ETSI TS 102 226 V19.0.0 §8.2.1.3.2.1 ('CA') and §8.2.1.3.2.2.1 ('80')
+        # share the toolkit resources; only 'CA' has an access domain.
+        self.assertIn("function renderToolkitResources(", self.app_js)
+        self.assertIn("saipSdParamToolkitState(simFileDecoded, simFileRaw, true)", self.app_js)
+        self.assertIn("saipSdParamToolkitState(toolkitDecoded, toolkitRaw, false)", self.app_js)
+        self.assertIn('"Max services"', self.app_js)
+        self.assertNotIn("SIM Toolkit application parameters", self.app_js)
         self.assertIn("+ TLV item", self.app_js)
         self.assertIn("Memory Management", self.app_js)
         self.assertIn("Volatile memory quota (C7)", self.app_js)
         self.assertIn("Contactless Parameters", self.app_js)
         self.assertIn("Reader Mode Protocol Data Type A", self.app_js)
         self.assertIn("Application is allowed to register a CLTObserverListener", self.app_js)
-        self.assertIn("+ ADF access", self.app_js)
+        # §8.2.1.3.2.2.2: entries of AID, access domain and DAP.
+        self.assertIn("+ ADF entry", self.app_js)
+        self.assertIn("+ UICC file system entry", self.app_js)
+        self.assertIn('"Access domain DAP"', self.app_js)
+        self.assertIn("function saipAccessDomainEditor(", self.app_js)
+        self.assertNotIn("accessDomainRecords", self.app_js)
         self.assertIn("ts102226AdditionalContactlessParameters", self.app_js)
         self.assertIn("contactlessProtocolParameters", self.app_js)
         self.assertIn("userInteractionContactlessParameters", self.app_js)
         self.assertIn("Security Domain parameters", self.app_js)
         self.assertIn("suppressEmptyDirectEditor", self.app_js)
-        self.assertIn("0x00 — Full access", self.app_js)
+        self.assertIn("0x00 -- Full access", self.app_js)
 
     def test_security_domain_dispatch_renders_parameter_card(self) -> None:
         anchor = self.app_js.find('t === "securitydomain"')
         self.assertGreater(anchor, 0)
         window = self.app_js[anchor: anchor + 1200]
         self.assertIn("isSecurityDomainLike", window)
-        self.assertIn("saipSdIsLeadInstanceField", window)
-        self.assertIn("saipSdIsParameterField", window)
         self.assertIn("saipEditorRenderApplicationParametersCard", window)
+        self.assertIn("saipEditorRenderSdAuthoringCard", window)
 
     def test_rfm_tar_summary_fallback_wired(self) -> None:
         anchor = self.app_js.find("function saipEditorRenderRfmCard(")
         self.assertGreater(anchor, 0)
-        window = self.app_js[anchor: anchor + 1800]
+        window = self.app_js[anchor: anchor + 3600]
         self.assertIn("decoded._tar_summary", window)
         self.assertIn("tarValues", window)
         self.assertIn("Apply TAR list", self.app_js)
@@ -2198,12 +2532,6 @@ class AdditionalPeTypedCardsWiringTests(unittest.TestCase):
         self.assertGreater(crypto_at, anchor)
         self.assertGreater(sqn_at, anchor)
         self.assertLess(crypto_at, sqn_at)
-
-    def test_rfm_wizard_buckets_instance_aid_with_access_domain(self) -> None:
-        anchor = self.app_js.find("function saipEditorRenderRfmWizard(")
-        self.assertGreater(anchor, 0)
-        window = self.app_js[anchor: anchor + 900]
-        self.assertIn("instanceaid", window.lower())
 
     def test_ram_wizard_header_matches_dashed_header_suffix(self) -> None:
         anchor = self.app_js.find("function saipEditorRenderRamWizard(")
@@ -2357,7 +2685,10 @@ class EfLociEpsLociImsiUstDecodeWiringTests(unittest.TestCase):
     def test_ust_service_labels_fdn_present(self) -> None:
         anchor = self.app_js.find("_UST_SERVICE_LABELS")
         self.assertGreater(anchor, 0)
-        body = self.app_js[anchor: anchor + 1500]
+        # The table spans every TS 31.102 §4.2.8 service, so read up to its
+        # closing brace instead of a fixed prefix.
+        end = self.app_js.find("\n  };", anchor)
+        body = self.app_js[anchor: end if end > anchor else anchor + 8000]
         self.assertIn("FDN", body)
         self.assertIn("IMS", body)
 
@@ -2406,12 +2737,15 @@ class EfSuciUacAcmLiDecodeWiringTests(unittest.TestCase):
         self.assertIn("Profile A", body)
         self.assertIn("Profile B", body)
 
-    def test_uac_aic_access_class_labels(self) -> None:
+    def test_uac_aic_access_identity_labels(self) -> None:
+        # EF.UAC_AIC byte 1 names two access identities (TS 31.102 §4.4.11.7).
+        # Access control classes belong to EF.ACC and were rendered here before.
         anchor = self.app_js.find("_UAC_AIC_BITS")
         self.assertGreater(anchor, 0)
         body = self.app_js[anchor: anchor + 500]
-        self.assertIn("emergency", body)
-        self.assertIn("Class 15", body)
+        self.assertIn("Multimedia Priority Service", body)
+        self.assertIn("Mission Critical Service", body)
+        self.assertNotIn("Class 15", body)
 
     def test_suci_card_label(self) -> None:
         self.assertIn("EF.SUCI-CALC-INFO decoded", self.data_body)
@@ -2703,8 +3037,27 @@ class EfSpnSmspDecodeWiringTests(unittest.TestCase):
     def test_smsp_wizard_uses_variable_alpha_and_28_byte_footer(self) -> None:
         self.assertIn("recordSize < 28", self.app_js)
         self.assertIn("alphaLen = recordSize - 28", self.app_js)
-        self.assertIn("Parameter block (28 B)", self.app_js)
         self.assertNotIn("EF.SMSP records are 38 B", self.app_js)
+
+    def test_smsp_wizard_splits_the_parameter_block_into_its_fields(self) -> None:
+        # TS 31.102 §4.2.27: PI, TP-DA, TS-SCA, TP-PID, TP-DCS, TP-VP are
+        # edited one by one; the 28 B block is only previewed.
+        self.assertNotIn("kept raw.", self.app_js)
+        self.assertIn('"Parameters present"', self.app_js)
+        self.assertIn('{ key: "da", bit: 0x01, label: "TP-Destination Address" }', self.app_js)
+        self.assertIn('{ key: "vp", bit: 0x10, label: "TP-Validity Period" }', self.app_js)
+        self.assertIn("function _saipSmsAddressEditor(", self.app_js)
+        self.assertIn("function _saipSmsValidityText(", self.app_js)
+        self.assertIn("var piByte = 0xE0;", self.app_js)
+        self.assertIn('_saipWizardRow(host, "Parameter block", preview, "The 28 B block as it will be written.");', self.app_js)
+
+    def test_acc_wizard_follows_the_spec_bit_layout(self) -> None:
+        # TS 31.102 §4.2.15: byte 1 b8..b1 = AC 15..8 (b3 set to 0), byte 2
+        # b8..b1 = AC 7..0; every class from 0 to 15 has a checkbox.
+        self.assertIn("for (var n = 0; n <= 15; n++) {", self.app_js)
+        self.assertIn("var byteIndex = n >= 8 ? 0 : 1;", self.app_js)
+        self.assertIn('"AC 10 (b3, spec sets 0)"', self.app_js)
+        self.assertNotIn("random backoff", self.app_js)
 
     def test_iccid_imsi_use_backend_decoded_editor_only(self) -> None:
         self.assertIn("function saipDecodedEditOwnsWholeFileWizard(", self.app_js)
@@ -2998,7 +3351,7 @@ class CbSmsCfisIsimMiscDecodeWiringTests(unittest.TestCase):
         # tolerant matcher that also catches contextual paths like
         # ``efIccProfile/ef-arr`` from nested file systems) plus the
         # ``saipDecodeEfArr`` summary helper. Either reference path is
-        # acceptable — the test guards the wiring, not the literal.
+        # acceptable -- the test guards the wiring, not the literal.
         self.assertTrue(
             "ef-arr" in self.data_body or "saipIsArrEfKey" in self.data_body,
             "EF.ARR dispatch missing from saipFileRenderData",
@@ -3152,14 +3505,15 @@ class FinalSevenEfDecodeWiringTests(unittest.TestCase):
     # --- zero gap assertion ---
     def test_all_registered_ef_keys_have_dispatch(self) -> None:
         # Coverage criteria: every EF advertised in the FID map must be
-        # reachable through one of three render paths —
+        # reachable through one of three render paths --
         #  1. a legacy ``efKey === "ef-X"`` branch in saipFileRenderData
         #     (the historical text-decoder pipeline),
         #  2. a transparent-EF wizard registered in ``_SAIP_WIZARDS``,
         #  3. a record-fixed wizard registered in
         #     ``_SAIP_RECORD_WIZARDS``,
         # plus the structural EF.ARR helper (saipIsArrEfKey) which
-        # owns the per-record decoder dispatch end-to-end.
+        # owns the per-record decoder dispatch end-to-end for ``ef-arr``
+        # and every ``ef-arr-<df>`` key.
         import re
         fid_keys = set(re.findall(r'"(ef-[a-z0-9-]+)": \["[0-9A-F]{4}"', self.app_js))
         branch_keys = set(re.findall(r'efKey === "(ef-[a-z0-9-]+)"', self.app_js))
@@ -3175,13 +3529,171 @@ class FinalSevenEfDecodeWiringTests(unittest.TestCase):
         record_wizard_keys |= set(
             re.findall(r'"(ef-[a-z0-9-]+)":\s*_SAIP_RECORD_WIZARD_', self.app_js),
         )
-        covered = branch_keys | wizard_keys | record_wizard_keys | {"ef-arr"}
+        arr_keys = {key for key in fid_keys if key == "ef-arr" or key.startswith("ef-arr-")}
+        covered = branch_keys | wizard_keys | record_wizard_keys | arr_keys
         missing = sorted(fid_keys - covered)
         self.assertEqual(
             missing, [],
             msg="EF keys registered in FID map but missing from saipFileRenderData dispatch: "
                 + str(missing),
         )
+
+
+_WARN = "⚠"
+
+
+class EfPsLoci5gAuthKeysTn3gppSnnDecodeWiringTests(unittest.TestCase):
+    """Pins the PSLOCI / 5GAUTHKEYS / TN3GPPSNN decoders, their Data-tab cards and the PSLOCI wizard.
+
+    3GPP TS 31.102 v19.5 section 4.2.23 (EF.PSLOCI), section 4.4.11.6
+    (EF.5GAUTHKEYS) and section 4.4.11.13 (EF.TN3GPPSNN). The vectors run
+    under node against the functions cut from the served bundle, with the
+    decode boundaries every decoder meets: empty, one byte, a truncated TLV
+    header and an over-claiming length.
+    """
+
+    _PRELUDE = (
+        "_PSLOCI_RAU_STATUS_LABELS",
+        "_5GAUTHKEYS_FIELDS",
+        "_saipHexToBytes",
+        "_saipBytesToHex",
+        "_saipHexPad2",
+        "_saipPlmnDecode",
+        "_saipUtf8Decode",
+        "_saipWalkBerTlvs",
+        "saipDecodeEfPsLoci",
+        "saipDecodeEf5gAuthKeys",
+        "saipDecodeEfTn3gppSnn",
+    )
+
+    def setUp(self) -> None:
+        self.app_js = Path("yggdrasim_common/gui_server/static/app.js").read_text(encoding="utf-8")
+        anchor = self.app_js.find("function saipFileRenderData(")
+        end = self.app_js.find("\n  function ", anchor + 100)
+        self.data_body = self.app_js[anchor: end if end > anchor else anchor + 14000]
+
+    def _cut(self, name: str) -> str:
+        """Return the top-level function or table ``name`` as the bundle defines it."""
+        for head, tail in (
+            (f"\n  function {name}(", "\n  }\n"),
+            (f"\n  var {name} = {{", "\n  };\n"),
+        ):
+            start = self.app_js.find(head)
+            if start < 0:
+                continue
+            stop = self.app_js.find(tail, start)
+            self.assertGreater(stop, start, name)
+            return self.app_js[start: stop + len(tail)]
+        self.fail(f"{name} is not defined in the bundle")
+        return ""
+
+    def _decode(self, function: str, vectors: list[str]) -> list:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is required to run the decoders under test.")
+        harness = (
+            "".join(self._cut(name) for name in self._PRELUDE)
+            + "\nconst vectors = " + json.dumps(vectors) + ";\n"
+            + "process.stdout.write(JSON.stringify(vectors.map((v) => " + function + "(v))));\n"
+        )
+        completed = subprocess.run(
+            [node, "-e", harness], check=False, capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        return json.loads(completed.stdout)
+
+    def test_decoders_defined(self) -> None:
+        for name in ("saipDecodeEfPsLoci", "saipDecodeEf5gAuthKeys", "saipDecodeEfTn3gppSnn"):
+            self.assertIn(f"function {name}(", self.app_js)
+
+    def test_wired_in_data_tab(self) -> None:
+        for key, name in (
+            ("ef-psloci", "saipDecodeEfPsLoci"),
+            ("ef-5gauthkeys", "saipDecodeEf5gAuthKeys"),
+            ("ef-tn3gppsnn", "saipDecodeEfTn3gppSnn"),
+        ):
+            self.assertIn(f'efKey === "{key}"', self.data_body)
+            self.assertIn(f"{name}(", self.data_body)
+
+    def test_card_labels(self) -> None:
+        for label in ("EF.PSLOCI decoded", "EF.5GAUTHKEYS decoded", "EF.TN3GPPSNN decoded"):
+            self.assertIn(label, self.data_body)
+
+    def test_psloci_wizard_registered(self) -> None:
+        self.assertIn('_SAIP_WIZARDS["ef-psloci"]', self.app_js)
+        self.assertIn('title: "EF.PSLOCI wizard"', self.app_js)
+
+    def test_psloci_vectors(self) -> None:
+        good = "C0000001" + "010203" + "00F110" + "0001" + "01" + "00"
+        decoded = self._decode(
+            "saipDecodeEfPsLoci", ["", "C0", "FF" * 13, good, "FF" * 14, good + "AA"],
+        )
+        self.assertEqual(decoded[:3], [None, None, None])
+        self.assertEqual(decoded[3].split("\n"), [
+            "P-TMSI: 0xC0000001",
+            "P-TMSI signature: 0x010203",
+            "RAI: MCC=001 MNC=01 LAC=0x0001 RAC=0x01",
+            "Routing Area update status: updated (0x0)",
+        ])
+        self.assertEqual(decoded[4].split("\n"), [
+            "P-TMSI: 0xFFFFFFFF (not assigned)",
+            "P-TMSI signature: 0xFFFFFF",
+            "RAI: not set",
+            f"Routing Area update status: reserved (0x7) {_WARN} RFU bits b4-b8 set",
+        ])
+        self.assertEqual(decoded[5].split("\n")[-1], f"{_WARN} 1 byte(s) beyond the 14-byte file.")
+
+    def test_5gauthkeys_vectors(self) -> None:
+        good = "8020" + "11" * 32 + "8120" + "FF" * 32 + "8220" + "22" * 32 + "83020005" + "8402FFFF"
+        decoded = self._decode(
+            "saipDecodeEf5gAuthKeys", ["", "80", "8020AA", "FF" * 110, good, "8501AA"],
+        )
+        self.assertIsNone(decoded[0])
+        self.assertEqual(
+            decoded[1].split("\n")[-1], f"{_WARN} Truncated: tag '80' at byte 0 has no length byte.",
+        )
+        self.assertEqual(
+            decoded[2].split("\n")[-1],
+            f"{_WARN} Truncated: tag '80' at byte 0 declares 32 B but 1 follow.",
+        )
+        self.assertEqual(decoded[3], "No TLV object: the file holds 'FF' fill only.")
+        self.assertEqual(decoded[4].split("\n"), [
+            "KAUSF ('80', 32 B): " + "11" * 32,
+            "KSEAF for 3GPP access ('81', 32 B): no valid value ('FF' fill)",
+            "KSEAF for non-3GPP access ('82', 32 B): " + "22" * 32,
+            "SOR counter ('83', 2 B): 5",
+            "UE parameter update counter ('84', 2 B): no valid value ('FF' fill)",
+        ])
+        self.assertEqual(decoded[5].split("\n")[0], f"{_WARN} Tag '85' (1 B) is not one of '80'..'84'.")
+        self.assertEqual(len(decoded[5].split("\n")), 6)
+
+    def test_tn3gppsnn_vectors(self) -> None:
+        names = ["5G:mnc001.mcc001.3gppnetwork.org", "5G:mnc099.mcc999.3gppnetwork.org"]
+        objects = "".join(
+            "80" + f"{len(name):02X}" + name.encode("utf-8").hex().upper() for name in names
+        )
+        decoded = self._decode(
+            "saipDecodeEfTn3gppSnn",
+            ["", "00", "01", "0180", "01800A41", "FF" * 4, "02" + objects, "01" + objects],
+        )
+        self.assertIsNone(decoded[0])
+        self.assertEqual(decoded[1], "Serving network name objects: 0")
+        self.assertEqual(decoded[2].split("\n")[-1], f"{_WARN} Byte 1 announces 1 object(s); 0 read.")
+        self.assertEqual(
+            decoded[3].split("\n")[-1],
+            f"{_WARN} Truncated after byte 1: tag '80' at byte 0 has no length byte.",
+        )
+        self.assertEqual(
+            decoded[4].split("\n")[-1],
+            f"{_WARN} Truncated after byte 1: tag '80' at byte 0 declares 10 B but 1 follow.",
+        )
+        self.assertEqual(decoded[5], "No count byte: the file holds 'FF' fill only.")
+        self.assertEqual(decoded[6].split("\n"), [
+            "Serving network name objects: 2",
+            f"#1 ('80', {len(names[0])} B): {names[0]}",
+            f"#2 ('80', {len(names[1])} B): {names[1]}",
+        ])
+        self.assertEqual(decoded[7].split("\n")[-1], f"{_WARN} Byte 1 announces 1 object(s); 2 read.")
 
 
 if __name__ == "__main__":

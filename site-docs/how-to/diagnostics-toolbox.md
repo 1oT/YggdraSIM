@@ -17,7 +17,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # Diagnostics Toolbox
 
 Four capabilities land next to the core subsystems for the v1
-release. Each is additive — nothing existing changes unless the
+release. Each is additive -- nothing existing changes unless the
 new command is explicitly invoked.
 
 | Capability | Entry point | Safety posture |
@@ -49,9 +49,9 @@ single `moved` entry.
 
 Inside `DIFF-TUI`:
 
-- `n` / `N` — next / previous diff
-- `v` — toggle value rendering
-- `q` — quit
+- `n` / `N` -- next / previous diff
+- `v` -- toggle value rendering
+- `q` -- quit
 
 See [Profile Package subsystem](../subsystems/profile-package.md).
 
@@ -61,7 +61,7 @@ See [Profile Package subsystem](../subsystems/profile-package.md).
 
 When SIMCARD writes a new ICCID to its profile store (typically
 after a successful SCP11 download), a polling watcher picks it up
-and launches a command per arrival — by default the SAIP TUI.
+and launches a command per arrival -- by default the SAIP TUI.
 
 ```bash
 yggdrasim-profile-autoload --store-root /path/to/profile_store
@@ -73,12 +73,12 @@ yggdrasim-profile-autoload \
 Template variables (single-brace Python `str.format` style; unknown
 tokens substitute the empty string rather than raising):
 
-- `{iccid}` — the newly seen ICCID
-- `{profile}` — preferred profile path
-- `{profile_path}` — alias of `{profile}`
-- `{profile_dir}` — the per-profile directory
-- `{manifest}` — the manifest JSON path (empty if absent)
-- `{python}` — `sys.executable`
+- `{iccid}` -- the newly seen ICCID
+- `{profile}` -- preferred profile path
+- `{profile_path}` -- alias of `{profile}`
+- `{profile_dir}` -- the per-profile directory
+- `{manifest}` -- the manifest JSON path (empty if absent)
+- `{python}` -- `sys.executable`
 
 With no `--launcher` flag the watcher runs
 `python -m Tools.ProfilePackage --cmd "USE <profile>; INFO; TREE; EXIT"`,

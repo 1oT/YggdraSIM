@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Check tracked content against the release-hygiene rules in CLAUDE.md.
 
 Covers the mechanically checkable parts of sections 1 to 4: reserved-range
@@ -61,9 +63,22 @@ REAL_ICCID_IIN = re.compile(r"\b(?:8946|8949|8937|8983|89126)[0-9]{10,}")
 # EF.ICCID packed BCD, low nibble first: 8946... becomes 9864...
 REAL_ICCID_BCD = re.compile(r"\b9864[0-9A-Fa-f]{14,16}\b")
 
+# Allocated MCCs that must not stand in for a test PLMN. Matched both as a
+# dashed/ASCII pair (240-07, "26201...") and in TS 24.008 packed-BCD nibble
+# order, where MCC 240 encodes as 42F0.. and 310 as 13F0../1300..
+REAL_PLMN_ASCII = re.compile(r"\b(?:240|244|262|310|311)-[0-9]{2,3}\b")
+REAL_IMSI_ASCII = re.compile(r"\b(?:240|244|262|310|311)[0-9]{11,12}\b")
+REAL_PLMN_BCD = re.compile(r"\b(?:42F0|44F2|62F2|13F0|1300|13F1)[0-9A-Fa-f]{2}\b")
+# No IPv4 rule here on purpose: this tree cites spec clauses densely
+# ("TS 24.008 10.5.4.7", "33.501 C.3"), which no dotted-quad pattern can
+# separate from an address without drowning the report in false positives.
+
 IDENTIFIER_CHECKS = (
-    ("iccid-ascii", REAL_ICCID_IIN, "real ITU-T E.118 issuer prefix; use the 8988 test range"),
+    ("iccid-ascii", REAL_ICCID_IIN, "real ITU-T E.118 issuer prefix; use the project's 8988 test range"),
     ("iccid-bcd", REAL_ICCID_BCD, "packed-BCD form of a real issuer prefix (TS 102 221 13.2)"),
+    ("plmn-ascii", REAL_PLMN_ASCII, "allocated MCC; use the 001/01 or 999/99 test PLMN"),
+    ("imsi-ascii", REAL_IMSI_ASCII, "IMSI on an allocated MCC; use 001010000000001"),
+    ("plmn-bcd", REAL_PLMN_BCD, "packed-BCD form of an allocated MCC (TS 24.008 10.5.1.3)"),
 )
 
 

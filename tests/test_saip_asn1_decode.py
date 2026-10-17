@@ -155,8 +155,10 @@ class SaipAsn1DecodeTests(unittest.TestCase):
             ],
         )
 
-        self.assertIn("ETSI TS 102 226 toolkit app specific parameters", text)
-        self.assertIn("accessDomain", text)
+        # ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.1: no access domain, services last.
+        self.assertIn("ETSI TS 102 226 UICC toolkit parameters", text)
+        self.assertNotIn("accessDomain", text)
+        self.assertIn("maxNumberOfServices", text)
         self.assertIn("minimumSecurityLevelDecimal", text)
         self.assertIn("tarInferred", text)
         self.assertIn("B20100", text)
@@ -631,7 +633,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
         self.assertIn("123456789", text)
         self.assertIn("pricePerUnitFormula", text)
         self.assertIn("EUR", text)
-        self.assertIn("emergencyCodes", text)
+        self.assertIn("emergencyCallCode", text)
         self.assertIn("111", text)
         self.assertIn("EF.ARR access rules", text)
         self.assertIn("PIN1", text)
@@ -657,7 +659,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "1300620001006401",
+                            _TAG_BYTES: "0001620001006401",
                         },
                     ]
                 }
@@ -667,7 +669,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "A3058003130062",
+                            _TAG_BYTES: "A3058003000162",
                         },
                     ]
                 }
@@ -677,7 +679,10 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "0122222222222222222222222222222222AABB",
+                            _TAG_BYTES: (
+                                "A034800103" + "8120" + "22" * 32
+                                + "820400000010" + "830400000011" + "840112"
+                            ),
                         },
                     ]
                 }
@@ -766,11 +771,11 @@ class SaipAsn1DecodeTests(unittest.TestCase):
         self.assertIn("Example", text)
         self.assertIn("Operator PLMN List record", text)
         self.assertIn("pnnRecordIdentifier", text)
-        self.assertIn("310-260", text)
+        self.assertIn("001-260", text)
         self.assertIn("Service Provider Display Information", text)
         self.assertIn("serviceProviderPlmnList", text)
         self.assertIn("EPS NAS security context", text)
-        self.assertIn("kasmeFirst16Bytes", text)
+        self.assertIn("kAsmeHex", text)
         self.assertIn("PKCS#15 Object Directory File", text)
         self.assertIn("5207", text)
         self.assertIn("PKCS#15 Data Object Directory File", text)
@@ -849,7 +854,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "130062",
+                            _TAG_BYTES: "000162",
                         },
                     ]
                 }
@@ -899,7 +904,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                         _TAG_TUPLE: [
                             "fillFileContent",
                             {
-                                _TAG_BYTES: "1300628000",
+                                _TAG_BYTES: "0001628000",
                             },
                         ]
                     },

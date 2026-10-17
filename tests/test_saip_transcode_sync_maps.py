@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for coordinate-mapping helpers in ``Tools.ProfilePackage.saip_transcode_sync``.
 
 Covers: ordered_section_keys_from_pes, pe_byte_ranges,

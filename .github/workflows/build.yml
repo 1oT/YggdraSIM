@@ -6,7 +6,7 @@ name: Build Bundles
 # The matrix publishes:
 #   * clean CLI + GUI bundles for Linux (x86_64), Windows (x86_64), macOS (arm64)
 #   * clean CLI + GUI bundles for Linux arm64 via QEMU, aimed at Raspberry Pi OS 64-bit
-#   * full CLI + GUI bundles for Linux (x86_64) — includes the HIL bridge
+#   * full CLI + GUI bundles for Linux (x86_64) -- includes the HIL bridge
 #   * full CLI + GUI bundles for Linux arm64 via QEMU, aimed at Raspberry Pi + SIMtrace2
 #   * a Debian package wrapping the clean Linux x86_64 bundle
 #
@@ -102,6 +102,21 @@ jobs:
             fi
           done
           test -n "${LINE}"
+          # The release page body is this tag's message (publish-release),
+          # so the message and the changelog are judged here, before any
+          # platform builds: a message that is the tagged commit's message,
+          # a bare version line or notes headed by another version is
+          # refused, as is a CHANGELOG.md that still files the tagged work
+          # under [Unreleased] or has no section for the version.
+          git for-each-ref --format='%(contents)' "refs/tags/${TAG}" \
+            > "${RUNNER_TEMP}/tag-message.txt"
+          git log -1 --format=%B "${GITHUB_SHA}" -- \
+            > "${RUNNER_TEMP}/commit-message.txt"
+          python3 scripts/release/release_notes.py check \
+            --tag "${TAG}" \
+            --notes "${RUNNER_TEMP}/tag-message.txt" \
+            --commit-message "${RUNNER_TEMP}/commit-message.txt" \
+            --changelog CHANGELOG.md
           printf 'tag_object_sha=%s\n' "${TAG_OBJECT_SHA}" >> "${GITHUB_OUTPUT}"
           echo "validated annotated ${TAG} on the ${LINE} history"
 
@@ -1049,14 +1064,18 @@ jobs:
         with:
           subject-path: release-assets/*
 
-      # ``--notes-from-tag`` reuses the annotated tag message we shipped with
-      # v1.0.0 (BCD EID marker + HIL fix + audit rectifications). Future tags
-      # should keep the annotation pattern; ``release-checklist.md`` documents
-      # this contract.
+      # The body is the message of the tag object release-ref-policy judged,
+      # read from the API by its id. The checkout's refs/tags/<tag> is a
+      # lightweight re-point at the commit (actions/checkout issue 290), so
+      # a body read from the local tag is the commit message: v2.1.0
+      # shipped that way. The message is judged again here and the page
+      # is read back after creation; ``release-checklist.md`` documents
+      # the contract.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          TAG_OBJECT: ${{ needs.release-ref-policy.outputs.tag_object_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1082,22 +1101,37 @@ jobs:
             test "${tagged_sha}" = "${GITHUB_SHA}"
           }
           verify_remote_tag
+          NOTES="${RUNNER_TEMP}/release-notes.md"
+          gh api "repos/${GITHUB_REPOSITORY}/git/tags/${TAG_OBJECT}" --jq '.message' \
+            > "${RUNNER_TEMP}/tag-message.txt"
+          git log -1 --format=%B "${GITHUB_SHA}" -- \
+            > "${RUNNER_TEMP}/commit-message.txt"
+          python3 scripts/release/release_notes.py check \
+            --tag "${TAG}" \
+            --notes "${RUNNER_TEMP}/tag-message.txt" \
+            --commit-message "${RUNNER_TEMP}/commit-message.txt" \
+            --changelog CHANGELOG.md \
+            --output "${NOTES}"
           PRERELEASE_FLAG=""
           case "${TAG}" in
             *-rc*|*-alpha*|*-beta*|*-pre*) PRERELEASE_FLAG="--prerelease" ;;
           esac
           gh release create "${TAG}" \
             --title "YggdraSIM ${TAG}" \
-            --notes-from-tag \
+            --notes-file "${NOTES}" \
             --verify-tag \
             ${PRERELEASE_FLAG} \
             release-assets/*
           verify_remote_tag
+          gh release view "${TAG}" --json body --jq '.body' \
+            > "${RUNNER_TEMP}/published-body.md"
+          python3 scripts/release/release_notes.py published \
+            --notes "${NOTES}" \
+            --body "${RUNNER_TEMP}/published-body.md"
 
-      # ``--notes-from-tag`` carries the release note the tag was annotated
-      # with. When a platform shipped unsigned, the note gains a section
-      # saying so, so the warning a first launch produces is explained on
-      # the page the binary came from.
+      # The body is the checked tag message. When a platform shipped
+      # unsigned, it gains a section saying so, so the warning a first
+      # launch produces is explained on the page the binary came from.
       - name: Record unsigned platform binaries in the release notes
         if: needs.build-windows-clean.outputs.signed != 'true' || needs.build-macos-clean.outputs.signed != 'true'
         env:

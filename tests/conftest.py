@@ -34,14 +34,37 @@ from pathlib import Path
 
 import pytest
 
+# The universal placeholder test-value list is per-user operator data
+# (``~/.yggdrasim/saip_universal_tokens.csv``) and seeds every opened
+# template. Tests must see the same thing CI sees -- no list -- unless
+# they point the variable at a list of their own.
+os.environ.setdefault(
+    "YGGDRASIM_SAIP_UNIVERSAL_TOKENS",
+    os.path.join(tempfile.gettempdir(), "yggdrasim-tests-no-universal-list.csv"),
+)
+
+
 # The repo ``plugins/`` directory is a runtime-loaded namespace package
-# (no __init__.py by design — see ``yggdrasim_common/plugin_runtime.py``),
+# (no __init__.py by design -- see ``yggdrasim_common/plugin_runtime.py``),
 # so tests that import it directly require the repo root on sys.path.
 # editable installs don't cover ``plugins/`` because it's excluded from
 # ``[tool.setuptools.packages.find]``.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+# A developer checkout at ``<repo>/pysim`` has to reach sys.path before
+# any test module imports pySim, not when collection has already
+# finished: the first import binds ``sys.modules["pySim"]`` for the
+# session, and a later path insertion cannot displace it. Deciding the
+# tree here is what makes a single-file run and a full-suite run compile
+# the same ASN.1 -- ``StoreMetadataRequest`` carries nine members from
+# the installed package and nineteen from a checkout patched per
+# ``upstream_patches/osmocom-pysim-rsp-v3-metadata/``, so the losing
+# order silently drops every SGP.22 v3.1 metadata field.
+_PYSIM_CHECKOUT = _REPO_ROOT / "pysim"
+if _PYSIM_CHECKOUT.is_dir() and str(_PYSIM_CHECKOUT) not in sys.path:
+    sys.path.insert(0, str(_PYSIM_CHECKOUT))
 
 
 def _default_env(name: str, value: str) -> None:
@@ -112,6 +135,7 @@ _PYSIM_DEPENDENT_TEST_BASENAMES = frozenset(
         "test_saip_asn1_opaque_ef_catalog.py",
         "test_saip_asn1_passthrough_encoders.py",
         "test_saip_decoded_edit_audit.py",
+        "test_saip_inline_template_values.py",
         "test_saip_json_codec.py",
         "test_saip_json_codec_translation.py",
         "test_saip_pe_quick_add.py",
@@ -216,9 +240,6 @@ def _pysim_available() -> tuple[bool, str]:
     extra because that is the path that turns this from "soft
     dependency" into "just works on a fresh checkout".
     """
-    pysim_root = _REPO_ROOT / "pysim"
-    if pysim_root.is_dir() and str(pysim_root) not in sys.path:
-        sys.path.insert(0, str(pysim_root))
     try:
         import pySim.esim.saip  # noqa: F401  (import-probe only)
     except Exception as import_error:

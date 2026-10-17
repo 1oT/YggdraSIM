@@ -72,7 +72,11 @@ function M.decode_cla(cla)
         -- The first is the '8X' block (GlobalPlatform Table 11-1),
         -- shaped like the first interindustry form -- bit 3 secure
         -- messaging, bits 2 and 1 the logical channel -- which is what
-        -- every GP and ES10 command on channels 0 to 3 uses.
+        -- every GP and ES10 command on channels 0 to 3 uses. ETSI
+        -- TS 102 221 Table 10.3 gives 'AX' the same shape, and 'A0' is
+        -- the class every GSM 11.11 command on a UICC carries, so
+        -- reading it as opaque loses the channel and the SM level on
+        -- the oldest traffic the dissector sees.
         --
         -- The second is 'C0' to 'FE': the further interindustry shape
         -- with bit 8 set, which is how GlobalPlatform reaches logical
@@ -89,10 +93,10 @@ function M.decode_cla(cla)
             decoded.chaining = (math.floor(cla / 16) % 2) == 1
             return decoded
         end
-        -- '90' to 'BF' really is opaque, and decoding it invents facts
-        -- per command: CLA 'AC' is not "secure messaging 3" and CLA 'A3'
-        -- is not channel 3.
-        if cla > 0x8F then
+        -- '90' to '9F' and 'B0' to 'BF' really are opaque: TS 102 221
+        -- Table 10.3 lists only '0X', '8X' and 'AX', and decoding the
+        -- rest invents facts per command.
+        if cla > 0x8F and (cla < 0xA0 or cla > 0xAF) then
             return opaque()
         end
     end
@@ -209,7 +213,23 @@ end
 -- rather than a code. Those families are why a plain lookup is not
 -- enough: 0x61 0x2B is not a distinct status word, it is "43 bytes
 -- available".
-function M.describe_status_word(sw1, sw2)
+-- ETSI TS 102 221 v18.4 clauses 11.1.9.1.2 and 11.1.13.1.2: VERIFY PIN
+-- and UNBLOCK PIN sent with an empty data field present no PIN at all --
+-- they read the retry counter, and '63CX' is that counter's value. A
+-- modem asks both at bring-up to learn whether PIN1 is enabled, so
+-- reporting the answer as a failed verification made an ordinary probe
+-- read as a card that refused to authenticate.
+function M.is_retry_counter_query(command)
+    if type(command) ~= "table" then
+        return false
+    end
+    if command.ins ~= 0x20 and command.ins ~= 0x2C then
+        return false
+    end
+    return command.lc == nil or command.lc == 0
+end
+
+function M.describe_status_word(sw1, sw2, command)
     local status_word = (sw1 * 256) + sw2
     local named = tables.STATUS_WORDS[status_word]
     if named ~= nil then
@@ -231,6 +251,12 @@ function M.describe_status_word(sw1, sw2)
         )
     end
     if sw1 == 0x63 and math.floor(sw2 / 16) == 0x0C then
+        if M.is_retry_counter_query(command) then
+            if sw2 % 16 == 0 then
+                return "Retry counter: none left, the key is blocked."
+            end
+            return string.format("Retry counter: %d attempts left.", sw2 % 16)
+        end
         if sw2 % 16 == 0 then
             return "Verification failed. No retries left: the key is blocked."
         end
@@ -367,7 +393,7 @@ function M.parse_command(payload, split_result)
 end
 
 --- Parse the response half into a plain table. Never raises.
-function M.parse_response(payload, split_result)
+function M.parse_response(payload, split_result, command)
     local total = payload:captured_len()
     local start = split_result.command_length
     local sw1 = util.byte_at(payload, total - 2)
@@ -387,7 +413,7 @@ function M.parse_response(payload, split_result)
         sw1 = sw1,
         sw2 = sw2,
         status_word = (sw1 * 256) + sw2,
-        meaning = M.describe_status_word(sw1, sw2),
+        meaning = M.describe_status_word(sw1, sw2, command),
         category = M.status_category(sw1, sw2),
         succeeded = M.status_is_success(sw1, sw2),
     }

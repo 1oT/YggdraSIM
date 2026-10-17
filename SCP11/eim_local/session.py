@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM-local session: drives local package exchange through ES8+ delivery."""
 import json
 import os
@@ -29,7 +28,10 @@ from .config import EimLocalConfig
 from .eim_cert_store import EimCertificateRecord, EimCertificateStore
 from .eim_package_codec import (
     encode_additional_tlvs,
+    encode_notification_event_bits,
     encode_optional_tlvs,
+    ipa_euicc_data_request_opaque_body,
+    ipa_euicc_data_request_tag_list,
     lint_eim_package_document,
     load_eim_package_document,
     resolve_package_runtime_hints,
@@ -38,6 +40,7 @@ from .identity import load_eim_identity
 from .models import EimLocalState, EimHandoverContext
 from .response_logger import EimResponseLogger
 from .runtime_state import EimRuntimeStateStore
+from SCP11.shared.ber_tlv import retag_sequence
 from SCP11.shared.gsma_error_codes import (
     describe_sgp22_profile_state_result,
     describe_sgp32_eim_package_result_error,
@@ -764,14 +767,22 @@ class EimLocalSession(LocalIsdrSession):
         self,
         eid: str = "",
         error_code: int = 127,
+        eim_transaction_id: bytes = b"",
     ) -> bytes:
+        # SGP.32 v1.3 EimPackageResult: eimPackageResultResponseError [0] is an
+        # implicitly tagged SEQUENCE whose INTEGER keeps its universal tag,
+        # because eimTransactionId [0] carries an explicit tag of its own.
         if error_code < 0 or error_code > 127:
             error_code = 127
         body = b""
         eid_bytes = self._eid_bcd_string_to_bytes(eid)
         if len(eid_bytes) == 16:
             body += self._wrap_tlv(b"\x5A", eid_bytes)
-        body += bytes.fromhex(f"800530030201{error_code:02X}")
+        error_body = b""
+        if len(eim_transaction_id) > 0:
+            error_body += self._wrap_tlv(b"\x80", bytes(eim_transaction_id))
+        error_body += bytes([0x02, 0x01, error_code & 0xFF])
+        body += self._wrap_tlv(b"\xA0", error_body)
         return self._wrap_tlv(bytes.fromhex("BF50"), body)
 
     def _build_provide_eim_package_result_tlv(self, card_response: bytes, eid: str = "") -> bytes:
@@ -1465,13 +1476,13 @@ class EimLocalSession(LocalIsdrSession):
             "trusted_eim_pk_tls",
             "trusted_public_key_tls",
         ):
-            return self._wrap_tlv(
-                b"\xA0",
-                self._decode_hex_field(
-                    field.get(public_key_hex_key),
-                    public_key_hex_key,
-                ),
-            )
+            # SGP.32 v1.3 EimConfigurationData: the SubjectPublicKeyInfo alternative
+            # takes automatic tag [0], which replaces the SEQUENCE tag of the DER.
+            spki_der = self._decode_hex_field(field.get(public_key_hex_key), public_key_hex_key)
+            try:
+                return retag_sequence(b"\xA0", spki_der)
+            except ValueError as error:
+                raise ValueError(f"{public_key_hex_key} must hold one DER SubjectPublicKeyInfo: {error}") from error
         if choice in (
             "eim_certificate",
             "certificate",
@@ -1487,7 +1498,10 @@ class EimLocalSession(LocalIsdrSession):
                 preferred_ci_pkids=preferred_ci_pkids or [],
                 allow_auto_select=allow_auto_select,
             )
-            return self._wrap_tlv(b"\xA1", cert_bytes)
+            try:
+                return retag_sequence(b"\xA1", cert_bytes)
+            except ValueError as error:
+                raise ValueError(f"{certificate_path_key} must hold one DER Certificate: {error}") from error
         raise ValueError(
             "Unsupported subject public key choice: "
             f"{choice or '(empty)'}"
@@ -2381,6 +2395,7 @@ class EimLocalSession(LocalIsdrSession):
             "euicc_package_result": {"mode": "executable", "execution_path": "result_acknowledge"},
             "profile_download_trigger_result": {"mode": "executable", "execution_path": "result_acknowledge"},
             "eim_package_request": {"mode": "model_only", "execution_path": "pending_operation_register"},
+            "ipa_euicc_data_request": {"mode": "model_only", "execution_path": "pending_operation_register"},
             "euicc_package_request_eim_configuration_data": {"mode": "model_only", "execution_path": "pending_operation_register"},
             "euicc_package_request_ecos": {"mode": "model_only", "execution_path": "pending_operation_register"},
             "euicc_package_request_psmos": {"mode": "model_only", "execution_path": "pending_operation_register"},
@@ -2472,6 +2487,110 @@ class EimLocalSession(LocalIsdrSession):
         inner += self._wrap_tlv(b"\x80", activation_code.encode("utf-8"))
         return self._wrap_tlv(bytes.fromhex("BF54"), inner)
 
+    def _build_ipa_euicc_data_request_preview(
+        self,
+        package_document: dict[str, Any],
+        txid: bytes,
+    ) -> bytes:
+        """Encode SGP.32 §2.11.1.2 IpaEuiccDataRequest (BF52) from a package document.
+
+        The body is reachable either as the standalone ``ipa_euicc_data_request``
+        package type or as the matching alternative of the eIM Package Request
+        CHOICE, so both spellings resolve to the same section.
+        """
+        sgp32 = package_document.get("sgp32", {})
+        request: dict[str, Any] = {}
+        if isinstance(sgp32, dict):
+            direct = sgp32.get("ipa_euicc_data_request", {})
+            if isinstance(direct, dict):
+                request = direct
+            wrapper = sgp32.get("eim_package_request", {})
+            if isinstance(wrapper, dict):
+                choice = str(wrapper.get("choice", "")).strip().lower()
+                if choice == "ipa_euicc_data_request":
+                    nested = wrapper.get("ipa_euicc_data_request", {})
+                    if isinstance(nested, dict):
+                        request = nested
+        if len(request) == 0:
+            return b""
+
+        tag_list = ipa_euicc_data_request_tag_list(request)
+        if len(tag_list) == 0:
+            # A body captured off the wire is replayed verbatim, with or
+            # without its outer BF52 tag.
+            opaque_body = ipa_euicc_data_request_opaque_body(request)
+            if len(opaque_body) == 0:
+                return b""
+            if opaque_body.startswith(bytes.fromhex("BF52")):
+                return opaque_body
+            return self._wrap_tlv(bytes.fromhex("BF52"), opaque_body)
+
+        body = self._wrap_tlv(b"\x5C", tag_list)
+
+        ci_pk = request.get("euicc_ci_pk_identifier_to_be_used", {})
+        if isinstance(ci_pk, dict) and bool(ci_pk.get("include", False)):
+            # euiccCiPKIdentifierToBeUsed is an untagged OCTET STRING: the
+            # SEQUENCE already carries tagged members, so automatic tagging
+            # does not apply and the universal '04' tag stays on the wire.
+            body += self._wrap_tlv(b"\x04", self._package_field_bytes(ci_pk))
+
+        notification = request.get("search_criteria_notification", {})
+        if isinstance(notification, dict) and bool(notification.get("include", False)):
+            criteria = self._build_search_criteria_notification(notification)
+            if len(criteria) > 0:
+                body += self._wrap_tlv(b"\xA1", criteria)
+
+        package_result = request.get("search_criteria_euicc_package_result", {})
+        if isinstance(package_result, dict) and bool(package_result.get("include", False)):
+            criteria = self._build_search_criteria_seq_number(package_result)
+            if len(criteria) > 0:
+                body += self._wrap_tlv(b"\xA2", criteria)
+
+        eim_transaction_id = bytes(txid)
+        transaction_field = request.get("eim_transaction_id", {})
+        if isinstance(transaction_field, dict) and bool(transaction_field.get("include", False)):
+            candidate = self._package_field_bytes(transaction_field)
+            if len(candidate) > 0:
+                eim_transaction_id = candidate
+        if len(eim_transaction_id) > 0:
+            body += self._wrap_tlv(b"\x83", eim_transaction_id)
+        return self._wrap_tlv(bytes.fromhex("BF52"), body)
+
+    @staticmethod
+    def _package_field_bytes(field: dict[str, Any]) -> bytes:
+        value_hex = str(field.get("value_hex", "")).strip().replace(" ", "")
+        if len(value_hex) == 0 or len(value_hex) % 2 != 0:
+            return b""
+        try:
+            return bytes.fromhex(value_hex)
+        except ValueError:
+            return b""
+
+    def _build_search_criteria_seq_number(self, section: dict[str, Any]) -> bytes:
+        seq_number = section.get("seq_number", {})
+        if isinstance(seq_number, dict) is False:
+            return b""
+        if bool(seq_number.get("include", True)) is False:
+            return b""
+        value = seq_number.get("value")
+        if isinstance(value, bool) or isinstance(value, int) is False or value < 0:
+            return b""
+        return self._wrap_tlv(b"\x80", self._encode_notification_sequence(value))
+
+    def _build_search_criteria_notification(self, section: dict[str, Any]) -> bytes:
+        choice = str(section.get("choice", "")).strip().lower()
+        if choice == "seq_number":
+            return self._build_search_criteria_seq_number(section)
+        if choice != "profile_management_operation":
+            return b""
+        operation = section.get("profile_management_operation", {})
+        if isinstance(operation, dict) is False:
+            return b""
+        events = operation.get("events", {})
+        if isinstance(events, dict) is False:
+            return b""
+        return self._wrap_tlv(b"\x81", encode_notification_event_bits(events))
+
     def build_wire_payload_preview(self, package_document: dict[str, Any]) -> bytes:
         """Build a structured preview of the wire payload that would be sent for this package."""
         package_type = str(package_document.get("package_type", "")).strip().lower()
@@ -2508,6 +2627,8 @@ class EimLocalSession(LocalIsdrSession):
             if source_bytes.startswith(bytes.fromhex("BF36")):
                 return bytes(source_bytes)
             return b""
+        if package_type in ("ipa_euicc_data_request",):
+            return self._build_ipa_euicc_data_request_preview(package_document, txid)
         if package_type in ("eim_package_request",):
             sgp32 = package_document.get("sgp32", {})
             if isinstance(sgp32, dict):
@@ -2520,6 +2641,8 @@ class EimLocalSession(LocalIsdrSession):
                             runtime_hints,
                             txid,
                         )
+                    if choice == "ipa_euicc_data_request":
+                        return self._build_ipa_euicc_data_request_preview(package_document, txid)
         if package_type in ("euicc_package_result",):
             payload = b""
             sgp32 = package_document.get("sgp32", {})
@@ -2871,6 +2994,7 @@ class EimLocalSession(LocalIsdrSession):
                 return resolved_path, package_type, result_len
             if package_type in (
                 "eim_package_request",
+                "ipa_euicc_data_request",
                 "euicc_package_request_eim_configuration_data",
                 "euicc_package_request_ecos",
                 "euicc_package_request_psmos",
@@ -3167,7 +3291,7 @@ class EimLocalSession(LocalIsdrSession):
         rows: list[dict[str, Any]] = []
         resolved_dir = self.reset_hotfolder_metadata_session(hotfolder_dir=hotfolder_dir)
         stop_reason = "cycles_completed"
-        # Determinate bar — we know the cycle budget up front. When
+        # Determinate bar -- we know the cycle budget up front. When
         # ``until_empty`` is set the bar may finish early (early break
         # below); the sticky footer just shows the real completion
         # state whenever the caller exits the ``with`` block.

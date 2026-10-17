@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# build_gui_frontend.sh — Build the GUI frontend bundle from source.
+# build_gui_frontend.sh -- Build the GUI frontend bundle from source.
 #
 # Reads source files from gui_frontend/src/ and produces the served
 # bundle at yggdrasim_common/gui_server/static/.

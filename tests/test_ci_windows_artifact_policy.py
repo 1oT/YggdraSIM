@@ -115,8 +115,8 @@ class WindowsArtifactWorkflowPolicyTests(unittest.TestCase):
             "Unexpected archive contents",
             "Downloaded CLI smoke test failed",
             "Downloaded GUI smoke test failed",
-            "COMPLETE — WINDOWS UNSIGNED TEST BUILD",
-            "INCOMPLETE — WINDOWS UNSIGNED TEST BUILD",
+            "COMPLETE -- WINDOWS UNSIGNED TEST BUILD",
+            "INCOMPLETE -- WINDOWS UNSIGNED TEST BUILD",
             "if: ${{ failure() }}",
         ):
             self.assertIn(marker, self.text)

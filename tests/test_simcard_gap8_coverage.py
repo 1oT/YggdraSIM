@@ -174,23 +174,26 @@ class ServiceSearchTests(_ToolkitHarness):
         self.assertEqual(result["mode"], "service-search")
         payload, sw1, sw2 = self.toolkit.handle_fetch()
         self.assertEqual((sw1, sw2), (0x90, 0x00))
-        # The proactive command must carry the service record (61) and
-        # the device filter (63) in the body.
-        self.assertIn(b"\x61\x02\x01\x02", payload)
-        self.assertIn(b"\x63\x02\xAA\xBB", payload)
+        # TS 102 223 v18.3 §6.6.32: the command carries the Service search
+        # object (§8.65, tag '43') and the optional Device filter (§8.64,
+        # tag '42'); the tags come from TS 101 220 v19 table 7.23.
+        self.assertIn(b"\x43\x02\x01\x02", payload)
+        self.assertIn(b"\x42\x02\xAA\xBB", payload)
 
-    def test_terminal_response_latches_service_record(self) -> None:
+    def test_terminal_response_latches_service_availability(self) -> None:
         result = self.toolkit.queue_service_search(
             service_record=bytes.fromhex("AB"),
         )
         cmd = int(result["commandNumber"])
         self.toolkit.handle_fetch()
         record = bytes.fromhex("AABBCCDD")
+        # §6.8.23: a successful SERVICE SEARCH response carries the Service
+        # availability object (§8.67, tag '45').
         tr = _terminal_response(
             command_number=cmd,
             command_type=SERVICE_SEARCH_COMMAND,
             qualifier=0x00,
-            extra=tlv("61", record),
+            extra=tlv("45", record),
         )
         self.toolkit.handle_terminal_response(tr)
         self.assertEqual(self.state.toolkit.last_service_search_result, record)
@@ -221,7 +224,9 @@ class GetServiceInformationTests(_ToolkitHarness):
         )
         self.assertEqual(result["mode"], "get-service-information")
         payload, _sw1, _sw2 = self.toolkit.handle_fetch()
-        self.assertIn(b"\x61\x01\x12", payload)
+        # §6.6.33: GET SERVICE INFORMATION carries the Attribute
+        # information object (§8.66, tag '44').
+        self.assertIn(b"\x44\x01\x12", payload)
 
     def test_terminal_response_latches_service_information(self) -> None:
         result = self.toolkit.queue_get_service_information(
@@ -230,11 +235,13 @@ class GetServiceInformationTests(_ToolkitHarness):
         cmd = int(result["commandNumber"])
         self.toolkit.handle_fetch()
         info = bytes.fromhex("DEADBEEF")
+        # §6.8.24: the response carries the Service record (§8.63, tag '41');
+        # '62' is the IMEISV tag and no longer feeds this field.
         tr = _terminal_response(
             command_number=cmd,
             command_type=GET_SERVICE_INFORMATION_COMMAND,
             qualifier=0x00,
-            extra=tlv("62", info),
+            extra=tlv("41", info),
         )
         self.toolkit.handle_terminal_response(tr)
         self.assertEqual(self.state.toolkit.last_service_information, info)

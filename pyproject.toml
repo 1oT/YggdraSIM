@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yggdrasim"
-version = "2.1.0"
+version = "2.2.0"
 description = "YggdraSIM secure-element, eUICC, OTA, and SAIP toolkit."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -95,7 +95,7 @@ dependencies = [
     # cipher and CC primitives delegate to it so spec-citation lineage
     # for the cryptographic primitives lives upstream. The wire-format
     # helpers (``Scp03Session.wrap_apdu`` / ``CryptoEngine.build_*``)
-    # remain YggdraSIM-specific — see tests/test_scp03_pysim_parity.py
+    # remain YggdraSIM-specific -- see tests/test_scp03_pysim_parity.py
     # and tests/test_scp80_pysim_parity.py for the pinned divergences.
     # Upstream does not publish wheels to PyPI, so we install the git
     # tree directly. The ``saip`` extra below adds the optional,
@@ -222,6 +222,7 @@ yggdrasim-hil-supervisor = "yggdrasim_common.console_scripts:hil_bridge_supervis
 yggdrasim-hil-reset = "yggdrasim_common.console_scripts:hil_bridge_reset"
 yggdrasim-card-bridge = "yggdrasim_common.console_scripts:card_bridge"
 yggdrasim-lab-agent = "yggdrasim_common.console_scripts:lab_agent"
+yggdrasim-lab = "yggdrasim_common.console_scripts:lab_client"
 yggdrasim-profile-package = "yggdrasim_common.console_scripts:profile_package"
 yggdrasim-suci-tool = "yggdrasim_common.console_scripts:suci_tool"
 yggdrasim-profile-autoload = "yggdrasim_common.console_scripts:profile_autoload"
@@ -427,6 +428,7 @@ include = [
     "Tools.ApduFuzz",
     "Tools.Asn1TlvDecode",
     "Tools.CardBridge",
+    "Tools.CardClone",
     "Tools.EumDiag",
     "Tools.HilBridge",
     "Tools.ProfilePackage",

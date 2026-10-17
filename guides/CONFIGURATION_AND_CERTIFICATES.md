@@ -27,7 +27,7 @@ defer to the schemas and selection rules described here.
 Pick the row that matches what you have. The right column is where to
 read next.
 
-| You have …                                                                    | Read                                                                        |
+| You have ...                                                                    | Read                                                                        |
 | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | operator DPauth / DPpb cert + key for `LOAD-PROFILE` against `ISD-R`          | [§ SCP11 RSP certificates (local-access)](#scp11-rsp-certificates-local-access)         |
 | operator DPauth / DPpb cert + key for the eIM local profile-loading path      | [§ SCP11 RSP certificates (eim-local)](#scp11-rsp-certificates-eim-local)               |
@@ -164,7 +164,7 @@ to the verb for machine-readable output.
 **Drop-in folder.** `SCP11/eim_local/certs/`.
 
 The drop-in pattern, sidecar fields, fallback rules, and inventory
-selector are **identical** to local-access (above) — the eim-local
+selector are **identical** to local-access (above) -- the eim-local
 shell reuses the same record schema. The only behavioural difference is
 that the selected `server_address` from the chosen DPauth record is
 mirrored into the eIM activation code when the package does not pin a
@@ -236,7 +236,7 @@ ordering is:
 | `ski` / `aki`        | string          | optional | Hex; only used when the certificate cannot be parsed.                  |
 
 The `addeim/` companion directory under both zones holds an
-`eim_identity.template.json` plus `SIMULATED_EIM_IDENTITY.md` — the
+`eim_identity.template.json` plus `SIMULATED_EIM_IDENTITY.md` -- the
 canonical record sheet for the bundled fake eIM identity. Use the
 identity sheet verbatim when registering YggdraSIM as a peer eIM with
 another portal; replace every PEM block with operator-owned material
@@ -258,14 +258,14 @@ before any non-test use.
 **Consumer.** The simulated card backend (`SIMCARD/engine.py`).
 
 **File.** `Workspace/SIMCARD/isdr_config.json`.
-**Override env var.** `YGGDRASIM_SIM_ISDR_CONFIG` — absolute path.
+**Override env var.** `YGGDRASIM_SIM_ISDR_CONFIG` -- absolute path.
 
 This file seeds the EID, ATR, AIDs, the default SM-DP+ address, the
 eUICC-side allowed CI list, and the SCP03 / SCP80 keysets used by the
 **simulated** card (it is independent of the SCP03 admin shell's reader
 keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-parameters)).
 
-**Schema (current shape — first-boot template):**
+**Schema (current shape -- first-boot template):**
 
 ```json
 {
@@ -311,8 +311,8 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
 
 1. `eid` is the 32-hex-digit eUICC identifier (TS 23.003 §10). Choose a
    namespace your lab does not collide with. The shipped default
-   `89049032123451234512345678901235` uses the SGP.22 Annex A.2 test
-   EID prefix `89049032` and a valid Luhn check digit. Replace it before
+   `89049032123451234512345678901235` uses the SGP.26 v3.0.2 test
+   EIN `89049032` (the §3.2.1 Table 5 test EID) and a valid Luhn check digit. Replace it before
    any production-adjacent run.
 2. `atr_hex` is replayed verbatim by the simulated reader. Match the
    profile under test (a USIM-only card without a NAA selector should
@@ -330,29 +330,29 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
    precedence at runtime.
 7. `toolkit` selects the STK proactive bring-up shape and is parsed by
    `SIMCARD/euicc_store.py::apply_euicc_state_payload`:
-   - `poll_strategy` — one of `"timer"`, `"poll_interval"`, `"both"`,
+   - `poll_strategy` -- one of `"timer"`, `"poll_interval"`, `"both"`,
      `"off"`. Default `"timer"` arms an ME timer per ETSI TS 102 223
      §6.6.21 (TIMER MANAGEMENT START) so the modem returns a TIMER
      EXPIRATION (D7) envelope on cadence; this is the trigger SGP.32
      §6.6.5 POLL INTERVAL heartbeat. `"both"` queues both proactive
      commands at TERMINAL PROFILE. `"off"` emits no proactive bring-up.
-   - `timer_management_seconds` — initial timer value (1..86399 s).
-   - `timer_management_id` — ETSI timer identifier `1..8`. Out-of-range
+   - `timer_management_seconds` -- initial timer value (1..86399 s).
+   - `timer_management_id` -- ETSI timer identifier `1..8`. Out-of-range
      values are clamped.
-   - `timer_management_auto_rearm` — when `true` (default), each
+   - `timer_management_auto_rearm` -- when `true` (default), each
      `D7` TIMER EXPIRATION envelope re-queues a fresh TIMER MANAGEMENT
      START so polling continues without applet-side housekeeping.
-   - `poll_interval_seconds` — POLL INTERVAL setpoint used when
+   - `poll_interval_seconds` -- POLL INTERVAL setpoint used when
      `poll_strategy` includes the legacy heartbeat.
-   - `provide_imei` — when `true` (default) the bootstrap also queues
+   - `provide_imei` -- when `true` (default) the bootstrap also queues
      a PROVIDE LOCAL INFORMATION (IMEI) proactive command after the
      timer/poll trigger, mirroring real eUICC bring-up.
      (default), every TIMER EXPIRATION (`D7`) envelope drives a
      two-leg BIP exchange before the timer re-arms:
-     1. **DNS leg** — OPEN CHANNEL UDP_REMOTE → `dns_server:53`,
+     1. **DNS leg** -- OPEN CHANNEL UDP_REMOTE → `dns_server:53`,
         SEND DATA AAAA query, SEND DATA A query, RECEIVE DATA × 2,
         CLOSE CHANNEL.
-     2. **eIM leg** — OPEN CHANNEL TCP_CLIENT_REMOTE →
+     2. **eIM leg** -- OPEN CHANNEL TCP_CLIENT_REMOTE →
         `<resolved_ip>:eim_port`, SEND DATA (ESipa request),
         RECEIVE DATA, CLOSE CHANNEL.
 
@@ -361,33 +361,33 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
      DNS leg until the operator clears the cache or a new APN
      forces a re-resolve.
 
-     - `eim_fqdn` — explicit eIM host name. Empty string falls back
+     - `eim_fqdn` -- explicit eIM host name. Empty string falls back
        to `state.eim_entries[0].eim_fqdn`, then to the workspace
        `eim_identity.json` default; if all three are empty the
        sequence is skipped (only the timer re-arm is emitted).
-     - `eim_port` — TCP destination port for the eIM leg
+     - `eim_port` -- TCP destination port for the eIM leg
        (default 443).
-     - `transport_type` — TS 102 223 §8.70 protocol code for the
+     - `transport_type` -- TS 102 223 §8.70 protocol code for the
        eIM leg. `2` = TCP CLIENT REMOTE (default). Use `6` if the
        modem firmware demands explicit TLS-over-TCP signalling.
-     - `buffer_size` — OPEN CHANNEL TLV `39` value applied to
+     - `buffer_size` -- OPEN CHANNEL TLV `39` value applied to
        both legs (default 1024).
-     - `receive_size` — RECEIVE DATA TLV `B7` byte count
+     - `receive_size` -- RECEIVE DATA TLV `B7` byte count
        (1..255, default 250).
-     - `alpha_id` — Alpha Identifier shown in the modem's STK UI.
+     - `alpha_id` -- Alpha Identifier shown in the modem's STK UI.
        Default empty (matching reference IPA behaviour: the TLV is
        still emitted as `05 00` so the modem can label the
        bearer).
-     - `apn` — cellular APN emitted under TLV `47` (Network
+     - `apn` -- cellular APN emitted under TLV `47` (Network
        Access Name) on every OPEN CHANNEL. Default
        `"internet.apn"`. Active SAIP profile EF.ACL (`6F57`)
        overrides this when the profile gets enabled (the
        filesystem rebuild copies the first APN into
        is published.
-     - `dns_server` — IPv4 of the resolver the IPA targets in the
+     - `dns_server` -- IPv4 of the resolver the IPA targets in the
        DNS leg. Default `"192.0.2.53"`. Override via
        deployments with a captive resolver.
-     - `request_payload_hex` — explicit hex-encoded body delivered
+     - `request_payload_hex` -- explicit hex-encoded body delivered
        under SEND DATA TLV `36` on the eIM leg. Empty (default)
        emits a minimal HTTP/1.1 `POST /gsma/rsp2/asn1` header
        wrapping a `BF4F GetEimPackageRequest`. When
@@ -417,7 +417,7 @@ yggdrasim --doctor
 ```
 
 For a targeted check that the file parses and is consumed by the
-simulator, run an SCP03 status probe — the shell prints the resolved
+simulator, run an SCP03 status probe -- the shell prints the resolved
 EID, the AIDs the SD wraps to, and reports any keyset mismatch:
 
 ```bash
@@ -430,7 +430,7 @@ YGGDRASIM_CARD_BACKEND=sim yggdrasim-scp03 --cmd "STATUS; EXIT"
 `BF55` eIM identity has not yet been programmed.
 
 **File.** `Workspace/SIMCARD/eim_identity.json`.
-**Override env var.** `YGGDRASIM_SIM_EIM_IDENTITY` — absolute path.
+**Override env var.** `YGGDRASIM_SIM_EIM_IDENTITY` -- absolute path.
 
 ```json
 {
@@ -472,7 +472,7 @@ state).
 `Workspace/SCP03/` exactly once, on first launch, and never overwrite an
 existing runtime file. The shipped `keys.ini` carries the publicly-known
 GlobalPlatform demo placeholder (`1122334455667788AABBCCDDEEFF0011` and
-ADM `3132333435363738`) — replace it before talking to any production
+ADM `3132333435363738`) -- replace it before talking to any production
 card.
 
 ```ini
@@ -521,7 +521,7 @@ SCP03> EXIT
 ```
 
 The file-based defaults are the booting fallback only. There is no
-top-level `INVENTORY-LOAD` / `INVENTORY-SET-KEYS` verb — the
+top-level `INVENTORY-LOAD` / `INVENTORY-SET-KEYS` verb -- the
 `CONFIG` / `SHOW` pair is the user-facing surface, with the
 SQLite-backed persistence handled implicitly by the shell.
 
@@ -543,7 +543,13 @@ under namespace `iccid/<ICCID>/scp80`. Slot semantics follow ETSI TS
 102 225 §5.1.1: `kic` / `kid` hold the 16-byte ciphering and integrity
 keys; `kic_indicator` / `kid_indicator` hold the 1-byte indicator bytes
 that select algorithm + key index in the Command Packet header. `pid`
-and `dcs` set the SMS TP-PID and TP-DCS bytes in the SMS-PP TPDU. The
+and `dcs` set the SMS TP-PID and TP-DCS bytes in the SMS-PP TPDU; the
+defaults are `7F`, (U)SIM Data download (3GPP TS 23.040 clause 9.2.3.9),
+and `F6`, class 2 8-bit data, the pair a modem requires before it hands
+a short message to the UICC (3GPP TS 31.111 clause 7.1.1.1). Cards
+reached directly over a reader have processed the ENVELOPE whatever the
+TP-PID, so a wrong value only surfaces once a modem is in the path; the
+build breakdown flags any value other than `7F`. The
 SCP80 admin shell uses lowercase verbs (`iccid`, `set`, `show`, `quit`)
 to manage it:
 
@@ -595,7 +601,7 @@ yggdrasim-suci-tool --cmd "USE keys/operator-alpha.key; STATUS; DUMP; EXIT"
 
 **Custodial guidance.**
 
-1. SUCI key files are short — 32 bytes of private material. Treat them
+1. SUCI key files are short -- 32 bytes of private material. Treat them
    as keys, not as configuration: 0600 on disk, exclude from any
    inventory exports, and rotate per the operator's home-network
    policy.
@@ -653,20 +659,21 @@ caller selects the Mongo URI and database name through the bridge's
 constructor; no environment file is consulted.
 
 **Custody.** `K` and `OPc` are long-term subscriber secrets. The stub
-keeps them in process memory only; `public_view()` redacts both. When
+keeps them in process memory only; `public_view()` returns both. When
 moving to the BYO bridge, the destination Mongo database is the
-authoritative store — protect it accordingly.
+authoritative store -- protect it accordingly.
 
 ## EUM session-key bundles
 
 **Consumer.** `Tools/EumDiag` (the EUM / SM-DP+ diagnostic tool) and
-the bundled Lua dissector at
-[`Tools/EumDiag/dissector.lua`](../Tools/EumDiag/dissector.lua).
+the Lua dissector at
+[`Tools/ApduDissector/lua/yggdrasim_apdu.lua`](../Tools/ApduDissector/lua/yggdrasim_apdu.lua), which
+`yggdrasim-eum-diag` hands its captures to.
 
 **File.** A JSON repository chosen by the operator. The dissector
 locates it through `YGGDRASIM_EUM_SESSION_KEYS=<absolute path>`.
 
-**Schema.** `yggdrasim-eum-session-keys/v1` — an ICCID-indexed object:
+**Schema.** `yggdrasim-eum-session-keys/v1` -- an ICCID-indexed object:
 
 ```json
 {
@@ -761,9 +768,9 @@ visibility into the pcap. Delete the keybag when the diagnostic is done.
 
 **Folders.**
 
-- `SCP11/eim_local/eim_packages/` — operator-authored package library.
-- `SCP11/eim_local/eim_packages/templates/` — package templates.
-- `SCP11/eim_local/eim_packages/hotfolder/` — runtime queue ingested
+- `SCP11/eim_local/eim_packages/` -- operator-authored package library.
+- `SCP11/eim_local/eim_packages/templates/` -- package templates.
+- `SCP11/eim_local/eim_packages/hotfolder/` -- runtime queue ingested
   by `HOTFOLDER-FETCH`.
 
 **Package shape.** JSON object with the fields listed in
@@ -834,7 +841,7 @@ gate is missing or when the card identifier is not in the allow-list.
 
 **Consumer.** Anything that goes through
 [`yggdrasim_common.inventory_crypto`](../yggdrasim_common/inventory_crypto.py)
-— the SQLite inventory writer, the cert store sidecar reader, and the
+-- the SQLite inventory writer, the cert store sidecar reader, and the
 SCP03 / SCP80 secret writers.
 
 **File.** `state/inventory_crypto.json`.
@@ -870,7 +877,7 @@ SCP03 / SCP80 secret writers.
    `# comments` are ignored.
 5. `gpg.gpg_key_file` may point to a file, one recipient per line. The
    path **must resolve inside the same directory as
-   `inventory_crypto.json`** — anything outside is refused. This stops
+   `inventory_crypto.json`** -- anything outside is refused. This stops
    a tampered config from siphoning recipients out of an arbitrary
    filesystem location.
 6. `gpg.timeout_seconds` caps every single `gpg` call. Default 120 s.
@@ -944,6 +951,52 @@ yggdrasim --doctor
 
 The doctor's `workspace` probe confirms the resolved root and that the
 required subdirectories exist and are writable.
+
+## Terminal colour palette
+
+**Consumer.** The launcher menu, every secure-channel shell, and the
+operator-facing CLI tools.
+
+`YGGDRASIM_CLI_THEME` selects the palette those surfaces colour their
+output with. Most names are the Universal GUI themes, transcribed from
+their token files into `yggdrasim_common/cli_palettes.py`, so a
+terminal can be matched to the GUI:
+
+```
+nord (default)      catppuccin-frappe   catppuccin-latte
+catppuccin-macchiato catppuccin-mocha   dracula
+github-dark         github-light        graphite-light
+gruv-dark           ink-light           islands-light
+matrix              mono                nord-light
+ocean-dark          oneot-dark          oneot-light
+solarized-dark      solarized-light     tokyo-night
+```
+
+`nord` is YggdraSIM's own palette and the default; `nord-dark` is
+accepted as an alias for it. `mono` emits no escape at all, which is
+the way to get plain output from the launcher menus: `NO_COLOR` is
+honoured by the status and hex-dump helpers but not by the shells'
+`Colors` tables.
+
+Set it for one run, or persist it from the launcher `[E]` menu or the
+GUI under **Environment -> Configuration**:
+
+```bash
+YGGDRASIM_CLI_THEME=tokyo-night yggdrasim-scp03
+```
+
+The value is read once per process, on the first coloured output, from
+the environment and then from the persisted overrides. Shells that
+never apply persisted overrides still pick up a persisted choice.
+
+**Light palettes on a dark terminal.** Only foreground colour is
+emitted, and each palette is built against its own theme background.
+A `-light` palette is legible on a light terminal and washed out on a
+dark one; the pairing is the operator's to make.
+
+**Independent of the GUI.** The GUI's own theme lives in browser
+storage and is chosen in the GUI. Selecting a CLI palette does not
+change the GUI, or the reverse.
 
 ## Bring-your-own keys checklist
 

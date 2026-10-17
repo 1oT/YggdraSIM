@@ -121,7 +121,7 @@ The tshark runner sets that variable for you when using `inject-keys`.
 ## Runtime dependencies
 
 - `tshark` on `PATH` for `inject-keys`
-- the shipped `Tools/EumDiag/dissector.lua` (part of the wheel's
+- the shipped `Tools/ApduDissector` Lua dissector (part of the wheel's
   package-data)
 - optional pySim checkout for `decode-bpp`
 

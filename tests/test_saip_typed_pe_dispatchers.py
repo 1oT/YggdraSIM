@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Dispatcher-layer smoke tests for the typed PE-section editors.
 
 Covers ``saip.{get,add,remove,replace}_security_domain_*``,
@@ -293,6 +292,32 @@ class ApplicationDispatcherTests(unittest.TestCase):
         )
         self.assertEqual(len(removed["instances"]), 0)
 
+    def test_update_instance_in_place(self) -> None:
+        self.saip._dispatch_add_application_instance(
+            ctx=None,
+            session_id=self.sid,
+            pe_index=0,
+            load_package_aid_hex="A0 00 00 01 51 00",
+            class_aid_hex="A0 00 00 01 51 00 01",
+            instance_aid_hex="A0 00 00 01 51 00 01 02",
+            privileges_hex="000000",
+            application_specific_parameters_hex="",
+        )
+        updated = self.saip._dispatch_update_application_instance(
+            ctx=None,
+            session_id=self.sid,
+            pe_index=0,
+            instance_aid_hex="A0 00 00 01 51 00 01 02",
+            load_package_aid_hex="A0 00 00 01 51 00",
+            class_aid_hex="A0 00 00 01 51 00 01",
+            privileges_hex="800000",
+            lifecycle_state=0x07,
+        )
+        self.assertIn("updated", updated["summary"])
+        row = updated["instances"][0]
+        self.assertEqual(row["instance_aid_hex"], "A000000151000102")
+        self.assertEqual(row["privileges_hex"], "800000")
+
     def test_set_load_block_round_trip(self) -> None:
         added = self.saip._dispatch_set_application_load_block(
             ctx=None,
@@ -396,6 +421,59 @@ class RfmDispatcherTests(unittest.TestCase):
         self.assertIsNone(removed["adf_access"])
 
 
+class RfmAdfCatalogueDispatcherTests(unittest.TestCase):
+    """``saip.get_rfm`` names the profile's ADFs and the binding resolves by name."""
+
+    USIM_AID = "A0000000871002FF34FF0789312E30FF"
+
+    def setUp(self) -> None:
+        from yggdrasim_common.gui_server.actions import saip as saip_actions
+
+        self.saip = saip_actions
+        self.sid = _open_synthetic_session({
+            "usim": {
+                "adf-usim": [("fileDescriptor", {"dfName": bytes.fromhex(self.USIM_AID)})],
+            },
+            "rfm": {
+                "instanceAID": b"\xA0\x00\x00\x00\x09\x00\x02",
+                "minimumSecurityLevel": b"\x16",
+                "uiccAccessDomain": b"\x02\x03\x01\x04",
+                "uiccAdminAccessDomain": b"\x00",
+                "tarList": [b"\xB0\x00\x00"],
+            },
+        })
+
+    def tearDown(self) -> None:
+        _release(self.sid)
+
+    def test_get_rfm_lists_adf_candidates_and_the_default_directory(self) -> None:
+        result = self.saip._dispatch_get_rfm(ctx=None, session_id=self.sid, pe_index=1)
+        self.assertEqual(result["default_directory"], "MF")
+        self.assertIsNone(result["adf_access"])
+        self.assertEqual(
+            [(row["adf"], row["pe_index"], row["aid_hex"]) for row in result["adf_candidates"]],
+            [("ADF.USIM", 0, self.USIM_AID)],
+        )
+
+    def test_bind_by_name_then_unbind(self) -> None:
+        bound = self.saip._dispatch_set_rfm_adf_access(
+            ctx=None, session_id=self.sid, pe_index=1, adf_aid_hex="USIM",
+        )
+        self.assertEqual(bound["default_directory"], "ADF")
+        self.assertEqual(bound["adf_access"]["adf_name"], "ADF.USIM")
+        self.assertEqual(bound["adf_access"]["adf_aid_hex"], self.USIM_AID)
+        self.assertEqual(bound["adf_access"]["adf_access_domain_hex"], "02030104")
+        self.assertEqual(bound["adf_access"]["adf_admin_access_domain_hex"], "00")
+        unbound = self.saip._dispatch_remove_rfm_adf_access(
+            ctx=None, session_id=self.sid, pe_index=1,
+        )
+        self.assertEqual(unbound["default_directory"], "MF")
+        with self.assertRaises(ValueError):
+            self.saip._dispatch_set_rfm_adf_access(
+                ctx=None, session_id=self.sid, pe_index=1, adf_aid_hex="ISIM",
+            )
+
+
 class RegistryWiringTests(unittest.TestCase):
     """All new specs must be registered + reachable by id."""
 
@@ -425,6 +503,7 @@ class RegistryWiringTests(unittest.TestCase):
             "saip.set_security_domain_instance_field",
             "saip.get_application",
             "saip.add_application_instance",
+            "saip.update_application_instance",
             "saip.remove_application_instance",
             "saip.set_application_load_block",
             "saip.remove_application_load_block",

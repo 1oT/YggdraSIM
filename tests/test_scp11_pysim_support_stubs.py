@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP11/pysim_support.py public functions.
 
 All functions that depend on pySim return empty/None gracefully when pySim is
@@ -100,14 +99,14 @@ assert live_payload_builder._PY_SIM_RSP_ASN1 is None
 
 
 # ---------------------------------------------------------------------------
-# encode_rsp_type / decode_rsp_type — no-pySim fallback
+# encode_rsp_type / decode_rsp_type -- no-pySim fallback
 # ---------------------------------------------------------------------------
 
 class RspTypeCodecTests(unittest.TestCase):
 
     def setUp(self) -> None:
         if pysim_available():
-            self.skipTest("pySim available — fallback path not exercised")
+            self.skipTest("pySim available -- fallback path not exercised")
 
     def test_encode_returns_empty_bytes(self) -> None:
         result = encode_rsp_type("AnyType", {})
@@ -119,7 +118,7 @@ class RspTypeCodecTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# unwrap_tlv_octet_string — does not require pySim
+# unwrap_tlv_octet_string -- does not require pySim
 # ---------------------------------------------------------------------------
 
 class UnwrapTlvOctetStringTests(unittest.TestCase):
@@ -163,14 +162,14 @@ class UnwrapTlvOctetStringTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# encode_* / decode_* — no-pySim fallback paths
+# encode_* / decode_* -- no-pySim fallback paths
 # ---------------------------------------------------------------------------
 
 class EncodeFallbackTests(unittest.TestCase):
 
     def setUp(self) -> None:
         if pysim_available():
-            self.skipTest("pySim available — fallback path not exercised")
+            self.skipTest("pySim available -- fallback path not exercised")
 
     def test_encode_server_signed1_returns_empty(self) -> None:
         result = encode_server_signed1(b"\x00" * 3, b"\x00" * 16, "smdp.example.test", b"\x00" * 16)
@@ -197,7 +196,7 @@ class DecodeFallbackTests(unittest.TestCase):
 
     def setUp(self) -> None:
         if pysim_available():
-            self.skipTest("pySim available — fallback path not exercised")
+            self.skipTest("pySim available -- fallback path not exercised")
 
     def test_decode_authenticate_server_response_returns_none(self) -> None:
         self.assertIsNone(decode_authenticate_server_response(b"\x00\x01"))

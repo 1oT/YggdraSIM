@@ -5,7 +5,7 @@
 
 
 /* ---------------------------------------------------------------------
- * Service-table checklist (EF.UST / EF.IST / EF_PSISMSC, …)
+ * Service-table checklist (EF.UST / EF.IST / EF_PSISMSC, ...)
  *
  * Operators asked for parity with what is *not* set so they can audit
  * a card without re-decoding the bitmap manually. The renderer pairs
@@ -28,7 +28,7 @@
   flex-wrap: wrap;
   gap: 8px;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
 }
@@ -76,7 +76,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
   min-width: 0;
@@ -159,7 +159,7 @@
   background: var(--fail-soft);
 }
 
-/* Yggdrasil-Nord palette accent on the active column — keeps the
+/* Yggdrasil-Nord palette accent on the active column -- keeps the
  * checklist visually anchored to the wider Norse-tinted theme but
  * stays subtle so the inactive column doesn't fight for attention. */
 [data-theme="nord"] .cc-svc-table-row--active .cc-svc-table-mark {
@@ -167,5 +167,5 @@
 }
 
 [data-theme="nord"] .cc-svc-table-col--active {
-  border-color: rgba(136, 192, 208, 0.25);
+  border-color: color-mix(in oklab, var(--accent) 25%, transparent);
 }

@@ -8,7 +8,7 @@ reader and :class:`Tools.HilBridge.apdu_relay.HilBridgeApduRelayService`
 to publish the APDU exchange over HTTP. Adds:
 
 * CLI argument parsing.
-* Bearer token bootstrap — generates a token if none was supplied,
+* Bearer token bootstrap -- generates a token if none was supplied,
   writes it to a 0600 file under ``~/.config/yggdrasim/card_bridge``,
   and echoes only the fingerprint on stdout.
 * Default loopback bind, refusal to bind anything else without a
@@ -176,7 +176,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--audit-full-apdu",
         action="store_true",
         help=(
-            "DANGEROUS — also log the full APDU and response hex. PIN "
+            "DANGEROUS -- also log the full APDU and response hex. PIN "
             "material rides through here; only enable for forensic work "
             "on test cards. Implies --audit."
         ),
@@ -338,13 +338,13 @@ def _emit_startup_banner(
 ) -> None:
     """Print the human-readable startup summary.
 
-    The full token never appears here — operators reconcile via the
+    The full token never appears here -- operators reconcile via the
     fingerprint and the on-disk file path. ``output`` is parameterised
     so tests can capture the lines without touching real stdout.
     """
     banner_lines: list[str] = []
     banner_lines.append("=" * 72)
-    banner_lines.append("YggdraSIM Card Bridge — ready")
+    banner_lines.append("YggdraSIM Card Bridge -- ready")
     banner_lines.append("=" * 72)
     banner_lines.append(f"  reader     : {reader_label}")
     banner_lines.append(f"  ATR        : {atr_hex or '(unknown)'}")
@@ -356,9 +356,9 @@ def _emit_startup_banner(
             verb = "written" if config.token_file_was_written else "loaded"
             banner_lines.append(f"  token file : {config.token_file}  ({verb}, mode 0600)")
     else:
-        banner_lines.append("  token      : (none — loopback only)")
+        banner_lines.append("  token      : (none -- loopback only)")
     if config.audit_enabled is True:
-        marker = " (FULL APDU + response — captures PINs!)" if config.audit_full_apdu else ""
+        marker = " (FULL APDU + response -- captures PINs!)" if config.audit_full_apdu else ""
         banner_lines.append(f"  audit log  : enabled via logger '{config.audit_logger_name}'{marker}")
     if is_loopback_host(config.host) is True:
         banner_lines.append(
@@ -371,7 +371,7 @@ def _emit_startup_banner(
         )
     else:
         banner_lines.append(
-            f"  remote use : non-loopback bind {config.host}:{config.port} — TLS termination is your responsibility"
+            f"  remote use : non-loopback bind {config.host}:{config.port} -- TLS termination is your responsibility"
         )
     # Self-documenting copy-paste template for the rig side. Pairs the
     # SSH tunnel above with the matching ``yggdrasim-hil-bridge`` flags

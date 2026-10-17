@@ -379,7 +379,7 @@ def test_gsm_auth_decoder_requires_ts_31_102_lv_framing() -> None:
     assert "LV-encoded" in raw_without_lengths["parse_warning"]
 
 
-def test_live_auth_redacts_derived_keys_unless_explicitly_revealed(monkeypatch) -> None:
+def test_live_auth_returns_the_derived_keys(monkeypatch) -> None:
     from yggdrasim_common.gui_server.actions import scp03
 
     session, transporter = _install_session(monkeypatch)
@@ -389,29 +389,19 @@ def test_live_auth_redacts_derived_keys_unless_explicitly_revealed(monkeypatch) 
     apdu = "008800812210" + ("AA" * 16) + "10" + ("BB" * 16) + "00"
     transporter.replies[apdu] = (response, 0x90, 0x00)
 
-    redacted = scp03._dispatch_run_auth_live(
+    result = scp03._dispatch_run_auth_live(
         _Ctx(),
         session_id=session.id,
         context="USIM",
         rand="AA" * 16,
         autn="BB" * 16,
     )
-    assert redacted["response"]["derived_keys_redacted"] is True
-    assert "ck" not in redacted["response"]
-    assert "ik" not in redacted["response"]
-    assert "raw_hex" not in redacted["response"]
-
-    revealed = scp03._dispatch_run_auth_live(
-        _Ctx(),
-        session_id=session.id,
-        context="USIM",
-        rand="AA" * 16,
-        autn="BB" * 16,
-        reveal_sensitive=True,
-    )
-    assert revealed["response"]["ck"] == "11" * 16
-    assert revealed["response"]["ik"] == "22" * 16
-    assert revealed["response"]["derived_keys_revealed"] is True
+    assert result["response"]["res"] == "A1A2A3A4"
+    assert result["response"]["ck"] == "11" * 16
+    assert result["response"]["ik"] == "22" * 16
+    assert result["response"]["raw_hex"] == response.hex().upper()
+    assert "derived_keys_redacted" not in result["response"]
+    assert "reveal_sensitive" not in result
 
 
 def test_configured_address_decoder_falls_back_to_hex_without_dropping_bytes() -> None:
@@ -477,7 +467,7 @@ def test_update_binary_spec_exposes_offset_and_confirm() -> None:
     assert fields["confirm"].required is True
 
 
-def test_linear_fixed_fcp_descriptor_contains_record_count() -> None:
+def test_linear_fixed_fcp_descriptor_uses_create_file_four_byte_form() -> None:
     from yggdrasim_common.gui_server.actions.scp03 import (
         _build_fcp_template_fields,
     )
@@ -489,7 +479,10 @@ def test_linear_fixed_fcp_descriptor_contains_record_count() -> None:
         rec_len_hex="14",
         num_rec_hex="0A",
     )
-    assert "8205422100140A" in result["fcp_hex"]
+    # TS 102 222 v17.1 §6.3.2.2.2 Table 4: descriptor byte, coding byte and
+    # the two-byte record length; the record count is derived from tag 80.
+    assert "820442210014" in result["fcp_hex"]
+    assert "800200C8" in result["fcp_hex"]
 
 
 def test_create_file_uses_extended_lc_for_large_valid_fcp(monkeypatch) -> None:
@@ -509,7 +502,10 @@ def test_create_file_uses_extended_lc_for_large_valid_fcp(monkeypatch) -> None:
     assert result["ok"] is True
 
 
-@pytest.mark.parametrize("bad_size", ("00", "010000"))
+# TS 102 221 v18.4 §11.1.1.4.1 gives the size value as "length X, X >= 2", so a
+# value of four bytes is legal and only a wider one is refused; a size of zero
+# empties the file and needs the explicit confirmation instead.
+@pytest.mark.parametrize("bad_size", ("00", "0100000000"))
 def test_resize_rejects_zero_or_oversized_sizes_before_transmit(
     monkeypatch,
     bad_size,
@@ -517,7 +513,7 @@ def test_resize_rejects_zero_or_oversized_sizes_before_transmit(
     from yggdrasim_common.gui_server.actions import scp03
 
     session, transporter = _install_session(monkeypatch)
-    with pytest.raises(ValueError, match="range 1..65535"):
+    with pytest.raises(ValueError, match="range 1..4294967295|at most 4 bytes"):
         scp03._dispatch_fs_resize(
             _Ctx(),
             session_id=session.id,
@@ -536,13 +532,65 @@ def test_resize_encodes_bounded_two_byte_sizes(monkeypatch) -> None:
         session_id=session.id,
         target_fid="6F07",
         new_file_size="40",
-        new_total_size="80",
     )
 
-    fcp = "620C83026F078002004081020080"
-    assert transporter.calls == ["80D400000E" + fcp]
+    fcp = "620883026F0780020040"
+    assert transporter.calls == ["80D400000A" + fcp]
     assert result["tag_80"] == "80020040"
-    assert result["tag_81"] == "81020080"
+    assert result["tag_81"] == ""
+
+
+def test_resize_size_objects_are_exclusive(monkeypatch) -> None:
+    """ETSI TS 102 222 v17.1 §6.10.2.1: tag '80' is for an EF, tag '81' for
+    the MF or a DF/ADF -- one file is never both."""
+    from yggdrasim_common.gui_server.actions import scp03
+
+    session, transporter = _install_session(monkeypatch)
+    with pytest.raises(ValueError, match="not both"):
+        scp03._dispatch_fs_resize(
+            _Ctx(),
+            session_id=session.id,
+            target_fid="6F07",
+            new_file_size="40",
+            new_total_size="80",
+        )
+    assert transporter.calls == []
+
+
+def test_resize_wraps_the_table_18_objects_in_one_a5(monkeypatch) -> None:
+    """Table 18: 'C1'/'C2' initialise the new space, '86' caps a BER-TLV EF."""
+    from yggdrasim_common.gui_server.actions import scp03
+
+    session, transporter = _install_session(monkeypatch)
+    result = scp03._dispatch_fs_resize(
+        _Ctx(),
+        session_id=session.id,
+        target_fid="6FE8",
+        new_file_size="40",
+        repeat_pattern_hex="0011",
+        max_file_size_hex="0800",
+    )
+
+    assert result["tag_a5"] == "A508C202001186020800"
+    assert result["fcp"] == "621283026FE880020040A508C202001186020800"
+    assert transporter.calls == ["80D4000014" + result["fcp"]]
+
+
+def test_resize_refuses_both_pattern_objects(monkeypatch) -> None:
+    """Table 18 note 1: 'C1' and 'C2' are never both present."""
+    from yggdrasim_common.gui_server.actions import scp03
+
+    session, transporter = _install_session(monkeypatch)
+    with pytest.raises(ValueError, match="cannot both be present"):
+        scp03._dispatch_fs_resize(
+            _Ctx(),
+            session_id=session.id,
+            target_fid="6F07",
+            new_file_size="40",
+            filling_pattern_hex="FF",
+            repeat_pattern_hex="00FF",
+        )
+    assert transporter.calls == []
 
 
 def test_search_record_uses_extended_lc_without_wrapping(monkeypatch) -> None:
@@ -556,7 +604,9 @@ def test_search_record_uses_extended_lc_without_wrapping(monkeypatch) -> None:
         search_hex=needle,
     )
 
-    expected = "00A20104000100" + needle
+    # TS 102 221 v18.4 §11.1.7.2: the command carries an Le, or the card
+    # returns no record numbers. An extended Lc takes a two-byte Le.
+    expected = "00A20104000100" + needle + "0000"
     assert transporter.calls == [expected]
     assert result["apdu"] == expected
 

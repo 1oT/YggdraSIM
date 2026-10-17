@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ProfileHeader ``connectivityParameters`` BER-TLV breakdown.
 
 TCA SAIP carries a single OCTET STRING ``connectivityParameters`` on
@@ -11,7 +10,7 @@ three bearer types defined by ETSI TS 102 226 / 3GPP TS 31.115 and
 provides the inverse encoders so the GUI can edit each bearer through
 typed form fields rather than raw hex.
 
-Bearer registry (TCA SAIP §A.2 ``ConnectivityParameters``)::
+Bearer registry (TCA SAIP v3.4.1 §8.2.1 ``connectivityParameters``, coded per GSMA SGP.02 v4.2 table 93)::
 
   Tag  Bearer        Reference
   ----  -----------   --------------------------------------------------
@@ -124,9 +123,23 @@ _SMS_NPI_NAMES: tuple[tuple[int, str], ...] = (
 )
 
 
-def _decode_dialing_number(value: bytes) -> dict[str, Any]:
+def _decode_dialing_number(
+    value: bytes, placeholders: list[tuple[bytes, str]] | None = None
+) -> dict[str, Any]:
     if len(value) == 0:
         return {"ton": "", "npi": "", "digits": ""}
+    for sentinel, literal in placeholders or ():
+        if sentinel and sentinel in value[1:]:
+            ton_byte = value[0]
+            ton = (ton_byte >> 4) & 0x07
+            npi = ton_byte & 0x0F
+            return {
+                "ton": next((n for v, n in _SMS_TON_NAMES if v == ton), f"ton_{ton:X}"),
+                "npi": next((n for v, n in _SMS_NPI_NAMES if v == npi), f"npi_{npi:X}"),
+                "digits": literal,
+                "raw_hex": value.hex().upper(),
+                "placeholder": literal,
+            }
     ton_byte = value[0]
     ton = (ton_byte >> 4) & 0x07
     npi = ton_byte & 0x0F
@@ -148,7 +161,38 @@ def _decode_dialing_number(value: bytes) -> dict[str, Any]:
     }
 
 
-def _encode_dialing_number(ton_name: Any, npi_name: Any, digits: Any) -> bytes:
+def _emit_tlv_text(tag: int, value_hex: str, byte_length: int) -> str:
+    """``_emit_tlv`` over hex text whose byte count is given (a literal may sit in it)."""
+    if byte_length < 0x80:
+        head = bytes([tag, byte_length])
+    elif byte_length <= 0xFF:
+        head = bytes([tag, 0x81, byte_length])
+    elif byte_length <= 0xFFFF:
+        head = bytes([tag, 0x82, (byte_length >> 8) & 0xFF, byte_length & 0xFF])
+    else:
+        raise ValueError(f"TLV length {byte_length} exceeds 2-byte length encoding.")
+    return head.hex().upper() + value_hex
+
+
+def _placeholder_digits(digits: Any) -> tuple[str, int] | None:
+    """``(typed literal, byte width)`` when ``digits`` is an MSISDN placeholder."""
+    from .saip_hex_template import format_placeholder_literal, parse_placeholder_literal
+
+    text = str(digits or "").strip()
+    parts = parse_placeholder_literal(text)
+    if parts is None or str(parts.get("type") or "").upper() != "MSISDN":
+        return None
+    return format_placeholder_literal(text, "typed"), int(parts["byte_length"])
+
+
+def _encode_dialing_number(ton_name: Any, npi_name: Any, digits: Any) -> tuple[str, int]:
+    """Hex text and byte count of an address: TON/NPI, then the BCD digits.
+
+    The digits may be an MSISDN placeholder literal (``{smsc:MSISDN:6:nibble_swap}``),
+    which then stands where its bytes go, so a header follows the same
+    variable as EF.SMSP; the caller substitutes it before the blob becomes
+    bytes.
+    """
     by_ton = {n: v for v, n in _SMS_TON_NAMES}
     by_npi = {n: v for v, n in _SMS_NPI_NAMES}
     ton_value = by_ton.get(str(ton_name or "unknown").strip().lower())
@@ -161,10 +205,15 @@ def _encode_dialing_number(ton_name: Any, npi_name: Any, digits: Any) -> bytes:
         raise ValueError(
             f"unknown NPI {npi_name!r}; allowed: {', '.join(by_npi.keys())}",
         )
+    ton_npi = (0x80 | ((ton_value & 0x07) << 4) | (npi_value & 0x0F)) & 0xFF
+    placeholder = _placeholder_digits(digits)
+    if placeholder is not None:
+        literal, width = placeholder
+        return f"{ton_npi:02X}" + literal, 1 + width
     digits_text = re.sub(r"\s+", "", str(digits or ""))
     if not digits_text.isdigit() and len(digits_text) > 0:
         raise ValueError(f"dialing number digits must be 0-9; got {digits!r}")
-    out = bytearray([(0x80 | ((ton_value & 0x07) << 4) | (npi_value & 0x0F)) & 0xFF])
+    out = bytearray([ton_npi])
     pad = digits_text + ("F" if len(digits_text) % 2 else "")
     for index in range(0, len(pad), 2):
         low = pad[index]
@@ -172,10 +221,12 @@ def _encode_dialing_number(ton_name: Any, npi_name: Any, digits: Any) -> bytes:
         nibble_low = int(low, 16)
         nibble_high = int(high, 16) if high != "F" else 0xF
         out.append(((nibble_high & 0x0F) << 4) | (nibble_low & 0x0F))
-    return bytes(out)
+    return bytes(out).hex().upper(), len(out)
 
 
-def _decode_sms_block(value: bytes) -> dict[str, Any]:
+def _decode_sms_block(
+    value: bytes, placeholders: list[tuple[bytes, str]] | None = None
+) -> dict[str, Any]:
     out: dict[str, Any] = {"bearer": "sms"}
     cursor = 0
     while cursor < len(value):
@@ -186,39 +237,44 @@ def _decode_sms_block(value: bytes) -> dict[str, Any]:
         tag, _length, val_offset, next_offset = parsed
         chunk = value[val_offset:next_offset]
         if tag in (0x06, 0x80):
-            out["dialing_number"] = _decode_dialing_number(chunk)
+            out["dialing_number"] = _decode_dialing_number(chunk, placeholders)
         elif tag == 0x81 and len(chunk) >= 1:
             out["pid_hex"] = f"{chunk[0]:02X}"
         elif tag == 0x82 and len(chunk) >= 1:
             out["dcs_hex"] = f"{chunk[0]:02X}"
         elif tag == 0x83:
-            out["smsc_dialing_number"] = _decode_dialing_number(chunk)
+            out["smsc_dialing_number"] = _decode_dialing_number(chunk, placeholders)
         else:
             _append_extra(out, tag, chunk)
         cursor = next_offset
     return out
 
 
-def _encode_sms_block(payload: dict[str, Any]) -> bytes:
-    body = bytearray()
+def _encode_sms_block(payload: dict[str, Any]) -> str:
+    body_hex = ""
+    body_len = 0
     if "dialing_number" in payload:
         dn = payload["dialing_number"] or {}
-        body += _emit_tlv(
-            0x06,
-            _encode_dialing_number(dn.get("ton"), dn.get("npi"), dn.get("digits")),
-        )
+        value_hex, width = _encode_dialing_number(dn.get("ton"), dn.get("npi"), dn.get("digits"))
+        body_hex += _emit_tlv_text(0x06, value_hex, width)
+        body_len += len(_emit_tlv(0x06, b"\x00" * width)) - width + width
     if payload.get("pid_hex"):
-        body += _emit_tlv(0x81, _to_bytes(payload["pid_hex"], label="pid"))
+        piece = _emit_tlv(0x81, _to_bytes(payload["pid_hex"], label="pid"))
+        body_hex += piece.hex().upper()
+        body_len += len(piece)
     if payload.get("dcs_hex"):
-        body += _emit_tlv(0x82, _to_bytes(payload["dcs_hex"], label="dcs"))
+        piece = _emit_tlv(0x82, _to_bytes(payload["dcs_hex"], label="dcs"))
+        body_hex += piece.hex().upper()
+        body_len += len(piece)
     if "smsc_dialing_number" in payload:
         sm = payload["smsc_dialing_number"] or {}
-        body += _emit_tlv(
-            0x83,
-            _encode_dialing_number(sm.get("ton"), sm.get("npi"), sm.get("digits")),
-        )
-    body += _encode_extras(payload.get("extras"))
-    return _emit_tlv(0xA0, bytes(body))
+        value_hex, width = _encode_dialing_number(sm.get("ton"), sm.get("npi"), sm.get("digits"))
+        body_hex += _emit_tlv_text(0x83, value_hex, width)
+        body_len += len(_emit_tlv(0x83, b"\x00" * width))
+    extras = _encode_extras(payload.get("extras"))
+    body_hex += extras.hex().upper()
+    body_len += len(extras)
+    return _emit_tlv_text(0xA0, body_hex, body_len)
 
 
 # ----------------------------------------------------------------------
@@ -494,7 +550,16 @@ def decode_connectivity_parameters(hex_value: Any) -> dict[str, Any]:
     "tag_hex": "Ax", "value_hex": "..."}`` so a vendor extension is
     surfaced rather than silently lost.
     """
-    raw = _to_bytes(hex_value, label="connectivityParameters")
+    from .saip_hex_template import detect_inline_placeholders, substitute_inline_placeholders
+
+    placeholders: list[tuple[bytes, str]] = []
+    text = hex_value
+    if isinstance(hex_value, str) and detect_inline_placeholders(hex_value):
+        # A projection shows a placeholder as its literal; the bytes it stands
+        # for are a sentinel run the dialing-number decoder names again.
+        text, records = substitute_inline_placeholders(hex_value)
+        placeholders = [(bytes.fromhex(record.sentinel_hex), record.literal) for record in records]
+    raw = _to_bytes(text, label="connectivityParameters")
     bearers: list[dict[str, Any]] = []
     cursor = 0
     while cursor < len(raw):
@@ -512,6 +577,8 @@ def decode_connectivity_parameters(hex_value: Any) -> dict[str, Any]:
                     "value_hex": chunk.hex().upper(),
                 },
             )
+        elif tag == 0xA0:
+            bearers.append(decoder(chunk, placeholders))
         else:
             bearers.append(decoder(chunk))
         cursor = next_offset
@@ -529,11 +596,13 @@ def encode_connectivity_parameters(bearers: list[dict[str, Any]]) -> str:
     of ``sms`` / ``cat_tp`` / ``https``, plus the bearer-specific
     fields the decoder emits. Unknown bearers can be re-injected
     verbatim by supplying ``{"bearer": "unknown", "tag_hex": "...",
-    "value_hex": "..."}``.
+    "value_hex": "..."}``. An SMS dialing number may be an MSISDN
+    placeholder literal, which the returned hex then carries in place
+    of its bytes; substitute it before turning the text into bytes.
     """
     if isinstance(bearers, list) is False:
         raise ValueError("bearers must be a list of bearer dicts.")
-    out = bytearray()
+    out_hex = ""
     for entry in bearers:
         if isinstance(entry, dict) is False:
             raise ValueError("bearer entry must be a dict.")
@@ -546,7 +615,7 @@ def encode_connectivity_parameters(bearers: list[dict[str, Any]]) -> str:
             if len(tag) != 1:
                 raise ValueError("tag_hex must be a single byte.")
             value_bytes = _to_bytes(entry.get("value_hex"), label="value_hex")
-            out += _emit_tlv(tag[0], value_bytes)
+            out_hex += _emit_tlv(tag[0], value_bytes).hex().upper()
             continue
         encoder = _BEARER_ENCODERS.get(bearer)
         if encoder is None:
@@ -555,8 +624,26 @@ def encode_connectivity_parameters(bearers: list[dict[str, Any]]) -> str:
                 + ", ".join(sorted(_BEARER_ENCODERS.keys()))
                 + " or 'unknown'.",
             )
-        out += encoder(entry)
-    return bytes(out).hex().upper()
+        piece = encoder(entry)
+        out_hex += piece if isinstance(piece, str) else bytes(piece).hex().upper()
+    return out_hex
+
+
+def decode_address_bytes(value: Any) -> dict[str, Any]:
+    """TON/NPI and digits of an Address value (ETSI TS 102 223 v18.3 §8.1).
+
+    The value is the TON/NPI byte followed by the dialling number in
+    swapped BCD: the coding of the SMSC Address an SMS-PP bearer carries
+    (SGP.02 v4.2 Table 94) and of an EF.SMSP address behind its length
+    byte (3GPP TS 24.011 v19 §8.2.5.2). Accepts bytes or hex text and
+    returns ``{"ton", "npi", "digits", "raw_hex"}``; an empty value
+    decodes to empty names.
+    """
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+    else:
+        raw = _to_bytes(value, label="address")
+    return _decode_dialing_number(raw)
 
 
 def bearer_catalog() -> list[dict[str, Any]]:
@@ -569,6 +656,7 @@ def bearer_catalog() -> list[dict[str, Any]]:
 
 __all__ = [
     "bearer_catalog",
+    "decode_address_bytes",
     "decode_connectivity_parameters",
     "encode_connectivity_parameters",
 ]

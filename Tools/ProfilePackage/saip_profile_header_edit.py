@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP ``ProfileHeader`` structured edit helpers.
 
 The header PE carries the most operator-edited metadata in any SAIP
 profile (ICCID, mandatory services, GFSTE list, mandatory AIDs,
-connectivity parameters, IoT PIX). Putting the mutation logic here —
-rather than spreading it across the GUI action dispatchers — keeps
+connectivity parameters, IoT PIX). Putting the mutation logic here --
+rather than spreading it across the GUI action dispatchers -- keeps
 the spec-aware shape rules in one place and lets the TUI / browser
-editor share the same primitives.
+editor share the same primitives. Two mutators read the file system
+instead of taking a value: ``sync_header_iccid_from_ef`` copies
+EF.ICCID into ``iccid`` and ``sync_header_smsc_from_ef_smsp`` copies
+the EF.SMSP service centre address into the SMS-PP bearer of
+``connectivityParameters``.
 
 ASN.1 reference: ``ProfileHeader`` and ``ServicesList`` in
-``pySim/esim/asn1/saip/PE_Definitions-3.3.1.asn`` (TCA SAIP §A.2).
+``pySim/esim/asn1/saip/PE_Definitions-3.3.1.asn`` (TCA SAIP v3.4.1 §8.2.1).
 
 Header section layout in the decoded document (post
 ``build_decoded_document_from_sequence``)::
@@ -110,7 +113,7 @@ SERVICES_LIST_LABELS: dict[str, str] = {
 }
 
 
-# Header section keys observed in deployed packages — pySim's encoder uses
+# Header section keys observed in deployed packages -- pySim's encoder uses
 # ``"header"`` post-decoding, but legacy / vendor packages sometimes
 # write ``"profileHeader"``. Both are accepted for lookup.
 _HEADER_SECTION_KEYS: tuple[str, ...] = ("header", "profileHeader")
@@ -125,8 +128,8 @@ def locate_header_section(decoded_document: dict[str, Any]) -> tuple[str, dict[s
     """Return ``(section_key, header_dict)`` for the ProfileHeader PE.
 
     Raises ``LookupError`` when the document carries no ProfileHeader,
-    which only happens for malformed test fixtures — every TCA SAIP
-    profile MUST start with one (see TCA SAIP §A.2).
+    which only happens for malformed test fixtures -- every TCA SAIP
+    profile MUST start with one (see TCA SAIP v3.4.1 §8.2.1).
     """
     sections = decoded_document.get("sections")
     if isinstance(sections, dict) is False:
@@ -185,7 +188,7 @@ def _iccid_digits_to_header_bytes(digits: str) -> bytes:
         raise ValueError(f"ICCID must contain digits only: {digits!r}")
     if len(cleaned) not in (19, 20):
         raise ValueError(
-            f"ICCID must be 19 or 20 digits per ITU-T E.118 / SGP.22 §A.2 (got {len(cleaned)}).",
+            f"ICCID must be 19 or 20 digits per ITU-T E.118 (09/2025) §6 and TS 102 221 v18.4 §13.2 (got {len(cleaned)}).",
         )
     if len(cleaned) == 19:
         cleaned = cleaned + "F"
@@ -290,7 +293,7 @@ def set_major_minor_version(
     """Replace the SAIP ``major-version`` / ``minor-version`` UInt8 pair.
 
     Both arguments are optional: ``None`` leaves the corresponding field
-    untouched, an empty string clears it (rare — TCA SAIP §A.2 marks
+    untouched, an empty string clears it (rare -- TCA SAIP v3.4.1 §8.2.1 marks
     both as mandatory but the encoder fills in safe defaults when
     absent). Values are validated against the UInt8 range [0..255].
 
@@ -332,7 +335,7 @@ def set_profile_type(header: dict[str, Any], value: str | None) -> str:
     if len(text) > 100:
         raise ValueError(
             f"profileType must be 1..100 characters (got {len(text)}); "
-            "TCA SAIP §A.2 caps the label.",
+            "TCA SAIP v3.4.1 §8.2.1 caps the label.",
         )
     header["profileType"] = text
     return f"profileType set to {text!r}."
@@ -342,7 +345,7 @@ def set_iccid_digits(header: dict[str, Any], digits: str | None) -> str:
     """Replace ``iccid`` from a 19/20-digit decimal string."""
     cleaned = re.sub(r"\s+|-", "", str(digits or ""))
     if len(cleaned) == 0:
-        raise ValueError("ICCID is mandatory in ProfileHeader (TCA SAIP §A.2).")
+        raise ValueError("ICCID is mandatory in ProfileHeader (TCA SAIP v3.4.1 §8.2.1).")
     encoded = _iccid_digits_to_header_bytes(cleaned)
     header["iccid"] = encoded
     return f"iccid set to {cleaned} ({len(encoded)} bytes)."
@@ -382,6 +385,215 @@ def sync_header_iccid_from_ef(decoded_document: dict[str, Any]) -> str:
             f"(got {digits!r})."
         )
     return set_iccid_digits(header, digits)
+
+
+# ----------------------------------------------------------------------
+# EF.SMSP -> connectivityParameters SMS-PP bearer
+# ----------------------------------------------------------------------
+
+# 3GPP TS 31.102 v18.4.0 §4.2.27: an EF.SMSP record is Y alpha bytes and
+# a fixed 28-byte tail -- Parameter Indicators (Y+1), TP-Destination
+# Address (Y+2..Y+13), TS-Service Centre Address (Y+14..Y+25), TP-PID,
+# TP-DCS, TP-VP. Offsets below count from the start of the tail.
+_SMSP_TAIL_LENGTH = 28
+_SMSP_INDICATOR_SCA_ABSENT = 0x02
+_SMSP_SCA_OFFSET = 13
+_SMSP_SCA_LENGTH = 12
+
+
+def _first_ef_smsp_file(decoded_document: dict[str, Any]) -> Any:
+    """The EF.SMSP file that carries a record, or ``None``.
+
+    A template ``ef-smsp`` with a body wins; a template entry whose
+    ``linkPath`` names another file (the USIM template links ADF.USIM
+    EF.SMSP to DF.TELECOM 7F10/6F42) resolves to that generic-file-
+    management file; any 6F42 file with a body is the last resort.
+    """
+    from Tools.ProfilePackage.saip_ef_length_fields import (
+        coding_for_file,
+        iter_document_files,
+    )
+
+    template_files: list[Any] = []
+    gfm_files: list[Any] = []
+    for entry in iter_document_files(decoded_document):
+        if entry.parent_fid:
+            coding = coding_for_file("", entry.fid, parent_fid=entry.parent_fid)
+            if coding is not None and coding.ef_name == "SMSP":
+                gfm_files.append(entry)
+        elif entry.path == "ef-smsp":
+            template_files.append(entry)
+    for entry in template_files:
+        if len(entry.image) > 0:
+            return entry
+    for entry in template_files:
+        if not entry.link_path:
+            continue
+        for linked in gfm_files:
+            if linked.path == entry.link_path and len(linked.image) > 0:
+                return linked
+    for entry in gfm_files:
+        if len(entry.image) > 0:
+            return entry
+    return None
+
+
+def _ef_smsp_service_centre_address(record: bytes, record_size: int | None) -> dict[str, Any]:
+    """TON/NPI and digits of a record's TS-Service Centre Address.
+
+    The field is a length byte counting the octets that follow (2..11),
+    the TON/NPI byte and the digits in swapped BCD, the RP-Destination
+    Address coding of 3GPP TS 24.011 v19 §8.2.5.2 (TS 31.102 v18.4.0
+    §4.2.27). Without a record size the whole body is one record.
+    """
+    from Tools.ProfilePackage.saip_connectivity_parameters import decode_address_bytes
+
+    size = int(record_size) if isinstance(record_size, int) and record_size > 0 else len(record)
+    if size < _SMSP_TAIL_LENGTH:
+        raise ValueError(
+            f"EF.SMSP record is {size} bytes; a record needs at least "
+            f"{_SMSP_TAIL_LENGTH} (TS 31.102 §4.2.27).",
+        )
+    body = bytes(record[:size]).ljust(size, b"\xff")
+    tail = body[size - _SMSP_TAIL_LENGTH:]
+    indicators = tail[0]
+    if indicators & _SMSP_INDICATOR_SCA_ABSENT:
+        raise ValueError(
+            f"EF.SMSP Parameter Indicators 0x{indicators:02X} mark the "
+            "TS-Service Centre Address absent (bit 2, TS 31.102 §4.2.27).",
+        )
+    sca = tail[_SMSP_SCA_OFFSET:_SMSP_SCA_OFFSET + _SMSP_SCA_LENGTH]
+    length = sca[0]
+    if length in (0x00, 0xFF):
+        raise ValueError(
+            f"EF.SMSP TS-Service Centre Address is empty (length byte 0x{length:02X}).",
+        )
+    if not 2 <= length <= _SMSP_SCA_LENGTH - 1:
+        raise ValueError(
+            f"EF.SMSP TS-Service Centre Address length 0x{length:02X} is outside "
+            "2..11 (TS 24.011 §8.2.5.2).",
+        )
+    address = decode_address_bytes(sca[1:1 + length])
+    if len(str(address.get("digits") or "")) == 0:
+        raise ValueError("EF.SMSP TS-Service Centre Address carries no digits.")
+    return address
+
+
+def _select_sms_bearer(bearers: list[Any], bearer_index: Any) -> int:
+    sms_indexes = [
+        index
+        for index, bearer in enumerate(bearers)
+        if isinstance(bearer, dict) and str(bearer.get("bearer") or "").lower() == "sms"
+    ]
+    if len(sms_indexes) == 0:
+        raise ValueError(
+            "connectivityParameters carries no SMS-PP bearer block (tag A0); "
+            "add one in the connectivity editor and apply it first.",
+        )
+    text = str(bearer_index if bearer_index is not None else "").strip()
+    if len(text) == 0:
+        return sms_indexes[0]
+    if _DIGITS_RE.fullmatch(text) is None:
+        raise ValueError(f"bearer index must be a non-negative integer (got {bearer_index!r}).")
+    index = int(text)
+    if index not in sms_indexes:
+        raise ValueError(
+            f"bearer [{index}] is not an SMS-PP block in the stored "
+            f"connectivityParameters (SMS-PP blocks: {sms_indexes}); apply the "
+            "connectivity editor first.",
+        )
+    return index
+
+
+def sync_header_smsc_from_ef_smsp(
+    decoded_document: dict[str, Any],
+    bearer_index: Any = None,
+) -> str:
+    """Set the SMS-PP bearer's SMSC Address from the first EF.SMSP record.
+
+    SGP.02 v4.2 Table 94 codes the SMS bearer (tag 'A0') of
+    ``connectivityParameters`` as an SMSC Address (tag '06': TON/NPI and
+    digits) with optional PID and DCS; the TS-Service Centre Address of
+    EF.SMSP carries the same TON/NPI and digits behind a length byte
+    (TS 31.102 v18.4.0 §4.2.27). ``bearer_index`` selects the SMS-PP
+    block when the header carries several; ``None`` takes the first.
+    Only the address changes: PID, DCS, extras and the other bearers
+    are re-encoded as they were.
+    """
+    encoded, summary = build_header_smsc_from_ef_smsp(decoded_document, bearer_index)
+    _section_key, header = locate_header_section(decoded_document)
+    header["connectivityParameters"] = bytes.fromhex(encoded)
+    return summary
+
+
+def ef_smsp_service_centre_bytes(decoded_document: dict[str, Any]) -> tuple[Any, bytes]:
+    """The EF.SMSP file and the twelve bytes of its TS-Service Centre Address.
+
+    The address is the length byte, the TON/NPI byte and the digit bytes of
+    the first record (TS 31.102 v18.4.0 section 4.2.27); a caller that
+    looks for a placeholder's sentinel reads the digit bytes from offset 2.
+    """
+    smsp = _first_ef_smsp_file(decoded_document)
+    if smsp is None:
+        raise ValueError(
+            "EF.SMSP fillFileContent was not found (no template ef-smsp with a "
+            "body and no 6F42 file under generic file management).",
+        )
+    record = bytes(smsp.image)
+    size = (
+        int(smsp.record_size)
+        if isinstance(smsp.record_size, int) and smsp.record_size > 0
+        else len(record)
+    )
+    body = record[:size].ljust(size, b"\xff")
+    tail = body[size - _SMSP_TAIL_LENGTH:]
+    return smsp, tail[_SMSP_SCA_OFFSET:_SMSP_SCA_OFFSET + _SMSP_SCA_LENGTH]
+
+
+def build_header_smsc_from_ef_smsp(
+    decoded_document: dict[str, Any],
+    bearer_index: Any = None,
+    address: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    """The header's ``connectivityParameters`` hex with EF.SMSP's SMSC address.
+
+    ``address`` (``ton``, ``npi``, ``digits``) replaces the one decoded from
+    the record; ``digits`` may be an MSISDN placeholder literal, which the
+    hex then carries where the digit bytes go. Returns the hex and the
+    summary line; the caller stores it.
+    """
+    from Tools.ProfilePackage.saip_connectivity_parameters import (
+        decode_connectivity_parameters,
+        encode_connectivity_parameters,
+    )
+
+    _section_key, header = locate_header_section(decoded_document)
+    smsp = _first_ef_smsp_file(decoded_document)
+    if smsp is None:
+        raise ValueError(
+            "EF.SMSP fillFileContent was not found (no template ef-smsp with a "
+            "body and no 6F42 file under generic file management).",
+        )
+    if address is None:
+        address = _ef_smsp_service_centre_address(smsp.image, smsp.record_size)
+    current_hex = _bytes_field_repr(header.get("connectivityParameters"))
+    if len(current_hex) > 0:
+        decoded = decode_connectivity_parameters(current_hex)
+    else:
+        decoded = {"bearers": [], "trailing_hex": ""}
+    bearers = list(decoded.get("bearers") or [])
+    index = _select_sms_bearer(bearers, bearer_index)
+    bearers[index]["dialing_number"] = {
+        "ton": address["ton"],
+        "npi": address["npi"],
+        "digits": address["digits"],
+    }
+    encoded = encode_connectivity_parameters(bearers) + str(decoded.get("trailing_hex") or "")
+    summary = (
+        f"SMS-PP bearer [{index}] SMSC address set to {address['ton']}/{address['npi']} "
+        f"{address['digits']} from {smsp.section_key}.{smsp.path}."
+    )
+    return encoded, summary
 
 
 def set_mandatory_services(header: dict[str, Any], services: dict[str, Any]) -> str:
@@ -446,7 +658,7 @@ def set_mandatory_aids(header: dict[str, Any], aids: list[Any] | None) -> str:
         version_bytes = _hex_to_bytes(version_hex, label="version")
         if len(version_bytes) != 2:
             raise ValueError(
-                f"AID version must be 2 bytes (TCA SAIP §A.2); got {len(version_bytes)}.",
+                f"AID version must be 2 bytes (TCA SAIP v3.4.1 §8.2.1); got {len(version_bytes)}.",
             )
         out.append({"aid": aid_bytes, "version": version_bytes})
     if len(out) == 0:
@@ -475,7 +687,7 @@ def set_iot_pix_hex(header: dict[str, Any], hex_value: str | None) -> str:
     pix_bytes = bytes.fromhex(text)
     if not (7 <= len(pix_bytes) <= 11):
         raise ValueError(
-            f"iotOptions.pix must be 7..11 bytes per TCA SAIP §A.2; got {len(pix_bytes)}.",
+            f"iotOptions.pix must be 7..11 bytes per TCA SAIP v3.4.1 §8.2.1; got {len(pix_bytes)}.",
         )
     header["iotOptions"] = {"pix": pix_bytes}
     return f"iotOptions.pix set ({len(pix_bytes)} bytes)."
@@ -548,6 +760,7 @@ __all__ = [
     "set_iccid_digits",
     "set_iccid_hex",
     "sync_header_iccid_from_ef",
+    "sync_header_smsc_from_ef_smsp",
     "set_iot_pix_hex",
     "set_major_minor_version",
     "set_mandatory_aids",

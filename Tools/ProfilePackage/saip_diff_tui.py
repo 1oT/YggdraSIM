@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Standalone Textual app for visual side-by-side SAIP profile diffing.
 
@@ -26,10 +25,10 @@ JSON, simulator manifest, or SAIP DER), runs
 
 Keybindings:
 
-* ``n`` / ``N`` — next / previous diff entry.
-* ``v`` — toggle value display.
-* ``d`` — toggle the decoded view pane.
-* ``q`` / ``Ctrl+C`` — quit.
+* ``n`` / ``N`` -- next / previous diff entry.
+* ``v`` -- toggle value display.
+* ``d`` -- toggle the decoded view pane.
+* ``q`` / ``Ctrl+C`` -- quit.
 
 Textual is only imported inside the app launcher so this module stays
 importable on hosts that do not ship the TUI extra. The standalone CLI
@@ -97,8 +96,8 @@ _OP_STYLE: dict[str, str] = {
 # "before" / left pane) gets a red background so a byte that is no
 # longer there in B reads as a deletion; side B (the "after" / right
 # pane) gets a green background so a byte that wasn't there in A
-# reads as an addition. ``black on …`` keeps the digits legible on
-# light *and* dark themes — ``reverse`` was unreliable on a couple
+# reads as an addition. ``black on ...`` keeps the digits legible on
+# light *and* dark themes -- ``reverse`` was unreliable on a couple
 # of terminal palettes seen in the lab.
 _HEX_DIFF_BYTE_STYLE_A: str = "black on red"
 _HEX_DIFF_BYTE_STYLE_B: str = "black on green"
@@ -178,14 +177,14 @@ def _render_hex_with_byte_diff(
     The output mimics ``xxd``'s byte panel:
 
         0000: A0 00 00 01 67 41 00 00 47 53 4D 41 31 35 31 32
-        0010: …
+        0010: ...
 
     Bytes are space-separated so the boundaries are obvious at any
     zoom level. Diverging bytes carry a directional background:
 
-    * ``side="a"`` paints diverging bytes on a red background — the
+    * ``side="a"`` paints diverging bytes on a red background -- the
       byte was here in A but is different / missing in B (deletion).
-    * ``side="b"`` paints diverging bytes on a green background — the
+    * ``side="b"`` paints diverging bytes on a green background -- the
       byte is here in B but is different / missing in A (addition).
 
     A summary line ``(n of m bytes differ)`` is prepended when there
@@ -256,7 +255,7 @@ def _build_relevant_path_set(diff_paths: Any) -> set[str]:
     profile the diff lives). The empty string represents the document
     root and is always included so the tree builder has a sentinel.
 
-    Descendants of a diff path are NOT enumerated here — the tree
+    Descendants of a diff path are NOT enumerated here -- the tree
     walker switches to "show everything" once it dips below a diff
     boundary so `changed`-block subtrees stay fully expanded.
     """
@@ -577,13 +576,13 @@ def _render_decoded_pane(
 
     Two display modes, switched by ``show_hex_diff``:
 
-    * ``show_hex_diff=False`` (default) — original plain decoded
+    * ``show_hex_diff=False`` (default) -- original plain decoded
       view. The body is the decoder's canonical rendering: a
       pretty-printed JSON object for structural payloads, the raw
       hex string for raw-hex payloads. No diff colouring is applied
       anywhere in the pane; the side-by-side tree above carries the
       diff signal via its op markers and op colours.
-    * ``show_hex_diff=True`` — byte-level hex diff overlay. When
+    * ``show_hex_diff=True`` -- byte-level hex diff overlay. When
       the payload exposes a flat hex string the bytes are paired
       with the other side and diverging bytes are painted on the
       directional background (red on A, green on B), shown in xxd
@@ -1050,7 +1049,7 @@ def _launch(
                     decoded_show_hex_diff=self._decoded_show_hex_diff,
                 )
             except Exception:
-                # Persistence is best-effort — never let a write failure
+                # Persistence is best-effort -- never let a write failure
                 # take down the running session.
                 pass
 
@@ -1092,7 +1091,7 @@ def _launch(
             self._update_status()
 
         def _focus_diff(self) -> None:
-            # Lightweight focus hint — Textual tree widgets do not
+            # Lightweight focus hint -- Textual tree widgets do not
             # expose a stable "jump to data-key" primitive across 0.x
             # versions, so we just update the status line with the
             # current path and let the operator scroll to it.

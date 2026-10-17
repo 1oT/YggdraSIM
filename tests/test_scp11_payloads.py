@@ -324,8 +324,8 @@ class ProviderPayloadFaultTolerance(unittest.TestCase):
         start = source.index("self.state.provider_smdp_certificate = smdp_certificate_raw")
         return source[start:start + 1400]
 
-    def test_both_orchestrators_guard_the_remote_build(self) -> None:
-        for module_path in ("SCP11/orchestrator.py", "SCP11/live/orchestrator.py"):
+    def test_orchestrator_guards_the_remote_build(self) -> None:
+        for module_path in ("SCP11/live/orchestrator.py",):
             with self.subTest(module_path):
                 region = self._orchestrator_call_site(module_path)
                 self.assertIn("try:", region)

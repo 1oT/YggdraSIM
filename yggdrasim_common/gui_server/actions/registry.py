@@ -1,28 +1,46 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Action registry and spec dataclasses.
 
 This module defines three building blocks:
 
-* :class:`ActionField` — one form field on an action (name, kind, required,
+* :class:`ActionField` -- one form field on an action (name, kind, required,
   default, help, enum choices, placeholder).
-* :class:`ActionSpec`  — everything the UI needs to render a card and
+* :class:`ActionSpec`  -- everything the UI needs to render a card and
   everything the API needs to dispatch the call.
-* :class:`ActionRegistry` — singleton-like container with idempotent
+* :class:`ActionRegistry` -- singleton-like container with idempotent
   :meth:`register` so subsystem modules can self-register safely.
 
-The registry is intentionally small. It is not a plugin system; the GUI
-only exposes actions that ship with the project. Dispatchers use lazy
-imports so nothing from SCP03 / SCP11 / eim_local is loaded until the
-action actually fires.
+The registry is intentionally small. Bundled modules register on import and
+plugins contribute through ``extend_target_with_plugins`` once the bundled
+set is in. Dispatchers use lazy imports so nothing from SCP03 / SCP11 /
+eim_local is loaded until the action actually fires.
+
+Both dataclasses check the fields the catalogue serialises as text at
+construction, so a malformed spec is refused where it is built (a plugin's
+``extend_target``, recorded as that plugin's load error) instead of turning
+``GET /api/actions`` into an HTTP 500 for every action.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
+
+
+def _require_text(owner: str, name: str, value: Any) -> None:
+    """Refuse a non-``str`` value for a field the catalogue serialises as text.
+
+    The usual slip is a trailing comma inside a parenthesised run of adjacent
+    string literals, which makes the field a one-element tuple.
+    """
+    if isinstance(value, str):
+        return
+    hint = ""
+    if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
+        hint = " (adjacent string literals with a trailing comma form a tuple)"
+    raise TypeError(f"{owner}: {name} must be a str, got {type(value).__name__}{hint}")
 
 
 FieldKind = str
@@ -61,6 +79,11 @@ class ActionField:
     min_value: Optional[int] = None
     max_value: Optional[int] = None
 
+    def __post_init__(self) -> None:
+        owner = f"ActionField {self.name!r}"
+        for name in ("name", "label", "kind", "help", "placeholder"):
+            _require_text(owner, name, getattr(self, name))
+
     def to_schema(self) -> dict[str, Any]:
         """Return a JSON-serialisable schema dict describing this action parameter."""
         data: dict[str, Any] = {
@@ -97,7 +120,7 @@ OutputKind = str
 
 Dispatcher = Callable[..., Any]
 """Dispatchers return a plain dict for ``run``, or an async generator of
-events for ``stream``. The registry does not enforce signature — the
+events for ``stream``. The registry does not enforce signature -- the
 routes adapter validates at dispatch time.
 """
 
@@ -109,7 +132,7 @@ class ActionContext:
     Provides access to the active card session manager, the event-loop
     (for background-thread → asyncio bridging in streaming actions), and
     a structured cancel flag. Dispatchers should not reach into FastAPI
-    internals — anything they need lives on this context.
+    internals -- anything they need lives on this context.
     """
 
     session_id: Optional[str] = None
@@ -130,17 +153,31 @@ class ActionSpec:
     requires_card: bool = False
     # ``requires_auth`` signals that the dispatcher will reject calls
     # made without a live, authenticated GlobalPlatform secure session
-    # (typically because the card returns 69 82 / 69 85 — "security
-    # status not satisfied" — for any command that crosses the SCP
+    # (typically because the card returns 69 82 / 69 85 -- "security
+    # status not satisfied" -- for any command that crosses the SCP
     # secure-messaging envelope). The GUI uses this flag to gate the
     # Run button behind an authentication prompt so operators don't
     # submit an ``scp03.install_*`` / ``scp03.put_key`` form only to
     # have it bounce on the first APDU. Backend dispatchers still
-    # enforce the invariant themselves (``_require_auth_session``) —
+    # enforce the invariant themselves (``_require_auth_session``) --
     # the flag is a UX hint, never a security boundary.
     requires_auth: bool = False
     streams: bool = False
     tags: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        owner = f"ActionSpec {self.id!r}"
+        for name in ("id", "subsystem", "title", "description", "output_kind"):
+            _require_text(owner, name, getattr(self, name))
+        if isinstance(self.inputs, (tuple, list)) is False:
+            raise TypeError(f"{owner}: inputs must be a tuple of ActionField, got {type(self.inputs).__name__}")
+        for index, entry in enumerate(self.inputs):
+            if isinstance(entry, ActionField) is False:
+                raise TypeError(f"{owner}: inputs[{index}] must be an ActionField, got {type(entry).__name__}")
+        if isinstance(self.tags, (tuple, list)) is False:
+            raise TypeError(f"{owner}: tags must be a tuple of str, got {type(self.tags).__name__}")
+        for index, tag in enumerate(self.tags):
+            _require_text(owner, f"tags[{index}]", tag)
 
     def to_schema(self) -> dict[str, Any]:
         """Return a JSON-serialisable schema dict describing this action."""
@@ -270,7 +307,7 @@ def ensure_builtin_actions_loaded() -> ActionRegistry:
     for module_name in modules:
         try:
             importlib.import_module(module_name)
-        except Exception as load_error:  # noqa: BLE001 — surface every failure mode
+        except Exception as load_error:  # noqa: BLE001 -- surface every failure mode
             log.warning(
                 "action module failed to load: %s (%s: %s)",
                 module_name,

@@ -1,0 +1,138 @@
+/* Placeholder picker: the panel {T} and "Insert variable" open under a row
+   of the Data tab, the JSON tab or an editor, and the "Define a variable"
+   form of the Variables panel. It reads the tokens and sets no colour of
+   its own, so it looks native in every theme. */
+
+.saip-ph-picker {
+  margin: 6px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.saip-ph-picker-title {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-ph-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-dim);
+}
+
+.saip-ph-row select,
+.saip-ph-row input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.saip-ph-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 12px;
+}
+
+.saip-ph-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 10px;
+}
+
+.saip-ph-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.saip-ph-grid input,
+.saip-ph-grid select {
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.saip-ph-preview {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+.saip-ph-hint {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.saip-ph-hint[data-tone="warn"] {
+  color: var(--warn);
+}
+
+.saip-ph-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The flag under an Unset row whose type decides a length byte. */
+.saip-vars-hint--flag {
+  color: var(--warn);
+}
+
+.saip-insert-variable {
+  white-space: nowrap;
+}
+
+/* The define form folds like the name form; its grid is the picker's. */
+.saip-token-define-form .saip-ph-grid {
+  margin-bottom: 6px;
+}
+
+/* A listed variable is a chip: dragged into a field or the JSON tab it
+   places its placeholder, clicked it copies it. */
+.saip-vars-name[draggable="true"] {
+  cursor: grab;
+}
+
+.saip-vars-name[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.saip-vars-name.is-copied {
+  outline: 1px solid var(--ok);
+  outline-offset: 1px;
+}
+
+/* The universal-list section below the package rows: the same table. */
+.saip-token-list-section {
+  margin-top: 16px;
+}
+
+.saip-token-list-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-token-list-lead {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+
+.saip-vars-row--list .saip-vars-value-input[readonly] {
+  cursor: default;
+}
+
+.saip-ph-offset {
+  width: 5em;
+}

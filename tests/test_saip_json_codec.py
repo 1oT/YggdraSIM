@@ -26,7 +26,7 @@ from Tools.ProfilePackage.saip_json_codec import (
 def _variable_catalog() -> dict:
     return {
         "schema_version": "yggdrasim.saip-variable-catalog/v1",
-        "selector_dialect": "YGGDRASIM_SAIP_SEMANTIC_SELECTOR_V1",
+        "selector_dialect": "example.selector/v1",
         "variables": [
             {
                 "id": "ICCID",
@@ -258,7 +258,7 @@ class SaipJsonCodecTests(unittest.TestCase):
             "__ygg_placeholder_style__": "brace",
         }
         post_tagged = {
-            "intro": ["Re-encoded …"],
+            "intro": ["Re-encoded ..."],
             "sections": {"s1": {_TAG_BYTES: "aac1d1bb"}},
         }
         reapply_transcode_editor_placeholders(pre_loaded, post_tagged)

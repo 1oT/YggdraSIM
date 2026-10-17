@@ -5,7 +5,7 @@
 
 Background
 ----------
-Mutation-class SCP03 actions (PUT KEY / INSTALL [for …] / SET STATUS /
+Mutation-class SCP03 actions (PUT KEY / INSTALL [for ...] / SET STATUS /
 DELETE / STORE DATA / UPDATE BINARY / UPDATE RECORD / fs_create_file /
 fs_delete_file / fs_resize / fs_lifecycle / fs_search_record /
 fs_suspend_uicc / export_keybag) cross the SCP secure-messaging envelope
@@ -20,15 +20,15 @@ round. Operator request verbatim:
 
 The pass adds three layers:
 
-* ``ActionSpec.requires_auth`` — opt-in flag surfaced through
+* ``ActionSpec.requires_auth`` -- opt-in flag surfaced through
   ``/api/actions``. Backend dispatchers enforce it independently via
   ``_require_auth_session``; the spec flag is a UX hint so the GUI can
   intercept before the inline form opens.
-* Backend — ``scp03.auth_scp03`` / ``scp03.auth_scp02`` accept optional
+* Backend -- ``scp03.auth_scp03`` / ``scp03.auth_scp02`` accept optional
   ``kvn`` / ``enc_key`` / ``mac_key`` / ``dek_key`` overrides and a
   sibling ``scp03.auth_status`` spec reports session auth state without
   touching the card.
-* Frontend — per-tab ``authStatus`` cache, ``scp03EnsureAuthed`` gate,
+* Frontend -- per-tab ``authStatus`` cache, ``scp03EnsureAuthed`` gate,
   ``scp03GateOpen`` click wrapper, auth-prompt popout, ``69 82``
   auto-invalidation in the shared run helper.
 
@@ -84,9 +84,9 @@ _EXPECTED_AUTH_GATED = frozenset({
 def test_requires_auth_flag_matches_expected_set() -> None:
     """Every destructive / mutation dispatcher opts in; nothing else does.
 
-    Guards against drift: if an operator adds a new ``_dispatch_install_…``
+    Guards against drift: if an operator adds a new ``_dispatch_install_...``
     variant without setting ``requires_auth=True`` the card will reject
-    the first APDU with ``69 82`` and the GUI won't prompt — classic
+    the first APDU with ``69 82`` and the GUI won't prompt -- classic
     "why did my install silently fail" ticket.
     """
     reg = get_registry()
@@ -102,7 +102,7 @@ def test_requires_auth_flag_matches_expected_set() -> None:
 
 
 def test_auth_specs_themselves_are_not_gated() -> None:
-    """The AUTH actions bootstrap the session — gating them would deadlock."""
+    """The AUTH actions bootstrap the session -- gating them would deadlock."""
     for name in ("AUTH_SCP03_SPEC", "AUTH_SCP02_SPEC", "AUTH_STATUS_SPEC"):
         spec = getattr(scp03_actions, name)
         assert spec.requires_auth is False, name
@@ -144,7 +144,7 @@ def test_auth_specs_expose_key_override_fields() -> None:
 def test_schema_exposes_requires_auth_flag() -> None:
     """The public ``/api/actions`` schema surfaces ``requires_auth``.
 
-    The frontend gate relies on this — a missing key would mean
+    The frontend gate relies on this -- a missing key would mean
     ``scp03ActionRequiresAuth`` always returns false and the popout
     never opens.
     """
@@ -197,7 +197,7 @@ def test_run_action_wrapper_clears_auth_on_6982() -> None:
     Without this clear, a card cold-reset (or reader-bar probe, or
     SGP.32 bulk traffic that trips SM) between the gate check and the
     actual APDU would leave ``authStatus.authenticated`` stuck at
-    ``true`` — every subsequent click would loop on the same 6982.
+    ``true`` -- every subsequent click would loop on the same 6982.
     """
     js = _read("app.js")
     assert "scp03RunActionWithOutput" in js
@@ -209,7 +209,7 @@ def test_gate_open_wires_into_ribbon_buttons() -> None:
     """Ribbon handlers for auth-gated actions route through ``scp03GateOpen``.
 
     If a wrap is dropped the button bypasses the popout and drops
-    straight to the legacy inline form — the card will then bounce the
+    straight to the legacy inline form -- the card will then bounce the
     first APDU and the operator sees a confusing mid-flow error.
     """
     js = _read("app.js")
@@ -270,7 +270,7 @@ def test_rehydrate_clears_auth_state() -> None:
     """Tabs loaded from ``localStorage`` start unauthenticated.
 
     The backend session is torn down on page reload (no persistence),
-    so any cached ``authStatus.authenticated=true`` would be a lie —
+    so any cached ``authStatus.authenticated=true`` would be a lie --
     the next action would 6982 without prompting. We reset explicitly
     during hydration instead of hoping the default struct stays
     consistent with ``scp03CreateEmptyTab``.
@@ -312,19 +312,19 @@ def test_replace_child_sites_guarded_against_hierarchy_error() -> None:
     """Surviving ``replaceChild`` calls wrap in try/catch.
 
     Any remaining in-place DOM swap (ribbon repaint, breadcrumb
-    refresh) can still race with a stale ref — guard with a
+    refresh) can still race with a stale ref -- guard with a
     try/catch that falls back to the safe full repaint so the UI
     never dead-locks in an orphaned state.
     """
     js = _read("app.js")
-    # The two named fallback patterns — both route to renderScp03Tabs
+    # The two named fallback patterns -- both route to renderScp03Tabs
     # on a catch so the tab body is guaranteed consistent even if the
     # targeted swap fails.
     assert "oldRibbon.parentNode.replaceChild(fresh, oldRibbon)" in js
     assert "oldCrumb.parentNode.replaceChild(fresh, oldCrumb)" in js
     # Both sites must live inside a try/catch that rerenders the tab.
     fragments_with_guard = js.count("renderScp03Tabs(tabBar, tabBody);\n    }")
-    # Expect at least two guarded catches — one per replaceChild site.
+    # Expect at least two guarded catches -- one per replaceChild site.
     assert fragments_with_guard >= 2, (
         "expected at least two renderScp03Tabs fallbacks after replaceChild guards; "
         f"found {fragments_with_guard}"

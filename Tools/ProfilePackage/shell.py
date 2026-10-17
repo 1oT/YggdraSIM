@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ProfilePackage interactive shell: REPL loop wiring the bridge commands to the Textual TUI and CLI surfaces."""
 import atexit
 import ast
@@ -11,17 +10,21 @@ import os
 import re
 import shlex
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import yaml
 
+from yggdrasim_common.command_log import LOG_FLAG_HELP, run_with_command_log
 from yggdrasim_common.progress import progress_session
 from yggdrasim_common.quit_control import quit_all
-from yggdrasim_common.nord_palette import NORD
+from yggdrasim_common.secure_files import atomic_write_bytes
+from yggdrasim_common.cli_theme import ThemedColorsMeta as _ThemedColorsMeta
 from .saip_asn1_decode import (
     _FID_TO_NAME,
     _decode_special_field as _asn1_decode_special_field,
+    _decode_uicc_toolkit_parameters,
     fid_name as _fid_name_lookup,
+    lcsi_state_name,
 )
 from .saip_dgi_decode import (
     decode_compact_binary_value as _dgi_decode_compact_binary_value,
@@ -55,6 +58,7 @@ from .saip_profile_template import (
     batch_output_stem,
     build_placeholder_template_document,
     extract_template_placeholder_names,
+    normalize_placeholder_name,
     load_batch_placeholder_records,
     parse_placeholder_assignment_tokens,
     validate_batch_record_assignments,
@@ -110,17 +114,17 @@ _AKA_ALGORITHM_ID_NAMES = {
     3: "usim-test-algorithm",
 }
 
-class ShellStyle:
-    """SAIP profile-package shell colour roles, anchored to Nord."""
+class ShellStyle(metaclass=_ThemedColorsMeta):
+    """SAIP profile-package shell colour roles, read from the active theme."""
 
-    HEADER = NORD.HEADER
-    BLUE = NORD.BLUE
-    CYAN = NORD.CYAN
-    GREEN = NORD.GREEN
-    WARNING = NORD.WARNING
-    FAIL = NORD.FAIL
-    BOLD = NORD.BOLD
-    END = NORD.RESET
+    _ROLE_MAP = {
+        "HEADER": "HEADER",
+        "BLUE": "BLUE",
+        "CYAN": "CYAN",
+        "GREEN": "GREEN",
+        "WARNING": "WARNING",
+        "FAIL": "FAIL",
+    }
 
 
 class ProfilePackageShell:
@@ -181,14 +185,22 @@ class ProfilePackageShell:
             "GENERATE-BATCH": self._cmd_generate_batch,
             "GENERATE-PROFILE": self._cmd_generate_profile,
             "GENERATE-TEMPLATE": self._cmd_generate_template,
+            "MATERIALIZE-TEMPLATE": self._cmd_materialize_template,
+            "MATERIALISE-TEMPLATE": self._cmd_materialize_template,
             "DIFF": self._cmd_diff,
             "DIFF-TUI": self._cmd_diff_tui,
             "HELP": self._cmd_help,
             "INFO": self._cmd_info,
             "INSPECT": self._cmd_inspect,
             "LINT": self._cmd_lint,
+            "TRIM": self._cmd_trim,
+            "RFM": self._cmd_rfm,
+            "VARIABLES": self._cmd_variables,
             "APPLY-TEMPLATE": self._cmd_apply_template,
             "APPLY-TOKENS": self._cmd_apply_tokens,
+            "UNIVERSAL-TOKENS": self._cmd_universal_tokens,
+            "APPLY-UNIVERSAL-TOKENS": self._cmd_apply_universal_tokens,
+            "TOKEN-LISTS": self._cmd_token_lists,
             "EXPORT-TOKENS": self._cmd_export_tokens,
             "EXPORT-TOKENS-CSV": self._cmd_export_tokens_csv,
             "IMPORT-TOKENS-CSV": self._cmd_import_tokens_csv,
@@ -410,6 +422,15 @@ class ProfilePackageShell:
         "RETOKENISE-LENGTHS": ("--dry-run", "--no-backup"),
         "RETOKENIZE-LENGTHS": ("--dry-run", "--no-backup"),
         "APPLY-TOKENS": ("OVERWRITE",),
+        "APPLY-UNIVERSAL-TOKENS": ("OVERWRITE",),
+        "TOKEN-LISTS": (
+            "OVERWRITE",
+            "BIND",
+            "STYLE=typed",
+            "STYLE=compact",
+            "STYLE=brace",
+            "STYLE=bracket",
+        ),
     }
 
     _TOKEN_CMD_POSITIONAL_SHAPE: dict[str, tuple[str, ...]] = {
@@ -424,9 +445,12 @@ class ProfilePackageShell:
         "EXPORT-TOKENS-CSV": (_SLOT_PATH, _SLOT_PATH),
         "IMPORT-TOKENS-CSV": (_SLOT_PATH, _SLOT_PATH),
         "APPLY-TOKENS": (_SLOT_PATH, _SLOT_PATH, _SLOT_PATH),
+        "APPLY-UNIVERSAL-TOKENS": (_SLOT_PATH, _SLOT_PATH),
         "ENCODE-JSON": (_SLOT_PATH, _SLOT_PATH),
         "GENERATE-TEMPLATE": (_SLOT_PATH,),
         "GENERATE-PROFILE": (_SLOT_PATH, _SLOT_PATH),
+        "MATERIALIZE-TEMPLATE": (_SLOT_PATH, _SLOT_PATH),
+        "MATERIALISE-TEMPLATE": (_SLOT_PATH, _SLOT_PATH),
         "GENERATE-BATCH": (_SLOT_PATH, _SLOT_PATH, _SLOT_PATH),
         "DIFF": (_SLOT_PATH, _SLOT_PATH),
         "DIFF-TUI": (_SLOT_PATH, _SLOT_PATH),
@@ -463,7 +487,52 @@ class ProfilePackageShell:
             return self._complete_scaffold_token(command, argument_text)
         if command in self._TOKEN_CMD_POSITIONAL_SHAPE:
             return self._complete_by_shape(command, argument_text)
+        if command == "RFM":
+            return self._complete_rfm_token(argument_text)
+        if command == "VARIABLES":
+            return self._complete_variables_token(argument_text)
         return []
+
+    def _complete_variables_token(self, argument_text: str) -> list[str]:
+        tokens = argument_text.split(" ")
+        trailing = tokens[-1].upper() if tokens else ""
+        if len(tokens) <= 1:
+            words: tuple[str, ...] = (
+                "SET", "CLEAR", "USE", "FILL", "GENERATE", "EXPORT", "EXPORT-LIST", "LISTS",
+                "NORMALISE", "DEFINE",
+            )
+        elif tokens[0].upper() == "USE" and len(tokens) == 2:
+            words = ("UNIVERSAL",)
+        elif tokens[0].upper() in ("NORMALISE", "NORMALIZE"):
+            words = ("IN-PLACE", "OUTPUT=", "--no-backup")
+        elif tokens[0].upper() == "DEFINE" and len(tokens) >= 3:
+            words = ("LIST=",)
+        elif tokens[0].upper() == "LISTS" and len(tokens) == 2:
+            words = ("LIST", "SHOW", "SET", "UNSET", "DELETE", "BIND", "CHECK", "EXPORT")
+        else:
+            return []
+        return [
+            word if word.endswith("=") else f"{word} "
+            for word in words
+            if word.upper().startswith(trailing)
+        ]
+
+    def _complete_rfm_token(self, argument_text: str) -> list[str]:
+        tokens = argument_text.split(" ")
+        if len(tokens) <= 1:
+            return []
+        trailing = tokens[-1].upper()
+        if len(tokens) == 2:
+            words: tuple[str, ...] = ("MF", "ADF")
+        elif len(tokens) == 3 and tokens[1].upper() == "ADF":
+            words = ("USIM", "ISIM", "CSIM")
+        else:
+            words = ("ACCESS=", "ADMIN=", "OUTPUT=", "IN-PLACE")
+        return [
+            word if word.endswith("=") else f"{word} "
+            for word in words
+            if word.startswith(trailing)
+        ]
 
     def _complete_tokens_namespace(self, argument_text: str) -> list[str]:
         tokens = argument_text.split(" ")
@@ -489,6 +558,9 @@ class ProfilePackageShell:
             "_cmd_export_tokens_csv": "EXPORT-TOKENS-CSV",
             "_cmd_import_tokens_csv": "IMPORT-TOKENS-CSV",
             "_cmd_apply_tokens": "APPLY-TOKENS",
+            "_cmd_universal_tokens": "UNIVERSAL-TOKENS",
+            "_cmd_apply_universal_tokens": "APPLY-UNIVERSAL-TOKENS",
+            "_cmd_token_lists": "TOKEN-LISTS",
         }
         flat = flat_aliases.get(handler_name)
         if flat is None:
@@ -1136,27 +1208,12 @@ class ProfilePackageShell:
         return {"format": "BER-TLV", "items": items}
 
     def _decode_uicc_toolkit_parameters(self, value):
+        # One reading for the shell, the GUI and the encoder: ETSI TS 102 226
+        # V19.0.0 §8.2.1.3.2.2.1, in saip_asn1_decode.
         value_bytes = self._value_to_bytes(value)
         if value_bytes is None:
             return None
-
-        decoded: dict[str, object] = {
-            "length": len(value_bytes),
-            "rawHex": value_bytes.hex(),
-        }
-        parsed = self._parse_uicc_toolkit_parameters(value_bytes)
-        if parsed is not None:
-            decoded.update(parsed)
-            return decoded
-
-        decoded["bytes"] = [f"0x{byte_value:02X}" for byte_value in value_bytes]
-        msl_value, tar_value = self._extract_toolkit_msl_and_tar(value_bytes)
-        if msl_value is not None:
-            decoded["minimumSecurityLevelInferred"] = f"0x{msl_value:02X}"
-            decoded["minimumSecurityLevelDecimal"] = msl_value
-        if tar_value is not None:
-            decoded["tarInferred"] = tar_value.hex()
-        return decoded
+        return _decode_uicc_toolkit_parameters(value_bytes)
 
     def _decode_sd_perso_data(self, value):
         # Delegated to ``saip_dgi_decode``: GlobalPlatform Amendment A
@@ -2026,19 +2083,7 @@ class ProfilePackageShell:
         if value_bytes is None or len(value_bytes) != 1:
             return None
         lcsi = value_bytes[0]
-        state_name = "unknown"
-        if lcsi == 0x00:
-            state_name = "no_information"
-        elif lcsi == 0x01:
-            state_name = "creation"
-        elif lcsi == 0x03:
-            state_name = "initialization"
-        elif lcsi & 0x05 == 0x05:
-            state_name = "operational_activated"
-        elif lcsi & 0x05 == 0x04:
-            state_name = "operational_deactivated"
-        elif lcsi & 0xC0 == 0xC0:
-            state_name = "termination"
+        state_name = lcsi_state_name(lcsi) or "unknown"
         return {
             "format": "Life Cycle Status Integer",
             "hex": value_bytes.hex(),
@@ -2109,116 +2154,15 @@ class ProfilePackageShell:
             decoded["recordLength"] = int.from_bytes(value_bytes[2:4], "big", signed=False)
         if len(value_bytes) >= 5:
             decoded["numberOfRecords"] = value_bytes[4]
-        if "recordLength" in decoded and "numberOfRecords" in decoded:
-            decoded["derivedFileSize"] = decoded["recordLength"] * decoded["numberOfRecords"]
+        if len(value_bytes) > 4:
+            # SAIP V3.4.1 §8.3.2 Fcp.fileDescriptor is SIZE(2..4) (ETSI TS 102 222
+            # V17.1.0 §6.3.2.2.2 Table 4); the record count after the record
+            # length belongs to the TS 102 221 V18.4.0 §11.1.1.4.3 SELECT layout.
+            decoded["warning"] = (
+                f"{len(value_bytes)} bytes: a profile's file descriptor is 2 or 4 bytes "
+                "and a card rejects this one; the record count is efFileSize / record length"
+            )
         return decoded
-
-    def _parse_uicc_toolkit_parameters(self, value_bytes: bytes) -> dict[str, object] | None:
-        try:
-            offset = 0
-            if offset >= len(value_bytes):
-                return None
-            access_domain_length = value_bytes[offset]
-            offset += 1
-            if offset + access_domain_length > len(value_bytes):
-                return None
-            access_domain = value_bytes[offset : offset + access_domain_length]
-            offset += access_domain_length
-
-            if offset + 4 > len(value_bytes):
-                return None
-            priority_level = value_bytes[offset]
-            offset += 1
-            max_num_of_timers = value_bytes[offset]
-            offset += 1
-            max_text_length = value_bytes[offset]
-            offset += 1
-            menu_entry_count = value_bytes[offset]
-            offset += 1
-
-            menu_entries: list[dict[str, int]] = []
-            for _ in range(menu_entry_count):
-                if offset + 2 > len(value_bytes):
-                    return None
-                menu_entries.append(
-                    {
-                        "id": value_bytes[offset],
-                        "position": value_bytes[offset + 1],
-                    }
-                )
-                offset += 2
-
-            if offset >= len(value_bytes):
-                return None
-            max_num_of_channels = value_bytes[offset]
-            offset += 1
-
-            if offset >= len(value_bytes):
-                return None
-            msl_length = value_bytes[offset]
-            offset += 1
-            if offset + msl_length > len(value_bytes):
-                return None
-            msl_value_bytes = value_bytes[offset : offset + msl_length]
-            offset += msl_length
-
-            if offset >= len(value_bytes):
-                return None
-            tar_data_length = value_bytes[offset]
-            offset += 1
-            tar_values: list[str] = []
-            if offset + tar_data_length > len(value_bytes):
-                return None
-            tar_end = offset + tar_data_length
-            if tar_data_length % 3 != 0:
-                return None
-            while offset < tar_end:
-                tar_values.append(value_bytes[offset : offset + 3].hex())
-                offset += 3
-
-            trailing_padding = b""
-            if offset != len(value_bytes):
-                trailing_padding = value_bytes[offset:]
-                if any(byte_value != 0x00 for byte_value in trailing_padding):
-                    return None
-                offset = len(value_bytes)
-
-            if offset != len(value_bytes):
-                return None
-        except Exception:
-            return None
-
-        decoded: dict[str, object] = {
-            "format": "ETSI TS 102 226 toolkit app specific parameters",
-            "accessDomain": access_domain.hex(),
-            "priorityLevelOfToolkitAppInstance": priority_level,
-            "maxNumberOfTimers": max_num_of_timers,
-            "maxTextLengthForMenuEntry": max_text_length,
-            "menuEntries": menu_entries,
-            "maxNumberOfChannels": max_num_of_channels,
-            "minimumSecurityLevelRaw": msl_value_bytes.hex(),
-            "tarValues": tar_values,
-        }
-        if len(msl_value_bytes) >= 1:
-            decoded["minimumSecurityLevelInferred"] = f"0x{msl_value_bytes[-1]:02X}"
-            decoded["minimumSecurityLevelDecimal"] = msl_value_bytes[-1]
-        if len(tar_values) > 0:
-            decoded["tarInferred"] = tar_values[0]
-        if len(trailing_padding) > 0:
-            decoded["trailingPadding"] = trailing_padding.hex()
-        return decoded
-
-    def _extract_toolkit_msl_and_tar(self, value_bytes: bytes) -> tuple[int | None, bytes | None]:
-        msl_value = None
-        if len(value_bytes) >= 3:
-            for index in range(0, len(value_bytes) - 2):
-                if value_bytes[index] == 0x02 and value_bytes[index + 1] == 0x01:
-                    msl_value = value_bytes[index + 2]
-                    break
-        tar_index = value_bytes.find(bytes.fromhex("b20100"))
-        if tar_index == -1:
-            return msl_value, None
-        return msl_value, value_bytes[tar_index : tar_index + 3]
 
     def _value_to_bytes(self, value) -> bytes | None:
         if isinstance(value, bytes):
@@ -2577,6 +2521,10 @@ class ProfilePackageShell:
         return tokens[:redirect_index], output_path
 
     def _exec_line(self, raw_line: str) -> bool:
+        """Run one command line; one carrying ``--log <file>`` runs under a command log."""
+        return run_with_command_log(raw_line, self._exec_command_line, shell="SAIP Tool", refused=False)
+
+    def _exec_command_line(self, raw_line: str) -> bool:
         parts = raw_line.split(None, 1)
         command = parts[0].upper()
         argument = ""
@@ -2622,6 +2570,7 @@ class ProfilePackageShell:
             "or `USE` if you only want to select the active file without launching the TUI."
         )
         print("    Output locations for write operations remain workspace-confined.")
+        print(f"    {LOG_FLAG_HELP}")
         print("")
         print("  Typical workflow:")
         print("    1. OPEN")
@@ -2645,6 +2594,9 @@ class ProfilePackageShell:
         print("  TREE                       Run `tree`.")
         print("  CHECK                      Run `check`.")
         print("  LINT [options] [> output_file]")
+        print("  TRIM [APPLY] [OUTPUT <file>] [GAP <n>]")
+        print("                             Report the fillFileContent bytes the fill pattern or template default already")
+        print("                             provides (TCA SAIP 8.3.3); APPLY writes the trimmed package (default <input>.trimmed.der).")
         print("                             Lint the profile across SAIP structure,")
         print("                             mandatory services, AID integrity, APDU/hex sanity, and metadata coherence.")
         print("                             For detailed lint options run: LINT HELP")
@@ -2727,6 +2679,25 @@ class ProfilePackageShell:
         print("                             for TUAK) via secrets.token_bytes and applies them to the first")
         print("                             akaParameter PE. authCounterMax / sqnInit are skipped unless")
         print("                             explicitly included so replay-protection stays predictable.")
+        print("  RFM [<pe_index> MF | <pe_index> ADF <USIM|ISIM|CSIM|aid>] [ACCESS=<hex>] [ADMIN=<hex>]")
+        print("                             [OUTPUT=<file.der> | IN-PLACE]")
+        print("                             Without arguments, list every PE-RFM with its TARs and default")
+        print("                             directory. MF drops the adfRFMAccess binding (UICC shared file")
+        print("                             system RFM, TS 102 226 7.2); ADF binds the instance to the named ADF")
+        print("                             or AID (ADF RFM, 7.3; TCA SAIP 8.8), the access domains defaulting")
+        print("                             to the PE's UICC domains. Without OUTPUT= or IN-PLACE the change is")
+        print("                             only shown.")
+        print("  VARIABLES [SET <name>=<value> ... | CLEAR <name> ... | USE <universal|list|file.csv> | FILL [OVERWRITE]")
+        print("             | GENERATE|EXPORT <out.der|out.hex> | EXPORT-LIST <name|out.csv> [OVERWRITE] [BIND]")
+        print("             | LISTS [...] | NORMALISE [IN-PLACE | OUTPUT=<file>] [--no-backup]]")
+        print("                             The active template's placeholders (inline typed, or {NAME} tokens of")
+        print("                             a tagged JSON template) with the value each takes and its source.")
+        print("                             SET / CLEAR edit the typed values, USE binds a test-value list, FILL")
+        print("                             stores the lists' values, GENERATE (EXPORT) writes the test profile,")
+        print("                             EXPORT-LIST writes the values as a list, LISTS manages the lists,")
+        print("                             NORMALISE respells the placeholders in the typed form. The long-form")
+        print("                             verbs (TOKEN-LISTS, UNIVERSAL-TOKENS, APPLY-UNIVERSAL-TOKENS,")
+        print("                             MATERIALIZE-TEMPLATE, TOKENS ...) are listed under HELP TOKENS.")
         print("  APPLY-TEMPLATE <template.json> <out.der> [ICCID=<digits|AUTO>] [IMSI=<digits|AUTO>] [VERIFY]")
         print("                             Materialise a tagged JSON template into a DER profile with typed")
         print("                             overrides. Mirrors GENERATE-PROFILE but with wizard-aware verbs.")
@@ -2745,14 +2716,6 @@ class ProfilePackageShell:
         print("                             Each record must map placeholder names 1:1 to template tokens.")
         print("                             CSV headers or object keys become placeholder names directly.")
         print("                             Quote ICCID / IMSI values in JSON/YAML to preserve leading zeros.")
-        print("  TOKENS <LIST|ADD|SET|REMOVE|RENAME|RETOKENISE-LENGTHS|EXPORT|APPLY|HELP> ...")
-        print("                             Unified placeholder-token namespace. Flat aliases")
-        print("                             (LIST-TOKENS, ADD-TOKEN, SET-TOKEN, REMOVE-TOKEN,")
-        print("                             RENAME-TOKEN, RETOKENISE-LENGTHS, EXPORT-TOKENS,")
-        print("                             APPLY-TOKENS) remain valid. Destructive commands")
-        print("                             (REMOVE / RENAME / RETOKENISE-LENGTHS) accept")
-        print("                             --dry-run and write <file>.bak by default. Full")
-        print("                             reference: HELP TOKENS.")
         print("  SPLIT [output_prefix]      Run `split`.")
         print("  EXTRACT-APPS [dir] [CAP|IJC]")
         print("                             Run `extract-apps`.")
@@ -2828,12 +2791,30 @@ class ProfilePackageShell:
         print("")
 
     def _cmd_help_tokens(self, _arg: str) -> None:
-        print(f"\n{ShellStyle.BOLD}Placeholder tokens — reference{ShellStyle.END}")
+        print(f"\n{ShellStyle.BOLD}Placeholder tokens -- reference{ShellStyle.END}")
+        print("  VARIABLES is the one verb over the active template (USE <template> first):")
+        print("    VARIABLES                                 Every placeholder, its value and its source")
+        print("    VARIABLES SET <name>=<value> [...]        Store typed values (values file / token defs)")
+        print("    VARIABLES CLEAR <name> [...]              Drop typed values")
+        print("    VARIABLES USE <universal|list|file.csv>   Bind a test-value list (inline templates)")
+        print("    VARIABLES FILL [OVERWRITE]                Store the lists' values (APPLY-UNIVERSAL-TOKENS)")
+        print("    VARIABLES GENERATE <out.der|out.hex>      Write the test profile: every placeholder replaced by")
+        print("                                              its value (typed, else the lists'); EXPORT is the same")
+        print("    VARIABLES EXPORT-LIST <name|out.csv> [OVERWRITE] [BIND]")
+        print("                                              Write the values as a reusable list (typed spelling)")
+        print("    VARIABLES LISTS [...]                     TOKEN-LISTS under the one verb")
+        print("    VARIABLES NORMALISE [IN-PLACE | OUTPUT=<file>] [--no-backup]")
+        print("                                              Respell inline placeholders in the typed form")
+        print("    VARIABLES DEFINE <{var:TYPE:len[:mod]}> [<value>] [LIST=<list>]")
+        print("                                              Add a placeholder to a list, with its value or declared alone")
+        print("    MATERIALIZE-TEMPLATE <template.varder|.asn|.json> <out.der|out.hex> [NAME=value ...] [--values <file.variables.json>] [--universal]")
+        print("                                              The long form of VARIABLES GENERATE for inline templates")
+        print("")
         print("  Tokens let a SAIP JSON template carry symbolic values that resolve at build time.")
         print("  Definitions live at the document root under __ygg_token_defs__ and __ygg_placeholder_style__.")
         print("  Syntax:")
-        print("    {NAME}   content expansion — replaces with the resolved bytes")
-        print("    {#NAME}  derived BER-TLV length of NAME (short form 0x00–0x7F, long form 0x81..0x84)")
+        print("    {NAME}   content expansion -- replaces with the resolved bytes")
+        print("    {#NAME}  derived BER-TLV length of NAME (short form 0x00-0x7F, long form 0x81..0x84)")
         print("    [NAME] / [#NAME] are accepted when __ygg_placeholder_style__ is 'bracket'")
         print("")
         print("  Token value forms:")
@@ -2843,7 +2824,7 @@ class ProfilePackageShell:
         print('    {"pattern_hex":"FF","byte_len":4}')
         print("                                 repeated pattern until byte_len is reached")
         print("")
-        print(f"  {ShellStyle.BOLD}Commands (flat form — still available){ShellStyle.END}")
+        print(f"  {ShellStyle.BOLD}Commands (flat form -- still available){ShellStyle.END}")
         print("    LIST-TOKENS <file.json>                   Show defs with per-token ref counts")
         print("    ADD-TOKEN <file.json> <NAME> <VALUE>      Add a new def (fails if NAME exists)")
         print("    SET-TOKEN <file.json> <NAME> <VALUE>      Add or overwrite a def")
@@ -2857,6 +2838,17 @@ class ProfilePackageShell:
         print("                                              Extract defs + style into a reusable sidecar")
         print("    APPLY-TOKENS <template.json> <sidecar.json> [<out.json>] [OVERWRITE]")
         print("                                              Merge a sidecar into a template")
+        print("    UNIVERSAL-TOKENS [SHOW|PATH|CHECK <template>]")
+        print("                                              Operator-wide placeholder test values (name,hex per line)")
+        print("    APPLY-UNIVERSAL-TOKENS <template> [<out>] [OVERWRITE]")
+        print("                                              JSON: fill {NAME} defs; varder/hex/ASN.1: record the bytes")
+        print("                                              as raw_values in <stem>.variables.json")
+        print("    TOKEN-LISTS [LIST]                        Universal list + library of profile-specific lists")
+        print("    TOKEN-LISTS SHOW|SET|UNSET|DELETE ...     Show or edit one list (universal | <name> | <file.csv>)")
+        print("    TOKEN-LISTS BIND <template> <list>        Bind a list to a template (before the universal one)")
+        print("    TOKEN-LISTS CHECK <template>              Which occurrences the template's lists answer")
+        print("    TOKEN-LISTS EXPORT <template> <name|out.csv> [OVERWRITE] [BIND] [STYLE=<style>]")
+        print("                                              Write the template's values as a reusable list")
         print("")
         print(f"  {ShellStyle.BOLD}Namespace form (discoverable via TAB){ShellStyle.END}")
         print("    TOKENS LIST <file.json>")
@@ -2867,6 +2859,9 @@ class ProfilePackageShell:
         print("    TOKENS RETOKENISE-LENGTHS <template.json> [<out.json>] [--dry-run] [--no-backup]")
         print("    TOKENS EXPORT <template.json> [<sidecar.json>]")
         print("    TOKENS APPLY <template.json> <sidecar.json> [<out.json>] [OVERWRITE]")
+        print("    TOKENS UNIVERSAL [SHOW|PATH|CHECK <template>]")
+        print("    TOKENS APPLY-UNIVERSAL <template> [<out>] [OVERWRITE]")
+        print("    TOKENS LISTS [LIST|SHOW|SET|UNSET|DELETE|BIND|CHECK|EXPORT ...]")
         print("    TOKENS HELP   (shortcut for this screen)")
         print("")
         print(f"  {ShellStyle.BOLD}Safety flags{ShellStyle.END}")
@@ -2887,7 +2882,7 @@ class ProfilePackageShell:
         print("  See also: HELP TEMPLATE, guides/TEMPLATE_AND_TOKENS.md")
 
     def _cmd_help_template(self, _arg: str) -> None:
-        print(f"\n{ShellStyle.BOLD}Template authoring — reference{ShellStyle.END}")
+        print(f"\n{ShellStyle.BOLD}Template authoring -- reference{ShellStyle.END}")
         print("  A template is a tagged SAIP JSON document with __ygg_token_defs__ at the root.")
         print("  Authored tokens can be filled at build time, per record, or in the TUI.")
         print("")
@@ -2908,6 +2903,10 @@ class ProfilePackageShell:
         print("                                  Materialise a template into a DER profile.")
         print("    GENERATE-PROFILE <template.json> <out.der> [NAME=value ...]")
         print("                                  Build a DER with free-form token overrides.")
+        print("    MATERIALIZE-TEMPLATE <template.varder|.asn|.json> <out.der|out.hex> [NAME=value ...] [--universal]")
+        print("                                  Complete profile from an inline-placeholder template; values")
+        print("                                  from <stem>.variables.json, --values <file>, NAME=value, or")
+        print("                                  --universal (the operator-wide test-value list).")
         print("    GENERATE-BATCH <template.json> <data_file> <out_dir>")
         print("                                  One DER per record (CSV/JSON/JSONL/YAML).")
         print("")
@@ -2926,10 +2925,10 @@ class ProfilePackageShell:
         print("  See also: HELP TOKENS, HELP EDIT, guides/TEMPLATE_AND_TOKENS.md")
 
     def _cmd_help_edit(self, _arg: str) -> None:
-        print(f"\n{ShellStyle.BOLD}Profile editing — reference{ShellStyle.END}")
+        print(f"\n{ShellStyle.BOLD}Profile editing -- reference{ShellStyle.END}")
         print("  INSPECT (alias TUI) launches a Textual editor with JSON outline + DER hex +")
         print("  live lint + a read-only decoded viewer. All mutations re-encode DER on save (Ctrl+S).")
-        print("  The decoded pane is a pure viewer in v1 — structured field / service-table /")
+        print("  The decoded pane is a pure viewer in v1 -- structured field / service-table /")
         print("  raw-hex editing has moved to the V2 GUI (see guides/ARCHITECTURE.md).")
         print("")
         print(f"  {ShellStyle.BOLD}Global shortcuts{ShellStyle.END}")
@@ -2952,14 +2951,14 @@ class ProfilePackageShell:
         print("    The decoded pane follows the JSON cursor and renders the decoded payload")
         print("    for the selected field using the structured / service-table / raw-hex")
         print("    builders in Tools/ProfilePackage/saip_decoded_edit.py. No keybind commits")
-        print("    back — edits happen in the JSON editor and re-encode on Ctrl+S. Per-field")
+        print("    back -- edits happen in the JSON editor and re-encode on Ctrl+S. Per-field")
         print("    decoded editing (previously Ctrl+E / Ctrl+Enter) is carved out to the V2 GUI.")
         print("")
         print(f"  {ShellStyle.BOLD}Templates + tokens{ShellStyle.END}")
         print("    Ctrl+K           Open the in-TUI token manager (list / add / rename /")
         print("                     set-value / delete). Rewrite-references confirmation")
         print("                     mirrors the shell RENAME-TOKEN flow.")
-        print("    Ctrl+R           Toggle the resolved preview — read-only view with every")
+        print("    Ctrl+R           Toggle the resolved preview -- read-only view with every")
         print("                     {NAME}/{#NAME} expanded using the current defs. Banner")
         print("                     lists any unresolved tokens.")
         print("    Ctrl+Alt+N/P     Jump cursor to the next / previous placeholder. The HUD")
@@ -3080,7 +3079,7 @@ class ProfilePackageShell:
             detail = str(error).strip() or error.__class__.__name__
             print(f"{ShellStyle.FAIL}[-] {detail}{ShellStyle.END}")
             print(
-                f"{ShellStyle.WARNING}[*] Skipping INSPECT — resolve the input then "
+                f"{ShellStyle.WARNING}[*] Skipping INSPECT -- resolve the input then "
                 f"re-run OPEN or INSPECT manually.{ShellStyle.END}"
             )
             return False
@@ -3947,6 +3946,248 @@ class ProfilePackageShell:
                 f"{ShellStyle.CYAN}[*] All template placeholders now have defs.{ShellStyle.END}"
             )
 
+    def _cmd_universal_tokens(self, arg: str) -> None:
+        """Show the universal placeholder test-value list.
+
+        Usage: ``UNIVERSAL-TOKENS [SHOW|PATH|CHECK <template>]``
+
+        ``SHOW`` (the default) prints the list's location, every usable
+        entry and every rejected line. ``PATH`` prints the location only.
+        ``CHECK <template>`` reports which of a template's placeholders the
+        list answers.
+        """
+        from .saip_universal_tokens import (
+            UniversalTokensError,
+            load_universal_tokens,
+            match_universal_values,
+            universal_token_defs,
+            universal_tokens_path,
+        )
+
+        tokens = shlex.split(str(arg or "").strip())
+        verb = tokens[0].upper() if tokens else "SHOW"
+        target = universal_tokens_path()
+        if verb == "PATH":
+            print(str(target))
+            return
+        if verb not in ("SHOW", "CHECK"):
+            raise ValueError("Usage: UNIVERSAL-TOKENS [SHOW|PATH|CHECK <template>]")
+        try:
+            token_list = load_universal_tokens(target)
+        except UniversalTokensError as error:
+            raise ValueError(str(error)) from error
+        if verb == "CHECK":
+            if len(tokens) != 2:
+                raise ValueError(
+                    "Usage: UNIVERSAL-TOKENS CHECK <template.varder|.hex|.asn|.json>"
+                )
+            template_path = self.bridge.resolve_workspace_path(tokens[1], must_exist=True)
+            from .saip_artifact_loader import load_saip_artifact
+            from .saip_json_codec import ensure_workspace_pysim_on_path
+            from .saip_profile_template import extract_template_placeholder_names
+
+            ensure_workspace_pysim_on_path(self.bridge.workspace_root)
+            artifact = load_saip_artifact(template_path)
+            records = list(artifact.inline_placeholder_records)
+            if not records:
+                names = sorted(
+                    extract_template_placeholder_names(
+                        artifact.decoded_document.get("sections") or {}
+                    )
+                )
+                defs = universal_token_defs(names, token_list)
+                print(
+                    f"{ShellStyle.CYAN}[*] {template_path.name}: {len(names)} "
+                    f"{{NAME}} token(s); the list answers {len(defs)}.{ShellStyle.END}"
+                )
+                for name in names:
+                    print(f"    {'+' if name in defs else '-'} {name}")
+                return
+            match = match_universal_values(records, token_list)
+            print(
+                f"{ShellStyle.CYAN}[*] {template_path.name}: {len(records)} placeholder "
+                f"occurrence(s); the list answers {len(match.matched)}.{ShellStyle.END}"
+            )
+            for item in match.matched:
+                print(f"    + {item['literal']}  ({item['byte_length']} B, line {item['line']})")
+            for item in match.unmatched:
+                print(f"    - {item['literal']}  {item['reason']}")
+            return
+        if not token_list.loaded:
+            print(
+                f"{ShellStyle.WARNING}[*] No universal list at {target}. Create it with "
+                f"one 'name,hex' line per placeholder.{ShellStyle.END}"
+            )
+            return
+        print(
+            f"{ShellStyle.GREEN}[+] {target}: {len(token_list.entries)} usable "
+            f"entr{'y' if len(token_list.entries) == 1 else 'ies'}, style "
+            f"{token_list.style}{ShellStyle.END}"
+        )
+        for entry in token_list.entries:
+            shown = entry.hex if len(entry.hex) <= 32 else entry.hex[:32] + "..."
+            print(f"    {entry.name:<32} {entry.byte_length:>4} B  {shown}")
+        for problem in token_list.problems:
+            print(
+                f"{ShellStyle.WARNING}[*] line {problem.line}: "
+                f"{problem.name or '(no name)'}: {problem.reason}{ShellStyle.END}"
+            )
+
+    def _cmd_apply_universal_tokens(self, arg: str) -> None:
+        """Apply the universal list to a template on disk.
+
+        Usage: ``APPLY-UNIVERSAL-TOKENS <template> [<out>] [OVERWRITE]``
+
+        A tagged JSON template gains a ``hex`` definition for every
+        ``{NAME}`` token the list answers (``__ygg_token_defs__``), written
+        to ``<out>`` or in place. A varder / hex / ASN.1 template keeps its
+        placeholders: the bytes are recorded as ``raw_values`` in
+        ``<stem>.variables.json`` (``<out>`` names another sidecar), which
+        MATERIALIZE-TEMPLATE and the GUI read back. ``OVERWRITE`` replaces
+        definitions and values that already exist.
+        """
+        from .saip_universal_tokens import (
+            UniversalTokensError,
+            load_universal_tokens,
+            match_universal_values,
+            universal_token_defs,
+        )
+
+        tokens = shlex.split(str(arg or "").strip())
+        overwrite_flag = False
+        positional: list[str] = []
+        for token in tokens:
+            if str(token).strip().upper() == "OVERWRITE":
+                overwrite_flag = True
+                continue
+            positional.append(str(token).strip())
+        if len(positional) < 1 or len(positional) > 2:
+            raise ValueError(
+                "Usage: APPLY-UNIVERSAL-TOKENS <template> [<out>] [OVERWRITE]"
+            )
+        template_path = self.bridge.resolve_workspace_path(positional[0], must_exist=True)
+        try:
+            token_list = load_universal_tokens()
+        except UniversalTokensError as error:
+            raise ValueError(str(error)) from error
+        if not token_list.loaded:
+            raise ValueError(f"No universal token list at {token_list.path}.")
+        for problem in token_list.problems:
+            print(
+                f"{ShellStyle.WARNING}[*] universal list line {problem.line}: "
+                f"{problem.reason}{ShellStyle.END}"
+            )
+
+        if template_path.suffix.lower() == ".json":
+            output_path = (
+                self.bridge.resolve_workspace_path(positional[1], must_exist=False)
+                if len(positional) == 2
+                else template_path
+            )
+            try:
+                loaded = json.loads(template_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f"Template {template_path.name} is not valid JSON: {error}"
+                ) from error
+            if isinstance(loaded, dict) is False:
+                raise ValueError("Template root JSON value must be an object.")
+            names = sorted(extract_template_placeholder_names(loaded))
+            defs = universal_token_defs(names, token_list)
+            existing = loaded.get("__ygg_token_defs__")
+            merged: dict[str, dict[str, str]] = (
+                dict(existing) if isinstance(existing, dict) else {}
+            )
+            added: list[str] = []
+            replaced: list[str] = []
+            kept: list[str] = []
+            for name, definition in defs.items():
+                if name not in merged:
+                    merged[name] = definition
+                    added.append(name)
+                elif overwrite_flag:
+                    merged[name] = definition
+                    replaced.append(name)
+                else:
+                    kept.append(name)
+            loaded["__ygg_token_defs__"] = merged
+            loaded.setdefault("__ygg_placeholder_style__", "brace")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(loaded, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            print(
+                f"{ShellStyle.GREEN}[+] {output_path.name}: {len(added)} definition(s) "
+                f"added, {len(replaced)} replaced, {len(kept)} kept{ShellStyle.END}"
+            )
+            unresolved = template_has_unresolved_placeholders(loaded)
+            if unresolved:
+                print(
+                    f"{ShellStyle.WARNING}[*] Remaining placeholders without defs: "
+                    f"{', '.join(unresolved)}{ShellStyle.END}"
+                )
+            return
+
+        from .saip_artifact_loader import load_saip_artifact
+        from .saip_json_codec import ensure_workspace_pysim_on_path
+        from .saip_variable_materialization import (
+            SaipVariableMaterializationError,
+            inline_variable_sidecar_path_for,
+            read_inline_variable_sidecar_document,
+            write_inline_variable_sidecar,
+        )
+
+        ensure_workspace_pysim_on_path(self.bridge.workspace_root)
+        artifact = load_saip_artifact(template_path)
+        records = list(artifact.inline_placeholder_records)
+        if not records:
+            raise ValueError(
+                f"{template_path.name} carries no inline typed placeholders and is "
+                "not a JSON template."
+            )
+        sidecar_path = (
+            self.bridge.resolve_workspace_path(positional[1], must_exist=False)
+            if len(positional) == 2
+            else inline_variable_sidecar_path_for(template_path)
+        )
+        typed_values: dict[str, str] = {}
+        raw_values: dict[str, str] = {}
+        if sidecar_path.is_file():
+            try:
+                stored = read_inline_variable_sidecar_document(sidecar_path)
+            except SaipVariableMaterializationError as error:
+                raise ValueError(f"{sidecar_path.name}: {error}") from error
+            typed_values = dict(stored["values"])
+            raw_values = dict(stored["raw_values"])
+        match = match_universal_values(records, token_list)
+        added = []
+        replaced = []
+        kept = []
+        for item in match.matched:
+            key = str(item["key"])
+            if key not in raw_values:
+                raw_values[key] = match.raw_values[key]
+                added.append(key)
+            elif overwrite_flag:
+                raw_values[key] = match.raw_values[key]
+                replaced.append(key)
+            else:
+                kept.append(key)
+        write_inline_variable_sidecar(
+            sidecar_path,
+            typed_values,
+            created_from=template_path.name,
+            raw_values=raw_values,
+        )
+        print(
+            f"{ShellStyle.GREEN}[+] {sidecar_path.name}: {len(added)} occurrence(s) "
+            f"took universal bytes, {len(replaced)} replaced, {len(kept)} kept"
+            f"{ShellStyle.END}"
+        )
+        for item in match.unmatched:
+            print(f"{ShellStyle.WARNING}[*] {item['literal']}: {item['reason']}{ShellStyle.END}")
+
     def _cmd_export_tokens_csv(self, arg: str) -> None:
         """Export token defs from a template or sidecar as a personalisation CSV.
 
@@ -4020,7 +4261,7 @@ class ProfilePackageShell:
         Single-block CSVs produce one sidecar at ``<out>`` (defaulting to
         ``<csv-stem>.tokens.json``). Multi-block CSVs (multiple profile
         packages in one file) produce ``<stem>_1.tokens.json``,
-        ``<stem>_2.tokens.json``, ... — one per block — so each set can be
+        ``<stem>_2.tokens.json``, ... -- one per block -- so each set can be
         applied independently via ``APPLY-TOKENS``.
         """
         tokens = shlex.split(str(arg or "").strip())
@@ -4077,6 +4318,956 @@ class ProfilePackageShell:
                 f"{target}{ShellStyle.END}"
             )
 
+    def _cmd_token_lists(self, arg: str) -> None:
+        """Manage the test-value lists and a template's binding.
+
+        Usage::
+
+            TOKEN-LISTS [LIST]
+            TOKEN-LISTS SHOW <list>
+            TOKEN-LISTS SET <list> <literal> [<hex>]
+            TOKEN-LISTS UNSET <list> <literal>
+            TOKEN-LISTS DELETE <name|file.csv>
+            TOKEN-LISTS BIND <template> <list>
+            TOKEN-LISTS CHECK <template>
+            TOKEN-LISTS EXPORT <template> <name|out.csv> [OVERWRITE] [BIND] [STYLE=<style>]
+
+        ``<list>`` is ``universal``, a library name, or a ``.csv`` path.
+        ``SET`` and ``UNSET`` rewrite one line of a list, creating a library
+        list on first use; the literal may be written in any template
+        spelling and the line takes the list's style, and ``SET`` without
+        a value declares the placeholder (``name,``) without answering it. ``BIND`` records the
+        list in the template's ``<stem>.variables.json`` (tagged JSON: its
+        placeholder block) and in the machine-local binding store, so the
+        GUI and ``MATERIALIZE-TEMPLATE --universal`` consult it before the
+        universal list. ``EXPORT`` writes the template's current values,
+        typed values in wire form and test values as stored, as a reusable
+        list in the universal list's style unless ``STYLE=`` (``typed``,
+        ``compact``, ``brace``, ``bracket``) names one.
+        """
+        from .saip_hex_template import DEFAULT_PLACEHOLDER_STYLE, PLACEHOLDER_STYLES
+        from .saip_universal_tokens import (
+            UNIVERSAL_LIST_SELECTOR,
+            UniversalTokensError,
+            delete_library_token_list,
+            format_token_list,
+            layered_universal_match,
+            load_test_value_layers,
+            load_universal_tokens,
+            remove_token_list_entry,
+            resolve_token_list_ref,
+            set_token_list_entry,
+            token_list_catalogue,
+            universal_tokens_path,
+            write_universal_tokens,
+        )
+
+        usage = (
+            "Usage: TOKEN-LISTS [LIST | SHOW <list> | SET <list> <literal> <hex> | "
+            "UNSET <list> <literal> | DELETE <name|file.csv> | BIND <template> <list> | "
+            "CHECK <template> | EXPORT <template> <name|out.csv> [OVERWRITE] [BIND] "
+            "[STYLE=<style>]]"
+        )
+        tokens = shlex.split(str(arg or "").strip())
+        verb = tokens[0].upper() if tokens else "LIST"
+        rest = tokens[1:]
+        try:
+            if verb == "LIST":
+                if rest:
+                    raise ValueError(usage)
+                rows = token_list_catalogue(with_counts=True)
+                print(f"{ShellStyle.CYAN}[*] {len(rows)} test-value list(s){ShellStyle.END}")
+                for row in rows:
+                    state = (
+                        f"{row.get('entry_count', 0)} usable"
+                        + (
+                            f", {row['problem_count']} rejected"
+                            if row.get("problem_count")
+                            else ""
+                        )
+                        if row.get("exists")
+                        else "missing"
+                    )
+                    if row.get("error"):
+                        state = str(row["error"])
+                    style = str(row.get("style") or "-")
+                    print(f"    {row['name']:<24} {state:<24} {style:<8} {row['path']}")
+                return
+            if verb == "SHOW":
+                if len(rest) != 1:
+                    raise ValueError("Usage: TOKEN-LISTS SHOW <universal|name|file.csv>")
+                ref = resolve_token_list_ref(rest[0])
+                token_list = load_universal_tokens(ref.path)
+                if not token_list.loaded:
+                    print(
+                        f"{ShellStyle.WARNING}[*] {ref.name}: no list at {ref.path}."
+                        f"{ShellStyle.END}"
+                    )
+                    return
+                print(
+                    f"{ShellStyle.GREEN}[+] {ref.name} ({ref.path}): "
+                    f"{len(token_list.entries)} usable "
+                    f"entr{'y' if len(token_list.entries) == 1 else 'ies'}, style "
+                    f"{token_list.style}{ShellStyle.END}"
+                )
+                for entry in token_list.entries:
+                    shown = entry.hex if len(entry.hex) <= 32 else entry.hex[:32] + "..."
+                    print(f"    {entry.name:<32} {entry.byte_length:>4} B  {shown}")
+                for problem in token_list.problems:
+                    print(
+                        f"{ShellStyle.WARNING}[*] line {problem.line}: "
+                        f"{problem.name or '(no name)'}: {problem.reason}{ShellStyle.END}"
+                    )
+                return
+            if verb in ("SET", "UNSET"):
+                accepted = (2, 3) if verb == "SET" else (2,)
+                if len(rest) not in accepted:
+                    raise ValueError(
+                        "Usage: TOKEN-LISTS SET <list> <literal> [<hex>]"
+                        if verb == "SET"
+                        else "Usage: TOKEN-LISTS UNSET <list> <literal>"
+                    )
+                ref = resolve_token_list_ref(rest[0])
+                current = load_universal_tokens(ref.path)
+                if verb == "SET":
+                    value_hex = rest[2] if len(rest) == 3 else ""
+                    updated = set_token_list_entry(current.text, rest[1], value_hex)
+                    written = write_universal_tokens(updated, ref.path)
+                    print(
+                        f"{ShellStyle.GREEN}[+] {ref.name}: {rest[1]} "
+                        f"{'set' if value_hex else 'declared without a value'}; "
+                        f"{len(written.entries)} usable entr"
+                        f"{'y' if len(written.entries) == 1 else 'ies'} at {ref.path}"
+                        f"{ShellStyle.END}"
+                    )
+                    return
+                updated, removed = remove_token_list_entry(current.text, rest[1])
+                if removed == 0:
+                    raise ValueError(f"{ref.name} has no entry named {rest[1]!r}.")
+                write_universal_tokens(updated, ref.path)
+                print(
+                    f"{ShellStyle.GREEN}[+] {ref.name}: {rest[1]} removed "
+                    f"({removed} line(s)){ShellStyle.END}"
+                )
+                return
+            if verb == "DELETE":
+                if len(rest) != 1:
+                    raise ValueError("Usage: TOKEN-LISTS DELETE <name|file.csv>")
+                ref = resolve_token_list_ref(rest[0])
+                if ref.is_universal:
+                    raise ValueError("The universal list cannot be deleted; edit it instead.")
+                if ref.kind == "library":
+                    removed_path = delete_library_token_list(ref.selector)
+                else:
+                    removed_path = ref.path
+                    if not removed_path.is_file():
+                        raise ValueError(f"No token list at {removed_path}.")
+                    removed_path.unlink()
+                print(f"{ShellStyle.GREEN}[+] deleted {ref.name} ({removed_path}){ShellStyle.END}")
+                return
+            if verb == "BIND":
+                if len(rest) != 2:
+                    raise ValueError("Usage: TOKEN-LISTS BIND <template> <universal|name|file.csv>")
+                template_path = self.bridge.resolve_workspace_path(rest[0], must_exist=True)
+                ref = resolve_token_list_ref(rest[1])
+                if not ref.is_universal and not ref.path.is_file():
+                    raise ValueError(f"Token list {ref.name} not found at {ref.path}.")
+                self._write_template_test_value_binding(
+                    template_path, "" if ref.is_universal else ref.selector
+                )
+                print(
+                    f"{ShellStyle.GREEN}[+] {template_path.name}: bound to "
+                    f"{ref.name}{'' if ref.is_universal else f' ({ref.path})'}"
+                    f"{ShellStyle.END}"
+                )
+                return
+            if verb == "CHECK":
+                if len(rest) != 1:
+                    raise ValueError("Usage: TOKEN-LISTS CHECK <template>")
+                template_path = self.bridge.resolve_workspace_path(rest[0], must_exist=True)
+                artifact = self._load_template_artifact(template_path)
+                records = list(artifact.inline_placeholder_records)
+                layers, bound_ref, layer_warnings = load_test_value_layers(
+                    artifact.test_value_list
+                )
+                for message in layer_warnings:
+                    print(f"{ShellStyle.WARNING}[*] {message}{ShellStyle.END}")
+                loaded_layers = [token_list for token_list in layers if token_list.loaded]
+                match = layered_universal_match(records, loaded_layers)
+                print(
+                    f"{ShellStyle.CYAN}[*] {template_path.name}: bound list "
+                    f"{bound_ref.name}; {len(records)} placeholder occurrence(s); "
+                    f"the lists answer {len(match.matched)}.{ShellStyle.END}"
+                )
+                for item in match.matched:
+                    print(
+                        f"    + {item['literal']}  ({item['byte_length']} B, "
+                        f"{Path(str(item.get('list') or '')).name} line {item['line']})"
+                    )
+                for item in match.unmatched:
+                    print(f"    - {item['literal']}  {item['reason']}")
+                return
+            if verb == "EXPORT":
+                overwrite_flag = False
+                bind_flag = False
+                style_text = ""
+                positional: list[str] = []
+                for token in rest:
+                    upper = str(token).strip().upper()
+                    if upper == "OVERWRITE":
+                        overwrite_flag = True
+                    elif upper == "BIND":
+                        bind_flag = True
+                    elif upper.startswith("STYLE="):
+                        style_text = str(token).strip()[len("STYLE="):].strip().casefold()
+                    else:
+                        positional.append(str(token).strip())
+                if len(positional) != 2:
+                    raise ValueError(
+                        "Usage: TOKEN-LISTS EXPORT <template> <name|out.csv> [OVERWRITE] "
+                        "[BIND] [STYLE=<style>]"
+                    )
+                if style_text == "universal":
+                    universal = load_universal_tokens(universal_tokens_path())
+                    style_text = universal.style if universal.loaded else DEFAULT_PLACEHOLDER_STYLE
+                elif style_text and style_text not in PLACEHOLDER_STYLES:
+                    raise ValueError(
+                        f"Unknown list style {style_text!r}; use STYLE=universal, "
+                        + ", ".join(f"STYLE={name}" for name in PLACEHOLDER_STYLES)
+                        + "."
+                    )
+                template_path = self.bridge.resolve_workspace_path(positional[0], must_exist=True)
+                ref = resolve_token_list_ref(positional[1])
+                if style_text == "":
+                    # A list keeps its own spelling; a new one takes the
+                    # typed spelling, the only one the tool chooses.
+                    from .saip_universal_tokens import destination_list_style
+
+                    style_text = destination_list_style(ref.path) or DEFAULT_PLACEHOLDER_STYLE
+                if ref.is_universal:
+                    raise ValueError(
+                        "The universal list is edited with TOKEN-LISTS SET; export to a "
+                        "library name or a file."
+                    )
+                if ref.path.is_file() and not overwrite_flag:
+                    raise ValueError(f"{ref.path} exists; pass OVERWRITE to replace it.")
+                artifact = self._load_template_artifact(template_path)
+                records = list(artifact.inline_placeholder_records)
+                if not records:
+                    raise ValueError(
+                        f"{template_path.name} has no inline placeholders to export values for."
+                    )
+                from .saip_variable_materialization import (
+                    SaipVariableMaterializationError,
+                    encode_inline_placeholder_value,
+                    inline_record_key,
+                    lookup_raw_value,
+                    match_inline_variable_values,
+                )
+
+                typed, _unresolved = match_inline_variable_values(
+                    records, dict(artifact.inline_variable_values)
+                )
+                typed_folded = {name.casefold(): value for name, value in typed.items()}
+                values: dict[str, str] = {}
+                missing: list[str] = []
+                for record in records:
+                    key = inline_record_key(record)
+                    variable = str(getattr(record, "variable_name", "") or "")
+                    typed_value = typed_folded.get(variable.casefold())
+                    if typed_value is not None:
+                        try:
+                            values[key] = encode_inline_placeholder_value(
+                                record, typed_value
+                            ).hex().upper()
+                        except SaipVariableMaterializationError as error:
+                            raise ValueError(f"{variable}: {error}") from error
+                        continue
+                    raw_hex = lookup_raw_value(artifact.inline_raw_values, key)
+                    if raw_hex:
+                        values[key] = str(raw_hex).upper()
+                    elif variable not in missing:
+                        missing.append(variable)
+                written = write_universal_tokens(
+                    format_token_list(
+                        values,
+                        comments=[
+                            f"test values exported from {template_path.name}",
+                            "one name,hex line per placeholder literal; typed values in wire form",
+                        ],
+                        style=style_text,
+                    ),
+                    ref.path,
+                )
+                print(
+                    f"{ShellStyle.GREEN}[+] {ref.name}: {len(written.entries)} entr"
+                    f"{'y' if len(written.entries) == 1 else 'ies'} written to {ref.path} "
+                    f"(style {style_text}){ShellStyle.END}"
+                )
+                if missing:
+                    print(
+                        f"{ShellStyle.WARNING}[*] no value yet for {', '.join(missing)}; "
+                        f"not written.{ShellStyle.END}"
+                    )
+                if bind_flag:
+                    self._write_template_test_value_binding(template_path, ref.selector)
+                    print(
+                        f"{ShellStyle.GREEN}[+] {template_path.name}: bound to {ref.name}"
+                        f"{ShellStyle.END}"
+                    )
+                return
+            if verb == UNIVERSAL_LIST_SELECTOR.upper():
+                self._cmd_universal_tokens(" ".join(shlex.quote(t) for t in rest))
+                return
+        except UniversalTokensError as error:
+            raise ValueError(str(error)) from error
+        raise ValueError(usage)
+
+    _VARIABLES_USAGE = (
+        "Usage: VARIABLES | VARIABLES SET <name>=<value> [...] | VARIABLES CLEAR <name> [...] "
+        "| VARIABLES USE <universal|list|file.csv> | VARIABLES FILL [OVERWRITE] "
+        "| VARIABLES GENERATE|EXPORT <out.der|out.hex> "
+        "| VARIABLES EXPORT-LIST <name|out.csv> [OVERWRITE] [BIND] "
+        "| VARIABLES LISTS [...] | VARIABLES NORMALISE [IN-PLACE | OUTPUT=<file>] [--no-backup] "
+        "| VARIABLES DEFINE <{var:TYPE:len[:modifier]}> [<value>] [LIST=<list>]"
+    )
+    # Template formats whose placeholders are spelt in the text itself.
+    _VARIABLES_TEXT_SUFFIXES = (".varder", ".hex", ".txt", ".asn", ".asn1")
+
+    def _cmd_variables(self, arg: str) -> None:
+        """VARIABLES: one verb over the active template's placeholder values.
+
+        Both grammars answer: a varder / hex / ASN.1 template with inline
+        typed placeholders, and a tagged JSON template with ``{NAME}``
+        tokens and ``__ygg_token_defs__``. The listing shows each
+        placeholder with the value it takes and where it comes from; ``SET``
+        and ``CLEAR`` edit the typed values (``<stem>.variables.json``, the
+        placeholder block of a tagged JSON template, or its token
+        definitions); ``USE`` binds a test-value list; ``FILL`` stores the
+        lists' values; ``GENERATE`` (``EXPORT`` is the same) writes the test
+        profile, every placeholder replaced by its value, DER or HEX by the
+        output suffix; ``EXPORT-LIST``
+        writes the values as a reusable list; ``LISTS`` manages the lists;
+        ``NORMALISE`` respells the placeholders in the typed form, the only
+        one the tool writes; ``DEFINE`` adds a placeholder to a list, with
+        its value or declared without one. The long-form verbs stay
+        (HELP TOKENS).
+        """
+        tokens = shlex.split(str(arg or "").strip())
+        verb = tokens[0].upper() if tokens else "LIST"
+        rest = tokens[1:]
+        if verb == "DEFINE":
+            self._variables_define(rest)
+            return
+        if verb == "LISTS":
+            self._cmd_token_lists(" ".join(shlex.quote(token) for token in rest))
+            return
+        template_path = Path(self.bridge.get_input_file())
+        quoted_template = shlex.quote(str(template_path))
+        if verb == "FILL":
+            if any(str(token).upper() != "OVERWRITE" for token in rest):
+                raise ValueError(self._VARIABLES_USAGE)
+            self._cmd_apply_universal_tokens(
+                quoted_template + (" OVERWRITE" if rest else "")
+            )
+            return
+        if verb == "EXPORT-LIST":
+            if len(rest) == 0:
+                raise ValueError(self._VARIABLES_USAGE)
+            self._cmd_token_lists(
+                f"EXPORT {quoted_template} " + " ".join(shlex.quote(token) for token in rest)
+            )
+            return
+        if verb in ("NORMALISE", "NORMALIZE"):
+            self._variables_normalise(template_path, rest)
+            return
+        grammar, artifact, loaded = self._variables_grammar(template_path)
+        if verb == "LIST":
+            if rest:
+                raise ValueError(self._VARIABLES_USAGE)
+            if grammar == "tokens":
+                self._token_variables_list(template_path, loaded)
+            else:
+                self._variables_list(template_path, artifact)
+            return
+        if verb == "SET":
+            assignments = parse_placeholder_assignment_tokens(rest)
+            if len(assignments) == 0:
+                raise ValueError(self._VARIABLES_USAGE)
+            if grammar == "tokens":
+                self._token_variables_set(template_path, loaded, assignments)
+            else:
+                self._variables_set(template_path, artifact, assignments)
+            return
+        if verb == "CLEAR":
+            if len(rest) == 0:
+                raise ValueError(self._VARIABLES_USAGE)
+            if grammar == "tokens":
+                self._token_variables_clear(template_path, loaded, rest)
+            else:
+                self._variables_clear(template_path, artifact, rest)
+            return
+        if verb == "USE":
+            if len(rest) != 1:
+                raise ValueError(self._VARIABLES_USAGE)
+            if grammar == "tokens":
+                raise ValueError(
+                    "A {NAME} token template binds no list; VARIABLES FILL stores the "
+                    "universal list's values as token definitions."
+                )
+            self._cmd_token_lists(f"BIND {quoted_template} {shlex.quote(rest[0])}")
+            return
+        if verb in ("EXPORT", "GENERATE"):
+            if len(rest) != 1:
+                raise ValueError(self._VARIABLES_USAGE)
+            if grammar == "tokens":
+                self._cmd_apply_template(f"{quoted_template} {shlex.quote(rest[0])}")
+                return
+            unresolved = self._variables_unresolved(template_path)
+            argument = f"{quoted_template} {shlex.quote(rest[0])}"
+            if unresolved:
+                argument += " --universal"
+            self._cmd_materialize_template(argument)
+            return
+        raise ValueError(self._VARIABLES_USAGE)
+
+    def _variables_grammar(self, template_path: Path) -> tuple[str, Any, Any]:
+        """Return ``("inline", artifact, None)`` or ``("tokens", None, loaded_json)``."""
+        artifact = self._load_template_artifact(template_path)
+        if len(artifact.inline_placeholder_records) > 0:
+            return "inline", artifact, None
+        if template_path.suffix.lower() == ".json":
+            loaded = json.loads(template_path.read_text(encoding="utf-8-sig"))
+            if isinstance(loaded, dict) and extract_template_placeholder_names(loaded):
+                return "tokens", None, loaded
+        raise ValueError(
+            f"{template_path.name} carries no placeholders: neither inline typed "
+            "placeholders nor {NAME} tokens."
+        )
+
+    def _variables_records(self, template_path: Path) -> tuple[Any, list[Any]]:
+        artifact = self._load_template_artifact(template_path)
+        records = list(artifact.inline_placeholder_records)
+        if len(records) == 0:
+            raise ValueError(
+                f"{template_path.name} carries no inline typed placeholders."
+            )
+        return artifact, records
+
+    # -- {NAME} token templates ------------------------------------------
+
+    @staticmethod
+    def _token_definition_text(definition: Any) -> str:
+        if isinstance(definition, dict):
+            if "hex" in definition:
+                return str(definition.get("hex") or "")
+            if "zero_len" in definition:
+                return f"{definition.get('zero_len')} zero bytes"
+            if "pattern_hex" in definition:
+                return f"{definition.get('pattern_hex')} x {definition.get('byte_len')}"
+            return json.dumps(definition, sort_keys=True)
+        return str(definition or "")
+
+    def _token_variables_list(self, template_path: Path, loaded: dict) -> None:
+        from .saip_universal_tokens import (
+            UniversalTokensError,
+            load_universal_tokens,
+            universal_token_defs,
+        )
+
+        names = sorted(extract_template_placeholder_names(loaded))
+        defs = loaded.get("__ygg_token_defs__")
+        if isinstance(defs, dict) is False:
+            defs = {}
+        list_defs: dict[str, dict[str, str]] = {}
+        try:
+            token_list = load_universal_tokens()
+            if token_list.loaded:
+                list_defs = universal_token_defs(names, token_list)
+        except UniversalTokensError as error:
+            print(f"{ShellStyle.WARNING}[*] {error}{ShellStyle.END}")
+        print(f"{ShellStyle.CYAN}[*] Variables of {template_path.name} ({{NAME}} tokens):{ShellStyle.END}")
+        print(f"    {'name':<18} {'value':<42} source")
+        defined = 0
+        for name in names:
+            if name in defs:
+                value = self._token_definition_text(defs[name])
+                source = "defined"
+                defined += 1
+            elif name in list_defs:
+                value = "(from the universal list on FILL)"
+                source = "universal list"
+            else:
+                value = "-"
+                source = "none"
+            print(f"    {name:<18} {value:<42} {source}")
+        ready = defined == len(names)
+        print(
+            f"    {defined} of {len(names)} have a definition; "
+            + ("EXPORT is ready." if ready else "EXPORT needs the rest (VARIABLES SET or FILL).")
+        )
+
+    def _write_token_template(self, template_path: Path, loaded: dict) -> None:
+        template_path.write_text(
+            json.dumps(loaded, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+
+    def _token_variables_set(self, template_path: Path, loaded: dict, assignments: dict[str, str]) -> None:
+        known = {name.casefold() for name in extract_template_placeholder_names(loaded)}
+        for name in assignments:
+            if normalize_placeholder_name(name).casefold() not in known:
+                raise ValueError(f"{name}: no {{NAME}} token of that name in {template_path.name}.")
+        try:
+            summaries = apply_placeholder_overrides_to_loaded_document(loaded, assignments)
+        except ValueError as error:
+            raise ValueError(str(error)) from error
+        self._write_token_template(template_path, loaded)
+        for summary in summaries:
+            print(f"{ShellStyle.GREEN}[+] {summary}{ShellStyle.END}")
+        print(f"{ShellStyle.CYAN}[*] definitions written to {template_path.name}{ShellStyle.END}")
+
+    def _token_variables_clear(self, template_path: Path, loaded: dict, names: list[str]) -> None:
+        defs = loaded.get("__ygg_token_defs__")
+        if isinstance(defs, dict) is False:
+            defs = {}
+        for name in names:
+            matches = [key for key in defs if str(key).casefold() == str(name).casefold()]
+            if not matches:
+                raise ValueError(f"{name}: no definition to clear.")
+            for key in matches:
+                defs.pop(key, None)
+            print(f"{ShellStyle.GREEN}[+] {name}: definition cleared{ShellStyle.END}")
+        loaded["__ygg_token_defs__"] = defs
+        self._write_token_template(template_path, loaded)
+
+    # -- Declaring a placeholder ------------------------------------------
+
+    def _variables_define(self, rest: list[str]) -> None:
+        """Add a placeholder to a test-value list, with its value or declared alone.
+
+        ``VARIABLES DEFINE {smsc:MSISDN:6:nibble_swap} 0100000000F1`` stores
+        the bytes (typed input such as digits is encoded first); without a
+        value the list gets ``name,``, a declaration every picker lists and
+        nothing answers, which the listings flag. ``LIST=`` names a library
+        list or a ``.csv`` path instead of the universal list.
+        """
+        from .saip_hex_template import (
+            InlinePlaceholderRecord,
+            format_placeholder_literal,
+            parse_placeholder_literal,
+            validate_inline_placeholder_parts,
+        )
+        from .saip_universal_tokens import (
+            UniversalTokensError,
+            load_universal_tokens,
+            resolve_token_list_ref,
+            set_token_list_entry,
+            write_universal_tokens,
+        )
+        from .saip_variable_materialization import (
+            SaipVariableMaterializationError,
+            placeholder_value_to_wire_hex,
+        )
+
+        selector = ""
+        positional: list[str] = []
+        for token in rest:
+            if str(token).upper().startswith("LIST="):
+                selector = str(token)[len("LIST="):]
+            else:
+                positional.append(str(token))
+        if not positional or len(positional) > 2:
+            raise ValueError(
+                "Usage: VARIABLES DEFINE <{var:TYPE:len[:modifier]}> [<value>] [LIST=<list>]"
+            )
+        parts = parse_placeholder_literal(positional[0])
+        if parts is None:
+            raise ValueError(
+                f"{positional[0]}: not a placeholder literal; write "
+                "{var:TYPE:len[:modifier]}, e.g. {smsc:MSISDN:6:nibble_swap}."
+            )
+        type_text = str(parts["type"]).upper()
+        modifier = str(parts["modifier"] or "")
+        validate_inline_placeholder_parts(
+            type_text, parts["byte_length"], modifier, literal=positional[0]
+        )
+        literal = format_placeholder_literal(positional[0], "typed")
+        record = InlinePlaceholderRecord(
+            index=0,
+            literal=literal,
+            variable_name=str(parts["variable"]),
+            type_name=type_text,
+            byte_length=int(parts["byte_length"]),
+            modifier=modifier or None,
+            sentinel_hex="",
+        )
+        wire_hex = ""
+        if len(positional) == 2:
+            try:
+                wire_hex = placeholder_value_to_wire_hex(record, positional[1])
+            except SaipVariableMaterializationError as error:
+                raise ValueError(str(error)) from error
+        try:
+            ref = resolve_token_list_ref(selector)
+            current = load_universal_tokens(ref.path)
+            written = write_universal_tokens(
+                set_token_list_entry(current.text, literal, wire_hex), ref.path
+            )
+        except UniversalTokensError as error:
+            raise ValueError(str(error)) from error
+        if wire_hex:
+            print(
+                f"{ShellStyle.GREEN}[+] {ref.name}: {literal} = {wire_hex}; "
+                f"{len(written.entries)} entr{'y' if len(written.entries) == 1 else 'ies'} "
+                f"at {ref.path}{ShellStyle.END}"
+            )
+            return
+        print(
+            f"{ShellStyle.GREEN}[+] {ref.name}: {literal} declared without a value "
+            f"at {ref.path}{ShellStyle.END}"
+        )
+        note = "a profile using it cannot export completely until a value exists"
+        if type_text in ("IMSI", "MSISDN"):
+            note += "; a length byte that counts it cannot be reconciled until then"
+        print(f"{ShellStyle.WARNING}[*] {note}.{ShellStyle.END}")
+
+    # -- Typed spelling ---------------------------------------------------
+
+    def _variables_normalise(self, template_path: Path, rest: list[str]) -> None:
+        """Respell the template's inline placeholders in the typed form.
+
+        Reports every rewrite; ``IN-PLACE`` writes the template (a ``.bak``
+        copy first unless ``--no-backup``), ``OUTPUT=<file>`` writes
+        elsewhere. The occurrence keys stay the same, so the values file
+        keeps answering.
+        """
+        from .saip_hex_template import (
+            extract_inline_placeholders_from_hex_text,
+            format_placeholder_literal,
+            placeholder_literal_style,
+        )
+
+        in_place = False
+        no_backup = False
+        output_text = ""
+        for token in rest:
+            upper = str(token).strip().upper()
+            if upper == "IN-PLACE":
+                in_place = True
+            elif upper == "--NO-BACKUP":
+                no_backup = True
+            elif upper.startswith("OUTPUT="):
+                output_text = str(token).strip()[len("OUTPUT="):]
+            else:
+                raise ValueError(self._VARIABLES_USAGE)
+        if in_place and output_text:
+            raise ValueError("Use either OUTPUT=<file> or IN-PLACE, not both.")
+        if template_path.suffix.lower() not in self._VARIABLES_TEXT_SUFFIXES:
+            raise ValueError(
+                f"{template_path.name}: only a varder / hex / ASN.1 template spells its "
+                "placeholders in the text; a {NAME} token template has no typed form."
+            )
+        text = template_path.read_text(encoding="utf-8-sig")
+        rewrites: list[tuple[int, int, str, str]] = []
+        for entry in extract_inline_placeholders_from_hex_text(text):
+            literal = str(entry["literal"])
+            if placeholder_literal_style(literal) in ("typed", None):
+                continue
+            rewrites.append(
+                (int(entry["start"]), int(entry["end"]), literal, format_placeholder_literal(literal, "typed"))
+            )
+        if not rewrites:
+            print(f"{ShellStyle.CYAN}[*] {template_path.name}: every placeholder is already typed.{ShellStyle.END}")
+            return
+        shown: list[str] = []
+        for _start, _end, old_literal, new_literal in rewrites:
+            line = f"{old_literal} -> {new_literal}"
+            if line not in shown:
+                shown.append(line)
+        print(
+            f"{ShellStyle.CYAN}[*] {template_path.name}: {len(rewrites)} placeholder"
+            f"{'s' if len(rewrites) != 1 else ''} to respell:{ShellStyle.END}"
+        )
+        for line in shown:
+            print(f"    {line}")
+        if not in_place and not output_text:
+            print(f"{ShellStyle.CYAN}[*] Dry run; add IN-PLACE or OUTPUT=<file> to write.{ShellStyle.END}")
+            return
+        pieces: list[str] = []
+        cursor = 0
+        for start, end, _old_literal, new_literal in sorted(rewrites, key=lambda item: item[0]):
+            pieces.append(text[cursor:start])
+            pieces.append(new_literal)
+            cursor = end
+        pieces.append(text[cursor:])
+        rewritten = "".join(pieces)
+        if in_place:
+            target = template_path
+            if not no_backup:
+                backup_path = template_path.with_suffix(template_path.suffix + ".bak")
+                backup_path.write_bytes(template_path.read_bytes())
+                print(f"{ShellStyle.CYAN}[*] backup written to {backup_path}{ShellStyle.END}")
+        else:
+            target = self.bridge.resolve_workspace_path(output_text, must_exist=False)
+            target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(target, rewritten.encode("utf-8"))
+        print(f"{ShellStyle.GREEN}[+] Wrote {target}{ShellStyle.END}")
+
+    def _variables_unresolved(self, template_path: Path) -> list[str]:
+        from .saip_variable_materialization import resolve_inline_records
+
+        artifact, records = self._variables_records(template_path)
+        del template_path
+        _typed, _raw, unresolved = resolve_inline_records(
+            records, artifact.inline_variable_values, artifact.inline_raw_values
+        )
+        return unresolved
+
+    def _variables_list(self, template_path: Path, artifact: Any = None) -> None:
+        from .saip_universal_tokens import (
+            UniversalTokensError,
+            layered_universal_match,
+            load_test_value_layers,
+        )
+        from .saip_variable_materialization import (
+            inline_record_key,
+            inline_variable_names,
+            resolve_inline_records,
+        )
+
+        if artifact is None:
+            artifact, records = self._variables_records(template_path)
+        else:
+            records = list(artifact.inline_placeholder_records)
+        typed, raw, _unresolved = resolve_inline_records(
+            records, artifact.inline_variable_values, artifact.inline_raw_values
+        )
+        typed_folded = {name.casefold(): value for name, value in typed.items()}
+        # What the lists answer, per occurrence: the list name and its bytes.
+        # A stored test value equal to that answer is reported under the
+        # list's name; an occurrence without any stored value takes it on
+        # export.
+        list_by_key: dict[str, tuple[str, str]] = {}
+        declared_keys: set[str] = set()
+        bound_name = "universal"
+        warnings: list[str] = []
+        try:
+            layers, bound_ref, layer_warnings = load_test_value_layers(artifact.test_value_list)
+            warnings.extend(layer_warnings)
+            if not bound_ref.is_universal:
+                bound_name = str(bound_ref.name)
+            loaded = [token_list for token_list in layers if token_list.loaded]
+            if loaded:
+                match = layered_universal_match(records, loaded)
+                for item in match.matched:
+                    key = str(item["key"])
+                    list_by_key[key] = (
+                        Path(str(item.get("list") or "list")).name,
+                        str(match.raw_values.get(key) or ""),
+                    )
+                for item in match.unmatched:
+                    if "declared without a value" in str(item.get("reason") or ""):
+                        declared_keys.add(str(item["key"]))
+        except UniversalTokensError as error:
+            warnings.append(str(error))
+        for message in warnings:
+            print(f"{ShellStyle.WARNING}[*] {message}{ShellStyle.END}")
+        print(f"{ShellStyle.CYAN}[*] Variables of {template_path.name} (bound list: {bound_name}):{ShellStyle.END}")
+        print(f"    {'name':<18} {'type':<10} {'bytes':<7} {'value':<34} source")
+        with_value = 0
+        names = inline_variable_names(records)
+        for name in names:
+            group = [
+                record
+                for record in records
+                if str(getattr(record, "variable_name", "") or "").casefold() == name.casefold()
+            ]
+            types = "/".join(sorted({str(getattr(item, "type_name", "") or "") for item in group}))
+            widths = ",".join(
+                str(width)
+                for width in sorted({int(getattr(item, "byte_length", 0) or 0) for item in group})
+            )
+            keys = [inline_record_key(item) for item in group]
+            if name.casefold() in typed_folded:
+                value = typed_folded[name.casefold()]
+                source = "typed"
+            elif all(key in raw for key in keys):
+                value = " / ".join(sorted({raw[key] for key in keys}))
+                if all(key in list_by_key and list_by_key[key][1] == raw[key] for key in keys):
+                    source = ", ".join(sorted({list_by_key[key][0] for key in keys}))
+                else:
+                    source = "stored list value"
+            elif all(key in list_by_key for key in keys):
+                value = "(from list on export)"
+                source = ", ".join(sorted({list_by_key[key][0] for key in keys}))
+            elif any(key in declared_keys for key in keys):
+                value = "-"
+                source = "declared, no value"
+            else:
+                value = "-"
+                source = "none"
+            if value != "-":
+                with_value += 1
+            if value == "-" and types.upper() in ("IMSI", "MSISDN"):
+                source += " (length byte not reconciled)"
+            print(f"    {name:<18} {types:<10} {widths:<7} {value:<34} {source}")
+        ready = with_value == len(names)
+        print(
+            f"    {with_value} of {len(names)} have a value; "
+            + ("EXPORT is ready." if ready else "EXPORT needs the rest (VARIABLES SET).")
+        )
+
+    def _variables_set(
+        self, template_path: Path, artifact: Any, assignments: dict[str, str]
+    ) -> None:
+        from .saip_variable_materialization import (
+            SaipVariableMaterializationError,
+            validate_inline_variable_value,
+        )
+
+        if artifact is None:
+            artifact, records = self._variables_records(template_path)
+        else:
+            records = list(artifact.inline_placeholder_records)
+        values = dict(artifact.inline_variable_values)
+        for name, value in assignments.items():
+            try:
+                matching = validate_inline_variable_value(records, name, value)
+            except SaipVariableMaterializationError as error:
+                raise ValueError(str(error)) from error
+            canonical = str(getattr(matching[0], "variable_name", "") or name)
+            for existing in [key for key in values if key.casefold() == canonical.casefold()]:
+                values.pop(existing, None)
+            values[canonical] = str(value)
+            print(
+                f"{ShellStyle.GREEN}[+] {canonical}: value set for {len(matching)} "
+                f"occurrence{'s' if len(matching) != 1 else ''}{ShellStyle.END}"
+            )
+        self._write_template_variable_values(template_path, values)
+
+    def _variables_clear(self, template_path: Path, artifact: Any, names: list[str]) -> None:
+        if artifact is None:
+            artifact, _records = self._variables_records(template_path)
+        values = dict(artifact.inline_variable_values)
+        for name in names:
+            matches = [key for key in values if key.casefold() == str(name).casefold()]
+            if not matches:
+                raise ValueError(f"{name}: no typed value to clear.")
+            for key in matches:
+                values.pop(key, None)
+            print(f"{ShellStyle.GREEN}[+] {name}: typed value cleared{ShellStyle.END}")
+        self._write_template_variable_values(template_path, values)
+
+    def _write_template_variable_values(self, template_path: Path, values: dict[str, str]) -> None:
+        """Store a template's typed values where the loader reads them.
+
+        Tagged JSON keeps them in its placeholder block; every other format
+        keeps them in ``<stem>.variables.json`` beside the template, whose
+        stored list values and bound list are preserved.
+        """
+        from .saip_variable_materialization import (
+            SaipVariableMaterializationError,
+            inline_variable_sidecar_path_for,
+            read_inline_variable_sidecar_document,
+            write_inline_variable_sidecar,
+        )
+
+        clean = {str(name): str(value) for name, value in values.items()}
+        if template_path.suffix.lower() == ".json":
+            loaded = json.loads(template_path.read_text(encoding="utf-8-sig"))
+            if isinstance(loaded, dict) is False:
+                raise ValueError(f"{template_path.name} is not a tagged JSON document.")
+            block = loaded.get("__ygg_inline_placeholders__")
+            if isinstance(block, dict) is False:
+                block = {}
+                loaded["__ygg_inline_placeholders__"] = block
+            block["values"] = clean
+            template_path.write_text(
+                json.dumps(loaded, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
+            return
+        sidecar_path = inline_variable_sidecar_path_for(template_path)
+        raw_values: dict[str, str] = {}
+        selector = ""
+        if sidecar_path.is_file():
+            try:
+                document = read_inline_variable_sidecar_document(sidecar_path)
+            except SaipVariableMaterializationError as error:
+                raise ValueError(f"{sidecar_path.name}: {error}") from error
+            raw_values = dict(document.get("raw_values") or {})
+            selector = str(document.get("test_value_list") or "")
+        write_inline_variable_sidecar(
+            sidecar_path,
+            clean,
+            created_from=template_path.name,
+            raw_values=raw_values,
+            test_value_list=selector,
+        )
+        print(f"{ShellStyle.CYAN}[*] values written to {sidecar_path}{ShellStyle.END}")
+
+    def _load_template_artifact(self, template_path: Path):
+        from .saip_artifact_loader import load_saip_artifact
+        from .saip_json_codec import ensure_workspace_pysim_on_path
+
+        ensure_workspace_pysim_on_path(self.bridge.workspace_root)
+        return load_saip_artifact(template_path)
+
+    def _write_template_test_value_binding(self, template_path: Path, selector: str) -> None:
+        """Record a template's bound list where the loader reads it.
+
+        Tagged JSON keeps it in its placeholder block; every other template
+        format keeps it in ``<stem>.variables.json``, created when absent.
+        The machine-local store is updated as well.
+        """
+        from yggdrasim_common.gui_server.actions.saip import _remember_test_value_binding
+
+        from .saip_variable_materialization import (
+            SaipVariableMaterializationError,
+            inline_variable_sidecar_path_for,
+            read_inline_variable_sidecar_document,
+            write_inline_variable_sidecar,
+        )
+
+        if template_path.suffix.lower() == ".json":
+            try:
+                loaded = json.loads(template_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f"Template {template_path.name} is not valid JSON: {error}"
+                ) from error
+            block = loaded.get("__ygg_inline_placeholders__") if isinstance(loaded, dict) else None
+            if not isinstance(block, dict):
+                raise ValueError(
+                    f"{template_path.name} carries no inline placeholder block; a binding "
+                    "needs a template with inline placeholders."
+                )
+            if selector:
+                block["test_value_list"] = selector
+            else:
+                block.pop("test_value_list", None)
+            template_path.write_text(
+                json.dumps(loaded, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
+        else:
+            sidecar_path = inline_variable_sidecar_path_for(template_path)
+            values: dict[str, str] = {}
+            raw_values: dict[str, str] = {}
+            if sidecar_path.is_file():
+                try:
+                    document = read_inline_variable_sidecar_document(sidecar_path)
+                except SaipVariableMaterializationError as error:
+                    raise ValueError(f"{sidecar_path.name}: {error}") from error
+                values = dict(document["values"])
+                raw_values = dict(document["raw_values"])
+            write_inline_variable_sidecar(
+                sidecar_path,
+                values,
+                created_from=template_path.name,
+                raw_values=raw_values,
+                test_value_list=selector,
+            )
+        _remember_test_value_binding(template_path, selector)
+
     _TOKEN_SUBCOMMANDS: dict[str, str] = {
         "LIST": "_cmd_list_tokens",
         "ADD": "_cmd_add_token",
@@ -4094,6 +5285,9 @@ class ProfilePackageShell:
         "APPLY": "_cmd_apply_tokens",
         "APPLY-SIDECAR": "_cmd_apply_tokens",
         "IMPORT-CSV": "_cmd_import_tokens_csv",
+        "UNIVERSAL": "_cmd_universal_tokens",
+        "APPLY-UNIVERSAL": "_cmd_apply_universal_tokens",
+        "LISTS": "_cmd_token_lists",
         "HELP": "_cmd_help_tokens",
     }
 
@@ -4103,7 +5297,7 @@ class ProfilePackageShell:
         Usage: TOKENS <subcommand> [<args>...]
 
         Subcommand aliases keep every flat command (``LIST-TOKENS``,
-        ``ADD-TOKEN``, ...) working verbatim — this namespace is purely a
+        ``ADD-TOKEN``, ...) working verbatim -- this namespace is purely a
         discoverability layer.
         """
 
@@ -4446,7 +5640,7 @@ class ProfilePackageShell:
         elif refs["total"] > 0:
             print(
                 f"{ShellStyle.WARNING}[*] Renamed {old_name} → {new_name} in "
-                f"__ygg_token_defs__. References left untouched — they now "
+                f"__ygg_token_defs__. References left untouched -- they now "
                 f"point to an undefined token.{ShellStyle.END}"
             )
         else:
@@ -4603,7 +5797,7 @@ class ProfilePackageShell:
 
         print(f"{ShellStyle.CYAN}[*] AKA algorithm:{ShellStyle.END}")
         for index, (choice_id, label, hint) in enumerate(aka_algorithm_choices(), start=1):
-            print(f"    {index}. {label} ({choice_id}) — {hint}")
+            print(f"    {index}. {label} ({choice_id}) -- {hint}")
         default_value = current if len(current) > 0 else "milenage"
         while True:
             raw = self._prompt_line("Algorithm (id or number)", default=default_value)
@@ -5085,6 +6279,140 @@ class ProfilePackageShell:
             for summary in summaries:
                 print(f"    - {summary}")
 
+    def _cmd_materialize_template(self, arg: str) -> None:
+        usage = (
+            "Usage: MATERIALIZE-TEMPLATE <template.varder|.asn|.json> <out.der|out.hex> "
+            "[NAME=value ...] [--values <file.variables.json>] [--universal]"
+        )
+        tokens = shlex.split(str(arg or "").strip())
+        values_path: Path | None = None
+        use_universal = False
+        positional: list[str] = []
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            if token in ("--universal", "--universal-tokens"):
+                use_universal = True
+                index += 1
+                continue
+            if token in ("--values", "--variables"):
+                if index + 1 >= len(tokens):
+                    raise ValueError("--values requires a sidecar path.")
+                values_path = self.bridge.resolve_workspace_path(
+                    tokens[index + 1],
+                    must_exist=True,
+                )
+                index += 2
+                continue
+            positional.append(token)
+            index += 1
+        if len(positional) < 2:
+            raise ValueError(usage)
+
+        from .saip_artifact_loader import load_saip_artifact
+        from .saip_json_codec import (
+            encode_der_from_document,
+            ensure_workspace_pysim_on_path,
+        )
+        from .saip_variable_materialization import (
+            SaipVariableMaterializationError,
+            materialize_inline_records,
+            read_inline_variable_sidecar,
+        )
+
+        template_path = self.bridge.resolve_workspace_path(positional[0], must_exist=True)
+        output_path = self.bridge.resolve_workspace_path(positional[1], must_exist=False)
+        assignments = parse_placeholder_assignment_tokens(positional[2:])
+        ensure_workspace_pysim_on_path(self.bridge.workspace_root)
+
+        artifact = load_saip_artifact(template_path)
+        records = list(artifact.inline_placeholder_records)
+        if len(records) == 0:
+            raise ValueError(
+                f"{template_path.name} carries no inline typed placeholders. Use "
+                "APPLY-TEMPLATE or GENERATE-PROFILE for {NAME} token templates."
+            )
+        for warning in artifact.inline_variable_warnings:
+            print(f"{ShellStyle.WARNING}[*] {warning.get('error')}{ShellStyle.END}")
+        # Precedence: NAME=value on the command line, then --values, then the
+        # sidecar or JSON block the loader already validated.
+        values: dict[str, str] = dict(artifact.inline_variable_values)
+        if values_path is not None:
+            try:
+                values.update(read_inline_variable_sidecar(values_path))
+            except SaipVariableMaterializationError as error:
+                raise ValueError(f"{values_path.name}: {error}") from error
+        values.update(assignments)
+        # The test-value lists answer the occurrences that still lack a typed
+        # value: the template's bound list first, then the universal one; a
+        # typed value keeps precedence for its variable.
+        raw_values: dict[str, str] = dict(artifact.inline_raw_values)
+        if use_universal:
+            from .saip_universal_tokens import (
+                layered_universal_match,
+                load_test_value_layers,
+            )
+
+            layers, bound_ref, layer_warnings = load_test_value_layers(
+                artifact.test_value_list
+            )
+            for message in layer_warnings:
+                print(f"{ShellStyle.WARNING}[*] {message}{ShellStyle.END}")
+            loaded_layers = [token_list for token_list in layers if token_list.loaded]
+            if not loaded_layers:
+                raise ValueError(
+                    f"No universal token list at {layers[-1].path}."
+                    if layers
+                    else "No test-value list is available."
+                )
+            if not bound_ref.is_universal:
+                print(
+                    f"{ShellStyle.CYAN}[*] bound list: {bound_ref.name} "
+                    f"({bound_ref.path}){ShellStyle.END}"
+                )
+            match = layered_universal_match(records, loaded_layers)
+            raw_values.update(match.raw_values)
+            for item in match.unmatched:
+                print(
+                    f"{ShellStyle.WARNING}[*] {item['literal']}: {item['reason']}"
+                    f"{ShellStyle.END}"
+                )
+            for token_list in loaded_layers:
+                for problem in token_list.problems:
+                    print(
+                        f"{ShellStyle.WARNING}[*] {token_list.path.name} line "
+                        f"{problem.line}: {problem.reason}{ShellStyle.END}"
+                    )
+        try:
+            document, _remaining, results = materialize_inline_records(
+                artifact.decoded_document,
+                records,
+                values,
+                raw_values=raw_values,
+            )
+        except SaipVariableMaterializationError as error:
+            raise ValueError(str(error)) from error
+        document.pop("__ygg_inline_placeholders__", None)
+        der = encode_der_from_document(document, self.bridge.workspace_root)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if output_path.suffix.lower() in (".hex", ".txt"):
+            # A .hex target takes the ASCII hex of the same DER, the form the
+            # vendor templates come in and OPEN reads back.
+            output_path.write_text(der.hex().upper() + "\n", encoding="utf-8")
+            written = f"{len(der)} bytes DER as hex text"
+        else:
+            output_path.write_bytes(der)
+            written = f"{len(der)} bytes DER"
+        print(f"{ShellStyle.GREEN}[+] Wrote {written} to {output_path}{ShellStyle.END}")
+        print(f"{ShellStyle.CYAN}[*] Resolved inline variables:{ShellStyle.END}")
+        for result in results:
+            secret_note = " (secret value not shown)" if result.secret else ""
+            source_note = " [universal]" if result.source == "universal_tokens" else ""
+            print(
+                f"    - {result.variable_name}: {result.binding_count} "
+                f"occurrence(s){secret_note}{source_note}"
+            )
+
     def _cmd_generate_batch(self, arg: str) -> None:
         tokens = shlex.split(arg.strip())
         if len(tokens) != 3:
@@ -5135,7 +6463,7 @@ class ProfilePackageShell:
         used_output_names: set[str] = set()
         generated_paths: list[Path] = []
 
-        # Determinate sweep — batch record count is known up front.
+        # Determinate sweep -- batch record count is known up front.
         # The sticky footer shows which record is being materialised
         # so large generations (hundreds of profiles) have visible
         # progress. Inactive on piped invocations.
@@ -5385,6 +6713,270 @@ class ProfilePackageShell:
             known_profiles = ", ".join(sorted(self._LINT_PROFILE_PRESETS.keys()))
             raise ValueError(f"Unknown lint profile '{normalized_name}'. Known profiles: {known_profiles}")
         return dict(self._LINT_PROFILE_PRESETS[normalized_name])
+
+    def _cmd_trim(self, arg: str) -> None:
+        """TRIM [APPLY] [OUTPUT <file>] [GAP <n>]: drop content the file's initial image holds.
+
+        TCA SAIP V3.4.1 section 8.3.3 gives fillFileContent the effect of an
+        update on a file created with its fill / repeat pattern or template
+        default, so a byte equal to that image can go. Without APPLY the verb
+        only reports; with APPLY it writes the trimmed DER next to the input
+        (or to OUTPUT), leaving the input untouched.
+        """
+        tokens = shlex.split(str(arg or "").strip())
+        apply_flag = False
+        output_text = ""
+        merge_gap: int | None = None
+        index = 0
+        while index < len(tokens):
+            token = tokens[index].strip()
+            upper = token.upper()
+            if upper == "APPLY":
+                apply_flag = True
+            elif upper == "OUTPUT":
+                if index + 1 >= len(tokens):
+                    raise ValueError("OUTPUT needs a file path.")
+                output_text = tokens[index + 1]
+                index += 1
+            elif upper == "GAP":
+                if index + 1 >= len(tokens):
+                    raise ValueError("GAP needs an integer.")
+                try:
+                    merge_gap = int(tokens[index + 1])
+                except ValueError as error:
+                    raise ValueError(f"GAP must be an integer: {tokens[index + 1]!r}") from error
+                index += 1
+            else:
+                raise ValueError("Usage: TRIM [APPLY] [OUTPUT <file>] [GAP <n>]")
+            index += 1
+
+        input_path = self.bridge.get_input_file()
+        payload = input_path.read_bytes()
+        if input_path.suffix.lower() in (".txt", ".hex"):
+            text = "".join(payload.decode("utf-8-sig").split())
+            try:
+                payload = bytes.fromhex(text)
+            except ValueError as error:
+                raise ValueError(
+                    f"{input_path.name} is not plain hex (a template with placeholders "
+                    "must be materialised first)."
+                ) from error
+
+        from .saip_fill_trim import MERGE_GAP, trim_sequence
+        from .saip_json_codec import ensure_workspace_pysim_on_path
+
+        ensure_workspace_pysim_on_path(self.bridge.workspace_root)
+        from pySim.esim.saip import ProfileElementSequence
+
+        pes = ProfileElementSequence.from_der(payload)
+        size_before = len(bytes(pes.to_der()))
+        report = trim_sequence(
+            pes,
+            apply=apply_flag,
+            merge_gap=MERGE_GAP if merge_gap is None else merge_gap,
+        )
+        totals = report.totals()
+        trimmed = [item for item in report.files if item.status == "trim"]
+        trimmed.sort(key=lambda item: item.saved, reverse=True)
+        print(
+            f"{ShellStyle.BOLD}Padded content in {input_path.name}: "
+            f"{totals['files_seen']} files with content, {len(trimmed)} trimmable, "
+            f"{totals['saved']} B of data tuples to drop{ShellStyle.END}"
+        )
+        for item in trimmed:
+            print(
+                f"  - {item.section:22} {item.file:28} {item.file_type} "
+                f"{item.bytes_before:5d} -> {item.bytes_after:5d} B  "
+                f"({item.image_source})"
+            )
+        reasons: dict[str, int] = {}
+        for item in report.files:
+            if item.status == "skipped":
+                reasons[item.reason] = reasons.get(item.reason, 0) + 1
+        for reason, count in sorted(reasons.items(), key=lambda pair: -pair[1]):
+            print(f"{ShellStyle.CYAN}[*] {count} skipped: {reason}{ShellStyle.END}")
+        if apply_flag is False:
+            print(f"{ShellStyle.CYAN}[*] Dry run; add APPLY to write the trimmed package.{ShellStyle.END}")
+            return
+        if len(report.changed_pe_indexes) == 0:
+            print(f"{ShellStyle.CYAN}[*] Nothing to trim; no file written.{ShellStyle.END}")
+            return
+        encoded = bytes(pes.to_der())
+        if output_text:
+            target = self.bridge.resolve_workspace_path(output_text, must_exist=False)
+        else:
+            target = self.bridge.resolve_workspace_path(
+                str(input_path.with_name(input_path.stem + ".trimmed.der")),
+                must_exist=False,
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(target, encoded)
+        print(
+            f"{ShellStyle.GREEN}[+] Wrote {target} ({size_before} -> {len(encoded)} B, "
+            f"{len(report.changed_pe_indexes)} profile elements changed){ShellStyle.END}"
+        )
+
+    _RFM_USAGE = (
+        "Usage: RFM [<pe_index> MF | <pe_index> ADF <USIM|ISIM|CSIM|aid>] "
+        "[ACCESS=<hex>] [ADMIN=<hex>] [OUTPUT=<file.der> | IN-PLACE]"
+    )
+    # Inputs the shell reads as hex text or as a template; IN-PLACE writes
+    # DER, which would silently change the file's format.
+    _RFM_NON_DER_SUFFIXES = (".txt", ".hex", ".varder", ".asn", ".json")
+
+    def _cmd_rfm(self, arg: str) -> None:
+        """RFM: list the PE-RFM elements, or move one between the MF and an ADF.
+
+        An RFM script selects the ADF named by ``adfRFMAccess`` by default
+        (ADF RFM, ETSI TS 102 226 V19.0.0 section 7.3) and the MF when the
+        PE carries no binding (UICC shared file system RFM, section 7.2;
+        TCA SAIP V3.4.1 section 8.8). ``MF`` drops the binding, ``ADF``
+        installs or replaces it with the access domains defaulting to the
+        PE's UICC domains, and the change reaches a file only with OUTPUT=
+        or IN-PLACE.
+        """
+        from .saip_json_codec import encode_der_from_document
+        from .saip_rfm_edit import (
+            list_adf_bindings,
+            locate_rfm_sections,
+            remove_adf_access,
+            resolve_adf_reference,
+            rfm_summary,
+            set_adf_access,
+        )
+
+        tokens = shlex.split(str(arg or "").strip())
+        document = self.bridge.build_decoded_dump_document("all_pe")
+        sections = document.get("sections")
+        if isinstance(sections, dict) is False:
+            raise ValueError("The decoded profile carries no sections.")
+        bindings = list_adf_bindings(document)
+        rfm_keys = {key for key, _section in locate_rfm_sections(document)}
+        keys = list(sections.keys())
+        if len(tokens) == 0:
+            self._print_rfm_listing(keys, rfm_keys, sections, bindings)
+            return
+        if len(tokens) < 2:
+            raise ValueError(self._RFM_USAGE)
+        try:
+            pe_index = int(tokens[0])
+        except ValueError as error:
+            raise ValueError(self._RFM_USAGE) from error
+        if pe_index < 0 or pe_index >= len(keys):
+            raise ValueError(f"pe_index {pe_index} is out of range 0..{len(keys) - 1}.")
+        section_key = keys[pe_index]
+        if section_key not in rfm_keys:
+            raise ValueError(f"PE {pe_index} ({section_key}) is not a PE-RFM.")
+        section = sections[section_key]
+        mode = tokens[1].upper()
+        rest = tokens[2:]
+        adf_reference = ""
+        if mode == "ADF":
+            if len(rest) == 0:
+                raise ValueError(self._RFM_USAGE)
+            adf_reference = rest[0]
+            rest = rest[1:]
+        elif mode != "MF":
+            raise ValueError(self._RFM_USAGE)
+        access_hex = ""
+        admin_hex = ""
+        output_text = ""
+        in_place = False
+        for token in rest:
+            if token.upper() == "IN-PLACE":
+                in_place = True
+                continue
+            name, separator, value = token.partition("=")
+            option = name.strip().upper()
+            if separator == "" or option not in ("ACCESS", "ADMIN", "OUTPUT"):
+                raise ValueError(f"Unknown RFM option: {token!r}. {self._RFM_USAGE}")
+            if option == "ACCESS":
+                access_hex = value.strip()
+            elif option == "ADMIN":
+                admin_hex = value.strip()
+            else:
+                output_text = value.strip()
+        if mode == "MF" and (access_hex or admin_hex):
+            raise ValueError("ACCESS= and ADMIN= describe an ADF binding; use them with ADF.")
+        if in_place and output_text:
+            raise ValueError("Use either OUTPUT=<file.der> or IN-PLACE, not both.")
+        target: Path | None = None
+        if in_place:
+            current_input = self.bridge.current_input_file
+            if current_input is None:
+                raise ValueError("RFM IN-PLACE requires an active input file; run USE / OPEN first.")
+            if current_input.suffix.lower() in self._RFM_NON_DER_SUFFIXES:
+                raise ValueError(
+                    f"IN-PLACE writes DER and {current_input.name} is a hex or template "
+                    "input; use OUTPUT=<file.der>."
+                )
+            target = current_input
+        elif output_text:
+            target = self.bridge.resolve_workspace_path(output_text, must_exist=False)
+
+        if mode == "MF":
+            message = remove_adf_access(section)
+        else:
+            message = set_adf_access(
+                section,
+                adf_aid_hex=resolve_adf_reference(adf_reference, bindings),
+                adf_access_domain_hex=access_hex,
+                adf_admin_access_domain_hex=admin_hex,
+            )
+        summary = rfm_summary(section, bindings=bindings)
+        print(f"{ShellStyle.GREEN}[+] PE {pe_index} ({section_key}): {message}{ShellStyle.END}")
+        print(f"    Default directory: {self._rfm_scope_text(summary)}")
+        if target is None:
+            print(
+                f"{ShellStyle.CYAN}[*] Dry run; add OUTPUT=<file.der> or IN-PLACE to write "
+                f"the package.{ShellStyle.END}"
+            )
+            return
+        der = encode_der_from_document(document, self.bridge.workspace_root)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(target, der)
+        print(f"{ShellStyle.GREEN}[+] Wrote {target} ({len(der)} B){ShellStyle.END}")
+
+    @staticmethod
+    def _rfm_scope_text(summary: dict) -> str:
+        adf = summary.get("adf_access")
+        if isinstance(adf, dict) is False:
+            return "MF (UICC shared file system RFM, TS 102 226 7.2)"
+        name = adf.get("adf_name") or "ADF"
+        return (
+            f"{name} {adf.get('adf_aid_hex', '')} (ADF RFM, TS 102 226 7.3; "
+            f"access {adf.get('adf_access_domain_hex') or '-'}, "
+            f"admin {adf.get('adf_admin_access_domain_hex') or '-'})"
+        )
+
+    def _print_rfm_listing(
+        self,
+        keys: list[str],
+        rfm_keys: set[str],
+        sections: dict,
+        bindings: list[dict],
+    ) -> None:
+        from .saip_rfm_edit import rfm_summary
+
+        rows = [(index, key) for index, key in enumerate(keys) if key in rfm_keys]
+        if len(rows) == 0:
+            print(f"{ShellStyle.WARNING}[*] Profile contains no PE-RFM.{ShellStyle.END}")
+            return
+        print(f"{ShellStyle.CYAN}[*] PE-RFM elements:{ShellStyle.END}")
+        print(f"    {'#':<4} {'section':<10} {'instance AID':<34} {'TARs':<22} default directory")
+        for index, key in rows:
+            summary = rfm_summary(sections[key], bindings=bindings)
+            tars = ",".join(summary.get("tar_list") or []) or "-"
+            instance_aid = summary.get("instance_aid_hex") or "-"
+            print(
+                f"    {index:<4} {key:<10} {instance_aid:<34} {tars:<22} "
+                f"{self._rfm_scope_text(summary)}"
+            )
+        if bindings:
+            adfs = ", ".join(
+                f"{row['adf']} {row['aid_hex']} (PE {row['pe_index']})" for row in bindings
+            )
+            print(f"    ADFs in the profile: {adfs}")
 
     def _cmd_lint(self, arg: str) -> None:
         tokens, output_path = self._parse_lint_output_redirection(arg)

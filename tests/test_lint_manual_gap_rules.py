@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for YRL-* rules derived from the TCA Profile Package TS sweep.
 
 Covers: YRL-JCA-004 (TCA APP-004), YRL-SDM-005 (TCA PP-004),
@@ -10,11 +9,11 @@ Covers: YRL-JCA-004 (TCA APP-004), YRL-SDM-005 (TCA PP-004),
         YRL-PIN-005 (TCA PIN-007), YRL-PIN-006 (TCA PIN-006),
         YRL-PIN-007 (ETSI TS 102 221 §9.5 Table 9.3 keyReference range),
         YRL-FIL-015 (TCA FS-015), YRL-FIL-024 (TCA FS-024),
-        YRL-HDR-005 (TCA SAIP §A.2 — eUICC-Mandatory-AIDs entry shape),
-        YRL-HDR-006 (TCA PP TS §3.1 / §A.2 — version coherence +
+        YRL-HDR-005 (TCA SAIP v3.4.1 §8.2.1 -- eUICC-Mandatory-AIDs entry shape),
+        YRL-HDR-006 (TCA SAIP v3.4.1 §8.2.1 / Annex F -- version coherence +
         iotOptions gating),
-        YRL-HDR-007 (TCA SAIP §A.2 — eUICC-Mandatory-GFSTEList OID),
-        YRL-HDR-008 (TCA SAIP §A.2 — profileType length),
+        YRL-HDR-007 (TCA SAIP v3.4.1 §8.2.1 -- eUICC-Mandatory-GFSTEList OID),
+        YRL-HDR-008 (TCA SAIP v3.4.1 §8.2.1 -- profileType length),
         YRL-AKA-001 (TUAK 128/256-bit K acceptance, TS 35.231 Annex F),
         YRL-AKA-005 (PE-AKAParameter mappingSource cross-reference,
         TCA PP TS PE-AKAParameter / ISO 7816-5 §8.5),
@@ -505,7 +504,7 @@ class ProfileHeaderGfsteListTests(unittest.TestCase):
 
 
 class ProfileHeaderProfileTypeTests(unittest.TestCase):
-    """YRL-HDR-008: profileType length (TCA SAIP §A.2)."""
+    """YRL-HDR-008: profileType length (TCA SAIP v3.4.1 §8.2.1)."""
 
     def _doc_with_profile_type(self, profile_type: str) -> dict:
         header = _base_header()

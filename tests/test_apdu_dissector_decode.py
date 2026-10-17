@@ -32,6 +32,39 @@ from tests.apdu_dissector_support import (
     swapped_bcd,
     write_capture,
 )
+from yggdrasim_common.apdu_risk import classify_apdu
+
+
+class CatInstructionRiskNaming(unittest.TestCase):
+    """The CAT proactive-loop instructions are named, not "unrecognised".
+
+    FETCH, TERMINAL RESPONSE, ENVELOPE and TERMINAL PROFILE were absent
+    from apdu_risk.py's table, so classify_apdu fell through to the
+    "unrecognised instruction" default -- which surfaced in the
+    dissector's risk-detail field as "unknown" on some of the commonest
+    STK frames. They are write (the conservative default they already
+    had), now named. Pure Python: no tshark needed.
+    """
+
+    def test_the_proactive_instructions_are_named(self) -> None:
+        cases = {
+            0x10: "TERMINAL PROFILE",
+            0x12: "FETCH",
+            0x14: "TERMINAL RESPONSE",
+            0xC2: "ENVELOPE",
+        }
+        for ins, name in cases.items():
+            result = classify_apdu(bytes([0x80, ins, 0x00, 0x00]))
+            self.assertEqual(result["name"], name)
+            self.assertNotEqual(result["name"], "unrecognised instruction")
+
+    def test_they_stay_write_so_the_card_gate_is_unchanged(self) -> None:
+        # Naming them must not loosen the MCP card gate or the prober:
+        # they were write by default and stay write.
+        for ins in (0x10, 0x12, 0x14, 0xC2):
+            self.assertEqual(
+                classify_apdu(bytes([0x80, ins, 0x00, 0x00]))["risk"], "write"
+            )
 
 
 class DecodeTestBase(unittest.TestCase):
@@ -90,7 +123,15 @@ class CommandHeaderDecoding(DecodeTestBase):
         """0xE2 is STORE DATA under CLA 0x80, not the ETSI meaning."""
         text = decode_text(self.capture, display_filter="yapdu.ins == 0xe2")
         self.assertIn("STORE_DATA", text)
-        self.assertIn("GlobalPlatform", text)
+        # The defining specification is a filter-only field: naming the
+        # standard under every command in a capture buries the decode.
+        # Read it as a field rather than looking for it in the tree.
+        sources = {
+            row[0]: row[1]
+            for row in self.rows(["yapdu.ins", "yapdu.command_source"])
+            if len(row) > 1 and row[0]
+        }
+        self.assertIn("GlobalPlatform", sources.get("0xe2", ""))
 
     def test_iso_cases_are_classified(self) -> None:
         # Keyed by corpus label, not by command name: the corpus holds
@@ -150,8 +191,33 @@ class StatusWordDecoding(DecodeTestBase):
         self.assertIn("43 bytes available", text)
 
     def test_the_63cx_family_reports_the_retry_count(self) -> None:
+        """Both readings of '63CX', told apart by the command half.
+
+        ETSI TS 102 221 v18.4 clause 11.1.9.1.2: VERIFY PIN with an empty
+        data field presents no PIN -- it reads the retry counter, and
+        '63CX' is that counter. A modem asks it at bring-up, so calling
+        the answer a failed verification made an ordinary probe read as a
+        card that refused to authenticate. Clause 11.1.13.1.2 gives
+        UNBLOCK PIN the same query form.
+        """
         text = decode_text(self.capture, display_filter="yapdu.sw == 0x63c2")
-        self.assertIn("2 retries left", text)
+        # The case-1 query and the 8-byte presentation both land here.
+        self.assertIn("Retry counter: 2 attempts left", text)
+        self.assertIn("Verification failed. 2 retries left", text)
+
+    def test_the_retry_counter_query_names_itself_in_the_info_column(self) -> None:
+        """The Info column is where an operator reads the trace.
+
+        "VERIFY application PIN 1 (PIN1) -> 63C3 Verification failed" is
+        what a rig's bring-up probe looked like; both halves now say it
+        is a counter read (TS 102 221 v18.4 clauses 11.1.9.1.2, 11.1.13.1.2).
+        """
+        rows = decode_fields(self.capture, ["yapdu.ins", "_ws.col.info"])
+        info_by_shape = [row[1] for row in rows if len(row) > 1 and row[0] == "0x20"]
+        queries = [text for text in info_by_shape if "retry counter" in text]
+        presentations = [text for text in info_by_shape if "retry counter" not in text]
+        self.assertTrue(queries, info_by_shape)
+        self.assertTrue(presentations, info_by_shape)
 
     def test_success_is_distinguished_from_failure(self) -> None:
         rows = self.rows(["yapdu.sw", "yapdu.sw_success"])
@@ -172,6 +238,22 @@ class StatusWordDecoding(DecodeTestBase):
         rows = self.rows(["yapdu.sw", "yapdu.sw_success"])
         by_sw = {row[0]: row[1] for row in rows if len(row) > 1 and row[0]}
         self.assertEqual(by_sw.get("0x63c2"), "False")
+
+    def test_every_exchange_reports_a_status_word(self) -> None:
+        """A body reader must not carry the status word away with it.
+
+        The INITIALIZE UPDATE and FETCH readers each returned as soon as
+        they had parsed their own structure, before the status word was
+        added -- so every secure-channel opening and every FETCH in an
+        SGP.32 trace was missing from `yapdu.sw != 0x9000`, the filter
+        the documentation names for "every exchange the card did not
+        accept", and showed a blank SW column in the bundled profile.
+        """
+        rows = self.rows(["yapdu.frame_kind", "yapdu.sw", "yapdu.command_name"])
+        exchanges = [row for row in rows if row and row[0] == "exchange"]
+        self.assertEqual(len(exchanges), len(self.corpus))
+        missing = [row[2] for row in exchanges if not row[1]]
+        self.assertEqual(missing, [], f"no status word on {missing}")
 
     def test_the_four_iso_categories_are_reported(self) -> None:
         rows = self.rows(["yapdu.sw", "yapdu.sw.category"])
@@ -327,6 +409,63 @@ class AmbiguousSplitIsReported(unittest.TestCase):
     def test_the_rejected_candidates_can_be_shown(self) -> None:
         text = decode_text(self.capture)
         self.assertIn("scored within 10 points", text)
+
+
+class GsmClassByteIsDecoded(unittest.TestCase):
+    """'AX' is channel- and SM-coded, not opaque.
+
+    ETSI TS 102 221 table 10.3 lists three standard-channel classes --
+    '0X', '8X' and 'AX' -- and gives all three the same shape: bits 4 and
+    3 the secure-messaging indication, bits 2 and 1 the logical channel.
+    'A0' is the class every GSM 11.11 command on a UICC carries, so
+    treating the whole '90'-'BF' block as proprietary dropped the channel
+    and the SM level from the oldest traffic in a trace. '90' and 'B0'
+    are outside the table and stay opaque.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._directory = tempfile.TemporaryDirectory()
+        cls.capture = write_capture(
+            Path(cls._directory.name) / "gsm_class.pcap",
+            [
+                Exchange(bytes.fromhex("A0A40000023F00"), bytes.fromhex("9F0F")),
+                Exchange(bytes.fromhex("A2B0000004"),
+                         bytes.fromhex("11223344") + b"\x90\x00"),
+                Exchange(bytes.fromhex("A4A40000023F00"), bytes.fromhex("9F0F")),
+                Exchange(bytes.fromhex("90B0000004"),
+                         bytes.fromhex("11223344") + b"\x90\x00"),
+            ],
+        )
+        require_working_tshark(cls.capture)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._directory.cleanup()
+
+    def rows(self) -> dict[str, list[str]]:
+        decoded = decode_fields(
+            self.capture,
+            ["yapdu.cla", "yapdu.cla.channel", "yapdu.cla.secure_messaging"],
+        )
+        return {row[0]: row for row in decoded if row and row[0]}
+
+    def test_the_gsm_class_reports_channel_zero(self) -> None:
+        row = self.rows()["0xa0"]
+        self.assertEqual(row[1], "0")
+        self.assertEqual(row[2], "0")
+
+    def test_a_logical_channel_is_read_from_the_low_bits(self) -> None:
+        self.assertEqual(self.rows()["0xa2"][1], "2")
+
+    def test_secure_messaging_is_read_from_bits_four_and_three(self) -> None:
+        self.assertEqual(self.rows()["0xa4"][2], "1")
+
+    def test_a_class_outside_the_table_stays_opaque(self) -> None:
+        """'90' has no coding in table 10.3, so it reports none."""
+        row = self.rows()["0x90"]
+        self.assertEqual(row[1], "")
+        self.assertEqual(row[2], "")
 
 
 class BadAtrChecksum(unittest.TestCase):

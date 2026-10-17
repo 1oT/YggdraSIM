@@ -94,6 +94,18 @@ EXTRA_TEXT_TARGETS: tuple[tuple[str, str], ...] = (
     ("Tools.ProfilePackage.saip_connectivity_parameters", "decode_connectivity_parameters"),
 )
 
+# Required keyword-only parameters the walker cannot guess, as zero-argument
+# builders so the value is made only when the decoder is probed. A decoder
+# with a required keyword-only parameter that is neither listed here nor an
+# int or str is skipped, the way an unfillable positional one is.
+KEYWORD_FILLERS: dict[tuple[str, str], dict[str, Callable[[], Any]]] = {
+    ("Tools.Asn1TlvDecode.context", "decode_cat"): {"expect": lambda: "cat_proactive"},
+    ("Tools.Asn1TlvDecode.context", "decode_es10"): {
+        "direction": lambda: "request",
+        "registry": lambda: importlib.import_module("Tools.Asn1TlvDecode.context")._registry(),
+    },
+}
+
 MALFORMED_TEXT: tuple[tuple[str, str], ...] = (
     ("empty text", ""),
     ("odd-nibble hex", "62C"),
@@ -138,8 +150,30 @@ def _annotation_text(annotation: Any) -> str:
     return getattr(annotation, "__name__", "") or str(annotation)
 
 
-def _byte_targets(module: Any) -> Iterator[tuple[str, Callable[..., Any], list[Any]]]:
-    """Yield (name, function, trailing-argument fillers) for byte decoders."""
+def _keyword_fillers(module_name: str, name: str, signature: inspect.Signature) -> dict[str, Any] | None:
+    """Values for the required keyword-only parameters, or None when one cannot be filled."""
+    listed = KEYWORD_FILLERS.get((module_name, name), {})
+    kwargs: dict[str, Any] = {}
+    for parameter in signature.parameters.values():
+        if parameter.kind is not inspect.Parameter.KEYWORD_ONLY:
+            continue
+        if parameter.default is not inspect.Parameter.empty:
+            continue
+        if parameter.name in listed:
+            kwargs[parameter.name] = listed[parameter.name]()
+            continue
+        annotation = _annotation_text(parameter.annotation)
+        if annotation.startswith("int"):
+            kwargs[parameter.name] = 0x80
+        elif annotation.startswith("str"):
+            kwargs[parameter.name] = ""
+        else:
+            return None
+    return kwargs
+
+
+def _byte_targets(module: Any) -> Iterator[tuple[str, Callable[..., Any], list[Any], dict[str, Any]]]:
+    """Yield (name, function, trailing-argument fillers, keyword fillers) for byte decoders."""
     for name, obj in vars(module).items():
         if not inspect.isfunction(obj):
             continue
@@ -178,7 +212,10 @@ def _byte_targets(module: Any) -> Iterator[tuple[str, Callable[..., Any], list[A
             else:
                 break
         else:
-            yield name, obj, fillers
+            kwargs = _keyword_fillers(module.__name__, name, signature)
+            if kwargs is None:
+                continue
+            yield name, obj, fillers, kwargs
 
 
 def _assert_clean(
@@ -186,9 +223,10 @@ def _assert_clean(
     function: Callable[..., Any],
     payload: Any,
     fillers: list[Any],
+    kwargs: dict[str, Any] | None = None,
 ) -> None:
     try:
-        function(payload, *fillers)
+        function(payload, *fillers, **(kwargs or {}))
     except CLEAN_REJECTIONS:
         return
     except Exception as exc:  # noqa: BLE001 - classifying the escape is the point
@@ -210,11 +248,11 @@ class DecoderBoundaryContractTests(unittest.TestCase):
                 module = importlib.import_module(module_name)
             except Exception:
                 continue
-            for name, function, fillers in _byte_targets(module):
+            for name, function, fillers, kwargs in _byte_targets(module):
                 probed += 1
                 for label, payload in MALFORMED_PAYLOADS:
                     with self.subTest(decoder=f"{module_name}.{name}", payload=label):
-                        _assert_clean(self, function, payload, fillers)
+                        _assert_clean(self, function, payload, fillers, kwargs)
         # Guards against a refactor that silently empties discovery.
         self.assertGreater(
             probed,

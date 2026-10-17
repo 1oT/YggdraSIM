@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""Tests for the Command Center action framework (R2-004 Phase C).
+"""Tests for the Command Center action framework.
 
 Covers:
 
@@ -9,7 +9,7 @@ Covers:
 * The in-memory session manager (no hardware needed).
 * The four bundled action specs register themselves on import.
 * The HTTP router: catalogue listing, per-action run, streaming gate,
-  auth gate, and unknown-action handling (FastAPI optional — skipped
+  auth gate, and unknown-action handling (FastAPI optional -- skipped
   in environments that did not install the ``gui`` extra).
 """
 
@@ -146,7 +146,7 @@ class TestActionRegistry:
         registry = ActionRegistry()
         spec = ActionSpec(id="demo.a", subsystem="demo", title="a", description="d")
         registry.register(spec)
-        registry.register(spec)  # same object — no-op
+        registry.register(spec)  # same object -- no-op
         assert registry.has("demo.a")
         assert len(registry.all()) == 1
 
@@ -188,6 +188,49 @@ class TestActionRegistry:
         registry.register(ActionSpec(id="demo.a", subsystem="demo", title="a", description=""))
         with pytest.raises(ValueError):
             registry.register(ActionSpec(id="demo.a", subsystem="other", title="other", description=""))
+
+    def test_spec_refuses_tuple_description(self) -> None:
+        # A trailing comma inside a parenthesised run of string literals is
+        # the slip that turns the field into a tuple; the spec names it.
+        with pytest.raises(TypeError, match=r"ActionSpec 'demo.a': description must be a str, got tuple \("):
+            ActionSpec(id="demo.a", subsystem="demo", title="a", description=("first.", "second."))
+
+    def test_field_refuses_tuple_label(self) -> None:
+        with pytest.raises(TypeError, match=r"ActionField 'x': label must be a str, got tuple"):
+            ActionField(name="x", label=("a", "b"))
+
+    def test_spec_refuses_foreign_inputs_and_tags(self) -> None:
+        with pytest.raises(TypeError, match=r"inputs\[0\] must be an ActionField, got dict"):
+            ActionSpec(id="demo.a", subsystem="demo", title="a", description="d", inputs=({"name": "x"},))
+        with pytest.raises(TypeError, match=r"tags\[1\] must be a str, got int"):
+            ActionSpec(id="demo.a", subsystem="demo", title="a", description="d", tags=("ok", 3))
+
+    def test_plugin_with_malformed_spec_is_isolated_from_the_catalogue(self) -> None:
+        # One plugin spec the catalogue cannot serialise must become that
+        # plugin's load error, never an HTTP 500 for every action.
+        from yggdrasim_common.plugin_runtime import PluginManager
+
+        registry = ActionRegistry()
+        registry.register(ActionSpec(id="builtin.ok", subsystem="demo", title="ok", description="d"))
+
+        class _BrokenProvider:
+            def extend_target(self, target: ActionRegistry) -> None:
+                target.register(ActionSpec(id="plugin.broken", subsystem="demo", title="b", description=("a", "b")))
+
+        class _GoodProvider:
+            def extend_target(self, target: ActionRegistry) -> None:
+                target.register(ActionSpec(id="plugin.good", subsystem="demo", title="g", description="d"))
+
+        manager = PluginManager()
+        manager._loaded = True  # no plugin directory scan; the two providers below are the plugin set
+        manager.register_capability("demo.broken", _BrokenProvider())
+        manager.register_capability("demo.good", _GoodProvider())
+        manager.extend_target(registry)
+
+        errors = manager.load_errors()
+        assert "ActionSpec 'plugin.broken': description must be a str" in errors["demo.broken:extend"]
+        assert sorted(spec.id for spec in registry.all()) == ["builtin.ok", "plugin.good"]
+        assert all(isinstance(spec.to_schema()["description"], str) for spec in registry.all())
 
     def test_by_subsystem_groups_and_sorts(self) -> None:
         registry = ActionRegistry()
@@ -403,24 +446,18 @@ class TestActionRegistry:
             assert spec.requires_card is True
             assert spec.streams is False
 
-    def test_scp11_live_eim_download_form_is_reader_only(self) -> None:
+    def test_scp11_live_eim_download_form_offers_entry_selection(self) -> None:
         registry = ensure_builtin_actions_loaded()
         spec = registry.get("scp11_live.eim_download")
         field_names = [field.name for field in spec.inputs]
+        entries_field = next(f for f in spec.inputs if f.name == "entries")
 
-        assert field_names == ["reader"]
+        assert field_names == ["reader", "entries"]
+        assert entries_field.required is False
+        assert entries_field.default == ""
         assert spec.streams is True
         assert spec.output_kind == "log_stream"
         assert "confirm checkbox" not in spec.description
-
-    def test_scp11_live_eim_poll_form_has_no_confirm(self) -> None:
-        registry = ensure_builtin_actions_loaded()
-        spec = registry.get("scp11_live.eim_poll")
-        field_names = [field.name for field in spec.inputs]
-
-        assert field_names == ["reader", "arguments"]
-        assert spec.streams is True
-        assert spec.output_kind == "log_stream"
 
     def test_scp11_live_euicc_info2_lines_preserve_shared_tuple_order(self) -> None:
         from yggdrasim_common.gui_server.actions import scp11_live
@@ -435,7 +472,7 @@ class TestActionRegistry:
 
         rows = scp11_live._build_euicc_info2_lines(response)
 
-        assert {"label": "IPA Mode", "value": "Mode 1 active (1)", "indent": 0} in rows
+        assert {"label": "LPA/IPA Mode", "value": "IPAe active (1)", "indent": 0} in rows
         assert {"label": "IoT Specific Info", "value": "true", "indent": 0} in rows
         assert {"label": "eCall Supported", "value": "true", "indent": 1} in rows
         assert {"label": "Fallback Supported", "value": "true", "indent": 1} in rows
@@ -482,7 +519,10 @@ class TestActionRegistry:
         monkeypatch.setattr(
             scp11_live,
             "_build_console",
-            lambda reader_index: (DummyConsole(), object()),
+            # Takes a reader name as well since remote readers landed; a
+            # one-argument stub raises into the handler's own except and
+            # the command silently never runs.
+            lambda reader_index, reader_name="": (DummyConsole(), object()),
         )
 
         async def collect_events() -> list[dict[str, object]]:
@@ -503,12 +543,54 @@ class TestActionRegistry:
         assert calls == [("execute", "DOWNLOAD", "")]
         assert events[-1] == {"level": "done", "message": "done", "ok": True}
 
+    def test_scp11_live_eim_download_forwards_the_entry_selector(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import scp11_live
+
+        calls: list[tuple[str, str]] = []
+
+        class DummyConsole:
+            _commands = {"DOWNLOAD": object()}
+
+            def _execute_command(self, command: str, argument: str) -> bool:
+                calls.append((command, argument))
+                return True
+
+        monkeypatch.setattr(
+            scp11_live,
+            "_build_console",
+            lambda reader_index, reader_name="": (DummyConsole(), object()),
+        )
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        registry = ensure_builtin_actions_loaded()
+        spec = registry.get("scp11_live.eim_download")
+
+        async def collect(entries: str) -> None:
+            async for _event in spec.dispatcher(
+                ActionContext(),
+                **coerce_inputs(spec, {"reader": "", "entries": entries}),
+            ):
+                pass
+
+        asyncio.run(collect("1, 2"))
+        asyncio.run(collect("--3"))
+        asyncio.run(collect(""))
+
+        assert calls == [
+            ("DOWNLOAD", "--1,2"),
+            ("DOWNLOAD", "--3"),
+            ("DOWNLOAD", ""),
+        ]
+
     def test_scp11_live_build_console_injects_profile_provider(self, monkeypatch) -> None:
         from yggdrasim_common.gui_server.actions import scp11_live
 
         @dataclass(frozen=True)
         class FakeConfig:
             READER_INDEX: int = 0
+            # Carried alongside the index since remote readers landed: a
+            # Remote Lab reader has no PC/SC ordinal, so the name travels.
+            READER_NAME: str = ""
 
         class FakeOrchestrator:
             def __init__(self, *, cfg, apdu_channel, profile_provider=None):
@@ -530,7 +612,11 @@ class TestActionRegistry:
             "orchestrator": SimpleNamespace(SGP22Orchestrator=FakeOrchestrator),
         }
         monkeypatch.setattr(scp11_live, "_provider_module", lambda name: modules[name])
-        monkeypatch.setattr(scp11_live, "_build_apdu_channel", lambda reader_index: channel)
+        monkeypatch.setattr(
+            scp11_live,
+            "_build_apdu_channel",
+            lambda reader_index, reader_name="": channel,
+        )
 
         console, built_channel = scp11_live._build_console(2)
 
@@ -562,7 +648,7 @@ class TestActionRegistry:
 class TestEngineToolDispatchers:
     """Exercise the offline decoder/reference actions end to end.
 
-    These dispatchers are deliberately side-effect free — they wrap the
+    These dispatchers are deliberately side-effect free -- they wrap the
     same helpers that back ``/api/tools/*``. Running them here guards
     against accidental drift between the two surfaces.
     """
@@ -614,12 +700,13 @@ class TestEngineToolDispatchers:
             **coerce_inputs(spec, {"hex": "30 07 A0 05 30 03 80 01 00"}),
         )
 
-        assert result["format"] == "SIMa response"
+        # TCA eUICC Profile Package V3.4.1 section 8.11 EUICCResponse.
+        assert result["format"] == "EUICCResponse"
         assert result["complete"] is True
-        assert result["semantic"]["choice"] == "successResult"
-        assert result["semantic"]["result_code"] == 0
-        assert result["nodes"][0]["label"] == "simaResponse"
-        assert "successResult.resultCode=0" in result["formatted"]
+        assert result["semantic"]["ok"] is True
+        assert result["semantic"]["pe_status"][0]["status"] == 0
+        assert result["nodes"][0]["label"] == "EUICCResponse"
+        assert "peStatus[0].status=ok(0)" in result["formatted"]
 
     def test_sw_lookup_happy_path(self) -> None:
         ensure_builtin_actions_loaded()
@@ -664,7 +751,7 @@ class TestEngineToolDispatchers:
 
 
 # ----------------------------------------------------------------------
-# SCP03 reader binding helpers — no hardware, fake PC/SC enumeration.
+# SCP03 reader binding helpers -- no hardware, fake PC/SC enumeration.
 # ----------------------------------------------------------------------
 
 
@@ -720,7 +807,7 @@ class TestScp03ReaderBinding:
 
 # ----------------------------------------------------------------------
 # SCP03 close_session is the one session-manipulating action that can
-# run without hardware — it's idempotent on unknown ids.
+# run without hardware -- it's idempotent on unknown ids.
 # ----------------------------------------------------------------------
 
 
@@ -749,7 +836,7 @@ class TestScp03CloseSessionDispatcher:
 
 
 # ----------------------------------------------------------------------
-# scp03.read_selected — payload shape
+# scp03.read_selected -- payload shape
 # ----------------------------------------------------------------------
 
 
@@ -766,7 +853,7 @@ class _FakeTransporter:
         self._responses = list(responses)
         self.sent = []
 
-    def transmit(self, apdu_hex, silent=False):  # noqa: D401 — mimic prod signature
+    def transmit(self, apdu_hex, silent=False):  # noqa: D401 -- mimic prod signature
         self.sent.append(apdu_hex)
         if len(self._responses) == 0:
             raise AssertionError(
@@ -819,9 +906,9 @@ class TestScp03ReadPayload:
 
         transporter = _FakeTransporter(
             responses=[
-                (b"\xDE\xAD\xBE\xEF", 0x90, 0x00),  # record 1 — non-empty
-                (b"\xFF\xFF\xFF\xFF", 0x90, 0x00),  # record 2 — empty sentinel
-                (b"", 0x6A, 0x83),                   # record 3 — not found
+                (b"\xDE\xAD\xBE\xEF", 0x90, 0x00),  # record 1 -- non-empty
+                (b"\xFF\xFF\xFF\xFF", 0x90, 0x00),  # record 2 -- empty sentinel
+                (b"", 0x6A, 0x83),                   # record 3 -- not found
             ],
         )
         fs = _FakeFs(fid="6F3B", fcp={"structure": "Linear Fixed", "rec_len": 4})
@@ -1089,7 +1176,7 @@ class TestHilDispatchers:
 
     def test_bridge_status_wraps_errors(self, monkeypatch) -> None:
         """A missing relay must surface as ``ok=False`` with the error
-        captured — never as an uncaught exception."""
+        captured -- never as an uncaught exception."""
 
         def _raise():
             raise FileNotFoundError("hil_bridge_card_relay.json")
@@ -1465,6 +1552,294 @@ class TestHilDispatchers:
             ("SMS", 1),
             ("Voice", 1),
             ("STK", 1),
+        ]
+
+    def test_context_tree_payload_matches_the_tui_context_tree(self) -> None:
+        """The GUI packet tree renders the TUI's grouping, node for node.
+
+        Both surfaces call the same helpers in
+        ``Tools/HilBridge/live_decode_tui.py``, and nothing else holds
+        them together: a level added to one tree has silently skipped
+        the other before.
+        """
+        pytest.importorskip("rich")
+        from Tools.HilBridge import live_decode_tui as tui_mod
+        from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
+        from Tools.HilBridge.live_decode_view import PacketSummary
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        class _RecordingNode:
+            """Stands in for the Textual tree node the TUI populates."""
+
+            def __init__(self, sink: list, depth: int) -> None:
+                self._sink = sink
+                self._depth = depth
+
+            def add(self, label, data=None, expand=False, allow_expand=True):
+                node_data = data or {}
+                self._sink.append((
+                    self._depth + 1,
+                    str(node_data.get("kind", "")),
+                    str(label),
+                    int(node_data.get("frame_number", 0) or 0),
+                ))
+                return _RecordingNode(self._sink, self._depth + 1)
+
+            def remove_children(self) -> None:
+                self._sink.clear()
+
+            def expand(self) -> None:
+                return None
+
+        class _RecordingTree:
+            def __init__(self) -> None:
+                self.sink: list = []
+                self.root = _RecordingNode(self.sink, -1)
+                self.show_root = True
+
+        def row(number: int, info: str) -> PacketSummary:
+            return PacketSummary(
+                number=number,
+                time_text=f"{number}.000000",
+                source="127.0.0.1",
+                destination="127.0.0.1",
+                protocol="GSM SIM",
+                length_text="80",
+                info=info,
+                udp_payload_hex="AA55",
+            )
+
+        rows: list[PacketSummary] = []
+        annotations: dict[int, StatefulFrameAnnotation] = {}
+        frame_number = 0
+        channel_session_id = 0
+        for card_session_index in (1, 2):
+            for info, suffix in (
+                ("ATR", ""),
+                ("DATA AVAILABLE", ""),
+                ("TERMINAL RESPONSE", "STK Provide Local Information"),
+                ("SELECT", "FS SELECT EF.IMSI"),
+                ("GET DATA", "eUICC ES10b GetEUICCInfo"),
+                ("AUTHENTICATE", ""),
+                ("SEARCH RECORD", ""),
+                ("ENVELOPE (SMS-PP DOWNLOAD)", ""),
+                ("SMS-DELIVER TPDU", ""),
+                ("STK SET UP CALL", ""),
+            ):
+                frame_number += 1
+                rows.append(row(frame_number, info))
+                annotations[frame_number] = StatefulFrameAnnotation(
+                    frame_number=frame_number,
+                    summary_suffix=suffix,
+                    card_session_index=card_session_index,
+                )
+            # Two BIP sessions make one poll cycle: a DNS lookup and the
+            # eIM exchange that follows it.
+            for _session in range(2):
+                channel_session_id += 1
+                for info in ("OPEN CHANNEL", "SEND DATA", "CLOSE CHANNEL"):
+                    frame_number += 1
+                    rows.append(row(frame_number, info))
+                    annotations[frame_number] = StatefulFrameAnnotation(
+                        frame_number=frame_number,
+                        channel_session_id=channel_session_id,
+                        channel_number=1,
+                        card_session_index=card_session_index,
+                    )
+
+        tree = _RecordingTree()
+        tui_mod._populate_summary_tree(
+            tree,
+            rows,
+            annotations,
+            view_mode="context",
+            selected_frame_number=None,
+            expanded_group_names=set(),
+            palette=tui_mod._theme_palette("nord"),
+            show_expert_details=False,
+        )
+        payload = hil_mod._build_context_tree_payload(rows, annotations)
+
+        assert [(depth, kind) for depth, kind, _label, _frame in tree.sink] == [
+            (item["depth"], item["kind"]) for item in payload
+        ]
+        assert [
+            (depth, label.strip())
+            for depth, kind, label, _frame in tree.sink
+            if kind != "frame"
+        ] == [
+            (item["depth"], str(item["display"]).strip())
+            for item in payload
+            if item["kind"] != "frame"
+        ]
+        assert [
+            frame for _depth, kind, _label, frame in tree.sink if kind == "frame"
+        ] == [
+            item["frame_number"] for item in payload if item["kind"] == "frame"
+        ]
+
+    def test_context_tree_payload_groups_the_capture_it_windows(self) -> None:
+        """A windowed payload keeps the grouping of the whole capture.
+
+        The poll ordinals, the DNS/eIM titles and the card-session
+        wrappers are derived from the rows handed to the grouping, so
+        grouping only the window renamed "Poll 3" to "Poll 1" and lost
+        every wrapper while the TUI still showed them.
+        """
+        from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
+        from Tools.HilBridge.live_decode_view import PacketSummary
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        rows: list[PacketSummary] = []
+        annotations: dict[int, StatefulFrameAnnotation] = {}
+        frame_number = 0
+        channel_session_id = 0
+        for card_session_index in (1, 2):
+            for _session in range(2):
+                channel_session_id += 1
+                for info in ("OPEN CHANNEL", "SEND DATA", "CLOSE CHANNEL"):
+                    frame_number += 1
+                    rows.append(
+                        PacketSummary(
+                            number=frame_number,
+                            time_text=f"{frame_number}.000000",
+                            source="127.0.0.1",
+                            destination="127.0.0.1",
+                            protocol="GSM SIM",
+                            length_text="80",
+                            info=info,
+                            udp_payload_hex="AA55",
+                        )
+                    )
+                    annotations[frame_number] = StatefulFrameAnnotation(
+                        frame_number=frame_number,
+                        channel_session_id=channel_session_id,
+                        channel_number=1,
+                        card_session_index=card_session_index,
+                    )
+
+        full = hil_mod._build_context_tree_payload(rows, annotations)
+        visible = {int(row.number) for row in rows[-3:]}
+        pruned = hil_mod._prune_context_tree_to_frames(full, visible)
+
+        assert [item["frame_number"] for item in pruned if item["kind"] == "frame"] == sorted(visible)
+        # Every header the window keeps is the header the whole-capture
+        # grouping produced, ordinals and counts included; the DNS
+        # session of the same poll has no visible frame and is dropped.
+        full_headers = [
+            (item["depth"], item["kind"], item["display"])
+            for item in full
+            if item["kind"] != "frame"
+        ]
+        pruned_headers = [
+            (item["depth"], item["kind"], item["display"])
+            for item in pruned
+            if item["kind"] != "frame"
+        ]
+        assert pruned_headers == [
+            (0, "card_session", "Card Session 2 (6 frames)"),
+            (1, "poll_group", "Poll (6 frames)"),
+            (2, "poll", "Poll 1 (6 frames)"),
+            (3, "poll_target", "Target 1 (6 frames)"),
+            (4, "session", "eIM (3 frames)"),
+        ]
+        for header in pruned_headers:
+            assert header in full_headers
+
+    def test_decode_snapshot_groups_the_capture_behind_a_small_window(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """The window the client receives is cut from the whole capture's tree.
+
+        Grouping only the returned window renumbered the poll ordinals
+        and dropped the card-session wrapper, so the GUI disagreed with
+        the TUI on every capture longer than one page.
+        """
+        from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
+        from Tools.HilBridge.live_decode_view import PacketSummary
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import Tools.HilBridge.live_decode_state as state_mod
+        import Tools.HilBridge.live_decode_view as view_mod
+
+        importlib.import_module("Tools.HilBridge.live_decode_tui")
+        capture_path = tmp_path / "windowed_capture.pcap"
+        capture_path.write_bytes(b"0" * 96)
+
+        rows: list[PacketSummary] = []
+        annotations: dict[int, StatefulFrameAnnotation] = {}
+        frame_number = 0
+        channel_session_id = 0
+        for card_session_index in (1, 2):
+            for _session in range(2):
+                channel_session_id += 1
+                for info in ("OPEN CHANNEL", "SEND DATA", "CLOSE CHANNEL"):
+                    frame_number += 1
+                    rows.append(
+                        PacketSummary(
+                            number=frame_number,
+                            time_text=f"{frame_number}.000000",
+                            source="127.0.0.1",
+                            destination="127.0.0.1",
+                            protocol="GSM SIM",
+                            length_text="80",
+                            info=info,
+                            udp_payload_hex="AA55",
+                        )
+                    )
+                    annotations[frame_number] = StatefulFrameAnnotation(
+                        frame_number=frame_number,
+                        channel_session_id=channel_session_id,
+                        channel_number=1,
+                        card_session_index=card_session_index,
+                    )
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_resolve_decode_capture_path",
+            lambda capture_path=None: str(capture_path),
+        )
+        monkeypatch.setattr(view_mod, "resolve_tshark_binary", lambda: "/usr/bin/tshark")
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_summaries",
+            lambda *_args, **_kwargs: (list(rows), ""),
+        )
+        monkeypatch.setattr(
+            state_mod,
+            "build_stateful_packet_annotations",
+            lambda *_args, **_kwargs: dict(annotations),
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.decode_snapshot")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(
+                spec,
+                {
+                    "capture_path": str(capture_path),
+                    "limit": "3",
+                    "include_detail": False,
+                },
+            ),
+        )
+
+        assert result["ok"] is True
+        assert [
+            item["frame_number"]
+            for item in result["context_tree"]
+            if item["kind"] == "frame"
+        ] == [10, 11, 12]
+        assert [
+            (item["kind"], item["display"])
+            for item in result["context_tree"]
+            if item["kind"] != "frame"
+        ] == [
+            ("card_session", "Card Session 2 (6 frames)"),
+            ("poll_group", "Poll (6 frames)"),
+            ("poll", "Poll 1 (6 frames)"),
+            ("poll_target", "Target 1 (6 frames)"),
+            ("session", "eIM (3 frames)"),
         ]
 
     def test_decode_snapshot_uses_existing_decode_helpers(self, monkeypatch, tmp_path) -> None:
@@ -2024,7 +2399,7 @@ class TestHilWatchSupervisorStream:
 
 
 # ----------------------------------------------------------------------
-# SCP11 live helpers (pure decoders — no reader, no orchestrator)
+# SCP11 live helpers (pure decoders -- no reader, no orchestrator)
 # ----------------------------------------------------------------------
 
 
@@ -2052,10 +2427,10 @@ class TestScp11LiveDecoders:
         from yggdrasim_common.gui_server.actions import scp11_live as live_mod
 
         # Hand-assembled BER-TLV:
-        #   5A 0A 98 14 20 32 01 65 43 21 F7 00  — ICCID (BCD)
-        #   9F70 01 01                           — state = 0x01 (ENABLED)
-        #   95 01 02                             — class = 0x02 (OPER)
-        #   90 04 54 45 53 54                    — nickname 'TEST'
+        #   5A 0A 98 14 20 32 01 65 43 21 F7 00  -- ICCID (BCD)
+        #   9F70 01 01                           -- state = 0x01 (ENABLED)
+        #   95 01 02                             -- class = 0x02 (OPER)
+        #   90 04 54 45 53 54                    -- nickname 'TEST'
         iccid_tlv = bytes.fromhex("5A0A98142032016543 21F700".replace(" ", ""))
         state_tlv = bytes.fromhex("9F700101")
         class_tlv = bytes.fromhex("950102")
@@ -2086,7 +2461,7 @@ class TestScp11LiveDecoders:
         junk = bytes.fromhex("DEADBEEF")
         row = live_mod._decode_profile_entry(junk)
         # Either fully decoded (TlvParser tolerates short inputs) or raw-hex
-        # fallback; both are acceptable — the contract is "never raise".
+        # fallback; both are acceptable -- the contract is "never raise".
         assert isinstance(row, dict)
         assert "iccid" in row
 
@@ -2130,7 +2505,9 @@ class TestScp11LiveDecoders:
                     },
                 )
 
-        def fake_run_console_callable(reader_index, work, *, connect_first=True):
+        def fake_run_console_callable(
+            reader_index, work, *, connect_first=True, reader_name=""
+        ):
             assert reader_index == 3
             assert connect_first is False
             return work(Console()), "trace"
@@ -2206,7 +2583,7 @@ class TestScp80ReaderBinding:
 
 class TestScp11LiveRegistration:
     """Every live action must declare the short-lived (not streaming),
-    card-requiring contract — otherwise the frontend routes it wrong."""
+    card-requiring contract -- otherwise the frontend routes it wrong."""
 
     def test_all_live_actions_are_short_lived_with_card(self) -> None:
         ensure_builtin_actions_loaded()
@@ -2257,7 +2634,7 @@ class TestScp11LiveRegistration:
             def _collect_profile_metadata(self) -> list[Entry]:
                 return [Entry()]
 
-        def fake_run_console_callable(reader_index, work):
+        def fake_run_console_callable(reader_index, work, **kwargs):
             return work(Console()), "trace"
 
         monkeypatch.setattr(live_mod, "_resolve_reader_index", lambda reader: 0)
@@ -2464,12 +2841,12 @@ class TestGuiLifecycle:
 
 
 # ----------------------------------------------------------------------
-# HTTP / WS — only when the GUI stack is present
+# HTTP / WS -- only when the GUI stack is present
 # ----------------------------------------------------------------------
 
 
 _FASTAPI_AVAILABLE = True
-try:  # pragma: no cover — the import itself is under test
+try:  # pragma: no cover -- the import itself is under test
     import fastapi as _fastapi  # noqa: F401
     import starlette as _starlette  # noqa: F401
 except ImportError:
@@ -2478,7 +2855,7 @@ except ImportError:
 
 _needs_gui_stack = pytest.mark.skipif(
     not _FASTAPI_AVAILABLE,
-    reason="FastAPI / Starlette not installed — gui extra missing.",
+    reason="FastAPI / Starlette not installed -- gui extra missing.",
 )
 
 
@@ -2622,7 +2999,7 @@ class TestRunRoute:
 @_needs_gui_stack
 class TestStreamingGate:
     def test_external_endpoint_closes_with_policy_violation(self) -> None:
-        # ``scp11.download_profile`` is streaming but has no dispatcher —
+        # ``scp11.download_profile`` is streaming but has no dispatcher --
         # it delegates to /api/flows/download-profile. Connecting to the
         # generic streaming route should fail fast with an 'external-endpoint'
         # reason. We just assert the connection is torn down.
@@ -2667,3 +3044,90 @@ class TestSessionsRoutes:
         with pytest.raises(HTTPException) as raised:
             actions_routes.close_session("does-not-exist")
         assert raised.value.status_code == 404
+
+
+def test_local_smdp_delete_profile_reports_the_commands_it_sent(monkeypatch) -> None:
+    """A delete of an enabled profile sends DisableProfile first; the result says so."""
+    from yggdrasim_common.gui_server.actions import scp11_local
+    from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+    class FakeSession:
+        last_profile_state_steps: tuple[str, ...] = ()
+
+        def delete_profile(self, identifier: str) -> bytes:
+            self.last_profile_state_steps = ("DisableProfile", "DeleteProfile")
+            return bytes.fromhex("BF3303800100")
+
+    monkeypatch.setattr(scp11_local, "_resolve_reader_index", lambda name: 0)
+    monkeypatch.setattr(
+        scp11_local,
+        "_build_session",
+        lambda index, reader_name="": (FakeSession(), None),
+    )
+
+    result = scp11_local._dispatch_delete_profile(
+        ActionContext(),
+        reader="",
+        identifier="8988201234567890123",
+        confirm=True,
+    )
+
+    assert result["ok"] is True
+    assert result["steps"] == ["DisableProfile", "DeleteProfile"]
+    assert result["response_hex"] == "BF3303800100"
+    assert result["note"] == "DeleteProfile completed (6 bytes). Sent DisableProfile then DeleteProfile."
+
+
+def test_local_smdp_load_profile_reports_the_post_load_enable(monkeypatch) -> None:
+    """The load result carries the EnableProfile outcome; a refused enable fails the action."""
+    from types import SimpleNamespace
+
+    from yggdrasim_common.gui_server.actions import scp11_local
+    from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+    def fake_session(status: str, detail: str = "") -> SimpleNamespace:
+        state = SimpleNamespace(
+            confirmation_code="",
+            auto_enable_status=status,
+            auto_enable_target_kind="ICCID",
+            auto_enable_target="8988201234567890123",
+            auto_enable_detail=detail,
+            auto_enable_response=bytes.fromhex("BF3103800100") if status == "enabled" else b"",
+        )
+        return SimpleNamespace(
+            state=state,
+            run_load_profile_chain=lambda profile_path="": bytes.fromhex("BF3700"),
+        )
+
+    monkeypatch.setattr(scp11_local, "_resolve_reader_index", lambda name: 0)
+    monkeypatch.setattr(
+        scp11_local,
+        "_build_session",
+        lambda index, reader_name="": (fake_session("enabled"), None),
+    )
+    result = scp11_local._dispatch_load_profile(
+        ActionContext(), reader="", profile_path="profile/test_profile.bpp"
+    )
+    assert result["ok"] is True
+    assert result["auto_enable"]["status"] == "enabled"
+    assert result["auto_enable"]["response_hex"] == "BF3103800100"
+    assert result["note"] == (
+        "LoadProfile chain completed (3 bytes); EnableProfile enabled ICCID 8988201234567890123."
+    )
+
+    refusal = "EnableProfile failed for ICCID=981000000000000000F2: code=0x03 (disallowedByPolicy)."
+    monkeypatch.setattr(
+        scp11_local,
+        "_build_session",
+        lambda index, reader_name="": (fake_session("failed", refusal), None),
+    )
+    result = scp11_local._dispatch_load_profile(
+        ActionContext(), reader="", profile_path="profile/test_profile.bpp"
+    )
+    assert result["ok"] is False
+    assert result["response_hex"] == "BF3700"
+    assert result["auto_enable"]["status"] == "failed"
+    assert result["note"] == (
+        "LoadProfile chain completed (3 bytes); "
+        f"EnableProfile failed for ICCID 8988201234567890123: {refusal}"
+    )

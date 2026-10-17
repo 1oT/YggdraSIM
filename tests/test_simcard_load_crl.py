@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""SGP.22 §5.7.13 ES10b.LoadCRL — validated eUICC-side acceptance."""
+"""SGP.22 §5.7.13 ES10b.LoadCRL -- validated eUICC-side acceptance."""
 
 from __future__ import annotations
 

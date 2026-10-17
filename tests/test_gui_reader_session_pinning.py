@@ -4,8 +4,8 @@
 """Static contract for reader-as-session plumbing (Task 2 of the v1.1 sweep).
 
 The operator-visible promise is that activating a top-bar reader pill
-turns every subsequently launched module — both Command Center actions
-and CLI/PTY shells — into a session that operates on that exact reader.
+turns every subsequently launched module -- both Command Center actions
+and CLI/PTY shells -- into a session that operates on that exact reader.
 The wiring spans three layers and must stay coherent across silent
 refactors:
 
@@ -144,7 +144,7 @@ def test_terminal_route_exports_yggdrasim_reader_env() -> None:
         "terminal route must export YGGDRASIM_READER into the PTY child "
         "environment so spawned shells inherit the active reader."
     )
-    # PtyStartSpec.env is the only legitimate channel — anything else
+    # PtyStartSpec.env is the only legitimate channel -- anything else
     # would mean the env var was applied to the host process, which is
     # a footgun across concurrent tabs.
     assert "env=spec_env" in py, (

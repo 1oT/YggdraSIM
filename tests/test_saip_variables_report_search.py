@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for the SAIP variables / report / search dispatchers.
 
 * ``saip.export_variables_csv`` / ``saip.import_variables_csv``
@@ -68,7 +67,7 @@ class VariablesCsvDispatcherTests(unittest.TestCase):
         self._actions._dispatch_export_variables_csv(
             ctx=None, session_id=self._sid, output_path=str(out_path)
         )
-        # Reimport — even if there are no overrides to apply, the
+        # Reimport -- even if there are no overrides to apply, the
         # dispatcher should report 0 applied without raising.
         result = self._actions._dispatch_import_variables_csv(
             ctx=None,

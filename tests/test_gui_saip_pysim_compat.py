@@ -9,7 +9,7 @@ Upstream pySim's ``ProfileElement.from_der`` classmethod calls
 ``inst.type`` for PE types not registered in ``class_for_petype``. When
 the ASN.1 decoder hands back a falsy ``decoded`` for that PE (empty
 OrderedDict / None), the ``__init__`` else-branch dereferences
-``self.header_name`` which in turn reads ``self.type`` — and crashes
+``self.header_name`` which in turn reads ``self.type`` -- and crashes
 with ``AttributeError: 'ProfileElement' object has no attribute 'type'``.
 
 The patch installed by ``_ensure_pysim_importable()`` converts that

@@ -17,8 +17,8 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-import os 
-import configparser 
+import os
+import configparser
 
 from yggdrasim_common.runtime_paths import (
     bundle_path,
@@ -27,120 +27,134 @@ from yggdrasim_common.runtime_paths import (
     runtime_path,
     WORKSPACE_DIRNAME,
 )
-from yggdrasim_common.nord_palette import NordHex as _NordHex
+from yggdrasim_common.cli_theme import ThemedColorsMeta as _ThemedColorsMeta
 
-try :
-    from yggdrasim_common.device_inventory import DeviceInventoryStore 
-except ImportError :
-    DeviceInventoryStore =None 
+try:
+    from yggdrasim_common.device_inventory import DeviceInventoryStore
+except ImportError:
+    DeviceInventoryStore = None
 
-class Config :
+
+class Config:
     """Centralized configuration and constants."""
 
-    BASE_DIR =bundle_path ("Workspace","SCP03")
-    CONFIG_DIR =runtime_path (WORKSPACE_DIRNAME ,"SCP03")
+    BASE_DIR = bundle_path("Workspace", "SCP03")
+    CONFIG_DIR = runtime_path(WORKSPACE_DIRNAME, "SCP03")
 
     # These path values are pure at import time. Operational entry points call
     # ``initialize_workspace`` before reading or modifying their seed files.
-    INI_FILE =runtime_path (WORKSPACE_DIRNAME ,"SCP03","keys.ini")
-    FIDS_FILE =runtime_path (WORKSPACE_DIRNAME ,"SCP03","fids.txt")
-    AID_FILE =runtime_path (WORKSPACE_DIRNAME ,"SCP03","aid.txt")
-    BINDS_FILE =runtime_path (WORKSPACE_DIRNAME ,"SCP03","binds.json")
+    INI_FILE = runtime_path(WORKSPACE_DIRNAME, "SCP03", "keys.ini")
+    FIDS_FILE = runtime_path(WORKSPACE_DIRNAME, "SCP03", "fids.txt")
+    AID_FILE = runtime_path(WORKSPACE_DIRNAME, "SCP03", "aid.txt")
+    BINDS_FILE = runtime_path(WORKSPACE_DIRNAME, "SCP03", "binds.json")
 
     @classmethod
-    def initialize_workspace (cls )->None :
+    def initialize_workspace(cls) -> None:
         """Create the SCP03 runtime directory and copy missing shipped seeds."""
-        cls .BASE_DIR =bundle_path ("Workspace","SCP03")
-        cls .CONFIG_DIR =ensure_workspace_dir ("SCP03")
-        cls .INI_FILE =ensure_seeded_workspace_file (
-        ("SCP03","seeds","keys.ini"),"SCP03","keys.ini"
+        cls.BASE_DIR = bundle_path("Workspace", "SCP03")
+        cls.CONFIG_DIR = ensure_workspace_dir("SCP03")
+        cls.INI_FILE = ensure_seeded_workspace_file(
+            ("SCP03", "seeds", "keys.ini"), "SCP03", "keys.ini"
         )
-        cls .FIDS_FILE =ensure_seeded_workspace_file (
-        ("SCP03","seeds","fids.txt"),"SCP03","fids.txt"
+        cls.FIDS_FILE = ensure_seeded_workspace_file(
+            ("SCP03", "seeds", "fids.txt"), "SCP03", "fids.txt"
         )
-        cls .AID_FILE =ensure_seeded_workspace_file (
-        ("SCP03","seeds","aid.txt"),"SCP03","aid.txt"
+        cls.AID_FILE = ensure_seeded_workspace_file(
+            ("SCP03", "seeds", "aid.txt"), "SCP03", "aid.txt"
         )
-        cls .BINDS_FILE =ensure_seeded_workspace_file (
-        ("SCP03","seeds","binds.json"),"SCP03","binds.json"
+        cls.BINDS_FILE = ensure_seeded_workspace_file(
+            ("SCP03", "seeds", "binds.json"), "SCP03", "binds.json"
         )
 
-    DEFAULT_KEYS ={
-    'scp03_kenc':'1122334455667788AABBCCDDEEFF0011',
-    'scp03_kmac':'1122334455667788AABBCCDDEEFF0011',
-    'scp03_dek':'1122334455667788AABBCCDDEEFF0011',
-    'scp03_kvn':'30',
-    'scp02_enc':'1122334455667788AABBCCDDEEFF0011',
-    'scp02_mac':'1122334455667788AABBCCDDEEFF0011',
-    'scp02_dek':'1122334455667788AABBCCDDEEFF0011',
-    'scp02_kvn':'20',
-    'aid':'A0000005591010FFFFFFFF8900000100',
-    'adm':'0000000000000000'
+    @staticmethod
+    def shipped_fids_seed_path() -> str:
+        """Return the shipped FID tree, which seeds a workspace that has none.
+
+        The copy is made once, so an existing workspace never picks up a name
+        added to the seed later; readers merge the two instead of replacing
+        the operator's file.
+        """
+        return bundle_path("SCP03", "seeds", "fids.txt")
+
+    DEFAULT_KEYS = {
+        "scp03_kenc": "1122334455667788AABBCCDDEEFF0011",
+        "scp03_kmac": "1122334455667788AABBCCDDEEFF0011",
+        "scp03_dek": "1122334455667788AABBCCDDEEFF0011",
+        "scp03_kvn": "30",
+        "scp02_enc": "1122334455667788AABBCCDDEEFF0011",
+        "scp02_mac": "1122334455667788AABBCCDDEEFF0011",
+        "scp02_dek": "1122334455667788AABBCCDDEEFF0011",
+        "scp02_kvn": "20",
+        "aid": "A0000005591010FFFFFFFF8900000100",
+        "adm": "0000000000000000",
     }
 
-    DEMO_KEY_SLOTS =(
-    'scp03_kenc','scp03_kmac','scp03_dek',
-    'scp02_enc','scp02_mac','scp02_dek',
+    DEMO_KEY_SLOTS = (
+        "scp03_kenc",
+        "scp03_kmac",
+        "scp03_dek",
+        "scp02_enc",
+        "scp02_mac",
+        "scp02_dek",
     )
 
-    MODULE_STATE_NAME ="scp03_config"
+    MODULE_STATE_NAME = "scp03_config"
 
-    class Colors :
-        """ANSI terminal colours sourced from the canonical Nord palette.
+    class Colors(metaclass=_ThemedColorsMeta):
+        """ANSI terminal colours read from the active CLI theme.
 
-        The SCP03 banner intentionally swaps the launcher's frost-teal
-        header for aurora-purple to keep the protocol header visually
-        distinct from the SCP11 / SAIP shells.
+        The SCP03 banner intentionally swaps the launcher's header role
+        for the palette's secondary brand hue to keep the protocol
+        header visually distinct from the SCP11 / SAIP shells; ``MINT``
+        carries the header role the other shells use. Attributes
+        resolve on first read, so a standalone ``yggdrasim-scp03``
+        shell picks up ``YGGDRASIM_CLI_THEME`` even though it imports
+        this module before any persisted override is applied.
         """
 
+        _ROLE_MAP = {
+            "HEADER": "PURPLE",
+            "BLUE": "BLUE",
+            "CYAN": "CYAN",
+            "GREEN": "GREEN",
+            "YELLOW": "YELLOW",
+            "WARNING": "WARNING",
+            "FAIL": "FAIL",
+            "RED": "RED",
+            "WHITE": "WHITE",
+            "MINT": "HEADER",
+        }
+
         @staticmethod
-        def _hex_to_ansi (hex_color ):
-            hex_value =hex_color .lstrip ('#')
-            red =int (hex_value [0 :2 ],16 )
-            green =int (hex_value [2 :4 ],16 )
-            blue =int (hex_value [4 :6 ],16 )
-            return f'\033[38;2;{red};{green};{blue}m'
-
-        HEADER_HEX =_NordHex .AURORA_PURPLE
-        BLUE_HEX =_NordHex .FROST_BLUE
-        CYAN_HEX =_NordHex .FROST_CYAN
-        GREEN_HEX =_NordHex .AURORA_GREEN
-        YELLOW_HEX =_NordHex .AURORA_YELLOW
-        WARNING_HEX =YELLOW_HEX
-        FAIL_HEX =_NordHex .AURORA_RED
-        RED_HEX =FAIL_HEX
-        WHITE_HEX =_NordHex .SNOW_2
-        MINT_HEX =_NordHex .FROST_TEAL
-
-        HEADER =_hex_to_ansi .__func__ (HEADER_HEX )
-        BLUE =_hex_to_ansi .__func__ (BLUE_HEX )
-        CYAN =_hex_to_ansi .__func__ (CYAN_HEX )
-        GREEN =_hex_to_ansi .__func__ (GREEN_HEX )
-        YELLOW =_hex_to_ansi .__func__ (YELLOW_HEX )
-        WARNING =_hex_to_ansi .__func__ (WARNING_HEX )
-        FAIL =_hex_to_ansi .__func__ (FAIL_HEX )
-        RED =_hex_to_ansi .__func__ (RED_HEX )
-        WHITE =_hex_to_ansi .__func__ (WHITE_HEX )
-        MINT =_hex_to_ansi .__func__ (MINT_HEX )
-        ENDC ='\033[0m'
-        BOLD ='\033[1m'
+        def _hex_to_ansi(hex_color):
+            hex_value = hex_color.lstrip("#")
+            red = int(hex_value[0:2], 16)
+            green = int(hex_value[2:4], 16)
+            blue = int(hex_value[4:6], 16)
+            return f"\033[38;2;{red};{green};{blue}m"
 
 
-_DEMO_KEYS_WARNED =False 
+_DEMO_KEYS_WARNED = False
 
 
-def detect_demo_key_slots (config_keys )->list :
+def detect_demo_key_slots(config_keys) -> list:
     """Return the list of key slot names currently set to the shipped demo placeholder."""
-    placeholder =Config .DEFAULT_KEYS .get ('scp03_kenc','')
-    hits =[]
-    for slot_name in Config .DEMO_KEY_SLOTS :
-        value =str (config_keys .get (slot_name ,Config .DEFAULT_KEYS .get (slot_name ,''))or '').strip ().upper ()
-        if value ==placeholder .upper ():
-            hits .append (slot_name )
-    return hits 
+    placeholder = Config.DEFAULT_KEYS.get("scp03_kenc", "")
+    hits = []
+    for slot_name in Config.DEMO_KEY_SLOTS:
+        value = (
+            str(
+                config_keys.get(slot_name, Config.DEFAULT_KEYS.get(slot_name, "")) or ""
+            )
+            .strip()
+            .upper()
+        )
+        if value == placeholder.upper():
+            hits.append(slot_name)
+    return hits
 
 
-def enforce_demo_key_policy (config_keys ,backend_label :str =""):
+def enforce_demo_key_policy(config_keys, backend_label: str = ""):
     """Warn (always) / fail (opt-in) when the active keyset is still the demo placeholder.
 
     Behavior:
@@ -158,87 +172,87 @@ def enforce_demo_key_policy (config_keys ,backend_label :str =""):
       drained the first banner, matching the previous observable
       behaviour for batch / report surfaces that re-enter the dispatcher.
     """
-    global _DEMO_KEYS_WARNED 
-    label =str (backend_label or '').strip ().lower ()
-    if label =='sim'or label =='simulator':
-        return None 
-    hits =detect_demo_key_slots (config_keys )
-    if len (hits )==0 :
-        return None 
-    require_flag =os .environ .get ('YGGDRASIM_REQUIRE_NON_DEMO_KEYS','').strip ().lower ()
-    if require_flag in ('1','true','yes','on'):
-        raise RuntimeError (
-        "Refusing to open a secure channel with shipped demo keys in slots: "
-        +", ".join (hits )
-        +". Populate SCP03/keys.ini (or the inventory store) with real values "
-        "before starting, or unset YGGDRASIM_REQUIRE_NON_DEMO_KEYS."
+    global _DEMO_KEYS_WARNED
+    label = str(backend_label or "").strip().lower()
+    if label == "sim" or label == "simulator":
+        return None
+    hits = detect_demo_key_slots(config_keys)
+    if len(hits) == 0:
+        return None
+    require_flag = os.environ.get("YGGDRASIM_REQUIRE_NON_DEMO_KEYS", "").strip().lower()
+    if require_flag in ("1", "true", "yes", "on"):
+        raise RuntimeError(
+            "Refusing to open a secure channel with shipped demo keys in slots: "
+            + ", ".join(hits)
+            + ". Populate SCP03/keys.ini (or the inventory store) with real values "
+            "before starting, or unset YGGDRASIM_REQUIRE_NON_DEMO_KEYS."
         )
-    allow_flag =os .environ .get ('YGGDRASIM_ALLOW_DEMO_KEYS','').strip ().lower ()
-    if allow_flag in ('1','true','yes','on'):
-        return None 
-    if _DEMO_KEYS_WARNED :
-        return None 
-    _DEMO_KEYS_WARNED =True 
+    allow_flag = os.environ.get("YGGDRASIM_ALLOW_DEMO_KEYS", "").strip().lower()
+    if allow_flag in ("1", "true", "yes", "on"):
+        return None
+    if _DEMO_KEYS_WARNED:
+        return None
+    _DEMO_KEYS_WARNED = True
     return (
-    "[SCP03] WARNING: shipped demo keys active for slots: "
-    +", ".join (hits )
-    +". Never use these against a real card. Set YGGDRASIM_ALLOW_DEMO_KEYS=1 "
-    "to silence this warning, or YGGDRASIM_REQUIRE_NON_DEMO_KEYS=1 to fail "
-    "fast when placeholders are present."
+        "[SCP03] WARNING: shipped demo keys active for slots: "
+        + ", ".join(hits)
+        + ". Never use these against a real card. Set YGGDRASIM_ALLOW_DEMO_KEYS=1 "
+        "to silence this warning, or YGGDRASIM_REQUIRE_NON_DEMO_KEYS=1 to fail "
+        "fast when placeholders are present."
     )
 
 
-def _legacy_scp03_parser ()->configparser .ConfigParser :
-    Config .initialize_workspace ()
-    parser =configparser .ConfigParser ()
-    if os .path .exists (Config .INI_FILE ):
-        parser .read (Config .INI_FILE )
-    if 'KEYS'not in parser :
-        parser ['KEYS']={}
-    legacy_map ={
-    'kenc':'scp03_kenc',
-    'enc':'scp03_kenc',
-    'kmac':'scp03_kmac',
-    'mac':'scp03_kmac',
-    'dek':'scp03_dek',
-    'kvn':'scp03_kvn'
+def _legacy_scp03_parser() -> configparser.ConfigParser:
+    Config.initialize_workspace()
+    parser = configparser.ConfigParser()
+    if os.path.exists(Config.INI_FILE):
+        parser.read(Config.INI_FILE)
+    if "KEYS" not in parser:
+        parser["KEYS"] = {}
+    legacy_map = {
+        "kenc": "scp03_kenc",
+        "enc": "scp03_kenc",
+        "kmac": "scp03_kmac",
+        "mac": "scp03_kmac",
+        "dek": "scp03_dek",
+        "kvn": "scp03_kvn",
     }
-    for legacy_key ,new_key in legacy_map .items ():
-        if legacy_key in parser ['KEYS']and new_key not in parser ['KEYS']:
-            parser ['KEYS'][new_key ]=parser ['KEYS'][legacy_key ]
-    for key_name ,default_value in Config .DEFAULT_KEYS .items ():
-        if key_name not in parser ['KEYS']:
-            parser ['KEYS'][key_name ]=default_value 
-    if 'GOLD_PROFILE'not in parser :
-        parser ['GOLD_PROFILE']={}
-    gold_sec =parser ['GOLD_PROFILE']
-    if 'path'not in gold_sec :
-        gold_sec ['path']=''
-    if 'standard'not in gold_sec :
-        gold_sec ['standard']='SGP.32'
-    if 'authenticate_sd'not in gold_sec :
-        gold_sec ['authenticate_sd']='false'
+    for legacy_key, new_key in legacy_map.items():
+        if legacy_key in parser["KEYS"] and new_key not in parser["KEYS"]:
+            parser["KEYS"][new_key] = parser["KEYS"][legacy_key]
+    for key_name, default_value in Config.DEFAULT_KEYS.items():
+        if key_name not in parser["KEYS"]:
+            parser["KEYS"][key_name] = default_value
+    if "GOLD_PROFILE" not in parser:
+        parser["GOLD_PROFILE"] = {}
+    gold_sec = parser["GOLD_PROFILE"]
+    if "path" not in gold_sec:
+        gold_sec["path"] = ""
+    if "standard" not in gold_sec:
+        gold_sec["standard"] = "SGP.32"
+    if "authenticate_sd" not in gold_sec:
+        gold_sec["authenticate_sd"] = "false"
     return parser
 
 
-def load_scp03_runtime_parser ()->configparser .ConfigParser :
+def load_scp03_runtime_parser() -> configparser.ConfigParser:
     """Build and return an argparse parser pre-loaded with SCP03 runtime flags."""
-    parser =_legacy_scp03_parser ()
-    if DeviceInventoryStore is None :
-        return parser 
-    try :
-        inventory =DeviceInventoryStore ()
-        payload =inventory .get_module_state (Config .MODULE_STATE_NAME )
-    except Exception :
-        return parser 
-    if isinstance (payload ,dict )==False or len (payload )==0 :
-        return parser 
-    keys_payload =payload .get ('KEYS',{})
-    if isinstance (keys_payload ,dict ):
-        for key_name ,value in keys_payload .items ():
-            parser ['KEYS'][str (key_name )]=str (value )
-    gold_payload =payload .get ('GOLD_PROFILE',{})
-    if isinstance (gold_payload ,dict ):
-        for key_name ,value in gold_payload .items ():
-            parser ['GOLD_PROFILE'][str (key_name )]=str (value )
+    parser = _legacy_scp03_parser()
+    if DeviceInventoryStore is None:
+        return parser
+    try:
+        inventory = DeviceInventoryStore()
+        payload = inventory.get_module_state(Config.MODULE_STATE_NAME)
+    except Exception:
+        return parser
+    if not isinstance(payload, dict) or len(payload) == 0:
+        return parser
+    keys_payload = payload.get("KEYS", {})
+    if isinstance(keys_payload, dict):
+        for key_name, value in keys_payload.items():
+            parser["KEYS"][str(key_name)] = str(value)
+    gold_payload = payload.get("GOLD_PROFILE", {})
+    if isinstance(gold_payload, dict):
+        for key_name, value in gold_payload.items():
+            parser["GOLD_PROFILE"][str(key_name)] = str(value)
     return parser

@@ -5,12 +5,12 @@
 
 Two gates are covered:
 
-1. ``create_insecure_context`` / ``configure_unpinned_context`` — used
+1. ``create_insecure_context`` / ``configure_unpinned_context`` -- used
    by request-carrying transports. Default: refused. Opt-in via
    ``YGGDRASIM_SCP11_ALLOW_INSECURE_TLS``. Hard-lock via
    ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS``.
 
-2. ``create_introspection_context`` — used by read-only TOFU chain
+2. ``create_introspection_context`` -- used by read-only TOFU chain
    reads. Default: refused. Opt-in via
    ``YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION`` and hard-lock via
    ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION``.
@@ -18,6 +18,8 @@ Two gates are covered:
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import ssl
 import unittest
@@ -113,6 +115,40 @@ class IntrospectionContextGateTests(unittest.TestCase):
         self.assertIsInstance(context, ssl.SSLContext)
         self.assertEqual(context.verify_mode, ssl.CERT_NONE)
         self.assertEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
+
+    def test_tofu_chain_read_is_announced_with_the_debug_flag_off(self) -> None:
+        """A first-contact trust decision is never silent.
+
+        The opt-in is routinely left set in env_overrides.json, so the
+        reads continue for every later run. Gating the note on the debug
+        flag left no trace that the decision had been made.
+        """
+        tls_helpers._INTROSPECTION_NOTE_SEEN.discard("pytest/introspection_note")
+        stderr = io.StringIO()
+        with _EnvScope(**{
+            ENV_ALLOW_INTROSPECTION: "1",
+            ENV_REQUIRE_INTROSPECTION: None,
+            "YGGDRASIM_GLOBAL_DEBUG": "0",
+        }):
+            with contextlib.redirect_stderr(stderr):
+                tls_helpers.create_introspection_context("pytest/introspection_note")
+
+        self.assertIn("TOFU chain introspection", stderr.getvalue())
+        self.assertIn("pytest/introspection_note", stderr.getvalue())
+
+    def test_tofu_chain_read_note_fires_once_per_call_site(self) -> None:
+        tls_helpers._INTROSPECTION_NOTE_SEEN.discard("pytest/introspection_repeat")
+        stderr = io.StringIO()
+        with _EnvScope(**{
+            ENV_ALLOW_INTROSPECTION: "1",
+            ENV_REQUIRE_INTROSPECTION: None,
+            "YGGDRASIM_GLOBAL_DEBUG": "0",
+        }):
+            with contextlib.redirect_stderr(stderr):
+                tls_helpers.create_introspection_context("pytest/introspection_repeat")
+                tls_helpers.create_introspection_context("pytest/introspection_repeat")
+
+        self.assertEqual(stderr.getvalue().count("TOFU chain introspection"), 1)
 
     def test_hard_lock_refuses_tofu_chain_reads(self) -> None:
         with _EnvScope(**{

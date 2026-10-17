@@ -1,17 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge live-decode state: accumulates captured APDU frames and maintains the decoded protocol tree for the TUI."""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-import ipaddress
 import math
 import re
 
 from SIMCARD.utils import read_tlv
 from Tools.HilBridge.live_decode_view import PacketSummary
+from yggdrasim_common.bip_stream_decode import LAYER_PAYLOAD, decode_payload
 from Tools.HilBridge.protocol import GSMTAP_SIM_APDU, GSMTAP_TYPE_SIM
 from Tools.HilBridge.scp_replay import (
     ScpReplayEngine,
@@ -40,13 +39,6 @@ POLL_INTERVAL_COMMAND = 0x03
 POLL_OFF_COMMAND = 0x04
 
 _POLL_INTERVAL_TIMER_ID = 0
-
-# Plausibility bounds for the RFC 1035 clause 4.1.1 header. A BIP channel
-# resolves one name at a time, so counts far above these mark bytes that are
-# not a DNS message at all. Kept in step with ``looks_like_dns`` in
-# Tools/ApduDissector/lua/yggdrasim_apdu/cat.lua.
-_MAX_DNS_QUESTION_COUNT = 16
-_MAX_DNS_RECORD_COUNT = 64
 
 _PROACTIVE_COMMAND_NAMES = {
     OPEN_CHANNEL_COMMAND: "OPEN CHANNEL",
@@ -174,6 +166,9 @@ class StatefulFrameAnnotation:
     # frame that belongs to a session whose EF.ICCID has been read at
     # least once. Empty string means "not yet observed in this session".
     card_session_iccid: str = ""
+    # card_session_imsi is backfilled the same way from EF.IMSI. The two
+    # are separate reads, so a session can carry one without the other.
+    card_session_imsi: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,10 +243,55 @@ def annotate_packet_summary(row: PacketSummary, annotation: StatefulFrameAnnotat
         return row
     base_info = str(row.info or "").strip()
     if len(base_info) == 0:
-        updated_info = suffix
-    else:
-        updated_info = f"{base_info} | {suffix}"
-    return replace(row, info=updated_info)
+        return replace(row, info=suffix)
+    if _suffix_adds_nothing(base_info, suffix):
+        return row
+    return replace(row, info=f"{base_info} | {suffix}")
+
+
+def _suffix_adds_nothing(base_info: str, suffix: str) -> bool:
+    """True when the annotation only repeats what the line already says.
+
+    This suffix was written against the stock GSM SIM dissector, which
+    names little more than the instruction. The bundled dissector names
+    the command, the file and the status word itself, so "FETCH PROVIDE
+    LOCAL INFORMATION -> 9000 Success | STK PROVIDE LOCAL INFORMATION"
+    says it twice and pushes what is genuinely new off the end of the
+    column. A suffix is kept whenever it carries a word the line does not.
+    """
+    existing = set(_significant_words(base_info))
+    if len(existing) == 0:
+        return False
+    words = _significant_words(suffix)
+    # A leading marker says which layer the suffix came from, not what
+    # happened, so it does not by itself make a repetition informative.
+    if len(words) > 1 and words[0] in _ANNOTATION_CATEGORY_MARKERS:
+        words = words[1:]
+    if len(words) == 0:
+        return True
+    return all(word in existing for word in words)
+
+
+# Words that carry no information on their own, so a suffix made only of
+# these is still a repetition.
+_ANNOTATION_FILLER_WORDS = frozenset({"THE", "OF", "AND", "TO", "FOR", "WITH", "ON"})
+# Layer markers the annotation prepends. Dropping one of these from the
+# comparison is deliberately the only leniency here: a suffix is kept
+# whenever it carries any other word the line does not, because hiding a
+# decoded value would be worse than repeating a command name.
+_ANNOTATION_CATEGORY_MARKERS = frozenset({"STK", "FS", "APDU", "CARD", "SCP"})
+
+
+def _significant_words(text: str) -> list[str]:
+    words: list[str] = []
+    # Split paths into their components too, so "FS MF/EF.ARR" is read as
+    # the same thing a line already showing "MF / EF.ARR" said.
+    for raw in re.split(r"[^0-9A-Za-z.]+", str(text or "").upper()):
+        word = raw.strip(".")
+        if len(word) == 0 or word in _ANNOTATION_FILLER_WORDS:
+            continue
+        words.append(word)
+    return words
 
 
 def build_stateful_packet_annotations(
@@ -335,6 +375,7 @@ class LiveDecodeStateTracker:
         # the terminal issues a successful READ BINARY on EF.ICCID while
         # that session is active; the new-session bump resets the slot.
         self._card_session_iccids: dict[int, str] = {1: ""}
+        self._card_session_imsis: dict[int, str] = {1: ""}
         self._last_row_time_seconds: float | None = None
 
     def finalize_annotations(
@@ -362,11 +403,13 @@ class LiveDecodeStateTracker:
                 getattr(annotation, "card_session_index", 1) or 1
             )
             session_iccid = self._card_session_iccids.get(card_session_index, "")
+            session_imsi = self._card_session_imsis.get(card_session_index, "")
             session_id = getattr(annotation, "channel_session_id", None)
             if session_id is None:
                 finalized[int(frame_number)] = replace(
                     annotation,
                     card_session_iccid=str(session_iccid or ""),
+                    card_session_imsi=str(session_imsi or ""),
                 )
                 continue
             session = self._sessions.get(int(session_id))
@@ -374,6 +417,7 @@ class LiveDecodeStateTracker:
                 finalized[int(frame_number)] = replace(
                     annotation,
                     card_session_iccid=str(session_iccid or ""),
+                    card_session_imsi=str(session_imsi or ""),
                 )
                 continue
             finalized[int(frame_number)] = replace(
@@ -381,6 +425,7 @@ class LiveDecodeStateTracker:
                 channel_number=self._effective_channel_number(session),
                 channel_poll_index=session.poll_index,
                 card_session_iccid=str(session_iccid or ""),
+                card_session_imsi=str(session_imsi or ""),
             )
         return finalized
 
@@ -396,6 +441,9 @@ class LiveDecodeStateTracker:
 
     def card_session_iccids(self) -> dict[int, str]:
         return dict(self._card_session_iccids)
+
+    def card_session_imsis(self) -> dict[int, str]:
+        return dict(self._card_session_imsis)
 
     def _queue_card_session_bump(self, reason: str) -> None:
         # The REFRESH exchange itself is still part of the closing
@@ -415,6 +463,7 @@ class LiveDecodeStateTracker:
         self._card_session_frame_starts[self._card_session_index] = int(frame_number)
         self._card_session_reset_reasons[self._card_session_index] = reason
         self._card_session_iccids[self._card_session_index] = ""
+        self._card_session_imsis[self._card_session_index] = ""
         # A fresh card session cannot carry channel state across: the
         # card was reset, so any still-open BIP sessions are invalid.
         self._force_close_stale_sessions_on_card_reset()
@@ -439,6 +488,7 @@ class LiveDecodeStateTracker:
         self._card_session_frame_starts[self._card_session_index] = int(frame_number)
         self._card_session_reset_reasons[self._card_session_index] = reason
         self._card_session_iccids[self._card_session_index] = ""
+        self._card_session_imsis[self._card_session_index] = ""
         self._force_close_stale_sessions_on_card_reset()
         self._reset_file_trace_context()
         return reason
@@ -1088,7 +1138,7 @@ class LiveDecodeStateTracker:
             )
         except Exception as engine_exc:
             frame_lines.append(
-                f"SCP replay: engine error ({engine_exc}) — ciphered APDU left wrapped."
+                f"SCP replay: engine error ({engine_exc}) -- ciphered APDU left wrapped."
             )
             return
         if result is None:
@@ -1404,6 +1454,21 @@ class LiveDecodeStateTracker:
                 if len(iccid_text) > 0:
                     self._card_session_iccids[self._card_session_index] = iccid_text
                     frame_lines.append(f"  ICCID decoded: {iccid_text}")
+                    frame_meta["iccid"] = iccid_text
+            # 3GPP TS 31.102 v19.5 clause 4.2.2: EF.IMSI is 9 bytes, a
+            # length byte followed by the IMSI in swapped-nibble BCD whose
+            # first low nibble carries parity rather than a digit.
+            if (
+                len(self._current_file_path) > 0
+                and self._current_file_path[-1] == "EF.IMSI"
+                and offset == 0
+                and byte_count >= 9
+            ):
+                imsi_text = _decode_imsi_bytes(bytes(exchange.response_data[:9]))
+                if len(imsi_text) > 0:
+                    self._card_session_imsis[self._card_session_index] = imsi_text
+                    frame_lines.append(f"  IMSI decoded: {imsi_text}")
+                    frame_meta["imsi"] = imsi_text
             return
         summary_parts.append(f"FS {target_text} READ BINARY FAIL {sw_text}")
         frame_lines.append(f"READ BINARY failed for {target_text} with status word {sw_text}.")
@@ -2181,21 +2246,17 @@ def _parse_timer_expiration_download(payload: bytes) -> dict[str, object] | None
 
 
 def _summarize_channel_payload(payload: bytes) -> list[str]:
-    if len(payload) == 0:
-        return []
-    dns_query = _try_decode_dns_query(payload)
-    if len(dns_query) > 0:
-        return [dns_query]
-    dns_response = _try_decode_dns_response(payload)
-    if len(dns_response) > 0:
-        return [dns_response]
-    tls_summaries = _try_decode_tls_records(payload)
-    if len(tls_summaries) > 0:
-        return tls_summaries
-    http_summary = _try_decode_http_message(payload)
-    if len(http_summary) > 0:
-        return [http_summary]
-    return []
+    """Name what a BIP channel-data block carried, or say nothing.
+
+    Undecoded bytes stay unreported here: this annotates a row that
+    already prints the block's length, so "Raw payload: N byte(s)" would
+    only repeat it.
+    """
+    return [
+        event.summary
+        for event in decode_payload(payload)
+        if event.layer != LAYER_PAYLOAD
+    ]
 
 
 def _compact_payload_summary(payload_summaries: list[str]) -> str:
@@ -2211,404 +2272,6 @@ def _compact_payload_summary(payload_summaries: list[str]) -> str:
     if remaining > 0:
         compact += f"; +{remaining} more"
     return compact
-
-
-def _dns_record_type_name(record_type: int) -> str:
-    return {
-        0x0001: "A",
-        0x0005: "CNAME",
-        0x001C: "AAAA",
-    }.get(int(record_type), f"0x{int(record_type):04X}")
-
-
-def _decode_dns_name(value_bytes: bytes, offset: int) -> tuple[str, int]:
-    if offset < 0 or offset >= len(value_bytes):
-        raise ValueError("DNS name offset is out of bounds.")
-    labels: list[str] = []
-    current_offset = offset
-    next_offset = offset
-    jumped = False
-    visited_offsets: set[int] = set()
-    while current_offset < len(value_bytes):
-        length_value = value_bytes[current_offset]
-        if length_value == 0:
-            current_offset += 1
-            if jumped is False:
-                next_offset = current_offset
-            return ".".join(labels), next_offset
-        if (length_value & 0xC0) == 0xC0:
-            if current_offset + 1 >= len(value_bytes):
-                raise ValueError("DNS compression pointer is truncated.")
-            pointer_offset = ((length_value & 0x3F) << 8) | value_bytes[current_offset + 1]
-            if pointer_offset in visited_offsets:
-                raise ValueError("DNS compression pointer loop detected.")
-            if pointer_offset >= len(value_bytes):
-                raise ValueError("DNS compression pointer is out of bounds.")
-            if jumped is False:
-                next_offset = current_offset + 2
-            visited_offsets.add(pointer_offset)
-            current_offset = pointer_offset
-            jumped = True
-            continue
-        if (length_value & 0xC0) != 0:
-            raise ValueError("Unsupported DNS label encoding.")
-        current_offset += 1
-        label_end = current_offset + length_value
-        if label_end > len(value_bytes):
-            raise ValueError("DNS label exceeds payload length.")
-        label_bytes = value_bytes[current_offset:label_end]
-        labels.append(label_bytes.decode("ascii"))
-        current_offset = label_end
-    raise ValueError("DNS name did not terminate.")
-
-
-def _parse_dns_question(value_bytes: bytes, offset: int) -> tuple[dict[str, object], int]:
-    qname_value, cursor = _decode_dns_name(value_bytes, offset)
-    if cursor + 4 > len(value_bytes):
-        raise ValueError("DNS question is truncated.")
-    query_type = int.from_bytes(value_bytes[cursor:cursor + 2], "big", signed=False)
-    query_class = int.from_bytes(value_bytes[cursor + 2:cursor + 4], "big", signed=False)
-    return {
-        "qname": qname_value,
-        "query_type": query_type,
-        "query_class": query_class,
-    }, cursor + 4
-
-
-def _parse_dns_resource_record(value_bytes: bytes, offset: int) -> tuple[dict[str, object], int]:
-    record_name, cursor = _decode_dns_name(value_bytes, offset)
-    if cursor + 10 > len(value_bytes):
-        raise ValueError("DNS resource record header is truncated.")
-    record_type = int.from_bytes(value_bytes[cursor:cursor + 2], "big", signed=False)
-    record_class = int.from_bytes(value_bytes[cursor + 2:cursor + 4], "big", signed=False)
-    ttl_value = int.from_bytes(value_bytes[cursor + 4:cursor + 8], "big", signed=False)
-    record_length = int.from_bytes(value_bytes[cursor + 8:cursor + 10], "big", signed=False)
-    record_data_offset = cursor + 10
-    record_data_end = record_data_offset + record_length
-    if record_data_end > len(value_bytes):
-        raise ValueError("DNS resource record data is truncated.")
-    record_data = value_bytes[record_data_offset:record_data_end]
-    record_value = record_data.hex().upper()
-    if record_type == 0x0001 and len(record_data) == 4:
-        record_value = ".".join(str(octet) for octet in record_data)
-    elif record_type == 0x001C and len(record_data) == 16:
-        record_value = str(ipaddress.IPv6Address(record_data))
-    elif record_type == 0x0005:
-        record_value, _ = _decode_dns_name(value_bytes, record_data_offset)
-    return {
-        "name": record_name,
-        "record_type": record_type,
-        "record_class": record_class,
-        "ttl_seconds": ttl_value,
-        "value": record_value,
-    }, record_data_end
-
-
-def _dns_header_is_plausible(flags: int, question_count: int) -> bool:
-    """True when a 12-byte DNS header (RFC 1035 clause 4.1.1) is self-consistent.
-
-    A BIP channel carrying TLS hands this decoder record fragments that have
-    no framing of their own, so the header fields have to carry the
-    discrimination: OPCODE is 0 to 2, the Z field is reserved and must be
-    zero, and a message always asks at least one question.
-    """
-    if ((flags >> 11) & 0x0F) > 2:
-        return False
-    if ((flags >> 4) & 0x07) != 0:
-        return False
-    return 1 <= question_count <= _MAX_DNS_QUESTION_COUNT
-
-
-def _try_decode_dns_query(value_bytes: bytes) -> str:
-    if len(value_bytes) < 17:
-        return ""
-    flags = int.from_bytes(value_bytes[2:4], "big", signed=False)
-    if (flags & 0x8000) != 0:
-        return ""
-    question_count = int.from_bytes(value_bytes[4:6], "big", signed=False)
-    answer_count = int.from_bytes(value_bytes[6:8], "big", signed=False)
-    authority_count = int.from_bytes(value_bytes[8:10], "big", signed=False)
-    if question_count != 1 or answer_count != 0 or authority_count != 0:
-        return ""
-    if not _dns_header_is_plausible(flags, question_count):
-        return ""
-    try:
-        question, _ = _parse_dns_question(value_bytes, 12)
-    except Exception:
-        return ""
-    query_type = int(question.get("query_type", 0) or 0)
-    query_class = int(question.get("query_class", 0) or 0)
-    type_name = {
-        0x0001: "A",
-        0x001C: "AAAA",
-    }.get(query_type, f"0x{query_type:04X}")
-    class_name = {
-        0x0001: "IN",
-    }.get(query_class, f"0x{query_class:04X}")
-    query_id = int.from_bytes(value_bytes[0:2], "big", signed=False)
-    query_name = str(question.get("qname", "")).strip()
-    if len(query_name) == 0:
-        return ""
-    return (
-        f"DNS Query: id=0x{query_id:04X} "
-        f"qname={query_name} type={type_name} class={class_name}"
-    )
-
-
-def _try_decode_dns_response(value_bytes: bytes) -> str:
-    if len(value_bytes) < 12:
-        return ""
-    flags = int.from_bytes(value_bytes[2:4], "big", signed=False)
-    if (flags & 0x8000) == 0:
-        return ""
-    question_count = int.from_bytes(value_bytes[4:6], "big", signed=False)
-    answer_count = int.from_bytes(value_bytes[6:8], "big", signed=False)
-    authority_count = int.from_bytes(value_bytes[8:10], "big", signed=False)
-    additional_count = int.from_bytes(value_bytes[10:12], "big", signed=False)
-    if not _dns_header_is_plausible(flags, question_count):
-        return ""
-    if max(answer_count, authority_count, additional_count) > _MAX_DNS_RECORD_COUNT:
-        return ""
-    query_id = int.from_bytes(value_bytes[0:2], "big", signed=False)
-    response_code = flags & 0x000F
-    question_name = ""
-    answer_summaries: list[str] = []
-    # A question that does not parse means these bytes were never a DNS
-    # message; reporting the header anyway invents a response out of
-    # whatever the channel happened to carry.
-    try:
-        offset = 12
-        for question_index in range(question_count):
-            question, offset = _parse_dns_question(value_bytes, offset)
-            if question_index == 0:
-                question_name = str(question.get("qname", "")).strip()
-    except Exception:
-        return ""
-    if len(question_name) == 0:
-        return ""
-    try:
-        for _ in range(min(answer_count, 6)):
-            answer_record, offset = _parse_dns_resource_record(value_bytes, offset)
-            record_type_name = _dns_record_type_name(int(answer_record.get("record_type", 0) or 0))
-            record_value = str(answer_record.get("value", "")).strip()
-            if len(record_value) == 0:
-                continue
-            answer_summaries.append(f"{record_type_name}:{record_value}")
-    except Exception:
-        answer_summaries = []
-    summary_text = f"DNS Response: id=0x{query_id:04X}"
-    if len(question_name) > 0:
-        summary_text += f" qname={question_name}"
-    summary_text += (
-        f" qd={question_count} an={answer_count} "
-        f"ns={authority_count} ar={additional_count} rcode={response_code}"
-    )
-    if len(answer_summaries) > 0:
-        summary_text += f" answers={','.join(answer_summaries)}"
-    return summary_text
-
-
-def _try_decode_tls_records(value_bytes: bytes) -> list[str]:
-    summaries: list[str] = []
-    offset = 0
-    while offset + 5 <= len(value_bytes):
-        record_type = value_bytes[offset]
-        major_version = value_bytes[offset + 1]
-        record_length = int.from_bytes(value_bytes[offset + 3:offset + 5], "big", signed=False)
-        record_end = offset + 5 + record_length
-        if major_version != 0x03:
-            return []
-        if record_end > len(value_bytes):
-            return []
-        record_payload = value_bytes[offset + 5:record_end]
-        record_name = _tls_record_type_name(record_type)
-        if record_type == 0x16:
-            handshake_summaries = _decode_tls_handshake_messages(record_payload)
-            if len(handshake_summaries) == 0:
-                summaries.append(f"TLS Record: {record_name} ({record_length} byte(s))")
-            else:
-                summaries.extend(handshake_summaries)
-        elif record_type == 0x15 and record_length == 2:
-            # RFC 5246 clause 7.2 gives a plaintext alert exactly two bytes.
-            # Anything longer is protected, and its leading bytes are the
-            # explicit nonce -- decoding those yields an invented level and
-            # description, so a close_notify reads as a fatal failure.
-            alert_level = record_payload[0]
-            alert_description = record_payload[1]
-            summaries.append(
-                "TLS Alert: "
-                f"{_tls_alert_level_name(alert_level)} "
-                f"{_tls_alert_description_name(alert_description)}"
-            )
-        elif record_type == 0x15:
-            summaries.append(f"TLS Alert: encrypted ({record_length} byte(s))")
-        else:
-            summaries.append(f"TLS Record: {record_name} ({record_length} byte(s))")
-        offset = record_end
-    if offset == 0:
-        return []
-    return summaries
-
-
-def _decode_tls_handshake_messages(value_bytes: bytes) -> list[str]:
-    summaries: list[str] = []
-    offset = 0
-    while offset + 4 <= len(value_bytes):
-        handshake_type = value_bytes[offset]
-        handshake_length = int.from_bytes(value_bytes[offset + 1:offset + 4], "big", signed=False)
-        next_offset = offset + 4 + handshake_length
-        if next_offset > len(value_bytes):
-            return summaries
-        handshake_name = _tls_handshake_type_name(handshake_type)
-        handshake_summary = f"TLS Handshake: {handshake_name}"
-        if handshake_type == 0x01:
-            server_name = _decode_tls_client_hello_server_name(value_bytes[offset + 4:next_offset])
-            if len(server_name) > 0:
-                handshake_summary += f" sni={server_name}"
-        handshake_summary += f" ({handshake_length} byte(s))"
-        summaries.append(handshake_summary)
-        offset = next_offset
-    return summaries
-
-
-def _decode_tls_client_hello_server_name(handshake_body: bytes) -> str:
-    if len(handshake_body) < 34:
-        return ""
-    cursor = 34
-    session_id_length = int(handshake_body[cursor])
-    cursor += 1
-    session_id_end = cursor + session_id_length
-    if session_id_end > len(handshake_body):
-        return ""
-    cursor = session_id_end
-    if cursor + 2 > len(handshake_body):
-        return ""
-    cipher_suites_length = int.from_bytes(handshake_body[cursor:cursor + 2], "big", signed=False)
-    cursor += 2
-    cipher_suites_end = cursor + cipher_suites_length
-    if cipher_suites_end > len(handshake_body):
-        return ""
-    cursor = cipher_suites_end
-    if cursor >= len(handshake_body):
-        return ""
-    compression_methods_length = int(handshake_body[cursor])
-    cursor += 1
-    compression_methods_end = cursor + compression_methods_length
-    if compression_methods_end > len(handshake_body):
-        return ""
-    cursor = compression_methods_end
-    if cursor + 2 > len(handshake_body):
-        return ""
-    extensions_length = int.from_bytes(handshake_body[cursor:cursor + 2], "big", signed=False)
-    cursor += 2
-    extensions_end = cursor + extensions_length
-    if extensions_end > len(handshake_body):
-        return ""
-    while cursor + 4 <= extensions_end:
-        extension_type = int.from_bytes(handshake_body[cursor:cursor + 2], "big", signed=False)
-        extension_length = int.from_bytes(handshake_body[cursor + 2:cursor + 4], "big", signed=False)
-        cursor += 4
-        extension_end = cursor + extension_length
-        if extension_end > extensions_end:
-            return ""
-        if extension_type == 0x0000:
-            server_name = _decode_tls_server_name_extension(handshake_body[cursor:extension_end])
-            if len(server_name) > 0:
-                return server_name
-        cursor = extension_end
-    return ""
-
-
-def _decode_tls_server_name_extension(extension_value: bytes) -> str:
-    if len(extension_value) < 5:
-        return ""
-    server_name_list_length = int.from_bytes(extension_value[0:2], "big", signed=False)
-    server_name_list_end = 2 + server_name_list_length
-    if server_name_list_end > len(extension_value):
-        return ""
-    cursor = 2
-    while cursor + 3 <= server_name_list_end:
-        name_type = int(extension_value[cursor])
-        name_length = int.from_bytes(extension_value[cursor + 1:cursor + 3], "big", signed=False)
-        cursor += 3
-        name_end = cursor + name_length
-        if name_end > server_name_list_end:
-            return ""
-        if name_type == 0x00:
-            return _normalize_tls_server_name(extension_value[cursor:name_end])
-        cursor = name_end
-    return ""
-
-
-def _normalize_tls_server_name(raw_name: bytes) -> str:
-    try:
-        normalized_name = raw_name.decode("ascii")
-    except Exception:
-        return ""
-    normalized_name = normalized_name.strip().strip(".").lower()
-    if len(normalized_name) == 0:
-        return ""
-    return normalized_name
-
-
-def _tls_record_type_name(record_type: int) -> str:
-    return {
-        0x14: "ChangeCipherSpec",
-        0x15: "Alert",
-        0x16: "Handshake",
-        0x17: "ApplicationData",
-    }.get(int(record_type), f"0x{int(record_type):02X}")
-
-
-def _tls_handshake_type_name(handshake_type: int) -> str:
-    return {
-        0x01: "ClientHello",
-        0x02: "ServerHello",
-        0x0B: "Certificate",
-        0x0C: "ServerKeyExchange",
-        0x0D: "CertificateRequest",
-        0x0E: "ServerHelloDone",
-        0x10: "ClientKeyExchange",
-        0x14: "Finished",
-    }.get(int(handshake_type), f"0x{int(handshake_type):02X}")
-
-
-def _tls_alert_level_name(level: int) -> str:
-    return {
-        0x01: "warning",
-        0x02: "fatal",
-    }.get(int(level), f"0x{int(level):02X}")
-
-
-def _tls_alert_description_name(description: int) -> str:
-    return {
-        0x0A: "unexpected_message",
-        0x2A: "bad_certificate",
-    }.get(int(description), f"0x{int(description):02X}")
-
-
-def _try_decode_http_message(value_bytes: bytes) -> str:
-    if len(value_bytes) < 8:
-        return ""
-    try:
-        preview_text = value_bytes[:512].decode("iso-8859-1")
-    except Exception:
-        return ""
-    first_line = str(preview_text.splitlines()[0] if len(preview_text.splitlines()) > 0 else "").strip()
-    if len(first_line) == 0:
-        return ""
-    http_methods = ("GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH")
-    if any(first_line.startswith(f"{method} ") for method in http_methods) and " HTTP/" in first_line:
-        parts = first_line.split()
-        if len(parts) >= 2:
-            return f"HTTP Request: {parts[0]} {parts[1]}"
-    if first_line.startswith("HTTP/"):
-        parts = first_line.split(None, 2)
-        if len(parts) >= 2:
-            if len(parts) >= 3:
-                return f"HTTP Response: {parts[1]} {parts[2]}"
-            return f"HTTP Response: {parts[1]}"
-    return ""
 
 
 def _parse_capture_time_seconds(time_text: str) -> float | None:
@@ -2777,6 +2440,35 @@ def _decode_duration_seconds(value_bytes: bytes) -> int:
 
 def _decode_bcd(value: int) -> int:
     return ((int(value) & 0x0F) * 10) + ((int(value) >> 4) & 0x0F)
+
+
+def _decode_imsi_bytes(imsi_bytes: bytes) -> str:
+    """Decode EF.IMSI, or return "" when the bytes are not an IMSI.
+
+    3GPP TS 31.102 v19.5 clause 4.2.2: byte 1 is the length in bytes of
+    what follows, and the IMSI itself is swapped-nibble BCD in which the
+    low nibble of the first byte carries the parity and format bits
+    rather than a digit. pySim already decodes exactly this shape, so the
+    nibble handling lives in one place rather than two.
+    """
+    if len(imsi_bytes) < 2:
+        return ""
+    try:
+        from pySim.utils import dec_imsi
+    except ImportError:
+        return ""
+    try:
+        decoded = dec_imsi(imsi_bytes.hex())
+    except Exception:  # noqa: BLE001 - a malformed record renders as raw hex
+        return ""
+    text = str(decoded or "").strip()
+    if len(text) == 0 or text.isdigit() is False:
+        return ""
+    # 3GPP TS 23.003 clause 2.2: an IMSI is at most 15 digits, and fewer
+    # than six cannot carry even a PLMN.
+    if len(text) < 6 or len(text) > 15:
+        return ""
+    return text
 
 
 def _decode_iccid_bytes(iccid_bytes: bytes) -> str:

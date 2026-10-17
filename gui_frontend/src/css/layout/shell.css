@@ -20,6 +20,10 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* Positioned so the auto-hide overlays further down can take their
+     own grid area as containing block. */
+  position: relative;
+  --panel-hotzone: 8px;
 }
 
 .app-shell[data-log-collapsed="true"] {
@@ -27,7 +31,7 @@
 }
 
 /* SA-G8: collapsible Command Center sidebar. The 260px column folds
-   away so the main content gets the full width — matches the
+   away so the main content gets the full width -- matches the
    ``data-log-collapsed`` pattern already used for the log dock. The
    chevron handle stays in the topbar at all times so the operator
    can bring the sidebar back without keyboard tricks. */
@@ -48,7 +52,7 @@
    grid row collapses to a slim handle strip. Both the sidebar
    toggle (left edge) and the topbar toggle (right edge) stay
    visible so the operator can independently control either panel
-   regardless of which one is currently collapsed — hiding the top
+   regardless of which one is currently collapsed -- hiding the top
    bar must NOT also remove the operator's only handle to the
    sidebar. */
 .app-shell[data-topbar-collapsed="true"] {
@@ -80,16 +84,198 @@
 }
 
 /* When the sidebar is collapsed independently, also drop its column
-   to zero — but the sidebar toggle (always rendered in the topbar)
+   to zero -- but the sidebar toggle (always rendered in the topbar)
    stays clickable so the operator can bring it back. */
 .app-shell[data-sidebar-collapsed="true"][data-topbar-collapsed="true"]
   .sidebar-collapse-toggle {
   margin-right: 0;
 }
 
+/* Auto-hide: a third state beside shown / collapsed for either chrome
+   panel. ``data-sidebar-mode`` / ``data-topbar-mode`` carry
+   ``shown`` | ``hidden`` | ``auto``; the collapsed flags above remain
+   the ``hidden`` case. In ``auto`` the panel's grid track shrinks to
+   an edge strip (``.panel-hotzone``) and the panel itself leaves the
+   flow. An absolutely positioned child of the grid container takes
+   its own grid area as containing block (CSS Grid Layout Level 1
+   §9.1), so the overlay's extent follows whatever height the other
+   panels currently have without coordinate bookkeeping. The panel
+   slides in over the workbench while ``data-*-revealed="true"`` --
+   set when the pointer rests on the strip, keyboard focus enters
+   the panel or the strip is tapped -- and back out when the pointer
+   leaves. */
+.panel-hotzone {
+  display: none;
+  position: relative;
+  z-index: 5;
+  background: var(--bg-elev);
+  cursor: pointer;
+}
+
+.panel-hotzone::after {
+  content: "";
+  position: absolute;
+  border-radius: var(--radius-pill);
+  background: var(--fg-dim);
+  opacity: 0.45;
+  transition: background-color var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.panel-hotzone:hover {
+  background: var(--surface-hover);
+}
+
+.panel-hotzone:hover::after {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.panel-hotzone--left {
+  grid-area: sidebar;
+  border-right: 1px solid var(--border);
+}
+
+.panel-hotzone--left::after {
+  top: 50%;
+  left: 2px;
+  width: 3px;
+  height: 28px;
+  transform: translateY(-50%);
+}
+
+.panel-hotzone--top {
+  grid-area: topbar;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-hotzone--top::after {
+  left: 50%;
+  top: 2px;
+  width: 28px;
+  height: 3px;
+  transform: translateX(-50%);
+}
+
+.app-shell[data-sidebar-mode="auto"] .panel-hotzone--left,
+.app-shell[data-topbar-mode="auto"] .panel-hotzone--top {
+  display: block;
+}
+
+.app-shell[data-sidebar-mode="auto"] {
+  grid-template-columns: var(--panel-hotzone) minmax(0, 1fr);
+}
+
+/* A concealed panel is parked past the shell edge, so it takes no
+   clicks and stays reachable for keyboard focus. The motion is a short
+   slide with a fade rather than a sweep from the edge: a large sweep
+   turns into visible steps as soon as the compositor drops below 60
+   frames a second, which the desktop shell does (it runs QtWebEngine
+   without GPU compositing), while a 28px offset under a fade stays
+   smooth at half that rate. ``data-*-revealed`` goes true -> leaving
+   -> false; the leaving phase plays the fade-out in place and lets
+   clicks through before the panel parks again. Both panels keep their
+   own compositor layer for as long as the mode is on. */
+.app-shell[data-sidebar-mode="auto"] .sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: min(260px, 88vw);
+  z-index: 6;
+  box-shadow: var(--shadow-card-hover);
+  transform: translateX(calc(-100% - 48px));
+  will-change: transform, opacity;
+}
+
+.app-shell[data-sidebar-mode="auto"][data-sidebar-revealed="true"] .sidebar {
+  transform: none;
+  animation: ygg-panel-reveal-left 160ms cubic-bezier(0.25, 0.8, 0.4, 1) both;
+}
+
+.app-shell[data-sidebar-mode="auto"][data-sidebar-revealed="leaving"] .sidebar {
+  transform: none;
+  pointer-events: none;
+  animation: ygg-panel-leave-left 130ms cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+@keyframes ygg-panel-reveal-left {
+  from { transform: translateX(-28px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+@keyframes ygg-panel-leave-left {
+  from { transform: none; opacity: 1; }
+  to   { transform: translateX(-20px); opacity: 0; }
+}
+
+.app-shell[data-topbar-mode="auto"] {
+  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
+}
+
+.app-shell[data-topbar-mode="auto"][data-log-collapsed="true"] {
+  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) 28px 28px;
+}
+
+/* Opaque while it moves: the glass blur of the resting bar would have
+   to be recomputed from the backdrop on every frame of the motion. */
+.app-shell[data-topbar-mode="auto"] .topbar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 52px;
+  z-index: 7;
+  background: var(--bg-elev);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(calc(-100% - 48px));
+  will-change: transform, opacity;
+}
+
+.app-shell[data-topbar-mode="auto"][data-topbar-revealed="true"] .topbar {
+  transform: none;
+  animation: ygg-panel-reveal-top 160ms cubic-bezier(0.25, 0.8, 0.4, 1) both;
+}
+
+.app-shell[data-topbar-mode="auto"][data-topbar-revealed="leaving"] .topbar {
+  transform: none;
+  pointer-events: none;
+  animation: ygg-panel-leave-top 130ms cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+@keyframes ygg-panel-reveal-top {
+  from { transform: translateY(-16px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+@keyframes ygg-panel-leave-top {
+  from { transform: none; opacity: 1; }
+  to   { transform: translateY(-12px); opacity: 0; }
+}
+
+/* The chevrons point away while a panel is auto-hidden -- a click pins
+   it open -- and carry an accent dot so the state reads differently
+   from plain collapsed. */
+.app-shell[data-sidebar-mode="auto"] .sidebar-collapse-glyph,
+.app-shell[data-topbar-mode="auto"] .topbar-collapse-glyph {
+  transform: rotate(180deg);
+}
+
+.app-shell[data-sidebar-mode="auto"] .sidebar-collapse-toggle::after,
+.app-shell[data-topbar-mode="auto"] .topbar-collapse-toggle::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px 0 var(--accent-glow);
+}
+
 .topbar-collapse-toggle,
 .app-close-button {
   display: inline-flex;
+  position: relative;
   align-items: center;
   justify-content: center;
   width: 28px;
@@ -137,6 +323,7 @@
 
 .sidebar-collapse-toggle {
   display: inline-flex;
+  position: relative;
   align-items: center;
   justify-content: center;
   width: 28px;
@@ -373,13 +560,53 @@
 
 .topbar-card-bridge[data-state="running"] .topbar-card-bridge-dot {
   opacity: 1;
-  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 10px rgba(163, 190, 140, 0.38);
+  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 10px color-mix(in oklab, var(--ok) 38%, transparent);
 }
 
 .topbar-card-bridge[data-state="error"] {
   border-color: color-mix(in oklab, var(--fail) 42%, transparent);
   background: var(--fail-soft);
   color: var(--fail);
+}
+
+.topbar-card-bridge[data-state="warn"] {
+  border-color: color-mix(in oklab, var(--warn) 42%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* Plugin console pills sit with the bridge pills and share their classes.
+   Their values go first when the bar runs out of room: the dot keeps the
+   tone and the title the whole text. */
+.topbar-plugin-pills {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 1760px) {
+  .topbar-plugin-pill .topbar-card-bridge-value {
+    display: none;
+  }
+}
+
+/* Then a console's further pills, then the suite chip (the version is in
+   About) and, while a plugin pill shows, the crumb the page title repeats. */
+@media (max-width: 1400px) {
+  .topbar-plugin-pill--more {
+    display: none;
+  }
+}
+
+@media (max-width: 1300px) {
+  .topbar-suite-health {
+    display: none;
+  }
+
+  .topbar:has(.topbar-plugin-pills:not([hidden])) > .breadcrumbs {
+    display: none;
+  }
 }
 
 .topbar-control-label {
@@ -534,6 +761,16 @@
     top: 30px;
   }
 
+  .app-shell[data-topbar-mode="auto"] .sidebar {
+    top: var(--panel-hotzone);
+  }
+
+  /* No edge strip on a touch-sized viewport; the chevron pins the
+     sidebar open instead. */
+  .app-shell[data-sidebar-mode="auto"] .panel-hotzone--left {
+    display: none;
+  }
+
   .brand-name,
   .topbar-card-bridge {
     display: none;
@@ -549,9 +786,5 @@
   .brand-mark {
     width: 28px;
     height: 28px;
-  }
-
-  .topbar-readers {
-    min-width: 140px;
   }
 }

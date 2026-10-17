@@ -99,12 +99,12 @@ to the modem.
 The 5G stack adds a few authentication surfaces on top of the classic
 USIM `AUTHENTICATE`:
 
-- **5G AKA** (3GPP TS 33.501) — `AUTHENTICATE` on the 5G UE-context
+- **5G AKA** (3GPP TS 33.501) -- `AUTHENTICATE` on the 5G UE-context
   produces `RES*` (a Kausf-bound transformation of `RES`) instead of
   `RES` directly.
-- **EAP-AKA'** (3GPP TS 33.402) — non-3GPP access authentication binding
+- **EAP-AKA'** (3GPP TS 33.402) -- non-3GPP access authentication binding
   the same long-term key into an EAP exchange.
-- **AKMA** (3GPP TS 33.535) — application-layer keys derived from
+- **AKMA** (3GPP TS 33.535) -- application-layer keys derived from
   `Kausf`, surfaced as `K_AKMA` and the `A-KID` identifier.
 
 The simulated UICC implements all three; the in-process YggdraCore stubs

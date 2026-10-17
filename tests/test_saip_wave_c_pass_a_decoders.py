@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Wave C Pass A — semantic decoder coverage for DF.5GS / DF.5G_ProSe /
+Wave C Pass A -- semantic decoder coverage for DF.5GS / DF.5G_ProSe /
 DF.SNPN / ADF.USIM ePDG EFs.
 
 The decoders live in ``Tools.ProfilePackage.saip_asn1_decode`` and are
@@ -185,7 +185,7 @@ class TestSuciCalcInfoAndSupiNai:
 
 class TestAnnotatedOpaqueEfs:
     def test_cag_is_annotated_as_spec_opaque(self) -> None:
-        decoded = _roundtrip("ef-cag", "13F01041")
+        decoded = _roundtrip("ef-cag", "00F11041")
         assert decoded["specReference"] == "TS 31.102 §4.4.11.14"
         assert decoded["format"] == "Pre-configured CAG Information List"
 
@@ -217,12 +217,12 @@ class TestDri:
 
 class TestMchpPlmn:
     def test_mchpplmn_decodes_plmn_triples(self) -> None:
-        decoded = _roundtrip("ef-mchpplmn", "13F0105A06FF")
+        decoded = _roundtrip("ef-mchpplmn", "00F1105A06FF")
         entries = decoded["entries"]
         assert len(entries) == 2
-        assert entries[0]["plmn"] == "310-01"
+        assert entries[0]["plmn"] == "001-01"
         assert entries[1]["raw"] == "5A06FF"
-        assert "310-01" in decoded["activePlmns"]
+        assert "001-01" in decoded["activePlmns"]
 
     def test_all_ff_marks_slot_as_empty(self) -> None:
         decoded = _roundtrip("ef-mchpplmn", "FFFFFF")
@@ -231,7 +231,7 @@ class TestMchpPlmn:
 
     def test_non_triple_length_returns_none(self) -> None:
         assert _decode_known_ef_payload(
-            ef_key="ef-mchpplmn", fid=None, hex_clean="13F010AB",
+            ef_key="ef-mchpplmn", fid=None, hex_clean="00F110AB",
         ) is None
 
 
@@ -323,10 +323,10 @@ def test_every_wave_c_pass_a_ef_has_semantic_route(token: str) -> None:
         "ef-pws-snpn": "00",
         "ef-suci-calc-info": "A0038001FFA100",
         "ef-supi-nai": "800A7573657240666F6F2E",
-        "ef-cag": "13F01041",
+        "ef-cag": "00F11041",
         "ef-sor-cmci": "AA55AA55",
         "ef-dri": "01030001000200",
-        "ef-mchpplmn": "13F0105A06FF",
+        "ef-mchpplmn": "00F1105A06FF",
         "ef-kausf-derivation": "01FF",
         "ef-ipd": "01020304",
         "ef-ips": "30300200",

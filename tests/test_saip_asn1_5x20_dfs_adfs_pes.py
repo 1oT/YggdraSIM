@@ -48,7 +48,7 @@ from Tools.ProfilePackage.saip_asn1_encode import (
 
 
 # ---------------------------------------------------------------------------
-# Pass A — DF identifier tokens.
+# Pass A -- DF identifier tokens.
 
 
 class DfTokenRegistrationTests(unittest.TestCase):
@@ -88,7 +88,7 @@ class DfTokenRegistrationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass B — ADF identifier tokens.
+# Pass B -- ADF identifier tokens.
 
 
 class AdfTokenRegistrationTests(unittest.TestCase):
@@ -133,7 +133,7 @@ class AdfTokenRegistrationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass C — PE filesystem hint mappings.
+# Pass C -- PE filesystem hint mappings.
 
 
 class ProfileElementHintTests(unittest.TestCase):
@@ -205,7 +205,7 @@ class ProfileElementHintTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass D — PE-level OCTET STRING subtag encoders.
+# Pass D -- PE-level OCTET STRING subtag encoders.
 
 
 class IccidFieldTests(unittest.TestCase):
@@ -349,7 +349,7 @@ class NotificationAddressFieldTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass D — PE-level INTEGER subtag encoders.
+# Pass D -- PE-level INTEGER subtag encoders.
 
 
 class MajorVersionFieldTests(unittest.TestCase):
@@ -403,7 +403,7 @@ class TemplateIdFieldTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass E — Coverage / dispatcher integration audit.
+# Pass E -- Coverage / dispatcher integration audit.
 
 
 class DispatcherAuditTests(unittest.TestCase):

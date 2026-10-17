@@ -1,15 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for the SAIP package-scaffold + variable-definition surface.
 
 Covered surfaces:
-  * ``saip.create_package`` — fresh in-memory session with header + end
-  * ``saip.open_package_with_variables`` — DER + CSV sidecar combo
-  * ``saip.add_variable_definition`` — pre-define a placeholder
-  * ``saip.remove_variable_definition`` — drop one (with binding guard)
-  * ``saip.add_pe`` — auto-renumber identification + auto-name on insert
+  * ``saip.create_package`` -- fresh in-memory session with header + end
+  * ``saip.open_package_with_variables`` -- DER + CSV sidecar combo
+  * ``saip.add_variable_definition`` -- pre-define a placeholder
+  * ``saip.remove_variable_definition`` -- drop one (with binding guard)
+  * ``saip.add_pe`` -- auto-renumber identification + auto-name on insert
 """
 
 from __future__ import annotations
@@ -113,7 +112,7 @@ class CreatePackageTests(unittest.TestCase):
             )
             self.assertTrue(target.is_file())
             self.assertGreater(saved["size_bytes"], 0)
-            # Reopen — must produce a session with the same PE count.
+            # Reopen -- must produce a session with the same PE count.
             reopened = self._actions._dispatch_open_package(ctx=None, path=str(target))
             self._track(reopened["session_id"])
             self.assertEqual(reopened["pe_count"], 2)
@@ -157,7 +156,7 @@ class OpenWithVariablesTests(unittest.TestCase):
         )
         self._track(result["session_id"])
         self.assertEqual(result["variables_loaded"]["applied_count"], 0)
-        # Token-mapping store now uses "no token-list pinned … no sibling csv".
+        # Token-mapping store now uses "no token-list pinned ... no sibling csv".
         summary = result["variables_loaded"]["summary"].lower()
         self.assertIn("no sibling csv", summary)
         self.assertIn("no token-list pinned", summary)

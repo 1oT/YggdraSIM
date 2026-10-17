@@ -16,10 +16,10 @@
 # Copyright (c) 2026 1oT OU. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-"""``/api/guides`` — markdown guide listing + read-only content endpoint.
+"""``/api/guides`` -- markdown guide listing + read-only content endpoint.
 
 Lists every ``*.md`` file shipped under the workspace ``guides/``
-directory (and a small allow-list of repository-root entries — README,
+directory (and a small allow-list of repository-root entries -- README,
 LICENSE, NOTICE, AUTHORS) so the GUI's About panel can deep-link to
 operator documentation without forcing the user to leave the desktop
 shell.
@@ -82,7 +82,7 @@ _CATALOG: tuple[tuple[str, str, str, str, str], ...] = (
         "README",
         "README.md",
         "Overview",
-        "Repository entry point — what YggdraSIM is and how to start.",
+        "Repository entry point -- what YggdraSIM is and how to start.",
     ),
     (
         "guides-index",
@@ -238,7 +238,7 @@ def _resolve_catalog_path(rel_path: str) -> Path | None:
     works in both source-checkout mode and PyInstaller-frozen mode
     (where guides are bundled into ``_MEIPASS``). The resolved path
     is rejected if it escapes the bundle root after symlink resolution
-    — defence-in-depth against ``..`` smuggling even though the id
+    -- defence-in-depth against ``..`` smuggling even though the id
     space is closed by the catalog.
     """
     if not rel_path:

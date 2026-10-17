@@ -101,3 +101,28 @@
   background: var(--border);
   margin: 4px 4px;
 }
+
+/* Radio items (``spec.checked`` on the item spec): the icon slot is
+   the radio, so a mode menu reads like a settings group. */
+.ctx-menu-icon--radio {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-inline: 3px;
+  border-radius: 50%;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--accent);
+}
+
+.ctx-menu-item[aria-checked="true"] .ctx-menu-icon--radio {
+  border-color: var(--accent);
+}
+
+.ctx-menu-item[aria-checked="true"] .ctx-menu-icon--radio::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}

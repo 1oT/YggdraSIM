@@ -22,6 +22,7 @@ from __future__ import annotations
 import unittest
 
 from SIMCARD.etsi_fs import (
+    DEFAULT_ARR_RECORDS,
     EtsiFileSystem,
     USIM_AID,
     build_default_state,
@@ -85,6 +86,22 @@ class ColdAttachUsimEfCoverageTests(unittest.TestCase):
         pbr_data, pbr_sw1, pbr_sw2 = self._select_by_path_from_mf("7F10", "5F3A", "4F30")
         self.assertEqual((pbr_sw1, pbr_sw2), (0x90, 0x00))
         self.assertIn(bytes.fromhex("83024F30"), pbr_data)
+
+    def test_gsm_access_ciphering_keys_seed_erased_with_cksn_seven(self) -> None:
+        # 3GPP TS 31.102 Annex E and TS 51.011 Annex D both give the
+        # pre-personalization value of EF.Kc / EF.KcGPRS as 'FF...FF07',
+        # and the TCA SAIP DF GSM-ACCESS template (§9.5.4) ships the same
+        # nine bytes. Zeroed key bytes would read as a cached all-zero Kc.
+        for fid in ("4F20", "4F52"):
+            data, sw1, sw2 = self._select_by_path_from_mf("7FF0", "5F3B", fid)
+            self.assertEqual(
+                (sw1, sw2),
+                (0x90, 0x00),
+                msg=f"ADF.USIM/DF.GSM-ACCESS/{fid} must be selectable",
+            )
+            body, read_sw1, read_sw2 = self.fs.read_binary(p1=0x00, p2=0x00)
+            self.assertEqual((read_sw1, read_sw2), (0x90, 0x00))
+            self.assertEqual(body, bytes.fromhex("FFFFFFFFFFFFFFFF07"))
 
     def test_rplmnactd_default_seeds_two_two_byte_records(self) -> None:
         data, sw1, sw2 = self._select_usim_ef_by_path("6F65")
@@ -167,7 +184,18 @@ class ActiveProfileLocalArrCoverageTests(unittest.TestCase):
                 self.assertIn(bytes.fromhex("83026F06"), data)
                 body, read_sw1, read_sw2 = self.fs.read_record(1, p2=0x04)
                 self.assertEqual((read_sw1, read_sw2), (0x90, 0x00))
-                self.assertEqual(body, bytes.fromhex("800101A40683010190A004840132"))
+                self.assertEqual(body, DEFAULT_ARR_RECORDS[0])
+
+    def test_every_record_an_fcp_can_cite_reads_back(self) -> None:
+        # ``_build_security_attributes_referenced`` derives the record byte from
+        # a node's write ACL and can cite 0x01, 0x02, 0x06, 0x0A or 0x0E. A
+        # reference past the end of the file reads back 6A83 instead of a rule.
+        self._select_by_path_from_mf("7FFF", "6F06")
+        for record in (0x01, 0x02, 0x06, 0x0A, 0x0E):
+            with self.subTest(record=f"0x{record:02X}"):
+                body, sw1, sw2 = self.fs.read_record(record, p2=0x04)
+                self.assertEqual((sw1, sw2), (0x90, 0x00))
+                self.assertEqual(body, DEFAULT_ARR_RECORDS[record - 1])
 
     def test_active_profile_ef_fcp_references_resolvable_local_arr(self) -> None:
         data, sw1, sw2 = self._select_by_path_from_mf("7FFF", "6F07")

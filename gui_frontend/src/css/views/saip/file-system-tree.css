@@ -7,7 +7,7 @@
 /* ---- SA-G3: file system tree -------------------------------------- */
 /*
  * Hierarchical tree view for the File System tab. Section roots
- * (MF / DF.TELECOM / ADF.USIM / …) sit at depth 0; mf / df-* / adf-*
+ * (MF / DF.TELECOM / ADF.USIM / ...) sit at depth 0; mf / df-* / adf-*
  * containers sit at depth 1; EFs sit at depth 2 (or depth 1 in
  * sections without an explicit container row). Each row is a compact
  * lane with a caret + glyph + label + optional FID / sFID
@@ -166,6 +166,14 @@
   color: var(--accent);
 }
 
+/* The caret toggles expand/collapse while the rest of the row selects
+   the node, so it needs a hit area of its own rather than a colour
+   change alone. */
+.saip-file-caret--toggle:hover {
+  background: var(--surface-alt);
+  border-radius: 4px;
+}
+
 .saip-file-caret--leaf {
   cursor: default;
   pointer-events: none;
@@ -183,10 +191,10 @@
 }
 
 .saip-file-glyph--section { color: var(--accent); }
-.saip-file-glyph--mf      { color: #9fc8d6; }
-.saip-file-glyph--adf     { color: #b4cf99; }
-.saip-file-glyph--df      { color: #88c0d0; }
-.saip-file-glyph--ef      { color: var(--fg-muted); }
+.saip-file-glyph--mf      { color: var(--tree-mf-fg); }
+.saip-file-glyph--adf     { color: var(--tree-adf-fg); }
+.saip-file-glyph--df      { color: var(--tree-df-fg); font-size: 10px; }
+.saip-file-glyph--ef      { color: var(--tree-ef-fg); }
 
 .saip-file-label {
   font-size: 12px;
@@ -205,8 +213,7 @@
   color: var(--fg);
 }
 
-.saip-file-fid,
-.saip-file-sfid {
+.saip-file-fid {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.04em;
@@ -218,13 +225,7 @@
   flex-shrink: 0;
 }
 
-.saip-file-sfid {
-  color: var(--accent);
-  border-color: var(--accent-soft);
-}
-
-.saip-file-node-row.is-active .saip-file-fid,
-.saip-file-node-row.is-active .saip-file-sfid {
+.saip-file-node-row.is-active .saip-file-fid {
   border-color: var(--accent);
   color: var(--fg);
 }
@@ -245,15 +246,21 @@
   text-transform: uppercase;
 }
 
-.saip-file-template-default {
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  background: var(--ok-soft);
-  border: 1px solid color-mix(in oklab, var(--ok) 38%, transparent);
-  border-radius: 4px;
-  padding: 0 4px;
-  color: var(--ok);
-  flex-shrink: 0;
-  text-transform: uppercase;
+/* The EF.ARR rules a securityAttributesReferenced can point at. */
+.saip-arr-rule-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* A select is as wide as its longest option; a rule summary would widen the
+   whole FCP table. It fills the cell instead, and the open list shows the
+   full text. */
+.saip-arr-rule-picker .saip-form-select {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
 }

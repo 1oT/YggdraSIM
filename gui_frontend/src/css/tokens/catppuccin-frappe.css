@@ -1,0 +1,46 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+
+/* -- Theme: Catppuccin · Frappe (mid-dark pastel, mauve accent) ---------- */
+html[data-theme="catppuccin-frappe"] {
+  --bg: #303446;
+  --bg-elev: #292c3c;
+  --bg-elev-2: #414559;
+  --surface: #292c3c;
+  --surface-alt: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(198, 208, 245, 0.06);
+  --border: rgba(198, 208, 245, 0.12);
+  --border-strong: rgba(198, 208, 245, 0.28);
+  --fg: #c6d0f5;
+  /* Frappe carries the lightest base of the four flavours, so the usual
+     subtext0 reaches only 4.26:1 on --bg-elev-2. Secondary text steps up to
+     subtext1 to clear the 4.5:1 the design-system test requires. */
+  --fg-dim: #b5bfe2;
+  --fg-muted: var(--fg-dim);
+  --accent: #ca9ee6;
+  --accent-strong: #b680e9;
+  --accent-soft: rgba(202, 158, 230, 0.14);
+  --accent-fg: #303446;
+  --accent-glow: rgba(202, 158, 230, 0.46);
+  --gradient-accent: linear-gradient(135deg, #ca9ee6 0%, #8caaee 60%, #99d1db 100%);
+  --gradient-brand: linear-gradient(135deg, #ca9ee6 0%, #f4b8e4 100%);
+  --ok: #a6d189;
+  --ok-soft: rgba(166, 209, 137, 0.16);
+  --warn: #e5c890;
+  --warn-soft: rgba(229, 200, 144, 0.16);
+  --fail: #e78284;
+  --fail-soft: rgba(231, 130, 132, 0.16);
+  --code-bg: #232634;
+  --kbd-bg: rgba(35, 38, 52, 0.96);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.36);
+  --shadow-card-hover: 0 20px 46px rgba(0, 0, 0, 0.50);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 16px 42px -12px var(--accent-glow);
+  --topbar-bg: rgba(41, 44, 60, 0.82);
+  --theme-tint:
+    radial-gradient(circle at 90% 8%, rgba(202, 158, 230, 0.12), transparent 46%),
+    radial-gradient(circle at 6% 92%, rgba(244, 184, 228, 0.08), transparent 48%),
+    radial-gradient(circle at 50% 45%, rgba(140, 170, 238, 0.04), transparent 56%);
+}

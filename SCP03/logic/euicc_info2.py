@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""EUICCInfo2 TLV decoder: parses tag BF22 into a structured dict (SGP.22 §2.6.2)."""
+"""EUICCInfo2 TLV decoder: parses tag BF22 into detail lines.
+
+The member tags follow the EUICCInfo2 ASN.1 of SGP.22 v3.1 §5.7.8
+(ES10b.GetEUICCInfo) and its SGP.32 v1.3 restatement, which renames
+``lpaMode [16]`` to ``ipaMode`` and adds ``iotSpecificInfo [20]`` and
+``euiccMinimumSecurityLevel [21]``.
+"""
 from typing import Dict, List, Optional, Tuple
 
 
@@ -22,11 +28,18 @@ EUICC_INFO2_TAG_NAMES: dict[int, str] = {
     0x8D: "TRE Properties",
     0x8E: "TRE Product Reference",
     0xAF: "Additional eUICC Profile Package Versions",
-    0x90: "IPA Mode",
-    0x91: "CI PKId List For Signing V3",
+    # Member [16] of EUICCInfo2, one tag under two names: SGP.22 v3.1 §5.7.8
+    # spells it lpaMode (lpad(0) / lpae(1)), the SGP.32 v1.3 module ipaMode
+    # (ipad(0) / ipae(1)). The label follows the SGP.32 spelling because the
+    # member is mandatory there; the tag decides, not the name.
+    # SGP.22 v3.1 §5.7.8 names member [16] lpaMode; the SGP.32 v1.3 module
+    # spells the same tag ipaMode, so the label names both.
+    0x90: "LPA/IPA Mode",
+    0xB1: "CI PKId List For Signing V3",
     0x92: "Additional eUICC Info",
     0x93: "Highest SVN",
     0xB4: "IoT Specific Info",
+    0x95: "eUICC Minimum Security Level",
     0xA9: "CI PKId List For Verification",
     0xAA: "CI PKId List For Signing",
 }
@@ -46,6 +59,9 @@ EUICC_INFO2_NESTED_TAG_NAMES: dict[int, dict[int, str]] = {
     0xAA: {
         0x04: "CI PKId",
     },
+    0xB1: {
+        0x04: "CI PKId",
+    },
     0xAF: {
         0x04: "Additional PP Version",
     },
@@ -53,6 +69,14 @@ EUICC_INFO2_NESTED_TAG_NAMES: dict[int, dict[int, str]] = {
         0xA0: "IoT Version List",
         0x81: "eCall Supported",
         0x82: "Fallback Supported",
+        0x83: "Fallback Allowed Update Supported",
+    },
+    # CertificationDataObject ::= SEQUENCE { platformLabel UTF8String,
+    # discoveryBaseURL UTF8String } takes automatic tags [0] and [1]
+    # (SGP.22 v3.1 §5.7.8 ASN.1, module DEFINITIONS AUTOMATIC TAGS).
+    0xAC: {
+        0x80: "Platform Label",
+        0x81: "Discovery Base URL",
     },
 }
 
@@ -144,6 +168,10 @@ TRE_PROPERTY_FLAGS: dict[int, str] = {
     2: "usesRemoteMemory",
 }
 
+# Mandatory for an SGP.32 eUICC. SGP.32 v1.2 §6.3.1 restates EUICCInfo2 with
+# globalplatformVersion [7] ('87') and certificationDataObject [12] ('AC') as
+# plain OPTIONAL, dropping the #MandatoryFromV3.0.0# markers SGP.22 v3.1 §4.3
+# carries -- so neither is listed here.
 EUICC_INFO2_MANDATORY_TAGS: tuple[int, ...] = (
     0x81,
     0x82,
@@ -216,7 +244,7 @@ def unwrap_euicc_info2_payload(data: bytes) -> bytes:
 
 
 def resolve_euicc_info2_tag_name(tag: int, parent_tag: Optional[int]) -> Optional[str]:
-    """Return the human-readable name for a tag within the EUICCInfo2 (BF22) response structure (SGP.22 §C.5)."""
+    """Return the name of a tag within the EUICCInfo2 ('BF22') response (SGP.22 v3.1 §5.7.8)."""
     if parent_tag == 0xBF22:
         return EUICC_INFO2_TAG_NAMES.get(tag)
     nested = EUICC_INFO2_NESTED_TAG_NAMES.get(parent_tag)
@@ -226,7 +254,7 @@ def resolve_euicc_info2_tag_name(tag: int, parent_tag: Optional[int]) -> Optiona
 
 
 def decode_euicc_info2_value(tag: int, value: bytes, parent_tag: Optional[int]) -> Optional[str]:
-    """Decode a single EUICCInfo2 TLV value to a printable string (SGP.22 §C.5)."""
+    """Decode a single EUICCInfo2 TLV value to a printable string (SGP.22 v3.1 §5.7.8)."""
     if parent_tag == 0xBF22:
         if tag in (0x81, 0x82, 0x83, 0x86, 0x87, 0x04):
             return format_version_bytes(value)
@@ -246,21 +274,25 @@ def decode_euicc_info2_value(tag: int, value: bytes, parent_tag: Optional[int]) 
             return value.hex().upper()
         if tag == 0x93:
             return format_version_bytes(value)
+        if tag == 0x8D:
+            return format_named_bit_string(value, TRE_PROPERTY_FLAGS)
+        if tag == 0x8E:
+            return quote_text(value)
     if parent_tag == 0x84:
         return decode_ext_card_resource_value(tag, value)
     if parent_tag == 0xA0 and tag == 0x04:
         return format_version_bytes(value)
-    if parent_tag in (0xA9, 0xAA) and tag == 0x04:
+    if parent_tag in (0xA9, 0xAA, 0xB1) and tag == 0x04:
         return value.hex().upper()
     if parent_tag == 0xAF and tag == 0x04:
         return format_version_bytes(value)
+    if parent_tag == 0xAC and tag in (0x80, 0x81):
+        return quote_text(value)
     if parent_tag == 0xB4:
         if tag == 0x81:
             return "true"
         if tag == 0x82:
             return "true"
-    if parent_tag == 0x8D:
-        return format_named_bit_string(value, TRE_PROPERTY_FLAGS)
     return None
 
 
@@ -290,10 +322,10 @@ def build_euicc_info2_detail_lines(response: bytes) -> List[Tuple[int, str, str]
         0x8E,
         0xAF,
         0x90,
-        0xB4,
-        0x91,
+        0xB1,
         0x92,
         0x93,
+        0xB4,
     ]
     for tag in ordered_tags:
         value = _first_bytes(root_map.get(tag))
@@ -301,6 +333,17 @@ def build_euicc_info2_detail_lines(response: bytes) -> List[Tuple[int, str, str]
             continue
         label = resolve_euicc_info2_tag_name(tag, 0xBF22) or f"{tag:02X}"
         lines.extend(_build_root_detail_lines(tag, label, value))
+
+    # EXTENSIBILITY IMPLIED: a v3 eUICC may answer with tags this build does
+    # not name. Reporting them as raw hex keeps the view a faithful account of
+    # the response instead of silently dropping the unrecognised part. The
+    # node walk preserves wire order and every repeat of a tag, which the
+    # tag-keyed map above collapses to the first occurrence.
+    known = set(ordered_tags)
+    for tag, value, _constructed in parse_tlv_nodes(root_value):
+        if tag in known:
+            continue
+        lines.append((0, f"Unknown Tag {tag:02X}", value.hex().upper()))
 
     validation_lines = build_euicc_info2_validation_lines(root_value)
     lines.extend(validation_lines)
@@ -331,7 +374,7 @@ def build_euicc_info2_validation_lines(response: bytes) -> List[Tuple[int, str, 
     if len(missing_mandatory) > 0:
         warnings.append("Missing mandatory fields: " + ", ".join(missing_mandatory))
 
-    if _first_bytes(root_map.get(0x91)) is not None:
+    if _first_bytes(root_map.get(0xB1)) is not None:
         warnings.append("CI PKId List For Signing V3 is present, but SGP.32 v1.2 marks it as not used.")
     if _first_bytes(root_map.get(0x92)) is not None:
         warnings.append("Additional eUICC Info is present, but SGP.32 v1.2 marks it as not used.")
@@ -369,7 +412,7 @@ def format_version_bytes(value: bytes) -> str:
 
 
 def decode_euicc_category(value: bytes) -> str:
-    """Map a single-byte euiccCategory value to its name string (SGP.22 §C.5 tag 0x8B)."""
+    """Map a euiccCategory INTEGER to its name (SGP.22 v3.1 §5.7.8, ``euiccCategory [11]``)."""
     if len(value) != 1:
         return value.hex().upper()
     categories = {
@@ -384,12 +427,12 @@ def decode_euicc_category(value: bytes) -> str:
 
 
 def decode_ipa_mode(value: bytes) -> str:
-    """Map a single-byte IPA mode byte to its name string (SGP.32 §C.1)."""
+    """Map an IpaMode INTEGER to its name (SGP.32 v1.3 ``IpaMode ::= INTEGER {ipad(0), ipae(1)}``)."""
     if len(value) != 1:
         return value.hex().upper()
     ipa_modes = {
         0: "IPAd active",
-        1: "Mode 1 active",
+        1: "IPAe active",
     }
     ipa_value = value[0]
     ipa_name = ipa_modes.get(ipa_value, "unknown")
@@ -432,7 +475,7 @@ def decode_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> List[str
 
 
 def decode_ext_card_resource_value(tag: int, value: bytes) -> Optional[str]:
-    """Decode an ExtCardResource sub-TLV value (SGP.22 §C.5 tag 0x84)."""
+    """Decode an extCardResource sub-TLV (ETSI TS 102 226 v19 §8.2.1.7.2: '81' applications, '82' free NVM, '83' free RAM)."""
     if tag == 0x81:
         return str(int.from_bytes(value, "big", signed=False))
     if tag in (0x82, 0x83):
@@ -456,7 +499,7 @@ def quote_text(value: bytes) -> str:
 def _build_root_detail_lines(tag: int, label: str, value: bytes) -> List[Tuple[int, str, str]]:
     lines: List[Tuple[int, str, str]] = []
     rendered = decode_euicc_info2_value(tag, value, 0xBF22)
-    if rendered is not None and tag not in (0x84, 0xA9, 0xAA, 0xAF, 0xB4, 0xAC):
+    if rendered is not None and tag not in (0x84, 0xA9, 0xAA, 0xB1, 0xAF, 0xB4, 0xAC):
         lines.append((0, label, rendered))
         return lines
 
@@ -474,7 +517,7 @@ def _build_root_detail_lines(tag: int, label: str, value: bytes) -> List[Tuple[i
             lines.append((1, child_label, child_rendered))
         return lines
 
-    if tag in (0xA9, 0xAA):
+    if tag in (0xA9, 0xAA, 0xB1):
         child_nodes = parse_tlv_nodes(value)
         lines.append((0, label, f"{len(child_nodes)} item(s)"))
         item_index = 1
@@ -525,6 +568,10 @@ def _build_root_detail_lines(tag: int, label: str, value: bytes) -> List[Tuple[i
             lines.append((1, "Fallback Supported", "true"))
         else:
             lines.append((1, "Fallback Supported", "false"))
+        if 0x83 in nested_map:
+            lines.append((1, "Fallback Allowed Update Supported", "true"))
+        else:
+            lines.append((1, "Fallback Allowed Update Supported", "false"))
         return lines
 
     if tag == 0xAC:
@@ -532,9 +579,16 @@ def _build_root_detail_lines(tag: int, label: str, value: bytes) -> List[Tuple[i
         child_nodes = parse_tlv_nodes(value)
         string_index = 1
         for child_tag, child_value, _constructed in child_nodes:
+            child_label = resolve_euicc_info2_tag_name(child_tag, 0xAC)
+            if child_label is not None:
+                lines.append((1, child_label, quote_text(child_value)))
+                continue
             if child_tag != 0x0C:
                 lines.append((1, f"{child_tag:02X}", child_value.hex().upper()))
                 continue
+            # Universal UTF8String tags are not what the module encodes; they
+            # are kept readable, by position, for responses built without
+            # automatic tagging.
             label_text = "Platform Label"
             if string_index == 2:
                 label_text = "Discovery Base URL"

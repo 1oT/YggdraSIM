@@ -7,8 +7,8 @@
     <title>YggdraSIM</title>
     <!-- Content-Security-Policy is delivered as an HTTP response header
          (see yggdrasim_common/gui_server/auth.py::_CSP_HEADER) so that
-         ``frame-ancestors`` is enforced — browsers ignore that directive
-         when it arrives via ``<meta http-equiv="…">``. -->
+         ``frame-ancestors`` is enforced -- browsers ignore that directive
+         when it arrives via ``<meta http-equiv="...">``. -->
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css" />
@@ -27,7 +27,7 @@
           class="sidebar-collapse-toggle"
           aria-controls="module-navigation"
           aria-label="Collapse Command Center sidebar"
-          title="Hide the Command Center sidebar. Click again to bring it back.">
+          title="Hide the Command Center sidebar. Click again to bring it back; Shift+click or right-click for auto-hide.">
           <span class="sidebar-collapse-glyph" aria-hidden="true">&#x25C0;</span>
         </button>
         <div class="brand">
@@ -67,9 +67,9 @@
         </nav>
         <div class="status-cluster">
           <span class="topbar-suite-health" id="topbar-suite-health" aria-label="Suite health">
-            <span class="topbar-suite-version" id="topbar-suite-version">v…</span>
+            <span class="topbar-suite-version" id="topbar-suite-version">v...</span>
             <span class="topbar-suite-separator" aria-hidden="true">·</span>
-            <span class="topbar-suite-active" id="topbar-suite-active">active …</span>
+            <span class="topbar-suite-active" id="topbar-suite-active">active ...</span>
           </span>
           <button
             type="button"
@@ -87,12 +87,14 @@
             class="topbar-card-bridge"
             id="topbar-card-bridge"
             data-state="idle"
-            title="Remote Bridge status"
-            aria-label="Remote Bridge status">
+            title="Remote APDU streaming status; opens whichever remote module is in use"
+            aria-label="Remote APDU streaming status">
             <span class="topbar-card-bridge-dot" aria-hidden="true"></span>
-            <span class="topbar-card-bridge-label">Remote bridge</span>
+            <span class="topbar-card-bridge-label">Remote</span>
             <span class="topbar-card-bridge-value" id="topbar-card-bridge-value">stopped</span>
           </button>
+          <!-- Pills of plugin consoles that report something (plugin-console-pills.js). -->
+          <span class="topbar-plugin-pills" id="topbar-plugin-pills" hidden></span>
           <span class="topbar-backend-switch" role="group" aria-label="Card backend">
             <span class="topbar-control-label">Backend</span>
             <button
@@ -123,7 +125,7 @@
           </div>
           <span class="badge badge-api" id="badge-api" data-state="unknown">
             <span class="dot"></span>
-            <span id="badge-api-text">probing…</span>
+            <span id="badge-api-text">probing...</span>
           </span>
           <span class="theme-picker">
             <label for="theme-select">Theme</label>
@@ -136,6 +138,8 @@
                 <option value="solarized-dark">Solarized · dark</option>
                 <option value="tokyo-night">Tokyo Night</option>
                 <option value="catppuccin-mocha">Catppuccin · Mocha</option>
+                <option value="catppuccin-macchiato">Catppuccin · Macchiato</option>
+                <option value="catppuccin-frappe">Catppuccin · Frappé</option>
                 <option value="dracula">Dracula</option>
                 <option value="github-dark">GitHub · dark</option>
                 <option value="matrix">Matrix</option>
@@ -147,6 +151,8 @@
                 <option value="solarized-light">Solarized · light</option>
                 <option value="catppuccin-latte">Catppuccin · Latte</option>
                 <option value="github-light">GitHub · light</option>
+                <option value="islands-light">Islands · light</option>
+                <option value="graphite-light">Graphite · light</option>
               </optgroup>
             </select>
           </span>
@@ -156,7 +162,7 @@
           id="topbar-collapse-toggle"
           class="topbar-collapse-toggle"
           aria-label="Collapse top bar"
-          title="Hide the top bar to maximise the working area. Click again to bring it back.">
+          title="Hide the top bar to maximise the working area. Click again to bring it back; Shift+click or right-click for auto-hide.">
           <span class="topbar-collapse-glyph" aria-hidden="true">&#x25B2;</span>
         </button>
         <button
@@ -169,10 +175,18 @@
         </button>
       </header>
 
+      <!--
+        Edge strips for the auto-hide mode of either chrome panel. A
+        panel's strip is only rendered while that panel is in "auto";
+        resting the pointer on it slides the panel in.
+      -->
+      <div class="panel-hotzone panel-hotzone--top" id="topbar-hotzone" aria-hidden="true"></div>
+      <div class="panel-hotzone panel-hotzone--left" id="sidebar-hotzone" aria-hidden="true"></div>
+
       <aside class="sidebar" id="module-navigation" aria-label="Module navigation">
         <div class="sidebar-title">Command Center</div>
         <ul class="subsystem-list tool-list" id="command-center-nav">
-          <li class="loading">loading…</li>
+          <li class="loading">loading...</li>
         </ul>
         <!--
           Legacy "Inspect" and "Advanced" flat-nav groups were folded
@@ -220,8 +234,8 @@
               <h3>Card backend</h3>
               <p>
                 Active backend:
-                <code id="overview-backend-value">…</code>
-                (<span id="overview-backend-source">…</span>).
+                <code id="overview-backend-value">...</code>
+                (<span id="overview-backend-source">...</span>).
               </p>
               <p class="hint">
                 Session-scoped. The persisted selection is only
@@ -239,7 +253,7 @@
             </p>
           </div>
           <div id="cc-actions" class="cc-actions">
-            <p class="loading">loading actions…</p>
+            <p class="loading">loading actions...</p>
           </div>
         </section>
 
@@ -286,6 +300,142 @@
           </div>
         </section>
 
+        <section data-view="plugin_console" class="view">
+          <div class="cc-wb-shell pc-shell">
+            <header class="cc-wb-page-header">
+              <div>
+                <h1 id="pc-title">Plugin console</h1>
+                <p class="cc-wb-lead" id="pc-summary"></p>
+              </div>
+              <div class="pc-toolbar">
+                <button type="button" class="btn" id="pc-refresh">Refresh</button>
+                <span class="cc-chip" id="pc-chip">idle</span>
+              </div>
+            </header>
+            <div class="pc-notice" id="pc-notice" role="status" aria-live="polite" hidden></div>
+            <!--
+              Two panes: what the operator does (controls) and what the console
+              answers (output). Each tab panel is shown by plugin-console-tabs.js
+              when the manifest declares its part; a pane with one panel shows
+              no tab strip, a pane with none is hidden.
+            -->
+            <div class="pc-layout" id="pc-layout" hidden>
+              <section class="pc-pane" id="pc-pane-controls" data-pc-pane="controls" aria-label="Console controls">
+                <div class="pc-tabs" id="pc-tabs-controls" role="tablist" aria-label="Console controls" hidden></div>
+                <div class="pc-pane-body">
+                  <div class="pc-tab-panel" id="pc-tab-session" role="tabpanel" data-pc-tab="session" hidden>
+                    <section class="pc-panel" id="pc-session" aria-labelledby="pc-session-title">
+                      <div class="pc-panel-head">
+                        <h2 id="pc-session-title">Session</h2>
+                        <span class="pc-status" id="pc-run-status" data-state="idle" role="status" aria-live="polite">unknown</span>
+                      </div>
+                      <div class="pc-fields" id="pc-start-fields"></div>
+                      <div class="pc-buttons" id="pc-start-controls">
+                        <button type="button" class="btn btn-primary" id="pc-start">Start</button>
+                        <button type="button" class="btn" id="pc-stop" disabled>Stop</button>
+                        <span class="pc-message" id="pc-start-message" role="status" aria-live="polite"></span>
+                      </div>
+                      <p class="pc-error" id="pc-last-error" hidden></p>
+                      <dl class="pc-state" id="pc-state"></dl>
+                    </section>
+                  </div>
+                  <div class="pc-tab-panel" id="pc-tab-state" role="tabpanel" data-pc-tab="state" hidden>
+                    <section class="pc-panel pc-state-panel" id="pc-state-panel" aria-labelledby="pc-state-title">
+                      <h2 id="pc-state-title">State</h2>
+                      <p class="hint" id="pc-state-empty">Nothing reported yet.</p>
+                    </section>
+                  </div>
+                  <div class="pc-tab-panel" id="pc-tab-actions" role="tabpanel" data-pc-tab="actions" hidden>
+                    <section class="pc-panel" id="pc-command-panel" aria-labelledby="pc-command-title" hidden>
+                      <h2 id="pc-command-title">Command line</h2>
+                      <div class="pc-transcript" id="pc-transcript" role="log" aria-live="polite"></div>
+                      <form class="pc-command" id="pc-command-form" autocomplete="off">
+                        <span class="pc-prompt" aria-hidden="true">&gt;</span>
+                        <input type="text" id="pc-command-input" aria-label="Command line" spellcheck="false" />
+                        <button type="submit" class="btn" id="pc-command-send">Send</button>
+                      </form>
+                      <p class="hint" id="pc-command-hint"></p>
+                      <details class="pc-help" id="pc-help">
+                        <summary>Commands</summary>
+                        <div class="pc-help-body" id="pc-help-body"></div>
+                      </details>
+                    </section>
+                    <section class="pc-panel" id="pc-actions-panel" aria-labelledby="pc-actions-title" hidden>
+                      <h2 id="pc-actions-title">Actions</h2>
+                      <div class="pc-actions" id="pc-actions"></div>
+                    </section>
+                  </div>
+                  <div class="pc-tab-panel" id="pc-tab-run" role="tabpanel" data-pc-tab="run" hidden>
+                    <section class="pc-panel pc-run-form" id="pc-run-form" aria-labelledby="pc-run-form-title">
+                      <h2 id="pc-run-form-title">New run</h2>
+                      <div class="pc-fields" id="pc-run-variant"></div>
+                      <div class="pc-fields" id="pc-run-common"></div>
+                      <div class="pc-fields" id="pc-run-fields"></div>
+                      <div class="pc-run-block" id="pc-run-before" hidden>
+                        <h3 id="pc-run-before-title">Credentials</h3>
+                        <div class="pc-run-credentials" id="pc-run-credentials"></div>
+                        <div class="pc-run-groups" id="pc-run-before-groups"></div>
+                      </div>
+                      <h3 id="pc-run-items-title">Items</h3>
+                      <div class="pc-run-items" id="pc-run-items"></div>
+                      <div class="pc-run-groups" id="pc-run-after-groups"></div>
+                      <div class="pc-run-actions">
+                        <button type="button" class="btn btn-primary" id="pc-run-start" disabled>Run</button>
+                        <span class="pc-message" id="pc-run-validation" role="status" aria-live="polite"></span>
+                      </div>
+                    </section>
+                  </div>
+                  <div class="pc-tab-panel" id="pc-tab-credentials" role="tabpanel" data-pc-tab="credentials" hidden>
+                    <section class="pc-panel" id="pc-credentials-panel" aria-labelledby="pc-credentials-title">
+                      <h2 id="pc-credentials-title">Credentials</h2>
+                      <div class="pc-run-credentials" id="pc-credentials"></div>
+                    </section>
+                  </div>
+                </div>
+              </section>
+              <section class="pc-pane" id="pc-pane-output" data-pc-pane="output" aria-label="Console output">
+                <div class="pc-tabs" id="pc-tabs-output" role="tablist" aria-label="Console output" hidden></div>
+                <div class="pc-pane-body">
+                  <div class="pc-tab-panel" id="pc-tab-compare" role="tabpanel" data-pc-tab="compare" hidden>
+                    <section class="pc-panel pc-compare" id="pc-compare" aria-labelledby="pc-compare-title" hidden>
+                      <div class="pc-panel-head">
+                        <h2 id="pc-compare-title">Comparison</h2>
+                        <span class="pc-compare-summary" id="pc-compare-summary" role="status" aria-live="polite"></span>
+                      </div>
+                      <p class="hint" id="pc-compare-hint" hidden></p>
+                      <div class="pc-compare-toolbar" id="pc-compare-actions" hidden></div>
+                      <div class="pc-action-result pc-compare-result" id="pc-compare-result" role="status" hidden></div>
+                      <p class="pc-compare-note" id="pc-compare-note" hidden></p>
+                      <div class="pc-compare-body" id="pc-compare-body"></div>
+                    </section>
+                  </div>
+                  <div class="pc-streams" id="pc-streams"></div>
+                  <div class="pc-tab-panel" id="pc-tab-runs" role="tabpanel" data-pc-tab="runs" hidden>
+                    <div class="pc-runs" id="pc-runs">
+                      <section class="pc-panel" id="pc-run-current" aria-labelledby="pc-run-current-title">
+                        <div class="pc-panel-head">
+                          <h2 id="pc-run-current-title">Current run</h2>
+                          <span class="pc-status" id="pc-run-state" data-state="idle" role="status" aria-live="polite">no run</span>
+                          <button type="button" class="btn btn-small" id="pc-run-cancel" disabled>Cancel</button>
+                        </div>
+                        <p class="pc-run-title" id="pc-run-title"></p>
+                        <ul class="pc-run-meta" id="pc-run-meta"></ul>
+                        <p class="pc-error" id="pc-run-error" hidden></p>
+                        <div class="pc-run-results" id="pc-run-results"></div>
+                        <div class="flow-log pc-run-log" id="pc-run-log" role="log" aria-label="Run events"></div>
+                      </section>
+                      <section class="pc-panel" id="pc-run-history" aria-labelledby="pc-run-history-title">
+                        <h2 id="pc-run-history-title">History</h2>
+                        <div class="pc-run-list" id="pc-run-list"></div>
+                      </section>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
         <section data-view="registry" class="view">
           <h1>Registry browser</h1>
           <p class="lead">
@@ -309,7 +459,7 @@
               </tr>
             </thead>
             <tbody id="registry-rows">
-              <tr><td colspan="3" class="loading">loading…</td></tr>
+              <tr><td colspan="3" class="loading">loading...</td></tr>
             </tbody>
           </table>
         </section>
@@ -338,15 +488,15 @@
             </div>
             <div class="cc-wb-frame cc-wb-frame--padded-tight env-flag-frame">
               <div id="env-flag-categories" class="env-flag-root">
-                <p class="loading">loading…</p>
+                <p class="loading">loading...</p>
               </div>
             </div>
             <div class="cc-wb-frame cc-wb-frame--padded-tight env-plugin-frame">
               <div class="cc-wb-status-strip" aria-live="polite">
-                <span class="cc-chip" id="env-plugin-status">plugins: …</span>
+                <span class="cc-chip" id="env-plugin-status">plugins: ...</span>
               </div>
               <div id="env-plugin-root" class="env-flag-root">
-                <p class="loading">loading…</p>
+                <p class="loading">loading...</p>
               </div>
             </div>
           </div>
@@ -360,7 +510,7 @@
                 Spawn a registered CLI module inside a server-side PTY and
                 drive it from the browser via xterm.js. Only modules listed
                 in <code>yggdrasim_common.registry.CLI_MODULES</code> are
-                accepted — the GUI cannot invoke arbitrary commands.
+                accepted -- the GUI cannot invoke arbitrary commands.
               </p>
             </header>
             <div class="cc-wb-status-strip">
@@ -389,7 +539,7 @@
             <header class="cc-wb-page-header">
               <h1>Host shell</h1>
               <p class="cc-wb-lead">
-                Free-form interactive shell on the GUI host — equivalent to
+                Free-form interactive shell on the GUI host -- equivalent to
                 an SSH session as the user that launched <code>yggdrasim</code>.
                 Use for ad-hoc modem CLI workflows
                 (<code>tio</code> / <code>minicom</code> / <code>socat</code>
@@ -438,7 +588,7 @@
                 <div class="host-shell-decoded-rows" id="host-shell-decoded-rows" aria-live="polite"></div>
               </div>
               <p class="cc-wb-foot-hint">
-                Free-form RCE-class surface — the bearer token grants
+                Free-form RCE-class surface -- the bearer token grants
                 shell-equivalent access. Restrict who holds it and prefer
                 an SSH tunnel over a public bind.
               </p>
@@ -447,311 +597,348 @@
         </section>
 
         <!--
-          Remote Host Onboarding panel — wraps the read-only card_bridge.status /
+          Remote Host Onboarding panel -- wraps the read-only card_bridge.status /
           card_bridge.probe actions in a focused diagnostics surface.
           Polls /api/actions/card_bridge.status/run every 5 s while the
           view is active so operators see auth posture + latency change
           in near-real time. Raw bearer tokens are NEVER displayed in
-          this panel — only the 6-char SHA-256 fingerprint that the
+          this panel -- only the 6-char SHA-256 fingerprint that the
           server-side helper returns.
         -->
         <section data-view="card_bridge" class="view">
-          <h1>Remote Bridge</h1>
-          <p class="lead">
-            Prepare a remote host for Remote Lab access. Card Bridge remains
-            the APDU data plane; this view configures the host, tunnel, token,
-            and HIL service that make the host reachable.
-          </p>
-
-          <div class="cb-panel">
-            <header class="cb-panel-header">
-              <h2>Bridge connection</h2>
-              <div class="cb-panel-controls">
-                <label class="cb-toggle">
-                  <input type="checkbox" id="cb-auto-refresh" checked />
-                  <span>Auto-refresh (5 s)</span>
-                </label>
-                <button class="btn" id="cb-refresh-status">Refresh</button>
-              </div>
+          <div class="cc-wb-shell cb-shell">
+            <header class="cc-wb-page-header">
+              <h1>Remote Bridge</h1>
+              <p class="cc-wb-lead">
+                Reach a modem and its SIM on another host. The PC bridge exposes
+                the local PC/SC reader, the SSH tunnel carries it to the remote
+                host, and the HIL service there relays APDUs to the modem over
+                SIMtrace2. Remote Lab devices and the HIL Bridge use this path as
+                their data plane.
+              </p>
             </header>
 
-            <div class="cb-status-grid">
-              <div class="cb-status-row">
-                <span class="cb-status-label">Status</span>
-                <span class="cb-badge cb-badge-unknown" id="cb-status-badge">unknown</span>
-              </div>
-              <div class="cb-status-row">
-                <span class="cb-status-label">URL</span>
-                <span class="cb-status-value cb-mono" id="cb-status-url">–</span>
-                <button class="btn btn-small" id="cb-copy-url" title="Copy URL to clipboard" disabled>Copy</button>
-              </div>
-              <div class="cb-status-row">
-                <span class="cb-status-label">Source</span>
-                <span class="cb-status-value" id="cb-status-source">–</span>
-              </div>
-              <div class="cb-status-row">
-                <span class="cb-status-label">Token</span>
-                <span class="cb-status-value cb-mono" id="cb-status-token">–</span>
-              </div>
-              <div class="cb-status-row">
-                <span class="cb-status-label">Token source</span>
-                <span class="cb-status-value" id="cb-status-token-source">–</span>
-              </div>
-              <div class="cb-status-row">
-                <span class="cb-status-label">Last probe</span>
-                <span class="cb-status-value" id="cb-status-last-probe">never</span>
-              </div>
-            </div>
+            <div class="cb-panel cb-rig-panel">
+              <header class="cb-panel-header">
+                <h2>Remote host onboarding</h2>
+                <div class="cb-panel-controls">
+                  <button class="btn btn-small" id="cb-rig-refresh">Refresh host status</button>
+                  <button class="btn btn-small" id="cb-rig-open-gui">Open remote GUI</button>
+                </div>
+              </header>
 
-            <div class="cb-status-summary" id="cb-status-summary">
-              not configured — set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass
-              <code>--remote-card-url</code> to talk to a Card Bridge stream.
-            </div>
-          </div>
+              <ol class="cb-steps">
+                <li>Pick a stored host, or fill the fields below for one you have not stored yet.</li>
+                <li>Select the PC/SC reader that holds the card in the top bar.</li>
+                <li>Start the full rig: the PC bridge, the SSH tunnel, the token sync and the remote HIL service come up in sequence.</li>
+              </ol>
 
-          <div class="cb-panel cb-rig-panel">
-            <header class="cb-panel-header">
-              <h2>Remote host onboarding</h2>
-              <div class="cb-panel-controls">
-                <button class="btn btn-small" id="cb-rig-refresh">Refresh</button>
-                <button class="btn btn-small" id="cb-rig-open-gui">Open remote GUI</button>
-              </div>
-            </header>
+              <div class="remote-lab-devices" id="cb-rig-hosts"></div>
 
-            <div class="cb-rig-grid">
-              <div class="form-row cb-rig-field">
-                <label for="cb-rig-ssh-target">SSH target</label>
-                <input type="text" id="cb-rig-ssh-target" list="cb-rig-ssh-target-options" placeholder="pi@rpi-host" autocomplete="off" />
-                <datalist id="cb-rig-ssh-target-options"></datalist>
+              <div class="form-row cb-rig-field cb-rig-add-host">
+                <label for="cb-rig-new-host-name">Store this host</label>
+                <input type="text" id="cb-rig-new-host-name" placeholder="a name for the host in the fields below" autocomplete="off" />
+                <button class="btn btn-small" id="cb-rig-add-host" type="button">Add host</button>
+                <p class="cb-rig-port-plan" id="cb-rig-add-host-note"></p>
               </div>
-              <div class="form-row cb-rig-field">
-                <label for="cb-rig-identity-file">SSH key</label>
-                <input type="text" id="cb-rig-identity-file" placeholder="optional private key path" autocomplete="off" />
-              </div>
-              <div class="form-row cb-rig-field">
-                <label for="cb-rig-ssh-path">SSH executable</label>
-                <input type="text" id="cb-rig-ssh-path" placeholder="ssh or full OpenSSH path" autocomplete="off" />
-              </div>
-              <div class="form-row cb-rig-field">
-                <label for="cb-rig-reader-index">PC reader index</label>
-                <input type="text" id="cb-rig-reader-index" inputmode="numeric" pattern="[0-9]*" value="0" autocomplete="off" />
-              </div>
-              <div class="form-row cb-rig-field">
-                <label for="cb-rig-reader-name">PC reader name</label>
-                <input type="text" id="cb-rig-reader-name" placeholder="optional substring" autocomplete="off" />
-              </div>
-              <div class="form-row cb-rig-field">
-                <label for="cb-rig-card-port">Card port</label>
-                <input type="text" id="cb-rig-card-port" inputmode="numeric" pattern="[0-9]*" value="8642" autocomplete="off" />
-              </div>
-              <div class="form-row cb-rig-field">
-                <label for="cb-rig-gui-port">GUI port</label>
-                <input type="text" id="cb-rig-gui-port" inputmode="numeric" pattern="[0-9]*" value="27854" autocomplete="off" />
-              </div>
-            </div>
-            <div class="cb-rig-port-plan" id="cb-rig-port-plan"></div>
 
-            <details class="cb-override cb-rig-advanced">
-              <summary>Remote host service settings</summary>
               <div class="cb-rig-grid">
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-service-name">Service</label>
-                  <input type="text" id="cb-rig-service-name" value="yggdrasim-hil-supervisor.service" />
+                  <label for="cb-rig-ssh-target">SSH target</label>
+                  <input type="text" id="cb-rig-ssh-target" list="cb-rig-ssh-target-options" placeholder="pi@rpi-host" autocomplete="off" />
+                  <datalist id="cb-rig-ssh-target-options"></datalist>
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-remote-workdir">Remote repo directory</label>
-                  <input type="text" id="cb-rig-remote-workdir" value="~/YggdraSIM" />
+                  <label for="cb-rig-identity-file">SSH key</label>
+                  <input type="text" id="cb-rig-identity-file" placeholder="optional private key path" autocomplete="off" />
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-remote-python">Remote Python</label>
-                  <input type="text" id="cb-rig-remote-python" value="~/YggdraSIM/.venv/bin/python" />
+                  <label for="cb-rig-ssh-path">SSH executable</label>
+                  <input type="text" id="cb-rig-ssh-path" placeholder="ssh or full OpenSSH path" autocomplete="off" />
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-remote-token">Remote token file</label>
-                  <input type="text" id="cb-rig-remote-token" value="~/.config/yggdrasim/card_bridge/8642.token" />
+                  <label for="cb-rig-reader-index">PC reader index</label>
+                  <input type="text" id="cb-rig-reader-index" inputmode="numeric" pattern="[0-9]*" value="0" autocomplete="off" />
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-remsim-binary">Remote REMSIM binary</label>
-                  <input type="text" id="cb-rig-remsim-binary" value="osmo-remsim-client-st2" autocomplete="off" />
+                  <label for="cb-rig-reader-name">PC reader name</label>
+                  <input type="text" id="cb-rig-reader-name" placeholder="optional substring" autocomplete="off" />
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-usb-vidpid">SIMtrace2 VID:PID</label>
-                  <input type="text" id="cb-rig-usb-vidpid" value="1d50:60e3" />
+                  <label for="cb-rig-card-port">Card port</label>
+                  <input type="text" id="cb-rig-card-port" inputmode="numeric" pattern="[0-9]*" value="8642" autocomplete="off" />
                 </div>
                 <div class="form-row cb-rig-field">
-                  <label for="cb-rig-hil-port">HIL port</label>
-                  <input type="text" id="cb-rig-hil-port" inputmode="numeric" pattern="[0-9]*" value="9997" autocomplete="off" />
+                  <label for="cb-rig-gui-port">GUI port</label>
+                  <input type="text" id="cb-rig-gui-port" inputmode="numeric" pattern="[0-9]*" value="27854" autocomplete="off" />
                 </div>
               </div>
-            </details>
+              <div class="cb-rig-port-plan" id="cb-rig-port-plan"></div>
 
-            <div class="cb-rig-primary-actions">
-              <button class="btn btn-primary" id="cb-rig-start-all">Start full rig</button>
-              <button class="btn" id="cb-rig-stop-all">Stop host</button>
-            </div>
-
-            <details class="cb-override cb-rig-manual">
-              <summary>Manual controls</summary>
-              <div class="cb-rig-actions">
-                <button class="btn btn-primary" id="cb-rig-start-local">Start PC bridge</button>
-                <button class="btn" id="cb-rig-stop-local">Stop PC bridge</button>
-                <button class="btn btn-primary" id="cb-rig-start-tunnel">Open tunnel</button>
-                <button class="btn" id="cb-rig-stop-tunnel">Stop tunnel</button>
-                <button class="btn" id="cb-rig-sync-token">Sync token</button>
-                <button class="btn" id="cb-rig-install-service">Install service</button>
-                <button class="btn btn-primary" id="cb-rig-start-service">Start HIL</button>
-                <button class="btn" id="cb-rig-stop-service">Stop HIL</button>
-              </div>
-            </details>
-
-            <div class="cb-rig-status-grid">
-              <div class="cb-probe-card">
-                <div class="cb-probe-label">PC bridge</div>
-                <div class="cb-probe-value" id="cb-rig-local-status">–</div>
-              </div>
-              <div class="cb-probe-card">
-                <div class="cb-probe-label">SSH tunnel</div>
-                <div class="cb-probe-value" id="cb-rig-tunnel-status">–</div>
-              </div>
-              <div class="cb-probe-card">
-                <div class="cb-probe-label">Remote service</div>
-                <div class="cb-probe-value" id="cb-rig-service-status">–</div>
-              </div>
-              <div class="cb-probe-card">
-                <div class="cb-probe-label">Remote bridge</div>
-                <div class="cb-probe-value" id="cb-rig-bridge-status">–</div>
-              </div>
-              <div class="cb-probe-card">
-                <div class="cb-probe-label">SIMtrace2</div>
-                <div class="cb-probe-value" id="cb-rig-usb-status">–</div>
-              </div>
-              <div class="cb-probe-card">
-                <div class="cb-probe-label">REMSIM</div>
-                <div class="cb-probe-value" id="cb-rig-remsim-status">–</div>
-              </div>
-              <div class="cb-probe-card">
-                <div class="cb-probe-label">Modem link</div>
-                <div class="cb-probe-value" id="cb-rig-modem-link-status">–</div>
-              </div>
-              <div class="cb-probe-card">
-                <div class="cb-probe-label">Remote GUI</div>
-                <div class="cb-probe-value cb-mono" id="cb-rig-gui-url">http://127.0.0.1:27854</div>
-              </div>
-            </div>
-            <div class="cb-status-summary" id="cb-rig-note">Remote rig controls are idle.</div>
-          </div>
-
-          <div class="cb-panel">
-            <header class="cb-panel-header">
-              <h2>Live probe</h2>
-              <div class="cb-panel-controls">
-                <button class="btn btn-primary" id="cb-run-probe">Probe now</button>
-              </div>
-            </header>
-
-            <p class="hint">
-              <code>GET /ping</code> + <code>GET /status</code> against the
-              configured (or supplied) bridge. Bearer tokens are never
-              echoed back — only their 6-char fingerprint, which lets you
-              confirm the token wired up here matches the one printed on
-              the bridge's startup banner.
-            </p>
-
-            <details class="cb-override" id="cb-override-details">
-              <summary>Override URL / token</summary>
-              <div class="form-row cb-override-row">
-                <label for="cb-probe-url">URL</label>
-                <input type="text" id="cb-probe-url"
-                       placeholder="http://127.0.0.1:8642/apdu (blank = use configured)" />
-              </div>
-              <div class="form-row cb-override-row">
-                <label for="cb-probe-token">Token</label>
-                <input type="password" id="cb-probe-token"
-                       placeholder="bearer token (blank = use resolved)"
-                       autocomplete="off" />
-              </div>
-              <label class="cb-toggle">
-                <input type="checkbox" id="cb-probe-fallback" checked />
-                <span>Fall back to configured values when a field is blank</span>
-              </label>
-            </details>
-
-            <div class="cb-probe-result" id="cb-probe-result" hidden>
-              <div class="cb-probe-grid">
-                <div class="cb-probe-card">
-                  <div class="cb-probe-label">Posture</div>
-                  <div class="cb-probe-value">
-                    <span class="cb-badge cb-badge-unknown" id="cb-probe-posture">–</span>
+              <details class="cb-override cb-rig-advanced">
+                <summary>Remote host service settings</summary>
+                <div class="cb-rig-grid">
+                  <div class="form-row cb-rig-field">
+                    <label for="cb-rig-service-name">Service</label>
+                    <input type="text" id="cb-rig-service-name" value="yggdrasim-hil-supervisor.service" />
+                  </div>
+                  <div class="form-row cb-rig-field">
+                    <label for="cb-rig-remote-workdir">Remote repo directory</label>
+                    <input type="text" id="cb-rig-remote-workdir" value="~/YggdraSIM" />
+                  </div>
+                  <div class="form-row cb-rig-field">
+                    <label for="cb-rig-remote-python">Remote Python</label>
+                    <input type="text" id="cb-rig-remote-python" value="~/YggdraSIM/.venv/bin/python" />
+                  </div>
+                  <div class="form-row cb-rig-field">
+                    <label for="cb-rig-remote-token">Remote token file</label>
+                    <input type="text" id="cb-rig-remote-token" value="~/.config/yggdrasim/hil/remote-card-8642.token" />
+                  </div>
+                  <div class="form-row cb-rig-field">
+                    <label for="cb-rig-remsim-binary">Remote REMSIM binary</label>
+                    <input type="text" id="cb-rig-remsim-binary" value="osmo-remsim-client-st2" autocomplete="off" />
+                  </div>
+                  <div class="form-row cb-rig-field">
+                    <label for="cb-rig-usb-vidpid">SIMtrace2 VID:PID</label>
+                    <input type="text" id="cb-rig-usb-vidpid" value="1d50:60e3" />
+                  </div>
+                  <div class="form-row cb-rig-field">
+                    <label for="cb-rig-hil-port">HIL port</label>
+                    <input type="text" id="cb-rig-hil-port" inputmode="numeric" pattern="[0-9]*" value="9997" autocomplete="off" />
                   </div>
                 </div>
+              </details>
+
+              <div class="cb-rig-primary-actions">
+                <button class="btn btn-primary" id="cb-rig-start-all">Start full rig</button>
+                <button class="btn" id="cb-rig-stop-all">Stop full rig</button>
+              </div>
+
+              <details class="cb-override cb-rig-manual">
+                <summary>Manual controls</summary>
+                <p class="hint">Run one stage at a time when a step of the full sequence needs attention.</p>
+                <div class="cb-rig-actions">
+                  <div class="cb-rig-action-group" role="group" aria-label="PC bridge">
+                    <span class="cb-rig-action-group-label">PC bridge</span>
+                    <button class="btn btn-small" id="cb-rig-start-local">Start</button>
+                    <button class="btn btn-small" id="cb-rig-stop-local">Stop</button>
+                  </div>
+                  <div class="cb-rig-action-group" role="group" aria-label="SSH tunnel">
+                    <span class="cb-rig-action-group-label">SSH tunnel</span>
+                    <button class="btn btn-small" id="cb-rig-start-tunnel">Open</button>
+                    <button class="btn btn-small" id="cb-rig-stop-tunnel">Stop</button>
+                  </div>
+                  <div class="cb-rig-action-group" role="group" aria-label="Remote host">
+                    <span class="cb-rig-action-group-label">Remote host</span>
+                    <button class="btn btn-small" id="cb-rig-sync-token">Sync token</button>
+                    <button class="btn btn-small" id="cb-rig-install-service">Install service</button>
+                    <button class="btn btn-small" id="cb-rig-start-service">Start HIL</button>
+                    <button class="btn btn-small" id="cb-rig-stop-service">Stop HIL</button>
+                  </div>
+                </div>
+              </details>
+
+              <h3 class="cb-subhead">Rig status</h3>
+              <div class="cb-rig-status-grid">
                 <div class="cb-probe-card">
-                  <div class="cb-probe-label">Ping latency</div>
-                  <div class="cb-probe-value cb-mono" id="cb-probe-ping-latency">–</div>
+                  <div class="cb-probe-label">PC bridge</div>
+                  <div class="cb-probe-value" id="cb-rig-local-status">-</div>
                 </div>
                 <div class="cb-probe-card">
-                  <div class="cb-probe-label">Status latency</div>
-                  <div class="cb-probe-value cb-mono" id="cb-probe-status-latency">–</div>
+                  <div class="cb-probe-label">SSH tunnel</div>
+                  <div class="cb-probe-value" id="cb-rig-tunnel-status">-</div>
                 </div>
                 <div class="cb-probe-card">
-                  <div class="cb-probe-label">Reader</div>
-                  <div class="cb-probe-value cb-mono" id="cb-probe-reader">–</div>
+                  <div class="cb-probe-label">Remote service</div>
+                  <div class="cb-probe-value" id="cb-rig-service-status">-</div>
                 </div>
                 <div class="cb-probe-card">
-                  <div class="cb-probe-label">ATR</div>
-                  <div class="cb-probe-value cb-mono" id="cb-probe-atr">–</div>
+                  <div class="cb-probe-label">Remote bridge</div>
+                  <div class="cb-probe-value" id="cb-rig-bridge-status">-</div>
                 </div>
                 <div class="cb-probe-card">
-                  <div class="cb-probe-label">Audit</div>
-                  <div class="cb-probe-value" id="cb-probe-audit">–</div>
+                  <div class="cb-probe-label">SIMtrace2</div>
+                  <div class="cb-probe-value" id="cb-rig-usb-status">-</div>
                 </div>
                 <div class="cb-probe-card">
-                  <div class="cb-probe-label">Token fp (this side)</div>
-                  <div class="cb-probe-value cb-mono" id="cb-probe-token-fp">–</div>
+                  <div class="cb-probe-label">REMSIM</div>
+                  <div class="cb-probe-value" id="cb-rig-remsim-status">-</div>
                 </div>
                 <div class="cb-probe-card">
-                  <div class="cb-probe-label">Token fp (bridge)</div>
-                  <div class="cb-probe-value cb-mono" id="cb-probe-bridge-fp">–</div>
+                  <div class="cb-probe-label">Modem link</div>
+                  <div class="cb-probe-value" id="cb-rig-modem-link-status">-</div>
                 </div>
                 <div class="cb-probe-card">
-                  <div class="cb-probe-label">Bind host</div>
-                  <div class="cb-probe-value cb-mono" id="cb-probe-bind-host">–</div>
+                  <div class="cb-probe-label">Remote GUI</div>
+                  <div class="cb-probe-value cb-mono" id="cb-rig-gui-url">http://127.0.0.1:27854</div>
                 </div>
               </div>
-              <div class="cb-probe-reason" id="cb-probe-reason" hidden></div>
+              <div class="cb-status-summary" id="cb-rig-note" role="status" aria-live="polite" aria-atomic="true">
+                Host status has not been read yet.
+              </div>
             </div>
-          </div>
 
-          <div class="cb-panel">
-            <header class="cb-panel-header">
-              <h2>Latency history</h2>
-              <div class="cb-panel-controls">
-                <span class="cb-history-meta" id="cb-history-meta">no probes yet</span>
-                <button class="btn btn-small" id="cb-clear-history">Clear</button>
+            <div class="cb-panel">
+              <header class="cb-panel-header">
+                <h2>Bridge connection</h2>
+                <div class="cb-panel-controls">
+                  <label class="cb-toggle">
+                    <input type="checkbox" id="cb-auto-refresh" checked />
+                    <span>Auto-refresh (5 s)</span>
+                  </label>
+                  <button class="btn btn-small" id="cb-refresh-status">Refresh</button>
+                </div>
+              </header>
+              <p class="hint">
+                The bridge this GUI talks to for remote card access, resolved from
+                the environment or from the rig above.
+              </p>
+
+              <div class="cb-status-grid">
+                <div class="cb-status-row">
+                  <span class="cb-status-label">Status</span>
+                  <span class="cb-badge cb-badge-unknown" id="cb-status-badge" role="status" aria-live="polite">unknown</span>
+                </div>
+                <div class="cb-status-row">
+                  <span class="cb-status-label">URL</span>
+                  <span class="cb-status-value cb-mono" id="cb-status-url">-</span>
+                  <button class="btn btn-small" id="cb-copy-url" title="Copy URL to clipboard" disabled>Copy</button>
+                </div>
+                <div class="cb-status-row">
+                  <span class="cb-status-label">Source</span>
+                  <span class="cb-status-value" id="cb-status-source">-</span>
+                </div>
+                <div class="cb-status-row">
+                  <span class="cb-status-label">Token</span>
+                  <span class="cb-status-value cb-mono" id="cb-status-token">-</span>
+                </div>
+                <div class="cb-status-row">
+                  <span class="cb-status-label">Token source</span>
+                  <span class="cb-status-value" id="cb-status-token-source">-</span>
+                </div>
+                <div class="cb-status-row">
+                  <span class="cb-status-label">Last probe</span>
+                  <span class="cb-status-value" id="cb-status-last-probe">never</span>
+                </div>
               </div>
-            </header>
 
-            <p class="hint">
-              Rolling buffer of the last 60 probe round-trips
-              (<code>/ping</code> + <code>/status</code> latency stacked).
-              Use this to spot SSH-tunnel hiccups versus a wedged bridge.
-            </p>
+              <div class="cb-status-summary" id="cb-status-summary" role="status" aria-live="polite" aria-atomic="true">
+                Checking the configured bridge...
+              </div>
+            </div>
 
-            <svg class="cb-history-chart" id="cb-history-chart"
-                 viewBox="0 0 600 120" preserveAspectRatio="none"
-                 aria-label="Probe latency history"></svg>
+            <div class="cb-panel">
+              <header class="cb-panel-header">
+                <h2>Live probe</h2>
+                <div class="cb-panel-controls">
+                  <button class="btn btn-primary btn-small" id="cb-run-probe">Probe now</button>
+                </div>
+              </header>
+
+              <p class="hint">
+                <code>GET /ping</code> + <code>GET /status</code> against the
+                configured (or supplied) bridge. Bearer tokens are never
+                echoed back -- only their 6-char fingerprint, which lets you
+                confirm the token wired up here matches the one printed on
+                the bridge's startup banner.
+              </p>
+
+              <details class="cb-override" id="cb-override-details">
+                <summary>Override URL / token</summary>
+                <div class="form-row cb-override-row">
+                  <label for="cb-probe-url">URL</label>
+                  <input type="text" id="cb-probe-url"
+                         placeholder="http://127.0.0.1:8642/apdu (blank = use configured)" />
+                </div>
+                <div class="form-row cb-override-row">
+                  <label for="cb-probe-token">Token</label>
+                  <input type="password" id="cb-probe-token"
+                         placeholder="bearer token (blank = use resolved)"
+                         autocomplete="off" />
+                </div>
+                <label class="cb-toggle">
+                  <input type="checkbox" id="cb-probe-fallback" checked />
+                  <span>Fall back to configured values when a field is blank</span>
+                </label>
+              </details>
+
+              <div class="cb-probe-result" id="cb-probe-result" hidden>
+                <div class="cb-probe-grid">
+                  <div class="cb-probe-card">
+                    <div class="cb-probe-label">Posture</div>
+                    <div class="cb-probe-value">
+                      <span class="cb-badge cb-badge-unknown" id="cb-probe-posture">-</span>
+                    </div>
+                  </div>
+                  <div class="cb-probe-card">
+                    <div class="cb-probe-label">Ping latency</div>
+                    <div class="cb-probe-value cb-mono" id="cb-probe-ping-latency">-</div>
+                  </div>
+                  <div class="cb-probe-card">
+                    <div class="cb-probe-label">Status latency</div>
+                    <div class="cb-probe-value cb-mono" id="cb-probe-status-latency">-</div>
+                  </div>
+                  <div class="cb-probe-card">
+                    <div class="cb-probe-label">Reader</div>
+                    <div class="cb-probe-value cb-mono" id="cb-probe-reader">-</div>
+                  </div>
+                  <div class="cb-probe-card">
+                    <div class="cb-probe-label">ATR</div>
+                    <div class="cb-probe-value cb-mono" id="cb-probe-atr">-</div>
+                  </div>
+                  <div class="cb-probe-card">
+                    <div class="cb-probe-label">Audit</div>
+                    <div class="cb-probe-value" id="cb-probe-audit">-</div>
+                  </div>
+                  <div class="cb-probe-card">
+                    <div class="cb-probe-label">Token fp (this side)</div>
+                    <div class="cb-probe-value cb-mono" id="cb-probe-token-fp">-</div>
+                  </div>
+                  <div class="cb-probe-card">
+                    <div class="cb-probe-label">Token fp (bridge)</div>
+                    <div class="cb-probe-value cb-mono" id="cb-probe-bridge-fp">-</div>
+                  </div>
+                  <div class="cb-probe-card">
+                    <div class="cb-probe-label">Bind host</div>
+                    <div class="cb-probe-value cb-mono" id="cb-probe-bind-host">-</div>
+                  </div>
+                </div>
+                <div class="cb-probe-reason" id="cb-probe-reason" hidden></div>
+              </div>
+            </div>
+
+            <div class="cb-panel">
+              <header class="cb-panel-header">
+                <h2>Latency history</h2>
+                <div class="cb-panel-controls">
+                  <span class="cb-history-meta" id="cb-history-meta">no probes yet</span>
+                  <button class="btn btn-small" id="cb-clear-history">Clear</button>
+                </div>
+              </header>
+
+              <p class="hint">
+                Rolling buffer of the last 60 probe round-trips
+                (<code>/ping</code> + <code>/status</code> latency stacked).
+                Use this to spot SSH-tunnel hiccups versus a wedged bridge.
+              </p>
+
+              <svg class="cb-history-chart" id="cb-history-chart"
+                   viewBox="0 0 600 120" preserveAspectRatio="none"
+                   aria-label="Probe latency history"></svg>
+            </div>
           </div>
         </section>
 
         <section data-view="about" class="view">
           <h1>About this GUI</h1>
           <p class="lead">
-            YggdraSIM Universal GUI — Phase A scaffolding for
-            roadmap entry <code>R2-004</code>.
+            YggdraSIM Universal GUI -- the loopback web surface for the
+            secure-element toolchain.
           </p>
           <ul>
             <li>Built on FastAPI + a handwritten no-build SPA.</li>
             <li>Token-gated; same-origin only; CSP locked to <code>self</code>.</li>
-            <li>Engine code stays headless — every endpoint resolves
+            <li>Engine code stays headless -- every endpoint resolves
               via <code>yggdrasim_common.registry</code>.</li>
           </ul>
 
@@ -763,7 +950,7 @@
                 build. Click any entry to open it in a viewer dialog.
               </p>
             </div>
-            <div class="about-guides-status" id="about-guides-status">loading guides…</div>
+            <div class="about-guides-status" id="about-guides-status">loading guides...</div>
             <div class="about-guides-groups" id="about-guides-groups"></div>
           </div>
         </section>
@@ -965,17 +1152,17 @@
         <span class="sep">·</span>
         <span class="status-metric">
           <span class="status-metric-label">readers</span>
-          <span class="status-metric-value" id="status-readers">–</span>
+          <span class="status-metric-value" id="status-readers">-</span>
         </span>
         <span class="sep">·</span>
         <span class="status-metric">
           <span class="status-metric-label">sessions</span>
-          <span class="status-metric-value" id="status-sessions">–</span>
+          <span class="status-metric-value" id="status-sessions">-</span>
         </span>
         <span class="sep">·</span>
         <span class="status-metric status-metric--muted">
           <span class="status-metric-label">last activity</span>
-          <span class="status-metric-value" id="status-activity">–</span>
+          <span class="status-metric-value" id="status-activity">-</span>
         </span>
         <span class="sep">·</span>
         <span id="status-error" class="status-error"></span>

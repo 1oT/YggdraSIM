@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SIM Application Toolkit logic: proactive command encoding, BIP bearer setup, timer management (ETSI TS 102 223)."""
 from __future__ import annotations
 
@@ -185,10 +184,11 @@ class ToolkitLogic:
         GET_CHANNEL_STATUS_COMMAND: "GET CHANNEL STATUS",
     }
 
-    def __init__(self, state: SimCardState) -> None:
+    def __init__(self, state: SimCardState, *, extend_with_plugins: bool = True) -> None:
         self.state = state
         self._extensions: list[Any] = []
-        extend_target_with_plugins(self)
+        if extend_with_plugins:
+            extend_target_with_plugins(self)
 
     def register_extension(self, extension: Any) -> None:
         if extension in self._extensions:
@@ -303,7 +303,7 @@ class ToolkitLogic:
         return self._pending_status()
 
     def handle_terminal_profile(self, payload: bytes) -> tuple[bytes, int, int]:
-        """ETSI TS 102 221 §11.1.14 TERMINAL PROFILE — stores the terminal capability bitmap.
+        """ETSI TS 102 221 §11.1.14 TERMINAL PROFILE -- stores the terminal capability bitmap.
 
         Kicks off the bootstrap proactive-command sequence when bootstrap is
         enabled and not yet initialised.
@@ -327,7 +327,7 @@ class ToolkitLogic:
         return active, 0x90, 0x00
 
     def handle_terminal_response(self, payload: bytes) -> tuple[bytes, int, int]:
-        """ETSI TS 102 221 §11.1.15 TERMINAL RESPONSE — processes the terminal's reply to a proactive command.
+        """ETSI TS 102 221 §11.1.15 TERMINAL RESPONSE -- processes the terminal's reply to a proactive command.
 
         Clears the active command slot and advances terminal-side state.
         """
@@ -467,7 +467,7 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """Queue a REFRESH proactive command (ETSI TS 102 223 §6.4.7).
 
-        Coalesces identical *qualifier* values — a second call for the same
+        Coalesces identical *qualifier* values -- a second call for the same
         mode returns the existing command rather than queuing a duplicate.
         Returns a status dict indicating whether the command was queued or coalesced.
         """
@@ -717,9 +717,12 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.15 PROVIDE LOCAL INFORMATION.
 
-        Common qualifiers per §6.6.15:
-        ``0x00`` location-info, ``0x01`` IMEI, ``0x03`` date/time/zone,
-        ``0x04`` language, ``0x06`` access-technology.
+        Qualifiers from the command-details table of TS 102 223 v18.3
+        §8.6: ``'00'`` location information, ``'01'`` IMEI, ``'02'``
+        network measurement results, ``'03'`` date/time/zone, ``'04'``
+        language, ``'06'`` access technology, ``'07'`` ESN, ``'08'``
+        IMEISV, ``'09'`` search mode, ``'0A'`` charge state of the
+        battery, ``'0B'`` MEID, ``'0D'`` broadcast network information.
         """
         return self._enqueue_named(PROVIDE_LOCAL_INFORMATION_COMMAND, qualifier, b"")
 
@@ -878,15 +881,16 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.34 DECLARE SERVICE.
 
-        ``service_record`` is the raw service-record TLV (TS 102 223
-        §8.66) and is appended to ``state.toolkit.declared_services``
+        ``service_record`` is the raw service-record value (TS 102 223
+        v18.3 §8.63, tag '41'/'C1' per TS 101 220 v19 table 7.23) and is
+        appended to ``state.toolkit.declared_services``
         on enqueue so subsequent SERVICE SEARCH / GET SERVICE
         INFORMATION commands can advertise the registration.
         """
         record = bytes(service_record or b"")
         if len(record) > 0:
-            self.state.toolkit.declared_services.append(record)
-        extra = tlv("61", record) if len(record) > 0 else b""
+            append_bounded(self.state.toolkit.declared_services, record)
+        extra = tlv("41", record) if len(record) > 0 else b""
         return self._enqueue_named(DECLARE_SERVICE_COMMAND, int(qualifier) & 0xFF, extra)
 
     def queue_service_search(
@@ -898,18 +902,18 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.32 SERVICE SEARCH.
 
-        ``service_record`` (TLV ``61``) is the pattern the terminal
-        compares against the previously declared services.
-        ``device_filter`` (TLV ``63``) optionally restricts the search
-        to a specific device class (handset, USB, etc.). Successful
-        SERVICE SEARCH replies carry a Service Record TLV in the
-        terminal response; ``_apply_service_search_response`` latches
-        the matching blob into ``state.toolkit.last_service_search_result``.
+        ``service_record`` is the Service search parameter (§8.65, tag
+        '43'/'C3') the terminal matches against the services in range;
+        ``device_filter`` (§8.64, tag '42'/'C2') optionally restricts the
+        search to a device class. §6.8.23 makes a successful TERMINAL
+        RESPONSE carry the Service availability object (§8.67, tag
+        '45'/'C5'), which ``_apply_service_search_response`` latches into
+        ``state.toolkit.last_service_search_result``.
         """
         record = bytes(service_record or b"")
-        extra = tlv("61", record)
+        extra = tlv("43", record)
         if len(device_filter) > 0:
-            extra += tlv("63", bytes(device_filter))
+            extra += tlv("42", bytes(device_filter))
         return self._enqueue_named(SERVICE_SEARCH_COMMAND, int(qualifier) & 0xFF, extra)
 
     def queue_get_service_information(
@@ -920,14 +924,14 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.33 GET SERVICE INFORMATION.
 
-        ``service_record`` is the service identifier whose detailed
-        information should be retrieved. The terminal replies with a
-        Service Information TLV (``62`` / ``E2`` -- TS 102 223 §8.66);
-        the simulator latches the blob into
+        ``service_record`` is the Attribute information parameter (§8.66,
+        tag '44'/'C4') naming the detail the UICC wants. §6.8.24 makes the
+        successful TERMINAL RESPONSE carry the Service record object
+        (§8.63, tag '41'/'C1'), which the simulator latches into
         ``state.toolkit.last_service_information``.
         """
         record = bytes(service_record or b"")
-        extra = tlv("61", record)
+        extra = tlv("44", record)
         return self._enqueue_named(
             GET_SERVICE_INFORMATION_COMMAND,
             int(qualifier) & 0xFF,
@@ -1898,19 +1902,27 @@ class ToolkitLogic:
     ) -> None:
         """Latch PROVIDE LOCAL INFORMATION TR data into toolkit state.
 
-        Per TS 102 223 §6.4.15 / §6.6.15 the terminal response carries
-        the requested datum keyed off the proactive qualifier:
+        The command qualifier of TS 102 223 v18.3 §8.6 selects the
+        datum the terminal returns; the tags come from TS 101 220 v19
+        Table 7.23:
 
-        - 0x00 location info (TLV 0x13)
-        - 0x01 IMEI (TLV 0x14)
-        - 0x03 date / time / timezone (TLV 0x26)
-        - 0x04 language (TLV 0x2D)
-        - 0x06 access technology (qualifier byte echoed; no TLV)
-        - 0x08 IMEISV (TLV 0x62)
-        - 0x0D battery state (TLV 0x5C)
+        - '00' location information (TLV '13', §8.19)
+        - '01' IMEI (TLV '14', §8.20)
+        - '02' network measurement results (TLV '16')
+        - '03' date, time and time zone (TLV '26', §8.39)
+        - '04' language setting (TLV '2D', §8.45)
+        - '06' access technology (TLV '3F', §8.61)
+        - '08' IMEISV (TLV '62', §8.74)
+        - '09' search mode (TLV '65')
+        - '0A' charge state of the battery (TLV '63', §8.76)
+        - '0D' broadcast network information (TLV '7A', §8.90)
 
-        On a non-zero result code we skip the latch so partial /
-        terminal-busy responses don't clobber a previously known good
+        Of those the simulator latches location information, IMEI,
+        date/time, language, IMEISV, access technology and battery
+        state; the remaining objects are accepted and discarded.
+
+        A non-zero result code skips the latch so partial or
+        terminal-busy responses do not clobber a previously known good
         value -- the caller's hook still fires.
         """
         if succeeded is False:
@@ -1941,13 +1953,13 @@ class ToolkitLogic:
         battery_state_value = response_fields.get("battery_state", None)
         if battery_state_value is not None:
             toolkit.battery_state = int(battery_state_value) & 0xFF
-        if qualifier == 0x06:
-            # §6.6.15 access-technology variant: terminals reply with
-            # an additional Result TLV that we don't parse but the
-            # qualifier itself disambiguates the request, so cache the
-            # qualifier as the technology hint when the TR carries no
-            # explicit access-tech TLV.
-            toolkit.access_technology = qualifier
+        access_technology_value = bytes(response_fields.get("access_technology", b"") or b"")
+        if qualifier == 0x06 and len(access_technology_value) > 0:
+            # TS 102 223 v18.3 §6.8.7: a qualifier '06' request is
+            # answered with the §8.61 Access Technology object, whose
+            # single byte is the technology the terminal is on. The
+            # qualifier itself is not a technology value.
+            toolkit.access_technology = int(access_technology_value[0]) & 0xFF
         self._dispatch_hook(
             "on_provide_local_information_response",
             command_fields,
@@ -2022,7 +2034,7 @@ class ToolkitLogic:
     ) -> None:
         toolkit = self.state.toolkit
         if succeeded:
-            blob = bytes(response_fields.get("service_record", b"") or b"")
+            blob = bytes(response_fields.get("service_availability", b"") or b"")
             toolkit.last_service_search_result = blob
         else:
             toolkit.last_service_search_result = b""
@@ -2041,7 +2053,7 @@ class ToolkitLogic:
     ) -> None:
         toolkit = self.state.toolkit
         if succeeded:
-            blob = bytes(response_fields.get("service_information", b"") or b"")
+            blob = bytes(response_fields.get("service_record", b"") or b"")
             toolkit.last_service_information = blob
         self._dispatch_hook(
             "on_get_service_information_response",
@@ -2998,7 +3010,7 @@ class ToolkitLogic:
         toolkit = self.state.toolkit
         if item_id > 0:
             toolkit.last_menu_item_id = item_id
-            toolkit.menu_selections.append(item_id)
+            append_bounded(toolkit.menu_selections, item_id)
         toolkit.last_menu_help_request = help_request
         self._dispatch_hook("on_menu_selection", item_id, help_request)
 
@@ -3297,7 +3309,7 @@ class ToolkitLogic:
         *,
         device_pair: bytes | None = None,
     ) -> bytes:
-        # ETSI TS 102 223 §8.7 — Device Identities (TLV 0x82) carries
+        # ETSI TS 102 223 §8.7 -- Device Identities (TLV 0x82) carries
         # [source, destination]. Default is UICC->Terminal (0x81 0x82);
         # BIP follow-ups override this to UICC->channel-id where the
         # destination device is encoded as 0x20 + channel_id (channel 1
@@ -3717,8 +3729,10 @@ class ToolkitLogic:
                 fields["timer_value_seconds"] = _decode_timer_value_bcd(value_bytes[:3])
                 fields["timer_value_raw"] = value_bytes[:3]
                 continue
-            if tag_bytes == b"\x61":
-                # TS 102 223 §8.66 Service Record TLV (DECLARE SERVICE).
+            if tag_bytes in (b"\x41", b"\xC1"):
+                # TS 102 223 v18.3 §8.63 Service record, tag '41'/'C1'
+                # (TS 101 220 v19 table 7.23): the object DECLARE SERVICE
+                # registers and GET SERVICE INFORMATION returns.
                 fields["service_record"] = value_bytes
         return fields
 
@@ -3758,11 +3772,12 @@ class ToolkitLogic:
                 fields["duration_value"] = int(value_bytes[1]) & 0xFF
                 fields["duration_raw"] = bytes(value_bytes[:2])
                 continue
-            # PROVIDE LOCAL INFORMATION terminal-response items.
-            # Tags below cover TS 102 223 §8.19 (Location Info),
-            # §8.20 (IMEI), §8.39 (Date-Time-Timezone), §8.45
-            # (Language), §8.66 (IMEISV) and §8.108 (Battery State).
-            # Both the comprehension-required (bit 8 set) and
+            # PROVIDE LOCAL INFORMATION terminal-response items, with
+            # the tag values of TS 101 220 v19 Table 7.23: Location
+            # Information '13' (TS 102 223 v18.3 §8.19), IMEI '14'
+            # (§8.20), Date-Time and Time zone '26' (§8.39), Language
+            # '2D' (§8.45), IMEISV '62' (§8.74) and Battery State '63'
+            # (§8.76). Both the comprehension-required (bit 8 set) and
             # comprehension-clear forms are accepted because some
             # terminals strip the CR bit.
             if tag_bytes in (b"\x13", b"\x93"):
@@ -3778,15 +3793,22 @@ class ToolkitLogic:
                 fields["language"] = value_bytes.decode("ascii", "ignore")
                 continue
             if tag_bytes in (b"\x62", b"\xE2"):
-                # 0x62/0xE2 multiplexes IMEISV (PROVIDE LOCAL
-                # INFORMATION qualifier 0x08) and Service
-                # Information (GET SERVICE INFORMATION). Stash both
-                # interpretations; the apply layer picks the right
-                # field based on the originating command.
+                # TS 101 220 v19 table 7.23: '62'/'E2' is the IMEISV tag
+                # (PROVIDE LOCAL INFORMATION qualifier '08'). The service
+                # objects have tags of their own and are read below.
                 fields["imeisv"] = value_bytes
-                fields["service_information"] = value_bytes
                 continue
-            if tag_bytes in (b"\x5C", b"\xDC") and len(value_bytes) > 0:
+            if tag_bytes in (b"\x41", b"\xC1"):
+                # TS 102 223 v18.3 §6.8.24: a successful GET SERVICE
+                # INFORMATION response carries the Service record (§8.63).
+                fields["service_record"] = value_bytes
+                continue
+            if tag_bytes in (b"\x45", b"\xC5"):
+                # §6.8.23: a successful SERVICE SEARCH response carries the
+                # Service availability object (§8.67).
+                fields["service_availability"] = value_bytes
+                continue
+            if tag_bytes in (b"\x63", b"\xE3") and len(value_bytes) > 0:
                 fields["battery_state"] = int(value_bytes[0])
                 continue
             if tag_bytes in (b"\x24", b"\xA4") and len(value_bytes) >= 1:
@@ -3805,10 +3827,6 @@ class ToolkitLogic:
                 # TS 102 223 §8.65 Service Record TLV (echoed in
                 # SERVICE SEARCH terminal responses).
                 fields["service_record"] = value_bytes
-                continue
-            if tag_bytes in (b"\x63", b"\xE3") and len(value_bytes) >= 1:
-                # TS 102 223 §8.67 Device Filter (search-side hint).
-                fields["device_filter"] = value_bytes
                 continue
             if tag_bytes in (b"\x29", b"\xA9"):
                 # TS 102 223 §8.46 AT Response (TR side of RUN AT
@@ -3879,6 +3897,22 @@ class ToolkitLogic:
                 # apply layer can disambiguate.
                 fields["item_identifier"] = int(value_bytes[0]) & 0xFF
                 continue
+
+        # TS 102 223 v18.3 §8.61 Access Technology carries tag '3F' /
+        # 'BF' (TS 101 220 v19 Table 7.23), whose bottom five bits hit
+        # the BER multi-byte-tag encoding, so the walker above cannot
+        # match it. Lift it out with the simple COMPREHENSION-TLV
+        # scanner, and only for the one request that can carry it, to
+        # keep the naive scan off every other terminal response.
+        details = bytes(fields.get("command_details_tlv", b"") or b"")
+        if (
+            len(details) == 5
+            and details[3] == PROVIDE_LOCAL_INFORMATION_COMMAND
+            and details[4] == 0x06
+        ):
+            access_technology_value = self._extract_simple_tlv(data, (0x3F, 0xBF))
+            if access_technology_value is not None and len(access_technology_value) >= 1:
+                fields["access_technology"] = bytes(access_technology_value)
         return fields
 
     def _parse_event_download(self, payload: bytes) -> dict[str, object] | None:
@@ -4047,6 +4081,11 @@ class ToolkitLogic:
             if offset + 1 >= len(data):
                 return None
             length = data[offset + 1]
+            if length >= 0x80:
+                # TS 101 220 §7.1.2 codes a length above 127 on three
+                # bytes ('81' xx). The one-byte assumption no longer
+                # holds, so fail closed rather than walk out of step.
+                return None
             value_start = offset + 2
             value_end = value_start + length
             if value_end > len(data):

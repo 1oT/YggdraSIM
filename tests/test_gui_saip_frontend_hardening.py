@@ -35,6 +35,23 @@ def _between(body: str, start_marker: str, end_marker: str) -> str:
     return body[start:end]
 
 
+def test_save_treats_the_browser_upload_label_as_no_location() -> None:
+    body = _body()
+    save = _between(
+        body,
+        "  async function saipRibbonSavePackage(",
+        "\n  // Generic multi-field ribbon modal.",
+    )
+
+    # ``upload:<name>`` names no file on disk: Save asks where to write
+    # instead of resolving the label against the server's working directory.
+    assert "function saipIsUploadSource(sourcePath)" in body
+    assert "/^upload:/i.test(" in body
+    assert 'if (saipIsUploadSource(outPath)) outPath = "";' in save
+    assert "var needsPicker = shiftToSaveAs || !outPath;" in save
+    assert save.index("saipIsUploadSource(outPath)") < save.index("var needsPicker")
+
+
 def test_browser_workbook_upload_uses_private_plugin_fields_and_two_size_checks() -> None:
     body = _body()
     route = _between(
@@ -251,7 +268,7 @@ def test_empty_saip_workbench_offers_a_direct_open_action() -> None:
     assert 'emptyTitle.textContent = "Open a SAIP package"' in active_slots
     assert 'openButton.textContent = "Open package"' in active_slots
     assert "saipRibbonOpenPackage(" in active_slots
-    assert "You can also drop a file anywhere in this workspace." in active_slots
+    assert "You can also drop one or more files anywhere in this workspace." in active_slots
     assert ".saip-placeholder-action:focus-visible" in css
 
 
@@ -422,3 +439,177 @@ def test_saip_focus_targets_and_names_remain_visible_and_usable() -> None:
     assert ".saip-val-code-cell:focus-within .saip-val-copy-btn" in validation_css
     assert ".saip-val-copy-btn:focus-visible" in validation_css
     assert "button.saip-chip:focus-visible" in typed_css
+
+
+def test_file_tree_containers_are_selectable_not_just_expandable() -> None:
+    node = _between(
+        _body(),
+        "  function saipBuildFileTreeNode(",
+        "\n  function saipExpandFileTreePath(",
+    )
+
+    # The caret owns expand/collapse so the row is free to select.
+    assert 'caret.addEventListener("click", function (event) {' in node
+    assert "event.stopPropagation();" in node
+    # A node with a createFCP row opens the detail pane whether or not it
+    # has children -- MF / DF / ADF used to fall into the toggle branch
+    # and were unreachable from the detail pane.
+    assert (
+        'row.addEventListener("click", function () {\n'
+        "        saipOpenFileRow(pkg, node.row, peList, detail, validation);"
+    ) in node
+    # Selecting a container must not shrink the expand target to a glyph.
+    assert 'row.addEventListener("dblclick", function (event) {' in node
+
+
+def test_directory_detail_hides_the_body_tabs_and_keeps_the_ef_preference() -> None:
+    detail = _between(
+        _body(),
+        "  function renderSaipFileDetail(",
+        "\n  function saipFileRenderHex(",
+    )
+
+    # mf / df / adf come back with body_size 0 and no decoded/records
+    # payload, so the Data and Template tabs have nothing to render.
+    assert 'var isContainer = fcpKind === "mf" || fcpKind === "df" || fcpKind === "adf";' in detail
+    assert "var tabData = isContainer ? null : mkTab(" in detail
+    assert "var hasTemplateTab = !isContainer && !!(" in detail
+    assert "if (tabData) tabs.appendChild(tabData);" in detail
+    # Containers track their own sub-tab so opening a folder does not
+    # reset the tab the operator chose for EFs.
+    assert (
+        'var tabStateKey = isContainer ? "activeContainerFileTab" : "activeFileTab";'
+    ) in detail
+    assert "pkg[tabStateKey] = id;" in detail
+
+
+def test_file_tree_kind_glyphs_do_not_reuse_the_caret_triangles() -> None:
+    body = _body()
+    caret = _between(
+        body, 'caret.className = "saip-file-caret saip-file-caret--toggle";',
+        'caret.setAttribute("aria-hidden", "true");',
+    )
+    assert 'caret.textContent = collapsed ? "▶" : "▼";' in caret
+    glyphs = _between(
+        body, "function saipFileGlyph(kind) {", "async function saipLoadShowPe("
+    )
+    # The DF glyph used to be ▼, which sat right beside the ▶ / ▼ caret
+    # and read as a second, dead disclosure control on every directory.
+    for triangle in ("▶", "▼", "◀", "▲", "▸", "▾"):
+        assert triangle not in glyphs
+    assert 'if (kind === "df") return "■";' in glyphs
+
+
+def test_pe_export_dialog_writes_the_pe_document_by_default() -> None:
+    body = _body()
+    helpers = _between(
+        body, "  // Single-PE files.", "\n  async function saipRibbonExportPe("
+    )
+    assert 'var SAIP_PE_EXPORT_EXTS = { json: ".pe.json", der: ".der", hex: ".hex" };' in helpers
+    assert "function saipPeExportBaseName(pkg, idx)" in helpers
+    assert "function saipPeExportFormatForPath(pathValue, fallback)" in helpers
+    export = _between(
+        body, "  async function saipRibbonExportPe(", "\n  async function saipRibbonMovePe("
+    )
+    assert 'default: "json"' in export
+    assert "saveFilename: baseName + SAIP_PE_EXPORT_EXTS.json" in export
+    # The destination's extension names the format; the select is the seed.
+    assert "var format = saipPeExportFormatForPath(outPath, selected);" in export
+    assert "format: format," in export
+    # Template sessions choose between keeping the literals and substituting.
+    assert "if (templateSession) inputs.resolve_variables = !!result.values.resolve_variables;" in export
+    assert 'saipEmitPeIoWarnings("saip.export_pe", d);' in export
+
+
+def test_pe_import_dialog_accepts_pe_documents_and_relays_warnings() -> None:
+    body = _body()
+    imported = _between(
+        body, "  async function saipRibbonImportPe(", "\n  // Single-PE files."
+    )
+    assert '"PE document (*.pe.json;*.json)",' in imported
+    assert '"PE bytes (*.der;*.asn;*.asn1;*.txt;*.hex)",' in imported
+    assert 'saipEmitPeIoWarnings("saip.import_pe", resp.data);' in imported
+    assert "pkg.peCount = resp.data.pe_count;" in imported
+
+
+def test_fcp_editor_applies_a_row_on_enter_and_ctrl_enter() -> None:
+    body = _body()
+    editor = _between(
+        body,
+        "    _SAIP_EDIT_FIELDS.forEach(function (spec) {",
+        "    fcpCard.appendChild(editTable);",
+    )
+
+    # Plain Enter in a text or number input of the row is the Apply button
+    # (a select and a checkbox keep it); Ctrl/Cmd+Enter applies from any
+    # control of the row, the chord every workbench editor takes.
+    assert 'if (ev.key !== "Enter" || ev.shiftKey || ev.altKey) return;' in editor
+    assert "if (ev.ctrlKey || ev.metaKey) {\n          if (!saipEventTargetIsEditable(el)) return;" in editor
+    assert 'if (el.tagName !== "INPUT") return;' in editor
+    assert 'if (el.type === "checkbox" || el.type === "hidden") return;' in editor
+    assert "applyButton.click();" in editor
+    assert "applyButton = btn;" in editor
+    assert editor.index("td2.addEventListener(\"keydown\"") < editor.index("applyButton = btn;")
+
+
+def test_fcp_pin_status_row_reads_the_pin_status_member() -> None:
+    body = _body()
+    fields = _between(body, "  var _SAIP_EDIT_FIELDS = [", "  ];")
+
+    assert 'row: "pin_status_template"' in fields
+    assert 'row: "details"' not in fields
+
+
+def test_fcp_editor_carries_the_life_cycle_state_row() -> None:
+    body = _body()
+    fields = _between(body, "  var _SAIP_EDIT_FIELDS = [", "  ];")
+
+    # TCA SAIP v3.4.1 §8.3.2 ``Fcp.lcsi`` (DEFAULT '05'H, optional for every
+    # file kind on pages 30 and 46); TS 102 221 §11.1.1.4.9 tag '8A'. The
+    # row sits where both FCP orders put it: right before the security
+    # attributes.
+    assert 'sub: "lcsi"' in fields
+    assert 'row: "lcsi"' in fields
+    assert fields.index('sub: "lcsi"') < fields.index('sub: "securityAttributesReferenced"')
+    lcsi_row = _between(fields, 'sub: "lcsi"', 'sub: "securityAttributesReferenced"')
+    for kind in ("mf", "adf", "df", '"ef-t"', '"ef-lf"', '"ef-cy"', '"ef-ber"', "link"):
+        assert kind + ': "O"' in lcsi_row
+
+    # The state the byte encodes is shown beside the hex and follows the
+    # input while the operator types, the way the EF.ARR record chip does.
+    editor = _between(
+        body,
+        "    _SAIP_EDIT_FIELDS.forEach(function (spec) {",
+        "    fcpCard.appendChild(editTable);",
+    )
+    assert 'if (spec.sub === "lcsi") {' in editor
+    assert "saipDecodeLcsi(input.value)" in editor
+    assert 'input.addEventListener("input", refreshStateChip);' in editor
+
+
+def test_security_attrs_record_is_shown_in_decimal_and_hex() -> None:
+    body = _body()
+
+    assert "function saipArrRecordLabel(record)" in body
+    assert "function saipSecurityAttrsRecordChip(hexValue)" in body
+    resolver = _between(
+        body,
+        "  function saipResolveSecurityAttrsRef(hexValue, fcp, accessRule) {",
+        "  function saipDeriveEfSize(fcp, fileKind) {",
+    )
+    assert "saipArrRecordLabel(bytes[2])" in resolver
+    assert "saipArrRecordLabel(bytes[0])" in resolver
+    assert '" · record " + bytes[' not in resolver
+    block = _between(
+        body,
+        "  function saipBuildAccessRuleBlock(info) {",
+        "    var rules = Array.isArray(info.rules) ? info.rules : [];",
+    )
+    assert block.count("saipArrRecordLabel(info.record)") == 2
+    editor = _between(
+        body,
+        "    _SAIP_EDIT_FIELDS.forEach(function (spec) {",
+        "    fcpCard.appendChild(editTable);",
+    )
+    assert 'if (spec.sub === "securityAttributesReferenced") {\n          // The record' in editor
+    assert 'input.addEventListener("input", refreshRecordChip);' in editor

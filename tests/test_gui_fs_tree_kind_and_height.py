@@ -25,6 +25,7 @@ Two issues are covered:
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -38,6 +39,16 @@ _APP_CSS = _REPO / "yggdrasim_common" / "gui_server" / "static" / "app.css"
 # ----------------------------------------------------------------------
 # Backend: classifier
 # ----------------------------------------------------------------------
+
+
+def _condensed(text: str) -> str:
+    """Source with every run of whitespace removed.
+
+    These assertions look for a construct in a module's source, and that
+    module's formatting is not what they are testing. Comparing condensed
+    text keeps a reformat from reading as a behaviour change.
+    """
+    return re.sub(r"\s+", "", text)
 
 
 class FsControllerKindClassifier(unittest.TestCase):
@@ -62,7 +73,7 @@ class FsControllerKindClassifier(unittest.TestCase):
         self.assertEqual(self.fn("ADF.ISIM"), "adf")
 
     def test_df_dot_prefix_returns_df(self) -> None:
-        # DF.TELECOM was the worst-affected entry — the entire
+        # DF.TELECOM was the worst-affected entry -- the entire
         # /MF/DF.TELECOM subtree (PHONEBOOK, MSISDN, SMS, ...) was
         # rendered with EF badges.
         self.assertEqual(self.fn("DF.TELECOM"), "df")
@@ -91,7 +102,7 @@ class FsControllerKindClassifier(unittest.TestCase):
 
     def test_lowercase_input_is_normalised(self) -> None:
         # fids.txt entries are uppercased before classification, but
-        # we should not crash on lowercase input — the classifier has
+        # we should not crash on lowercase input -- the classifier has
         # to cope with hand-rolled callers too.
         self.assertEqual(self.fn("adf_usim"), "adf")
         self.assertEqual(self.fn("df.telecom"), "df")
@@ -109,16 +120,18 @@ class FsControllerScanTreeKindWiring(unittest.TestCase):
         text = _FS_PY.read_text(encoding="utf-8")
         # Root entry is the literal MF dict embedded in scan_tree.
         # Every field on it has to be present + have the new kind="mf".
-        self.assertIn('"name":"MF"', text)
-        self.assertIn('"kind":"mf"', text)
+        self.assertIn(_condensed('"name": "MF"'), _condensed(text))
+        self.assertIn(_condensed('"kind": "mf"'), _condensed(text))
 
     def test_live_scan_entry_includes_kind_field(self) -> None:
         text = _FS_PY.read_text(encoding="utf-8")
         # Recursive descendant collector calls the classifier with the
         # node's name + has_children so DF.TELECOM / ADF.USIM / etc.
         # land with the right kind.
-        self.assertIn("self ._classify_tree_node_kind (", text)
-        self.assertIn("has_children =bool (node .get ('children')),", text)
+        self.assertIn(_condensed("self._classify_tree_node_kind("), _condensed(text))
+        self.assertIn(
+            _condensed('has_children=bool(node.get("children")),'), _condensed(text)
+        )
 
 
 # ----------------------------------------------------------------------
@@ -203,18 +216,26 @@ class FrontendTreePanelLayout(unittest.TestCase):
     def test_tree_max_height_is_viewport_relative(self) -> None:
         # Old code: ``max-height: 460px`` flat. New behaviour: cap to
         # window height minus dock + ribbon room so taller monitors
-        # actually use the available real estate.
-        self.assertIn("max-height: calc(100vh - 280px);", self.css)
+        # actually use the available real estate. The reserve is a
+        # custom property so a denser ribbon can retune it in one place;
+        # the fallback carries the height the flat cap was replaced with.
+        block_start = self.css.find(".cc-tree {")
+        self.assertGreaterEqual(block_start, 0)
+        block = self.css[block_start : self.css.find("}", block_start)]
+        self.assertIn(
+            "max-height: calc(100vh - var(--scp03-pane-reserve, 280px));",
+            block,
+        )
 
     def test_tree_min_height_floor_is_present(self) -> None:
-        # A short window must still show a usable tree height — pick
+        # A short window must still show a usable tree height -- pick
         # a 360px floor so even half-screen Ubuntu tile mode is OK.
         self.assertIn("min-height: 360px;", self.css)
 
     def test_tree_no_longer_caps_at_460px(self) -> None:
         # Defensive: re-introducing the old cap silently hides nodes
         # below the fold. The 460px line was the only ``max-height``
-        # for ``.cc-tree`` — make sure nobody re-added it.
+        # for ``.cc-tree`` -- make sure nobody re-added it.
         block_start = self.css.find(".cc-tree {")
         self.assertGreaterEqual(block_start, 0)
         block_end = self.css.find("}", block_start)

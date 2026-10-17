@@ -97,7 +97,7 @@ def _format_value_preview(flag: env_flags.EnvFlag, value_text: str, *, max_width
             return f"{_color('BROWN')}off ({value}){_color('ENDC')}"
     if len(value) <= max_width:
         return value
-    return value[: max_width - 1] + "…"
+    return value[: max_width - 1] + "..."
 
 
 def _render_header(title: str) -> None:
@@ -143,7 +143,7 @@ def _render_persistence_marker(flag: env_flags.EnvFlag) -> str:
 
 def _render_category_detail(category: str) -> list[env_flags.EnvFlag]:
     flags = env_flags.flags_by_category(category)
-    _render_header(f"Environment Flags — {category}")
+    _render_header(f"Environment Flags -- {category}")
     if len(flags) == 0:
         print(f"{_color('WARNING')}(no flags registered in this category){_color('ENDC')}")
         return list(flags)
@@ -363,7 +363,7 @@ def _browse_category(category: str) -> None:
 
 
 def _dump_export_lines() -> None:
-    _render_header("Active Flags — Shell Export Lines")
+    _render_header("Active Flags -- Shell Export Lines")
     lines = env_flags.dump_export_lines()
     if len(lines) == 0:
         print(f"{_color('WHITE')}(no YGGDRASIM_* variables currently set){_color('ENDC')}")

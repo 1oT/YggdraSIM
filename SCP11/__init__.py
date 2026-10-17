@@ -24,8 +24,10 @@ __all__ = [
 def __getattr__(name):
     if name == "SGPConfig":
         from .live.config import SGPConfig
+
         return SGPConfig
     if name == "SGP22Orchestrator":
         from .live.orchestrator import SGP22Orchestrator
+
         return SGP22Orchestrator
     raise AttributeError(name)

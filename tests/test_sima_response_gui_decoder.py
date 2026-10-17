@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,7 +19,8 @@ def test_sima_response_frontend_renderer_hooks() -> None:
 
     assert "renderSimaResponseResult" in command_js
     assert 'kind === "sima_response"' in command_js
-    assert "SIMa final result" in command_js
+    # The card is headed by the type's own name, EUICCResponse.
+    assert '"EUICCResponse status"' in command_js
     assert ".cc-sima-summary" in tlv_css
     assert ".cc-sima-result-chip--failure" in tlv_css
 

@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Tests for SCP11/providers.py public utilities.
+"""Tests for SCP11/live/providers.py public utilities.
 
 Covers: Sgp26LocalProvider.load_certificate_chain (empty-paths path),
         Sgp26LocalProvider.decode_b64_to_bytes,
@@ -14,7 +13,7 @@ from __future__ import annotations
 import unittest
 
 try:
-    from SCP11.providers import RemoteEs9Provider, Sgp26LocalProvider
+    from SCP11.live.providers import RemoteEs9Provider, Sgp26LocalProvider
     _IMPORT_OK = True
 except (ImportError, ModuleNotFoundError):
     _IMPORT_OK = False
@@ -23,7 +22,7 @@ _SKIP = unittest.skipUnless(_IMPORT_OK, "SCP11 deps not installed")
 
 
 # ---------------------------------------------------------------------------
-# Sgp26LocalProvider.decode_b64_to_bytes  (static — no deps)
+# Sgp26LocalProvider.decode_b64_to_bytes  (static -- no deps)
 # ---------------------------------------------------------------------------
 
 @_SKIP
@@ -48,7 +47,7 @@ class DecodeB64ToBytesTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Sgp26LocalProvider.load_certificate_chain — empty-paths path
+# Sgp26LocalProvider.load_certificate_chain -- empty-paths path
 # ---------------------------------------------------------------------------
 
 @_SKIP

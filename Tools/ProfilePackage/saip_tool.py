@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP tool bridge: GUI-facing adapter over the pySim saip_tool subprocess.
 
 ``SaipToolBridge`` owns the workspace state (current input file, default
@@ -702,7 +701,7 @@ class SaipToolBridge:
         Resolution order: absolute / home-relative → workspace-relative with
         bare-name fallback to ``default_profile_dir`` → workspace root.
         Raises ``FileNotFoundError`` when ``must_exist=True`` and the path
-        does not exist.  Does NOT enforce the workspace sandbox boundary —
+        does not exist.  Does NOT enforce the workspace sandbox boundary --
         use ``resolve_workspace_path`` for that.
         """
         raw_value = str(path_text or "").strip()
@@ -792,9 +791,9 @@ class SaipToolBridge:
         """Decode the current profile package in-process via pySim and return a document dict.
 
         ``mode`` selects the output shape:
-        - ``"all_pe"`` — one section per PE in sequence order.
-        - ``"all_pe_by_type"`` — one section per PE type (list of decoded dicts).
-        - ``"all_pe_by_naa"`` — grouped by NAA (Network Access Application).
+        - ``"all_pe"`` -- one section per PE in sequence order.
+        - ``"all_pe_by_type"`` -- one section per PE type (list of decoded dicts).
+        - ``"all_pe_by_naa"`` -- grouped by NAA (Network Access Application).
 
         Raises ``RuntimeError`` when the pySim source tree is not found, or
         ``ValueError`` on parse failure or unsupported mode.
@@ -1067,7 +1066,7 @@ class SaipToolBridge:
           report them).
         * YggdraSIM-native ``{NAME}`` / ``[NAME]`` placeholders present
           (means the file is a JSON-style template mis-saved as hex
-          text — point at ``APPLY-TEMPLATE``).
+          text -- point at ``APPLY-TEMPLATE``).
         * Anything else: the historical terse diagnostic.
         """
         typed_matches = [match.group(0) for match in iter_inline_placeholders(raw_text)]

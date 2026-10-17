@@ -202,7 +202,7 @@ class PeerThrottleTests(unittest.TestCase):
         throttle = _PeerThrottle(failures=3, window_seconds=10.0, lockout_seconds=60.0)
         throttle.record_failure("192.0.2.4", now=100.0)
         throttle.record_failure("192.0.2.4", now=101.0)
-        # Third failure 30s later — outside the 10s window, so the
+        # Third failure 30s later -- outside the 10s window, so the
         # earlier ones must be evicted and this should not lock out.
         self.assertFalse(throttle.record_failure("192.0.2.4", now=130.0))
 

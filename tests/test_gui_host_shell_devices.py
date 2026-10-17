@@ -24,7 +24,7 @@ def _make_dev_layout(root: Path) -> None:
     (root / "ttyS0").write_bytes(b"")
     by_id = root / "serial" / "by-id"
     by_id.mkdir(parents=True, exist_ok=True)
-    # symlink targeting the flat ttyUSB0 — the enumerator should
+    # symlink targeting the flat ttyUSB0 -- the enumerator should
     # de-duplicate so the same canonical path doesn't appear twice.
     (by_id / "usb-Quectel_EG25-G-if02-port0").symlink_to(root / "ttyUSB0")
 

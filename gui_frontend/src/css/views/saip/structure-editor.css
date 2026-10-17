@@ -1,0 +1,374 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+
+/* ---- Fields of a profile element -------------------------------------
+   Every member the SAIP ASN.1 module gives the element, nested as the
+   module nests them. A constructed member folds; an absent one is muted
+   until a value lands in it. */
+
+.saip-structure-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.saip-structure-node {
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+  margin: 2px 0;
+}
+
+.saip-structure-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 3px 4px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: var(--radius-sm);
+}
+
+.saip-structure-head:hover {
+  background: var(--bg-hover);
+}
+
+.saip-structure-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.saip-structure-head::-webkit-details-marker {
+  display: none;
+}
+
+.saip-structure-head::before {
+  content: "▸";
+  display: inline-block;
+  color: var(--fg-muted);
+  transition: transform var(--transition-fast);
+}
+
+.saip-structure-node[open] > .saip-structure-head::before {
+  transform: rotate(90deg);
+}
+
+.saip-structure-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 12px;
+}
+
+.saip-structure-row {
+  padding: 3px 4px;
+}
+
+/* A leaf or an absent member: label, value, actions on one line, so the
+   inputs of one level line up whatever the member names; in a narrow pane
+   the value and the actions wrap under the label instead of leaving it. */
+.saip-structure-leaf,
+.saip-structure-absent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.saip-structure-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  flex: 0 0 38%;
+  min-width: min(150px, 100%);
+}
+
+/* A leaf whose value is a list of flags: the label stays level with the
+   first row instead of the middle of the list. */
+.saip-structure-leaf--list {
+  align-items: flex-start;
+}
+
+.saip-structure-leaf--list > .saip-structure-label {
+  padding-top: 4px;
+}
+
+.saip-structure-value {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.saip-structure-value .saip-form-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font-family: var(--mono);
+}
+
+.saip-structure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.saip-structure-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.saip-structure-choice .saip-form-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.saip-structure-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.saip-structure-type {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.saip-structure-meta {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.saip-structure-absent .saip-structure-name {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--fg-muted);
+}
+
+/* A value the member was added with rather than one the operator chose. */
+.saip-structure-placeholder {
+  font-size: 10px;
+  padding: 0 6px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-pill);
+  background: var(--warn-soft);
+  color: var(--fg);
+}
+
+.saip-structure-status {
+  margin: 0;
+}
+
+/* Edits pySim cannot build yet: the reason beside Discard draft. */
+.saip-structure-draft {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.saip-structure-draft-text {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.saip-field-tree-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.saip-structure-absent-group > .saip-structure-head .saip-structure-name {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--fg-muted);
+}
+
+/* The decoded reading of the bytes, and a value refused before it left. */
+.saip-structure-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.saip-structure-error {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fail);
+}
+
+.saip-structure-select,
+.saip-structure-access {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.saip-structure-select .saip-form-select,
+.saip-structure-access > .saip-form-select {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.saip-structure-custom {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+/* A file descriptor's structure, Shareable box and record length on one
+   wrapping line. The bit fields list one field per row instead
+   (.saip-structure-flags, flag-rows.css). */
+.saip-structure-bits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+/* An access domain's key bits go below its parameter list, full width. */
+.saip-structure-access > .saip-structure-flags {
+  flex: 1 0 100%;
+}
+
+.saip-structure-bit,
+.saip-structure-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.saip-structure-number {
+  width: 6em;
+}
+
+.saip-structure-decoded {
+  margin: 4px 0 6px 12px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+/* A security domain's privileges: a grid of chips across the full width
+   under the member's name, the held ones lit, under a count of them. The
+   chip is the label of a check box kept out of sight but focusable. The
+   AID directory's security-domain cards show the same grid read-only, as
+   plain chips without the pointer or the hover (applications-tab-cards.css
+   holds the card around it). */
+.saip-structure-leaf--grid > .saip-structure-value {
+  flex-basis: 100%;
+}
+
+.saip-priv-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 4px;
+}
+
+.saip-priv-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-priv-count::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.saip-priv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
+}
+
+.saip-priv-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: 12px;
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+/* :where() keeps the hover below .is-on, so a held chip keeps its accent. */
+.saip-priv-chip:where(label) {
+  cursor: pointer;
+}
+
+.saip-priv-chip:where(label):hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.saip-priv-chip.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.saip-priv-chip:has(> .saip-priv-box:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.saip-priv-grid .saip-priv-chip > input.saip-priv-box {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.saip-priv-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.saip-priv-chip.is-on .saip-priv-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.saip-priv-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

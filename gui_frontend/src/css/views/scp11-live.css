@@ -86,7 +86,7 @@
   background-color: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   width: min(320px, 100%);
   min-width: 0;
   max-width: 100%;
@@ -128,7 +128,7 @@
   padding: 10px 12px;
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.4;
@@ -147,7 +147,7 @@
   padding: 8px 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   min-height: 44px;
   max-width: 100%;
   overflow-x: auto;
@@ -219,7 +219,7 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-left-width: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .scp03-apdu-result--ok {

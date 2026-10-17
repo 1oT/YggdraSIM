@@ -26,6 +26,7 @@ import pytest
 from yggdrasim_common.gui_server.actions.saip import (
     _APP_FRIENDLY_TYPES,
     _APP_PE_TYPES,
+    _GP_PRIVILEGE_BITS,
     _SD_PE_TYPES,
     _decode_gp_lifecycle,
     _decode_gp_privileges,
@@ -91,7 +92,7 @@ class TestPrivilegeDecoder:
         assert result == {"hex": "", "names": [], "byte_count": 0}
 
     def test_odd_length_input_is_rejected_silently(self) -> None:
-        # Odd hex lengths can't decode to bytes — emit empty rather
+        # Odd hex lengths can't decode to bytes -- emit empty rather
         # than raising so a malformed package doesn't kill list_applications.
         result = _decode_gp_privileges("a0c")
         assert result["names"] == []
@@ -111,7 +112,7 @@ class TestPrivilegeDecoder:
         assert result["names"] == ["Card Lock", "Card Terminate"]
 
     def test_three_byte_isd_canonical(self) -> None:
-        # 82DC20 — the canonical ISD-R privilege set in the in-tree
+        # 82DC20 -- the canonical ISD-R privilege set in the in-tree
         # reference profile. The result must enumerate the eight
         # GP 2.3 Table 6-1 flags in spec order.
         result = _decode_gp_privileges("82DC20")
@@ -137,6 +138,17 @@ class TestPrivilegeDecoder:
         result = _decode_gp_privileges(" 82-DC:20 ")
         assert result["names"][0] == "Security Domain"
 
+    def test_the_bits_are_the_named_rows_of_the_shared_catalogue(self) -> None:
+        # GP Card Spec v2.3.1 Tables 11-8 and 11-9 (page 149): privilege 10
+        # is Token Management, privilege 20 Self-Removal. The AID directory
+        # names a bit as the PE editors do; only the RFU bits stay out.
+        from Tools.ProfilePackage.saip_security_domain_decode import _PRIVILEGE_FLAGS
+
+        named = tuple(row for row in _PRIVILEGE_FLAGS if not row[2].startswith("RFU"))
+        assert _GP_PRIVILEGE_BITS == named
+        assert _decode_gp_privileges("002000")["names"] == ["Token Management"]
+        assert _decode_gp_privileges("000008")["names"] == ["Self-Removal"]
+
 
 # ---------------------------------------------------------------------
 # Lifecycle decoder
@@ -147,7 +159,7 @@ class TestLifecycleDecoder:
     def test_empty_input(self) -> None:
         assert _decode_gp_lifecycle("", "securityDomain") == {
             "hex": "",
-            "label": "—",
+            "label": "--",
             "category": "",
         }
 
@@ -166,7 +178,7 @@ class TestLifecycleDecoder:
         assert result["label"] == "(unknown)"
 
     def test_pe_type_case_is_normalised(self) -> None:
-        # The PE type comes from pySim verbatim — accept ``securityDomain``
+        # The PE type comes from pySim verbatim -- accept ``securityDomain``
         # (camelCase), ``securitydomain``, and ``MNO-SD`` interchangeably.
         for variant in ("securityDomain", "securitydomain", "MNO-SD", "mnoSD"):
             assert _decode_gp_lifecycle("0F", variant)["category"] == "sd"
@@ -245,13 +257,17 @@ class TestDispatchListApplications:
     def test_rfm_row_falls_back_to_top_level_aid(self, saip_session) -> None:
         result = _dispatch_list_applications(None, session_id=saip_session.id)
         rfm_row = next(r for r in result["rows"] if r["pe_type"].lower() == "rfm")
-        # RFM doesn't nest its instanceAID under ``instance`` — the
+        # RFM doesn't nest its instanceAID under ``instance`` -- the
         # dispatcher must fall through to the top-level read.
         assert rfm_row["instance_aid"] != ""
         assert rfm_row["instance_aid"].startswith("A0000005591010")
         # TAR list is RFM/RAM-specific surface.
         assert rfm_row["tar_list"] == ["B00001"]
         assert rfm_row["friendly_type"] == "Remote File Mgmt"
+        # The reference RFM is bound to ADF.USIM (TCA SAIP v3.4.1 section 8.8).
+        assert rfm_row["rfm_scope"] == "ADF A0000000871002FF34FF0789312E30FF"
+        sd_row = next(r for r in result["rows"] if r["pe_type"].lower() == "securitydomain")
+        assert sd_row["rfm_scope"] == ""
 
     def test_session_kind_unrelated_to_app_count(self, saip_session) -> None:
         # Defensive: opening list_applications twice on the same session

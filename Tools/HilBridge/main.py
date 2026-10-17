@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge package entry point."""
 from __future__ import annotations
 
@@ -52,6 +51,18 @@ def add_bridge_runtime_arguments(
         default=0,
         help="Bind port for the local APDU relay. Use 0 to auto-select a free port.",
     )
+    parser.add_argument(
+        "--apdu-relay-token-file",
+        type=str,
+        default="",
+        help=(
+            "Path to a 0600-mode bearer-token file guarding the bridge's own "
+            "APDU relay. Read when it exists and generated when it does not. "
+            "Required in effect for a non-loopback --apdu-relay-host, which "
+            "the relay refuses to serve unauthenticated; a loopback bind "
+            "without this flag stays unauthenticated as before."
+        ),
+    )
     parser.add_argument("--no-apdu-relay", action="store_true", help="Disable the local APDU relay side-channel")
     parser.add_argument("--reader-index", type=int, default=0, help="PC/SC reader index to use")
     parser.add_argument(
@@ -83,6 +94,17 @@ def add_bridge_runtime_arguments(
             "Path to a 0600-mode bearer-token file matching the token "
             "the remote 'yggdrasim-card-bridge' wrote on startup. "
             "Mirrors YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE."
+        ),
+    )
+    parser.add_argument(
+        "--remote-card-lease-file",
+        type=str,
+        default="",
+        help=(
+            "Path to a 0600-mode file holding the card lease this bridge "
+            "presents to the remote relay. Written by the supervisor when "
+            "the relay grants a lease; absent when it grants none, which "
+            "is not an error. Mirrors YGGDRASIM_HIL_REMOTE_CARD_LEASE_FILE."
         ),
     )
     parser.add_argument(
@@ -165,9 +187,15 @@ def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
         apdu_relay_host=str(args.apdu_relay_host),
         apdu_relay_port=int(args.apdu_relay_port),
         apdu_relay_enabled=not bool(args.no_apdu_relay),
+        apdu_relay_token_file=str(
+            getattr(args, "apdu_relay_token_file", "") or ""
+        ).strip(),
         reader_index=int(args.reader_index),
         reader_name=str(args.reader_name or ""),
         remote_card_url=str(getattr(args, "remote_card_url", "") or "").strip(),
+        remote_card_lease_file=str(
+            getattr(args, "remote_card_lease_file", "") or ""
+        ).strip(),
         remote_card_token_file=str(
             getattr(args, "remote_card_token_file", "") or ""
         ).strip(),

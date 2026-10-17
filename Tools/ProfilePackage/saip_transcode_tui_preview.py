@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Resolved-preview rendering for the transcode TUI.
 
 The preview expands every ``{NAME}``/``{#NAME}`` placeholder inside tagged
@@ -152,10 +151,10 @@ def format_preview_banner(undefined_paths: dict[str, set[str]]) -> str:
     """Return a short status banner summarising unresolved placeholders."""
 
     if len(undefined_paths) == 0:
-        return "Resolved preview (read-only) — all placeholders expanded."
+        return "Resolved preview (read-only) -- all placeholders expanded."
     names = ", ".join(sorted(undefined_paths.keys()))
     return (
-        "Resolved preview (read-only) — unresolved tokens: "
+        "Resolved preview (read-only) -- unresolved tokens: "
         + names
         + ". Define them under __ygg_token_defs__ (Ctrl+K) or via APPLY-TOKENS."
     )
@@ -171,11 +170,11 @@ def find_placeholder_locations(text: str) -> list[dict[str, Any]]:
 
     Each entry is a dictionary with:
 
-    * ``start`` / ``end``   — 0-based absolute character offsets (Python slice).
-    * ``line`` / ``column`` — 1-based editor coordinates for ``start``.
-    * ``name``              — token name (without braces or ``#``).
-    * ``is_length``         — ``True`` for ``{#NAME}`` / ``[#NAME]``.
-    * ``style``             — ``"brace"`` or ``"bracket"``.
+    * ``start`` / ``end``   -- 0-based absolute character offsets (Python slice).
+    * ``line`` / ``column`` -- 1-based editor coordinates for ``start``.
+    * ``name``              -- token name (without braces or ``#``).
+    * ``is_length``         -- ``True`` for ``{#NAME}`` / ``[#NAME]``.
+    * ``style``             -- ``"brace"`` or ``"bracket"``.
     """
 
     if isinstance(text, str) is False or len(text) == 0:

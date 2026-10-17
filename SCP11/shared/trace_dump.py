@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 trace dump helpers: render card-bound payloads and STORE DATA chunk plans."""
 from __future__ import annotations
 
@@ -13,6 +12,7 @@ from yggdrasim_common.process_debug import is_global_debug_enabled
 from yggdrasim_common.terminal_output import colorize_hex_dump_line
 from yggdrasim_common.terminal_output import should_use_color
 from yggdrasim_common.terminal_output import status_print as print
+from SCP11.shared.ber_tlv import decode_object_identifier
 
 try:
     from SCP03.logic.euicc_info2 import build_euicc_info2_detail_lines
@@ -73,6 +73,97 @@ _TAG_NAMES: dict[str, str] = {
     "9F67": "fallbackAllowed",
     "9F70": "profileState",
     "9F7B": "eCallIndication",
+}
+
+
+# SGP.32 §2.11.1.1 EuiccPackage ::= CHOICE { psmoList [0], ecoList [1] }.
+# Psmo and Eco reuse the same context numbers, so only the enclosing list
+# alternative decides what a command tag means.
+_EUICC_PACKAGE_LIST_NAMES: dict[str, str] = {
+    "A0": "psmoList",
+    "A1": "ecoList",
+}
+
+_PSMO_COMMAND_NAMES: dict[str, str] = {
+    "A3": "enable",
+    "A4": "disable",
+    "A5": "delete",
+    "A6": "getRAT",
+    "A7": "configureImmediateEnable",
+    "A8": "setFallbackAttribute",
+    "A9": "unsetFallbackAttribute",
+    "BF2D": "listProfileInfo",
+    "BF65": "setDefaultDpAddress",
+}
+
+_ECO_COMMAND_NAMES: dict[str, str] = {
+    "A8": "addEim",
+    "A9": "deleteEim",
+    "AA": "updateEim",
+    "AB": "listEim",
+}
+
+# SGP.32 v1.3 section 2.11.1.1.1 EimConfigurationData: eimPublicKeyData [5] and
+# trustedPublicKeyDataTls [6] are each CHOICE { SubjectPublicKeyInfo, Certificate }
+# under AUTOMATIC TAGS, so the alternatives travel as the implicit 'A0' / 'A1'
+# with the SEQUENCE tag of the key material replaced.
+_EIM_KEY_MATERIAL_CHOICE_NAMES: dict[str, dict[str, str]] = {
+    "A5": {"A0": "eimPublicKey", "A1": "eimCertificate"},
+    "A6": {"A0": "trustedEimPkTls", "A1": "trustedCertificateTls"},
+}
+
+# SGP.32 §2.11.2.1 EuiccPackageResult ::= CHOICE.
+_EUICC_PACKAGE_RESULT_NAMES: dict[str, str] = {
+    "A0": "euiccPackageResultSigned",
+    "A1": "euiccPackageErrorSigned",
+    "A2": "euiccPackageErrorUnsigned",
+}
+
+# SGP.32 v1.3 §2.11.2.1 EuiccPackageResultDataSigned and
+# EuiccPackageErrorDataSigned. Their fields carry tags in the ASN.1 text, so
+# euiccResult travels as a plain SEQUENCE and euiccPackageErrorCode as a plain
+# INTEGER. '83' here is the result's sequence number, not a counter.
+_EUICC_PACKAGE_RESULT_DATA_NAMES: dict[str, str] = {
+    "80": "eimId",
+    "81": "counterValue",
+    "82": "eimTransactionId",
+    "83": "seqNumber",
+    "30": "euiccResult",
+}
+
+_EUICC_PACKAGE_ERROR_DATA_NAMES: dict[str, str] = {
+    "80": "eimId",
+    "81": "counterValue",
+    "82": "eimTransactionId",
+    "02": "euiccPackageErrorCode",
+}
+
+# EuiccPackageErrorUnsigned; euiccPackageUnsignedErrorCode [15] is new in v1.3.
+_EUICC_PACKAGE_ERROR_UNSIGNED_NAMES: dict[str, str] = {
+    "80": "eimId",
+    "82": "eimTransactionId",
+    "84": "associationToken",
+    "8F": "euiccPackageUnsignedErrorCode",
+}
+
+# EuiccResultData alternatives. AUTOMATIC TAGS keeps an INTEGER result
+# primitive, so the Psmo and Eco numbers that collide on the command side
+# stay distinguishable here (setFallbackAttributeResult is '8D', addEimResult
+# is the constructed 'A8').
+_EUICC_RESULT_DATA_NAMES: dict[str, str] = {
+    "02": "processingTerminated",
+    "83": "enableResult",
+    "84": "disableResult",
+    "85": "deleteResult",
+    "87": "configureImmediateEnableResult",
+    "89": "deleteEimResult",
+    "8A": "updateEimResult",
+    "8D": "setFallbackAttributeResult",
+    "8E": "unsetFallbackAttributeResult",
+    "A8": "addEimResult",
+    "AB": "listEimResult",
+    "BF2D": "listProfileInfoResult",
+    "BF65": "setDefaultDpAddressResult",
 }
 
 
@@ -592,13 +683,9 @@ def _collect_bit_string_material(value: bytes, summary: dict[str, Any]) -> None:
 
 
 def _count_certificate_objects(value: bytes) -> int:
-    root = _read_tlv_header(value, 0, len(value))
-    if root is None:
-        return 0
-    tag_start, tag_end, value_start, value_end, _ = root
-    tag = value[tag_start:tag_end]
-    child_value = value[value_start:value_end]
-    if value_end == len(value) and _looks_like_der_certificate(tag, child_value):
+    # An implicit [5] / [6] replaces the certificate's SEQUENCE tag, so the
+    # container value is the certificate contents themselves.
+    if _looks_like_certificate_contents(value):
         return 1
     count = 0
     for parsed in _iter_tlv_headers(value, 0, len(value)):
@@ -990,13 +1077,12 @@ def _append_tlv_decode_node(
 
     if constructed is False:
         return
+    if _looks_like_der_certificate(tag, value):
+        _append_certificate_paste(lines, line_indent, tag, value, max_lines=max_lines)
+        return
     if depth >= max_depth:
         if len(lines) < max_lines:
             lines.append(line_indent + "  <max decode depth reached>")
-        return
-    if _looks_like_der_certificate(tag, value):
-        if len(lines) < max_lines:
-            lines.append(line_indent + "  <X.509 certificate DER omitted>")
         return
 
     offset = value_start
@@ -1031,6 +1117,34 @@ def _append_tlv_decode_node(
         _append_decode_truncated_line(lines, indent, max_lines)
 
 
+def _append_certificate_paste(
+    lines: list[str],
+    line_indent: str,
+    tag: bytes,
+    value: bytes,
+    *,
+    max_lines: int,
+) -> None:
+    """Emit a certificate as one DER hex line instead of walking it.
+
+    Walking a certificate spends dozens of rows and meets the depth cap inside
+    the Name and Extensions SEQUENCEs, which then starves the fields that
+    follow it of the line budget. The operator needs the bytes, so the DER goes
+    out whole. An implicit context tag (SGP.32 v1.3 section 2.11.1.1.1
+    eimCertificate / trustedCertificateTls carry the Certificate contents under
+    'A1') is swapped back for the SEQUENCE tag so the line loads in X.509 tooling.
+    """
+    der = _wrap_ber_tlv(b"\x30", value)
+    note = f"<certificate DER, {len(der)} bytes"
+    if tag != b"\x30":
+        note += f", wire tag {tag.hex().upper()} shown as 30"
+    note += "; not walked>"
+    if len(lines) < max_lines:
+        lines.append(line_indent + "  " + note)
+    if len(lines) < max_lines:
+        lines.append(line_indent + "  " + der.hex().upper())
+
+
 def _append_decode_truncated_line(lines: list[str], indent: str, max_lines: int) -> None:
     marker = f"<decode truncated at {max_lines} lines>"
     if any(line.strip() == marker for line in lines):
@@ -1054,6 +1168,42 @@ def _display_name(tag_hex: str, path: tuple[str, ...]) -> str:
             "9F7B": "eCallIndication",
         }
         name = profile_names.get(tag_hex)
+        if name is not None:
+            return name
+    if path[-1:] == ("BF51",):
+        name = _EUICC_PACKAGE_RESULT_NAMES.get(tag_hex)
+        if name is not None:
+            return name
+    if path[-3:] == ("BF51", "A0", "30"):
+        name = _EUICC_PACKAGE_RESULT_DATA_NAMES.get(tag_hex)
+        if name is not None:
+            return name
+    if path[-3:] == ("BF51", "A1", "30"):
+        name = _EUICC_PACKAGE_ERROR_DATA_NAMES.get(tag_hex)
+        if name is not None:
+            return name
+    if path[-2:] == ("BF51", "A2"):
+        name = _EUICC_PACKAGE_ERROR_UNSIGNED_NAMES.get(tag_hex)
+        if name is not None:
+            return name
+    if path[-2:] == ("BF51", "30"):
+        name = _EUICC_PACKAGE_LIST_NAMES.get(tag_hex)
+        if name is not None:
+            return name
+    if path[-3:] == ("BF51", "30", "A0"):
+        name = _PSMO_COMMAND_NAMES.get(tag_hex)
+        if name is not None:
+            return name
+    if path[-3:] == ("BF51", "30", "A1"):
+        name = _ECO_COMMAND_NAMES.get(tag_hex)
+        if name is not None:
+            return name
+    if path[-4:] == ("BF51", "A0", "30", "30"):
+        name = _EUICC_RESULT_DATA_NAMES.get(tag_hex)
+        if name is not None:
+            return name
+    if len(path) >= 2 and path[-1] in _EIM_KEY_MATERIAL_CHOICE_NAMES and _inside_eim_configuration_data(path[:-1]):
+        name = _EIM_KEY_MATERIAL_CHOICE_NAMES[path[-1]].get(tag_hex)
         if name is not None:
             return name
     if _inside_eim_configuration_data(path):
@@ -1086,6 +1236,9 @@ def _inside_eim_configuration_data(path: tuple[str, ...]) -> bool:
         ("BF51", "30", "A1", "A8"),
         ("BF51", "30", "A1", "AA"),
     }:
+        return True
+    # listEimResult rows: BF51 / A0 / 30 / 30 / AB / A0 / 30.
+    if len(path) >= 3 and path[-3:] == ("AB", "A0", "30"):
         return True
     if len(path) >= 3 and path[-3:] == ("BF57", "A0", "30"):
         return True
@@ -1220,24 +1373,10 @@ def _format_eim_supported_protocol(value: bytes) -> str:
 
 
 def _decode_der_oid(value: bytes) -> str:
-    if len(value) == 0:
+    try:
+        return decode_object_identifier(value)
+    except ValueError:
         return ""
-    first = value[0]
-    if first < 40:
-        numbers = [0, first]
-    elif first < 80:
-        numbers = [1, first - 40]
-    else:
-        numbers = [2, first - 80]
-    current = 0
-    for item in value[1:]:
-        current = (current << 7) | (item & 0x7F)
-        if item & 0x80 == 0:
-            numbers.append(current)
-            current = 0
-    if current != 0:
-        numbers.append(current)
-    return ".".join(str(item) for item in numbers)
 
 
 def _decode_tag_list(value: bytes) -> str:
@@ -1284,13 +1423,60 @@ def _hex_preview(value: bytes, max_value_bytes: int) -> str:
 
 
 def _looks_like_der_certificate(tag: bytes, value: bytes) -> bool:
-    if tag != b"\x30":
+    """Return whether a constructed node carries an X.509 Certificate.
+
+    Only the contents are inspected: the SEQUENCE tag is replaced on the wire
+    wherever the certificate sits under an implicit context tag (SGP.32 v1.3
+    section 2.11.1.1.1 eimCertificate / trustedCertificateTls behind 'A1',
+    GetCertsResponse eumCertificate / euiccCertificate behind 'A5' / 'A6').
+    """
+    if len(tag) == 0 or tag[0] & 0x20 == 0:
         return False
-    if len(value) < 16:
+    return _looks_like_certificate_contents(value)
+
+
+def _looks_like_certificate_contents(value: bytes) -> bool:
+    # RFC 5280 section 4.1: Certificate ::= SEQUENCE { tbsCertificate
+    # TBSCertificate, signatureAlgorithm AlgorithmIdentifier, signatureValue
+    # BIT STRING }. AlgorithmIdentifier opens with its OBJECT IDENTIFIER.
+    children = _split_tlv_children(value)
+    if children is None or len(children) != 3:
         return False
-    if value.startswith(b"\xA0\x03\x02\x01") is False:
+    (tbs_tag, tbs_value), (algorithm_tag, algorithm_value), (signature_tag, _) = children
+    if tbs_tag != b"\x30" or algorithm_tag != b"\x30" or signature_tag != b"\x03":
         return False
-    return b"\x30" in value[4:16]
+    if algorithm_value[:1] != b"\x06":
+        return False
+    return _looks_like_tbs_certificate(tbs_value)
+
+
+def _looks_like_tbs_certificate(value: bytes) -> bool:
+    # RFC 5280 section 4.1: TBSCertificate opens with version [0] EXPLICIT
+    # (absent for v1), then serialNumber INTEGER, signature, issuer, validity,
+    # subject and subjectPublicKeyInfo, all SEQUENCEs. The serial length is
+    # not part of the shape: OpenSSL issues 20-byte random serials.
+    children = _split_tlv_children(value)
+    if children is None:
+        return False
+    tags = [tag for tag, _ in children]
+    if tags[:1] == [b"\xA0"]:
+        tags = tags[1:]
+    return tags[:6] == [b"\x02", b"\x30", b"\x30", b"\x30", b"\x30", b"\x30"]
+
+
+def _split_tlv_children(value: bytes) -> list[tuple[bytes, bytes]] | None:
+    """Return the (tag, value) pairs that exactly tile value, or None when they do not."""
+    children: list[tuple[bytes, bytes]] = []
+    offset = 0
+    end = len(value)
+    while offset < end:
+        parsed = _read_tlv_header(value, offset, end)
+        if parsed is None:
+            return None
+        tag_start, tag_end, value_start, value_end, _ = parsed
+        children.append((value[tag_start:tag_end], value[value_start:value_end]))
+        offset = value_end
+    return children
 
 
 def _decode_text_or_hex(value: bytes) -> str:

@@ -42,9 +42,9 @@ class _EfDirFallbackTransport:
         command = str(cmd or "").strip().upper()
         self.calls.append(command)
 
-        legacy_select = f"00A40400{len(self.legacy_aid)//2:02X}{self.legacy_aid}"
+        legacy_select = f"00A40404{len(self.legacy_aid)//2:02X}{self.legacy_aid}"
         discovered_select = (
-            f"00A40400{len(self.discovered_aid)//2:02X}{self.discovered_aid}"
+            f"00A40404{len(self.discovered_aid)//2:02X}{self.discovered_aid}"
         )
 
         if command == "00A40004023F00":
@@ -89,7 +89,7 @@ class _ScanTreeEfDirTransport:
         self.calls.append(command)
 
         discovered_select = (
-            f"00A40400{len(self.discovered_aid)//2:02X}{self.discovered_aid}"
+            f"00A40404{len(self.discovered_aid)//2:02X}{self.discovered_aid}"
         )
 
         if command == "00A40004023F00":
@@ -104,7 +104,7 @@ class _ScanTreeEfDirTransport:
             return bytes.fromhex(f"6F148410{self.discovered_aid}A500"), 0x90, 0x00
         if command == "00A40004026F07":
             return bytes.fromhex("6206820101800109"), 0x90, 0x00
-        if command.startswith("00A40400"):
+        if command.startswith("00A404"):
             return b"", 0x6A, 0x82
         if command.startswith("00A4000402"):
             return b"", 0x6A, 0x82
@@ -279,7 +279,7 @@ class _ArrRestoreTrailTransport:
         command = str(cmd or "").strip().upper()
         self.calls.append(command)
 
-        usim_select = f"00A40400{len(self.usim_aid)//2:02X}{self.usim_aid}"
+        usim_select = f"00A40404{len(self.usim_aid)//2:02X}{self.usim_aid}"
 
         if command == "00A40004023F00":
             self.selected = "3F00"
@@ -310,6 +310,39 @@ class _ArrRestoreTrailTransport:
         return b"", 0x6A, 0x82
 
 
+class _ApplicationSelectCodingTransport:
+    """A card whose answer to SELECT by AID depends on the P2 coding.
+
+    ``answers_by_p2`` maps the P2 byte of a SELECT by DF name to the reply
+    for the USIM AID. The MF and EF_ICCID answer with their FCP; every
+    other identifier is absent.
+    """
+
+    usim_aid = "A0000000871002FF34FF0789312E30FF"
+    df_fcp = bytes.fromhex(f"621D8202782183027FF08410{usim_aid}8A0105")
+    gp_fci = bytes.fromhex(f"6F148410{usim_aid}A500")
+    iccid_fcp = bytes.fromhex("62128202412183022FE28A01058002000A880110")
+
+    def __init__(self, answers_by_p2: dict[str, tuple[bytes, int, int]]) -> None:
+        self.answers_by_p2 = dict(answers_by_p2)
+        self.calls: list[str] = []
+
+    def transmit(self, cmd: str, silent: bool = False):
+        del silent
+        command = str(cmd or "").strip().upper()
+        self.calls.append(command)
+
+        if command == "00A40004023F00":
+            return bytes.fromhex("620782013883023F00"), 0x90, 0x00
+        if command == "00A40004022FE2":
+            return self.iccid_fcp, 0x90, 0x00
+        if command.startswith("00A404") and command.endswith(self.usim_aid):
+            answer = self.answers_by_p2.get(command[6:8])
+            if answer is not None:
+                return answer
+        return b"", 0x6A, 0x82
+
+
 class FileSystemControllerAdfFallbackTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
@@ -325,6 +358,17 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
         self._fids_patch = mock.patch.object(Config, "FIDS_FILE", str(self._fids_path))
         self._fids_patch.start()
         self.addCleanup(self._fids_patch.stop)
+        # ``_load_fid_map`` also folds in the shipped seed, so these EF_DIR
+        # discovery tests point that at the same fixture: a name the shipped
+        # tree already knows would be selected by AID and never reach the
+        # fallback under test.
+        self._seed_patch = mock.patch.object(
+            Config,
+            "shipped_fids_seed_path",
+            staticmethod(lambda: str(self._fids_path)),
+        )
+        self._seed_patch.start()
+        self.addCleanup(self._seed_patch.stop)
 
     def _legacy_usim_aid(self) -> str:
         controller = FileSystemController(_NoopTransport(), aid_registry={})
@@ -369,7 +413,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
         self.assertEqual(aid_registry.get("USIM"), discovered_aid)
         self.assertEqual(aid_registry.get("ADF_USIM"), discovered_aid)
         self.assertIn(
-            f"00A40400{len(legacy_aid)//2:02X}{legacy_aid}",
+            f"00A40404{len(legacy_aid)//2:02X}{legacy_aid}",
             transport.calls,
         )
         self.assertEqual(transport.calls.count("00A40004022F00"), 1)
@@ -411,10 +455,85 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
         self.assertTrue(selected)
         self.assertEqual(aid_registry.get("ADF_USIM"), discovered_aid)
         self.assertIn(
-            f"00A40400{len(stale_aid)//2:02X}{stale_aid}",
+            f"00A40404{len(stale_aid)//2:02X}{stale_aid}",
             transport.calls,
         )
         self.assertEqual(transport.calls.count("00A40004022F00"), 1)
+
+    def _application_selects(self, transport: _ApplicationSelectCodingTransport) -> list[str]:
+        return [command for command in transport.calls if command.startswith("00A404")]
+
+    def test_select_by_aid_asks_for_the_fcp_with_the_uicc_coding_first(self) -> None:
+        # TS 102 221 v18.4 table 11.2: P2 '04' returns the FCP template. A
+        # card that answers the undefined P2 '00' with SW 9000 and no data
+        # never gets asked with it when the UICC coding already worked.
+        transport = _ApplicationSelectCodingTransport(
+            {
+                "04": (_ApplicationSelectCodingTransport.df_fcp, 0x90, 0x00),
+                "00": (b"", 0x90, 0x00),
+            }
+        )
+        controller = FileSystemController(
+            transport, aid_registry={"USIM": transport.usim_aid}
+        )
+
+        self.assertTrue(controller.select("USIM", silent=True))
+
+        self.assertEqual(controller.current_fid, transport.usim_aid)
+        self.assertEqual(controller.current_fcp.get("template"), "FCP")
+        self.assertEqual(controller.current_fcp.get("type"), "DF")
+        self.assertEqual(controller.current_fcp.get("structure"), "Tree")
+        self.assertEqual(
+            self._application_selects(transport),
+            [f"00A40404{len(transport.usim_aid)//2:02X}{transport.usim_aid}"],
+        )
+
+    def test_select_by_aid_falls_back_to_the_globalplatform_coding_when_rejected(self) -> None:
+        # GlobalPlatform Card Specification v2.3.1 table 11-81 codes the
+        # selection as P2 '00'; a security domain refusing P2 '04' with
+        # '6A86' (TS 102 221 v18.4 table 10.14) is selected with that form,
+        # and the restore trail replays the coding that worked.
+        transport = _ApplicationSelectCodingTransport(
+            {"04": (b"", 0x6A, 0x86), "00": (_ApplicationSelectCodingTransport.gp_fci, 0x90, 0x00)}
+        )
+        controller = FileSystemController(
+            transport, aid_registry={"USIM": transport.usim_aid}
+        )
+
+        self.assertTrue(controller.select("USIM", silent=True))
+
+        uicc_form = f"00A40404{len(transport.usim_aid)//2:02X}{transport.usim_aid}"
+        gp_form = f"00A40400{len(transport.usim_aid)//2:02X}{transport.usim_aid}"
+        self.assertEqual(self._application_selects(transport), [uicc_form, gp_form])
+        self.assertEqual(controller.current_fcp.get("template"), "FCI")
+        self.assertEqual(controller._selection_restore_commands, [gp_form])
+
+    def test_select_by_aid_without_fcp_does_not_inherit_the_previous_descriptor(self) -> None:
+        # A SELECT accepted without response data under either coding leaves
+        # the selection in place and the FCP unknown; the transparent EF
+        # selected before must not survive as the application's descriptor.
+        transport = _ApplicationSelectCodingTransport(
+            {"04": (b"", 0x90, 0x00), "00": (b"", 0x90, 0x00)}
+        )
+        controller = FileSystemController(
+            transport, aid_registry={"USIM": transport.usim_aid}
+        )
+        self.assertTrue(controller.select("EF_ICCID", silent=True))
+        self.assertEqual(controller.current_fcp.get("type"), "EF")
+
+        self.assertTrue(controller.select("USIM", silent=True))
+
+        self.assertEqual(controller.current_fid, transport.usim_aid)
+        self.assertEqual(controller.current_fcp.get("template"), "Unknown")
+        self.assertNotIn("type", controller.current_fcp)
+        self.assertNotIn("structure", controller.current_fcp)
+        self.assertEqual(
+            self._application_selects(transport),
+            [
+                f"00A40404{len(transport.usim_aid)//2:02X}{transport.usim_aid}",
+                f"00A40400{len(transport.usim_aid)//2:02X}{transport.usim_aid}",
+            ],
+        )
 
     def test_arr_resolution_restores_nested_selection_by_full_trail(self) -> None:
         transport = _ArrRestoreTrailTransport()
@@ -441,7 +560,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
         self.assertEqual(transport.selected, "4F20")
 
         arr_read_index = transport.calls.index("00B2050400")
-        usim_select = f"00A40400{len(transport.usim_aid)//2:02X}{transport.usim_aid}"
+        usim_select = f"00A40404{len(transport.usim_aid)//2:02X}{transport.usim_aid}"
         self.assertEqual(
             transport.calls[arr_read_index + 1 : arr_read_index + 4],
             [usim_select, "00A40004025F3B", "00A40004024F20"],
@@ -466,7 +585,10 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
         self.assertIn("USIM", controller.scan_cache.values())
         self.assertIn("USIM/EF_IMSI", controller.scan_cache.values())
         self.assertEqual(controller.aid_registry.get("USIM"), discovered_aid)
-        self.assertFalse(any(command.startswith("00A40404") for command in transport.calls))
+        # TS 102 221 v18.4 table 11.2: the application is asked for its FCP
+        # with P2 '04'; the GlobalPlatform P2 '00' form is never needed here.
+        self.assertTrue(any(command.startswith("00A40404") for command in transport.calls))
+        self.assertFalse(any(command.startswith("00A40400") for command in transport.calls))
 
     def test_scan_tree_always_renders_mf_root_entry(self) -> None:
         discovered_aid = "A0000000871002FF86FF112233445566"

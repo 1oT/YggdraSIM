@@ -78,7 +78,7 @@ physical or simulated eUICC.
 | `STORE-METADATA-CUSTOM [args]` | store a single custom metadata tag |
 | `STORE-METADATA-CUSTOM-ALL` | store the full custom metadata set |
 | `UPDATE-METADATA` | update metadata on an already-loaded profile |
-| `LOAD-PROFILE` | full local SCP11 + PrepareDownload + LoadBPP flow |
+| `LOAD-PROFILE` | full local SCP11 + PrepareDownload + LoadBPP flow, then EnableProfile on the installed profile |
 
 ### Profile state control
 
@@ -147,9 +147,9 @@ python -m SCP11.local_access --cmd "DISCOVER; STATUS; CERTS --json; EXIT"
 
 `EXPORT-KEYBAG` snapshots the last-built pySim BSP session into a
 keybag JSON compatible with the HIL Bridge offline-replay decoder.
-The BSP is (re)built by any verb that needs a secure channel —
+The BSP is (re)built by any verb that needs a secure channel --
 `LOAD-PROFILE`, `ENABLE-PROFILE`, `DISABLE-PROFILE`, `DELETE-PROFILE`,
-`STORE-METADATA`, `UPDATE-METADATA`, etc. — so run the desired verb
+`STORE-METADATA`, `UPDATE-METADATA`, etc. -- so run the desired verb
 first, then export.
 
 ### Interactive shell
@@ -161,10 +161,10 @@ first, then export.
 
 Arguments (both optional):
 
-- `OutputPath.keys.json` — destination file. Defaults to a
+- `OutputPath.keys.json` -- destination file. Defaults to a
   timestamped path under `Workspace/SCP11/local_access/keybags/` when
   omitted.
-- `Label` — free-form identifier written to the entry for operator
+- `Label` -- free-form identifier written to the entry for operator
   cross-referencing.
 
 The handler refuses cleanly if:
@@ -189,17 +189,17 @@ keybag. If no batch is provided, the export runs standalone.
 The shell's `LocalSessionState` keeps the BSP material after every
 build via `_snapshot_session_bsp`:
 
-- `last_bsp_s_enc_hex` — BSP session S-ENC
-- `last_bsp_s_mac_hex` — BSP session S-MAC
-- `last_bsp_mac_chain_hex` — MAC chaining value
-- `last_bsp_block_nr` — per-session block counter
-- `last_bsp_aid_hex` — AID under which the BSP was built
-- `last_bsp_protocol` — `"SCP11c"`
+- `last_bsp_s_enc_hex` -- BSP session S-ENC
+- `last_bsp_s_mac_hex` -- BSP session S-MAC
+- `last_bsp_mac_chain_hex` -- MAC chaining value
+- `last_bsp_block_nr` -- per-session block counter
+- `last_bsp_aid_hex` -- AID under which the BSP was built
+- `last_bsp_protocol` -- `"SCP11c"`
 
 `EXPORT-KEYBAG` reads directly from this snapshot, so it is safe to
 run even after the BSP has been torn down by the verb that built it.
 
-See [HIL Bridge — Keybag JSON schema](hil-bridge.md#keybag-json-schema)
+See [HIL Bridge -- Keybag JSON schema](hil-bridge.md#keybag-json-schema)
 for the complete file structure and
 [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md) for
 how the keybag feeds into the decoded-APDU TUI.
@@ -212,6 +212,9 @@ how the keybag feeds into the decoded-APDU TUI.
   by the card if a field is out of the card's acceptable range.
 - `LOAD-PROFILE` requires both `PROFILE` and (often) `METADATA` to be set
   for the current session. `STATUS` confirms the choices.
+- `LOAD-PROFILE` enables the profile it installed (`AUTO_ENABLE_AFTER_LOAD`
+  in `LocalAccessConfig`). A refused enable is reported after the load
+  banner and does not fail the load.
 - Certificate matching uses the card's allowed CI PKID set. Drop-in custom
   certificates must live in a directory the loader scans; see
   [Runtime Root](../reference/runtime-root.md).
@@ -222,5 +225,5 @@ how the keybag feeds into the decoded-APDU TUI.
 - [SCP11 Live Relay](scp11-live.md)
 - [Download a Profile (Local Access)](../how-to/download-a-profile-local.md)
 - [Enable, Disable, Delete a Profile](../how-to/enable-disable-delete-profile.md)
-- [HIL Bridge — offline pcap replay](hil-bridge.md#offline-pcap-replay)
+- [HIL Bridge -- offline pcap replay](hil-bridge.md#offline-pcap-replay)
 - [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md)

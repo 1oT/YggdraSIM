@@ -2,15 +2,17 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Remaining-gap closure tests — structured decoders + round-trip encoders
+Remaining-gap closure tests -- structured decoders + round-trip encoders
 for the ``_PASSTHROUGH_BYTES_FIELD_NAMES`` entries that were previously
 hex-only on the editor surface:
 
 * ``restrictParameter``                (SAIP §8.6.6 / GP Amd F §A.4)
 * GP memory quotas (C7/C8/reserved/cumulative; GP Amd A §5.1.2)
-* ``ts102226SIMFileAccessToolkitParameter`` (TS 102 226 §8.2.1.3.2.3)
+* ``ts102226SIMFileAccessToolkitParameter`` (ETSI TS 102 226 V19.0.0
+  §8.2.1.3.2.1: the access domain, then the toolkit resources)
 * ``uiccAccessApplicationSpecificParametersField`` and the
-  administrative variant (TS 102 226 §8.2.1.3.2.2)
+  administrative variant (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.2 and
+  §8.2.1.3.2.2.4: entries of AID, access domain and DAP)
 
 The tests assert both the decoder's semantic output and the matching
 encoder's round-trip identity from the decoder's dictionary form back to
@@ -19,6 +21,7 @@ the original on-card bytes.
 
 import unittest
 
+from SCP03.core import install_script
 from Tools.ProfilePackage.saip_asn1_decode import (
     _GP_MEMORY_QUOTA_FIELD_LABELS,
     _RESTRICT_PARAMETER_BITS,
@@ -228,174 +231,186 @@ class GpMemoryQuotaEncodingTests(unittest.TestCase):
             self.assertEqual(encoded, bytes.fromhex("00001000"))
 
 
+# Access domain '00', priority 01, two timers, menu text length 16, one menu
+# entry at position 3 with identifier 4, two channels, MSL '01' + '12', TAR
+# B00001 (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.1, page 25).
+CA_EXAMPLE = bytes.fromhex("01000102100103040202011203B00001")
+
+
 class Ts102226FileAccessToolkitDecodingTests(unittest.TestCase):
-    def test_decode_splits_toolkit_and_file_access_sections(self):
-        payload = bytes.fromhex("02AABB02CCDD")
-        decoded = _decode_ts102226_sim_file_access_toolkit_parameter(payload)
+    def test_decode_reads_the_access_domain_then_the_toolkit_resources(self):
+        decoded = _decode_ts102226_sim_file_access_toolkit_parameter(CA_EXAMPLE)
         assert decoded is not None
-        self.assertEqual(decoded["simToolkitApplicationParameters"]["length"], 2)
-        self.assertEqual(
-            decoded["simToolkitApplicationParameters"]["hex"], "AABB"
-        )
-        self.assertEqual(decoded["simFileAccessParameters"]["length"], 2)
-        self.assertEqual(decoded["simFileAccessParameters"]["hex"], "CCDD")
+        self.assertEqual(decoded["accessDomain"], "00")
+        self.assertEqual(decoded["accessDomainSummary"], "Full access to the File System")
+        self.assertEqual(decoded["priorityLevelOfToolkitAppInstance"], 1)
+        self.assertEqual(decoded["maxNumberOfTimers"], 2)
+        self.assertEqual(decoded["maxTextLengthForMenuEntry"], 0x10)
+        self.assertEqual(decoded["menuEntries"], [{"position": 3, "id": 4}])
+        self.assertEqual(decoded["maxNumberOfChannels"], 2)
+        self.assertEqual(decoded["minimumSecurityLevelRaw"], "0112")
+        self.assertEqual(decoded["tarValues"], ["B00001"])
+        self.assertNotIn("additionalBytes", decoded)
 
-    def test_decode_captures_trailing_bytes_when_present(self):
-        payload = bytes.fromhex("0102020304FFFF")
-        decoded = _decode_ts102226_sim_file_access_toolkit_parameter(payload)
+    def test_decode_keeps_bytes_after_the_tar_values(self):
+        decoded = _decode_ts102226_sim_file_access_toolkit_parameter(CA_EXAMPLE + b"\xff\xff")
         assert decoded is not None
-        self.assertEqual(decoded.get("trailingBytes"), "FFFF")
+        self.assertEqual(decoded["additionalBytes"], "FFFF")
 
-    def test_decode_rejects_truncated_toolkit_section(self):
-        self.assertIsNone(
-            _decode_ts102226_sim_file_access_toolkit_parameter(
-                bytes.fromhex("05AABB")
-            )
-        )
-
-    def test_decode_rejects_truncated_file_access_section(self):
-        self.assertIsNone(
-            _decode_ts102226_sim_file_access_toolkit_parameter(
-                bytes.fromhex("01AA0500")
-            )
-        )
+    def test_decode_rejects_what_is_not_the_layout(self):
+        # The two-section reading this field used to get does not parse.
+        for raw in ("05AABB", "0100", "01AA02BBCC", ""):
+            with self.subTest(raw=raw):
+                self.assertIsNone(
+                    _decode_ts102226_sim_file_access_toolkit_parameter(bytes.fromhex(raw))
+                )
 
     def test_decoder_dispatches_via_special_field(self):
-        decoded = _decode_special_field(
-            "ts102226SIMFileAccessToolkitParameter",
-            bytes.fromhex("0102020304"),
-        )
+        decoded = _decode_special_field("ts102226SIMFileAccessToolkitParameter", CA_EXAMPLE)
         assert isinstance(decoded, dict)
-        self.assertEqual(
-            decoded["simFileAccessParameters"]["hex"], "0304"
-        )
+        self.assertEqual(decoded["tarValues"], ["B00001"])
 
 
 class Ts102226FileAccessToolkitEncodingTests(unittest.TestCase):
     def test_hex_passthrough_roundtrips(self):
-        payload = bytes.fromhex("0102020304")
         encoded = encode_ts102226_sim_file_access_toolkit_parameter_field(
-            {"hex": payload.hex().upper()}
+            {"hex": CA_EXAMPLE.hex().upper()}
         )
-        self.assertEqual(encoded, payload)
+        self.assertEqual(encoded, CA_EXAMPLE)
 
     def test_structured_encoding_matches_decoder_output(self):
-        source = bytes.fromhex("0102020304")
-        decoded = _decode_ts102226_sim_file_access_toolkit_parameter(source)
-        assert decoded is not None
-        decoded.pop("hex")
-        encoded = encode_ts102226_sim_file_access_toolkit_parameter_field(decoded)
-        self.assertEqual(encoded, source)
+        for source in (CA_EXAMPLE, CA_EXAMPLE + b"\xff"):
+            with self.subTest(source=source.hex()):
+                decoded = _decode_ts102226_sim_file_access_toolkit_parameter(source)
+                assert decoded is not None
+                decoded.pop("hex")
+                encoded = encode_ts102226_sim_file_access_toolkit_parameter_field(decoded)
+                self.assertEqual(encoded, source)
 
-    def test_trailing_bytes_are_appended(self):
-        encoded = encode_ts102226_sim_file_access_toolkit_parameter_field(
-            {
-                "simToolkitApplicationParameters": {"hex": "AA"},
-                "simFileAccessParameters": {"hex": "BB"},
-                "trailingBytes": "CC",
-            }
-        )
-        self.assertEqual(encoded, bytes.fromhex("01AA01BBCC"))
-
-    def test_missing_sections_raise(self):
-        with self.assertRaises(RoundtripEncoderError):
-            encode_ts102226_sim_file_access_toolkit_parameter_field({})
-
-    def test_over_long_section_rejected(self):
+    def test_the_two_section_shape_is_refused(self):
         with self.assertRaises(RoundtripEncoderError):
             encode_ts102226_sim_file_access_toolkit_parameter_field(
                 {
-                    "simToolkitApplicationParameters": {
-                        "hex": "00" * 256,
-                    },
-                    "simFileAccessParameters": {"hex": "00"},
+                    "simToolkitApplicationParameters": {"hex": "AA"},
+                    "simFileAccessParameters": {"hex": "BB"},
                 }
             )
 
+    def test_missing_access_domain_raises(self):
+        with self.assertRaises(RoundtripEncoderError):
+            encode_ts102226_sim_file_access_toolkit_parameter_field({})
+
+    def test_over_long_access_domain_rejected(self):
+        decoded = _decode_ts102226_sim_file_access_toolkit_parameter(CA_EXAMPLE)
+        assert decoded is not None
+        decoded.pop("hex")
+        decoded["accessDomain"] = "00" * 256
+        with self.assertRaises(RoundtripEncoderError):
+            encode_ts102226_sim_file_access_toolkit_parameter_field(decoded)
+
+
+# The SCP03 install-script builder writes the same entries: the UICC file
+# system (empty AID) and one ADF, both with full access and no DAP.
+ADF_AID = bytes.fromhex("A0000000871002")
+SCP03_ACCESS = install_script.build_access_parameters(install_script.TAG_UICC_ACCESS, [ADF_AID])[2:]
+
 
 class UiccAccessApplicationParametersDecodingTests(unittest.TestCase):
-    def test_decode_full_access_record(self):
+    def test_decode_the_uicc_file_system_entry(self):
         decoded = _decode_uicc_access_application_specific_parameters(
-            bytes.fromhex("0100"),
+            bytes.fromhex("00010000"),
             administrative=False,
         )
         assert decoded is not None
-        records = decoded["accessDomainRecords"]
-        assert isinstance(records, list)
-        self.assertEqual(len(records), 1)
         self.assertEqual(
-            records[0]["domainLabel"],
-            "Full access to the UICC file system",
+            [(entry["aid"], entry["target"], entry["accessDomain"], entry["dap"]) for entry in decoded["entries"]],
+            [("", "UICC file system", "00", "")],
         )
-        self.assertEqual(records[0]["declaredLength"], 1)
+        self.assertEqual(decoded["entries"][0]["accessDomainSummary"], "Full access to the File System")
 
-    def test_decode_chv_access_record_has_bitmap(self):
+    def test_decode_what_the_install_script_builder_writes(self):
         decoded = _decode_uicc_access_application_specific_parameters(
-            bytes.fromhex("050201020304"),
+            SCP03_ACCESS,
             administrative=False,
         )
         assert decoded is not None
-        records = decoded["accessDomainRecords"]
-        assert isinstance(records, list)
-        self.assertEqual(records[0]["chvReferenceBitmap"], "01020304")
         self.assertEqual(
-            records[0]["domainLabel"],
-            "Access granted to CHV references (3G/UICC)",
+            [entry["target"] for entry in decoded["entries"]],
+            ["UICC file system", "ADF A0000000871002"],
         )
+
+    def test_decode_uicc_access_mechanism_names_the_granted_conditions(self):
+        # ETSI TS 102 226 V19.0.0 §8.2.1.3.2.5.2: '02' and three data bytes.
+        decoded = _decode_uicc_access_application_specific_parameters(
+            bytes.fromhex("00040203010400"),
+            administrative=False,
+        )
+        assert decoded is not None
+        record = decoded["entries"][0]["accessDomainDecoded"]
+        self.assertEqual(record["accessDomainData"], "030104")
+        self.assertEqual(record["domainLabel"], "UICC access mechanism")
+        self.assertEqual(
+            record["grantedAccessConditions"],
+            ["Application PIN 1", "Application PIN 2", "ADM1", "ALWAYS"],
+        )
+
+    def test_decode_keeps_the_dap(self):
+        decoded = _decode_uicc_access_application_specific_parameters(
+            bytes.fromhex("00010002AABB"),
+            administrative=False,
+        )
+        assert decoded is not None
+        self.assertEqual(decoded["entries"][0]["dap"], "AABB")
+        self.assertIn("DAP AABB", decoded["summary"])
 
     def test_decode_administrative_label_differs(self):
         decoded = _decode_uicc_access_application_specific_parameters(
-            bytes.fromhex("01FF"),
+            bytes.fromhex("0001FF00"),
             administrative=True,
         )
         assert decoded is not None
         self.assertIn("administrative", decoded["format"])
 
-    def test_decode_rejects_length_overflow(self):
-        self.assertIsNone(
-            _decode_uicc_access_application_specific_parameters(
-                bytes.fromhex("050102"),
-                administrative=False,
-            )
-        )
+    def test_decode_rejects_what_is_not_whole_entries(self):
+        # '0100' was read as one record before; it is an AID with no entry.
+        for raw in ("050102", "0100", "000100", "00"):
+            with self.subTest(raw=raw):
+                self.assertIsNone(
+                    _decode_uicc_access_application_specific_parameters(
+                        bytes.fromhex(raw),
+                        administrative=False,
+                    )
+                )
 
     def test_decoder_dispatches_via_special_field(self):
         decoded = _decode_special_field(
             "uiccAdministrativeAccessApplicationSpecificParametersField",
-            bytes.fromhex("01FF"),
+            bytes.fromhex("0001FF00"),
         )
         assert isinstance(decoded, dict)
         self.assertIn("administrative", decoded["format"])
 
-    def test_multiple_records_are_captured(self):
-        decoded = _decode_uicc_access_application_specific_parameters(
-            bytes.fromhex("010001FF"),
-            administrative=False,
-        )
-        assert decoded is not None
-        self.assertEqual(len(decoded["accessDomainRecords"]), 2)
-
 
 class UiccAccessApplicationParametersEncodingTests(unittest.TestCase):
     def test_hex_passthrough_roundtrips(self):
-        payload = bytes.fromhex("050201020304")
         encoded = encode_uicc_access_application_specific_parameters_field(
-            {"hex": payload.hex().upper()}
+            {"hex": SCP03_ACCESS.hex().upper()}
         )
-        self.assertEqual(encoded, payload)
+        self.assertEqual(encoded, SCP03_ACCESS)
 
     def test_structured_roundtrip_matches_decoder(self):
-        source = bytes.fromhex("050201020304")
-        decoded = _decode_uicc_access_application_specific_parameters(
-            source, administrative=False
-        )
-        assert decoded is not None
-        decoded.pop("hex")
-        encoded = encode_uicc_access_application_specific_parameters_field(decoded)
-        self.assertEqual(encoded, source)
+        for source in (SCP03_ACCESS, bytes.fromhex("00040203010400"), bytes.fromhex("00010002AABB")):
+            with self.subTest(source=source.hex()):
+                decoded = _decode_uicc_access_application_specific_parameters(
+                    source, administrative=False
+                )
+                assert decoded is not None
+                decoded.pop("hex")
+                encoded = encode_uicc_access_application_specific_parameters_field(decoded)
+                self.assertEqual(encoded, source)
 
     def test_administrative_encoder_roundtrips(self):
-        source = bytes.fromhex("01FF")
+        source = bytes.fromhex("0001FF00")
         decoded = _decode_uicc_access_application_specific_parameters(
             source, administrative=True
         )
@@ -410,32 +425,31 @@ class UiccAccessApplicationParametersEncodingTests(unittest.TestCase):
         with self.assertRaises(RoundtripEncoderError):
             encode_uicc_access_application_specific_parameters_field({})
 
-    def test_record_without_hex_is_rejected(self):
+    def test_the_record_shape_is_refused(self):
         with self.assertRaises(RoundtripEncoderError):
             encode_uicc_access_application_specific_parameters_field(
-                {"accessDomainRecords": [{"domainByte": "0x00"}]}
+                {"accessDomainRecords": [{"hex": "00"}]}
             )
 
-    def test_record_over_255_bytes_rejected(self):
-        with self.assertRaises(RoundtripEncoderError):
-            encode_uicc_access_application_specific_parameters_field(
-                {
-                    "accessDomainRecords": [
-                        {"hex": "00" * 256},
-                    ]
-                }
-            )
+    def test_entries_the_clause_does_not_allow_are_refused(self):
+        for entries in (
+            [{"aid": "A000", "accessDomain": "00"}],
+            [{"aid": "", "accessDomain": "00"}, {"aid": "", "accessDomain": "FF"}],
+            [{"aid": "", "accessDomain": ""}],
+            [{"aid": "", "accessDomain": "00", "dap": "00" * 256}],
+        ):
+            with self.subTest(entries=entries), self.assertRaises(RoundtripEncoderError):
+                encode_uicc_access_application_specific_parameters_field({"entries": entries})
 
     def test_dispatcher_round_trip_identity(self):
-        source = bytes.fromhex("010001FF")
         decoded = _decode_uicc_access_application_specific_parameters(
-            source, administrative=False
+            SCP03_ACCESS, administrative=False
         )
         assert decoded is not None
         encoded = encode_decoded_roundtrip_bytes(
             "uiccAccessApplicationSpecificParametersField", decoded
         )
-        self.assertEqual(encoded, source)
+        self.assertEqual(encoded, SCP03_ACCESS)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Unit tests for ``saip_profile_header_edit``.
 
 These exercise the spec-aware mutators without requiring a full SAIP
-ASN.1 round-trip — every helper operates on a dict-shaped header
+ASN.1 round-trip -- every helper operates on a dict-shaped header
 section. The integration with ``build_profile_sequence_from_document``
 is exercised in the action-dispatcher tests.
 """
@@ -94,6 +93,167 @@ class ScalarFieldTests(unittest.TestCase):
     def test_set_pol_rejects_non_hex(self) -> None:
         with self.assertRaises(ValueError):
             ph.set_pol_hex({}, "not-hex")
+
+
+# 3GPP TS 31.102 v18.4.0 §4.2.27: Y alpha bytes, Parameter Indicators,
+# 12-byte TP-Destination Address, 12-byte TS-Service Centre Address (a
+# length byte, TON/NPI and swapped BCD digits per TS 24.011 §8.2.5.2),
+# TP-PID, TP-DCS, TP-VP. The number below is the NANP fictional range.
+_SMSC_SCA_HEX = "07912120550501F0"
+_SMSC_DIGITS = "12025550100"
+
+
+def _smsp_record(alpha_len: int, indicators: int, sca_hex: str = _SMSC_SCA_HEX) -> bytes:
+    return bytes.fromhex(
+        "FF" * alpha_len + f"{indicators:02X}" + "FF" * 12 + sca_hex.ljust(24, "F") + "FFFFFF"
+    )
+
+
+def _gfm_smsp_group(record_size: int, indicators: int, sca_hex: str = _SMSC_SCA_HEX) -> list:
+    alpha = record_size - 28
+    return [
+        ("filePath", bytes.fromhex("7F10")),
+        ("createFCP", {
+            "fileDescriptor": bytes.fromhex(f"4221{record_size:04X}"),
+            "fileID": bytes.fromhex("6F42"),
+            "efFileSize": bytes([record_size]),
+        }),
+        ("fillFileOffset", alpha),
+        ("fillFileContent", bytes([indicators])),
+        ("fillFileOffset", 12),
+        ("fillFileContent", bytes.fromhex(sca_hex)),
+    ]
+
+
+def _connectivity(bearers: list) -> bytes:
+    from Tools.ProfilePackage.saip_connectivity_parameters import encode_connectivity_parameters
+
+    return bytes.fromhex(encode_connectivity_parameters(bearers))
+
+
+_HTTPS_BEARER = {
+    "bearer": "https",
+    "bearer_description_hex": "02000003000002",
+    "network_access_name": {"text": "apn"},
+}
+
+
+def _sms_bearer(digits: str) -> dict:
+    return {
+        "bearer": "sms",
+        "dialing_number": {"ton": "international", "npi": "isdn", "digits": digits},
+        "pid_hex": "7F",
+        "dcs_hex": "F6",
+    }
+
+
+class SyncSmscFromEfSmspTests(unittest.TestCase):
+
+    def _document(self, ef_smsp: list, *, connectivity: bytes | None, gfm: list | None = None) -> dict:
+        header: dict = {}
+        if connectivity is not None:
+            header["connectivityParameters"] = connectivity
+        sections: dict = {"header": header}
+        if gfm is not None:
+            sections["genericFileManagement"] = {"fileManagementCMD": [gfm]}
+        sections["usim"] = {"ef-smsp": ef_smsp}
+        return {"sections": sections}
+
+    def _sms_numbers(self, header: dict) -> list:
+        from Tools.ProfilePackage.saip_connectivity_parameters import decode_connectivity_parameters
+
+        decoded = decode_connectivity_parameters(header["connectivityParameters"].hex())
+        return [
+            (bearer["bearer"], (bearer.get("dialing_number") or {}).get("digits"))
+            for bearer in decoded["bearers"]
+        ]
+
+    def test_template_record_with_descriptor_updates_the_sms_bearer(self) -> None:
+        # Record length 0x26 = 38: a 10-byte alpha identifier before the tail.
+        doc = self._document(
+            [
+                ("fileDescriptor", {"fileDescriptor": bytes.fromhex("42210026")}),
+                ("fillFileContent", _smsp_record(10, 0xFD) + _smsp_record(10, 0xFF, "FF" * 12)),
+            ],
+            connectivity=_connectivity([_HTTPS_BEARER, _sms_bearer("15550100")]) + b"\xab",
+        )
+        msg = ph.sync_header_smsc_from_ef_smsp(doc)
+        self.assertIn("SMS-PP bearer [1]", msg)
+        self.assertIn("usim.ef-smsp", msg)
+        header = doc["sections"]["header"]
+        self.assertEqual(self._sms_numbers(header), [("https", None), ("sms", _SMSC_DIGITS)])
+        # PID, DCS, the other bearer and the trailing byte are kept.
+        expected = _connectivity([_HTTPS_BEARER, _sms_bearer(_SMSC_DIGITS)]) + b"\xab"
+        self.assertEqual(header["connectivityParameters"], expected)
+
+    def test_whole_body_is_one_record_without_a_size(self) -> None:
+        doc = self._document(
+            [("fillFileContent", _smsp_record(4, 0xFD))],
+            connectivity=_connectivity([_sms_bearer("15550100")]),
+        )
+        ph.sync_header_smsc_from_ef_smsp(doc)
+        self.assertEqual(self._sms_numbers(doc["sections"]["header"]), [("sms", _SMSC_DIGITS)])
+
+    def test_linked_template_entry_follows_link_path_to_the_gfm_file(self) -> None:
+        # The USIM template links ADF.USIM EF.SMSP to DF.TELECOM 7F10/6F42.
+        doc = self._document(
+            [("fileDescriptor", {"linkPath": bytes.fromhex("7F106F42"), "lcsi": b"\x05"})],
+            connectivity=_connectivity([_sms_bearer("15550100")]),
+            gfm=_gfm_smsp_group(0x40, 0xFD),
+        )
+        msg = ph.sync_header_smsc_from_ef_smsp(doc)
+        self.assertIn("genericFileManagement.7F10/6F42", msg)
+        self.assertEqual(self._sms_numbers(doc["sections"]["header"]), [("sms", _SMSC_DIGITS)])
+
+    def test_bearer_index_selects_one_of_several_sms_bearers(self) -> None:
+        doc = self._document(
+            [("fillFileContent", _smsp_record(0, 0xFD))],
+            connectivity=_connectivity([_sms_bearer("15550100"), _sms_bearer("15550101")]),
+        )
+        ph.sync_header_smsc_from_ef_smsp(doc, bearer_index="1")
+        self.assertEqual(
+            self._sms_numbers(doc["sections"]["header"]),
+            [("sms", "15550100"), ("sms", _SMSC_DIGITS)],
+        )
+        with self.assertRaises(ValueError):
+            ph.sync_header_smsc_from_ef_smsp(doc, bearer_index="2")
+        with self.assertRaises(ValueError):
+            ph.sync_header_smsc_from_ef_smsp(doc, bearer_index="one")
+
+    def test_rejects_headers_without_an_sms_bearer(self) -> None:
+        doc = self._document(
+            [("fillFileContent", _smsp_record(0, 0xFD))],
+            connectivity=_connectivity([_HTTPS_BEARER]),
+        )
+        with self.assertRaisesRegex(ValueError, "no SMS-PP bearer"):
+            ph.sync_header_smsc_from_ef_smsp(doc)
+        doc = self._document([("fillFileContent", _smsp_record(0, 0xFD))], connectivity=None)
+        with self.assertRaisesRegex(ValueError, "no SMS-PP bearer"):
+            ph.sync_header_smsc_from_ef_smsp(doc)
+
+    def test_rejects_absent_or_malformed_service_centre_address(self) -> None:
+        connectivity = _connectivity([_sms_bearer("15550100")])
+        # Parameter Indicators bit 2 set: the address is marked absent.
+        doc = self._document([("fillFileContent", _smsp_record(0, 0xFF))], connectivity=connectivity)
+        with self.assertRaisesRegex(ValueError, "absent"):
+            ph.sync_header_smsc_from_ef_smsp(doc)
+        # Present but empty (length byte FF).
+        doc = self._document([("fillFileContent", _smsp_record(0, 0xFD, "FF" * 12))], connectivity=connectivity)
+        with self.assertRaisesRegex(ValueError, "empty"):
+            ph.sync_header_smsc_from_ef_smsp(doc)
+        # Length outside 2..11.
+        doc = self._document([("fillFileContent", _smsp_record(0, 0xFD, "0C912120550501F0"))], connectivity=connectivity)
+        with self.assertRaisesRegex(ValueError, "2..11"):
+            ph.sync_header_smsc_from_ef_smsp(doc)
+        # Shorter than the 28-byte tail.
+        doc = self._document([("fillFileContent", b"\xfd" + b"\xff" * 10)], connectivity=connectivity)
+        with self.assertRaisesRegex(ValueError, "at least 28"):
+            ph.sync_header_smsc_from_ef_smsp(doc)
+        # No EF.SMSP body anywhere.
+        doc = self._document([("fileDescriptor", {"linkPath": bytes.fromhex("7F106F42")})], connectivity=connectivity)
+        with self.assertRaisesRegex(ValueError, "not found"):
+            ph.sync_header_smsc_from_ef_smsp(doc)
+        self.assertEqual(doc["sections"]["header"]["connectivityParameters"], connectivity)
 
 
 class MajorMinorVersionTests(unittest.TestCase):

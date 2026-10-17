@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP11/local_access/metadata_codec.py public functions.
 
 Covers: collect_enabled_custom_metadata_tags, build_store_metadata_request_payload,

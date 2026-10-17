@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 local-access session: drives a full SGP.26 local-delivery exchange without network dependencies."""
 import hashlib
 import os
@@ -19,15 +18,36 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtensionOID
 from yggdrasim_common.euicc_issuer import infer_ecasd_issuer_identity
+from yggdrasim_common.process_debug import is_global_debug_enabled
 from yggdrasim_common.progress import progress_session
 from yggdrasim_common.runtime_paths import ensure_seeded_workspace_file, remap_legacy_workspace_relative, runtime_root
 
 try:
     from ..pysim_path import describe_pysim_resolution, ensure_repo_pysim_on_path
+    from ..shared.notification_event import (
+        decode_notification_operation_contents as _decode_notification_operation_contents,
+        record_notification_parse_error as _record_notification_parse_error,
+    )
+    from ..shared.ber_tlv import decode_object_identifier
+    from ..shared.iccid import decode_bcd_digits
+    from ..shared.gsma_error_codes import SGP22_BPP_COMMAND_ID, SGP22_PROFILE_INSTALLATION_RESULT_REASON
+    from ..shared.profile_actions import is_enabled as profile_is_enabled
+    from ..shared.profile_info import split_profile_info_list
     from ..shared.profile_targeting import resolve_profile_target_identifier
+    from ..shared.sima_locator import describe_pe_status_location, outline_profile_package
 except ImportError:
     from SCP11.pysim_path import describe_pysim_resolution, ensure_repo_pysim_on_path
+    from SCP11.shared.notification_event import (
+        decode_notification_operation_contents as _decode_notification_operation_contents,
+        record_notification_parse_error as _record_notification_parse_error,
+    )
+    from SCP11.shared.ber_tlv import decode_object_identifier
+    from SCP11.shared.iccid import decode_bcd_digits
+    from SCP11.shared.gsma_error_codes import SGP22_BPP_COMMAND_ID, SGP22_PROFILE_INSTALLATION_RESULT_REASON
+    from SCP11.shared.profile_actions import is_enabled as profile_is_enabled
+    from SCP11.shared.profile_info import split_profile_info_list
     from SCP11.shared.profile_targeting import resolve_profile_target_identifier
+    from SCP11.shared.sima_locator import describe_pe_status_location, outline_profile_package
 
 ensure_repo_pysim_on_path()
 
@@ -45,76 +65,6 @@ _SMPP_STUB_MODULES = [
     "smpp.pdu.operations",
 ]
 _DEFAULT_PCSC_CHANNEL = object()
-
-
-_NOTIFICATION_OPERATION_BY_BIT = {
-    0: (1, "install"),
-    1: (2, "enable"),
-    2: (3, "disable"),
-    3: (4, "delete"),
-    4: (5, "rpm-enable"),
-    5: (6, "rpm-disable"),
-    6: (7, "rpm-delete"),
-    7: (8, "load-rpm-package-result"),
-}
-
-
-def _decode_notification_operation_contents(value: bytes) -> tuple[int, str]:
-    """Decode implicit ``NotificationEvent`` BIT STRING contents strictly."""
-
-    raw = bytes(value)
-    if len(raw) < 2:
-        raise ValueError(
-            "profileManagementOperation BIT STRING must contain an unused-bit "
-            "octet and event bits"
-        )
-
-    unused_bits = raw[0]
-    event_bytes = raw[1:]
-    if unused_bits > 7:
-        raise ValueError(
-            "profileManagementOperation BIT STRING unused-bit count must be 0..7"
-        )
-    if unused_bits and event_bytes[-1] & ((1 << unused_bits) - 1):
-        raise ValueError(
-            "profileManagementOperation BIT STRING has non-zero padding bits"
-        )
-
-    significant_bit_count = (len(event_bytes) * 8) - unused_bits
-    set_bits = [
-        bit_index
-        for bit_index in range(significant_bit_count)
-        if event_bytes[bit_index // 8] & (0x80 >> (bit_index % 8))
-    ]
-    if len(set_bits) != 1:
-        raise ValueError(
-            "profileManagementOperation in NotificationMetadata must set exactly one event bit"
-        )
-
-    bit_index = set_bits[0]
-    operation = _NOTIFICATION_OPERATION_BY_BIT.get(bit_index)
-    if operation is None:
-        raise ValueError(
-            f"profileManagementOperation uses unsupported event bit {bit_index}"
-        )
-    if significant_bit_count != bit_index + 1:
-        raise ValueError(
-            "profileManagementOperation BIT STRING is not canonical "
-            "(trailing zero event bits)"
-        )
-    return operation
-
-
-def _record_notification_parse_error(details: dict, error: object) -> None:
-    message = str(error).strip()
-    if len(message) == 0:
-        return
-    existing = details.get("notificationParseError")
-    if isinstance(existing, str) and len(existing) > 0:
-        if message not in existing:
-            details["notificationParseError"] = f"{existing}; {message}"
-        return
-    details["notificationParseError"] = message
 
 
 def _install_minimal_smartcard_stubs() -> None:
@@ -287,7 +237,7 @@ def _run_with_timeout(callable_, args, *, timeout_seconds: float):
 
     Returns the callable's result, or ``None`` on timeout / exception. The
     returned ``None`` is treated by the caller as a "decoder punted" signal
-    — the header-TLV path still supplies identity fields, so downstream
+    -- the header-TLV path still supplies identity fields, so downstream
     callers degrade gracefully instead of wedging the whole console.
     Background threads are daemonised; if the decoder genuinely loops, the
     worker is left pinned but the main thread continues and the process
@@ -462,7 +412,23 @@ class LocalSessionState:
     cancel_session_response: bytes = b""
     prepare_download_response: bytes = b""
     last_load_bpp_response: bytes = b""
+    # 1-based index of the A3 member whose StoreData round returned the
+    # ProfileInstallationResult; 0 until a load has run or when the result
+    # arrived outside the A3 sequence. The failure summary attributes the
+    # failing chunk to it instead of guessing from the chunk carrying PE-End.
+    last_load_bpp_terminal_a3_member_index: int = 0
+    # StoreData segments ahead of the first A3 member (BF23, A0, the A1 and
+    # A2 chains, the A3 header); the segmenter records it so a loop index
+    # maps onto an A3 member index.
+    bpp_a3_member_segment_base: int = 0
     load_notifications_synced: bool = False
+    # Outcome of the EnableProfile that follows a successful load:
+    # status "" (not attempted), "enabled", "failed" or "skipped".
+    auto_enable_status: str = ""
+    auto_enable_target_kind: str = ""
+    auto_enable_target: str = ""
+    auto_enable_detail: str = ""
+    auto_enable_response: bytes = b""
     allowed_ci_pkids: list[str] = field(default_factory=list)
     selected_ci_pkid: str = ""
     selected_auth_certificate_path: str = ""
@@ -479,6 +445,9 @@ class LocalSessionState:
     bpp_command_descriptions: list[str] = field(default_factory=list)
     upp_protected_command_descriptions: list[str] = field(default_factory=list)
     last_bpp_layout_lines: list[str] = field(default_factory=list)
+    # Span outline of the unprotected package the last load bound (no values
+    # beyond file identifiers and paths); replaced on every load.
+    upp_pe_outline: list[Any] = field(default_factory=list)
     last_bpp_crypto_debug_lines: list[str] = field(default_factory=list)
     last_pre_bsp_payload_bin_path: str = ""
     last_pre_bsp_payload_hex_path: str = ""
@@ -498,6 +467,48 @@ class OpenSessionResult:
     euicc_signed1: bytes
     euicc_signature1: bytes
     authenticate_server_response: bytes
+
+
+# Result names of the three ES10c profile-state responses, SGP.22 v3.1
+# sections 5.7.16 (EnableProfileResponse, 'BF31'), 5.7.17
+# (DisableProfileResponse, 'BF32') and 5.7.18 (DeleteProfileResponse,
+# 'BF33'). Code 2 and code 4 mean different things per command, so the
+# tables stay separate.
+_PROFILE_STATE_RESULT_NAMES: dict[str, dict[int, str]] = {
+    "BF31": {
+        0: "ok",
+        1: "iccidOrAidNotFound",
+        2: "profileNotInDisabledState",
+        3: "disallowedByPolicy",
+        4: "wrongProfileReenabling",
+        5: "catBusy",
+        6: "disallowedByEnterpriseRule",
+        7: "commandError",
+        9: "disallowedForRpm",
+        10: "noEsimPortAvailable",
+        127: "undefinedError",
+    },
+    "BF32": {
+        0: "ok",
+        1: "iccidOrAidNotFound",
+        2: "profileNotInEnabledState",
+        3: "disallowedByPolicy",
+        5: "catBusy",
+        6: "disallowedByEnterpriseRule",
+        7: "commandError",
+        9: "disallowedForRpm",
+        127: "undefinedError",
+    },
+    "BF33": {
+        0: "ok",
+        1: "iccidOrAidNotFound",
+        2: "profileNotInDisabledState",
+        3: "disallowedByPolicy",
+        4: "disallowedInTestMode",
+        7: "commandError",
+        127: "undefinedError",
+    },
+}
 
 
 @dataclass
@@ -528,14 +539,22 @@ class LocalIsdrSession:
     TAG_AID = b"\x4F"
     TAG_CTX_0 = b"\xA0"
     TAG_RESULT = b"\x80"
+    # ES10c commands the last enable / disable / delete call actually sent,
+    # in order; reassigned per call so it never grows.
+    last_profile_state_steps: tuple[str, ...] = ()
 
     def __init__(self, cfg: Optional[LocalAccessConfig] = None, apdu_channel: Any = _DEFAULT_PCSC_CHANNEL):
         self.cfg = cfg or LocalAccessConfig()
-        self.apdu_channel = (
-            PcscApduChannel(reader_index=self.cfg.READER_INDEX)
-            if apdu_channel is _DEFAULT_PCSC_CHANNEL
-            else apdu_channel
-        )
+        if apdu_channel is _DEFAULT_PCSC_CHANNEL:
+            remote_name = str(getattr(self.cfg, "READER_NAME", "") or "").strip()
+            if remote_name:
+                from SCP11.transport import RemoteApduChannel
+
+                self.apdu_channel = RemoteApduChannel(remote_name)
+            else:
+                self.apdu_channel = PcscApduChannel(reader_index=self.cfg.READER_INDEX)
+        else:
+            self.apdu_channel = apdu_channel
         set_raw_logging = getattr(self.apdu_channel, "set_raw_apdu_logging", None)
         if callable(set_raw_logging):
             set_raw_logging(False)
@@ -688,7 +707,7 @@ class LocalIsdrSession:
         return snapshot
 
     def collect_quick_overview(self) -> dict[str, Any]:
-        """Lightweight ``INFO``/``SCAN`` snapshot — header data only.
+        """Lightweight ``INFO``/``SCAN`` snapshot -- header data only.
 
         Mirrors :meth:`discover_card` but skips the heavy ES10 reads
         (``GetRAT``, ``RetrieveNotificationsList``, ``GetCerts``) so the
@@ -768,27 +787,12 @@ class LocalIsdrSession:
     def decode_profile_metadata_rows(self, raw_data: bytes) -> list[ProfileMetadataView]:
         """Decode raw profile metadata bytes into a list of human-readable (key, value) pairs."""
         rows: list[ProfileMetadataView] = []
-        index = 0
-        while index < len(raw_data):
-            if raw_data[index] != 0xE3:
-                index += 1
-                continue
-
-            length, length_size = self._decode_der_length(raw_data, index + 1)
-            if length_size == 0:
-                break
-
-            value_start = index + 1 + length_size
-            value_end = value_start + length
-            if value_end > len(raw_data):
-                break
-
-            blob = raw_data[value_start:value_end]
+        profiles, _error_code = split_profile_info_list(raw_data)
+        for blob in profiles:
             parsed = self._parse_tlv_simple(blob)
             row = self._profile_metadata_from_parsed(parsed)
             if row is not None:
                 rows.append(row)
-            index = value_end
         return rows
 
     def decode_euicc_configured_data(self, raw_data: bytes) -> dict[str, Any]:
@@ -871,7 +875,32 @@ class LocalIsdrSession:
         return self._run_profile_state_command(identifier, self.TAG_DISABLE_PROFILE, "DisableProfile")
 
     def delete_profile(self, identifier: str) -> bytes:
-        return self._run_profile_state_command(identifier, self.TAG_DELETE_PROFILE, "DeleteProfile")
+        """Delete a profile, disabling it first when the card reports it enabled.
+
+        SGP.22 v3.1 section 5.7.18: the eUICC verifies that the target is not
+        in Enabled state and answers profileNotInDisabledState otherwise. An
+        enabled target therefore gets DisableProfile (section 5.7.17) before
+        BF33. The disable result gates the delete: a refusal raises and the
+        delete is never sent. An unreadable profile list degrades to a plain
+        delete, the same way target resolution degrades, and the card then
+        answers for itself.
+        """
+        profiles = self._collect_profile_metadata_quietly()
+        resolved = self._resolve_profile_target(identifier, profiles=profiles)
+        if resolved is None:
+            raise ValueError("DeleteProfile requires <iccid-or-aid-or-alias>.")
+        target_view = self._find_profile_view_for_target(resolved, profiles)
+        if target_view is not None and profile_is_enabled(target_view):
+            self.last_profile_state_steps = ("DisableProfile",)
+            self._run_resolved_profile_state_command(
+                resolved,
+                self.TAG_DISABLE_PROFILE,
+                "DisableProfile",
+            )
+            self.last_profile_state_steps = ("DisableProfile", "DeleteProfile")
+        else:
+            self.last_profile_state_steps = ("DeleteProfile",)
+        return self._run_resolved_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile")
 
     def store_metadata(self, metadata_path: str = "") -> bytes:
         """Persist the supplied metadata dict to the session metadata store."""
@@ -921,19 +950,71 @@ class LocalIsdrSession:
         resolved = self._resolve_profile_target(identifier)
         if resolved is None:
             raise ValueError(f"{action_label} requires <iccid-or-aid-or-alias>.")
+        self.last_profile_state_steps = (action_label,)
+        return self._run_resolved_profile_state_command(resolved, command_tag, action_label)
 
+    def _collect_profile_metadata_quietly(self) -> list[ProfileMetadataView]:
+        """Profile list for a state decision; unreadable degrades to empty, like target resolution."""
+        try:
+            return list(self.collect_profile_metadata())
+        except (RuntimeError, OSError, ValueError, AttributeError, TypeError):
+            return []
+
+    def _find_profile_view_for_target(
+        self,
+        resolved: tuple[bytes, str],
+        profiles: list[ProfileMetadataView],
+    ) -> Optional[ProfileMetadataView]:
+        """Match a resolved (tag, value-hex) target against the decoded profile rows."""
+        target_tag, target_value_hex = resolved
+        wanted = str(target_value_hex or "").strip().upper()
+        if len(wanted) == 0:
+            return None
+        for view in profiles:
+            if target_tag == self.TAG_AID:
+                if str(view.aid or "").strip().upper() == wanted:
+                    return view
+                continue
+            iccid_digits = str(view.iccid or "").strip().upper()
+            if len(iccid_digits) == 0:
+                continue
+            # The row carries the swapped digits; the command carries the
+            # raw EF-format bytes, so compare in command form.
+            if self._encode_iccid_for_command(iccid_digits).upper() == wanted:
+                return view
+        return None
+
+    def _run_resolved_profile_state_command(
+        self,
+        resolved: tuple[bytes, str],
+        command_tag: bytes,
+        action_label: str,
+    ) -> bytes:
+        self.reset_state()
+        return self._send_resolved_profile_state_command(resolved, command_tag, action_label)
+
+    def _send_resolved_profile_state_command(
+        self,
+        resolved: tuple[bytes, str],
+        command_tag: bytes,
+        action_label: str,
+    ) -> bytes:
+        """SELECT ISD-R, send one ES10c profile-state command and check its result.
+
+        The session state is left as found: the standalone commands reset it
+        first, the post-load enable keeps the load diagnostics in place.
+        """
         target_tag, target_value_hex = resolved
         target_type = "ICCID"
         if target_tag == self.TAG_AID:
             target_type = "AID"
-        self.reset_state()
         self.select_isdr()
         payload = self._build_profile_state_payload(command_tag, target_tag, target_value_hex)
         response = self._send_personalization_store_data(payload, f"LOCAL: {action_label}")
 
         result_code = self._extract_profile_state_result_code(response, command_tag)
         if result_code is not None and result_code != 0:
-            error_text = self._profile_state_error_name(result_code)
+            error_text = self._profile_state_error_name(result_code, command_tag)
             raise RuntimeError(
                 f"{action_label} failed for {target_type}={target_value_hex}: "
                 f"code=0x{result_code:02X} ({error_text})."
@@ -946,7 +1027,16 @@ class LocalIsdrSession:
 
         return response
 
-    def _resolve_profile_target(self, identifier: str) -> Optional[tuple[bytes, str]]:
+    def _resolve_profile_target(
+        self,
+        identifier: str,
+        profiles: Optional[list[ProfileMetadataView]] = None,
+    ) -> Optional[tuple[bytes, str]]:
+        def fetch_profiles() -> list[ProfileMetadataView]:
+            if profiles is not None:
+                return list(profiles)
+            return self.collect_profile_metadata()
+
         return resolve_profile_target_identifier(
             identifier,
             tag_aid=self.TAG_AID,
@@ -955,7 +1045,7 @@ class LocalIsdrSession:
             is_hex=self._is_valid_hex,
             extract_decimal_iccid=self._extract_decimal_iccid,
             encode_iccid_for_command=self._encode_iccid_for_command,
-            fetch_profiles=self.collect_profile_metadata,
+            fetch_profiles=fetch_profiles,
         )
 
     def _resolve_aid_from_alias(self, alias: str) -> Optional[str]:
@@ -1044,9 +1134,12 @@ class LocalIsdrSession:
         elif isinstance(values, bytes):
             blobs.append(values)
 
+        # additionalRootDsAddresses is SEQUENCE OF UTF8String (SGP.22 v3.1
+        # section 5.7.3): automatic tagging names the SEQUENCE OF A2 but leaves
+        # its elements as universal UTF8String, tag 0C.
         for blob in blobs:
             nested = self._parse_tlv_simple(blob)
-            nested_values = self._extract_text_values(nested, 0x82)
+            nested_values = self._extract_text_values(nested, 0x0C)
             if len(nested_values) > 0:
                 output.extend(nested_values)
             else:
@@ -1238,7 +1331,10 @@ class LocalIsdrSession:
         return None
 
     @staticmethod
-    def _profile_state_error_name(result_code: int) -> str:
+    def _profile_state_error_name(result_code: int, command_tag: bytes = b"") -> str:
+        names = _PROFILE_STATE_RESULT_NAMES.get(bytes(command_tag).hex().upper())
+        if names is not None:
+            return names.get(result_code, "unknown result code")
         error_map = {
             1: "Profile Not Found",
             2: "Already in requested state",
@@ -1427,10 +1523,11 @@ class LocalIsdrSession:
     def run_load_profile_chain(self, profile_path: str = "") -> bytes:
         """
         Run the full load-profile flow: open session, PrepareDownload, LoadBoundProfilePackage,
-        then close session. Same pattern as relay — each command opens, does work, closes.
-        Transaction ID and card expectations: we use the transaction ID from the BPP file
-        (BF23) so that AuthenticateServer, PrepareDownload and the loaded BPP all match;
-        otherwise the card will reject the load.
+        close session, then EnableProfile for the installed profile when
+        ``AUTO_ENABLE_AFTER_LOAD`` is set. Same pattern as relay -- each command opens, does
+        work, closes. Transaction ID and card expectations: we use the transaction ID from the
+        BPP file (BF23) so that AuthenticateServer, PrepareDownload and the loaded BPP all
+        match; otherwise the card will reject the load.
         """
         # Each LOAD-PROFILE attempt must start from a fresh SCP11 session context.
         # Reusing a previous PrepareDownload response mixes old transaction/session
@@ -1449,8 +1546,10 @@ class LocalIsdrSession:
         bpp_bytes = self._decode_profile_bytes(bpp_bytes)
         self.state.upp_protected_command_descriptions = []
         self.state.last_bpp_layout_lines = []
+        self.state.upp_pe_outline = []
         self.state.last_bpp_crypto_debug_lines = []
         self.state.last_load_bpp_response = b""
+        self.state.last_load_bpp_terminal_a3_member_index = 0
         self.state.load_notifications_synced = False
         transaction_id_override = (
             self._extract_transaction_id_from_bpp(bpp_bytes)
@@ -1511,7 +1610,7 @@ class LocalIsdrSession:
                     )
                 bar.advance("describe bpp layout")
                 self.state.last_bpp_layout_lines = self._describe_bpp_layout(bpp_bytes)
-                return self._load_profile_from_bytes(bpp_bytes, progress_bar=bar)
+                load_response = self._load_profile_from_bytes(bpp_bytes, progress_bar=bar)
             finally:
                 if self.state.session_open:
                     try:
@@ -1520,6 +1619,87 @@ class LocalIsdrSession:
                     except Exception:
                         pass
                     self.close_session()
+            # The RSP Session is over once the card has delivered the Profile
+            # Installation Result (SGP.22 v3.1 section 5.7.6), so the enable
+            # runs after the close as its own ES10c exchange.
+            self._auto_enable_installed_profile(load_response, progress_bar=bar)
+        return load_response
+
+    def _installed_profile_target(self, load_response: bytes) -> Optional[tuple[bytes, str, str]]:
+        """Identify the profile a successful load installed.
+
+        Returns ``(tag, value_hex, display)`` in the shape the profile-state
+        commands take, or ``None`` when the response is not a Profile
+        Installation Result with successResult. SGP.22 v3.1 section 2.5.6:
+        the NotificationMetadata carries the ICCID as an OPTIONAL member
+        while SuccessResult always carries the ISD-P AID, so the ICCID is
+        preferred and the AID is the fallback.
+        """
+        details = self._decode_profile_installation_result(load_response)
+        if len(details) == 0 or details.get("finalResultTag") != b"\xA0":
+            return None
+        iccid = str(details.get("iccid") or "").strip()
+        if len(iccid) > 0:
+            return self.TAG_ICCID, self._encode_iccid_for_command(iccid), iccid
+        aid = details.get("aid")
+        if isinstance(aid, bytes) and len(aid) > 0:
+            return self.TAG_AID, aid.hex().upper(), aid.hex().upper()
+        return None
+
+    def _auto_enable_installed_profile(self, load_response: bytes, progress_bar: Any = None) -> None:
+        """Enable the profile the load just installed when the config asks for it.
+
+        SGP.22 v3.1 section 3.1.3 step 8 makes "enable the profile after
+        installation?" an End User choice; ``AUTO_ENABLE_AFTER_LOAD`` answers
+        it. The enable is a fresh ES10c exchange: SELECT ISD-R, then
+        EnableProfile, which disables the currently enabled profile implicitly
+        and atomically and refuses with disallowedByPolicy when that profile
+        carries PPR1 (section 5.7.16). No explicit DisableProfile precedes it,
+        so a refusal leaves the previously enabled profile in place. The load
+        state is kept so EXPLAIN-LAST and EXPORT-KEYBAG still describe the
+        package just sent; the outcome lands in ``state.auto_enable_*`` and is
+        never raised, because the install itself succeeded and is reported as
+        such.
+        """
+        if bool(getattr(self.cfg, "AUTO_ENABLE_AFTER_LOAD", False)) is False:
+            return
+        target = self._installed_profile_target(load_response)
+        if target is None:
+            self.state.auto_enable_status = "skipped"
+            self.state.auto_enable_detail = (
+                "the load returned no Profile Installation Result with "
+                "successResult, so there is no installed profile to enable."
+            )
+            return
+        target_tag, target_value_hex, display = target
+        self.state.auto_enable_target_kind = "AID" if target_tag == self.TAG_AID else "ICCID"
+        self.state.auto_enable_target = display
+        self._progress_add_step(progress_bar, "enable installed profile")
+        try:
+            response = self._send_resolved_profile_state_command(
+                (target_tag, target_value_hex),
+                self.TAG_ENABLE_PROFILE,
+                "EnableProfile",
+            )
+        except (RuntimeError, ValueError, OSError) as error:
+            self.state.auto_enable_status = "failed"
+            self.state.auto_enable_detail = str(error)
+            return
+        self.state.auto_enable_status = "enabled"
+        self.state.auto_enable_response = response
+
+    @staticmethod
+    def _progress_add_step(progress_bar: Any, label: str) -> None:
+        """Grow the sticky-footer total by one step and advance onto it."""
+        if progress_bar is None:
+            return
+        try:
+            total = getattr(progress_bar, "total", None)
+            if isinstance(total, int):
+                progress_bar.set_total(total + 1)
+            progress_bar.advance(label)
+        except Exception:
+            pass
 
     @staticmethod
     def _is_local_bpp_metadata_error(error: BaseException) -> bool:
@@ -1623,6 +1803,10 @@ class LocalIsdrSession:
                 raise RuntimeError("PrepareDownload did not yield euiccOtpk for local BPP generation.")
 
             self._persist_pre_bsp_payload_debug(upp_bytes)
+            self.state.upp_pe_outline = outline_profile_package(
+                bytes(upp_bytes),
+                schema=getattr(pysim_saip, "asn1", None),
+            )
             profile_metadata = self._build_pysim_profile_metadata(upp_bytes)
             rsp_session = self._build_local_rsp_session(
                 transaction_id=transaction_id,
@@ -1681,13 +1865,20 @@ class LocalIsdrSession:
         debug_dir = str(getattr(self.cfg, "DEBUG_DIR", "")).strip()
         if len(debug_dir) == 0:
             return
+        # The UPP is the unprotected profile -- for a real profile it carries the
+        # subscriber authentication keys, so it is written only under the debug
+        # flag and only with owner-private permissions.
+        if is_global_debug_enabled() is False:
+            return
         try:
             os.makedirs(debug_dir, exist_ok=True)
             bin_path = os.path.join(debug_dir, "_debug_pre_bsp_payload.bin")
             hex_path = os.path.join(debug_dir, "_debug_pre_bsp_payload.txt")
-            with open(bin_path, "wb") as fh:
+            bin_fd = os.open(bin_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(bin_fd, "wb") as fh:
                 fh.write(bytes(upp_bytes))
-            with open(hex_path, "w", encoding="ascii") as fh:
+            hex_fd = os.open(hex_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(hex_fd, "w", encoding="ascii") as fh:
                 fh.write(bytes(upp_bytes).hex().upper())
                 fh.write("\n")
         except Exception:
@@ -1923,6 +2114,11 @@ class LocalIsdrSession:
         a3_plaintext_chunk_size: int = 0,
         use_ppk_replace_session_keys: bool = False,
     ) -> list[str]:
+        # These lines carry live BSP session keys (S-ENC/S-MAC/MCV); they are
+        # printed and embedded in --json/--yaml output, so they stay behind the
+        # global debug flag. EXPORT-KEYBAG is the deliberate way to obtain them.
+        if is_global_debug_enabled() is False:
+            return []
         _ensure_pysim_session_bound_support()
         if BspInstance is None:
             return []
@@ -2404,6 +2600,7 @@ class LocalIsdrSession:
         self.state.last_bpp_layout_lines = self._describe_bpp_layout(bpp_bytes)
         self._update_bpp_structure_debug(bpp_bytes)
         self.state.bpp_command_descriptions = self._describe_bpp_command_id_sequence(bpp_bytes)
+        self.state.last_load_bpp_terminal_a3_member_index = 0
         segments = self._segment_bound_profile_package(bpp_bytes)
         segment_count = len(segments)
         self._progress_expand_for_install(progress_bar, segment_count)
@@ -2419,6 +2616,9 @@ class LocalIsdrSession:
             )
             self.state.last_load_bpp_response = last_response
             if self._is_terminal_profile_installation_result(last_response):
+                self.state.last_load_bpp_terminal_a3_member_index = (
+                    self._a3_member_index_for_segment(index)
+                )
                 self._progress_coast_remaining_segments(
                     progress_bar,
                     skipped_count=segment_count - index,
@@ -2548,7 +2748,7 @@ class LocalIsdrSession:
                         }
                     )
                 return entries
-        # pySim decoder returned nothing usable — fall back to manual BER-TLV
+        # pySim decoder returned nothing usable -- fall back to manual BER-TLV
         # parsing so that notifications queued on the eUICC are never missed.
         try:
             root_tag, root_value, _, _ = self._read_tlv(raw_response, 0)
@@ -2850,10 +3050,48 @@ class LocalIsdrSession:
         block_count = (protected_length + apdu_chunk_size - 1) // apdu_chunk_size
         return f"{member_index}.0 -> {member_index}.{block_count - 1}"
 
+    def _a3_member_index_for_segment(self, segment_index: int) -> int:
+        """Map a 1-based StoreData loop index onto its A3 member index (0 = none)."""
+        base = int(self.state.bpp_a3_member_segment_base or 0)
+        if base <= 0 or segment_index <= base:
+            return 0
+        return int(segment_index) - base
+
+    def _describe_a3_member_focus(self, label: str, member: dict[str, Any]) -> list[str]:
+        index = int(member.get("index", 0))
+        length = int(member.get("length", 0))
+        start = int(member.get("start", 0))
+        end = int(member.get("end", 0))
+        overlap = str(member.get("overlap", "")).strip()
+        parts = [f"{label}=A3[{index}]"]
+        parts.append(f"  blocks={self._a3_member_block_window(index, length)}")
+        parts.append(f"  plaintext[{start}:{end}]")
+        if len(overlap) > 0:
+            parts.append("  overlaps:")
+            for text in self._split_overlap_labels(overlap):
+                parts.append(f"    {text}")
+        return parts
+
     def _describe_a3_failure_focus_parts(self) -> list[str]:
         members = self._parse_a3_layout_members()
         if len(members) == 0:
             return []
+
+        # The card answers the StoreData round that completed the segment it
+        # could not process, so that member is the failing chunk. The PE-End
+        # guess below only stands in when no load recorded the index (a
+        # summary rendered from stored state).
+        reported_index = int(self.state.last_load_bpp_terminal_a3_member_index or 0)
+        if reported_index > 0:
+            for member in members:
+                if int(member.get("index", 0)) != reported_index:
+                    continue
+                parts = self._describe_a3_member_focus("likelyProtectedChunk", member)
+                parts.insert(
+                    1,
+                    "  attribution=segment that returned the ProfileInstallationResult",
+                )
+                return parts
 
         terminal_label = ""
         for member in reversed(members):
@@ -2884,33 +3122,16 @@ class LocalIsdrSession:
                 break
 
         likely_index = int(likely.get("index", 0))
-        likely_length = int(likely.get("length", 0))
-        likely_start = int(likely.get("start", 0))
-        likely_end = int(likely.get("end", 0))
-        likely_overlap = str(likely.get("overlap", "")).strip()
-        parts = [f"likelyProtectedChunk=A3[{likely_index}]"]
-        parts.append(f"  blocks={self._a3_member_block_window(likely_index, likely_length)}")
-        parts.append(f"  plaintext[{likely_start}:{likely_end}]")
-        if len(likely_overlap) > 0:
-            parts.append("  overlaps:")
-            for label in self._split_overlap_labels(likely_overlap):
-                parts.append(f"    {label}")
+        parts = self._describe_a3_member_focus("likelyProtectedChunk", likely)
+        parts.insert(
+            1,
+            "  attribution=chunk carrying PE-End (the failing segment was not recorded)",
+        )
 
         tail = candidates[-1]
         tail_index = int(tail.get("index", 0))
         if tail_index != likely_index:
-            tail_length = int(tail.get("length", 0))
-            tail_start = int(tail.get("start", 0))
-            tail_end = int(tail.get("end", 0))
-            tail_overlap = str(tail.get("overlap", "")).strip()
-            continuation = f"terminalChunkContinuation=A3[{tail_index}]"
-            parts.append(continuation)
-            parts.append(f"  blocks={self._a3_member_block_window(tail_index, tail_length)}")
-            parts.append(f"  plaintext[{tail_start}:{tail_end}]")
-            if len(tail_overlap) > 0:
-                parts.append("  overlaps:")
-                for label in self._split_overlap_labels(tail_overlap):
-                    parts.append(f"    {label}")
+            parts.extend(self._describe_a3_member_focus("terminalChunkContinuation", tail))
         return parts
 
     def _update_bpp_structure_debug(self, bpp_bytes: bytes) -> None:
@@ -2966,13 +3187,14 @@ class LocalIsdrSession:
 
     def _decode_profile_bytes(self, data: bytes) -> bytes:
         """If data looks like ASCII hex (e.g. from a .txt profile), decode to binary."""
-        if len(data) < 4 or len(data) % 2 != 0:
+        if len(data) < 4:
             return data
         try:
             text = data.decode("ascii").strip()
         except UnicodeDecodeError:
             return data
-        if len(text) % 2 != 0:
+        # Whitespace, including a trailing newline, is not part of the hex.
+        if len("".join(text.split())) % 2 != 0:
             return data
         allowed = set("0123456789ABCDEFabcdef \t\n\r")
         if not all(c in allowed for c in text):
@@ -3823,7 +4045,8 @@ class LocalIsdrSession:
         if first < 0x80:
             return first, 1
         count = first & 0x7F
-        if count == 0:
+        if count == 0 or count == 0x7F:
+            # Indefinite form and the reserved octet 0xFF (X.690 8.1.3.5 c).
             return 0, 0
         end = offset + 1 + count
         if end > len(data):
@@ -3846,15 +4069,9 @@ class LocalIsdrSession:
 
     @staticmethod
     def _decode_bcd_digits(value: bytes) -> str:
-        digits = ""
-        for byte in value:
-            high = (byte >> 4) & 0x0F
-            low = byte & 0x0F
-            for nibble in [high, low]:
-                if nibble == 0x0F:
-                    continue
-                digits += str(nibble)
-        return digits
+        # Straight BCD; a nibble above 9 or padding is rendered as its hex
+        # letter rather than turned into digits (TS 102 221 v18.4 13.2).
+        return decode_bcd_digits(value, strict=False).rstrip("F")
 
     @staticmethod
     def _swap_bcd_nibbles(value: bytes) -> bytes:
@@ -3913,6 +4130,9 @@ class LocalIsdrSession:
         sima_response = details.get("simaResponse")
         if isinstance(sima_response, bytes) and len(sima_response) > 0:
             lines.append(f"simaResponse={sima_response.hex().upper()}")
+            lines.extend(
+                self._describe_sima_response_lines(sima_response, self.state.upp_pe_outline)
+            )
         smdp_oid = details.get("smdpOid")
         if isinstance(smdp_oid, str) and len(smdp_oid) > 0:
             lines.append(f"smdpOid={smdp_oid}")
@@ -3940,6 +4160,62 @@ class LocalIsdrSession:
         if isinstance(parse_error, str) and len(parse_error) > 0:
             lines.append(f"notificationParseError={parse_error}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _describe_sima_response_lines(
+        sima_response: bytes,
+        pe_outline: Optional[list[Any]] = None,
+    ) -> list[str]:
+        """Decode the EUICCResponse (SAIP V3.4.1 section 8.11) under its raw hex.
+
+        ``offset`` counts bytes from the start of the PE that raised the
+        status, and the Profile Header is the only PE without an
+        identification number (section 8.2.1 defines it without a PEHeader).
+        With ``pe_outline`` (the package this session bound) every status that
+        carries an offset is mapped onto the elements around it; without one
+        (a pre-built BF36 input) a status with an offset but no identification
+        sends the operator to the header.
+        """
+        try:
+            from SCP11.shared.sima_response import decode_sima_response
+
+            decoded = decode_sima_response(sima_response)
+        except Exception:
+            return []
+        if isinstance(decoded, dict) is False:
+            return []
+        lines: list[str] = []
+        summary = str(decoded.get("summary") or "").strip()
+        if len(summary) > 0:
+            lines.append(f"simaResponseDecoded={summary}")
+        semantic = decoded.get("semantic")
+        statuses = semantic.get("pe_status") if isinstance(semantic, dict) else None
+        entries = [entry for entry in statuses if isinstance(entry, dict)] if isinstance(statuses, list) else []
+        if pe_outline:
+            located: list[str] = []
+            for entry in entries:
+                located.extend(
+                    describe_pe_status_location(
+                        pe_outline,
+                        entry.get("identification"),
+                        entry.get("offset"),
+                    )
+                )
+            if len(located) > 0:
+                return lines + located
+        for entry in entries:
+            if entry.get("identification") is not None:
+                continue
+            offset = entry.get("offset")
+            if isinstance(offset, bool) or isinstance(offset, int) is False:
+                continue
+            lines.append(
+                "simaResponseHint=no PE identification; the Profile Header is the one PE "
+                f"without one, so read byte offset {offset} of the header first "
+                "(offset counts from the start of the failing PE)"
+            )
+            break
+        return lines
 
     @staticmethod
     def _indent_text_block(text: str, prefix: str = "  ") -> str:
@@ -3978,6 +4254,12 @@ class LocalIsdrSession:
         return describe_sgp22_profile_installation_reason(int(error_reason))
 
     def _decode_profile_installation_result(self, raw_response: bytes) -> dict:
+        """Decode a BF37 ProfileInstallationResult (SGP.22 v3.1 section 2.5.6).
+
+        ``profileInstallationResultData [39]`` (BF27) and ``euiccSignPIR`` (5F37)
+        are siblings under BF37; the data carries transactionId 80, the
+        NotificationMetadata BF2F, the SM-DP+ OID 06 and finalResult A2.
+        """
         if len(raw_response) == 0:
             return {}
         try:
@@ -3985,12 +4267,6 @@ class LocalIsdrSession:
         except Exception:
             return {}
         if root_tag != bytes.fromhex("BF37"):
-            return {}
-        try:
-            inner_tag, inner_value, _, _ = self._read_tlv(root_value, 0)
-        except Exception:
-            return {}
-        if inner_tag != bytes.fromhex("BF27"):
             return {}
         details = {
             "transactionId": b"",
@@ -4005,7 +4281,29 @@ class LocalIsdrSession:
             "finalResultTag": b"",
             "resultCode": None,
             "resultDetail": None,
+            "bppCommandId": None,
+            "bppCommandIdName": "",
+            "errorReason": None,
+            "errorReasonName": "",
         }
+        data_seen = False
+        offset = 0
+        while offset < len(root_value):
+            try:
+                member_tag, member_value, _, next_offset = self._read_tlv(root_value, offset)
+            except Exception:
+                break
+            if member_tag == bytes.fromhex("BF27"):
+                data_seen = True
+                self._decode_profile_installation_result_data(member_value, details)
+            elif member_tag == bytes.fromhex("5F37"):
+                details["euiccSignPIR"] = member_value
+            offset = next_offset
+        if data_seen is False:
+            return {}
+        return details
+
+    def _decode_profile_installation_result_data(self, inner_value: bytes, details: dict) -> None:
         offset = 0
         while offset < len(inner_value):
             try:
@@ -4020,12 +4318,16 @@ class LocalIsdrSession:
                 details["smdpOid"] = self._decode_oid(field_value)
             elif field_tag == b"\xA2":
                 self._decode_profile_installation_final_result(field_value, details)
-            elif field_tag == bytes.fromhex("5F37"):
-                details["euiccSignPIR"] = field_value
             offset = next_offset
-        return details
 
     def _decode_profile_installation_final_result(self, value: bytes, details: dict) -> None:
+        """Decode finalResult [2] CHOICE { successResult [0], errorResult [1] }.
+
+        SuccessResult carries aid [APPLICATION 15] and ppiResponse (tags 4F and
+        04). ErrorResult has no textual tags, so automatic tagging gives
+        bppCommandId 80, errorReason 81 and ppiResponse 82 (SGP.22 v3.1 section
+        2.5.6); resultCode / resultDetail keep mirroring the two integers.
+        """
         offset = 0
         while offset < len(value):
             try:
@@ -4040,13 +4342,21 @@ class LocalIsdrSession:
                         field_tag, field_value, _, inner_next_offset = self._read_tlv(result_value, inner_offset)
                     except Exception:
                         return
-                    if field_tag == b"\x80":
-                        details["resultCode"] = int.from_bytes(field_value, "big", signed=False)
-                    elif field_tag == b"\x81":
-                        details["resultDetail"] = int.from_bytes(field_value, "big", signed=False)
-                    elif field_tag == b"\x4F":
+                    if result_tag == b"\xA1" and field_tag == b"\x80":
+                        code = int.from_bytes(field_value, "big", signed=False)
+                        details["bppCommandId"] = code
+                        details["bppCommandIdName"] = SGP22_BPP_COMMAND_ID.get(code, "")
+                        details["resultCode"] = code
+                    elif result_tag == b"\xA1" and field_tag == b"\x81":
+                        reason = int.from_bytes(field_value, "big", signed=False)
+                        details["errorReason"] = reason
+                        details["errorReasonName"] = SGP22_PROFILE_INSTALLATION_RESULT_REASON.get(reason, "")
+                        details["resultDetail"] = reason
+                    elif result_tag == b"\xA1" and field_tag == b"\x82":
+                        details["simaResponse"] = field_value
+                    elif result_tag == b"\xA0" and field_tag == b"\x4F":
                         details["aid"] = field_value
-                    elif field_tag == b"\x04":
+                    elif result_tag == b"\xA0" and field_tag == b"\x04":
                         details["simaResponse"] = field_value
                     inner_offset = inner_next_offset
             offset = next_offset
@@ -4107,26 +4417,18 @@ class LocalIsdrSession:
                         f"notificationAddress is not valid UTF-8: {error}",
                     )
             elif field_tag == b"\x5A":
-                details["iccid"] = self._decode_bcd_digits(field_value)
+                # Iccid is "ICCID as coded in EFiccid" (SGP.22 v3.1), so the
+                # nibbles are swapped before the digits are read.
+                details["iccid"] = self._decode_bcd_digits(self._swap_bcd_nibbles(field_value))
             offset = next_offset
         return details
 
     @staticmethod
     def _decode_oid(value: bytes) -> str:
-        if len(value) == 0:
+        try:
+            return decode_object_identifier(value)
+        except ValueError:
             return ""
-        first = value[0]
-        parts = [str(first // 40), str(first % 40)]
-        current = 0
-        for byte in value[1:]:
-            current = (current << 7) | (byte & 0x7F)
-            if byte & 0x80:
-                continue
-            parts.append(str(current))
-            current = 0
-        if current != 0:
-            parts.append(str(current))
-        return ".".join(parts)
 
     def _segment_bound_profile_package(self, bpp_bytes: bytes) -> list[bytes]:
         # Keep the A0 configureISDPRequest wrapped and emit A1/A2/A3
@@ -4140,6 +4442,7 @@ class LocalIsdrSession:
         if root_tag != bytes.fromhex("BF36"):
             raise ValueError(f"Unexpected Bound Profile Package root tag: {root_tag.hex().upper()}")
         segments: list[bytes] = []
+        self.state.bpp_a3_member_segment_base = 0
         child_offset = 0
         first_child = True
         while child_offset < len(root_value):
@@ -4152,9 +4455,18 @@ class LocalIsdrSession:
             elif child_tag == b"\xA0":
                 segments.append(child_raw)
             elif child_tag in (b"\xA1", b"\xA2", b"\xA3"):
-                segments.append(self._encode_tlv_header(child_tag, len(child_value)))
-                if len(child_value) > 0:
-                    segments.extend(self._extract_sequence_members(child_value))
+                header = self._encode_tlv_header(child_tag, len(child_value))
+                members = self._extract_sequence_members(child_value) if len(child_value) > 0 else []
+                if child_tag == b"\xA2" and len(members) > 0:
+                    # SGP.22 v3.1 section 2.5.5: the secondSequenceOf87 header
+                    # travels with its first '87' in one segment.
+                    segments.append(header + members[0])
+                    segments.extend(members[1:])
+                else:
+                    segments.append(header)
+                    if child_tag == b"\xA3":
+                        self.state.bpp_a3_member_segment_base = len(segments)
+                    segments.extend(members)
             else:
                 raise ValueError(f"Unexpected Bound Profile Package child tag: {child_tag.hex().upper()}")
             child_offset = next_offset

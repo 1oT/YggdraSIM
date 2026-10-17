@@ -4,7 +4,7 @@
 """Regression tests for the tolerant SAIP DER loader.
 
 The strict loader used to raise a raw ``asn1tools.codecs.ber.MissingDataError``
-from deep inside pySim whenever one PE in a package was malformed —
+from deep inside pySim whenever one PE in a package was malformed --
 operators saw ``MissingDataError: ProfileElement: Expected at least 48
 contents byte(s), but got 3. (At offset: 2)`` with no file context, no PE
 index, and no recoverable state.
@@ -52,20 +52,103 @@ class TolerantLoaderHelperTests(unittest.TestCase):
         pe.decoded = {"end-header": {"mandated": None, "identification": 0}}
         return pe.to_der()
 
+    def _header_pe_tlv(self) -> bytes:
+        """Return a minimal ProfileHeader PE; a neighbour that is not ``end``."""
+        from pySim.esim.saip import ProfileElement
+
+        pe = ProfileElement()
+        pe.type = "header"
+        pe.decoded = {
+            "major-version": 2,
+            "minor-version": 3,
+            "iccid": bytes.fromhex("988802214365870921F3"),
+            "eUICC-Mandatory-services": {},
+            "eUICC-Mandatory-GFSTEList": [],
+        }
+        return pe.to_der()
+
+    def _gfm_first_profile_der(self) -> bytes:
+        """Header, a GFM that creates the MF and EF.ARR below it, then end.
+
+        TCA SAIP V3.4.1 §8.1 lets a Full Profile create the MF with
+        PE-GenericFileManagement instead of PE-MF.
+        """
+        from pySim.esim.saip import asn1
+
+        gfm = asn1.encode("ProfileElement", ("genericFileManagement", {
+            "gfm-header": {"mandated": None, "identification": 1},
+            "fileManagementCMD": [[
+                ("createFCP", {
+                    "fileDescriptor": b"\x78\x21",
+                    "fileID": b"\x3f\x00",
+                    "securityAttributesReferenced": b"\x01",
+                }),
+                ("createFCP", {
+                    "fileDescriptor": b"\x42\x21\x00\x20",
+                    "fileID": b"\x2f\x06",
+                    "securityAttributesReferenced": b"\x03",
+                    "efFileSize": b"\x40",
+                }),
+                ("fillFileContent", b"\x80\x01\x00\x90\x00"),
+            ]],
+        }))
+        return self._header_pe_tlv() + gfm + self._good_pe_tlv()
+
     # ------------------------------------------------------------------
     # Tolerant walker
     # ------------------------------------------------------------------
 
     def test_tolerant_walker_decodes_clean_sequence(self) -> None:
         """Two well-formed PEs back-to-back yield zero warnings."""
-        tlv = self._good_pe_tlv()
-        raw = tlv + tlv
+        raw = self._header_pe_tlv() + self._good_pe_tlv()
 
         pes, warnings, first_fail = self.saip._parse_pes_tolerant(raw)
 
-        self.assertEqual(len(pes.pe_list), 2)
+        self.assertEqual([pe.type for pe in pes.pe_list], ["header", "end"])
         self.assertEqual(warnings, [])
         self.assertIsNone(first_fail)
+
+    def test_tolerant_walker_stops_after_the_end_pe(self) -> None:
+        """Bytes behind ``end`` are one trailing-data note, not broken PEs.
+
+        TCA SAIP V3.4.1 §8.1: PE-End is provided once at the end of the
+        Profile Package.
+        """
+        end = self._good_pe_tlv()
+        raw = end + bytes.fromhex("33 44 55 66")
+
+        pes, warnings, first_fail = self.saip._parse_pes_tolerant(raw)
+
+        self.assertEqual([pe.type for pe in pes.pe_list], ["end"])
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0]["stage"], "trailing_data")
+        self.assertEqual(warnings[0]["index"], 1)
+        self.assertEqual(warnings[0]["offset"], len(end))
+        self.assertEqual(warnings[0]["segment_len"], 4)
+        self.assertEqual(warnings[0]["head_hex"], "33 44 55 66")
+        self.assertIn("follow the end PE", warnings[0]["error"])
+        self.assertIsNone(first_fail)
+
+    def test_split_at_end_pe_cuts_the_package_and_describes_the_tail(self) -> None:
+        """The cut lands right behind ``end``; a clean package is untouched."""
+        package = self._header_pe_tlv() + self._good_pe_tlv()
+        tail = bytes.fromhex("88 86 10 FF FF FF")
+
+        body, warning = self.saip._split_at_end_pe(package + tail)
+
+        self.assertEqual(body, package)
+        assert warning is not None
+        self.assertEqual(warning["stage"], "trailing_data")
+        self.assertEqual(warning["index"], 2)
+        self.assertEqual(warning["offset"], len(package))
+        self.assertEqual(warning["segment_len"], len(tail))
+        self.assertEqual(warning["head_hex"], "88 86 10 FF FF FF")
+        self.assertEqual(self.saip._split_at_end_pe(package), (package, None))
+        # No ``end`` PE at all: nothing to cut, the parsers report the rest.
+        header_only = self._header_pe_tlv()
+        self.assertEqual(self.saip._split_at_end_pe(header_only), (header_only, None))
+        garbage = bytes.fromhex("01 02 03")
+        self.assertEqual(self.saip._split_at_end_pe(garbage), (garbage, None))
 
     def test_tolerant_walker_records_failing_pe_but_keeps_good_ones(self) -> None:
         """A PE with a valid outer TLV but unparseable content produces one warning.
@@ -75,13 +158,13 @@ class TolerantLoaderHelperTests(unittest.TestCase):
           * append exactly one warning describing the broken segment,
           * surface the first failure for the error shaper to quote.
 
-        Note: if the inner length prefix is *itself* lying about segment
-        size, the BER chopper will over-advance and we lose bytes — that
-        scenario is covered separately by the total-garbage test below.
-        Here we craft a self-consistent outer TLV whose content simply
-        isn't a valid ProfileElement body.
+        An inner length prefix that lies about segment size makes the
+        BER chopper over-advance and drop bytes; the total-garbage test
+        below covers that separately. The TLV built here is
+        self-consistent, and only its content fails to decode as a
+        ProfileElement body.
         """
-        good = self._good_pe_tlv()
+        good = self._header_pe_tlv()
         # Context-specific tag [0] (header) with a well-formed length of
         # five bytes of content that won't decode as a ProfileHeader
         # structure. The outer TLV boundary is accurate so the chopper
@@ -110,14 +193,14 @@ class TolerantLoaderHelperTests(unittest.TestCase):
         raising.  The tolerant loader must not append that unusable object,
         while still recovering both valid neighbours.
         """
-        good = self._good_pe_tlv()
+        good = self._header_pe_tlv()
         typeless = bytes.fromhex("50 00")
 
         pes, warnings, first_fail = self.saip._parse_pes_tolerant(
             good + typeless + good
         )
 
-        self.assertEqual([pe.type for pe in pes.pe_list], ["end", "end"])
+        self.assertEqual([pe.type for pe in pes.pe_list], ["header", "header"])
         self.assertEqual(len(warnings), 1)
         self.assertIsNotNone(first_fail)
         assert first_fail is not None
@@ -347,7 +430,7 @@ class TolerantLoaderHelperTests(unittest.TestCase):
         """Strict type validation still preserves tolerant partial recovery."""
         import tempfile
 
-        good = self._good_pe_tlv()
+        good = self._header_pe_tlv()
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = Path(temp_dir) / "partially-damaged.der"
             input_path.write_bytes(good + bytes.fromhex("50 00") + good)
@@ -355,10 +438,62 @@ class TolerantLoaderHelperTests(unittest.TestCase):
 
         self.assertEqual(
             [pe.type for pe in package["pes"].pe_list],
-            ["end", "end"],
+            ["header", "header"],
         )
         self.assertEqual(len(package["warnings"]), 1)
         self.assertEqual(package["warnings"][0]["head_hex"], "50 00")
+
+    def test_full_loader_ignores_bytes_after_the_end_pe(self) -> None:
+        """A stale tail behind ``end`` keeps the strict parse and adds one note.
+
+        A package overwritten in place by a shorter one keeps the old tail;
+        TCA SAIP V3.4.1 §8.1 provides PE-End once at the end, so the tail is
+        not a run of broken PEs.
+        """
+        import tempfile
+
+        package = self._header_pe_tlv() + self._good_pe_tlv()
+        stale_tail = bytes.fromhex("33 44 55 66 77 88 A3 7F 04 7D")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "overwritten-in-place.der"
+            input_path.write_bytes(package + stale_tail)
+            loaded = self.saip._load_package_payload_core(input_path)
+
+        self.assertTrue(loaded["strict_complete"])
+        self.assertIsNone(loaded["strict_failure"])
+        self.assertEqual(
+            [pe.type for pe in loaded["pes"].pe_list], ["header", "end"]
+        )
+        self.assertEqual(len(loaded["warnings"]), 1)
+        warning = loaded["warnings"][0]
+        self.assertEqual(warning["stage"], "trailing_data")
+        self.assertEqual(warning["offset"], len(package))
+        self.assertEqual(warning["segment_len"], len(stale_tail))
+        self.assertEqual(warning["head_hex"], "33 44 55 66 77 88 A3 7F 04 7D")
+
+    def test_full_loader_roots_a_gfm_created_mf(self) -> None:
+        """A profile whose MF comes from PE-GenericFileManagement opens strictly.
+
+        Upstream pySim dereferences ``pe_sequence.mf`` for every GFM file;
+        ``Tools/ProfilePackage/saip_pysim_compat.install_gfm_mf_creation``
+        roots the MF the GFM creates.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "gfm-first.der"
+            input_path.write_bytes(self._gfm_first_profile_der())
+            loaded = self.saip._load_package_payload_core(input_path)
+
+        self.assertTrue(loaded["strict_complete"])
+        self.assertEqual(loaded["warnings"], [])
+        self.assertEqual(
+            [pe.type for pe in loaded["pes"].pe_list],
+            ["header", "genericFileManagement", "end"],
+        )
+        self.assertIsNotNone(loaded["pes"].mf)
+        self.assertIn(0x2F06, loaded["pes"].mf.children)
+        self.assertIn("genericFileManagement", loaded["decoded_document"]["sections"])
 
 
 class OpenPackageResponseTests(unittest.TestCase):
@@ -368,7 +503,7 @@ class OpenPackageResponseTests(unittest.TestCase):
         """Verify the dispatcher threads the field through to the JSON.
 
         The field must be present whether or not the tolerant parser
-        recovered anything — the frontend's log-bus relay indexes on it
+        recovered anything -- the frontend's log-bus relay indexes on it
         and would skip all warnings if the key were absent.
         """
         from yggdrasim_common.gui_server.actions import saip as saip_actions
@@ -582,7 +717,7 @@ class HexTextLoaderTests(unittest.TestCase):
 
     def test_load_package_falls_back_to_der_for_txt_with_binary_content(self) -> None:
         """A ``.txt`` file that actually contains DER bytes (operator
-        misnamed the extension) must still load — the loader's hex
+        misnamed the extension) must still load -- the loader's hex
         decode raises ``ValueError`` on the non-hex bytes and we then
         fall back to feeding the binary payload to the DER parser.
         """

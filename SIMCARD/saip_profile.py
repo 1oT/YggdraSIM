@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP profile applicator: walks a decoded pySim profile document and writes each PE to the simulated FS."""
 from __future__ import annotations
 
@@ -22,10 +21,6 @@ from SIMCARD.saip_pysim_specs import (
     pysim_sd_keys,
 )
 
-# When pySim is installed, use its TS-aligned service-name maps
-# in place of the inspector's hand-curated copies. The call is a no-op
-# in stripped deployments without pySim.
-apply_pysim_service_table_overlay_to_inspector()
 from SIMCARD.state import (
     SimProfileApplicationInstance,
     SimProfileApplicationPackage,
@@ -41,7 +36,19 @@ from SIMCARD.state import (
     SimProfileSecurityDomainKey,
     SimProfileSsimEaptlsBundle,
 )
-from SIMCARD.utils import decode_imsi_ef, encode_iccid_ef, encode_imsi_ef, read_tlv
+from SIMCARD.utils import (
+    decode_impi_ef,
+    decode_imsi_ef,
+    encode_iccid_ef,
+    encode_impi_ef,
+    encode_imsi_ef,
+    read_tlv,
+)
+
+# When pySim is installed, use its TS-aligned service-name maps
+# in place of the inspector's hand-curated copies. The call is a no-op
+# in stripped deployments without pySim.
+apply_pysim_service_table_overlay_to_inspector()
 
 _SAIP_ASN1 = None
 _SAIP_ASN1_FAILED = False
@@ -51,6 +58,9 @@ _SAIP_ASN1_FAILED = False
 # ``root_path`` (when set) causes the DF/ADF node itself to be emitted so
 # the profile image has a clean parent for the EFs. Container FIDs follow
 # the SAIP tool's ``_EF_KEY_TO_FID`` convention.
+# TCA SAIP v3.4.1 §9.10.1 fixes the IoT template's USIM ADF identifier.
+_IOT_ADF_USIM_FID = "7FF1"
+
 _SECTION_SPECS: dict[str, dict[str, Any]] = {
     "mf": {
         "base_path": ("MF",),
@@ -111,6 +121,15 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_path": ("MF", "ADF.USIM"),
         "root_kind": "adf",
         "root_fid": "7FF0",
+        "root_aid": USIM_AID,
+        "root_label": "USIM",
+        "descriptor_key": "adf-usim",
+    },
+    "opt-iot": {
+        "base_path": ("MF", "ADF.USIM"),
+        "root_path": ("MF", "ADF.USIM"),
+        "root_kind": "adf",
+        "root_fid": _IOT_ADF_USIM_FID,
         "root_aid": USIM_AID,
         "root_label": "USIM",
         "descriptor_key": "adf-usim",
@@ -990,7 +1009,10 @@ def _install_pysim_aliases(specs: dict[str, dict[str, Any]]) -> None:
 _install_pysim_aliases(_FILE_SPECS)
 
 
-_NOOP_PE_TYPES = frozenset({"end", "iot", "opt-iot", "ssim"})
+_NOOP_PE_TYPES = frozenset({"end", "ssim"})
+# PE-IoT carries the MF-level files and the USIM ADF in one element
+# (TCA SAIP v3.4.1 §8.3.4.8.1); these members belong to the MF.
+_IOT_MF_LEVEL_MEMBERS = frozenset({"mf", "ef-pl", "ef-iccid", "ef-dir", "ef-arr", "ef-umpc"})
 
 
 def known_profile_element_types() -> frozenset[str]:
@@ -1004,6 +1026,7 @@ def known_profile_element_types() -> frozenset[str]:
             "pukCodes",
             "akaParameter",
             "cdmaParameter",
+            "iot",
             "securityDomain",
             "rfm",
             "application",
@@ -1108,7 +1131,70 @@ def _extract_profile_identity_from_header_tlv(profile_bytes: bytes) -> tuple[str
     return profile_name, profile_iccid
 
 
-def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict[str, Any]) -> None:
+def _consume_iot_profile_element(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    """PE-IoT creates the MF-level files and the USIM ADF in one element.
+
+    TCA SAIP v3.4.1 §8.3.4.8.1: the element carries ``mf`` and its files
+    first, then ``adf-usim`` and the USIM files (``ef-arr-usim`` is the
+    ADF's own EF.ARR). The two halves go through the MF and USIM
+    consumers; §9.10.1 fixes the ADF's file identifier at 7FF1.
+    """
+    mf_part: dict[str, Any] = {}
+    usim_part: dict[str, Any] = {}
+    for key, value in decoded.items():
+        text = str(key)
+        if text.endswith("-header") or text == "templateID":
+            continue
+        if text in _IOT_MF_LEVEL_MEMBERS:
+            mf_part[text] = value
+        elif text == "ef-arr-usim":
+            usim_part["ef-arr"] = value
+        else:
+            usim_part[text] = value
+    if mf_part:
+        _consume_profile_element(image, "mf", mf_part)
+    usim_spec = dict(_SECTION_SPECS["usim"], root_fid=_IOT_ADF_USIM_FID)
+    _consume_profile_element(image, "usim", usim_part, spec_override=usim_spec)
+
+
+# PE-OPT-IoT nests DF.5GS and DF.SAIP inside the element (TCA SAIP v3.4.1
+# §8.3.4.8.2); each DF descriptor key maps to the standalone PE that owns
+# the same directory, and the files that follow it belong to that DF.
+_OPT_IOT_DF_SECTIONS: dict[str, str] = {"df-df-5gs": "df-5gs", "df-df-saip": "df-saip"}
+
+
+def _consume_opt_iot_profile_element(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    """Split PE-OPT-IoT into its USIM, DF.5GS and DF.SAIP parts.
+
+    Member order is the schema order, so every file after a DF descriptor
+    sits under that DF until the next descriptor. The USIM part goes through
+    the ``opt-iot`` section spec (no fresh ADF root); the DF parts reuse the
+    ``df-5gs`` / ``df-saip`` consumers with their descriptor key renamed.
+    """
+    parts: list[tuple[str, dict[str, Any]]] = [("opt-iot", {})]
+    for key, value in decoded.items():
+        text = str(key)
+        if text.endswith("-header") or text == "templateID":
+            continue
+        section = _OPT_IOT_DF_SECTIONS.get(text)
+        if section is not None:
+            parts.append((section, {section: value}))
+            continue
+        parts[-1][1][text] = value
+    for pe_type, payload in parts:
+        if len(payload) == 0:
+            continue
+        # The explicit spec keeps the USIM part out of this splitter.
+        _consume_profile_element(image, pe_type, payload, spec_override=_SECTION_SPECS[pe_type])
+
+
+def _consume_profile_element(
+    image: SimProfileImage,
+    pe_type: str,
+    decoded: dict[str, Any],
+    *,
+    spec_override: dict[str, Any] | None = None,
+) -> None:
     if pe_type == "header":
         _consume_profile_header(image, decoded)
         return
@@ -1156,7 +1242,15 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
         _consume_generic_file_management(image, decoded)
         return
 
-    spec = _SECTION_SPECS.get(pe_type)
+    if pe_type == "iot":
+        _consume_iot_profile_element(image, decoded)
+        return
+
+    if pe_type == "opt-iot" and spec_override is None:
+        _consume_opt_iot_profile_element(image, decoded)
+        return
+
+    spec = spec_override if spec_override is not None else _SECTION_SPECS.get(pe_type)
     if spec is None:
         return
 
@@ -2271,7 +2365,7 @@ def _consume_generic_file_management_local(
                     buffer.extend(b"\xFF" * (cursor - len(buffer)))
                 end_offset = cursor + len(payload)
                 if len(buffer) < end_offset:
-                    buffer.extend(b"\x00" * (end_offset - len(buffer)))
+                    buffer.extend(b"\xFF" * (end_offset - len(buffer)))
                 buffer[cursor:end_offset] = payload
                 cursor = end_offset
                 continue
@@ -2690,9 +2784,11 @@ def _finalize_image(image: SimProfileImage) -> SimProfileImage | None:
     isim_impi = _node_by_path(image, ("MF", "ADF.ISIM", "EF.IMPI"))
     if isim_impi is not None and len(isim_impi.data) > 0:
         try:
+            image.impi = decode_impi_ef(isim_impi.data).strip()
+        except ValueError:
+            # Images written before EF.IMPI carried its TS 31.103 v19
+            # §4.2.2 NAI TLV hold the bare NAI.
             image.impi = isim_impi.data.decode("utf-8", "ignore").strip()
-        except Exception:
-            pass
 
     if len(image.iccid) > 0 and _node_by_path(image, ("MF", "EF.ICCID")) is None:
         try:
@@ -2771,7 +2867,7 @@ def _finalize_image(image: SimProfileImage) -> SimProfileImage | None:
                 kind="ef",
                 fid="6F02",
                 structure="transparent",
-                data=image.impi.encode("utf-8"),
+                data=encode_impi_ef(image.impi),
             )
         )
 

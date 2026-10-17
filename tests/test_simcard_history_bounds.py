@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Bounds on the toolkit history accumulators.
 
 ``SimulatedSimCardEngine`` is a process-wide singleton, so a list that
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest import mock
 
 os.environ.setdefault("YGGDRASIM_ALLOW_QUIRKS", "1")
 
@@ -20,8 +22,10 @@ from SIMCARD.state import (
     _resolve_history_cap,
     append_bounded,
 )
+from SIMCARD.sgp import SgpLogic
 from SIMCARD.toolkit import ToolkitLogic
-from SIMCARD.utils import tlv
+from SIMCARD.utils import encode_iccid_ef, tlv
+from tests.test_simcard_sgp32_load_euicc_package import _build_state_with_test_eim, _sign_euicc_package
 
 
 def _envelope(*body: bytes) -> bytes:
@@ -127,6 +131,28 @@ class ToolkitHistoryBoundTests(unittest.TestCase):
     def test_a_short_run_keeps_every_entry(self) -> None:
         self._send_events(4)
         self.assertEqual(self.state.toolkit.event_history, [0x03, 0x05, 0x03, 0x05])
+
+
+class EuiccPackageResultBoundTests(unittest.TestCase):
+    def test_unacknowledged_package_results_stop_at_the_cap(self) -> None:
+        state, key, eim_id = _build_state_with_test_eim()
+        logic = SgpLogic(state)
+        enable = tlv(b"\xA3", tlv(b"\x5A", encode_iccid_ef(state.profiles[0].iccid)))
+
+        with mock.patch("SIMCARD.state.MAX_HISTORY_ENTRIES", 4):
+            for counter in range(1, 7):
+                logic.handle_store_data(
+                    _sign_euicc_package(
+                        key,
+                        eim_id=eim_id,
+                        eid_hex=state.eid,
+                        counter_value=counter,
+                        inner_choice_tag=b"\xA0",
+                        inner_items=enable,
+                    )
+                )
+
+        self.assertEqual([entry.counter_value for entry in state.euicc_package_results], [3, 4, 5, 6])
 
 
 if __name__ == "__main__":

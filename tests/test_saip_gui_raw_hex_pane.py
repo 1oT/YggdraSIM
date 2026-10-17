@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Static GUI contracts for the SAIP raw file hex pane."""
 
 from __future__ import annotations
@@ -16,7 +15,12 @@ _APP_CSS = Path("yggdrasim_common/gui_server/static/app.css")
 def test_raw_file_hex_uses_spaced_octets_and_soft_wrap() -> None:
     js = _APP_JS.read_text(encoding="utf-8")
     assert 'ta.wrap = "soft";' in js
-    assert 'ta.value = saipFormatHexPretty(String(opts.currentHex || ""));' in js
+    # The pane shows the image with placeholders in place of their
+    # sentinels (464f7d75); a file without placeholders is the spaced
+    # octets, a file with them the tokenised shown image.
+    assert "var paneText = placeholderRanges.length > 0" in js
+    assert ': saipFormatHexPretty(imageHex);' in js
+    assert "ta.value = paneText;" in js
     assert 'replace(/(.{32})/g, "$1\\n")' not in js
 
 

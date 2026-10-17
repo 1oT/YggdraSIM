@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Scaffold a brand-new SAIP ProfileElement sequence from a curated preset.
 
@@ -257,8 +256,8 @@ def describe_menu_id(menu_id: str) -> str:
 
 
 _PLACEHOLDER_CARRIERS: dict[str, tuple[str, ...]] = {
-    "ICCID": ("header", "mf"),
-    "IMSI": ("usim", "opt-usim", "isim", "opt-isim"),
+    "ICCID": ("header", "mf", "iot"),
+    "IMSI": ("usim", "opt-usim", "isim", "opt-isim", "iot"),
 }
 
 

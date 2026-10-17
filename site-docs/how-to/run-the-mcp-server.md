@@ -22,7 +22,7 @@ or an eIM package, diff two session recordings, drive a card, and run batch
 commands in the operator shells.
 
 31 tools, 4 reference resources, and 3 canned workflows. Eight operator
-shells are reachable through `shell_run`, covering 360 classified verbs --
+shells are reachable through `shell_run`, covering 378 classified verbs --
 every entry point in the project that has a batch mode.
 
 The server speaks the Model Context Protocol over stdio and works with any
@@ -153,7 +153,7 @@ There are two ways to keep state. `card_session_open` holds a connection
 locally and hands back a session id to transmit through. Or run a Card
 Bridge and use `card_bridge_transmit`: the bridge holds the reader and
 relays through it, which is also what reaches a remote rig. See
-[Remote APDU Streaming](remote-apdu-streaming.md).
+[Card Bridge over SSH](remote-apdu-streaming.md).
 
 Whatever the layers say: use a throwaway test card, not one carrying live
 credentials.
@@ -253,9 +253,9 @@ is equivalent.
 | --- | --- |
 | `status_word_lookup` | resolve SW1/SW2, including the `61xx`, `6Cxx`, and `63Cx` families |
 | `ber_tlv_lookup` | name a single BER-TLV tag with its spec citation |
-| `spec_section_lookup` | resolve a spec section identifier |
+| `spec_section_lookup` | find a clause in the local spec library (`docs/tel-docs/converted`) and return its title, page file and a versioned citation; without the library, a short verified index |
 | `aide_registry_lookup` | resolve an application identifier |
-| `validate_identifier` | check an ICCID, IMSI, EID, or similar against its rules |
+| `validate_identifier` | check an ICCID, IMSI, EID or MCC/MNC against the test ranges this project uses |
 
 ### Decode
 
@@ -386,22 +386,22 @@ shell="scp11_relay"         GET-EID; GET-EUICC-INFO2; LIST; EXIT
 shell="scp11_local_access"  LIST; PROFILE; METADATA; EXIT
 ```
 
-All eight operator shells are exposed, covering 360 classified verbs:
+All eight operator shells are exposed, covering 378 classified verbs:
 
 | Shell | Opens a reader at startup | Verbs | Purpose |
 | --- | --- | --- | --- |
-| `profile_package` | no | 53 | SAIP package inspection and authoring |
+| `profile_package` | no | 61 | SAIP package inspection and authoring |
 | `scp80` | no | 15 | OTA: build an envelope offline, or `SEND` it to a card |
 | `scp11_eim` | no | 74 | SGP.32 local eIM: author, lint, and issue eIM packages |
 | `suci_tool` | no | 11 | SUCI key generation and public-key export |
-| `scp03` | **yes** | 80 | card admin: filesystem, registry, GlobalPlatform |
+| `scp03` | **yes** | 81 | card admin: filesystem, registry, GlobalPlatform |
 | `scp11_live` | **yes** | 50 | SGP.22/SGP.32 profile download and eUICC management |
-| `scp11_relay` | **yes** | 41 | SGP.22 relay compatibility console (ES2+/ES9+) |
+| `scp11_relay` | **yes** | 50 | the live shell under its legacy `SCP11.relay` entry point |
 | `scp11_local_access` | **yes** | 36 | local eUICC profile management over ES10 |
 
-`scp11_relay` is the older console kept for the compatibility namespace. It
-covers much of the same ES10 surface as `scp11_live`, and a test asserts
-the two never classify a shared verb differently.
+`scp11_relay` is the compatibility namespace of `scp11_live`: every module
+under `SCP11/relay/` aliases its `SCP11/live/` counterpart, so the two
+shells register the same verbs and share one classification.
 
 `scp80` and `scp11_eim` are the two that split the axes apart. Building an
 OTA envelope or authoring and linting an eIM package is offline work that
@@ -423,7 +423,7 @@ connects to a reader during startup, so even `HELP` would touch hardware;
 refusing early means it never gets that far. Individual verbs that reach a
 card from an otherwise offline shell are gated the same way.
 
-**Verbs are allow-listed, not deny-listed.** SCP03 alone carries 80
+**Verbs are allow-listed, not deny-listed.** SCP03 alone carries 81
 classified verbs. Read verbs run at any access level; anything that changes
 state needs `YGGDRASIM_MCP_ACCESS=write`. An unrecognised verb is refused
 rather than assumed harmless, and a refusal anywhere blocks the whole batch
@@ -434,6 +434,11 @@ own subcommands is classified by the most dangerous thing it can reach:
 `TOKENS` sits at the write tier because `TOKENS SET` writes, even though a
 bare `TOKENS` only lists. Use the dedicated read verb where one exists --
 `LIST-TOKENS` rather than `TOKENS` -- to stay inside read-only access.
+
+**`--log <file>` makes a read a write.** Every shell appends a command's
+output to the file a `--log` modifier names, on the host the server runs
+on, so the gate takes the modifier off before it reads the verb and files
+a read verb that carries one under the write tier.
 
 **Verbs whose payload is never classified need their own opt-in.** `RUN`
 and `SCRIPT` take a file of commands; `RAW` passes its arguments straight
@@ -528,8 +533,8 @@ per lookup:
 | --- | --- |
 | `yggdrasim://reference/status-words` | every status word the server can name |
 | `yggdrasim://reference/ber-tlv-tags` | BER-TLV tags with spec citations |
-| `yggdrasim://reference/spec-sections` | the spec-section index |
-| `yggdrasim://reference/test-identifier-ranges` | standards-reserved test ranges to use instead of real allocations |
+| `yggdrasim://reference/spec-sections` | the verified clause index `spec_section_lookup` falls back to without the spec library |
+| `yggdrasim://reference/test-identifier-ranges` | the test ranges to use instead of real allocations, each with its source |
 
 ## Prompts
 

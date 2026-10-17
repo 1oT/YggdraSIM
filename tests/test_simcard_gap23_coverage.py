@@ -3,22 +3,17 @@
 
 """Twenty-third-pass gap-coverage suite for ISIM-side GBA EFs.
 
-3GPP TS 31.103 §4.2.7 lists the ISIM Service Table; the
-simulator advertises every service bit (`EF.IST = 0xFF`),
-which means **service 2 (GBA)** is "available + activated".
-Per §4.2.10 / §4.2.11 a card that flips service 2 on must
-provide both EF.GBABP and EF.GBANL or every GBA bootstrap
-attempt by the ME will hit ``6A 82``.
+3GPP TS 31.103 v19 §4.2.7 lists the ISIM Service Table; the
+simulator advertises **service 2 (GBA)**, so §4.2.9 / §4.2.10 have
+it provide EF.GBABP and EF.GBANL under ``ADF.ISIM``:
 
-Round-23 seeds the missing pair under ``ADF.ISIM``:
-
-* EF.GBABP (`6FD5`) -- transparent, six bytes
-  (``80 00 81 00 82 00``). The three empty TLVs let a modem
-  read a deterministic shape before any successful Ks_NAF
-  derivation, then UPDATE BINARY over the placeholder once
-  bootstrapping succeeds.
-* EF.GBANL (`6FD7`) -- linear-fixed, single 28-byte all-FF
-  record. The modem populates per-NAF rows via UPDATE RECORD.
+* EF.GBABP (`6FD5`) -- transparent, length-prefixed RAND, B-TID and
+  key lifetime fields, 'FF' before the first bootstrap (Annex C).
+  The ISIM writes RAND when it bootstraps, the ME the B-TID and the
+  lifetime.
+* EF.GBANL (`6FD7`) -- linear-fixed, '80' NAF_ID / '81' B-TID records,
+  'FF' at issue, UPDATE ADM: the ISIM fills them in NAF Derivation
+  Mode.
 """
 
 from __future__ import annotations
@@ -32,6 +27,7 @@ os.environ.setdefault("YGGDRASIM_ALLOW_QUIRKS", "1")
 
 from SIMCARD.engine import SimulatedSimCardEngine
 from SIMCARD.etsi_fs import ISIM_AID
+from SIMCARD.utils import tlv
 
 
 class _IsimEngineHarness(unittest.TestCase):
@@ -76,23 +72,25 @@ class _IsimEngineHarness(unittest.TestCase):
 
 
 class EfGbabpSeedTests(_IsimEngineHarness):
-    """3GPP TS 31.103 §4.2.10 EF.GBABP seed."""
+    """3GPP TS 31.103 v19 §4.2.9 EF.GBABP seed."""
 
-    def test_default_holds_three_empty_tlvs(self) -> None:
+    def test_default_is_unwritten(self) -> None:
         self._select_isim()
         self._select_ef("6FD5")
-        body = self._read_binary(0x06)
-        # 80 00 (B-TID), 81 00 (Ks_NAF), 82 00 (Lifetime).
-        self.assertEqual(body, bytes((0x80, 0x00, 0x81, 0x00, 0x82, 0x00)))
+        body = self._read_binary(0x80)
+        self.assertEqual(body, b"\xFF" * 0x80)
 
     def test_update_binary_round_trip(self) -> None:
         self._select_isim()
         self._select_ef("6FD5")
-        # Stage a fake B-TID / Ks_NAF / Lifetime triplet.
+        # L RAND, RAND, L B-TID, B-TID, L key lifetime, key lifetime.
+        rand = bytes(range(16))
+        b_tid = b"AAECAwQFBgcICQoLDA0ODw==@bsf.example.test"
+        lifetime = bytes.fromhex("00000E10")
         new_body = (
-            bytes((0x80, 0x04)) + b"BTID"
-            + bytes((0x81, 0x04)) + b"KEYZ"
-            + bytes((0x82, 0x02)) + bytes((0x0E, 0x10))   # 3600 s lifetime
+            bytes((len(rand),)) + rand
+            + bytes((len(b_tid),)) + b_tid
+            + bytes((len(lifetime),)) + lifetime
         )
         apdu = (
             bytes([0x00, 0xD6, 0x00, 0x00, len(new_body)])
@@ -104,26 +102,25 @@ class EfGbabpSeedTests(_IsimEngineHarness):
 
 
 class EfGbanlSeedTests(_IsimEngineHarness):
-    """3GPP TS 31.103 §4.2.11 EF.GBANL seed."""
+    """3GPP TS 31.103 v19 §4.2.10 EF.GBANL seed."""
 
-    def test_default_record_is_28_bytes_of_ff(self) -> None:
+    def test_default_records_are_free(self) -> None:
         self._select_isim()
         self._select_ef("6FD7")
-        record = self._read_record(record=1, length=28)
-        self.assertEqual(record, b"\xFF" * 28)
+        for record in (1, 2):
+            self.assertEqual(self._read_record(record=record, length=0x80), b"\xFF" * 0x80)
 
-    def test_update_record_persists_naf_pair(self) -> None:
+    def test_update_record_needs_adm(self) -> None:
         self._select_isim()
         self._select_ef("6FD7")
-        new_record = b"NAF1" + b"\x00" * 8 + b"BTID-XYZ" + b"\xFF" * 8
-        self.assertEqual(len(new_record), 28)
+        new_record = tlv("80", b"naf.example.test" + bytes(5)) + tlv("81", b"btid@bsf.example.test")
         apdu = (
             bytes([0x00, 0xDC, 0x01, 0x04, len(new_record)])
             + new_record
         )
         _data, sw1, sw2 = self.engine.transmit(apdu)
-        self.assertEqual((sw1, sw2), (0x90, 0x00))
-        self.assertEqual(self._read_record(1, 28), new_record)
+        self.assertEqual((sw1, sw2), (0x69, 0x82))
+        self.assertEqual(self._read_record(1, 0x80), b"\xFF" * 0x80)
 
 
 class IsimGbaServiceCoherenceTests(_IsimEngineHarness):

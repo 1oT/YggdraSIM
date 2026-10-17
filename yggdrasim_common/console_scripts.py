@@ -149,6 +149,10 @@ def lab_agent() -> int:
     return _invoke("yggdrasim_common.remote_lab.agent", "main")
 
 
+def lab_client() -> int:
+    return _invoke("yggdrasim_common.remote_lab.cli", "run_standalone")
+
+
 def profile_package() -> int:
     return _invoke("Tools.ProfilePackage.main", "run_standalone")
 

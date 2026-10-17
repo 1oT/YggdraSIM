@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Wave D Pass C — CSIM legacy / analog / registration / PUZL / PRL / LCS
+Wave D Pass C -- CSIM legacy / analog / registration / PUZL / PRL / LCS
 annotated opaque EFs.
 
 This is the final pass of the opaque-catalog promotion campaign. With

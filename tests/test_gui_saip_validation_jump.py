@@ -12,14 +12,14 @@ Covers:
   conventions:
 
   * ``""`` / ``"sections"`` / ``"PE-order"`` / ``"document"`` /
-    ``"summary"`` — non-routable, returns ``{}``.
-  * ``"service:<name>"`` — non-routable rollup.
-  * ``"<section>"`` — anchors on the matching PE.
-  * ``"<section>.<field>"`` — anchors on the matching PE; if the
+    ``"summary"`` -- non-routable, returns ``{}``.
+  * ``"service:<name>"`` -- non-routable rollup.
+  * ``"<section>"`` -- anchors on the matching PE.
+  * ``"<section>.<field>"`` -- anchors on the matching PE; if the
     (section, field) tuple is a known file row the route also
     surfaces the file path so the GUI can land on the File System
     tab directly.
-  * ``"<section>::<field>"`` — explicit file key (forward-compat for
+  * ``"<section>::<field>"`` -- explicit file key (forward-compat for
     a future linter emission style).
   * Multi-segment dotted paths (``a.b.c``) anchor on the first
     segment.
@@ -178,7 +178,7 @@ class TestResolveFindingTarget:
             pe_index_by_section=pe_idx,
             file_keys=file_keys,
         )
-        # USIM PE + EF.IMSI file — both routes available.
+        # USIM PE + EF.IMSI file -- both routes available.
         assert "pe_index" in target
         assert target["section_key"] == "usim"
         assert target["field_path"] == "ef-imsi"
@@ -235,15 +235,15 @@ class TestValidateEnrichesFindings:
     def test_iccid_findings_carry_pe_index(self, saip_session) -> None:
         # The reference profile may carry a fully-valid ICCID (no
         # YRL-ICC-* findings emitted) once the linter normalises bytes
-        # input correctly. When findings *do* fire — for example on a
-        # hand-edited profile where the ICCID was truncated — every
+        # input correctly. When findings *do* fire -- for example on a
+        # hand-edited profile where the ICCID was truncated -- every
         # one of them must enrich with the header PE coordinates so
         # the click-to-jump UI lands on the right pane.
         result = _dispatch_validate(None, session_id=saip_session.id, strict=False)
         iccid = [f for f in result["findings"] if f["code"].startswith("YRL-ICC-")]
         if len(iccid) == 0:
             pytest.skip(
-                "reference profile is fully ICCID-valid — enrichment "
+                "reference profile is fully ICCID-valid -- enrichment "
                 "behaviour for ICCID findings is asserted indirectly "
                 "by TestResolveFindingTarget."
             )

@@ -6,7 +6,10 @@ from __future__ import annotations
 import sys
 from collections.abc import Sequence
 
-from yggdrasim_common.frozen_dispatch import dispatch_internal_entry
+from yggdrasim_common.frozen_dispatch import (
+    dispatch_internal_entry,
+    install_missing_standard_streams,
+)
 
 
 def _load_run_cli():
@@ -18,6 +21,15 @@ def _load_run_cli():
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Desktop GUI entry of the windowed executable and ``pythonw -m main.gui``.
+
+    Both start with no console, so ``sys.stdin``, ``sys.stdout`` and
+    ``sys.stderr`` are ``None`` and the first write to one raises
+    ``AttributeError``: the plugin-loading notice, then uvicorn's logging
+    setup, which calls ``sys.stdout.isatty()``. The streams are repaired
+    before ``main.main`` is imported, as in ``console_scripts.gui``.
+    """
+    install_missing_standard_streams()
     args = list(sys.argv[1:] if argv is None else argv)
     internal_exit = dispatch_internal_entry(args)
     if internal_exit is not None:

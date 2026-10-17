@@ -63,6 +63,17 @@ APDU_RISK: dict[int, tuple[str, str]] = {
     # MANAGE CHANNEL opens consume a finite channel pool and are only
     # recovered by an explicit close, so an unbalanced probe exhausts them.
     0x70: ("write", "MANAGE CHANNEL"),
+    # Card Application Toolkit proactive loop (ETSI TS 102 221 §11.2). None
+    # of these mutate a file, but each advances the proactive session, so
+    # they are classified write rather than read: the conservative default
+    # this table already applied to them, now named. FETCH consumes the
+    # pending proactive command; TERMINAL RESPONSE and ENVELOPE drive the
+    # terminal side of the exchange; TERMINAL PROFILE re-declares terminal
+    # capabilities and can restart proactive command issue.
+    0x10: ("write", "TERMINAL PROFILE"),
+    0x12: ("write", "FETCH"),
+    0x14: ("write", "TERMINAL RESPONSE"),
+    0xC2: ("write", "ENVELOPE"),
     0xA4: ("read", "SELECT"),
     0xB0: ("read", "READ BINARY"),
     0xB2: ("read", "READ RECORD"),

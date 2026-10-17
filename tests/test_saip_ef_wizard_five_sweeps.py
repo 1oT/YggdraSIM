@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 from __future__ import annotations
 
@@ -90,15 +89,15 @@ class Sweep06DecodedEditCoverage(unittest.TestCase):
     Covered by either a typed editor branch in the JS dispatch, the per-PE
     generic ``saipRenderDecodedEditPanel`` mount, or (for EFs) a routed
     dispatcher decoder. The two gap helpers must stay at zero so a
-    regression — adding a typed editor branch that bypasses the decoded
-    panel without supplying its own edit affordances — fails CI.
+    regression -- adding a typed editor branch that bypasses the decoded
+    panel without supplying its own edit affordances -- fails CI.
     """
 
     def test_ef_decoded_edit_coverage_gaps_empty(self) -> None:
         self.assertEqual(
             ef_decoded_edit_coverage_gaps(),
             [],
-            msg="EFs with no decoded-edit surface — add to dispatcher / wizard / opaque catalog.",
+            msg="EFs with no decoded-edit surface -- add to dispatcher / wizard / opaque catalog.",
         )
 
     def test_ef_dispatcher_key_gaps_empty(self) -> None:

@@ -64,7 +64,7 @@
   background: var(--surface-alt);
   border: 1px solid var(--border);
   color: var(--fg-muted);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 7px;
   line-height: 18px;
   min-width: 18px;

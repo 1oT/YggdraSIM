@@ -8,12 +8,12 @@ Background
 Operators asked for the FS-Admin actions (CREATE FILE / DELETE /
 RESIZE / Lifecycle / SEARCH RECORD / SUSPEND UICC) to move out of
 the SCP03 ribbon's "Files" tab and down into the file preview next
-to the ``fid:`` badge — **and** to be gated by the selected-file
+to the ``fid:`` badge -- **and** to be gated by the selected-file
 kind so an operator cannot, for example, try to CREATE FILE while
 staring at an EF leaf (CREATE FILE is issued under a DF per
 ETSI TS 102 222 §6.3).
 
-This test is a pure static-bundle pin — it never boots the GUI.
+This test is a pure static-bundle pin -- it never boots the GUI.
 It guards against silent refactors that would:
 
   * lose the per-kind gating matrix (``scp03FsActionAvailability``);
@@ -49,20 +49,20 @@ def test_classifier_helper_present() -> None:
     """``scp03ClassifyFile`` maps a read_selected payload to a kind."""
     js = _read("app.js")
     assert "function scp03ClassifyFile(data)" in js, \
-        "classifier helper missing — the action bar cannot gate without it"
+        "classifier helper missing -- the action bar cannot gate without it"
     # Every canonical kind the action matrix branches on must be
     # emitted by the classifier, otherwise the matrix lookup silently
     # falls through to "unknown" and every action stays disabled.
     for kind in ('"df"', '"application"', '"transparent"', '"linear"', '"cyclic"', '"unknown"'):
-        assert kind in js, f"classifier no longer emits {kind} — matrix will desync"
+        assert kind in js, f"classifier no longer emits {kind} -- matrix will desync"
 
 
 def test_availability_matrix_present() -> None:
     """``scp03FsActionAvailability`` returns the per-kind availability map."""
     js = _read("app.js")
     assert "function scp03FsActionAvailability(kind)" in js, \
-        "availability helper missing — the action bar cannot gate without it"
-    # The six action slots must all be present in the returned object —
+        "availability helper missing -- the action bar cannot gate without it"
+    # The six action slots must all be present in the returned object --
     # if one is dropped the UI renders a button with no gating data.
     for key in ("create:", "delete:", "resize:", "activate:", "deactivate:",
                 "terminate:", "searchRecord:", "suspend:"):
@@ -82,7 +82,7 @@ def test_render_fcp_result_accepts_tab() -> None:
     """``renderFcpResult`` gains the optional tab parameter."""
     js = _read("app.js")
     assert "function renderFcpResult(data, container, tab)" in js, \
-        "renderFcpResult signature regressed — action bar cannot wire handlers"
+        "renderFcpResult signature regressed -- action bar cannot wire handlers"
     # The cached-repaint call site (cc-scan-preview restore on remount)
     # must still hand over the tab so the action bar shows up on first
     # paint of a switched-back-to tab.
@@ -91,7 +91,7 @@ def test_render_fcp_result_accepts_tab() -> None:
     # + retry), so it now renders ``first.data`` / ``second.data`` /
     # cached entries rather than a single ``resp.data`` reference. The
     # contract the action bar cares about is "a tab is threaded through
-    # on every render path" — verify each ``renderFcpResult(...)`` call
+    # on every render path" -- verify each ``renderFcpResult(...)`` call
     # outside the generic dispatch passes a tab.
     for call in (
         "renderFcpResult(first.data, previewEl, tab);",
@@ -103,7 +103,7 @@ def test_render_fcp_result_accepts_tab() -> None:
 
 
 # ----------------------------------------------------------------------
-# Ribbon retirement — "Files" tab is gone.
+# Ribbon retirement -- "Files" tab is gone.
 # ----------------------------------------------------------------------
 
 
@@ -111,18 +111,18 @@ def test_files_ribbon_tab_removed() -> None:
     """The legacy "Files" ribbon tab is retired."""
     js = _read("app.js")
     # The literal descriptor that used to mount the fsAdminGroup into
-    # the ribbon must no longer appear. A greppable check is enough —
+    # the ribbon must no longer appear. A greppable check is enough --
     # the only other way "files" shows up in the ribbon is a typo we'd
     # want to catch anyway.
     assert '{ id: "files",    label: "Files",      groups: [fsAdminGroup] }' not in js, \
-        "Files ribbon tab re-appeared — actions must stay contextual"
+        "Files ribbon tab re-appeared -- actions must stay contextual"
     # And the fsAdminGroup factory call must not reappear either.
     assert 'fsAdminGroup = scp03MakeRibbonGroup(' not in js, \
-        "fsAdminGroup ribbon factory re-appeared — group should be gone"
+        "fsAdminGroup ribbon factory re-appeared -- group should be gone"
 
 
 def test_fs_wizard_entrypoints_preserved() -> None:
-    """The wizards themselves survive — only the entry point moved."""
+    """The wizards themselves survive -- only the entry point moved."""
     js = _read("app.js")
     for entry in (
         "async function scp03ShowFsCreateFile(tab)",
@@ -136,7 +136,7 @@ def test_fs_wizard_entrypoints_preserved() -> None:
 
 
 # ----------------------------------------------------------------------
-# Gating matrix contract — the cases operators asked about explicitly.
+# Gating matrix contract -- the cases operators asked about explicitly.
 # ----------------------------------------------------------------------
 
 
@@ -151,27 +151,27 @@ def test_gating_rules_match_operator_expectations() -> None:
        (and by extension record-scoped reads) must be disabled for
        transparent EFs.
 
-    Both rules are verified by reading the matrix source — we pin
+    Both rules are verified by reading the matrix source -- we pin
     the exact branches so a future refactor can't accidentally flip
     the sign.
     """
     js = _read("app.js")
 
-    # Rule 1 — DF branch enables CREATE.
+    # Rule 1 -- DF branch enables CREATE.
     df_branch_idx = js.index('if (kind === "df")')
     df_branch_end = js.index("return matrix;", df_branch_idx)
     df_branch = js[df_branch_idx:df_branch_end]
     assert "matrix.create = { enabled: true," in df_branch, \
         "DF branch no longer enables CREATE FILE"
 
-    # Rule 1 — transparent branch disables CREATE.
+    # Rule 1 -- transparent branch disables CREATE.
     transp_idx = js.index('if (kind === "transparent")')
     transp_end = js.index("return matrix;", transp_idx)
     transp_branch = js[transp_idx:transp_end]
     assert "matrix.create = { enabled: false," in transp_branch, \
         "transparent EF branch must disable CREATE FILE"
 
-    # Rule 2 — transparent branch disables SEARCH RECORD.
+    # Rule 2 -- transparent branch disables SEARCH RECORD.
     assert "matrix.searchRecord = { enabled: false," in transp_branch, \
         "SEARCH RECORD must be disabled on transparent EFs"
 
@@ -208,7 +208,7 @@ def test_css_tokens_for_action_bar_present() -> None:
 
 
 # ----------------------------------------------------------------------
-# Update wiring — the FCP contextual bar exposes file administration.
+# Update wiring -- the FCP contextual bar exposes file administration.
 # Data mutation lives next to the transparent body / record hex so the
 # selected path, record number, and bytes are inferred by the tool.
 # ----------------------------------------------------------------------
@@ -235,7 +235,7 @@ def test_availability_matrix_exposes_update_slot() -> None:
     assert 'matrix.update = { enabled: true, apdu: "record"' in record_branch, \
         "linear/cyclic EF must enable UPDATE RECORD"
 
-    # DF / ADF / unknown branches must keep update disabled — UPDATE is
+    # DF / ADF / unknown branches must keep update disabled -- UPDATE is
     # an EF-only operation per ETSI TS 102 221 §11.1.5 / §11.1.6.
     for guard in (
         'if (kind === "df")',
@@ -328,7 +328,7 @@ def test_fs_update_wizards_present() -> None:
 
     # Each wizard must dispatch the matching backend action.
     bin_idx = js.index("async function scp03ShowFsUpdateBinary(tab)")
-    bin_end = js.index("// FS — UPDATE RECORD (00DC) wizard", bin_idx)
+    bin_end = js.index("// FS -- UPDATE RECORD (00DC) wizard", bin_idx)
     bin_body = js[bin_idx:bin_end]
     assert '"scp03.update_binary"' in bin_body, \
         "UPDATE BINARY wizard no longer dispatches scp03.update_binary"
@@ -340,12 +340,12 @@ def test_fs_update_wizards_present() -> None:
     assert 'inputs.hex_data' in bin_body
 
     rec_idx = js.index("async function scp03ShowFsUpdateRecord(tab, kind)")
-    rec_end = js.index("// FS — lifecycle wizard", rec_idx)
+    rec_end = js.index("// FS -- lifecycle wizard", rec_idx)
     rec_body = js[rec_idx:rec_end]
     assert '"scp03.update_record"' in rec_body, \
         "UPDATE RECORD wizard no longer dispatches scp03.update_record"
     # The wizard must validate the record number client-side before
-    # bouncing through the network — operators were getting opaque
+    # bouncing through the network -- operators were getting opaque
     # "invalid record" backend errors otherwise.
     assert "Record must be a positive integer." in rec_body
     assert "Record out of range (1..254)" in rec_body
@@ -360,9 +360,31 @@ def test_fs_update_wizards_invalidate_preview_cache() -> None:
     """
     js = _read("app.js")
     bin_idx = js.index("async function scp03ShowFsUpdateBinary(tab)")
-    bin_end = js.index("// FS — UPDATE RECORD (00DC) wizard", bin_idx)
+    bin_end = js.index("// FS -- UPDATE RECORD (00DC) wizard", bin_idx)
     rec_idx = js.index("async function scp03ShowFsUpdateRecord(tab, kind)")
-    rec_end = js.index("// FS — lifecycle wizard", rec_idx)
+    rec_end = js.index("// FS -- lifecycle wizard", rec_idx)
     for body in (js[bin_idx:bin_end], js[rec_idx:rec_end]):
         assert "delete tab.previewCache;" in body, \
             "UPDATE wizard must clear the FCP cache so the next read re-fetches"
+
+
+def test_create_file_panel_offers_every_backend_file_type() -> None:
+    """The shortcut panel must reach every type the CREATE FILE action accepts.
+
+    The panel hard-codes its own dropdown, so a file type added to the
+    backend (cyclic and BER-TLV structure EFs, TS 102 221 v18.4 table 11.5)
+    is otherwise reachable only through the generic action form.
+    """
+    from yggdrasim_common.gui_server.actions import scp03 as scp03_mod
+
+    js = _read("app.js")
+    for file_type in scp03_mod._FS_FILE_TYPES:
+        assert f'val: "{file_type}"' in js, f"file type {file_type} missing from the panel"
+
+
+def test_ber_tlv_panel_collects_its_proprietary_fields() -> None:
+    """TS 102 222 v17.1 table 4: a BER-TLV EF carries file details and a maximum size."""
+    js = _read("app.js")
+
+    assert '"file_details_hex"' in js
+    assert '"max_file_size_hex"' in js

@@ -29,6 +29,7 @@ from SCP11.local_access.cert_store import LocalSgp26CertStore
 import SCP11.local_access.session as local_access_session
 from SCP11.local_access import LocalAccessConfig, LocalIsdrSession
 from SCP11.local_access.main import LocalAccessShell
+import SCP11.local_access.main as local_access_main
 from SCP11.local_access.payload_diff import analyze_payload_pair, decode_payload_bytes
 from SCP11.pysim_path import ensure_repo_pysim_on_path
 from SCP11.shared.pysim_support import decode_rsp_type
@@ -238,22 +239,62 @@ def build_prepare_download_response(transaction_id: bytes, euicc_otpk: bytes) ->
     return wrap_tlv(bytes.fromhex("BF21"), wrap_tlv(b"\xA0", response_ok))
 
 
-def build_profile_installation_failure(transaction_id: bytes) -> bytes:
+def build_profile_installation_failure(
+    transaction_id: bytes,
+    *,
+    error_reason: int = 0x0D,
+    sima_response: bytes = b"",
+) -> bytes:
     notification_metadata = (
         wrap_tlv(b"\x80", bytes.fromhex("021F"))
         + wrap_tlv(b"\x81", bytes.fromhex("07"))
         + wrap_tlv(b"\x0C", b"smdpplus2.smdpp.example.test")
-        + wrap_tlv(b"\x5A", bytes.fromhex("89880811111111111112"))
+        # Iccid is EF_ICCID-coded (nibble-swapped) per SGP.22 v3.1; it reads back
+        # as 89880811111111111112.
+        + wrap_tlv(b"\x5A", bytes.fromhex("98888011111111111121"))
     )
-    failure_result = wrap_tlv(
-        b"\xA1",
-        wrap_tlv(b"\x80", bytes([0x05])) + wrap_tlv(b"\x81", bytes([0x0D])),
-    )
+    error_result = wrap_tlv(b"\x80", bytes([0x05])) + wrap_tlv(b"\x81", bytes([error_reason]))
+    if len(sima_response) > 0:
+        error_result += wrap_tlv(b"\x82", sima_response)
+    failure_result = wrap_tlv(b"\xA1", error_result)
     value = (
         wrap_tlv(b"\x80", transaction_id)
         + wrap_tlv(bytes.fromhex("BF2F"), notification_metadata)
         + wrap_tlv(b"\x06", bytes.fromhex("88370A"))
         + wrap_tlv(b"\xA2", failure_result)
+        + wrap_tlv(bytes.fromhex("5F37"), b"\xAA" * 64)
+    )
+    return wrap_tlv(bytes.fromhex("BF37"), wrap_tlv(bytes.fromhex("BF27"), value))
+
+
+def build_profile_installation_success(
+    transaction_id: bytes,
+    *,
+    include_iccid: bool = True,
+    isdp_aid: bytes = bytes.fromhex("A0000005591010FFFFFFFF8900001200"),
+) -> bytes:
+    """BF37 whose finalResult is successResult (SGP.22 v3.1 section 2.5.6).
+
+    The NotificationMetadata iccid is OPTIONAL, so ``include_iccid=False``
+    drops it to exercise the ISD-P AID fallback. The EF_ICCID-coded value
+    reads back as 89880811111111111112.
+    """
+    notification_metadata = (
+        wrap_tlv(b"\x80", bytes.fromhex("0220"))
+        + wrap_tlv(b"\x81", bytes.fromhex("0780"))
+        + wrap_tlv(b"\x0C", b"smdpplus2.smdpp.example.test")
+    )
+    if include_iccid:
+        notification_metadata += wrap_tlv(b"\x5A", bytes.fromhex("98888011111111111121"))
+    success_result = wrap_tlv(
+        b"\xA0",
+        wrap_tlv(b"\x4F", isdp_aid) + wrap_tlv(b"\x04", bytes.fromhex("9000")),
+    )
+    value = (
+        wrap_tlv(b"\x80", transaction_id)
+        + wrap_tlv(bytes.fromhex("BF2F"), notification_metadata)
+        + wrap_tlv(b"\x06", bytes.fromhex("88370A"))
+        + wrap_tlv(b"\xA2", success_result)
         + wrap_tlv(bytes.fromhex("5F37"), b"\xAA" * 64)
     )
     return wrap_tlv(bytes.fromhex("BF37"), wrap_tlv(bytes.fromhex("BF27"), value))
@@ -330,6 +371,22 @@ class FakeApduChannel:
         if log_name != "LOCAL: AuthenticateServer":
             raise AssertionError(f"Unexpected chunked APDU log name: {log_name}")
         return self.auth_response
+
+
+class EnableAwareApduChannel(FakeApduChannel):
+    """FakeApduChannel that also answers the EnableProfile a load may send."""
+
+    def __init__(self, enable_result_code: int = 0, events: list | None = None):
+        super().__init__()
+        self.enable_result_code = enable_result_code
+        self.events = events if events is not None else []
+
+    def send(self, apdu: bytes, log_name: str) -> bytes:
+        if log_name.startswith("LOCAL: EnableProfile"):
+            self.send_calls.append((log_name, apdu))
+            self.events.append(("enable", apdu))
+            return bytes.fromhex("BF31038001") + bytes([self.enable_result_code])
+        return super().send(apdu, log_name)
 
 
 class CaptureApduChannel:
@@ -525,6 +582,98 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(session.apdu_channel.send_calls[0][0], "LOCAL: Select ISD-R")
         self.assertEqual(session.apdu_channel.send_calls[1][0], "LOCAL: DeleteProfile [Block 0]")
         self.assertEqual(session.apdu_channel.send_calls[1][1], expected_apdu)
+
+    def _profile_view(self, iccid: str, aid: str, state: str) -> local_access_session.ProfileMetadataView:
+        return local_access_session.ProfileMetadataView(
+            iccid=iccid,
+            aid=aid,
+            state=state,
+            profile_class="OPER",
+            nickname="Primary",
+        )
+
+    def test_delete_profile_disables_enabled_target_before_delete(self):
+        """SGP.22 v3.1 section 5.7.18: the eUICC rejects a delete of an enabled
+        profile with profileNotInDisabledState, so the session disables first."""
+        session = LocalIsdrSession(apdu_channel=CaptureApduChannel())
+        session.collect_profile_metadata = lambda: [  # type: ignore[method-assign]
+            self._profile_view("8988201234567890123F", "A0000005591010FFFFFFFF8900001100", "ENABLED"),
+        ]
+        session._sync_pending_notifications = lambda response=b"": None  # type: ignore[method-assign]
+
+        session.delete_profile("8988201234567890123")
+
+        labels = [entry[0] for entry in session.apdu_channel.send_calls]
+        self.assertEqual(
+            labels,
+            [
+                "LOCAL: Select ISD-R",
+                "LOCAL: DisableProfile [Block 0]",
+                "LOCAL: Select ISD-R",
+                "LOCAL: DeleteProfile [Block 0]",
+            ],
+        )
+        encoded_iccid = "988802214365870921F3"
+        disable_payload = session._build_profile_state_payload(
+            session.TAG_DISABLE_PROFILE,
+            session.TAG_ICCID,
+            encoded_iccid,
+        )
+        delete_payload = session._build_profile_state_payload(
+            session.TAG_DELETE_PROFILE,
+            session.TAG_ICCID,
+            encoded_iccid,
+        )
+        self.assertTrue(session.apdu_channel.send_calls[1][1].endswith(disable_payload))
+        self.assertTrue(session.apdu_channel.send_calls[3][1].endswith(delete_payload))
+        self.assertEqual(session.last_profile_state_steps, ("DisableProfile", "DeleteProfile"))
+
+    def test_delete_profile_sends_only_the_delete_for_a_disabled_target(self):
+        session = LocalIsdrSession(apdu_channel=CaptureApduChannel())
+        session.collect_profile_metadata = lambda: [  # type: ignore[method-assign]
+            self._profile_view("8988201234567890123F", "A0000005591010FFFFFFFF8900001100", "DISABLED"),
+        ]
+        session._sync_pending_notifications = lambda response=b"": None  # type: ignore[method-assign]
+
+        session.delete_profile("A0000005591010FFFFFFFF8900001100")
+
+        labels = [entry[0] for entry in session.apdu_channel.send_calls]
+        self.assertEqual(labels, ["LOCAL: Select ISD-R", "LOCAL: DeleteProfile [Block 0]"])
+        self.assertEqual(session.last_profile_state_steps, ("DeleteProfile",))
+
+    def test_delete_profile_aborts_when_the_card_refuses_the_disable(self):
+        """A DisableProfile refusal (disallowedByPolicy) must never be
+        followed by the delete; the error names the SGP.22 result."""
+
+        class RefusingChannel(CaptureApduChannel):
+            def send(self, apdu: bytes, log_name: str) -> bytes:
+                self.send_calls.append((log_name, apdu))
+                if log_name.startswith("LOCAL: DisableProfile"):
+                    return bytes.fromhex("BF3203800103")
+                return b""
+
+        session = LocalIsdrSession(apdu_channel=RefusingChannel())
+        session.collect_profile_metadata = lambda: [  # type: ignore[method-assign]
+            self._profile_view("8988201234567890123F", "A0000005591010FFFFFFFF8900001100", "ENABLED"),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, r"DisableProfile failed .*code=0x03 \(disallowedByPolicy\)"):
+            session.delete_profile("8988201234567890123")
+
+        labels = [entry[0] for entry in session.apdu_channel.send_calls]
+        self.assertNotIn("LOCAL: DeleteProfile [Block 0]", labels)
+        self.assertEqual(session.last_profile_state_steps, ("DisableProfile",))
+
+    def test_profile_state_error_name_follows_the_command(self):
+        """Code 2 differs per response: SGP.22 v3.1 sections 5.7.16 - 5.7.18."""
+        name = LocalIsdrSession._profile_state_error_name
+        self.assertEqual(name(2, LocalIsdrSession.TAG_DELETE_PROFILE), "profileNotInDisabledState")
+        self.assertEqual(name(2, LocalIsdrSession.TAG_ENABLE_PROFILE), "profileNotInDisabledState")
+        self.assertEqual(name(2, LocalIsdrSession.TAG_DISABLE_PROFILE), "profileNotInEnabledState")
+        self.assertEqual(name(4, LocalIsdrSession.TAG_DELETE_PROFILE), "disallowedInTestMode")
+        self.assertEqual(name(4, LocalIsdrSession.TAG_ENABLE_PROFILE), "wrongProfileReenabling")
+        self.assertEqual(name(127, LocalIsdrSession.TAG_DELETE_PROFILE), "undefinedError")
+        self.assertEqual(name(2), "Already in requested state")
 
     def test_analyze_payload_pair_reports_first_diff(self):
         analysis = analyze_payload_pair(bytes.fromhex("A00100"), bytes.fromhex("A00200"))
@@ -762,6 +911,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             snapshot["configured_decode_error"],
         )
 
+    @mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False)
     def test_pre_bsp_debug_files_use_dedicated_debug_dir(self):
         with tempfile.TemporaryDirectory() as profile_dir, tempfile.TemporaryDirectory() as debug_dir:
             session = LocalIsdrSession(
@@ -781,6 +931,33 @@ class LocalAccessSessionTests(unittest.TestCase):
             self.assertEqual(bin_path.read_bytes(), bytes.fromhex("A00100"))
             self.assertEqual(hex_path.read_text(encoding="ascii").strip(), "A00100")
             self.assertEqual(list(Path(profile_dir).iterdir()), [])
+            # The UPP carries subscriber authentication keys for a real
+            # profile, so both artefacts are owner-private.
+            self.assertEqual(bin_path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(hex_path.stat().st_mode & 0o777, 0o600)
+
+    def test_pre_bsp_debug_files_are_not_written_when_debug_is_off(self):
+        """The unprotected profile is never persisted as a side effect.
+
+        Writing the pre-BSP payload is a debug-only action; a normal
+        LOAD-PROFILE must leave nothing on disk to recover the profile's
+        authentication keys from.
+        """
+        with tempfile.TemporaryDirectory() as profile_dir, tempfile.TemporaryDirectory() as debug_dir:
+            session = LocalIsdrSession(
+                cfg=LocalAccessConfig(
+                    PROFILE_DIR=str(profile_dir),
+                    DEBUG_DIR=str(debug_dir),
+                ),
+                apdu_channel=FakeApduChannel(),
+            )
+
+            with mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "0"}, clear=False):
+                session._persist_pre_bsp_payload_debug(bytes.fromhex("A00100"))
+
+            self.assertEqual(list(Path(debug_dir).iterdir()), [])
+            self.assertEqual(session.state.last_pre_bsp_payload_bin_path, "")
+            self.assertEqual(session.state.last_pre_bsp_payload_hex_path, "")
 
     def test_local_shell_enable_profile_auto_disables_active_profile(self):
         shell = LocalAccessShell()
@@ -823,7 +1000,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         # The shared profile-action helpers normalise both the
         # auto-disable and the enable call to the canonical metadata
         # identifier (AID first, ICCID fallback). Operators still type
-        # the ICCID — resolution happens inside the helpers.
+        # the ICCID -- resolution happens inside the helpers.
         self.assertEqual(
             calls,
             [
@@ -908,7 +1085,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         """Harmonised contract: deleting an ENABLED profile auto-disables it
         first (mirrors eSIM Live / Test / Local eIM after SCP11 command
         harmonisation). The previous "delete-while-enabled (laptop
-        override)" behaviour is gone — SGP.22 §5.7.18 forbids it and
+        override)" behaviour is gone -- SGP.22 §5.7.18 forbids it and
         relying on the card to forgive the sequence was non-portable."""
         shell = LocalAccessShell()
         calls = []
@@ -946,7 +1123,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         # identifier (AID first, ICCID fallback) so the underlying
         # ``disable_profile`` / ``delete_profile`` callbacks see the
         # same target the eSIM Live shell would. Operators still type
-        # the ICCID — the resolution happens inside the helpers.
+        # the ICCID -- the resolution happens inside the helpers.
         self.assertEqual(
             calls,
             [
@@ -956,6 +1133,72 @@ class LocalAccessSessionTests(unittest.TestCase):
         )
         rendered = output.getvalue()
         self.assertIn("auto-disabling enabled target", rendered)
+
+    def test_completer_offers_every_command_and_alias(self):
+        shell = LocalAccessShell()
+        expected = sorted(set(local_access_main._COMMANDS) | set(local_access_main._COMMAND_ALIASES))
+
+        self.assertEqual(shell._completion_options("", ""), expected)
+        self.assertEqual(shell._completion_options("q", "q"), ["Q", "QA", "QUIT"])
+        self.assertEqual(shell._completion_options("get", "get"), ["GET-METADATA"])
+        self.assertEqual(shell._completion_options("profile-r", "profile-r"), ["PROFILE-RESET"])
+        self.assertEqual(shell._completion_options("?", "?"), ["?"])
+
+    def test_completer_follows_each_command_argument_grammar(self):
+        shell = LocalAccessShell()
+
+        self.assertEqual(shell._completion_options("RECORD ", ""), ["STATUS", "START", "STOP", "CANCEL"])
+        self.assertEqual(shell._completion_options("record st", "st"), ["STATUS", "START", "STOP"])
+        self.assertEqual(shell._completion_options("RECORD STATUS ", ""), [])
+        self.assertEqual(shell._completion_options("HELP del", "del"), ["DELETE", "DELETE-PROFILE"])
+        self.assertEqual(shell._completion_options("? del", "del"), ["DELETE", "DELETE-PROFILE"])
+        self.assertEqual(shell._completion_options("CERTS --", "--"), ["--debug", "--json", "--yaml"])
+        self.assertEqual(shell._completion_options("METADATA-LINT --y", "--y"), ["--yaml"])
+        self.assertEqual(shell._completion_options("LIST --", "--"), ["--debug"])
+        self.assertEqual(shell._completion_options("LIST ", ""), [])
+        self.assertEqual(shell._completion_options("SCAN ", ""), [])
+
+    def test_completer_offers_profile_identifiers_from_the_last_decoded_list(self):
+        shell = LocalAccessShell()
+        shell.session = SimpleNamespace(
+            collect_profile_metadata=lambda: [
+                SimpleNamespace(
+                    iccid="8988201234567890123F",
+                    aid="A0000005591010FFFFFFFF8900001100",
+                    state="ENABLED",
+                    nickname="Primary",
+                    profile_name="Lab One",
+                ),
+            ],
+        )
+
+        self.assertEqual(shell._completion_options("DELETE-PROFILE 89", "89"), [])
+        shell._safe_collect_profile_metadata()
+
+        self.assertEqual(shell._completion_options("DELETE-PROFILE 89", "89"), ["8988201234567890123F"])
+        self.assertEqual(shell._completion_options("delete a0", "a0"), ["A0000005591010FFFFFFFF8900001100"])
+        self.assertEqual(shell._completion_options("ENABLE pri", "pri"), ["Primary"])
+        # "Lab One" cannot be typed as one token, so it is not offered.
+        self.assertEqual(shell._completion_options("ENABLE lab", "lab"), [])
+        self.assertEqual(shell._completion_options("ENABLE Primary ", ""), [])
+
+    def test_completer_offers_filesystem_paths_for_path_arguments(self):
+        shell = LocalAccessShell()
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "profile.txt").write_text("00", encoding="utf-8")
+            (Path(root) / "nested").mkdir()
+            prefix = os.path.join(root, "")
+            nested = os.path.join(root, "nested") + os.sep
+            profile = os.path.join(root, "profile.txt")
+
+            self.assertEqual(shell._completion_options(f"LOAD-PROFILE {prefix}", prefix), [nested, profile])
+            self.assertEqual(shell._completion_options(f"RECORD START {prefix}pro", f"{prefix}pro"), [profile])
+            self.assertEqual(
+                shell._completion_options(f"STORE-METADATA-CUSTOM 90 {prefix}pro", f"{prefix}pro"),
+                [profile],
+            )
+            self.assertEqual(shell._completion_options(f"METADATA-LINT {prefix}nes", f"{prefix}nes"), [nested])
+            self.assertEqual(shell._completion_options(f"LOAD-PROFILE {profile} ", ""), [])
 
     def test_local_shell_help_shows_canonical_commands_and_alias_notes(self):
         shell = LocalAccessShell()
@@ -1549,10 +1792,23 @@ class LocalAccessSessionTests(unittest.TestCase):
         payload = build_store_metadata_request_payload(metadata_document)
         self.assertEqual(len(payload["notificationConfigurationInfo"]), 1)
         notif_bits = payload["notificationConfigurationInfo"][0]["profileManagementOperation"]
-        self.assertEqual(notif_bits, (b"\x70", 0), "NotificationEvent bits 1,2,3 (enable,disable,delete) per ASN.1")
+        # asn1tools reads the tuple as (payload, significant-bit count). The
+        # eight NotificationEvent flags give 8, not the unused-bit 0 the packer
+        # used to return -- which asn1tools encoded as an empty BIT STRING,
+        # dropping the events the document asked for.
+        self.assertEqual(
+            notif_bits,
+            (b"\x70", 8),
+            "NotificationEvent bits 1,2,3 (enable,disable,delete) per ASN.1",
+        )
 
         decoded = decode_rsp_type("StoreMetadataRequest", encoded)
-        self.assertEqual(decoded["iccid"], bytes.fromhex("89880811111111111112"))
+        self.assertEqual(
+            decoded["notificationConfigurationInfo"][0]["profileManagementOperation"],
+            (b"\x70", 8),
+            "the requested events must survive the encoder, not encode empty",
+        )
+        self.assertEqual(decoded["iccid"], bytes.fromhex("98888011111111111121"))
         self.assertEqual(decoded["serviceProviderName"], "Hampus Test")
         self.assertEqual(decoded["profileName"], "Hampus test profile")
         # The fixture carries icon type "NONE". IconType has no member for
@@ -1566,7 +1822,9 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(decoded["profileOwner"]["mccMnc"], bytes.fromhex("99F999"))
         self.assertEqual(decoded["profileOwner"]["gid1"], bytes.fromhex("FFFFFFFFFFFFFFFF"))
         self.assertEqual(decoded["profileOwner"]["gid2"], bytes.fromhex("FFFFFFFFFFFFFFFF"))
-        self.assertEqual(decoded["profilePolicyRules"], (b"\x00", 5))
+        # PprIds defines three bits, so the BIT STRING declares three -- not
+        # the five the unused-bit count used to be mistaken for.
+        self.assertEqual(decoded["profilePolicyRules"], (b"\x00", 3))
         self.assertEqual(len(decoded["notificationConfigurationInfo"]), 1)
         notification_entry = decoded["notificationConfigurationInfo"][0]
         self.assertEqual(notification_entry["notificationAddress"], "")
@@ -1648,6 +1906,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(session.apdu_channel.send_calls[0][0], "LOCAL: Select ECASD")
         self.assertEqual(session.apdu_channel.send_calls[1][0], "LOCAL: GetEID")
 
+    @mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False)
     def test_build_session_bound_profile_package_honors_custom_a3_chunk_size(self):
         metadata_document = {
             "profile": {
@@ -1740,6 +1999,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(cfg.BPP_INITIAL_BLOCK_NR, 1000)
         self.assertTrue(cfg.BPP_USE_PPK_REPLACE_SESSION_KEYS)
 
+    @mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False)
     def test_build_session_bound_profile_package_emits_replace_session_keys_in_default_mode(self):
         metadata_document = {
             "profile": {
@@ -2106,7 +2366,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             bytes.fromhex("BF36"),
             wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x10" * 16)),
         )
-        # Three segments, none of them terminal — the loop must walk
+        # Three segments, none of them terminal -- the loop must walk
         # through all of them without short-circuiting so we can assert
         # on three per-segment advances.
         segments = [b"\xAA", b"\xBB", b"\xCC"]
@@ -2138,7 +2398,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             ],
         )
         # Counter must land at 100 % only after the final sync advance,
-        # not before — otherwise the footer would sit at 100 % while
+        # not before -- otherwise the footer would sit at 100 % while
         # the notify sync is still running.
         self.assertEqual(bar.completed, 8)
 
@@ -2333,6 +2593,227 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(response, bytes.fromhex("9000"))
         self.assertEqual(calls, ["load", ("close", LocalIsdrSession.CANCEL_SESSION_REASON_END_USER_REJECTION)])
 
+    def _run_load_chain_with_result(
+        self,
+        load_result: bytes,
+        *,
+        channel: FakeApduChannel,
+        events: list,
+        **config_overrides,
+    ):
+        """Drive run_load_profile_chain with open / prepare / build / close faked.
+
+        Only the load result and the post-load enable reach the fake channel,
+        so the test controls what the card reported for the install.
+        """
+        with tempfile.TemporaryDirectory() as profile_dir:
+            profile_path = Path(profile_dir) / "local-profile.hex"
+            profile_path.write_text("A00100", encoding="utf-8")
+            session = LocalIsdrSession(
+                cfg=LocalAccessConfig(
+                    PROFILE_DIR=str(profile_dir),
+                    GENERATE_SESSION_BOUND_BPP=True,
+                    WRAP_SEGMENT_IN_BOOTSTRAP=False,
+                    **config_overrides,
+                ),
+                apdu_channel=channel,
+            )
+
+            def fake_open(transaction_id_override=None):
+                session.state.session_open = True
+                session.state.transaction_id = b"\x55" * 16
+                return None
+
+            def fake_prepare():
+                session.state.prepare_download_response = b"\x01"
+                return b"\x01"
+
+            def fake_build(_payload: bytes) -> bytes:
+                return wrap_tlv(
+                    bytes.fromhex("BF36"),
+                    wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x55" * 16)),
+                )
+
+            def fake_load(_payload: bytes, *, progress_bar=None) -> bytes:
+                _ = progress_bar
+                session.state.last_load_bpp_response = load_result
+                session.state.last_bpp_layout_lines = ["BF36 root"]
+                session.state.load_notifications_synced = True
+                events.append(("load", load_result))
+                return load_result
+
+            def fake_close(reason=LocalIsdrSession.CANCEL_SESSION_REASON_END_USER_REJECTION):
+                events.append(("close", reason))
+                session.state.session_open = False
+                return b""
+
+            session.open_session = fake_open
+            session.prepare_download = fake_prepare
+            session._build_session_bound_profile_package = fake_build
+            session._load_profile_from_bytes = fake_load
+            session.close_session = fake_close
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                response = session.run_load_profile_chain()
+        return response, session
+
+    def test_run_load_profile_chain_enables_the_installed_profile_after_the_close(self):
+        """A successResult is followed by ES10c.EnableProfile for the ICCID it names.
+
+        SGP.22 v3.1 section 3.1.3 step 8 leaves the post-install enable to
+        the End User; AUTO_ENABLE_AFTER_LOAD answers it. The enable runs
+        after the session close, keeps the load diagnostics and carries
+        the EF_ICCID-coded value with refreshFlag false (section 5.7.16).
+        """
+        events: list = []
+        channel = EnableAwareApduChannel(events=events)
+        load_result = build_profile_installation_success(b"\x55" * 16)
+
+        response, session = self._run_load_chain_with_result(
+            load_result, channel=channel, events=events
+        )
+
+        self.assertEqual(response, load_result)
+        self.assertEqual([event[0] for event in events], ["load", "close", "enable"])
+        enable_apdu = events[2][1]
+        self.assertEqual(enable_apdu[:4], bytes.fromhex("80E29100"))
+        self.assertTrue(
+            enable_apdu.endswith(bytes.fromhex("BF3111A00C5A0A98888011111111111121810100")),
+            enable_apdu.hex().upper(),
+        )
+        self.assertEqual(session.state.auto_enable_status, "enabled")
+        self.assertEqual(session.state.auto_enable_target_kind, "ICCID")
+        self.assertEqual(session.state.auto_enable_target, "89880811111111111112")
+        self.assertEqual(session.state.auto_enable_response, bytes.fromhex("BF3103800100"))
+        # The enable did not reset the state the banner, EXPLAIN-LAST and
+        # EXPORT-KEYBAG read after LOAD-PROFILE.
+        self.assertEqual(session.state.transaction_id, b"\x55" * 16)
+        self.assertEqual(session.state.last_load_bpp_response, load_result)
+        self.assertEqual(session.state.last_bpp_layout_lines, ["BF36 root"])
+        select_calls = [name for name, _ in channel.send_calls if name == "LOCAL: Select ISD-R"]
+        self.assertEqual(select_calls, ["LOCAL: Select ISD-R"])
+
+    def test_run_load_profile_chain_reports_a_refused_enable_and_keeps_the_load_result(self):
+        """disallowedByPolicy on the enable is recorded; the successful load is still returned."""
+        events: list = []
+        channel = EnableAwareApduChannel(enable_result_code=3, events=events)
+        load_result = build_profile_installation_success(b"\x55" * 16)
+
+        response, session = self._run_load_chain_with_result(
+            load_result, channel=channel, events=events
+        )
+
+        self.assertEqual(response, load_result)
+        self.assertEqual(session.state.auto_enable_status, "failed")
+        self.assertIn("disallowedByPolicy", session.state.auto_enable_detail)
+        self.assertIn("code=0x03", session.state.auto_enable_detail)
+        self.assertEqual(session.state.auto_enable_response, b"")
+        self.assertEqual(session.state.last_load_bpp_response, load_result)
+
+    def test_run_load_profile_chain_auto_enable_falls_back_to_the_isdp_aid(self):
+        """Without an ICCID in the NotificationMetadata the SuccessResult AID is the target."""
+        events: list = []
+        channel = EnableAwareApduChannel(events=events)
+        isdp_aid = bytes.fromhex("A0000005591010FFFFFFFF8900001200")
+        load_result = build_profile_installation_success(
+            b"\x55" * 16, include_iccid=False, isdp_aid=isdp_aid
+        )
+
+        _, session = self._run_load_chain_with_result(load_result, channel=channel, events=events)
+
+        self.assertEqual(session.state.auto_enable_status, "enabled")
+        self.assertEqual(session.state.auto_enable_target_kind, "AID")
+        self.assertEqual(session.state.auto_enable_target, isdp_aid.hex().upper())
+        enable_apdu = events[2][1]
+        self.assertIn(wrap_tlv(b"\x4F", isdp_aid), enable_apdu)
+
+    def test_run_load_profile_chain_skips_the_enable_without_an_installation_result(self):
+        """A load that ends without BF37 successResult names no profile, so nothing is enabled."""
+        events: list = []
+        channel = EnableAwareApduChannel(events=events)
+
+        response, session = self._run_load_chain_with_result(
+            bytes.fromhex("9000"), channel=channel, events=events
+        )
+
+        self.assertEqual(response, bytes.fromhex("9000"))
+        self.assertEqual([event[0] for event in events], ["load", "close"])
+        self.assertEqual(session.state.auto_enable_status, "skipped")
+        self.assertIn("no Profile Installation Result", session.state.auto_enable_detail)
+
+    def test_run_load_profile_chain_leaves_the_profile_disabled_when_auto_enable_is_off(self):
+        events: list = []
+        channel = EnableAwareApduChannel(events=events)
+        load_result = build_profile_installation_success(b"\x55" * 16)
+
+        _, session = self._run_load_chain_with_result(
+            load_result, channel=channel, events=events, AUTO_ENABLE_AFTER_LOAD=False
+        )
+
+        self.assertEqual([event[0] for event in events], ["load", "close"])
+        self.assertEqual(session.state.auto_enable_status, "")
+        self.assertEqual(session.state.auto_enable_target, "")
+
+    def test_eim_local_config_keeps_the_post_load_enable_off(self):
+        """The eIM shell inherits the chain but drives profile state through PSMOs."""
+        from SCP11.eim_local.config import EimLocalConfig
+
+        self.assertIs(LocalAccessConfig.__dataclass_fields__["AUTO_ENABLE_AFTER_LOAD"].default, True)
+        self.assertIs(EimLocalConfig.__dataclass_fields__["AUTO_ENABLE_AFTER_LOAD"].default, False)
+
+    def test_local_shell_load_profile_reports_the_post_load_enable(self):
+        shell = LocalAccessShell()
+        state = SimpleNamespace(
+            transaction_id=b"\x55" * 16,
+            last_bpp_layout_lines=[],
+            last_bpp_crypto_debug_lines=[],
+            auto_enable_status="enabled",
+            auto_enable_target_kind="ICCID",
+            auto_enable_target="8988201234567890123",
+            auto_enable_detail="",
+            auto_enable_response=bytes.fromhex("BF3103800100"),
+        )
+        shell.session = SimpleNamespace(
+            state=state,
+            resolve_profile_path=lambda: "profile/test_profile.bpp",
+            run_load_profile_chain=lambda profile_path="": bytes.fromhex("BF3700"),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._cmd_load_profile([])
+
+        text = output.getvalue()
+        self.assertIn("PROFILE LOAD SUCCESS", text)
+        self.assertIn("Auto-enable    : enabled ICCID 8988201234567890123", text)
+        self.assertIn("[+] EnableProfile completed. Last response: 6 bytes.", text)
+
+    def test_local_shell_load_profile_reports_a_refused_post_load_enable(self):
+        shell = LocalAccessShell()
+        refusal = "EnableProfile failed for ICCID=981000000000000000F2: code=0x03 (disallowedByPolicy)."
+        state = SimpleNamespace(
+            transaction_id=b"\x55" * 16,
+            last_bpp_layout_lines=[],
+            last_bpp_crypto_debug_lines=[],
+            auto_enable_status="failed",
+            auto_enable_target_kind="ICCID",
+            auto_enable_target="8988201234567890123",
+            auto_enable_detail=refusal,
+            auto_enable_response=b"",
+        )
+        shell.session = SimpleNamespace(
+            state=state,
+            resolve_profile_path=lambda: "profile/test_profile.bpp",
+            run_load_profile_chain=lambda profile_path="": bytes.fromhex("BF3700"),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._cmd_load_profile([])
+
+        text = output.getvalue()
+        self.assertIn("PROFILE LOAD SUCCESS", text)
+        self.assertIn(f"Auto-enable    : FAILED for ICCID 8988201234567890123: {refusal}", text)
+        self.assertIn(f"[!] EnableProfile after load failed: {refusal}", text)
+
     def test_install_failure_summary_includes_bpp_command_stage(self):
         session = LocalIsdrSession(apdu_channel=FakeApduChannel())
         session.state.bpp_command_descriptions = [
@@ -2378,6 +2859,200 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("plaintext[11088:12096]", summary)
         self.assertIn("terminalChunkContinuation=A3[13]", summary)
         self.assertIn("blocks=13.0 -> 13.5", summary)
+
+    def test_install_failure_summary_decodes_sima_response(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        # EUICCResponse as a card returned it: feature-not-supported(10),
+        # offset 40, no PE identification, profileInstallationAborted.
+        sima = bytes.fromhex("300CA008300680010A8301288100")
+
+        summary = session._summarize_profile_installation_result(
+            build_profile_installation_failure(
+                b"\x10" * 16, error_reason=0x0C, sima_response=sima
+            )
+        )
+
+        self.assertIn("errorReason=12", summary)
+        self.assertIn("simaResponse=300CA008300680010A8301288100", summary)
+        self.assertIn(
+            "simaResponseDecoded=peStatus[0].status=feature-not-supported(10) "
+            "offset=40, profileInstallationAborted",
+            summary,
+        )
+        self.assertIn("simaResponseHint=no PE identification; the Profile Header", summary)
+        self.assertIn("byte offset 40 of the header", summary)
+
+    def test_install_failure_summary_skips_header_hint_when_pe_is_identified(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        # bad-values(3) raised by PE identification 12 at offset 40.
+        sima = bytes.fromhex("300FA00B300980010381010C8301288100")
+
+        summary = session._summarize_profile_installation_result(
+            build_profile_installation_failure(b"\x10" * 16, sima_response=sima)
+        )
+
+        self.assertIn("simaResponseDecoded=", summary)
+        self.assertIn("bad-values(3)", summary)
+        self.assertNotIn("simaResponseHint", summary)
+
+    def test_install_failure_summary_locates_the_offset_in_the_bound_package(self):
+        from pySim.esim.saip import asn1 as saip_schema
+
+        from SCP11.shared.sima_locator import outline_profile_package
+        from tests.sima_locator_support import FDN_LINK, GFM, PACKAGE, span_in, tlv
+
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.state.upp_pe_outline = outline_profile_package(PACKAGE, saip_schema)
+        _start, fdn_end = span_in(GFM, FDN_LINK)
+        self.assertLess(fdn_end, 0x80)
+        # invalid-request-format(5) from PE identification 11, reported at the
+        # byte after the second link FCP, then profileInstallationAborted.
+        status = tlv("80", b"\x05") + tlv("81", b"\x0b") + tlv("83", bytes([fdn_end]))
+        sima = tlv("30", tlv("A0", tlv("30", status)) + tlv("81"))
+
+        summary = session._summarize_profile_installation_result(
+            build_profile_installation_failure(b"\x10" * 16, sima_response=sima)
+        )
+
+        self.assertIn("simaResponseLocation=PE identification 11 = TLV[2] genericFileManagement", summary)
+        self.assertIn(
+            "endsAt=fileManagementCMD[0][2].createFCP.linkPath (fileID 6F3B, linkPath 7FFF/6F3B, in 7F10)",
+            summary,
+        )
+        self.assertIn(
+            "startsAt=fileManagementCMD[0][3].createFCP (fileID 6F3C, linkPath 7FFF/6F3C, in 7F10)",
+            summary,
+        )
+        self.assertNotIn("simaResponseHint", summary)
+
+    def test_install_failure_summary_locates_a_header_offset_instead_of_hinting(self):
+        from pySim.esim.saip import asn1 as saip_schema
+
+        from SCP11.shared.sima_locator import outline_profile_package
+        from tests.sima_locator_support import HEADER, PACKAGE, SERVICES, span_in, tlv
+
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.state.upp_pe_outline = outline_profile_package(PACKAGE, saip_schema)
+        _start, services_end = span_in(HEADER, SERVICES)
+        # feature-not-supported(10) with no identification: the Profile header.
+        status = tlv("80", b"\x0a") + tlv("83", bytes([services_end]))
+        sima = tlv("30", tlv("A0", tlv("30", status)) + tlv("81"))
+
+        summary = session._summarize_profile_installation_result(
+            build_profile_installation_failure(b"\x10" * 16, sima_response=sima)
+        )
+
+        self.assertIn("simaResponseLocation=the Profile header = TLV[1] header", summary)
+        self.assertIn("endsAt=eUICC-Mandatory-services.dfLink", summary)
+        self.assertIn("startsAt=eUICC-Mandatory-GFSTEList", summary)
+        self.assertNotIn("simaResponseHint", summary)
+
+    def test_install_failure_summary_attributes_chunk_to_segment_that_returned_result(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.state.bpp_command_descriptions = [
+            "BF23.InitialiseSecureChannelRequest",
+            "A0.ConfigureISDPRequest",
+            "A1.StoreMetadataRequest",
+            "A2.ReplaceSessionKeys",
+            "A3.ProtectedProfilePackageCommand",
+        ]
+        session.state.last_bpp_layout_lines = [
+            "BF36 total=5400 value=5395",
+            "A3 total=5000 value=4996 members=5 memberLengths=[1036, 1036, 1036, 1036, 944]",
+            "A3[1] len=1036 plaintext[0:1008] overlaps TLV[1] A0 header, TLV[2] B0 mf, TLV[3] A3 pukCodes",
+            "A3[2] len=1036 plaintext[1008:2016] overlaps TLV[3] A3 pukCodes, TLV[4] A2 pinCodes",
+            "A3[5] len=944 plaintext[4032:4948] overlaps TLV[12] A1 genericFileManagement, TLV[16] AA end",
+        ]
+        session.state.last_load_bpp_terminal_a3_member_index = 1
+
+        summary = session._summarize_profile_installation_result(
+            build_profile_installation_failure(b"\x10" * 16)
+        )
+
+        self.assertIn("likelyProtectedChunk=A3[1]", summary)
+        self.assertIn("attribution=segment that returned the ProfileInstallationResult", summary)
+        self.assertIn("blocks=1.0 -> 1.8", summary)
+        self.assertIn("plaintext[0:1008]", summary)
+        self.assertIn("TLV[1] A0 header", summary)
+        self.assertNotIn("A3[5]", summary)
+        self.assertNotIn("terminalChunkContinuation", summary)
+
+    def test_install_failure_summary_marks_pe_end_guess_when_segment_unknown(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.state.bpp_command_descriptions = [
+            "BF23.InitialiseSecureChannelRequest",
+            "A0.ConfigureISDPRequest",
+            "A1.StoreMetadataRequest",
+            "A2.ReplaceSessionKeys",
+            "A3.ProtectedProfilePackageCommand",
+        ]
+        session.state.last_bpp_layout_lines = [
+            "BF36 total=5400 value=5395",
+            "A3 total=5000 value=4996 members=5 memberLengths=[1036, 1036, 1036, 1036, 944]",
+            "A3[1] len=1036 plaintext[0:1008] overlaps TLV[1] A0 header, TLV[2] B0 mf",
+            "A3[5] len=944 plaintext[4032:4948] overlaps TLV[12] A1 genericFileManagement, TLV[16] AA end",
+        ]
+
+        summary = session._summarize_profile_installation_result(
+            build_profile_installation_failure(b"\x10" * 16)
+        )
+
+        self.assertIn("likelyProtectedChunk=A3[5]", summary)
+        self.assertIn(
+            "attribution=chunk carrying PE-End (the failing segment was not recorded)",
+            summary,
+        )
+
+    def test_segment_bound_profile_package_records_a3_member_base(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        bpp = wrap_tlv(
+            bytes.fromhex("BF36"),
+            wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x10" * 16))
+            + wrap_tlv(b"\xA0", wrap_tlv(b"\x87", b"\x01"))
+            + wrap_tlv(b"\xA1", wrap_tlv(b"\x87", b"\x02") + wrap_tlv(b"\x87", b"\x03"))
+            + wrap_tlv(b"\xA3", wrap_tlv(b"\x86", b"\x04") + wrap_tlv(b"\x86", b"\x05")),
+        )
+
+        segments = session._segment_bound_profile_package(bpp)
+
+        # bootstrap, A0, A1 header, two A1 members, A3 header, two A3 members
+        self.assertEqual(len(segments), 8)
+        self.assertEqual(session.state.bpp_a3_member_segment_base, 6)
+        self.assertEqual(session._a3_member_index_for_segment(6), 0)
+        self.assertEqual(session._a3_member_index_for_segment(7), 1)
+        self.assertEqual(session._a3_member_index_for_segment(8), 2)
+
+    def test_load_profile_from_bytes_records_a3_member_that_returned_result(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.state.session_open = True
+        session.state.prepare_download_response = b"\x01"
+        valid_bpp = wrap_tlv(
+            bytes.fromhex("BF36"),
+            wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x10" * 16)),
+        )
+        # bootstrap, A0, A3 header, then three A3 members.
+        segments = [b"\xAA", b"\xA0", b"\xA3", b"\x86", b"\x86", b"\x86"]
+
+        def fake_segments(_bpp):
+            session.state.bpp_a3_member_segment_base = 3
+            return list(segments)
+
+        session._segment_bound_profile_package = fake_segments
+        calls = {"count": 0}
+
+        def fake_store_data(*_args, **_kwargs):
+            calls["count"] += 1
+            if calls["count"] == 5:
+                return build_profile_installation_failure(b"\x10" * 16)
+            return b""
+
+        session._send_personalization_store_data = fake_store_data
+        session._sync_pending_notifications = lambda *_args, **_kwargs: None
+
+        with self.assertRaises(RuntimeError):
+            session._load_profile_from_bytes(valid_bpp)
+
+        self.assertEqual(session.state.last_load_bpp_terminal_a3_member_index, 2)
 
     def test_install_failure_summary_keeps_full_overlap_list(self):
         session = LocalIsdrSession(apdu_channel=FakeApduChannel())
@@ -2473,6 +3148,26 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("mf", descriptions[0])
         self.assertIn("plaintext[1008:2016]", descriptions[1])
         self.assertIn("telecom", descriptions[1])
+
+    def test_the_shipped_local_access_profile_is_a_decodable_upp(self):
+        """Every element of the bundled profile decodes as a ProfileElement.
+
+        The fixture ships (MANIFEST.in), so an operator reads it as the
+        reference local-access package. The blob that stood here until now
+        was not a profile at all: its telecom PE overran ``ef-arr`` into the
+        members that follow, the top-level framing desynchronised, and 141
+        of the 154 apparent elements were fragments of the ones before them.
+        """
+        profile_path = Path(__file__).resolve().parent.parent / "SCP11" / "local_access" / "profile" / "test_profile.txt"
+        profile_bytes = bytes.fromhex(profile_path.read_text(encoding="utf-8").strip())
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+
+        ranges = session._describe_upp_element_ranges(profile_bytes)
+
+        self.assertEqual(len(ranges), 17)
+        unnamed = [label for _s, _e, label in ranges if label.split()[-1].isupper()]
+        self.assertEqual(unnamed, [], "every element must resolve to a PE name")
+        self.assertEqual(ranges[-1][1], len(profile_bytes), "elements must tile the package")
 
     def test_describe_bpp_layout_lists_member_lengths_and_plaintext_ranges(self):
         session = LocalIsdrSession(apdu_channel=FakeApduChannel())

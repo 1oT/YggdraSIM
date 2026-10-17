@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -115,9 +117,21 @@ class NordAnsiSequencesTests(unittest.TestCase):
         self.assertEqual(NordAnsi.MAGENTA, NordAnsi.PURPLE)
 
     def test_module_singleton_exposes_attributes(self) -> None:
-        self.assertEqual(NORD.RESET, "\033[0m")
-        self.assertEqual(NORD.BOLD, "\033[1m")
-        self.assertEqual(NORD.GREEN, NordAnsi.GREEN)
+        """``NORD`` follows YGGDRASIM_CLI_THEME, so pin it explicitly.
+
+        Without the pin this assertion would fail for any operator whose
+        own shell selects a non-default palette.
+        """
+        from yggdrasim_common import cli_theme
+
+        previous = cli_theme.active_theme()
+        cli_theme.set_active_theme(cli_theme.DEFAULT_THEME)
+        try:
+            self.assertEqual(NORD.RESET, "\033[0m")
+            self.assertEqual(NORD.BOLD, "\033[1m")
+            self.assertEqual(NORD.GREEN, NordAnsi.GREEN)
+        finally:
+            cli_theme.set_active_theme(previous)
 
 
 if __name__ == "__main__":

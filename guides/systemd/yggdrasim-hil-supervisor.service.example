@@ -19,7 +19,14 @@
 [Unit]
 Description=YggdraSIM HIL bridge supervisor
 Documentation=file:%h/Documents/Tools/YggdraSIM/guides/HIL_BRIDGE_GUIDE.md
-After=default.target
+# Do not add ``After=default.target`` here. This unit is already pulled in
+# by ``WantedBy=default.target``, so naming that target as a predecessor
+# closes an ordering cycle. systemd resolves a cycle by deleting one of the
+# start jobs, which means a unit silently never starts at boot -- and
+# ``systemctl --user enable --now`` does not reproduce it, because starting
+# a unit by hand never runs the boot transaction. Order against a concrete
+# unit instead, the way the Remote Lab agent example orders itself after
+# the Card Bridge.
 
 [Service]
 Type=simple

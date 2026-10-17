@@ -1,25 +1,24 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SIMCARD-adjacent Command Center actions (C-7 slice).
 
 Wraps four standalone helpers that currently live behind direct module
 imports or launcher subcommands so operators can invoke them from the
 GUI without dropping into a raw shell:
 
-* ``simcard.quirks_status``      — introspect the resolved quirks file
+* ``simcard.quirks_status``      -- introspect the resolved quirks file
   and the current runtime gating (``YGGDRASIM_ALLOW_QUIRKS`` /
   ``YGGDRASIM_DISABLE_QUIRKS``) without side-effects.
-* ``simcard.profile_store_list`` — list profiles in a Workspace-style
+* ``simcard.profile_store_list`` -- list profiles in a Workspace-style
   profile store directory, with manifest metadata.
-* ``simcard.euicc_store_list``   — enumerate child eUICC stores under
+* ``simcard.euicc_store_list``   -- enumerate child eUICC stores under
   a chosen root path (EID-keyed directories).
-* ``simcard.tuak_derive_topc``   — derive TOPc from a TOP + K pair
+* ``simcard.tuak_derive_topc``   -- derive TOPc from a TOP + K pair
   using the simulator's TUAK helper. Registered under Offline Tools;
   pure math, does not read card.
 
-No action here reaches the PC/SC transport layer — these are
+No action here reaches the PC/SC transport layer -- these are
 module-local utilities that supplement the SCP03 workbench.
 """
 
@@ -202,7 +201,7 @@ def _dispatch_euicc_store_list(
         exists = False
         try:
             exists = euicc_store_exists(resolved_store)
-        except Exception:  # noqa: BLE001 — tolerate malformed stores
+        except Exception:  # noqa: BLE001 -- tolerate malformed stores
             exists = False
         profile_store = ""
         try:
@@ -238,7 +237,7 @@ def _decode_hex_bytes(field_name: str, raw: Any, *, allowed_lengths: tuple[int, 
     try:
         value = bytes.fromhex(cleaned)
     except ValueError as error:
-        raise ValueError(f"{field_name}: invalid hex — {error}") from error
+        raise ValueError(f"{field_name}: invalid hex -- {error}") from error
     if len(value) not in allowed_lengths:
         allowed = ", ".join(str(n) for n in allowed_lengths)
         raise ValueError(
@@ -269,14 +268,13 @@ def _dispatch_tuak_derive_topc(
 
     try:
         topc = derive_topc(top_bytes, key_bytes, number_of_keccak=rounds)
-    except Exception as error:  # noqa: BLE001 — surface the validator
+    except Exception as error:  # noqa: BLE001 -- surface the validator
         raise ValueError(f"derive_topc failed: {error}") from error
 
     return {
         "key_length_bits": len(key_bytes) * 8,
         "number_of_keccak": rounds,
         "topc_hex": topc.hex().upper(),
-        "secret_outputs_redacted": ["key", "top"],
     }
 
 
@@ -288,7 +286,7 @@ def _dispatch_tuak_derive_topc(
 QUIRKS_STATUS_SPEC = ActionSpec(
     id="simcard.quirks_status",
     subsystem="SIMCARD",
-    title="Quirks — status",
+    title="Quirks -- status",
     description=(
         "Show the resolved simulator quirks file (from YGGDRASIM_SIM_QUIRKS "
         "or an explicit path), its size, and whether the allow / disable "
@@ -314,7 +312,7 @@ QUIRKS_STATUS_SPEC = ActionSpec(
 PROFILE_STORE_LIST_SPEC = ActionSpec(
     id="simcard.profile_store_list",
     subsystem="SIMCARD",
-    title="Profile store — list",
+    title="Profile store -- list",
     description=(
         "Enumerate profile directories under a SIMCARD-style profile "
         "store root. Each manifest is parsed into AID / ICCID / state / "
@@ -339,7 +337,7 @@ PROFILE_STORE_LIST_SPEC = ActionSpec(
 EUICC_STORE_LIST_SPEC = ActionSpec(
     id="simcard.euicc_store_list",
     subsystem="SIMCARD",
-    title="eUICC store — list",
+    title="eUICC store -- list",
     description=(
         "List child eUICC stores under a chosen root. The directory name "
         "is treated as the candidate EID; the resolver returns the "
@@ -366,20 +364,20 @@ EUICC_STORE_LIST_SPEC = ActionSpec(
 TUAK_DERIVE_TOPC_SPEC = ActionSpec(
     id="simcard.tuak_derive_topc",
     subsystem=OFFLINE_TOOLS_SUBSYSTEM,
-    title="TUAK — derive TOPc",
+    title="TUAK -- derive TOPc",
     description=(
         "Derive TOPc from TOP (32 bytes) and subscriber key K "
-        "(16 or 32 bytes) using 3GPP TS 35.231 TUAK. Pure arithmetic — "
+        "(16 or 32 bytes) using 3GPP TS 35.231 TUAK. Pure arithmetic -- "
         "does not touch the card or the live simulator."
     ),
     inputs=(
         ActionField(name="top", label="TOP (64 hex)", kind="hex", required=True,
                     help="32-byte operator constant.", secret=True),
         ActionField(name="key", label="K (32 or 64 hex)", kind="hex", required=True,
-                    help="Subscriber key — 128 or 256 bit.", secret=True),
+                    help="Subscriber key -- 128 or 256 bit.", secret=True),
         ActionField(name="number_of_keccak", label="Keccak rounds", kind="int",
                     required=False, default=1, min_value=1, max_value=16,
-                    help="TS 35.231 NR_KECCAK — typically 1."),
+                    help="TS 35.231 NR_KECCAK -- typically 1."),
     ),
     output_kind="json",
     dispatcher=_dispatch_tuak_derive_topc,

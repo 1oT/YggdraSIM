@@ -493,28 +493,10 @@ def _build_subscriber_document(
 
 
 def _sanitise_document(document: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy with key material redacted to a fingerprint.
-
-    The GUI / HTTP layers only ever see this shape, never the full
-    K / OPc. The full document is still available on the wire to
-    Open5GS itself; we just don't echo it back to the operator.
-    """
+    """Return a copy without the MongoDB ``_id``; K and OPc stay as stored."""
     sanitised = dict(document)
     sanitised.pop("_id", None)
-    security = dict(document.get("security") or {})
-    if "k" in security:
-        security["k"] = _fingerprint(security["k"])
-    if "opc" in security:
-        security["opc"] = _fingerprint(security["opc"])
-    sanitised["security"] = security
     return sanitised
-
-
-def _fingerprint(hex_value: Any) -> str:
-    text = str(hex_value or "")
-    if len(text) <= 8:
-        return text
-    return f"{text[:4]}\u2026{text[-4:]} ({len(text) // 2} bytes)"
 
 
 __all__ = [

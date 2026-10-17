@@ -280,6 +280,108 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             "STK",
         )
 
+    def test_summary_group_name_reads_the_bundled_dissectors_underscored_command_names(self) -> None:
+        """The markers are spec spellings; the dissector emits identifiers.
+
+        ETSI TS 102 221 v18.4 table 10.5 names the commands with spaces
+        ("TERMINAL PROFILE"); the bundled Lua names them the way an
+        identifier is spelled ("TERMINAL_PROFILE"), so every marker scan
+        missed them and the frames collected in "Other APDU" -- or worse,
+        TERMINAL_PROFILE reached the eUICC bucket on the "PROFILE"
+        substring alone. These are the exact Info strings tshark produced
+        for frames 628, 635, 636, 659 and 790 of a rig capture.
+        """
+        from Tools.HilBridge.live_decode_tui import _summary_group_name
+
+        for info, expected in (
+            ("TERMINAL_CAPABILITY 00 00 -> 9000 Success", "STK"),
+            (
+                "TERMINAL_PROFILE 00 00 -> 9110 Normal ending. 16 bytes of proactive data.",
+                "STK",
+            ),
+            (
+                "MANAGE_CHANNEL open, card allocates -> 9110 Normal ending. "
+                "16 bytes of proactive data.",
+                "STK",
+            ),
+            (
+                "RESET_RETRY_COUNTER application PIN 1 (PIN1) retry counter "
+                "-> 63CA Retry counter: 10 attempts left.",
+                "Authentication",
+            ),
+            (
+                "SEARCH_RECORD 01 04 -> 6282 End of file/record reached before "
+                "reading Le bytes, or unsuccessful search",
+                "ETSI FS",
+            ),
+            ("READ_BINARY 00 00 -> 9000 Success", "ETSI FS"),
+            ("UPDATE_RECORD 01 04 -> 9000 Success", "ETSI FS"),
+            ("GET_RESPONSE 00 00 -> 9000 Success", "ETSI FS"),
+            ("INTERNAL_AUTHENTICATE 00 81 -> 9000 Success", "Authentication"),
+            ("STORE_DATA 88 00 -> 9000 Success", "eUICC"),
+        ):
+            with self.subTest(info=info):
+                self.assertEqual(
+                    _summary_group_name(self._summary_row(1, info=info), None),
+                    expected,
+                )
+
+    def test_summary_group_name_gives_the_answer_to_reset_its_own_bucket(self) -> None:
+        """TS 102 221 v18.4 clause 6.3: the ATR carries no CLA/INS.
+
+        It matches no command marker, so it sat in "Other APDU" beside
+        genuinely unrecognised APDUs -- and it is the frame that opens
+        every card session.
+        """
+        from Tools.HilBridge.live_decode_tui import (
+            _SUMMARY_GROUP_ORDER,
+            _summary_group_name,
+        )
+
+        self.assertEqual(
+            _summary_group_name(
+                self._summary_row(1, info="ATR (direct convention, 23 bytes)"),
+                None,
+            ),
+            "ATR",
+        )
+        # First on the wire, so first in the tree.
+        self.assertEqual(_SUMMARY_GROUP_ORDER[0], "ATR")
+        # And a command that merely contains those three letters is not one.
+        self.assertNotEqual(
+            _summary_group_name(self._summary_row(2, info="UICC CONNECT ATRACT"), None),
+            "ATR",
+        )
+
+    def test_summary_secondary_text_drops_a_repeat_of_the_line(self) -> None:
+        """An unannotated frame rendered its Info column twice.
+
+        The primary text falls back to ``row.info`` when the frame
+        carries no annotation suffix, and the secondary text is
+        ``row.info`` -- so the packet list read
+        "ATR (23 bytes) | ATR (23 bytes)" and the repeat pushed the tail
+        of the line off the column.
+        """
+        from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
+        from Tools.HilBridge.live_decode_tui import (
+            _summary_primary_text,
+            _summary_secondary_text,
+        )
+
+        row = self._summary_row(1, info="ATR (direct convention, 23 bytes)")
+        self.assertEqual(_summary_primary_text(row, None), "ATR (direct convention, 23 bytes)")
+        self.assertIsNone(_summary_secondary_text(row, None))
+
+        # A suffix that says something the line does not still shows.
+        annotated = self._summary_row(2, info="SELECT 00 04")
+        self.assertEqual(
+            _summary_secondary_text(
+                annotated,
+                StatefulFrameAnnotation(frame_number=2, summary_suffix="FS MF/EF.ICCID"),
+            ),
+            "SELECT 00 04",
+        )
+
     def test_summary_partition_channel_rows_groups_channel_lifecycle_under_open_channel_session(self) -> None:
         from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
         from Tools.HilBridge.live_decode_tui import (
@@ -1894,6 +1996,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                         return_value=("0000  A0 A4 00 00 02 3F 00   ......?.", ""),
                     ):
                         async with app.run_test() as pilot:
+                            await pilot.pause()
                             detail_view = app.query_one("#detail_view", Tree)
                             bytes_view = app.query_one("#bytes_view", RichLog)
 
@@ -1915,6 +2018,36 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                             await pilot.pause()
 
                             self.assertTrue(top_level_nodes[0].is_expanded)
+
+        asyncio.run(scenario())
+
+    def test_interval_ticks_skip_once_the_app_stops_running(self) -> None:
+        # App._shutdown clears is_running and prunes the screens before it
+        # stops the app's timers; a tick in that window queried the removed
+        # #summary_tree / #status_line and the run ended on NoMatches.
+        from textual.app import App
+
+        async def scenario() -> None:
+            app = self._build_app()
+            with (
+                mock.patch.object(App, "set_interval", autospec=True, side_effect=App.set_interval) as registered,
+                mock.patch(
+                    "Tools.HilBridge.live_decode_tui.read_packet_summaries",
+                    return_value=([], ""),
+                ) as summaries,
+            ):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    ticks = [call.args[2] for call in registered.call_args_list if call.args[0] is app]
+                    self.assertEqual(len(ticks), 4)
+                    await app.screen.remove_children()
+                    summaries.reset_mock()
+                    with mock.patch.object(
+                        type(app), "is_running", new_callable=mock.PropertyMock, return_value=False
+                    ):
+                        for tick in ticks:
+                            tick()
+                    summaries.assert_not_called()
 
         asyncio.run(scenario())
 
@@ -3734,6 +3867,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 card_session_index=2,
                 card_session_reset_reason="REFRESH UICC Reset",
                 card_session_iccid="8988000000000000002",
+                card_session_imsi="001010000000002",
             ),
             4: StatefulFrameAnnotation(
                 frame_number=4,
@@ -3742,7 +3876,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             ),
         }
 
-        session_rows, reasons, iccids = _summary_partition_rows_by_card_session(
+        session_rows, reasons, iccids, imsis = _summary_partition_rows_by_card_session(
             rows, annotations
         )
 
@@ -3753,6 +3887,10 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         self.assertNotIn(1, reasons)
         self.assertEqual(iccids.get(1), "8988000000000000001")
         self.assertEqual(iccids.get(2), "8988000000000000002")
+        # EF.IMSI is a separate read, so a session can carry one
+        # identifier without the other.
+        self.assertNotIn(1, imsis)
+        self.assertEqual(imsis.get(2), "001010000000002")
 
     def test_summary_card_session_title_includes_iccid_and_reset_reason_when_present(self) -> None:
         from Tools.HilBridge.live_decode_tui import _summary_card_session_title
@@ -3774,6 +3912,16 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 4, "REFRESH UICC Reset", "8988000000000000004"
             ),
             "Card Session 4 - [8988000000000000004] - REFRESH UICC Reset",
+        )
+        # EF.ICCID and EF.IMSI are separate reads, so the caption has to
+        # carry either one alone as well as both.
+        self.assertEqual(
+            _summary_card_session_title(5, "", "8988000000000000005", "001010000000005"),
+            "Card Session 5 - [8988000000000000005 / 001010000000005]",
+        )
+        self.assertEqual(
+            _summary_card_session_title(6, "", "", "001010000000006"),
+            "Card Session 6 - [IMSI 001010000000006]",
         )
 
     def test_summary_tree_renders_card_session_wrappers_when_reset_detected(self) -> None:

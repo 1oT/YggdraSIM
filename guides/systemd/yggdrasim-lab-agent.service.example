@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+# Runs the Remote Lab agent in front of one or more Card Bridges, adding
+# rig inventory, per-person access tokens and exclusive session locking.
+#
+# Copy this file to:
+#   ~/.config/systemd/user/yggdrasim-lab-agent.service
+#
+# Then adjust:
+# - WorkingDirectory and ExecStart to the checkout and venv on this host
+# - --config to the agent YAML
+#
+# The config carries the bind hosts and ports, so this unit names none:
+# see site-docs/how-to/run-a-remote-lab-agent.md for the schema, and keep
+# the file mode 0600 because it lists access-token hashes.
+#
+# For an unattended host, enable lingering so the unit survives logout
+# and starts at boot without a login:
+#   loginctl enable-linger "$USER"
+
+[Unit]
+Description=YggdraSIM Remote Lab agent (control API and per-rig stream proxies)
+Documentation=file:%h/YggdraSIM/site-docs/how-to/run-a-remote-lab-agent.md
+# Ordering only, and against a concrete unit rather than a target. The
+# agent serves its inventory whether or not the bridge is up; until it is,
+# the rig simply reports its upstream as down. Never add
+# ``After=default.target`` alongside the WantedBy below -- that closes an
+# ordering cycle and systemd resolves it by dropping a start job, so one
+# of the two units silently never starts at boot.
+Wants=yggdrasim-card-bridge.service
+After=yggdrasim-card-bridge.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/YggdraSIM
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/YggdraSIM/.venv/bin/yggdrasim-lab-agent --config %h/.config/yggdrasim/remote-lab.yaml
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

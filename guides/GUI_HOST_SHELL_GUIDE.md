@@ -7,8 +7,8 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 The **Advanced > Host shell** tab in the YggdraSIM Universal GUI gives
 the operator a free-form interactive OS shell over a WebSocket-backed
-PTY. It is intended for ad-hoc modem CLI workflows — `tio`, `minicom`,
-`socat`, `screen`, `cu`, plain `cat /dev/ttyUSB*` — that the more
+PTY. It is intended for ad-hoc modem CLI workflows -- `tio`, `minicom`,
+`socat`, `screen`, `cu`, plain `cat /dev/ttyUSB*` -- that the more
 constrained **Advanced > Shell** tab cannot reach because that tab is
 locked to `python -m <module>` against a fixed allow-list.
 
@@ -18,8 +18,8 @@ locked to `python -m <module>` against a fixed allow-list.
 | Backing route | `WS /api/terminal/{module}` | `WS /api/host-shell` |
 | argv shape | `python -m <module>` | `<resolved $SHELL> -i`, or configured argv via `command=` |
 | argv allow-list | `yggdrasim_common.registry.CLI_MODULES` | none |
-| Default | **on** in both `--gui` and `--web-server` | **off** — opt-in only |
-| Trust posture | Allow-listed Python modules | RCE-class — equivalent to SSH |
+| Default | **on** in both `--gui` and `--web-server` | **off** -- opt-in only |
+| Trust posture | Allow-listed Python modules | RCE-class -- equivalent to SSH |
 | Companion REST | `/api/terminal/modules` | `/api/host-shell/{capabilities,devices}` |
 | AT-decode overlay | n/a | yes (per-session toggle) |
 
@@ -45,7 +45,7 @@ yggdrasim-web-server --token-file ./gui.token
 ```
 
 The flag is read at launch time. Flipping it inside an already-running
-process has no effect — restart the launcher.
+process has no effect -- restart the launcher.
 
 Accepted truthy values: `1`, `true`, `yes`, `on` (case-insensitive).
 Anything else (including unset, `0`, empty string) leaves the surface
@@ -60,7 +60,7 @@ When disabled:
   `{"enabled": false, "shell": null, "reason": "..."}`. The SPA reads
   this on every tab activation, so the notice always reflects the
   current process state.
-- `GET /api/host-shell/devices` is harmless and remains reachable —
+- `GET /api/host-shell/devices` is harmless and remains reachable --
   it has no side effects and only enumerates `/dev/tty*`. It returns
   the same payload regardless of the env flag.
 - `WS /api/host-shell` accepts the handshake, sends one
@@ -90,7 +90,7 @@ The tab is divided into three rows plus an optional side panel.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ [Start session] [Stop]                            status: idle … │
+│ [Start session] [Stop]                            status: idle ... │
 ├──────────────────────────────────────────────────────────────────┤
 │ Serial device [/dev/serial/by-id/usb-... ▼] [↻] [Insert path]    │
 │                                          ☐ Decode AT lines       │
@@ -108,24 +108,24 @@ The tab is divided into three rows plus an optional side panel.
 
 ### 2.1 Session controls
 
-- `Start session` — opens a WebSocket to `/api/host-shell`, forks the
+- `Start session` -- opens a WebSocket to `/api/host-shell`, forks the
   resolved shell inside a fresh PTY, and pipes the byte stream to the
-  xterm view. The status pill shows `running · pid=… · /bin/bash`
+  xterm view. The status pill shows `running · pid=... · /bin/bash`
   once the server has confirmed the spawn.
-- `Stop` — cleanly closes the WebSocket; the server reaps the child.
+- `Stop` -- cleanly closes the WebSocket; the server reaps the child.
   The xterm history is preserved in the DOM until the operator
   navigates away or starts another session.
 
 ### 2.2 Serial device picker
 
-- Dropdown — populated from `GET /api/host-shell/devices` on tab
+- Dropdown -- populated from `GET /api/host-shell/devices` on tab
   activation. Sources scanned (in order): `/dev/serial/by-id/*`,
   `/dev/ttyUSB*`, `/dev/ttyACM*`, `/dev/ttyS*`. Devices that resolve
   to the same canonical path are de-duplicated; `by-id` entries win
   because their names are stable across reboots and reseatings.
-- `↻` — re-runs the enumeration. Useful after plugging or unplugging a
+- `↻` -- re-runs the enumeration. Useful after plugging or unplugging a
   USB-serial adapter without leaving the tab.
-- `Insert path` — sends the highlighted device path as raw stdin into
+- `Insert path` -- sends the highlighted device path as raw stdin into
   the running shell. Combine with the cursor position in xterm to
   splice the path into a `tio`, `socat`, or `minicom` invocation
   without retyping.
@@ -134,16 +134,16 @@ The tab is divided into three rows plus an optional side panel.
   `/dev/serial/by-id/[A-Za-z0-9._:\-+]+`, with a 256-character cap. The
   server-side picker therefore cannot be used to splice
   `; rm -rf ~` into the prompt; if you want to type something else,
-  type it normally — the PTY transport itself is byte-for-byte
+  type it normally -- the PTY transport itself is byte-for-byte
   transparent, exactly like SSH.
 
 ### 2.3 AT decode overlay
 
-- Checkbox `☐ Decode AT lines` — enables the per-session decoder.
+- Checkbox `☐ Decode AT lines` -- enables the per-session decoder.
   When toggled on, the route tee's the byte stream through
   `yggdrasim_common.gui_server.at_decoder` and emits a structured JSON
   frame for every line that matches a known AT shape.
-- Side panel — three-column rows:
+- Side panel -- three-column rows:
 
   | Column | Content |
   | --- | --- |
@@ -153,7 +153,7 @@ The tab is divided into three rows plus an optional side panel.
 
   Hovering a row expands a JSON detail block with the parsed APDU
   header (CLA / INS / P1 / P2 / Lc / data), the friendly INS label
-  (e.g. `SELECT`, `READ BINARY`), and — for response lines — the
+  (e.g. `SELECT`, `READ BINARY`), and -- for response lines -- the
   human-readable status word from
   `SCP03.core.utils.StatusWordTranslator` (e.g. `9000` →
   `Success`).
@@ -161,17 +161,17 @@ The tab is divided into three rows plus an optional side panel.
 - Click a row to copy the raw APDU hex (request rows) or the response
   hex (response rows) to the system clipboard. Useful for pasting into
   the SCP03 shell's `SEND` command for cross-checking.
-- The xterm output is unchanged whether the toggle is on or off — the
+- The xterm output is unchanged whether the toggle is on or off -- the
   decoder is strictly additive.
 
 The overlay is bounded:
 
-- Buffer cap — 16 KiB rolling buffer per direction. A runaway binary
+- Buffer cap -- 16 KiB rolling buffer per direction. A runaway binary
   stream is dropped wholesale rather than tying up RAM. The xterm
   output is unaffected; the decoder simply skips that fragment.
-- Long-line cap — single lines longer than 4 KiB are flushed at the
+- Long-line cap -- single lines longer than 4 KiB are flushed at the
   cap to keep one bad request from monopolising the channel.
-- Row cap — the side panel keeps the most recent 250 entries; older
+- Row cap -- the side panel keeps the most recent 250 entries; older
   rows are evicted as new ones arrive.
 
 ---
@@ -257,7 +257,7 @@ Two frame directions, two encodings:
 | client → server | binary | Raw stdin bytes (xterm.js typed input, paste, etc.). |
 | client → server | text (JSON) | Control message, see below. |
 | server → client | binary | Raw stdout / stderr bytes from the PTY master. xterm.js writes these straight into the screen buffer. |
-| server → client | text (JSON) | Lifecycle event — see below. |
+| server → client | text (JSON) | Lifecycle event -- see below. |
 
 #### 3.3.1 Client control frames
 
@@ -326,11 +326,11 @@ older servers (or vice versa) interoperate without a hard break.
 sync with the SCP03 shell vocabulary.
 
 `command_label` is `READ BINARY` / `READ RECORD` / `GET RESPONSE` /
-`UPDATE BINARY` / `UPDATE RECORD` / `STATUS` — the six commands TS
+`UPDATE BINARY` / `UPDATE RECORD` / `STATUS` -- the six commands TS
 27.007 §8.18 lets `AT+CRSM` carry.
 
 `ins_label` is populated for the common ISO 7816 / UICC / STK INS
-codes used over `AT+CSIM` in practice (`SELECT`, `READ BINARY`, …,
+codes used over `AT+CSIM` in practice (`SELECT`, `READ BINARY`, ...,
 `TERMINAL PROFILE`, `FETCH`, `TERMINAL RESPONSE`); unknown INS
 values produce an empty label rather than a guess.
 
@@ -378,13 +378,13 @@ tcpdump -i lo -n udp port 4729 -w /tmp/modem.pcap
 ```
 
 Useful when sharing a live modem trace with the SIMtrace2 / HIL
-bridge stack — see `HIL_BRIDGE_GUIDE.md` for the full topology.
+bridge stack -- see `HIL_BRIDGE_GUIDE.md` for the full topology.
 
 ### 4.5 Pasting an APDU back into SCP03
 
 1. Toggle `Decode AT lines` on.
 2. Issue `AT+CSIM=14,"00A40004023F00"` against the modem.
-3. Click the matching `csim request` row in the side panel — the APDU
+3. Click the matching `csim request` row in the side panel -- the APDU
    hex is now on the clipboard.
 4. Switch to the `Advanced > Shell` tab and paste it into a running
    `python -m SCP03` session as `SEND 00A40004023F00`.
@@ -411,8 +411,8 @@ correctly.
 
 ### 5.3 Lifecycle and cleanup
 
-Closing the WebSocket — either via `Stop`, navigating away, the
-browser tab closing, or a network error — always tears down the
+Closing the WebSocket -- either via `Stop`, navigating away, the
+browser tab closing, or a network error -- always tears down the
 child:
 
 1. The reader task is cancelled.
@@ -422,7 +422,7 @@ child:
 
 A long-running process started inside the shell (`tio`, `tail -f`)
 inherits the hangup. If the operator wants the process to outlive the
-session, they need to `nohup` / `disown` / `setsid` it themselves —
+session, they need to `nohup` / `disown` / `setsid` it themselves --
 the same constraint as a real SSH session.
 
 ### 5.4 Concurrent sessions
@@ -440,8 +440,8 @@ under `yggdrasim.gui.host_shell.route` and
 
 | Logger record | When |
 | --- | --- |
-| `gui.host_shell.opened token=<id> peer=<addr>:<port> rows=… cols=…` | Successful WS handshake (after token validation, after the env-flag check). Logged at `WARNING` to surface in default log destinations. |
-| `gui.host_shell.spawned shell=<path> pid=<pid> rows=… cols=…` | After `pty.fork()` succeeds. Logged at `INFO`. |
+| `gui.host_shell.opened token=<id> peer=<addr>:<port> rows=... cols=...` | Successful WS handshake (after token validation, after the env-flag check). Logged at `WARNING` to surface in default log destinations. |
+| `gui.host_shell.spawned shell=<path> pid=<pid> rows=... cols=...` | After `pty.fork()` succeeds. Logged at `INFO`. |
 | `gui.host_shell.closed peer=<addr>:<port>` | After cleanup. Logged at `INFO`. |
 | `gui.host_shell.auth_rejected peer=<addr>:<port>` | Bearer-token mismatch / missing. Logged at `INFO`. |
 | `gui.host_shell.spawn_failed err=<msg> peer=<addr>:<port>` | Spawn errored after auth passed. Logged at `WARNING`. |
@@ -457,18 +457,18 @@ If Host shell is enabled in `--web-server` mode, walk this list:
 
 1. Bind to `127.0.0.1` and use SSH tunnelling (`ssh -L
    <port>:localhost:<port> user@host`) instead of binding `0.0.0.0`.
-2. If a public bind is unavoidable, terminate TLS — either with
+2. If a public bind is unavoidable, terminate TLS -- either with
    `--tls-self-signed` for one-off use (the SHA-256 fingerprint is
    printed on launch; pin it manually) or with operator certificates
    via `YGGDRASIM_GUI_TLS_CERT` / `YGGDRASIM_GUI_TLS_KEY`.
 3. Store the bearer token in a `chmod 600` file referenced by
    `YGGDRASIM_GUI_TOKEN_FILE`. Never inline it via
-   `YGGDRASIM_GUI_TOKEN` on a multi-user host — the env block is
+   `YGGDRASIM_GUI_TOKEN` on a multi-user host -- the env block is
    visible to any process the operator can read.
 4. Rotate the token whenever it could plausibly have been observed
    (shared screen, terminal screenshot, mistyped paste).
 5. If multiple operators share a host, give each one their own
-   account, their own token file, and their own GUI process — one
+   account, their own token file, and their own GUI process -- one
    shared token means shared blame.
 6. Monitor the GUI process logs (§5.5) and pipe them through your
    existing SIEM / journald aggregator. The
@@ -486,11 +486,11 @@ If Host shell is enabled in `--web-server` mode, walk this list:
 | --- | --- | --- |
 | Tab shows the disabled notice. | `YGGDRASIM_GUI_HOST_SHELL` is unset / falsey, or set after the launcher started. | Export the flag and restart the launcher. |
 | WS opens then immediately closes with `event=error: Host shell is disabled`. | Same as above; the route refuses late-flipped config. | Same as above. |
-| Notice says "PTY bridge is not supported on this platform." | Running on a non-POSIX target — currently Windows native. | Use the `--gui` desktop launcher on a Linux/macOS host, or run YggdraSIM under WSL2 / a Linux container and tunnel back. |
+| Notice says "PTY bridge is not supported on this platform." | Running on a non-POSIX target -- currently Windows native. | Use the `--gui` desktop launcher on a Linux/macOS host, or run YggdraSIM under WSL2 / a Linux container and tunnel back. |
 | Notice says "Could not resolve a usable login shell." | `$SHELL` points outside `/etc/shells` and neither `/bin/bash` nor `/bin/sh` is on disk (extremely stripped container). | Point `SHELL` at a real entry in `/etc/shells` before launching, or install `bash` / `sh` in the container. |
 | `Insert path` does nothing. | No session is running, or no device is selected. | Start the session first; refresh the device list with `↻`. |
 | Decoder side panel never shows rows. | `Decode AT lines` is off, or the modem dialogue isn't using `AT+CSIM` / `AT+CRSM`. | Toggle the decoder; verify with `echo 'AT+CSIM=14,"00A40004023F00"' | socat -t1 - /dev/ttyUSB2,raw,b115200,echo=0` to inject a known-good line. |
-| Decoder shows a row but `decoded.sw_meaning` is empty. | The status word is not in `SCP03.core.utils.StatusWordTranslator.SW_MAP`, and not in the parametric `61xx` / `6Cxx` ranges. | Treat the empty meaning as "unrecognised SW" — the SW1/SW2 hex pair is still authoritative. |
+| Decoder shows a row but `decoded.sw_meaning` is empty. | The status word is not in `SCP03.core.utils.StatusWordTranslator.SW_MAP`, and not in the parametric `61xx` / `6Cxx` ranges. | Treat the empty meaning as "unrecognised SW" -- the SW1/SW2 hex pair is still authoritative. |
 | Long binary output (e.g. `cat /dev/random`) makes the side panel stop updating. | The line accumulator dropped the buffer to protect the GUI process from OOM. | Stop the runaway producer; the decoder resumes on the next terminated line. The xterm output is unaffected. |
 | Shell sessions disconnect after `YGGDRASIM_GUI_IDLE_SECONDS`. | The idle cutoff applies to all GUI shell sessions (Shell + Host shell) so a left-open tab does not pin a child forever. | Increase `YGGDRASIM_GUI_IDLE_SECONDS`, or set it to `0` on a desktop bind. Not recommended for `--web-server`. |
 

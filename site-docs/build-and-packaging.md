@@ -188,4 +188,4 @@ Use these authored guides for the complete reference:
 - `guides/INSTALL_RASPBERRYPI.md` - Raspberry Pi notes
 - `guides/SIMTRACE2_CARDEM_GUIDE.md` - SIMtrace2 firmware / toolchain
 - [Universal GUI Command Center](subsystems/gui-command-center.md)
-- [Remote APDU Streaming](how-to/remote-apdu-streaming.md)
+- [Card Bridge over SSH](how-to/remote-apdu-streaming.md)

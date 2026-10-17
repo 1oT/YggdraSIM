@@ -1,5 +1,5 @@
 ---
-title: Remote APDU Streaming
+title: Card Bridge over SSH
 tags:
   - how-to
   - apdu
@@ -12,7 +12,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-# Remote APDU Streaming
+# Card Bridge over SSH
 
 ## Goal
 
@@ -105,7 +105,7 @@ mode `0600`.
 
 Use `--reader-index 0` instead of `--reader-name` when reader ordering is
 stable. In the interactive launcher, the same controls are available under
-`python main/main.py` -> `[CB] Card Bridge / Remote APDU Streaming`.
+`python main/main.py` -> `[CB] Card Bridge / Card Bridge over SSH`.
 
 ## Open the SSH tunnel
 

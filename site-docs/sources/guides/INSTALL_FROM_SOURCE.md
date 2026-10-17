@@ -3,7 +3,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-# Installation — From Source Checkout
+# Installation -- From Source Checkout
 
 This path is the right choice when you want to run the full test suite,
 modify the code, or cherry-pick HIL features without committing to a
@@ -13,7 +13,7 @@ A source checkout contains the cross-platform Card Bridge / remote APDU
 streaming modules on every operating system. Local SIMtrace2 HIL behaviour
 is still runtime-gated:
 
-- the `[CB] Card Bridge / Remote APDU Streaming` menu is available on
+- the `[CB] Card Bridge / Card Bridge over SSH` menu is available on
   Windows, macOS, Linux, and Raspberry Pi when PC/SC is available.
 - the `[B] Local SIMtrace2 HIL Bridge Session` main-menu entry is only shown on Linux and
   only after `pip install -e '.[hil]'` (or `.[full]`) makes `pyudev`
@@ -67,7 +67,7 @@ git clone https://github.com/osmocom/pysim.git pysim
 `pysim/` is gitignored so the checkout never ships in the
 distribution.
 
-### Optional — let the installer script handle it
+### Optional -- let the installer script handle it
 
 Steps 2 and 3 can be replaced by the corresponding script under
 `scripts/install/`:
@@ -99,7 +99,7 @@ Python 3.10 or newer is required.
 ## 3. Pick the extras that match your needs
 
 ```bash
-# Minimal — matches the clean flavor. Runs on any OS.
+# Minimal -- matches the clean flavor. Runs on any OS.
 python -m pip install -e .
 
 # Clean + build + test tooling (PyInstaller, pytest, httpx).
@@ -129,7 +129,7 @@ python -m pip install -e '.[docs]'
 ```
 
 `pyudev` is listed with `sys_platform == 'linux'` so the extras stay
-installable on Windows / macOS — the package simply gets skipped. The
+installable on Windows / macOS -- the package simply gets skipped. The
 extras can be combined: `pip install -e '.[full,build,test,gui,open5gs]'` is a
 common Linux-developer profile.
 
@@ -162,7 +162,11 @@ otherwise. Set `YGGDRASIM_FLAVOR=clean` to make the HIL guard refuse
 explicitly.
 
 After installing, `python scripts/install_shortcuts.py` writes a native
-desktop launcher pointed at the `yggdrasim-desktop` entry point. See
+desktop launcher pointed at the `yggdrasim-desktop` entry point. The
+launcher is also listed under the file manager's Open With menu for
+`.txt` profiles and `.varder` templates, so a right-click opens the file
+in the SAIP workbench; it is never made the application a double-click
+uses. `yggdrasim-desktop FILE` does the same from a shell. See
 `scripts/install/README.md`.
 
 The Python extras do not install SIMtrace2 firmware, `pcscd`,
@@ -197,12 +201,12 @@ python -m SCP11.local_access                    # local SMDPP shell
 python -m SCP11.eim_local                       # local eIM shell
 python -m Tools.ProfilePackage                  # SAIP tool shell
 python -m Tools.SuciTool                        # SUCI tool shell
-python -m Tools.HilBridge.main                  # HIL bridge — Linux only
-python -m Tools.HilBridge.supervisor            # HIL supervisor — Linux only
+python -m Tools.HilBridge.main                  # HIL bridge -- Linux only
+python -m Tools.HilBridge.supervisor            # HIL supervisor -- Linux only
 ```
 
 After `pip install -e .` the same surfaces are available as console
-scripts (`yggdrasim-scp03`, `yggdrasim-scp11-live`, …). The HIL scripts
+scripts (`yggdrasim-scp03`, `yggdrasim-scp11-live`, ...). The HIL scripts
 exit with a helpful message on non-Linux or clean-only environments.
 
 The unified launcher commands are:
@@ -262,9 +266,9 @@ The resulting onefiles are written to `dist/yggdrasim-clean` plus
 
 ## Related guides
 
-- [`INSTALL_CLEAN.md`](INSTALL_CLEAN.md) — published lean executables.
-- [`INSTALL_FULL.md`](INSTALL_FULL.md) — published HIL-capable executable.
-- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) — arm64 / Pi-specific notes.
-- [`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md) — PyInstaller, `.deb`, and Docker notes.
-- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) — operator flow once the HIL bundle is running.
-- [`CARD_BRIDGE_GUIDE.md`](CARD_BRIDGE_GUIDE.md) — stream a PC/SC reader to a remote rig.
+- [`INSTALL_CLEAN.md`](INSTALL_CLEAN.md) -- published lean executables.
+- [`INSTALL_FULL.md`](INSTALL_FULL.md) -- published HIL-capable executable.
+- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) -- arm64 / Pi-specific notes.
+- [`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md) -- PyInstaller, `.deb`, and Docker notes.
+- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) -- operator flow once the HIL bundle is running.
+- [`CARD_BRIDGE_GUIDE.md`](CARD_BRIDGE_GUIDE.md) -- stream a PC/SC reader to a remote rig.

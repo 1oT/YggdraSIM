@@ -6,24 +6,24 @@
 
 /* -- Theme: Solarized · light (base3 ground, classic operator palette) --- */
 html[data-theme="solarized-light"] {
-  --bg: #fdf6e3;
-  --bg-elev: #ffffff;
-  --bg-elev-2: #eee8d5;
-  --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --bg: #eee8d5;
+  --bg-elev: #fdf6e3;
+  --bg-elev-2: #e6dfc8;
+  --surface: #fdf6e3;
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(101, 123, 131, 0.07);
-  --border: rgba(101, 123, 131, 0.18);
-  --border-strong: rgba(101, 123, 131, 0.32);
+  --border: rgba(101, 123, 131, 0.30);
+  --border-strong: rgba(101, 123, 131, 0.50);
   --fg: #073642;
-  --fg-dim: #53686f;
+  --fg-dim: #4d626a;
   --fg-muted: var(--fg-dim);
-  --accent: #176ea6;
-  --accent-strong: #145f8e;
+  --accent: #14649a;
+  --accent-strong: #11557f;
   --accent-soft: rgba(38, 139, 210, 0.12);
   --accent-fg: #ffffff;
   --accent-glow: rgba(38, 139, 210, 0.34);
-  --gradient-accent: linear-gradient(135deg, #176ea6 0%, #145f8e 70%, #5c6f00 130%);
-  --gradient-brand: linear-gradient(135deg, #176ea6 0%, #565bab 100%);
+  --gradient-accent: linear-gradient(135deg, #14649a 0%, #11557f 70%, #5c6f00 130%);
+  --gradient-brand: linear-gradient(135deg, #14649a 0%, #565bab 100%);
   --ok: #5c6f00;
   --ok-soft: rgba(133, 153, 0, 0.14);
   --warn: #786000;
@@ -32,10 +32,10 @@ html[data-theme="solarized-light"] {
   --fail-soft: rgba(220, 50, 47, 0.14);
   --code-bg: #eee8d5;
   --kbd-bg: rgba(253, 246, 227, 0.98);
-  --shadow-card: 0 10px 26px rgba(7, 54, 66, 0.08);
-  --shadow-card-hover: 0 20px 44px rgba(7, 54, 66, 0.14);
+  --shadow-card: 0 1px 2px rgba(7, 54, 66, 0.06), 0 8px 22px -6px rgba(7, 54, 66, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(7, 54, 66, 0.08), 0 16px 34px -8px rgba(7, 54, 66, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.86);
+  --topbar-bg: rgba(253, 246, 227, 0.88);
   --theme-tint:
     radial-gradient(circle at 8% 0%, rgba(38, 139, 210, 0.10), transparent 42%),
     radial-gradient(circle at 90% 100%, rgba(42, 161, 152, 0.08), transparent 46%),

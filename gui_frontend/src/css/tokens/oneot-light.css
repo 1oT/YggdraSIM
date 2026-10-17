@@ -6,35 +6,41 @@
 
 /* -- Theme: 1oT Light ---------------------------------------------------- */
 html[data-theme="oneot-light"] {
-  --bg: #f5f8fb;
+  --bg: #eaf0f6;
   --bg-elev: #ffffff;
-  --bg-elev-2: #e8f4ef;
+  --bg-elev-2: #e0ece7;
   --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(1, 215, 153, 0.06);
-  --border: rgba(194, 204, 215, 0.55);
-  --border-strong: rgba(194, 204, 215, 0.95);
+  --border: rgba(13, 25, 38, 0.16);
+  --border-strong: rgba(13, 25, 38, 0.32);
   --fg: #0d1926;
   --fg-dim: #576675;
-  --accent: #007f62;
-  --accent-strong: #006b52;
+  --accent: #00745a;
+  --accent-strong: #00614a;
   --accent-soft: rgba(2, 180, 128, 0.12);
   --accent-fg: #ffffff;
   --accent-glow: rgba(1, 215, 153, 0.45);
-  --gradient-accent: linear-gradient(135deg, #007f62 0%, #006b52 100%);
-  --gradient-brand: linear-gradient(135deg, #007f62 0%, #425fc0 100%);
-  --ok: #007f62;
+  --gradient-accent: linear-gradient(135deg, #00745a 0%, #00614a 100%);
+  --gradient-brand: linear-gradient(135deg, #00745a 0%, #425fc0 100%);
+  --ok: #00745a;
   --ok-soft: rgba(2, 180, 128, 0.14);
   --warn: #875800;
   --warn-soft: rgba(232, 158, 0, 0.16);
   --fail: #ad3b0c;
   --fail-soft: rgba(238, 93, 31, 0.14);
-  --code-bg: #f5f8fb;
+
+  /* The brand accent is the ok green, so files keep the neutral
+     hairline instead of a second green beside the ADF teal. */
+  --tree-ef-bg: transparent;
+  --tree-ef-fg: var(--fg-dim);
+  --tree-ef-edge: var(--border);
+  --code-bg: #eaf0f6;
   --kbd-bg: #ffffff;
-  --shadow-card: 0 14px 38px rgba(13, 25, 38, 0.08);
-  --shadow-card-hover: 0 24px 48px rgba(13, 25, 38, 0.14);
+  --shadow-card: 0 1px 2px rgba(13, 25, 38, 0.06), 0 8px 22px -6px rgba(13, 25, 38, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(13, 25, 38, 0.08), 0 16px 34px -8px rgba(13, 25, 38, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 18px 40px -14px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.82);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
   --theme-tint:
     radial-gradient(circle at 88% 0%, rgba(1, 215, 153, 0.16), transparent 48%),
     radial-gradient(circle at 8% 100%, rgba(99, 130, 238, 0.12), transparent 50%),

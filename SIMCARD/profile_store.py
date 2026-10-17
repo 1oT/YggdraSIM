@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Profile store: tracks enabled/disabled profiles and maps EID profile slots to on-disk state files."""
 from __future__ import annotations
 
@@ -37,6 +36,9 @@ STORE_VERSION = 1
 MANIFEST_FILENAME = "manifest.json"
 PROFILE_IMAGE_FILENAME = "profile_image.json"
 PROFILE_UPP_FILENAME = "profile.upp.der"
+# Written at the store root by the first sync, so a store whose every Profile was deleted
+# is told apart from one that was never written.
+STORE_MARKER_FILENAME = "store.json"
 
 
 def load_profiles_from_store(store_path: str) -> list[SimProfileEntry]:
@@ -63,6 +65,9 @@ def sync_profiles_to_store(store_path: str, profiles: list[SimProfileEntry]) -> 
     root_path = _ensure_store_root(store_path)
     if len(root_path) == 0:
         return
+    marker_path = os.path.join(root_path, STORE_MARKER_FILENAME)
+    if os.path.isfile(marker_path) is False:
+        _write_json_file(marker_path, {"store_version": STORE_VERSION})
     desired_directories: set[str] = set()
     for order_index, profile in enumerate(profiles):
         directory_name = _profile_directory_name(profile)
@@ -102,6 +107,15 @@ def load_profile_image_json_file(path: str) -> SimProfileImage | None:
         os.path.abspath(os.path.expanduser(str(path or "").strip())),
         protect_plaintext_on_read=False,
     )
+
+
+def profile_store_is_initialized(store_path: str) -> bool:
+    """Return True once the store has been written, even if every Profile was deleted since."""
+    raw_text = str(store_path or "").strip()
+    if len(raw_text) == 0:
+        return False
+    root_path = os.path.abspath(os.path.expanduser(raw_text))
+    return os.path.isfile(os.path.join(root_path, STORE_MARKER_FILENAME))
 
 
 def profile_store_has_entries(store_path: str) -> bool:
@@ -189,6 +203,9 @@ def _load_profile_directory(directory_path: str) -> tuple[int, SimProfileEntry] 
         rollback_armed=bool(manifest.get("rollback_armed", False)),
         ecall_indication=bool(manifest.get("ecall_indication", False)),
         connectivity_params_http=_coerce_hex_bytes(manifest.get("connectivity_params_http_hex", "")),
+        notification_configuration=_deserialize_notification_configuration(
+            manifest.get("notification_configuration")
+        ),
     )
     order_index = int(manifest.get("order_index", 0) or 0)
     return order_index, entry
@@ -357,7 +374,34 @@ def _serialize_profile_manifest(profile: SimProfileEntry, *, order_index: int) -
         "rollback_armed": bool(profile.rollback_armed),
         "ecall_indication": bool(profile.ecall_indication),
         "connectivity_params_http_hex": bytes(profile.connectivity_params_http or b"").hex().upper(),
+        "notification_configuration": _serialize_notification_configuration(profile.notification_configuration),
     }
+
+
+def _serialize_notification_configuration(
+    configuration: list[tuple[int, str]] | None,
+) -> list[dict[str, Any]] | None:
+    if configuration is None:
+        return None
+    return [{"event_bit": int(bit), "address": str(address)} for bit, address in configuration]
+
+
+def _deserialize_notification_configuration(value: Any) -> list[tuple[int, str]] | None:
+    """Stored pairs back as tuples; None (absent key) keeps the Profile on the no-metadata path."""
+    if isinstance(value, list) is False:
+        return None
+    configuration: list[tuple[int, str]] = []
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        address = str(item.get("address", "")).strip()
+        try:
+            bit = int(item.get("event_bit", -1))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= bit <= 7 and len(address) > 0:
+            configuration.append((bit, address))
+    return configuration
 
 
 def _serialize_profile_image(image: SimProfileImage) -> dict[str, Any]:

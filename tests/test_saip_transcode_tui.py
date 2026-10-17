@@ -20,6 +20,7 @@ from Tools.ProfilePackage.saip_json_codec import (
 )
 from Tools.ProfilePackage.saip_pe_quick_add import insert_blank_pe_for_menu_id
 from Tools.ProfilePackage.saip_tool import SaipToolBridge
+from Tools.ProfilePackage import saip_transcode_tui_prefs as prefs_module
 from Tools.ProfilePackage.saip_transcode_tui import run_saip_transcode_tui
 
 
@@ -33,6 +34,48 @@ pytestmark = pytest.mark.slow
 
 
 class SaipTranscodeTuiInteractionTests(unittest.TestCase):
+    # The app persists pane layout through
+    # ``saip_transcode_tui_prefs.transcode_tui_prefs_path``, keyed off the
+    # workspace root these tests hand it. Left alone, each test inherits the
+    # layout the previous one saved. Redirecting the path into a temporary
+    # directory starts every test from ``_SLOT_DEFAULTS`` -- the layout these
+    # assertions were written against, and the committed file is not: it parks
+    # ``bottom_left`` on ``none``, so the inspect pane renders empty.
+    #
+    # Redirecting rather than moving the tracked file aside is what keeps an
+    # interrupted run from leaving the repository without
+    # Tools/ProfilePackage/saip_transcode_tui_config.json, whose absence
+    # breaks prepare_bundle_data and both distribution verifiers.
+    def setUp(self) -> None:
+        prefs_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(prefs_dir.cleanup)
+        prefs_path = Path(prefs_dir.name) / "saip_transcode_tui_config.json"
+        patcher = mock.patch.object(
+            prefs_module,
+            "transcode_tui_prefs_path",
+            lambda _workspace_root: prefs_path,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @staticmethod
+    async def _pause_until(pilot: object, predicate, *, timeout: float = 5.0) -> bool:
+        """Pause until ``predicate()`` holds, or the timeout elapses.
+
+        The editor's validation runs behind a 0.48 s debounce. A fixed pause
+        just over that margin passes alone and fails once the module has a
+        few dozen Textual apps competing for the same loop, so wait on the
+        condition rather than on a duration.
+        """
+        waited = 0.0
+        step = 0.1
+        while waited < timeout:
+            if predicate():
+                return True
+            await pilot.pause(step)
+            waited += step
+        return predicate()
+
     def _build_app(
         self,
         input_path: str = "Tools/ProfilePackage/profile/reference_test_profile.txt",
@@ -201,6 +244,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
         async def scenario() -> None:
             app = self._build_app()
             async with app.run_test() as pilot:
+                await pilot.pause()
                 editor = app.query_one("#json_editor")
                 await pilot.click("#der_view", offset=(10, 1))
                 await pilot.pause()
@@ -219,6 +263,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
         async def scenario() -> None:
             app = self._build_app()
             async with app.run_test() as pilot:
+                await pilot.pause()
                 editor = app.query_one("#json_editor")
                 await pilot.double_click("#der_view", offset=(10, 1))
                 await pilot.pause()
@@ -284,6 +329,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             ) as mocked_lint:
                 app = self._build_app()
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     await pilot.pause(0.7)
 
@@ -309,6 +355,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
         async def scenario() -> None:
             app = self._build_app()
             async with app.run_test() as pilot:
+                await pilot.pause()
                 editor = app.query_one("#json_editor")
                 await pilot.pause(0.7)
 
@@ -334,6 +381,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
                 return_value="xclip",
             ) as mocked_copy:
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     editor.focus()
                     await pilot.pause()
@@ -356,6 +404,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
                 return_value=(replacement, "xclip"),
             ) as mocked_read:
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     editor.focus()
                     await pilot.pause()
@@ -379,7 +428,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
                 app._apply_pane_layout()
                 await pilot.pause()
 
-                outline = app.query_one("#json_outline")
+                outline = app.query_one("#json_outline_shell")
                 right_switcher = app.query_one("#right_switcher")
                 bottom_row = app.query_one("#bottom_row")
 
@@ -414,7 +463,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
 
                 right_switcher = app.query_one("#right_switcher")
                 bottom_row = app.query_one("#bottom_row")
-                outline = app.query_one("#json_outline")
+                outline = app.query_one("#json_outline_shell")
 
                 app._on_pane_layout_choice("slot:right:lint")
                 await pilot.pause()
@@ -443,6 +492,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
         async def scenario() -> None:
             app = self._build_app()
             async with app.run_test() as pilot:
+                await pilot.pause()
                 right_switcher = app.query_one("#right_switcher")
 
                 app._on_pane_layout_choice("slot:right:decoded")
@@ -475,6 +525,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
         async def scenario() -> None:
             app = self._build_app()
             async with app.run_test() as pilot:
+                await pilot.pause()
                 outline = app.query_one("#json_outline")
                 outline.root.expand_all()
                 await pilot.pause(0.1)
@@ -511,6 +562,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
         async def scenario() -> None:
             app = self._build_app()
             async with app.run_test() as pilot:
+                await pilot.pause()
                 outline = app.query_one("#json_outline")
                 outline.root.expand_all()
                 await pilot.pause(0.1)
@@ -572,6 +624,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             try:
                 async with app.run_test() as pilot:
                     await pilot.pause(0.7)
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     intro_offset = editor.text.index('"intro"')
                     app._jump_editor_to_span(intro_offset, intro_offset)
@@ -596,6 +649,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
         async def scenario() -> None:
             app = self._build_app()
             async with app.run_test() as pilot:
+                await pilot.pause()
                 del pilot
                 self.assertIsNone(app.query_one("#inspect_log").max_lines)
                 self.assertIsNone(app.query_one("#right_inspect_log").max_lines)
@@ -607,6 +661,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
         async def scenario() -> None:
             app = self._build_app()
             async with app.run_test() as pilot:
+                await pilot.pause()
                 editor = app.query_one("#json_editor")
                 status = app.query_one("#status_line")
                 editor.text = (
@@ -621,7 +676,9 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
                     "  }\n"
                     "}\n"
                 )
-                await pilot.pause(0.7)
+                await self._pause_until(
+                    pilot, lambda: editor.has_class("invalid-buffer")
+                )
 
                 self.assertTrue(editor.has_class("invalid-buffer"))
                 self.assertTrue(status.has_class("error-state"))
@@ -638,6 +695,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             app = self._build_app()
             async with app.run_test() as pilot:
                 await pilot.pause(0.7)
+                await pilot.pause()
                 outline = app.query_one("#json_outline")
                 sections_root = outline.root.children[0]
 
@@ -672,7 +730,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
 
                 first_group_labels = [str(child.label) for child in first_group.children]
                 self.assertIn(
-                    f"[0] ({humanize_saip_display_name('filePath')}) — DF.TELECOM",
+                    f"[0] ({humanize_saip_display_name('filePath')}) -- DF.TELECOM",
                     first_group_labels,
                 )
                 # The remaining children are EF entries rendered as
@@ -744,6 +802,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             app = self._build_app()
             async with app.run_test() as pilot:
                 await pilot.pause(0.7)
+                await pilot.pause()
                 outline = app.query_one("#json_outline")
                 sections_root = outline.root.children[0]
 
@@ -789,6 +848,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             app = self._build_app()
             async with app.run_test() as pilot:
                 await pilot.pause(0.7)
+                await pilot.pause()
                 outline = app.query_one("#json_outline")
                 outline.root.expand_all()
                 await pilot.pause(0.1)
@@ -835,6 +895,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             app = self._build_app()
             async with app.run_test() as pilot:
                 await pilot.pause(0.7)
+                await pilot.pause()
                 outline = app.query_one("#json_outline")
                 outline.root.expand_all()
                 await pilot.pause(0.1)
@@ -886,6 +947,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             app = self._build_app()
             async with app.run_test() as pilot:
                 await pilot.pause(0.7)
+                await pilot.pause()
                 outline = app.query_one("#json_outline")
                 outline.root.expand_all()
                 await pilot.pause(0.1)
@@ -924,8 +986,14 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
         async def scenario() -> None:
             app = self._build_app()
             async with app.run_test() as pilot:
+                # Wait for the widget, not for a duration. This case loads the
+                # full 17-element reference profile, so the editor is mounted
+                # behind the decode; neither a timed pause nor an idle one is
+                # a guarantee that it exists yet.
+                await self._pause_until(
+                    pilot, lambda: bool(app.query("#json_editor"))
+                )
                 editor = app.query_one("#json_editor")
-                await pilot.pause(0.7)
                 outline = app.query_one("#json_outline")
                 sections_root = outline.root.children[0]
 
@@ -988,6 +1056,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     target_text = '"genericFileManagement_4"'
                     start = editor.text.index(target_text)
@@ -1029,6 +1098,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     target_text = '"mf"'
                     start = editor.text.index(target_text)
@@ -1070,6 +1140,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     await pilot.pause(0.7)
                     outline = app.query_one("#json_outline")
@@ -1135,6 +1206,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     await pilot.pause(0.7)
                     outline = app.query_one("#json_outline")
@@ -1235,6 +1307,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     await pilot.pause(0.7)
                     outline = app.query_one("#json_outline")
@@ -1317,6 +1390,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     await pilot.pause(0.7)
                     outline = app.query_one("#json_outline")
@@ -1402,6 +1476,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     await pilot.pause(0.7)
                     outline = app.query_one("#json_outline")
@@ -1488,6 +1563,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     editor = app.query_one("#json_editor")
                     search_input = app.query_one("#json_outline_search")
                     await pilot.pause(0.7)
@@ -1496,13 +1572,13 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
                     await pilot.pause()
                     self.assertEqual(getattr(app.focused, "id", None), "json_outline_search")
 
-                    search_input.value = "ef-ust"
+                    search_input.value = "ef.ust"
                     await pilot.pause(0.3)
 
                     self.assertEqual(getattr(app.focused, "id", None), "json_outline_search")
                     self.assertGreaterEqual(getattr(app, "_outline_search_match_count", 0), 1)
                     self.assertEqual(getattr(app, "_outline_search_index", -1), 0)
-                    matches = app._outline_search_matches("ef-ust")
+                    matches = app._outline_search_matches("ef.ust")
                     self.assertGreaterEqual(len(matches), 1)
                     self.assertGreater(len(getattr(matches[0].label, "spans", [])), 0)
                     self.assertIn('"fillFileContent"', editor.selected_text)
@@ -1518,18 +1594,19 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
             async def scenario() -> None:
                 app = self._build_app(str(custom_profile))
                 async with app.run_test() as pilot:
+                    await pilot.pause()
                     search_input = app.query_one("#json_outline_search")
                     await pilot.pause(0.7)
 
                     app.action_focus_outline_search()
                     await pilot.pause()
-                    search_input.value = "ef-arr"
+                    search_input.value = "ef.arr"
                     await pilot.pause(0.3)
 
                     self.assertEqual(getattr(app.focused, "id", None), "json_outline_search")
                     self.assertGreaterEqual(getattr(app, "_outline_search_match_count", 0), 2)
                     self.assertEqual(getattr(app, "_outline_search_index", -1), 0)
-                    matches = app._outline_search_matches("ef-arr")
+                    matches = app._outline_search_matches("ef.arr")
                     self.assertGreaterEqual(len(matches), 2)
                     initial_active_style = matches[0].label.spans[0].style
                     initial_background_style = matches[1].label.spans[0].style
@@ -1541,7 +1618,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
                     self.assertEqual(len(app.screen_stack), 1)
                     self.assertEqual(getattr(app.focused, "id", None), "json_outline_search")
                     self.assertEqual(getattr(app, "_outline_search_index", -1), 1)
-                    matches = app._outline_search_matches("ef-arr")
+                    matches = app._outline_search_matches("ef.arr")
                     self.assertEqual(matches[0].label.spans[0].style, initial_background_style)
                     self.assertEqual(matches[1].label.spans[0].style, initial_active_style)
 

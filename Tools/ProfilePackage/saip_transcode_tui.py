@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Split-pane Textual UI for SAIP decoded JSON editing with DER hex preview.
 
@@ -478,7 +477,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
     if len(_inline_placeholder_records) > 0:
         # The native document (pySim's decoded output) still holds raw
         # ``bytes`` values, so the splice has to run on the tagged tree
-        # produced by ``jsonify_document`` — that is where the ``hex``
+        # produced by ``jsonify_document`` -- that is where the ``hex``
         # leaves with the sentinel runs actually materialise.
         _tagged_for_editor = jsonify_document(document)
         _spliced = _splice_inline_placeholders(
@@ -555,6 +554,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         "opt-usim",
         "isim",
         "opt-isim",
+        "iot",
+        "opt-iot",
         "genericFileManagement",
     })
     SEARCH_MATCH_STYLE = "bold #2E3440 on #EBCB8B"
@@ -842,7 +843,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
 
         def compose(self) -> ComposeResult:
             """Compose and yield the Textual widget tree for this modal or panel."""
-            options: list[Option] = [Option("— Cancel —", id="_cancel")]
+            options: list[Option] = [Option("-- Cancel --", id="_cancel")]
             for option_id, title, hint in self._rows:
                 prompt = str(title or "").strip()
                 hint_text = str(hint or "").strip()
@@ -897,7 +898,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
 
         def compose(self) -> ComposeResult:
             """Compose and yield the Textual widget tree for this modal or panel."""
-            options: list[Option] = [Option("— Cancel —", id="_cancel")]
+            options: list[Option] = [Option("-- Cancel --", id="_cancel")]
             for option_id, title, hint, disabled in self._rows:
                 prompt = str(title or "").strip()
                 hint_text = str(hint or "").strip()
@@ -2115,7 +2116,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     yield Input(value=initial, id="token_prompt_name")
                 if self._mode in ("add", "value"):
                     label = (
-                        "Value — hex string or JSON object "
+                        "Value -- hex string or JSON object "
                         "(e.g. 89881111111111111112 or {\"zero_len\":10})"
                     )
                     if self._mode == "value":
@@ -2272,7 +2273,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             if len(rows) == 0:
                 widget.add_option(
                     Option(
-                        "(no tokens defined — press A to add)",
+                        "(no tokens defined -- press A to add)",
                         id="__empty__",
                         disabled=True,
                     )
@@ -5877,9 +5878,9 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     if isinstance(inline_payload, dict):
                         placeholder_count = len(inline_payload.get("placeholders", []))
                         title = (
-                            f"Decoded view: {field_name} — inline template placeholder"
+                            f"Decoded view: {field_name} -- inline template placeholder"
                             if placeholder_count <= 1
-                            else f"Decoded view: {field_name} — {placeholder_count} inline template placeholders"
+                            else f"Decoded view: {field_name} -- {placeholder_count} inline template placeholders"
                         )
                         return {
                             "replacement_path": replacement_path,
@@ -5973,7 +5974,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     pe_section_key=pe_key,
                 )
                 if isinstance(readonly_view, dict):
-                    # Fall through to raw-hex — semantic decode succeeded
+                    # Fall through to raw-hex -- semantic decode succeeded
                     # but no round-trip encoder exists.
                     pass
                 raw_hex_model = build_decoded_value_raw_hex_model(
@@ -6447,7 +6448,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 if base_pe_type(pe_key) not in _FILESYSTEM_PE_TYPES:
                     raise ValueError(
                         f"selected profile element {pe_key!r} is not a filesystem "
-                        "container — pick MF / TELECOM / USIM / ISIM / genericFileManagement / "
+                        "container -- pick MF / TELECOM / USIM / ISIM / genericFileManagement / "
                         "an ADF branch before adding files"
                     )
                 context_key: object | None = self._preferred_selected_pe_member_key()
@@ -6742,7 +6743,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     self._set_status("Tree selection active.")
                 else:
                     self._set_status(
-                        f"Tree PE {pe_key} selected — Ctrl+T tree actions · Ctrl+A add file · F3 picker · "
+                        f"Tree PE {pe_key} selected -- Ctrl+T tree actions · Ctrl+A add file · F3 picker · "
                         "F11 after · F12 before · Ctrl+↑/↓ move · Ctrl+D remove · Ctrl+Y copy · "
                         "Ctrl+P paste after · Ctrl+B paste before · "
                         "F1 help · Ctrl+L lint"
@@ -7018,7 +7019,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             info_n = int(summary.get("info", 0))
             score = int(payload.get("score", 0))
             base = (
-                f"Lint refreshed — score {score}/100 · "
+                f"Lint refreshed -- score {score}/100 · "
                 f"FAIL {fail_n} · WARN {warn_n} · INFO {info_n}"
             )
             if outcome.template_mode is True or len(outcome.undefined_tokens) > 0:
@@ -7143,7 +7144,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             marker = "#" if loc.get("is_length") else ""
             token_repr = f"{opener}{marker}{name}{closer}"
             self._set_status(
-                f"Placeholder {index + 1}/{len(self._placeholder_locations)} — "
+                f"Placeholder {index + 1}/{len(self._placeholder_locations)} -- "
                 f"{token_repr} at L{loc.get('line')}:C{loc.get('column')}",
                 remember=False,
             )
@@ -7464,7 +7465,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             text = str(suffix or "").strip()
             if len(text) == 0:
                 return base_label
-            return f"{base_label} — {text}"
+            return f"{base_label} -- {text}"
 
         def _outline_file_management_group_suffix(self, value: object) -> str | None:
             if isinstance(value, list) is False:
@@ -7542,7 +7543,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     byte_len = len(compact) // 2 if len(compact) % 2 == 0 else len(compact)
                     hint = str(value.get(_TAG_LABEL, value.get(_LEGACY_TAG_LABEL, ""))).strip()
                     if hint != "":
-                        return f"{display_key} [{byte_len}B] — {hint}"
+                        return f"{display_key} [{byte_len}B] -- {hint}"
                     return f"{display_key} [{byte_len}B]"
                 if structural == {_TAG_TUPLE}:
                     inner = value.get(_TAG_TUPLE, value.get(_LEGACY_TAG_TUPLE))
@@ -7812,7 +7813,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                             # ``Tree.TreeNode.set_label`` should always
                             # exist, but in the unlikely event it does
                             # not the unmodified base label is still
-                            # correct — drop the decoration silently.
+                            # correct -- drop the decoration silently.
                             pass
                         continue
                     base_label = self._outline_label_with_suffix(
@@ -8232,7 +8233,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 for log in logs:
                     log.write(
                         Text.from_markup(
-                            "[bold red]Validation error[/bold red] — "
+                            "[bold red]Validation error[/bold red] -- "
                             f"[dim]{escape(self._validation_issue.summary)}[/dim]"
                         )
                     )
@@ -8249,7 +8250,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 for log in logs:
                     log.write(
                         Text.from_markup(
-                            "[bold]Lint pending[/bold] — live lint is disabled for performance.\n"
+                            "[bold]Lint pending[/bold] -- live lint is disabled for performance.\n"
                             f"[dim]{trigger_text} to refresh lint findings for the current buffer.[/dim]"
                         )
                     )
@@ -8261,7 +8262,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 for log in logs:
                     log.write(
                         Text.from_markup(
-                            "[bold red]JSON parse error[/bold red] — fix syntax to run lint rules.\n"
+                            "[bold red]JSON parse error[/bold red] -- fix syntax to run lint rules.\n"
                             f"[dim]{escape(str(outcome.parse_error))}[/dim]"
                         )
                     )
@@ -8279,7 +8280,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 log.write(
                     Text.from_markup(
                         "[bold]Lint[/bold] (same rules as [cyan]LINT[/cyan]; "
-                        "[dim]saip-tool check omitted[/dim]) — "
+                        "[dim]saip-tool check omitted[/dim]) -- "
                         f"score [bold]{score}[/]/100 · "
                         f"[red]FAIL {fail_n}[/] · [yellow]WARN {warn_n}[/] · "
                         f"[bright_blue]INFO {info_n}[/]"
@@ -8298,7 +8299,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     log.write(Text.from_markup(line))
                     shown += 1
                     if shown >= 120:
-                        log.write(Text.from_markup("[dim]… truncated at 120 non-PASS rows[/dim]"))
+                        log.write(Text.from_markup("[dim]... truncated at 120 non-PASS rows[/dim]"))
                         break
                 if shown == 0:
                     log.write(Text.from_markup("[green]No FAIL/WARN/INFO findings.[/green]"))
@@ -8362,7 +8363,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             if len(probe_tolerant.undefined_tokens) > 0:
                 unresolved = ", ".join(sorted(probe_tolerant.undefined_tokens))
                 self._set_status(
-                    "Template mode — DER re-encode skipped. Unresolved placeholders: "
+                    "Template mode -- DER re-encode skipped. Unresolved placeholders: "
                     + unresolved
                     + ". Use APPLY-TEMPLATE / GENERATE-PROFILE to materialise.",
                     remember=False,
@@ -8608,7 +8609,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 loaded = json.loads(text)
             except json.JSONDecodeError as error:
                 self._set_status(
-                    f"Token manager unavailable: JSON parse error — {error}",
+                    f"Token manager unavailable: JSON parse error -- {error}",
                     remember=False,
                 )
                 return
@@ -8632,7 +8633,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             pre_defs = dict(self._token_manager_pre_defs or {})
             self._token_manager_pre_defs = {}
             if updated is None:
-                self._set_status("Token manager closed — no changes.", remember=False)
+                self._set_status("Token manager closed -- no changes.", remember=False)
                 return
             editor = self.query_one("#json_editor", TextArea)
             pretty = json.dumps(updated, indent=2, ensure_ascii=False) + "\n"
@@ -8814,7 +8815,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 self._token_watcher_last_defs, disk_defs
             )
             body = (
-                f"{path.name} on disk has updated __ygg_token_defs__ — "
+                f"{path.name} on disk has updated __ygg_token_defs__ -- "
                 "likely from a shell SET-TOKEN / RENAME-TOKEN / REMOVE-TOKEN "
                 "run in another pane. Import the on-disk defs into the "
                 "editor buffer?\n\n"
@@ -8931,7 +8932,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 loaded = json.loads(stripped)
             except json.JSONDecodeError as error:
                 self._set_status(
-                    f"Resolved preview unavailable: JSON parse error — {error}",
+                    f"Resolved preview unavailable: JSON parse error -- {error}",
                     remember=False,
                 )
                 return
@@ -8969,7 +8970,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._refresh_validation_feedback()
             self._refresh_template_mode_badge()
             self._set_status(
-                "Resolved preview closed — editor is editable again.",
+                "Resolved preview closed -- editor is editable again.",
                 remember=False,
             )
 
@@ -9190,7 +9191,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         # already stopped, the coroutine produced by ``_post_message``
         # is never awaited and Python emits a RuntimeWarning from the
         # coroutine's finalizer. Nothing is lost and no state is
-        # corrupted — the warning is cosmetic noise bound to Textual's
+        # corrupted -- the warning is cosmetic noise bound to Textual's
         # shutdown race (observed on Textual 8.x). Silence just this
         # exact message so unrelated RuntimeWarnings still surface.
         warnings.filterwarnings(
@@ -9235,7 +9236,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 import sys as _sys
 
                 _tty_restore = (
-                    "\x1b[?25h"       # DECTCEM — show cursor
+                    "\x1b[?25h"       # DECTCEM -- show cursor
                     "\x1b[?2004l"     # bracketed paste off
                     "\x1b[?1000l"     # mouse X11 tracking off
                     "\x1b[?1002l"     # mouse cell-motion tracking off

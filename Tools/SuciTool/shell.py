@@ -4,22 +4,23 @@
 from pathlib import Path
 from typing import Callable
 
+from yggdrasim_common.command_log import LOG_FLAG_HELP, run_with_command_log
 from yggdrasim_common.quit_control import quit_all
-from yggdrasim_common.nord_palette import NORD
+from yggdrasim_common.cli_theme import ThemedColorsMeta as _ThemedColorsMeta
 from .tool import SuciCommandResult, SuciKeyToolBridge
 
 
-class ShellStyle:
-    """SUCI tool shell colour roles, anchored to Nord."""
+class ShellStyle(metaclass=_ThemedColorsMeta):
+    """SUCI tool shell colour roles, read from the active theme."""
 
-    HEADER = NORD.HEADER
-    BLUE = NORD.BLUE
-    CYAN = NORD.CYAN
-    GREEN = NORD.GREEN
-    WARNING = NORD.WARNING
-    FAIL = NORD.FAIL
-    BOLD = NORD.BOLD
-    END = NORD.RESET
+    _ROLE_MAP = {
+        "HEADER": "HEADER",
+        "BLUE": "BLUE",
+        "CYAN": "CYAN",
+        "GREEN": "GREEN",
+        "WARNING": "WARNING",
+        "FAIL": "FAIL",
+    }
 
 
 class SuciToolShell:
@@ -79,6 +80,10 @@ class SuciToolShell:
         self._cmd_status("")
 
     def _exec_line(self, raw_line: str) -> None:
+        """Run one command line; one carrying ``--log <file>`` runs under a command log."""
+        run_with_command_log(raw_line, self._exec_command_line, shell="SUCI Tool", refused=None)
+
+    def _exec_command_line(self, raw_line: str) -> None:
         parts = raw_line.split(None, 1)
         command = parts[0].upper()
         argument = ""
@@ -133,6 +138,8 @@ class SuciToolShell:
         print("  PWD                        Print current workspace root and selected key file.")
         print("  EXIT / Q                   Leave the SUCI Tool shell.")
         print("  QA                         Leave the SUCI Tool shell and exit YggdraSIM.")
+        print("")
+        print(f"  {LOG_FLAG_HELP}")
         print("")
         print("  Examples:")
         print("    USE tests/demo_suci.key")

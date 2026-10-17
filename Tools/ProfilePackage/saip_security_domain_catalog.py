@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Symbolic catalogues for SecurityDomain install-parameter blobs.
 
 Companion to ``saip_security_domain_decode`` (privilege byte +
@@ -46,20 +45,19 @@ def _to_byte(value: Any, *, label: str) -> int:
 
 
 # ----------------------------------------------------------------------
-# Access Domain (ETSI TS 102 226 §8.2.1.3)
+# Access Domain (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.5, page 29)
 #
-# Access Domain Parameter (ADP) is a single byte selecting the access
-# regime the toolkit / RFM application enjoys against the target file
-# system. The values below cover the four regimes called out by the
-# spec; vendor-specific values pass through as ``CUSTOM`` so an audit
-# trace still preserves the byte.
+# The Access Domain Parameter (ADP) byte selects the mechanism that
+# controls the application's access to the file system; the Access
+# Domain Data after it is defined per ADP. Proprietary values ('80'-'FE')
+# pass through as ``CUSTOM`` so an audit trace still preserves the byte.
 # ----------------------------------------------------------------------
 
 _ACCESS_DOMAIN_VALUES: tuple[tuple[int, str, str], ...] = (
-    (0x00, "FULL_ACCESS",   "Application performs file operations under its own access conditions."),
-    (0x01, "ALWAYS_ACCESS", "Application bypasses access conditions (use sparingly; logged on the card)."),
-    (0x02, "PROFILE_ACCESS","Access conditions evaluated against the issuer profile."),
-    (0xFF, "NO_ACCESS",     "Application is denied any file-system access."),
+    (0x00, "FULL_ACCESS", "Full access to the file system (no access domain data)."),
+    (0x01, "RESERVED_APDU_ACCESS", "Reserved for an APDU access mechanism."),
+    (0x02, "UICC_ACCESS_MECHANISM", "UICC access mechanism: three bytes of the keys whose SE ID 01 rules apply."),
+    (0xFF, "NO_ACCESS", "No access to the file system (no access domain data)."),
 )
 
 
@@ -90,131 +88,95 @@ def encode_access_domain(name_or_hex: Any) -> str:
 
 
 # ----------------------------------------------------------------------
-# Minimum Security Level (ETSI TS 102 225 §5.1.2)
+# Minimum Security Level (ETSI TS 102 226 V19.0.0 §8.2.1.3.2.4, page 28)
 #
-# MSL is a 1..3 byte structure: SPI1 (mandatory), optional KIc, optional
-# KID. SPI1 packs four orthogonal selectors; the bit positions below
-# are the YggdraSIM projection over the spec layout, kept disjoint so
-# every selector can be flipped without touching its neighbours:
-#
-#   b1..b2  AuthN-response selector (no_security / RC / CC / DS)
-#   b3      Counter present
-#   b4      Counter-higher-value required
-#   b5..b6  Integrity selector (no_integrity / RC / CC / DS)
-#   b7..b8  RFU (cleared on encode)
+# An MSL field is empty (no check), or the MSL parameter and its data: '01'
+# Minimum SPI1 takes one byte coded as the first SPI octet (ETSI TS 102 225
+# V19.0.0 §5.1.1, page 13): b2-b1 integrity, b3 ciphering, b5-b4 counter,
+# b8-b6 reserved. A PE-RFM minimumSecurityLevel is that data byte alone
+# (TCA SAIP v3.4.1 §8.8).
 # ----------------------------------------------------------------------
 
-_MSL_AUTH_RESPONSE: tuple[tuple[int, str], ...] = (
-    (0b00, "no_security"),
-    (0b01, "redundancy_check"),
-    (0b10, "cryptographic_checksum"),
-    (0b11, "digital_signature"),
-)
+_MSL_PARAMETER_MINIMUM_SPI1 = 0x01
+
 _MSL_INTEGRITY: tuple[tuple[int, str], ...] = (
     (0b00, "no_integrity"),
     (0b01, "redundancy_check"),
     (0b10, "cryptographic_checksum"),
-    (0b11, "digital_signature"),
+    (0b11, "digital_signature_reserved"),
 )
-_MSL_COUNTER_FLAGS: tuple[tuple[int, str], ...] = (
-    (0x04, "counter_present"),
-    (0x08, "counter_high_value_required"),
+_MSL_CIPHERING: tuple[tuple[int, str], ...] = (
+    (0, "no_ciphering"),
+    (1, "ciphering"),
+)
+_MSL_COUNTER: tuple[tuple[int, str], ...] = (
+    (0b00, "no_counter"),
+    (0b01, "counter_not_checked"),
+    (0b10, "counter_higher"),
+    (0b11, "counter_one_higher"),
 )
 
 
 def msl_catalog() -> dict[str, list[dict[str, Any]]]:
     return {
-        "auth_response": [
-            {"name": name, "bits": value} for value, name in _MSL_AUTH_RESPONSE
-        ],
-        "integrity": [
-            {"name": name, "bits": value} for value, name in _MSL_INTEGRITY
-        ],
-        "counter_flags": [
-            {"name": name, "bit_mask": mask} for mask, name in _MSL_COUNTER_FLAGS
-        ],
+        "integrity": [{"name": name, "bits": value} for value, name in _MSL_INTEGRITY],
+        "ciphering": [{"name": name, "bits": value} for value, name in _MSL_CIPHERING],
+        "counter": [{"name": name, "bits": value} for value, name in _MSL_COUNTER],
     }
 
 
 def decode_msl(value: Any) -> dict[str, Any]:
+    """Decode the Minimum SPI1 data byte, or a whole MSL field ('01' + byte)."""
     text = _strip(value)
-    if len(text) == 0:
-        raise ValueError("minimumSecurityLevel is empty.")
-    if _HEX_RE.fullmatch(text) is None:
-        raise ValueError(f"minimumSecurityLevel is not hexadecimal: {value!r}")
-    if len(text) % 2 != 0 or len(text) > 6:
-        raise ValueError(
-            f"minimumSecurityLevel must be 1..3 bytes; got {len(text) // 2} bytes.",
-        )
+    if _HEX_RE.fullmatch(text or "0") is None or len(text) % 2 != 0:
+        raise ValueError(f"minimumSecurityLevel is not hexadecimal bytes: {value!r}")
     raw = bytes.fromhex(text)
-    spi1 = raw[0]
-    auth_bits = spi1 & 0b11
-    integrity_bits = (spi1 >> 4) & 0b11
-    counter_flags: list[str] = []
-    # Integrity bits reside in b5..b6 (mask 0x30); see layout note.
-    for mask, name in _MSL_COUNTER_FLAGS:
-        if spi1 & mask:
-            counter_flags.append(name)
-    auth_name = next((n for v, n in _MSL_AUTH_RESPONSE if v == auth_bits), "rfu")
-    integrity_name = next((n for v, n in _MSL_INTEGRITY if v == integrity_bits), "rfu")
-    out: dict[str, Any] = {
+    if len(raw) == 0:
+        return {"hex": "", "check": False}
+    if len(raw) == 1:
+        parameter = None
+        spi1 = raw[0]
+    elif len(raw) == 2 and raw[0] == _MSL_PARAMETER_MINIMUM_SPI1:
+        parameter = "minimum_spi1"
+        spi1 = raw[1]
+    else:
+        raise ValueError(
+            "minimumSecurityLevel is the Minimum SPI1 byte or an MSL field of "
+            f"parameter '01' and that byte; got {raw.hex().upper()!r}."
+        )
+    return {
         "hex": raw.hex().upper(),
+        "check": True,
+        "parameter": parameter,
         "spi1_hex": f"{spi1:02X}",
-        "auth_response": auth_name,
-        "integrity": integrity_name,
-        "counter_flags": counter_flags,
+        "integrity": dict(_MSL_INTEGRITY)[spi1 & 0b11],
+        "ciphering": dict(_MSL_CIPHERING)[(spi1 >> 2) & 0b1],
+        "counter": dict(_MSL_COUNTER)[(spi1 >> 3) & 0b11],
     }
-    if len(raw) >= 2:
-        out["kic_hex"] = f"{raw[1]:02X}"
-    if len(raw) >= 3:
-        out["kid_hex"] = f"{raw[2]:02X}"
-    return out
 
 
 def encode_msl(
     *,
-    auth_response: str | None = None,
     integrity: str | None = None,
-    counter_flags: list[str] | None = None,
-    kic_hex: Any = None,
-    kid_hex: Any = None,
+    ciphering: str | None = None,
+    counter: str | None = None,
+    field: bool = False,
 ) -> str:
-    by_auth = {n: v for v, n in _MSL_AUTH_RESPONSE}
-    by_integrity = {n: v for v, n in _MSL_INTEGRITY}
-    by_counter = {n: v for v, n in _MSL_COUNTER_FLAGS}
-    auth_bits = by_auth.get(auth_response or "no_security")
-    if auth_bits is None:
-        raise ValueError(
-            f"unknown auth_response {auth_response!r}; allowed: "
-            + ", ".join(by_auth.keys()),
-        )
-    integrity_bits = by_integrity.get(integrity or "no_integrity")
-    if integrity_bits is None:
-        raise ValueError(
-            f"unknown integrity {integrity!r}; allowed: "
-            + ", ".join(by_integrity.keys()),
-        )
-    spi1 = (auth_bits & 0b11) | ((integrity_bits & 0b11) << 4)
-    for raw in counter_flags or []:
-        name = str(raw or "").strip()
-        if len(name) == 0:
-            continue
-        if name not in by_counter:
-            raise ValueError(
-                f"unknown counter flag {name!r}; allowed: "
-                + ", ".join(by_counter.keys()),
-            )
-        spi1 |= by_counter[name]
-    out = bytearray([spi1 & 0xFF])
-    if kic_hex is not None and str(kic_hex).strip() != "":
-        out.append(_to_byte(kic_hex, label="kic"))
-    if kid_hex is not None and str(kid_hex).strip() != "":
-        if len(out) == 1:
-            # KID requires KIc to precede it. Emit a zero KIc so the
-            # byte order remains valid per ETSI TS 102 225 §5.1.2.
-            out.append(0x00)
-        out.append(_to_byte(kid_hex, label="kid"))
-    return bytes(out).hex().upper()
+    """The Minimum SPI1 byte, or with ``field`` the MSL field ('01' + byte)."""
+    def pick(table: tuple[tuple[int, str], ...], name: str | None, default: str, label: str) -> int:
+        by_name = {n: v for v, n in table}
+        chosen = name or default
+        if chosen not in by_name:
+            raise ValueError(f"unknown {label} {chosen!r}; allowed: " + ", ".join(by_name))
+        return by_name[chosen]
+
+    spi1 = (
+        pick(_MSL_INTEGRITY, integrity, "no_integrity", "integrity")
+        | pick(_MSL_CIPHERING, ciphering, "no_ciphering", "ciphering") << 2
+        | pick(_MSL_COUNTER, counter, "no_counter", "counter") << 3
+    )
+    data = f"{spi1:02X}"
+    return f"{_MSL_PARAMETER_MINIMUM_SPI1:02X}{data}" if field else data
 
 
 # ----------------------------------------------------------------------
@@ -269,19 +231,23 @@ def encode_afi(name_or_hex: Any) -> str:
 
 
 # ----------------------------------------------------------------------
-# Key attributes — Usage Qualifier (Table 11-17), Access (Table 11-19),
-# Version Number (§11.1.9), Component Type (§11.1.8 DGI 00B9 / 8010).
+# Key attributes, GP Card Spec v2.3.1: usage qualifier §11.1.9 Tables 11-17
+# and 11-18 (page 156), access Table 11-19 (page 157), type Table 11-16
+# (pages 154-155).
 # ----------------------------------------------------------------------
 
+# Masks over the two-byte qualifier; a one-byte qualifier is the first byte,
+# the second taken as '00'.
 _KEY_USAGE_BITS: tuple[tuple[int, str], ...] = (
-    (0x80, "verification_encryption"),
-    (0x40, "computation_decryption"),
-    (0x20, "sm_response"),
-    (0x10, "sm_command"),
-    (0x08, "confidentiality"),
-    (0x04, "cryptographic_checksum"),
-    (0x02, "digital_signature"),
-    (0x01, "cryptographic_authorization"),
+    (0x8000, "verification_encryption"),
+    (0x4000, "computation_decipherment"),
+    (0x2000, "sm_response"),
+    (0x1000, "sm_command"),
+    (0x0800, "confidentiality"),
+    (0x0400, "crypto_checksum"),
+    (0x0200, "digital_signature"),
+    (0x0100, "crypto_authorization"),
+    (0x0080, "key_agreement"),
 )
 
 
@@ -290,15 +256,16 @@ def key_usage_catalog() -> list[dict[str, Any]]:
 
 
 def decode_key_usage(value: Any) -> dict[str, Any]:
-    byte = _to_byte(value, label="keyUsageQualifier")
-    flags: list[str] = []
-    for mask, name in _KEY_USAGE_BITS:
-        if byte & mask:
-            flags.append(name)
-    return {"hex": f"{byte:02X}", "flags": flags}
+    text = _strip(value)
+    if _HEX_RE.fullmatch(text or "x") is None or len(text) not in (2, 4):
+        raise ValueError(f"keyUsageQualifier is 1 or 2 bytes of hex: {value!r}")
+    qualifier = int(text, 16) << 8 if len(text) == 2 else int(text, 16)
+    flags = [name for mask, name in _KEY_USAGE_BITS if qualifier & mask]
+    return {"hex": text.upper(), "flags": flags}
 
 
 def encode_key_usage(flags: list[str] | None) -> str:
+    """One byte, or two when key agreement (the second byte's b8) is set."""
     if flags is None:
         flags = []
     if isinstance(flags, (list, tuple)) is False:
@@ -315,14 +282,14 @@ def encode_key_usage(flags: list[str] | None) -> str:
                 + ", ".join(by_name.keys()),
             )
         out |= by_name[name]
-    return f"{out & 0xFF:02X}"
+    return f"{out:04X}" if out & 0xFF else f"{out >> 8:02X}"
 
 
 _KEY_ACCESS_VALUES: tuple[tuple[int, str], ...] = (
-    (0x00, "ANY_ENTITY"),
+    (0x00, "SD_AND_ASSOCIATED_APPLICATIONS"),
     (0x01, "SECURITY_DOMAIN_ONLY"),
-    (0x02, "APPLICATION_AND_SD"),
-    (0x03, "CONTROLLING_AUTHORITY"),
+    (0x02, "ASSOCIATED_APPLICATIONS_NOT_SD"),
+    (0xFF, "NOT_AVAILABLE"),
 )
 
 
@@ -347,37 +314,30 @@ def encode_key_access(name_or_hex: Any) -> str:
 
 
 def decode_key_version(value: Any) -> dict[str, Any]:
-    """Symbolic projection of the key version number byte.
+    """The key version number byte.
 
-    GP CS §11.1.9 reserves 0x00 for the issuer / OPEN, 0x01..0x7F for
-    application-defined version numbers, and 0x71..0x73 for the
-    Controlling Authority hierarchy. The decode pass reports the
-    bucket so the GUI can colour the chip correctly without enforcing
-    the spec restriction at edit-time (some test profiles ship with
-    out-of-range values).
+    GP Card Spec v2.3.1 §11.8.2.1 (page 194) codes it '01' to '7F'; the
+    bucket reports that range without refusing a value outside it (some test
+    profiles carry one). ``reserved_for`` is the range label the decoded view
+    gives the byte, from the same table.
     """
+    from .saip_asn1_decode import _decode_key_version_number
+
     byte = _to_byte(value, label="keyVersionNumber")
-    if byte == 0x00:
-        bucket = "OPEN_ISSUER"
-    elif byte in (0x71, 0x72, 0x73):
-        bucket = "CONTROLLING_AUTHORITY"
-    elif 0x01 <= byte <= 0x7F:
-        bucket = "APPLICATION"
-    else:
-        bucket = "RESERVED"
-    return {"hex": f"{byte:02X}", "value": byte, "bucket": bucket}
+    decoded = _decode_key_version_number(bytes([byte])) or {}
+    return {
+        "hex": f"{byte:02X}",
+        "value": byte,
+        "bucket": "IN_RANGE" if 0x01 <= byte <= 0x7F else "OUT_OF_RANGE",
+        "reserved_for": decoded.get("reservedFor"),
+    }
 
 
 _KEY_COMPONENT_TYPES: tuple[tuple[int, str], ...] = (
-    (0x80, "DES_ECB"),
-    (0x81, "DES_CBC"),
-    (0x82, "TRIPLE_DES_ECB"),
-    (0x83, "TRIPLE_DES_CBC"),
-    (0x84, "DES_CMAC"),
-    (0x85, "AES"),
-    (0x88, "AES_CMAC"),
-    (0x90, "HMAC_SHA1"),
-    (0x91, "HMAC_SHA256"),
+    (0x80, "DES"),
+    (0x85, "TLS_PSK"),
+    (0x88, "AES"),
+    (0x89, "SM4"),
     (0xA0, "RSA_PUBLIC_EXPONENT"),
     (0xA1, "RSA_PUBLIC_MODULUS"),
     (0xA2, "RSA_PRIVATE_MODULUS"),
@@ -389,7 +349,16 @@ _KEY_COMPONENT_TYPES: tuple[tuple[int, str], ...] = (
     (0xA8, "RSA_PRIVATE_CRT_DQ1"),
     (0xB0, "ECC_PUBLIC"),
     (0xB1, "ECC_PRIVATE"),
-    (0xF0, "EXTENDED_HEADER"),
+    (0xB2, "ECC_FIELD_PARAMETER_P"),
+    (0xB3, "ECC_FIELD_PARAMETER_A"),
+    (0xB4, "ECC_FIELD_PARAMETER_B"),
+    (0xB5, "ECC_FIELD_PARAMETER_G"),
+    (0xB6, "ECC_FIELD_PARAMETER_N"),
+    (0xB7, "ECC_FIELD_PARAMETER_K"),
+    (0xB8, "SM2_PUBLIC"),
+    (0xB9, "SM2_PRIVATE"),
+    (0xF0, "ECC_KEY_PARAMETERS_REFERENCE"),
+    (0xFF, "EXTENDED_FORMAT"),
 )
 
 

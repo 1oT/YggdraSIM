@@ -2,11 +2,11 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Round-6 Sweep 1 — MCS / MCPTT per-tag text decoder regression tests.
+Round-6 Sweep 1 -- MCS / MCPTT per-tag text decoder regression tests.
 
 The MCS family (TS 31.102 §4.4.13 / TS 24.483) uses the shared
 ``_EF_MCS_TAGS`` vocabulary plus per-tag UTF-8 decoders for the MC
-Service Identifier (0x80 — SIP URI), MC User Profile (0x81), and
+Service Identifier (0x80 -- SIP URI), MC User Profile (0x81), and
 MC Configuration Data (0x82). Tags 0x83 / 0x84 / 0x85 are opaque
 security material and must NOT surface as text.
 """

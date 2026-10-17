@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Insert blank ProfileElement instances using pySim default constructors (same templates
 as bundled ``saip-tool`` / ``pySim.esim.saip``). Intended for TRANSCODE-TUI rapid edits.
@@ -10,6 +9,7 @@ as bundled ``saip-tool`` / ``pySim.esim.saip``). Intended for TRANSCODE-TUI rapi
 from __future__ import annotations
 
 import copy
+import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
@@ -32,7 +32,7 @@ def iter_option_list_specs(
     First row is cancel; remaining rows follow ``list_pe_quick_add_rows``.
     """
     out: List[Tuple[str, str, str | None, bool]] = [
-        ("_cancel", "— Cancel —", None, False),
+        ("_cancel", "-- Cancel --", None, False),
     ]
     for menu_id, title, hint in list_pe_quick_add_rows():
         disabled = menu_id in blocked
@@ -78,7 +78,7 @@ def list_pe_quick_add_rows() -> List[Tuple[str, str, str]]:
         ("opt-iot", "opt-iot", "IoT optional files"),
         ("cdmaParameter", "cdmaParameter", "CDMA/CAVE authentication keys"),
         ("rfm", "rfm", "Remote File Management placeholder"),
-        # ssim / ssimEapTLSParameters deferred — pySim schema v3.4+
+        # ssim / ssimEapTLSParameters deferred -- pySim schema v3.4+
     ]
     return rows
 
@@ -141,7 +141,7 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         return pe
 
     def _blank_cdma_parameter() -> Any:
-        """PE-CDMAParameter — CAVE authentication keys."""
+        """PE-CDMAParameter -- CAVE authentication keys."""
         pe = ProfileElement(
             OrderedDict(
                 {
@@ -176,13 +176,27 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
 
         Produces a placeholder suitable for insertion into a profile
         document.  The skeleton contains only the header and template
-        reference; mandatory ``File`` fields (``adf-csim``, ``ef-imsi``,
-        etc.) are NOT pre-populated because pySim v0.8 lacks dedicated
-        ``ProfileElement`` subclasses for these types.  The operator must
-        populate the file tree via the filesystem editor before encoding
-        to DER — ``to_der()`` will fail on the bare skeleton.
+        reference when pySim has no ``ProfileElement`` subclass for the
+        type (csim / opt-csim); mandatory ``File`` fields (``adf-csim``,
+        ``ef-imsi``, etc.) are then NOT pre-populated and the operator
+        must populate the file tree via the filesystem editor before
+        encoding to DER -- ``to_der()`` will fail on the bare skeleton.
         """
         from pySim.esim.saip.templates import ProfileTemplateRegistry
+
+        from Tools.ProfilePackage.saip_pysim_compat import install_extra_profile_elements
+
+        # PE-IoT / PE-OPT-IoT have classes once the compensation is in
+        # place; those pre-populate the template's mandatory files the
+        # way ProfileElementUSIM does.
+        install_extra_profile_elements()
+        pe_class = ProfileElement.class_for_petype(pe_type)
+        if pe_class is not None:
+            typed = pe_class()
+            typed_header = typed.decoded.get(typed.header_name)
+            if isinstance(typed_header, dict) and "identification" not in typed_header:
+                typed_header["identification"] = 0
+            return typed
 
         header_name = pe_type.replace("-", "") + "-header"
         tpl = ProfileTemplateRegistry.get_by_oid(
@@ -201,15 +215,16 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         pe.type = pe_type
         return pe
 
-    # SAIP V3.4.1 §Annex A default template OIDs for filesystem PEs
-    # that lack dedicated pySim ProfileElement subclasses.
-    # Note: ssim (2.23.143.1.2.15) and ssimEapTLSParameters are
-    # deferred — they require pySim ASN.1 schema ≥ v3.4.
+    # TCA SAIP v3.4.1 Annex A template OIDs (§9.7 CSIM, §9.10 IoT) for
+    # filesystem PEs upstream pySim has no class for. The IoT pair is
+    # served by saip_pysim_compat.install_extra_profile_elements; the
+    # CSIM pair has no template yet. ssim (2.23.143.1.2.19) and
+    # ssimEapTLSParameters need the v3.4 ASN.1 module.
     _DEFAULT_TEMPLATE_OID: dict[str, str] = {
-        "csim": "2.23.143.1.2.7",
-        "opt-csim": "2.23.143.1.2.8",
-        "iot": "2.23.143.1.2.13",
-        "opt-iot": "2.23.143.1.2.14",
+        "csim": "2.23.143.1.2.10",
+        "opt-csim": "2.23.143.1.2.11",
+        "iot": "2.23.143.1.2.17",
+        "opt-iot": "2.23.143.1.2.18",
     }
 
     mapping: Dict[str, Callable[[], Any]] = {
@@ -246,7 +261,7 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         "iot": lambda: _blank_filesystem_pe("iot"),
         "opt-iot": lambda: _blank_filesystem_pe("opt-iot"),
         "cdmaParameter": _blank_cdma_parameter,
-        # ssim and ssimEapTLSParameters are deferred — they require
+        # ssim and ssimEapTLSParameters are deferred -- they require
         # pySim ASN.1 schema ≥ v3.4 (Profile Interop TS V3.4 added
         # PE-SSIM and PE-SSIM-EAPTLSParameters to the CHOICE).
     }
@@ -327,17 +342,51 @@ def _build_pe_from_snapshot(snapshot: dict[str, Any], pes: Any) -> Any:
     return pe
 
 
-def _build_blank_pe_snapshot(menu_id: str) -> dict[str, Any]:
+def blank_pe(pe_type: str) -> Any | None:
+    """The quick-add blank of ``pe_type``, or ``None`` when there is no factory.
+
+    The GUI's ``saip.add_pe`` takes its blanks for the PEs pySim cannot
+    scaffold into an encodable element from here, so the TUI and the GUI
+    insert the same element.
+    """
+    factory = _factory_map().get(pe_type)
+    return factory() if factory is not None else None
+
+
+def eap_df_file_id(df_fid: Any) -> bytes:
+    """The file ID of the DF.EAP a new PE-EAP creates.
+
+    Each DF EAP is named by its application's EF.DIR record (ETSI TS 102 310
+    v9.1 §5.2), so the Annex A §9.8 template TCA SAIP v3.4.1 §8.3.4.7 builds
+    on carries no FID and pySim cannot place the DF without one.
+    """
+    text = re.sub(r"\s+", "", str(df_fid or ""))
+    if not text:
+        raise ValueError(
+            "A PE-EAP needs the file ID of its DF.EAP (df_fid): the application's "
+            "EF.DIR record names it (ETSI TS 102 310 v9.1 §5.2), so no template "
+            "fixes one."
+        )
+    if re.fullmatch(r"[0-9A-Fa-f]{4}", text) is None:
+        raise ValueError(f"df_fid is a file ID of 2 bytes (4 hex digits); got {df_fid!r}.")
+    return bytes.fromhex(text)
+
+
+def _build_blank_pe_snapshot(menu_id: str, *, df_fid: Any = None) -> dict[str, Any]:
     factories = _factory_map()
     if menu_id not in factories:
         raise ValueError(f"Unknown quick-add menu id: {menu_id!r}")
     ctor = factories[menu_id]
     new_pe = ctor()
+    eap_fid = eap_df_file_id(df_fid) if str(new_pe.type) == "eap" else None
     if hasattr(new_pe, "_post_decode"):
         new_pe._post_decode()
+    decoded = copy.deepcopy(new_pe.decoded)
+    if eap_fid is not None:
+        decoded["df-eap"] = [("fileDescriptor", {"fileID": eap_fid})]
     return {
         "type": str(new_pe.type),
-        "decoded": copy.deepcopy(new_pe.decoded),
+        "decoded": decoded,
     }
 
 
@@ -667,6 +716,15 @@ def _document_section_value(document: dict[str, Any], section_key: str) -> dict[
     return section_value
 
 
+def _arr_scope_for_file_template(file_template: Any) -> str:
+    """Return the ARR access-mode scope a template's file kind reads with."""
+    from .saip_asn1_decode import arr_scope_for_file_kind
+
+    return arr_scope_for_file_kind(
+        str(getattr(file_template, "file_type", "") or "").strip().lower()
+    )
+
+
 def _arr_summary_for_pe_section(
     document: dict[str, Any],
     *,
@@ -684,6 +742,7 @@ def _arr_summary_for_pe_section(
     return describe_arr_record_from_section(
         section_value,
         record_number=arr,
+        scope=_arr_scope_for_file_template(file_template),
     )
 
 
@@ -706,6 +765,7 @@ def _arr_summary_for_gfm_section(
         section_value,
         context_path=context_path,
         record_number=arr,
+        scope=_arr_scope_for_file_template(file_template),
     )
 
 
@@ -1900,6 +1960,45 @@ class _GfmExplicitTemplateDefaults:
 _GFM_EXPLICIT_TEMPLATE_DEFAULTS = _GfmExplicitTemplateDefaults()
 
 
+def _declared_file_size(file_obj: Any) -> int | None:
+    """Declared size of ``file_obj``, or ``None`` while it is undecided.
+
+    The upstream ``File.file_size`` property multiplies ``nb_rec`` by
+    ``rec_len`` for record files and raises ``TypeError`` when either is still
+    unset, which is the normal state for a file being built from a partial
+    template. This deliberately does **not** reproduce upstream's other
+    behaviour of back-computing ``nb_rec`` from ``_file_size // rec_len``: a
+    half-specified record file returns ``None`` here and receives no pattern,
+    which is also the geometry ``expand_fill_pattern`` needs before it can
+    expand one.
+    """
+    if file_obj.file_type in ("TR", "BT"):
+        size = getattr(file_obj, "_file_size", None)
+        return int(size) if isinstance(size, int) and size > 0 else None
+    if isinstance(file_obj.rec_len, int) and isinstance(file_obj.nb_rec, int):
+        return int(file_obj.rec_len) * int(file_obj.nb_rec)
+    return None
+
+
+def _spec_default_fill_pattern(file_obj: Any, file_template: Any) -> bytes | None:
+    """Pre-personalization fill pattern for a file with no default content.
+
+    A file whose size is not yet decided gets nothing: the pattern describes
+    bytes that do not exist yet, and pySim expands it eagerly through
+    ``File.file_size``, which multiplies ``nb_rec`` by ``rec_len``.
+    """
+    from Tools.ProfilePackage.saip_ef_default_fill import default_fill_pattern
+
+    declared_size = _declared_file_size(file_obj)
+    if declared_size is None:
+        return None
+    return default_fill_pattern(
+        getattr(file_template, "name", None),
+        file_id=file_obj.fid,
+        file_size=declared_size,
+    )
+
+
 def _explicit_file_descriptor(file_template: Any, *, gfm_mode: bool) -> dict[str, Any]:
     from pySim.esim.saip import File
 
@@ -1925,6 +2024,14 @@ def _explicit_file_descriptor(file_template: Any, *, gfm_mode: bool) -> dict[str
         file_obj.fill_pattern_repeat = bool(
             getattr(file_template, "fill_pattern_repeat", False)
         )
+    elif not getattr(file_template, "default_val", None):
+        # Nothing decides what this file's unwritten bytes read as: the Fcp
+        # carries no pattern and the template no default content. Declare the
+        # pre-personalization value so a ``fillFileOffset`` gap is not left to
+        # the eUICC. Only files in that position may do this -- SAIP §8.3.3
+        # makes an Fcp pattern replace a template default outright.
+        file_obj.fill_pattern = _spec_default_fill_pattern(file_obj, file_template)
+        file_obj.fill_pattern_repeat = False
     file_descriptor = file_obj.to_fileDescriptor()
     link_path = getattr(file_template, "link_path", None)
     if isinstance(link_path, (bytes, bytearray, memoryview)):
@@ -2520,12 +2627,13 @@ def insert_blank_pe_for_menu_id(
     menu_id: str,
     anchor_key: str | None = None,
     insert_after: bool = True,
+    df_fid: Any = None,
 ) -> dict[str, Any]:
     """
     Parse ``document``, insert a new PE from pySim defaults at the requested anchor.
 
     With no anchor, default insertion remains immediately before ``end`` (or append if
-    there is no ``end``).
+    there is no ``end``). A PE-EAP takes ``df_fid`` (:func:`eap_df_file_id`).
     """
     if menu_id == "_cancel":
         raise ValueError("invalid menu_id")
@@ -2539,7 +2647,7 @@ def insert_blank_pe_for_menu_id(
                 target_anchor = key
                 target_after = False
                 break
-    snapshot = _build_blank_pe_snapshot(menu_id)
+    snapshot = _build_blank_pe_snapshot(menu_id, df_fid=df_fid)
     return paste_pe_snapshot(
         document,
         workspace_root,

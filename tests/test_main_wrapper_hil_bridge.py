@@ -292,7 +292,9 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
         mocked_popen.assert_called_once()
         return list(mocked_popen.call_args.args[0])
 
-    def test_launch_hil_bridge_wireshark_uses_dark_adwaita_style(self) -> None:
+    def test_launch_hil_bridge_wireshark_uses_the_desktop_default_style(self) -> None:
+        # No -style argument, so Wireshark keeps the desktop's own Qt palette
+        # instead of being pinned to one light or dark theme.
         self.assertEqual(
             self._wireshark_argv([]),
             [
@@ -302,14 +304,12 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
                 "lo",
                 "-f",
                 "udp port 4729",
-                "-style",
-                "Adwaita-Dark",
             ],
         )
 
     def test_launch_hil_bridge_wireshark_loads_the_apdu_dissector(self) -> None:
-        # The dissector arguments belong to the capture, so they precede the
-        # style flags rather than trailing the command.
+        # The dissector arguments belong to the capture, so they follow the
+        # interface and filter rather than leading the command.
         self.assertEqual(
             self._wireshark_argv(["-X", "lua_script:/tmp/yggdrasim_apdu.lua"]),
             [
@@ -321,8 +321,6 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
                 "udp port 4729",
                 "-X",
                 "lua_script:/tmp/yggdrasim_apdu.lua",
-                "-style",
-                "Adwaita-Dark",
             ],
         )
 

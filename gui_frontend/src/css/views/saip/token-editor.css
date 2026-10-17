@@ -4,19 +4,60 @@
  */
 
 
-/* ---- Token editor — wider modal + two-column layout ----------------- */
+/* ---- Token editor dock ------------------------------------------------ */
 /*
- * The token editor modal carries a list-on-left + bind-form-on-right
- * layout. It needs more horizontal real estate than the default modal
- * card so the bind form can stay inline rather than wrapping under the
- * token table on every paint.
+ * The token editor is the third column of the workbench grid: a docked
+ * panel beside the main column, so the package drawer, the PE list and
+ * the detail pane stay live while values are bound. It is hidden until
+ * the ribbon's Token editor button (Ctrl+E) opens it and it never
+ * floats: no backdrop, no blur over the workbench, no focus trap.
  */
-.saip-token-modal {
-  width: min(1080px, 96vw);
+.saip-token-dock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.saip-token-modal-header {
-  padding: 12px 16px;
+.saip-token-dock[hidden] {
+  display: none;
+}
+
+/* Left-edge grip: drag to resize, double-click or Home to reset. */
+.saip-token-dock-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.saip-token-dock-grip:hover,
+.saip-token-dock-grip:focus-visible,
+.is-resizing-token-dock .saip-token-dock-grip {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.saip-layout.is-resizing-token-dock {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.saip-token-dock-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+  border-bottom: 1px solid var(--border);
   background:
     linear-gradient(
       180deg,
@@ -25,19 +66,34 @@
     );
 }
 
-.saip-token-modal-title-row {
+.saip-token-dock-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.saip-token-dock-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.saip-token-modal-glyph {
+.saip-token-dock-title-row h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-token-dock-glyph {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--mono);
@@ -46,17 +102,92 @@
   letter-spacing: 0.04em;
 }
 
-.saip-token-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-  gap: 16px;
-  align-items: start;
+.saip-token-dock-sub {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@media (max-width: 880px) {
-  .saip-token-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.saip-token-dock-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.saip-token-dock-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.saip-token-dock-stat-chip--mono {
+  font-family: var(--mono);
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
+.saip-token-dock-stat-chip--muted {
+  color: var(--fg-muted);
+  background: transparent;
+}
+
+.saip-token-dock-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.saip-token-dock-close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.saip-token-dock-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.saip-token-dock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 12px 12px 14px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* A listing reload keeps the mounted form; only the table reads as
+   stale until the fresh rows land. */
+.saip-token-dock[aria-busy="true"] .saip-token-col--list {
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+}
+
+/* One column: the Set form first, the variable list under it. */
+.saip-token-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 
 .saip-token-col {
@@ -66,19 +197,48 @@
   min-width: 0;
 }
 
+/* The table must never paint outside the dock. Wrapped state chips keep
+   its min-content width inside the column; the clip guards the rest.
+   Not auto: that would make the column a scroll container inside the
+   scrolling dock body. */
+.saip-token-col--list {
+  overflow-x: clip;
+}
+
 .saip-token-list-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .saip-token-list-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+/* The bound-list selector and its buttons travel as one group so a
+   narrow header wraps the whole group instead of splitting it. */
+.saip-token-list-binding {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.saip-token-list-binding-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.saip-token-list-select {
+  max-width: 220px;
 }
 
 .saip-token-list-title-wrap {
@@ -106,7 +266,7 @@
   margin: 0;
   padding: 18px 14px;
   border: 1px dashed var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   color: var(--fg-muted);
   line-height: 1.5;
@@ -114,6 +274,79 @@
 
 .saip-token-table {
   margin-top: 0;
+}
+
+/* The variable table folds into stacked rows for the dock's width:
+   name, kind chip and Reset on the first line, the bound value under
+   it, the state chips last. The header row stays for assistive
+   technology but is not painted. */
+.saip-token-dock .saip-token-table,
+.saip-token-dock .saip-token-table tbody {
+  display: block;
+}
+
+.saip-token-dock .saip-token-table thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.saip-token-dock .saip-token-table tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "name kind actions"
+    "value value value"
+    "state state state";
+  gap: 3px 8px;
+  align-items: center;
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-token-dock .saip-token-table td {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(1) {
+  grid-area: name;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(2) {
+  grid-area: value;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(3) {
+  grid-area: kind;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(4) {
+  grid-area: state;
+}
+
+.saip-token-dock .saip-token-table td:nth-child(5) {
+  grid-area: actions;
+}
+
+/* The whole value shows; a long hex string wraps instead of clipping. */
+.saip-token-dock .saip-token-table .saip-vars-val {
+  max-width: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.saip-token-dock .saip-token-table .saip-vars-row.is-overridden {
+  border-left: 2px solid color-mix(in oklab, var(--warn) 50%, transparent);
+}
+
+.saip-token-dock .saip-token-table .saip-vars-row.is-overridden td:first-child {
+  border-left: 0;
 }
 
 .saip-token-bind-card {
@@ -145,4 +378,43 @@
   padding: 0;
   border: none;
   background: transparent;
+}
+
+/* Below the single-column breakpoint the dock stacks under the main
+   column as a bounded row; the grip has nothing to resize there. */
+@media (max-width: 1100px) {
+  .saip-token-dock {
+    max-height: 70vh;
+  }
+  .saip-token-dock-grip {
+    display: none;
+  }
+}
+
+/* The name form folds under a summary; rows are the editor. */
+.saip-token-bind-details {
+  margin: 0;
+}
+
+.saip-token-bind-summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 0;
+}
+
+.saip-token-list-actions--more {
+  margin-top: 4px;
+}
+
+.saip-vars-value-input {
+  width: 100%;
+  min-width: 0;
+  font-family: var(--mono);
+}
+
+.saip-vars-row.is-draft .saip-vars-value-input {
+  border-color: var(--warn);
 }

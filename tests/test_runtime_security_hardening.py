@@ -20,7 +20,6 @@ from Tools.HilBridge.live_decode_view import (
     MAX_PDML_TEXT_CHARS,
     parse_packet_field_ranges,
 )
-from yggdrasim_common.gui_server.action_security import scrub_action_result
 from yggdrasim_common.gui_server import auth as gui_auth
 from yggdrasim_common.secure_files import (
     assert_private_file,
@@ -208,22 +207,6 @@ def test_eim_response_log_rotates_at_budget(
     logger.append_event({"action": "second", "success": True})
     assert path.is_file()
     assert Path(f"{path}.1").is_file()
-
-
-def test_action_result_scrubber_removes_known_secret_outputs() -> None:
-    assert scrub_action_result(
-        "scp03.derive_opc",
-        {"ki": "11" * 16, "op": "22" * 16, "opc": "33" * 16},
-    ) == {
-        "opc": "33" * 16,
-        "secret_outputs_redacted": ["ki", "op"],
-    }
-    private = scrub_action_result(
-        "saip.ssim_eaptls_inspect",
-        {"kind": "private_key", "der_hex": "DEADBEEF", "metadata": {}},
-    )
-    assert "der_hex" not in private
-    assert private["secret_outputs_redacted"] == ["der_hex"]
 
 
 def test_card_session_close_purges_scoped_raw_apdu_capture() -> None:

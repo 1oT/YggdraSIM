@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``SCP03.logic.gp.GlobalPlatformManager`` utility methods.
 
 Covers: get_config_key_fields_for_protocol, _parse_key_template_entries,

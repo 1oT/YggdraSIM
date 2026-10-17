@@ -12,7 +12,7 @@
  * that operators no longer have to hand-type absolute paths into the
  * legacy ``window.prompt`` fallback.
  * ------------------------------------------------------------------- */
-/* File explorer modal — fallback browser opened by ``pickForField``
+/* File explorer modal -- fallback browser opened by ``pickForField``
  * when no native pywebview picker is available. Uses the YggdraSIM
  * theme tokens (``--bg``, ``--bg-elev``, ``--bg-elev-2``, ``--fg``,
  * ``--fg-dim``, ``--accent``, ``--accent-soft``, ``--fail``,
@@ -22,8 +22,11 @@
 .cc-fs-explorer-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
+  /* No `backdrop-filter` here. A viewport-sized blur over the app shell --
+   * whose topbar carries its own `blur(14px)` -- is re-composited by
+   * WebKitGTK for the whole time the modal is up, which costs more frames
+   * than a 2px blur under the scrim is worth seeing. */
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;

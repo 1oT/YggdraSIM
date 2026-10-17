@@ -13,14 +13,16 @@
   var TOKEN_KEY = "ygg-gui-token";
   var THEME_KEY = "ygg-gui-theme";
   // VALID_THEMES sourced from window.YGG_VALID_THEMES (set by theme-init.js
-  // before first paint). Single source of truth — add new themes there.
+  // before first paint). Single source of truth -- add new themes there.
   var VALID_THEMES = window.YGG_VALID_THEMES || {
     "nord-dark": 1, "nord-light": 1,
     "oneot-dark": 1, "oneot-light": 1,
     "matrix": 1, "gruv-dark": 1, "ink-light": 1,
     "ocean-dark": 1, "solarized-dark": 1, "solarized-light": 1,
     "tokyo-night": 1, "catppuccin-mocha": 1, "catppuccin-latte": 1,
+    "catppuccin-frappe": 1, "catppuccin-macchiato": 1,
     "dracula": 1, "github-dark": 1, "github-light": 1,
+    "islands-light": 1, "graphite-light": 1,
   };
 
   function captureTokenFromUrl() {
@@ -212,14 +214,14 @@
       }
     });
     state.activeView = name;
-    if (name !== "command_center") {
-      var mainEl = document.querySelector(".main");
-      if (mainEl) {
-        mainEl.classList.remove("main--module-workbench");
-        mainEl.classList.remove("main--saip-workbench");
-        mainEl.classList.remove("main--hil-workbench");
-      }
+    var mainEl = document.querySelector(".main");
+    if (name !== "command_center" && mainEl) {
+      mainEl.classList.remove("main--module-workbench");
+      mainEl.classList.remove("main--saip-workbench");
+      mainEl.classList.remove("main--hil-workbench");
     }
+    // The plugin console fills the main area and scrolls inside its panes.
+    if (mainEl) mainEl.classList.toggle("main--plugin-console", name === "plugin_console");
     if (name === "about" && typeof loadGuidesForAboutPanel === "function") {
       loadGuidesForAboutPanel();
     }
@@ -232,8 +234,9 @@
       terminal: "Advanced · Shell",
       host_shell: "Advanced · Host shell",
       live_readers: "Inspect · PC/SC readers",
-      card_bridge: "Advanced · Remote Bridge",
-      remote_lab: "Advanced · Remote Lab",
+      card_bridge: "APDU Streaming · Remote Bridge",
+      remote_lab: "APDU Streaming · Remote Lab",
+      plugin_console: "Plugin consoles",
       command_center: (options && options.crumb) || "Command Center",
     }[name] || "Overview");
     highlightSidebar(name);
@@ -254,7 +257,7 @@
   async function loadHealth() {
     try {
       var data = await apiFetch("/api/health");
-      setText("topbar-suite-version", "v" + String(data.version || "…"));
+      setText("topbar-suite-version", "v" + String(data.version || "..."));
       setText("topbar-suite-active", "active " + formatUptime(data.uptime_seconds));
       setApiBadge("ok", "online");
       clearError();
@@ -288,7 +291,7 @@
   }
 
   async function setBackend(backend) {
-    setStatusAction("switching backend → " + backend + "…");
+    setStatusAction("switching backend → " + backend + "...");
     try {
       await apiFetch("/api/backend/card", {
         method: "POST",
@@ -306,7 +309,7 @@
   async function loadRegistry(query) {
     var tbody = $("registry-rows");
     if (!tbody) return;
-    tbody.innerHTML = "<tr><td colspan=\"3\" class=\"loading\">loading…</td></tr>";
+    tbody.innerHTML = "<tr><td colspan=\"3\" class=\"loading\">loading...</td></tr>";
     try {
       var path = "/api/registry/search" + (query ? "?query=" + encodeURIComponent(query) : "");
       var data = await apiFetch(path);
@@ -350,7 +353,7 @@
   }
 
   async function resetPersistedEnvFlags() {
-    setEnvFlagToolbarStatus("resetting…");
+    setEnvFlagToolbarStatus("resetting...");
     try {
       var result = await apiFetch("/api/env_flags/reset", {
         method: "POST",
@@ -368,7 +371,7 @@
   async function loadEnvFlags() {
     var root = $("env-flag-categories");
     if (!root) return;
-    root.innerHTML = "<p class=\"loading\">loading…</p>";
+    root.innerHTML = "<p class=\"loading\">loading...</p>";
     try {
       var data = await apiFetch("/api/env_flags/list");
       var categories = data.categories || [];
@@ -412,7 +415,7 @@
     var root = $("env-plugin-root");
     if (!root) return;
     var statusChip = $("env-plugin-status");
-    root.innerHTML = "<p class=\"loading\">loading…</p>";
+    root.innerHTML = "<p class=\"loading\">loading...</p>";
     try {
       var data = await apiFetch("/api/env_flags/plugins");
       renderPlugins(root, statusChip, data);
@@ -471,7 +474,7 @@
       var restart = document.createElement("p");
       restart.className = "loading";
       restart.textContent =
-        "Plugin gate changed — restart YggdraSIM to apply "
+        "Plugin gate changed -- restart YggdraSIM to apply "
         + "(loading is evaluated once at startup).";
       root.appendChild(restart);
     }
@@ -708,6 +711,7 @@
         if (view !== "card_bridge") {
           cbStopAutoRefresh();
         }
+        pcStopPolling();
       });
     });
 
@@ -846,7 +850,7 @@
         }
       });
     }
-    window.addEventListener("resize", function () {
+    addCoalescedResizeListener(function () {
       Object.keys(terminalTabs).forEach(function (tabId) {
         var tab = terminalTabs[tabId];
         if (!tab || tab.id !== activeTerminalTabId) return;
@@ -1033,7 +1037,7 @@
     var token = getStoredToken();
     if (!token) {
       tab.status = "no-token";
-      setText("terminal-status", "missing token — reload the GUI.");
+      setText("terminal-status", "missing token -- reload the GUI.");
       renderTerminalTabStrip();
       return;
     }
@@ -1063,7 +1067,7 @@
     sock.binaryType = "arraybuffer";
     tab.socket = sock;
     tab.status = "connecting";
-    setText("terminal-status", "connecting…");
+    setText("terminal-status", "connecting...");
     renderTerminalTabStrip();
     updateTerminalButtons();
 
@@ -1165,8 +1169,8 @@
 
   async function loadLiveReaders() {
     var body = $("live-readers-body");
-    if (body) body.innerHTML = "<tr><td colspan=\"3\" class=\"loading\">probing…</td></tr>";
-    setText("live-readers-status", "probing…");
+    if (body) body.innerHTML = "<tr><td colspan=\"3\" class=\"loading\">probing...</td></tr>";
+    setText("live-readers-status", "probing...");
     try {
       var data = await apiFetch("/api/live/readers");
       renderLiveReaders(data);
@@ -1202,7 +1206,7 @@
   // Command Center action (scp11.download_profile). We still expose the
   // reader cache so action forms of kind "reader" can pull the latest list.
   function populateFlowReaders(_readers) {
-    /* intentionally empty — kept for back-compat; readers render inside
+    /* intentionally empty -- kept for back-compat; readers render inside
        Command Center action forms now. */
   }
 
@@ -1221,6 +1225,11 @@
     sessionPollTimer: null,
     loading: false,
     connectInFlight: "",
+    disconnectInFlight: "",
+    editing: "",
+    editError: "",
+    editInFlight: false,
+    loadAgain: false,
   };
 
   function wireRemoteLabPanel() {
@@ -1337,13 +1346,102 @@
     return sessions;
   }
 
+  // Server-side session state, not the workbench tabs. A Remote Lab
+  // session outlives the tab that adopted it -- the agent keeps the rig
+  // locked until the GUI session is closed -- so a tab lost to a reload
+  // leaves a rig no local surface can release. ``/api/remote-lab/sessions``
+  // is the authority that makes Disconnect work in that case.
+  function remoteLabSessionForDevice(id) {
+    var deviceId = String(id || "");
+    if (!deviceId) return null;
+    var rows = Array.isArray(remoteLabState.activeSessions)
+      ? remoteLabState.activeSessions
+      : [];
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i] && String(rows[i].device_id || "") === deviceId) return rows[i];
+    }
+    return null;
+  }
+
+  // Drop the workbench tab's claim on a session the release route is
+  // about to close. Deliberately does not call the close API: the
+  // release route already closes it, and a second close would race.
+  // Drop every workbench tab bound to a link the release route is about to
+  // close. Tabs hold module session ids (an scp03 scan, say), never the
+  // link's, so the match is on the reader name the link published. The
+  // route closes the module sessions themselves; this only clears the
+  // client-side claim and the persisted tree + FCP cache under that name,
+  // which the operator otherwise had to clear by hand.
+  function remoteLabDetachLocalSession(sessionRow) {
+    var row = sessionRow && typeof sessionRow === "object" ? sessionRow : {};
+    var target = String(row.session_id || "");
+    var readerName = String(row.reader_name || "");
+    if (!target && !readerName) return;
+    var canonical = typeof readerBarCanonicalName === "function"
+      ? readerBarCanonicalName(readerName)
+      : readerName;
+    var wb = commandState && commandState.scp03Workbench;
+    var tabs = wb && Array.isArray(wb.tabs) ? wb.tabs : [];
+    tabs.forEach(function (tab) {
+      if (!tab) return;
+      var boundName = typeof readerBarBoundName === "function"
+        ? readerBarBoundName(tab)
+        : String(tab.readerName || tab.pendingReader || "");
+      var matchesName = canonical && boundName === canonical;
+      var matchesSession = target && String(tab.sessionId || "") === target;
+      if (!matchesName && !matchesSession) return;
+      var previousReader = tab.readerName || tab.pendingReader || "";
+      tab.sessionId = null;
+      tab.readerName = "";
+      tab.pendingReader = "";
+      tab.atrHex = "";
+      tab.scanData = null;
+      tab.selectedPath = null;
+      tab.previewCache = null;
+      tab.fcpCache = {};
+      tab.treeCollapsed = {};
+      tab.persistedAt = 0;
+      tab.status = "idle";
+      tab.error = null;
+      tab.errorKind = "";
+      if (previousReader && typeof scp03PurgePersisted === "function") {
+        scp03PurgePersisted(previousReader);
+      }
+    });
+    if (commandState) {
+      var bar = commandState.readerBar;
+      if (bar && canonical && readerBarCanonicalName(bar.activeReader || "") === canonical) {
+        bar.activeReader = "";
+      }
+      commandState.scp03Session = null;
+    }
+    var tabBar = document.querySelector(".cc-wb-tabs.scp03-topbar");
+    var tabBody = document.querySelector(".cc-wb-body");
+    if (tabBar && tabBody && typeof renderScp03Tabs === "function") {
+      renderScp03Tabs(tabBar, tabBody);
+    }
+  }
+
   function remoteLabSetActiveSessions(sessions) {
     var rows = Array.isArray(sessions) ? sessions.filter(function (item) {
       return item && (item.session_id || item.remote_session_id);
     }) : [];
+    var previous = (remoteLabState.activeSessions || []).map(function (item) {
+      return String(item.device_id || "") + ":" + String(item.session_id || "");
+    }).sort().join("|");
+    var current = rows.map(function (item) {
+      return String(item.device_id || "") + ":" + String(item.session_id || "");
+    }).sort().join("|");
     remoteLabState.activeSessions = rows;
     remoteLabState.activeSessionCount = rows.length;
     remoteLabRenderGlobalSessionIndicators();
+    // Disconnect's enabled state is derived from this set, and the 10 s
+    // poll is the only thing that notices a session opened or expired
+    // elsewhere. Without this repaint the button stays stale until the
+    // operator clicks Refresh.
+    if (current !== previous && remoteLabState.devices.length > 0) {
+      renderRemoteLab();
+    }
   }
 
   function remoteLabRenderGlobalSessionIndicators() {
@@ -1382,7 +1480,10 @@
   }
 
   async function loadRemoteLab() {
-    if (remoteLabState.loading) return;
+    if (remoteLabState.loading) {
+      remoteLabState.loadAgain = true;
+      return;
+    }
     remoteLabState.loading = true;
     remoteLabSetState("loading");
     try {
@@ -1407,6 +1508,10 @@
       }
     } finally {
       remoteLabState.loading = false;
+      if (remoteLabState.loadAgain) {
+        remoteLabState.loadAgain = false;
+        loadRemoteLab();
+      }
     }
   }
 
@@ -1442,10 +1547,18 @@
     head.appendChild(title);
     var badge = document.createElement("span");
     var state = String(status.status || "offline");
-    badge.className = "remote-lab-status remote-lab-status--" + state;
-    badge.textContent = state;
+    var hostInfo = status.host && typeof status.host === "object" ? status.host : null;
+    var hostBusy = !!(hostInfo && String(hostInfo.hil_rig || "none") === "running");
+    // The pill reports the unit, not just its card. A card can be free
+    // while the bench it sits on runs someone else's rig, and the pill is
+    // what an operator reads; the line below it carries the detail. The
+    // rig's own state still drives what is allowed, so this changes what
+    // is shown and never what can be done.
+    var displayState = (hostBusy && state === "available") ? "host-busy" : state;
+    badge.className = "remote-lab-status remote-lab-status--" + displayState;
+    badge.textContent = displayState === "host-busy" ? "host busy" : displayState;
     badge.setAttribute("role", "status");
-    badge.setAttribute("aria-label", "Device status: " + state);
+    badge.setAttribute("aria-label", "Device status: " + badge.textContent);
     head.appendChild(badge);
     card.appendChild(head);
 
@@ -1478,15 +1591,50 @@
     }
     card.appendChild(detail);
 
+    // A rig's own card can be free while the bench around it is not: a
+    // HIL rig may be driving the modem from a card on another desk. The
+    // rig stays available because it genuinely is, so the host says so
+    // separately rather than the pill lying in either direction.
+    if (hostBusy) {
+      var hostLine = document.createElement("div");
+      hostLine.className = "remote-lab-detail";
+      var source = String(hostInfo.hil_card_url || hostInfo.hil_card_source || "");
+      hostLine.textContent =
+        "a HIL rig is running on this host" + (source ? " against " + source : "");
+      if (String(hostInfo.hil_card_lease || "") === "held") {
+        hostLine.textContent += " \u00b7 holds that card's lease";
+      }
+      hostLine.textContent += ". This card is still free to take.";
+      card.appendChild(hostLine);
+    }
+
     var actions = document.createElement("div");
     actions.className = "remote-lab-actions";
     var connect = document.createElement("button");
     connect.type = "button";
     connect.className = "btn btn-primary";
     connect.textContent = remoteLabState.connectInFlight === id ? "Connecting..." : "Connect";
-    connect.disabled = remoteLabState.connectInFlight === id || state === "busy" || state === "reserved";
+    connect.disabled = remoteLabState.connectInFlight === id
+      || state === "busy"
+      || state === "reserved"
+      // Recorded for SSH alone: there is no agent to reserve a rig from.
+      || state === "ssh-only";
     connect.addEventListener("click", function () { remoteLabConnect(id); });
     actions.appendChild(connect);
+
+    var activeSession = remoteLabSessionForDevice(id);
+    var disconnect = document.createElement("button");
+    disconnect.type = "button";
+    disconnect.className = "btn";
+    disconnect.textContent = remoteLabState.disconnectInFlight === id
+      ? "Disconnecting..."
+      : "Disconnect";
+    disconnect.disabled = remoteLabState.disconnectInFlight === id || !activeSession;
+    disconnect.title = activeSession
+      ? "Release this rig and close the card session held by this GUI"
+      : "No session held by this GUI for this device";
+    disconnect.addEventListener("click", function () { remoteLabDisconnect(id); });
+    actions.appendChild(disconnect);
 
     var refresh = document.createElement("button");
     refresh.type = "button";
@@ -1502,6 +1650,25 @@
     exportBtn.addEventListener("click", function () { remoteLabExport(id); });
     actions.appendChild(exportBtn);
 
+    var editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn";
+    editBtn.textContent = "Edit";
+    // A rename or a repoint while a link is live would strand the
+    // remote-reader binding, the session metadata reader_name and the
+    // per-reader persisted tab, all of which carry the name this device had
+    // when the link opened. Releasing first is the one safe order.
+    editBtn.disabled = !!activeSession;
+    editBtn.title = activeSession
+      ? "Disconnect before editing: a live session is bound to this device's current name and address"
+      : "Change this device's name, location, tags or agent address";
+    editBtn.addEventListener("click", function () {
+      remoteLabState.editing = remoteLabState.editing === id ? "" : id;
+      remoteLabState.editError = "";
+      renderRemoteLab();
+    });
+    actions.appendChild(editBtn);
+
     var remove = document.createElement("button");
     remove.type = "button";
     remove.className = "btn btn-danger";
@@ -1510,7 +1677,205 @@
     actions.appendChild(remove);
 
     card.appendChild(actions);
+    if (remoteLabState.editing === id) {
+      card.classList.add("remote-lab-card--editing");
+      card.appendChild(remoteLabBuildEditForm(device));
+    }
     return card;
+  }
+
+  // Editable device fields, mirroring EDITABLE_DEVICE_FIELDS in
+  // yggdrasim_common/remote_lab/registry.py. ``id`` and the token file are
+  // identity and credential plumbing; ``rig_id`` is the id the agent matches
+  // and is baked into live session state, so all three are changed by
+  // re-importing the invite rather than here.
+  var REMOTE_LAB_EDIT_FIELDS = [
+    { key: "name", label: "Name", hint: "Shown on this card and used for the reader name" },
+    { key: "agent_host", label: "Agent host", hint: "Hostname or IP the GUI connects to" },
+    { key: "agent_control_port", label: "Control port", hint: "", numeric: true },
+    { key: "location", label: "Location", hint: "" },
+    { key: "owner", label: "Owner", hint: "" },
+    { key: "tags", label: "Tags", hint: "Comma or space separated" },
+    { key: "notes", label: "Notes", hint: "" },
+    // The SSH half of a host card. Only Remote Bridge uses it, and it
+    // never travels in an invite: a colleague gets the agent and a
+    // token, not this operator's login or private key path.
+    { key: "ssh_target", label: "SSH target", hint: "user@host, for preparing this rig over SSH" },
+    { key: "ssh_identity_file", label: "SSH key", hint: "Optional private key path" },
+    { key: "remote_workdir", label: "Remote checkout", hint: "Where YggdraSIM lives on that host" },
+    { key: "remote_python", label: "Remote Python", hint: "Interpreter that runs its services" },
+    { key: "hil_service_name", label: "HIL service", hint: "systemd unit managing its HIL supervisor" },
+    { key: "card_reachability", label: "Card path", hint: "tunnel or direct" },
+    { key: "card_url", label: "Card URL", hint: "Required for direct: a bridge that host can route to" }
+  ];
+
+  var REMOTE_LAB_ACCESS_KEYS = {
+    ssh_target: "ssh_target",
+    ssh_identity_file: "identity_file",
+    remote_workdir: "remote_workdir",
+    remote_python: "remote_python",
+    hil_service_name: "hil_service_name",
+    card_reachability: "card_reachability",
+    card_url: "card_url"
+  };
+
+  function remoteLabEditValueFor(device, key) {
+    var agent = device.agent || {};
+    if (key === "agent_host") return String(agent.host || "");
+    if (key === "agent_control_port") return String(agent.control_port || "");
+    if (key === "tags") {
+      return (Array.isArray(device.tags) ? device.tags : []).join(", ");
+    }
+    if (Object.prototype.hasOwnProperty.call(REMOTE_LAB_ACCESS_KEYS, key)) {
+      var access = device.access || {};
+      return String(access[REMOTE_LAB_ACCESS_KEYS[key]] || "");
+    }
+    return String(device[key] || "");
+  }
+
+  function remoteLabBuildEditForm(device) {
+    var id = String(device && device.id || "");
+    var form = document.createElement("form");
+    form.className = "remote-lab-edit-panel";
+    form.setAttribute("data-device-id", id);
+
+    var grid = document.createElement("div");
+    grid.className = "remote-lab-edit-grid";
+    var inputs = {};
+
+    REMOTE_LAB_EDIT_FIELDS.forEach(function (field) {
+      var wrap = document.createElement("div");
+      wrap.className = "remote-lab-edit-field";
+      var inputId = "remote-lab-edit-" + id + "-" + field.key;
+      var label = document.createElement("label");
+      label.setAttribute("for", inputId);
+      label.textContent = field.label;
+      wrap.appendChild(label);
+      var input = document.createElement("input");
+      input.type = field.numeric ? "number" : "text";
+      input.id = inputId;
+      input.className = "remote-lab-edit-input";
+      input.value = remoteLabEditValueFor(device, field.key);
+      if (field.numeric) {
+        input.min = "1";
+        input.max = "65535";
+      }
+      if (field.hint) {
+        input.title = field.hint;
+      }
+      wrap.appendChild(input);
+      inputs[field.key] = input;
+      grid.appendChild(wrap);
+    });
+
+    var schemeWrap = document.createElement("div");
+    schemeWrap.className = "remote-lab-edit-field";
+    var schemeId = "remote-lab-edit-" + id + "-agent_scheme";
+    var schemeLabel = document.createElement("label");
+    schemeLabel.setAttribute("for", schemeId);
+    schemeLabel.textContent = "Scheme";
+    schemeWrap.appendChild(schemeLabel);
+    var scheme = document.createElement("select");
+    scheme.id = schemeId;
+    scheme.className = "remote-lab-edit-input";
+    ["http", "https"].forEach(function (value) {
+      var option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      scheme.appendChild(option);
+    });
+    scheme.value = String((device.agent || {}).scheme || "http");
+    schemeWrap.appendChild(scheme);
+    inputs.agent_scheme = scheme;
+    grid.appendChild(schemeWrap);
+    form.appendChild(grid);
+
+    if (remoteLabState.editError) {
+      var error = document.createElement("p");
+      error.className = "remote-lab-edit-error";
+      error.textContent = remoteLabState.editError;
+      error.setAttribute("role", "alert");
+      form.appendChild(error);
+    }
+
+    var row = document.createElement("div");
+    row.className = "remote-lab-edit-actions";
+    var save = document.createElement("button");
+    save.type = "submit";
+    save.className = "btn btn-primary";
+    save.textContent = remoteLabState.editInFlight ? "Saving..." : "Save";
+    save.disabled = remoteLabState.editInFlight;
+    row.appendChild(save);
+    var cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", function () {
+      remoteLabState.editing = "";
+      remoteLabState.editError = "";
+      renderRemoteLab();
+    });
+    row.appendChild(cancel);
+    form.appendChild(row);
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      remoteLabSaveEdit(id, inputs);
+    });
+    return form;
+  }
+
+  async function remoteLabSaveEdit(id, inputs) {
+    if (remoteLabState.editInFlight) return;
+    // Only the fields this form owns are sent. The route applies exactly the
+    // keys it receives, so anything absent here (capabilities, rig_id) keeps
+    // its stored value instead of being blanked.
+    var payload = {
+      name: String(inputs.name.value || "").trim(),
+      agent_host: String(inputs.agent_host.value || "").trim(),
+      agent_scheme: String(inputs.agent_scheme.value || "http"),
+      location: String(inputs.location.value || "").trim(),
+      owner: String(inputs.owner.value || "").trim(),
+      tags: String(inputs.tags.value || "").trim(),
+      notes: String(inputs.notes.value || "").trim(),
+    };
+    // The SSH half travels only to the local registry. Blank is a real
+    // answer here: it means this host has no SSH door, so the keys are
+    // always sent rather than omitted when empty.
+    Object.keys(REMOTE_LAB_ACCESS_KEYS).forEach(function (key) {
+      if (!inputs[key]) return;
+      payload[key] = String(inputs[key].value || "").trim();
+    });
+    var port = parseInt(inputs.agent_control_port.value, 10);
+    if (!isNaN(port)) {
+      payload.agent_control_port = port;
+    }
+    remoteLabState.editInFlight = true;
+    remoteLabState.editError = "";
+    renderRemoteLab();
+    try {
+      await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id) + "/update", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      remoteLabState.editing = "";
+      logBus.emit({
+        level: "info",
+        source: "remote-lab",
+        message: "updated device " + id,
+      });
+    } catch (err) {
+      remoteLabState.editError = String(err && err.message || err);
+    } finally {
+      remoteLabState.editInFlight = false;
+      await loadRemoteLab();
+      // loadRemoteLab repaints, but a failed save must keep the form open with
+      // its message, and the reader pill may now resolve a different name.
+      renderRemoteLab();
+      if (typeof readerBarRefresh === "function") {
+        readerBarRefresh({ manual: false });
+      }
+    }
   }
 
   async function remoteLabRefreshOne(id) {
@@ -1535,7 +1900,7 @@
         body: JSON.stringify({ user: "", requested_ttl_seconds: 3600 }),
       });
       var data = resp && resp.data ? resp.data : {};
-      remoteLabAdoptScp03Session(data);
+      remoteLabBindReader(data);
       remoteLabSetState("connected");
       logBus.emit({
         level: "info",
@@ -1551,39 +1916,76 @@
       });
     } finally {
       remoteLabState.connectInFlight = "";
+      // Repaint from the state already in hand before asking the server
+      // again: loadRemoteLab declines to run while another load is in
+      // flight, and a poll landing at the wrong moment left the card
+      // showing the pre-connect state until the operator clicked something.
+      renderRemoteLab();
       await loadRemoteLab();
     }
   }
 
-  function remoteLabAdoptScp03Session(data) {
-    if (!data || !data.session_id) return;
-    openCommandSubsystem("SCP03", { scope: "filesystem", leafId: "leaf-scp03-filesystem" });
-    var wb = commandState.scp03Workbench;
-    var tab = null;
-    for (var i = 0; i < wb.tabs.length; i++) {
-      if (!wb.tabs[i].sessionId) { tab = wb.tabs[i]; break; }
+  async function remoteLabDisconnect(id) {
+    if (!id || remoteLabState.disconnectInFlight) return;
+    // Re-read server state first: the cached row may predate an expiry,
+    // and releasing a session id the agent has already reaped reports a
+    // failure for work that is already done.
+    await remoteLabRefreshSessionState();
+    var session = remoteLabSessionForDevice(id);
+    if (!session) {
+      remoteLabSetState("no session for " + id);
+      renderRemoteLab();
+      return;
     }
-    if (!tab) {
-      tab = scp03CreateEmptyTab();
-      wb.tabs.push(tab);
+    var sessionId = String(session.session_id || "");
+    remoteLabState.disconnectInFlight = id;
+    remoteLabSetState("disconnecting " + id);
+    renderRemoteLab();
+    try {
+      remoteLabDetachLocalSession(session);
+      await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id) + "/release", {
+        method: "POST",
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+      remoteLabSetState("disconnected " + id);
+      logBus.emit({
+        level: "info",
+        source: "remote-lab",
+        message: "released " + id + " session " + sessionId.substring(0, 8),
+      });
+    } catch (err) {
+      remoteLabSetState("disconnect failed");
+      logBus.emit({
+        level: "error",
+        source: "remote-lab",
+        message: "disconnect failed for " + id + ": " + String(err && err.message || err),
+      });
+    } finally {
+      remoteLabState.disconnectInFlight = "";
+      await loadRemoteLab();
     }
-    wb.activeTabId = tab.id;
-    tab.sessionId = data.session_id || null;
-    tab.readerName = data.reader_name || "Remote Lab";
-    tab.atrHex = data.atr_hex || "";
-    tab.scanData = data;
-    tab.status = "open";
-    tab.pendingReader = "";
-    tab.error = null;
-      tab.errorKind = "";
-    commandState.scp03Session = tab.sessionId;
-    scp03PersistTab(tab);
-    readerBarSetActiveReaderOnly(tab.readerName);
-    remoteLabSetActiveSessions(remoteLabLocalActiveSessions());
+  }
+
+  // The remote counterpart of clicking a local reader pill. The connect
+  // route reserved the rig and published its reader name; nothing has been
+  // scanned. Bind the SCP03 tab to that name exactly as
+  // readerBarSyncToScp03Tab does for a local reader -- hydrate what was
+  // persisted, promote the tab, mark the pill -- and stay on this view. The
+  // tab is simply there when the operator opens a workbench, and each module
+  // opens its own card channel through the name when it needs one.
+  function remoteLabBindReader(data) {
+    if (!data || !data.reader_name) return;
+    var readerName = String(data.reader_name || "");
+    if (typeof readerBarSyncToScp03Tab === "function") {
+      readerBarSyncToScp03Tab(readerName);
+    }
+    readerBarSetActiveReaderOnly(readerName);
     remoteLabRefreshSessionState();
-    var tabBar = document.querySelector(".cc-wb-tabs.scp03-topbar");
-    var tabBody = document.querySelector(".cc-wb-body");
-    if (tabBar && tabBody) renderScp03Tabs(tabBar, tabBody);
+    // The reader row appears through /api/live/readers; ask for it now so
+    // the pill turns green on this click rather than on the next 5 s poll.
+    if (typeof readerBarRefresh === "function") {
+      readerBarRefresh({ manual: false });
+    }
     if (typeof readerBarNotifySessionChanged === "function") {
       readerBarNotifySessionChanged();
     }
@@ -1698,8 +2100,16 @@
 	    autoRefreshTimer: null,
 	    autoRefreshIntervalMs: 5000,
 	    lastStatus: null,
+	    // Whether this machine's own Card Bridge subprocess is up, as the
+	    // rig poll last saw it. null means that poll has not run.
+	    lastRigBridgeRunning: null,
+	    // The same answer for the bridge on the rig itself, so a surface
+	    // outside this module can tell a running stream from a stopped
+	    // one without paying for an SSH round trip of its own.
+	    lastRemoteBridgeRunning: null,
 	    globalState: "idle",
 	    globalLabel: "stopped",
+	    globalRendered: false,
 	  };
 
 	  function cbBridgeStatusFromPayload(data) {
@@ -1716,15 +2126,46 @@
 	    return nextState;
 	  }
 
+	  function cbResolveGlobalBridgeStatus() {
+	    // Two pollers report on this badge and they answer different
+	    // questions: the rig poll knows whether the local Card Bridge
+	    // subprocess is up, the relay poll knows how the card relay is
+	    // configured. Each used to write the badge itself, so a running
+	    // rig and a merely configured relay took turns and the badge
+	    // blinked once per tick. They both feed this instead.
+	    if (cbState.lastRigBridgeRunning === true) {
+	      return { state: "running", label: "running" };
+	    }
+	    var fromRelay = cbBridgeStatusFromPayload(cbState.lastStatus);
+	    if (cbState.lastRigBridgeRunning === false && fromRelay.state === "running") {
+	      return { state: "idle", label: "stopped" };
+	    }
+	    return fromRelay;
+	  }
+
+	  function cbRefreshGlobalBridgeStatus() {
+	    var resolved = cbResolveGlobalBridgeStatus();
+	    cbSetGlobalBridgeStatus(resolved.state, resolved.label);
+	  }
+
 	  function cbSetGlobalBridgeStatus(state, label) {
 	    var nextState = state || "idle";
 	    var nextLabel = cbBridgeDisplayLabel(nextState, label);
+	    if (
+	      cbState.globalRendered === true
+	      && cbState.globalState === nextState
+	      && cbState.globalLabel === nextLabel
+	    ) {
+	      return;
+	    }
+	    cbState.globalRendered = true;
 	    cbState.globalState = nextState;
 	    cbState.globalLabel = nextLabel;
     var pill = $("topbar-card-bridge");
     if (pill) {
       pill.setAttribute("data-state", nextState);
-      pill.title = "Remote Bridge status: " + nextLabel;
+      pill.title = "Remote APDU streaming: " + nextLabel
+        + "; opens whichever remote module is in use";
       pill.setAttribute("aria-label", pill.title);
     }
     setText("topbar-card-bridge-value", nextLabel);
@@ -1824,7 +2265,7 @@
   }
 
   function cbFormatLatencyMs(value) {
-    if (typeof value !== "number" || !isFinite(value) || value < 0) return "–";
+    if (typeof value !== "number" || !isFinite(value) || value < 0) return "-";
     if (value >= 1000) return (value / 1000).toFixed(2) + " s";
     if (value >= 100) return value.toFixed(0) + " ms";
     return value.toFixed(1) + " ms";
@@ -1875,10 +2316,9 @@
     if (!data) return;
     var configured = !!data.configured;
     cbSetBadge("cb-status-badge", configured ? "configured" : "not-configured");
-    var global = cbBridgeStatusFromPayload(data);
-    cbSetGlobalBridgeStatus(global.state, global.label);
-    setText("cb-status-url", data.url || "–");
-    setText("cb-status-source", data.url_source || "–");
+    cbRefreshGlobalBridgeStatus();
+    setText("cb-status-url", data.url || "-");
+    setText("cb-status-source", data.url_source || "-");
     var fp = data.token_fingerprint || "";
     setText(
       "cb-status-token",
@@ -1903,18 +2343,18 @@
           "Resolved <code>" + escapeHtml(data.url || "") + "</code>" +
           " (via " + escapeHtml(data.url_source || "?") + "). " +
           (data.has_token
-            ? "Bearer token wired up — fingerprint <code>" + escapeHtml(fp || "n/a") + "</code>."
-            : "No bearer token configured — only loopback bridges will accept the request.");
+            ? "Bearer token wired up -- fingerprint <code>" + escapeHtml(fp || "n/a") + "</code>."
+            : "No bearer token configured -- only loopback bridges will accept the request.");
       } else {
         summary.innerHTML =
-          "Not configured — set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass " +
+          "Not configured -- set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass " +
           "<code>--remote-card-url</code> to talk to a Card Bridge stream.";
       }
     }
 
     // Probe-card defaults inherit the status snapshot so a fresh page
     // load shows something sensible before the first probe runs.
-    setText("cb-probe-token-fp", fp || "–");
+    setText("cb-probe-token-fp", fp || "-");
   }
 
   async function runCardBridgeProbe() {
@@ -1929,7 +2369,7 @@
     var btn = $("cb-run-probe");
     if (btn) {
       btn.setAttribute("disabled", "true");
-      btn.textContent = "probing…";
+      btn.textContent = "probing...";
     }
     try {
       var resp = await apiFetch("/api/actions/card_bridge.probe/run", {
@@ -1974,16 +2414,16 @@
       "cb-probe-ping-latency",
       data && typeof data.ping_latency_ms === "number"
         ? cbFormatLatencyMs(data.ping_latency_ms)
-        : "–"
+        : "-"
     );
     setText(
       "cb-probe-status-latency",
       data && typeof data.status_latency_ms === "number"
         ? cbFormatLatencyMs(data.status_latency_ms)
-        : "–"
+        : "-"
     );
-    setText("cb-probe-reader", (data && data.reader) || "–");
-    setText("cb-probe-atr", (data && data.atr_hex) || "–");
+    setText("cb-probe-reader", (data && data.reader) || "-");
+    setText("cb-probe-atr", (data && data.atr_hex) || "-");
 
     var auditEl = $("cb-probe-audit");
     if (auditEl) {
@@ -1992,15 +2432,15 @@
       } else if (data && data.audit_enabled === false) {
         auditEl.textContent = "disabled";
       } else {
-        auditEl.textContent = "–";
+        auditEl.textContent = "-";
       }
     }
 
-    setText("cb-probe-token-fp", (data && data.token_fingerprint) || "–");
+    setText("cb-probe-token-fp", (data && data.token_fingerprint) || "-");
     var bridgeFp = (data && data.bridge_token_fingerprint) || "";
     var bridgeFpEl = $("cb-probe-bridge-fp");
     if (bridgeFpEl) {
-      bridgeFpEl.textContent = bridgeFp || "–";
+      bridgeFpEl.textContent = bridgeFp || "-";
       bridgeFpEl.classList.remove("cb-probe-bridge-fp--match", "cb-probe-bridge-fp--mismatch");
       // When we know both fingerprints, hint mismatch via colour.
       if (data && data.token_fingerprint && bridgeFp) {
@@ -2011,7 +2451,7 @@
         );
       }
     }
-    setText("cb-probe-bind-host", (data && data.bind_host) || "–");
+    setText("cb-probe-bind-host", (data && data.bind_host) || "-");
 
     var reasonEl = $("cb-probe-reason");
     if (reasonEl) {
@@ -2152,8 +2592,8 @@
 
     if (meta) {
       var lastSample = samples[samples.length - 1];
-      var lastPing = lastSample.pingMs != null ? cbFormatLatencyMs(lastSample.pingMs) : "—";
-      var lastStatus = lastSample.statusMs != null ? cbFormatLatencyMs(lastSample.statusMs) : "—";
+      var lastPing = lastSample.pingMs != null ? cbFormatLatencyMs(lastSample.pingMs) : "--";
+      var lastStatus = lastSample.statusMs != null ? cbFormatLatencyMs(lastSample.statusMs) : "--";
       meta.textContent =
         samples.length +
         " sample(s) • last ping " +
@@ -2171,7 +2611,7 @@
   function cbStartAutoRefresh() {
     cbStopAutoRefresh();
     cbState.autoRefreshTimer = window.setInterval(function () {
-      // Only refresh while the panel is the active view — otherwise
+      // Only refresh while the panel is the active view -- otherwise
       // we'd hammer the server when the operator is elsewhere.
       var view = document.querySelector('section[data-view="card_bridge"]');
       if (!view || !view.classList.contains("view-active")) return;
@@ -2235,6 +2675,245 @@
     "cb-rig-hil-port",
   ];
   var cbRigApplyingProfile = false;
+  // Which stored host the form is currently describing. The action reads
+  // every host field from the card when this is set, so the fields below
+  // become overrides rather than the only way to say where the rig is.
+  var cbRigSelectedHostId = "";
+
+  function cbRigSetField(id, value) {
+    var field = $(id);
+    if (!field) return;
+    field.value = String(value || "");
+  }
+
+  async function cbRigStoreHostAccess(id, changes) {
+    try {
+      var resp = await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id) + "/update", {
+        method: "POST",
+        body: JSON.stringify(changes),
+      });
+      return !!(resp && resp.ok);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function cbRigApplyHost(device) {
+    var access = (device && device.access) || {};
+    var id = String((device && device.id) || "");
+    cbRigSelectedHostId = id;
+
+    var stored = String(access.ssh_target || "").trim();
+    if (stored) {
+      cbRigSetField("cb-rig-ssh-target", stored);
+      cbRigSetField("cb-rig-identity-file", access.identity_file);
+      if (access.remote_workdir) {
+        cbRigSetField("cb-rig-remote-workdir", access.remote_workdir);
+      }
+      if (access.remote_python) {
+        cbRigSetField("cb-rig-remote-python", access.remote_python);
+      }
+      if (access.hil_service_name) {
+        cbRigSetField("cb-rig-service-name", access.hil_service_name);
+      }
+    } else {
+      // The card is the host; an empty SSH target is a gap to fill, not a
+      // reason to refuse the choice. Whatever is already typed belongs to
+      // the host just picked, so it is written back rather than asking the
+      // operator to retype it in another module.
+      var typed = String(cbRigReadField("cb-rig-ssh-target") || "").trim();
+      if (typed) {
+        await cbRigStoreHostAccess(id, {
+          ssh_target: typed,
+          ssh_identity_file: String(cbRigReadField("cb-rig-identity-file") || "").trim(),
+          remote_workdir: String(cbRigReadField("cb-rig-remote-workdir") || "").trim(),
+          remote_python: String(cbRigReadField("cb-rig-remote-python") || "").trim(),
+          hil_service_name: String(cbRigReadField("cb-rig-service-name") || "").trim(),
+        });
+        await cbRigLoadHosts();
+      }
+    }
+    cbRigSaveSettings();
+    cbRigRenderHosts();
+    cbRigRefreshStatus(null);
+  }
+
+  function cbRigBuildHostCard(device, status) {
+    var id = String((device && device.id) || "");
+    var access = (device && device.access) || {};
+    var sshTarget = String(access.ssh_target || "");
+    var card = document.createElement("article");
+    card.className = "remote-lab-card";
+    card.setAttribute("data-device-id", id);
+
+    var head = document.createElement("div");
+    head.className = "remote-lab-card-head";
+    var title = document.createElement("div");
+    title.className = "remote-lab-title";
+    title.textContent = String((device && device.name) || id || "Host");
+    head.appendChild(title);
+
+    var host = (status && status.host) || null;
+    var busy = host && String(host.hil_rig || "none") === "running";
+    var state = busy ? "busy" : (sshTarget ? "ready" : "needs ssh");
+    var badge = document.createElement("span");
+    badge.className = "remote-lab-status remote-lab-status--" + (busy ? "busy" : "available");
+    badge.textContent = state;
+    badge.setAttribute("role", "status");
+    badge.setAttribute("aria-label", "Host state: " + state);
+    head.appendChild(badge);
+    card.appendChild(head);
+
+    var meta = document.createElement("div");
+    meta.className = "remote-lab-meta";
+    var tags = Array.isArray(device && device.tags) ? device.tags : [];
+    meta.textContent = [
+      String((device && device.location) || "no location"),
+      tags.length ? tags.join(", ") : "no tags",
+      String(access.card_reachability || "tunnel") + " card path",
+    ].join(" \u00b7 ");
+    card.appendChild(meta);
+
+    var detail = document.createElement("div");
+    detail.className = "remote-lab-detail";
+    detail.textContent = sshTarget
+      || "no SSH target stored; choosing this host saves the one below";
+    card.appendChild(detail);
+
+    if (busy) {
+      var busyLine = document.createElement("div");
+      busyLine.className = "remote-lab-detail";
+      var source = String(host.hil_card_url || host.hil_card_source || "");
+      busyLine.textContent =
+        "a HIL rig is already running here" + (source ? " against " + source : "");
+      card.appendChild(busyLine);
+    }
+
+    var actions = document.createElement("div");
+    actions.className = "remote-lab-actions";
+    var use = document.createElement("button");
+    use.type = "button";
+    use.className = cbRigSelectedHostId === id ? "btn btn-primary" : "btn";
+    use.textContent = cbRigSelectedHostId === id
+      ? "Selected"
+      : (sshTarget ? "Use this host" : "Use this host and save SSH target");
+    use.addEventListener("click", function () {
+      cbRigApplyHost(device);
+    });
+    actions.appendChild(use);
+    card.appendChild(actions);
+    return card;
+  }
+
+  function cbRigSelectedHostName() {
+    if (!cbRigSelectedHostId) return "";
+    var devices = Array.isArray(cbRigHostState.devices) ? cbRigHostState.devices : [];
+    for (var index = 0; index < devices.length; index += 1) {
+      if (String(devices[index].id || "") === cbRigSelectedHostId) {
+        return String(devices[index].name || cbRigSelectedHostId);
+      }
+    }
+    return cbRigSelectedHostId;
+  }
+
+  function cbRigRenderHosts() {
+    var container = $("cb-rig-hosts");
+    if (!container) return;
+    container.innerHTML = "";
+    var devices = Array.isArray(cbRigHostState.devices) ? cbRigHostState.devices : [];
+    if (devices.length === 0) {
+      var empty = document.createElement("p");
+      empty.className = "loading";
+      empty.textContent =
+        "No stored hosts. Import one under Remote Lab, or fill the fields below.";
+      container.appendChild(empty);
+      return;
+    }
+    devices.forEach(function (device) {
+      var status = cbRigHostState.statuses[String(device.id || "")] || {};
+      container.appendChild(cbRigBuildHostCard(device, status));
+    });
+  }
+
+  var cbRigHostState = { devices: [], statuses: {} };
+
+  function cbRigHostIdFromName(name) {
+    var slug = String(name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return slug;
+  }
+
+  async function cbRigAddHost() {
+    var note = $("cb-rig-add-host-note");
+    function say(text) {
+      if (note) note.textContent = String(text || "");
+    }
+    var name = String(cbRigReadField("cb-rig-new-host-name") || "").trim();
+    var target = String(cbRigReadField("cb-rig-ssh-target") || "").trim();
+    if (!name) {
+      say("Give the host a name first.");
+      return;
+    }
+    if (!target) {
+      say("Fill the SSH target below before storing this host.");
+      return;
+    }
+    var id = cbRigHostIdFromName(name);
+    if (!id) {
+      say("That name has no letters or digits to build an id from.");
+      return;
+    }
+    say("Storing " + name + "...");
+    try {
+      var resp = await apiFetch("/api/remote-lab/hosts", {
+        method: "POST",
+        body: JSON.stringify({
+          id: id,
+          name: name,
+          ssh_target: target,
+          ssh_identity_file: String(cbRigReadField("cb-rig-identity-file") || "").trim(),
+          remote_workdir: String(cbRigReadField("cb-rig-remote-workdir") || "").trim(),
+          remote_python: String(cbRigReadField("cb-rig-remote-python") || "").trim(),
+          hil_service_name: String(cbRigReadField("cb-rig-service-name") || "").trim(),
+        }),
+      });
+      if (!resp || resp.ok === false) {
+        say(String((resp && resp.error) || "Could not store this host."));
+        return;
+      }
+      cbRigSelectedHostId = id;
+      cbRigSetField("cb-rig-new-host-name", "");
+      say("Stored " + name + ". It is available in Remote Lab too.");
+      cbRigSaveSettings();
+      await cbRigLoadHosts();
+    } catch (error) {
+      say(String((error && error.message) || error));
+    }
+  }
+
+  async function cbRigLoadHosts() {
+    try {
+      var resp = await apiFetch("/api/remote-lab/devices");
+      cbRigHostState.devices = (resp && resp.devices) || [];
+    } catch (error) {
+      cbRigHostState.devices = [];
+    }
+    try {
+      var statusResp = await apiFetch("/api/remote-lab/status");
+      var rows = (statusResp && statusResp.devices) || [];
+      var byId = {};
+      rows.forEach(function (row) {
+        byId[String(row.id || "")] = row;
+      });
+      cbRigHostState.statuses = byId;
+    } catch (error) {
+      cbRigHostState.statuses = {};
+    }
+    cbRigRenderHosts();
+  }
 
   function cbRigReadField(id) {
     var el = $(id);
@@ -2248,12 +2927,17 @@
 	  }
 
   function cbRigDefaultTokenFileForPort(port) {
-    return "~/.config/yggdrasim/card_bridge/" + String(port || CB_RIG_DEFAULT_CARD_PORT) + ".token";
+    return "~/.config/yggdrasim/hil/remote-card-" + String(port || CB_RIG_DEFAULT_CARD_PORT) + ".token";
   }
 
   function cbRigIsDefaultTokenFile(value) {
     var text = String(value || "").trim();
     if (!text) return true;
+    if (/^~\/\.config\/yggdrasim\/hil\/remote-card-[0-9]+\.token$/.test(text)) return true;
+    // The former default wrote into the namespace a Card Bridge uses for
+    // its own token. It stays a default here so a stored host card
+    // follows the port onto the current path instead of pinning the old
+    // one; the backend rewrites whatever still reaches it.
     return /^~\/\.config\/yggdrasim\/card_bridge\/[0-9]+\.token$/.test(text);
   }
 
@@ -2444,7 +3128,9 @@
     var profiles = cbRigLoadProfiles();
     cbRigRenderProfileOptions(profiles);
     var stored = cbRigLoadStoredSettingsPayload(profiles);
+    cbRigSelectedHostId = String(stored[CB_RIG_HOST_KEY] || "");
 	    Object.keys(stored).forEach(function (id) {
+	      if (id === CB_RIG_HOST_KEY) return;
 	      cbRigWriteField(id, stored[id]);
 	    });
 	    cbRigSyncReaderFieldsToActiveReader();
@@ -2452,8 +3138,11 @@
       cbRigUpdatePortPlan();
 	  }
 
+  var CB_RIG_HOST_KEY = "cb-rig-selected-host";
+
   function cbRigSaveSettings(options) {
     var payload = cbRigReadSettingsPayload();
+    payload[CB_RIG_HOST_KEY] = cbRigSelectedHostId;
     try {
       window.localStorage.setItem(CB_RIG_STORAGE_KEY, JSON.stringify(payload));
     } catch (_err) {}
@@ -2482,6 +3171,7 @@
 	    var cardPort = cbRigPayloadNumber(payload, "cb-rig-card-port", CB_RIG_DEFAULT_CARD_PORT);
 	    var guiPort = cbRigPayloadNumber(payload, "cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT);
 	    return ccApplyActiveReaderBindingInputs({
+	      device_id: cbRigSelectedHostId,
 	      ssh_target: cbRigPayloadValue(payload, "cb-rig-ssh-target"),
 	      identity_file: cbRigPayloadValue(payload, "cb-rig-identity-file"),
 	      ssh_path: cbRigPayloadValue(payload, "cb-rig-ssh-path"),
@@ -2516,7 +3206,11 @@
       cbRigSaveSettings();
       return cbRigCommonInputs();
     }
-    return cbRigInputsFromPayload(cbRigLoadStoredSettingsPayload());
+    var stored = cbRigLoadStoredSettingsPayload();
+    // Launching from the HIL panel never renders these fields, so the
+    // chosen host comes back from storage rather than from the form.
+    cbRigSelectedHostId = String(stored[CB_RIG_HOST_KEY] || cbRigSelectedHostId || "");
+    return cbRigInputsFromPayload(stored);
   }
 
   function cbRigRemoteRigStartInputs(cfg) {
@@ -2550,7 +3244,7 @@
     if (!button) return function () {};
     var previous = button.textContent;
     button.disabled = true;
-    button.textContent = busyText || "working…";
+    button.textContent = busyText || "working...";
     return function () {
       button.disabled = false;
       button.textContent = previous;
@@ -2640,20 +3334,20 @@
       "SSH tunnel"
     );
     var remote = state.remote_service || {};
-    var remoteStatus = remote.ActiveState || (state.remote_error ? "error" : "–");
+    var remoteStatus = remote.ActiveState || (state.remote_error ? "error" : "-");
     if (remote.SubState) remoteStatus += " · " + remote.SubState;
     cbSetSemanticStatus("cb-rig-service-status", remoteStatus, "Remote service");
     var hil = state.remote_hil || {};
     var bridgeStatus = Object.prototype.hasOwnProperty.call(hil, "bridge_running")
       ? (hil.bridge_running ? "running" : "stopped")
-      : "–";
+      : "-";
     var usbStatus = Object.prototype.hasOwnProperty.call(hil, "usb_present")
       ? (hil.usb_present ? "present" : "missing")
-      : "–";
+      : "-";
     var remsimStatus = Object.prototype.hasOwnProperty.call(hil, "remsim_client_running")
       ? (hil.remsim_client_running ? "running" : (hil.remsim_binary_missing ? "missing" : (hil.remsim_client_enabled === false ? "disabled" : "stopped")))
-      : "–";
-    var linkStatus = "–";
+      : "-";
+    var linkStatus = "-";
     if (Object.prototype.hasOwnProperty.call(hil, "modem_path_ready")) {
       if (hil.modem_path_ready) {
         linkStatus = "connected";
@@ -2670,13 +3364,13 @@
     cbSetSemanticStatus("cb-rig-remsim-status", remsimStatus, "REMSIM");
     cbSetSemanticStatus("cb-rig-modem-link-status", linkStatus, "Modem link");
     if (state.local_gui_url) setText("cb-rig-gui-url", state.local_gui_url);
-    if (state.local_card_bridge_running) {
-      cbSetGlobalBridgeStatus("running", "running");
-	    } else if (Object.prototype.hasOwnProperty.call(state, "local_card_bridge_running")) {
-	      var global = cbBridgeStatusFromPayload(cbState.lastStatus);
-	      if (global.state === "running") global = { state: "idle", label: "stopped" };
-	      cbSetGlobalBridgeStatus(global.state, global.label);
-	    }
+    if (Object.prototype.hasOwnProperty.call(state, "local_card_bridge_running")) {
+      cbState.lastRigBridgeRunning = !!state.local_card_bridge_running;
+    }
+    if (Object.prototype.hasOwnProperty.call(hil, "bridge_running")) {
+      cbState.lastRemoteBridgeRunning = !!hil.bridge_running;
+    }
+    cbRefreshGlobalBridgeStatus();
     cbRigSetNote(
       cbRigDescribeAction(data, "Remote host status refreshed."),
       !!(state.remote_error || (hil && hil.ok === false) || (data && data.ok === false)),
@@ -2723,7 +3417,7 @@
       local_gui_port: cfg.local_gui_port,
       remote_workdir: cfg.remote_workdir,
       remote_python: cfg.remote_python,
-    }, button, "checking…");
+    }, button, "checking...");
     if (data) cbRigRenderStatus(data);
   }
 
@@ -2737,7 +3431,7 @@
 	      apdu_timeout_ms: cfg.apdu_timeout_ms,
 	      restart: false,
 	      confirm: true,
-	    }, button, "starting…", { flashOk: true });
+	    }, button, "starting...", { flashOk: true });
     if (data) {
       loadCardBridgeStatus();
       cbRigRefreshStatus(null);
@@ -2745,7 +3439,7 @@
   }
 
   async function cbRigStopLocal(button) {
-    var data = await cbRigRun("card_bridge.local_stop", { confirm: true }, button, "stopping…");
+    var data = await cbRigRun("card_bridge.local_stop", { confirm: true }, button, "stopping...");
     if (data) cbRigRefreshStatus(null);
   }
 
@@ -2763,7 +3457,7 @@
       forward_gui: true,
       restart: false,
       confirm: true,
-    }, button, "opening…", { flashOk: true });
+    }, button, "opening...", { flashOk: true });
     if (data) cbRigRefreshStatus(null);
   }
 
@@ -2775,7 +3469,7 @@
       "card_bridge.remote_rig_start",
       cbRigRemoteRigStartInputs(cfg),
       button,
-      "starting rig…",
+      "starting rig...",
       { flashOk: true }
     );
     if (data) {
@@ -2798,7 +3492,7 @@
       "card_bridge.remote_rig_start",
       cbRigRemoteRigStartInputs(cfg),
       null,
-      "starting rig…",
+      "starting rig...",
       { flashOk: true, saveSettings: false }
     );
     if (data) {
@@ -2819,7 +3513,7 @@
       remote_workdir: cfg.remote_workdir,
       remote_python: cfg.remote_python,
       confirm: true,
-    }, button, "stopping rig…");
+    }, button, "stopping rig...");
     if (data) {
       loadCardBridgeStatus();
       cbRigRenderStatus(data, { flashOk: data.ok !== false });
@@ -2842,7 +3536,7 @@
       remote_workdir: cfg.remote_workdir,
       remote_python: cfg.remote_python,
       confirm: true,
-    }, null, "stopping rig…", { saveSettings: false });
+    }, null, "stopping rig...", { saveSettings: false });
     if (data) {
       loadCardBridgeStatus();
       cbRigRenderStatus(data, { flashOk: data.ok !== false });
@@ -2851,7 +3545,7 @@
   }
 
   async function cbRigStopTunnel(button) {
-    var data = await cbRigRun("card_bridge.remote_rig_tunnel_stop", { confirm: true }, button, "stopping…");
+    var data = await cbRigRun("card_bridge.remote_rig_tunnel_stop", { confirm: true }, button, "stopping...");
     if (data) cbRigRefreshStatus(null);
   }
 
@@ -2862,9 +3556,13 @@
       ssh_target: cfg.ssh_target,
       identity_file: cfg.identity_file,
       ssh_path: cfg.ssh_path,
+      // Both ends read the token named for the port in use; without them
+      // the action falls back to a fixed port and ships the wrong token.
+      local_card_port: cfg.local_card_port,
+      remote_card_port: cfg.remote_card_port,
       remote_token_file: cfg.remote_token_file,
       confirm: true,
-    }, button, "syncing…");
+    }, button, "syncing...");
   }
 
   async function cbRigInstallService(button) {
@@ -2877,6 +3575,8 @@
       service_name: cfg.service_name,
       remote_workdir: cfg.remote_workdir,
       remote_python: cfg.remote_python,
+      // The unit dials this port and reads the token named for it.
+      remote_card_port: cfg.remote_card_port,
       remote_card_url: cfg.remote_card_url,
       remote_token_file: cfg.remote_token_file,
       remsim_binary: cfg.remsim_binary,
@@ -2885,7 +3585,7 @@
       apdu_timeout_ms: cfg.apdu_timeout_ms,
       start_now: true,
       confirm: true,
-    }, button, "installing…");
+    }, button, "installing...");
     if (data) cbRigRefreshStatus(null);
   }
 
@@ -2899,7 +3599,7 @@
       service_name: cfg.service_name,
       action: action,
       confirm: action !== "status",
-    }, button, action + "…");
+    }, button, action + "...");
     if (data) cbRigRefreshStatus(null);
   }
 
@@ -2911,6 +3611,12 @@
 
   function loadCardBridge() {
     cbRigLoadSettings();
+    cbRigLoadHosts();
+    var addHost = $("cb-rig-add-host");
+    if (addHost && !addHost.dataset.wired) {
+      addHost.dataset.wired = "1";
+      addHost.addEventListener("click", cbRigAddHost);
+    }
     loadCardBridgeStatus();
     cbRigRefreshStatus(null);
     if ($("cb-auto-refresh") && $("cb-auto-refresh").checked) {
@@ -2984,23 +3690,33 @@
         cbRigUpdateGuiUrl();
         cbRigUpdatePortPlan();
       });
+      // The derived read-outs follow every keystroke; the two
+      // localStorage writes and the profile lookup wait for a pause
+      // in typing (the ``change`` handler above still commits on blur).
+      var inputTimer = null;
       el.addEventListener("input", function () {
-        if (id === "cb-rig-ssh-target") {
-          var applied = cbRigApplyProfileForTarget(cbRigReadField(id));
-          if (!applied) cbRigApplySuggestedPortsForTarget(cbRigReadField(id));
-          cbRigSaveSettings({ updateProfile: applied });
-        } else if (id === "cb-rig-card-port") {
-          cbRigClearAutoPortFlag(id);
-          cbRigSyncTokenFileToCardPort();
-          cbRigSaveSettings();
-        } else if (id === "cb-rig-gui-port" || id === "cb-rig-hil-port" || id === "cb-rig-remote-token") {
-          cbRigClearAutoPortFlag(id);
-          cbRigSaveSettings();
-        } else if (!cbRigApplyingProfile) {
-          cbRigSaveSettings();
-        }
         cbRigUpdateGuiUrl();
         cbRigUpdatePortPlan();
+        if (inputTimer) window.clearTimeout(inputTimer);
+        inputTimer = window.setTimeout(function () {
+          inputTimer = null;
+          if (id === "cb-rig-ssh-target") {
+            var applied = cbRigApplyProfileForTarget(cbRigReadField(id));
+            if (!applied) cbRigApplySuggestedPortsForTarget(cbRigReadField(id));
+            cbRigSaveSettings({ updateProfile: applied });
+          } else if (id === "cb-rig-card-port") {
+            cbRigClearAutoPortFlag(id);
+            cbRigSyncTokenFileToCardPort();
+            cbRigSaveSettings();
+          } else if (id === "cb-rig-gui-port" || id === "cb-rig-hil-port" || id === "cb-rig-remote-token") {
+            cbRigClearAutoPortFlag(id);
+            cbRigSaveSettings();
+          } else if (!cbRigApplyingProfile) {
+            cbRigSaveSettings();
+          }
+          cbRigUpdateGuiUrl();
+          cbRigUpdatePortPlan();
+        }, 250);
       });
     });
 
@@ -3047,7 +3763,7 @@
     var s = String(text == null ? "" : text);
     if (s.length <= FLOW_LOG_MAX_MSG_CHARS) return s;
     var keep = FLOW_LOG_MAX_MSG_CHARS - 32;
-    return s.slice(0, keep) + "… [+" + (s.length - keep) + " chars truncated]";
+    return s.slice(0, keep) + "... [+" + (s.length - keep) + " chars truncated]";
   }
 
   function appendLogRow(logEl, level, message) {
@@ -3074,5 +3790,28 @@
   }
 
   function scheduleHealthPoll() {
-    setInterval(loadHealth, 10000);
+    setInterval(function () {
+      if (document.hidden) return;
+      loadHealth();
+    }, 10000);
+  }
+
+  // Coalesce a burst of resize events into one callback per frame so
+  // xterm reflows and dock re-measures run once per paint, not once
+  // per event while a window edge is being dragged.
+  function addCoalescedResizeListener(handler) {
+    var scheduled = false;
+    window.addEventListener("resize", function () {
+      if (scheduled) return;
+      scheduled = true;
+      var run = function () {
+        scheduled = false;
+        handler();
+      };
+      if (window.requestAnimationFrame) {
+        window.requestAnimationFrame(run);
+      } else {
+        setTimeout(run, 16);
+      }
+    });
   }

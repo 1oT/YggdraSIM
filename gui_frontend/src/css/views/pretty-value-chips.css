@@ -4,7 +4,7 @@
  */
 
 
-/* Pretty primitives — type chips help an operator read a row without
+/* Pretty primitives -- type chips help an operator read a row without
    parsing it. Hex strings get their own monospace pill so an ICCID or
    IMSI is byte-grouped exactly like the hex dump panes. */
 
@@ -78,7 +78,7 @@
   padding: 0 6px;
 }
 
-/* Pretty containers — arrays of primitives become chip rows; arrays of
+/* Pretty containers -- arrays of primitives become chip rows; arrays of
    objects become a numbered stack; nested objects recurse into their
    own dl. */
 
@@ -94,7 +94,7 @@
   gap: 6px;
 }
 
-/* Vertical "one item per line" layout — used for arrays of
+/* Vertical "one item per line" layout -- used for arrays of
    human-readable strings (EF.ARR decoded rules, multi-line lint
    findings, etc.). Each line stays on its own row so the operator
    can scan the values without parsing whitespace. */

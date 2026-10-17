@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """pySim profile-template registry adapter.
 
 Bridges pySim's ``ProfileTemplateRegistry`` (TCA SAIP §9 / Annex A
@@ -31,8 +30,12 @@ literal ``_FILE_SPECS`` table alone.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+from yggdrasim_common.service_table_names import service_table_names
 
 
 _PYSIM_FTYPE_TO_STRUCTURE: dict[str, str] = {
@@ -157,6 +160,10 @@ def _build_registry() -> dict[str, tuple[FileTemplateSnapshot, ...]]:
     templates_module = _import_pysim_templates()
     if templates_module is None:
         return {}
+    # The compat installs register templates upstream lacks (the IoT Minimal
+    # Profile files among them); enumerate after them, or the snapshot
+    # depends on which surface decoded a package before the cache filled.
+    _ensure_pysim_saip_compat()
     registry_cls = getattr(templates_module, "ProfileTemplateRegistry", None)
     if registry_cls is None:
         return {}
@@ -350,6 +357,63 @@ def _decode_link_path_from_descriptor(descriptor: Any) -> tuple[str, ...]:
     )
 
 
+def _ensure_pysim_saip_compat() -> None:
+    """Apply the SAIP compatibility fixes this module's callers depend on.
+
+    ``File.file_content_from_tuples`` linearises through an ``io.BytesIO``,
+    which grows with NUL, so a gap left by ``fillFileOffset`` arrives as '00'
+    where the card holds the erased state -- TCA SAIP §8.3.5 makes the offset a
+    pointer move that writes nothing and §9.10 pads the default EF-ARR image
+    with 'FF...FF'. The GUI and TUI surfaces install the fix through
+    ``ensure_workspace_pysim_on_path``; the card engine reaches pySim directly,
+    so it installs it here. Evidence is in
+    ``upstream_patches/osmocom-pysim-saip-fill-file-offset-erased-state/``.
+    ``install_extra_profile_elements`` adds the PE-IoT / PE-OPT-IoT,
+    cdmaParameter and nonStandard classes upstream lacks
+    (``upstream_patches/osmocom-pysim-saip-extra-profile-elements/``).
+    ``install_proprietary_efinfo_without_descriptor`` reads a template file's
+    fill or repeat pattern when its Fcp names no ``fileDescriptor``
+    (``upstream_patches/osmocom-pysim-saip-proprietary-efinfo-without-descriptor/``).
+    ``install_gfm_mf_creation`` lets a PE-GenericFileManagement create the MF
+    and registers the IoT Minimal Profile templates
+    (``upstream_patches/osmocom-pysim-saip-gfm-mf-creation/``); it runs here,
+    not only when a GFM package is decoded, so the file-template registry
+    this module caches holds the same files whichever surface fills it first.
+    ``install_phonebook_pbc_template`` names the DF.PHONEBOOK template rows
+    EF.PBC (``upstream_patches/osmocom-pysim-saip-implicit-template-ppath/``,
+    bug 2) here for the same reason: the JSON codec installs it as well, and
+    without it a registry built before the codec ran has no ``ef-pbc`` on
+    stock pySim.
+    ``install_optional_security_domain_key_list`` lets a PE-SecurityDomain
+    omit its optional ``keyList``
+    (``upstream_patches/osmocom-pysim-saip-sd-optional-key-list/``), and
+    ``install_object_identifier_arc2_decoding`` decodes an object identifier
+    under arc 2 with a second arc above 39
+    (``upstream_patches/eerimoq-asn1tools-oid-arc2/``).
+    """
+    from yggdrasim_common.asn1tools_compat import install_object_identifier_arc2_decoding
+    from Tools.ProfilePackage.saip_pysim_compat import (
+        install_erased_state_file_fill,
+        install_extra_profile_elements,
+        install_gfm_mf_creation,
+        install_optional_security_domain_key_list,
+        install_phonebook_pbc_template,
+        install_proprietary_efinfo_without_descriptor,
+        install_record_aware_fill_pattern,
+        install_record_aware_template_default,
+    )
+
+    install_object_identifier_arc2_decoding()
+    install_optional_security_domain_key_list()
+    install_erased_state_file_fill()
+    install_record_aware_fill_pattern()
+    install_record_aware_template_default()
+    install_proprietary_efinfo_without_descriptor()
+    install_extra_profile_elements()
+    install_gfm_mf_creation()
+    install_phonebook_pbc_template()
+
+
 def _import_pysim_file_class() -> Any:
     try:
         import pySim.esim.saip as saip_module  # noqa: WPS433
@@ -357,6 +421,7 @@ def _import_pysim_file_class() -> Any:
         return None
     except Exception:
         return None
+    _ensure_pysim_saip_compat()
     return getattr(saip_module, "File", None)
 
 
@@ -459,6 +524,9 @@ def _import_pysim_saip_module() -> Any:
         return None
     except Exception:
         return None
+    # ``FsProfileElement._post_decode`` builds File objects from the decoded
+    # tuples, so the wrappers this returns need the same fix as the walker.
+    _ensure_pysim_saip_compat()
     return saip_module
 
 
@@ -587,42 +655,6 @@ def pysim_sd_keys(decoded: dict[str, Any]) -> tuple[PySimSdKeySnapshot, ...]:
             )
         )
     return tuple(snapshots)
-
-
-def pysim_sd_scp_list(decoded: dict[str, Any]) -> tuple[tuple[int, int], ...]:
-    """Return ``[(scp, i), ...]`` parsed from the C9 install parameters.
-
-    Resolves SAIP §11.2.10 ``UICC SD Install Parameters`` tag C9 via
-    pySim's ``ProfileElementSD.usip``. Each entry is the ``(SCP, i)``
-    pair from GP Card Spec v2.3.1 Amendment D §7.5 (e.g. ``(3, 0x70)``
-    for SCP03 with i=70). Returns ``()`` on failure.
-    """
-    wrapper = pysim_pe_wrapper("securityDomain", decoded)
-    if wrapper is None:
-        return ()
-    usip = getattr(wrapper, "usip", None)
-    if usip is None:
-        return ()
-    nested = getattr(usip, "nested_collection", None)
-    if nested is None:
-        return ()
-    children = getattr(nested, "children", None) or []
-    out: list[tuple[int, int]] = []
-    for child in children:
-        # Each SCP descriptor child carries an ``scp`` and ``i`` byte.
-        scp = getattr(child, "scp", None)
-        i_param = getattr(child, "i", None)
-        if isinstance(scp, int) and isinstance(i_param, int):
-            out.append((int(scp) & 0xFF, int(i_param) & 0xFF))
-            continue
-        # Fallback: the descriptor may expose a ``decoded`` dict
-        decoded_dict = getattr(child, "decoded", None)
-        if isinstance(decoded_dict, dict):
-            scp_v = decoded_dict.get("scp")
-            i_v = decoded_dict.get("i")
-            if isinstance(scp_v, int) and isinstance(i_v, int):
-                out.append((int(scp_v) & 0xFF, int(i_v) & 0xFF))
-    return tuple(out)
 
 
 @dataclass(frozen=True)
@@ -999,13 +1031,40 @@ def pysim_alias_specs_for(
 #
 # The simulator historically duplicated these as hand-curated dicts inside
 # ``Tools/ProfilePackage/saip_asn1_decode``. The duplication was a known
-# drift hazard (TS releases bump the table every 6-12 months). The helpers
-# below expose the upstream maps so the local copies can be replaced by an
-# overlay at module load time, while still degrading gracefully when pySim
-# is not installed (the hand-curated maps remain functional in that case).
+# drift hazard (TS releases bump the table every 6-12 months), so the clause
+# text now lives once in ``yggdrasim_common.service_table_names`` and is the
+# base every lookup below starts from. pySim's wording is layered on top when
+# pySim is installed, which keeps a live-card dump and an inspector pass in
+# step with the upstream strings; a deployment without pySim still gets the
+# clause-current names rather than an empty overlay. pySim trails the current
+# release (146 of the 152 USIM services, 5 of the 13 5G ProSe services), so
+# the base carries services the overlay does not name.
 
 
 _SERVICE_TABLE_CACHE: dict[str, dict[int, str]] | None = None
+
+
+def _prefer_workspace_pysim_checkout() -> None:
+    """Put a developer ``<repo>/pysim`` checkout ahead of site-packages.
+
+    ``Tools.ProfilePackage.saip_json_codec.ensure_workspace_pysim_on_path``
+    decides the same race for the SAIP tools, but ``SIMCARD.saip_profile``
+    imports this module at module load and the service-table overlay below
+    is the first ``import pySim`` in most processes; the package bound to
+    ``sys.modules`` there is the one every later import returns, so the
+    checkout won in the GUI and lost in a script depending on which module
+    loaded first. The path is inserted only while pySim is not imported
+    yet, so a process that has resolved it keeps its choice, and a
+    site-packages layout (no nested ``pysim/pySim`` package) is left alone.
+    """
+    if "pySim" in sys.modules:
+        return
+    checkout = Path(__file__).resolve().parents[1] / "pysim"
+    if (checkout / "pySim" / "__init__.py").is_file() is False:
+        return
+    root_text = str(checkout)
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
 
 
 def _import_pysim_service_tables() -> dict[str, dict[int, str]]:
@@ -1015,6 +1074,7 @@ def _import_pysim_service_tables() -> dict[str, dict[int, str]]:
     if _SERVICE_TABLE_CACHE is not None:
         return _SERVICE_TABLE_CACHE
 
+    _prefer_workspace_pysim_checkout()
     tables: dict[str, dict[int, str]] = {}
     try:
         from pySim import ts_31_102 as _ts_31_102  # type: ignore[import-not-found]
@@ -1054,18 +1114,25 @@ def _import_pysim_service_tables() -> dict[str, dict[int, str]]:
 
 
 def pysim_service_table(name: str) -> dict[int, str]:
-    """Return a copy of the pySim service-name map for ``name``.
+    """Return a fresh service-name map for ``name``.
 
     ``name`` is one of ``"UST"``, ``"EST"``, ``"IST"``, ``"SST"``,
-    ``"5G_PROSE_ST"``. Returns an empty dict when pySim is unavailable
-    or the requested table is missing -- callers must therefore treat
-    ``{}`` as "no overlay; keep the local copy".
+    ``"5G_PROSE_ST"``. The clause wording of
+    ``yggdrasim_common.service_table_names`` is the base and pySim's strings
+    are layered over it where pySim defines the same service number, so a
+    machine without pySim still gets every service the clause names. An
+    unrecognised table name returns an empty dict, which callers read as
+    "no overlay; keep the local copy".
     """
 
-    table = _import_pysim_service_tables().get(str(name).upper())
-    if table is None:
+    key = str(name).upper()
+    merged = service_table_names(key, style="spec")
+    overlay = _import_pysim_service_tables().get(key)
+    if overlay is None and not merged:
         return {}
-    return dict(table)
+    if overlay is not None:
+        merged.update(overlay)
+    return merged
 
 
 def overlay_pysim_service_names(

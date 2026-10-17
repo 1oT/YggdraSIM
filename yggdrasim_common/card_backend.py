@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Card backend selector: persists and resolves the active transport (physical reader vs simulated card) and associated config paths."""
 from __future__ import annotations
 
@@ -18,6 +17,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import urlparse, urlunparse
 
+from .card_bridge_auth import CARD_LEASE_HEADER
 from .runtime_paths import ensure_seeded_workspace_file, ensure_workspace_dir, runtime_path, workspace_path
 
 
@@ -753,8 +753,8 @@ def _resolve_card_relay_token(*, allow_marker: bool) -> str:
     Resolution order matches :func:`_resolve_card_relay_url` so the
     URL and the token are sourced consistently:
 
-    1. ``YGGDRASIM_CARD_RELAY_TOKEN`` — raw token value.
-    2. ``YGGDRASIM_CARD_RELAY_TOKEN_FILE`` — path to a 0600 token file.
+    1. ``YGGDRASIM_CARD_RELAY_TOKEN`` -- raw token value.
+    2. ``YGGDRASIM_CARD_RELAY_TOKEN_FILE`` -- path to a 0600 token file.
     3. The runtime marker (only when *allow_marker* is True), which
        may carry either ``token`` (raw) or ``tokenFile`` (path).
 
@@ -806,6 +806,7 @@ def _request_card_relay_json(
     timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS,
     request_json: dict[str, Any] | None = None,
     auth_token: str = "",
+    extra_headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     encoded_body = None
     headers = {"Accept": "application/json"}
@@ -814,6 +815,9 @@ def _request_card_relay_json(
         headers["Content-Type"] = "application/json"
     if len(auth_token) > 0:
         headers["Authorization"] = f"Bearer {auth_token}"
+    for header_name, header_value in (extra_headers or {}).items():
+        if len(str(header_value or "")) > 0:
+            headers[str(header_name)] = str(header_value)
     request = urllib_request.Request(url, data=encoded_body, headers=headers, method=method)
     try:
         with urllib_request.urlopen(
@@ -838,9 +842,15 @@ def _request_card_relay_json(
                 error_bytes.decode("utf-8", errors="replace"),
                 auth_token=auth_token,
             )
-        raise RuntimeError(
+        # Carry the status code on the exception. Callers that must
+        # distinguish "another consumer holds the card" (409) from
+        # "this relay grants no leases" (403) cannot re-parse a
+        # human-readable message to find out.
+        relay_error = RuntimeError(
             f"Card relay HTTP {exc.code}: {detail or 'request rejected'}"
-        ) from exc
+        )
+        relay_error.status = int(exc.code)
+        raise relay_error from exc
     except urllib_error.URLError as exc:
         reason = getattr(exc, "reason", exc)
         raise RuntimeError(
@@ -886,7 +896,7 @@ def _safe_card_relay_error_detail(raw_text: str, *, auth_token: str = "") -> str
     text = re.sub(r"(?i)(authorization\s*:\s*bearer|bearer)\s+\S+", r"\1 <redacted>", text)
     text = " ".join(text.split())
     if len(text) > MAX_CARD_RELAY_ERROR_DETAIL_CHARS:
-        text = text[:MAX_CARD_RELAY_ERROR_DETAIL_CHARS].rstrip() + "…"
+        text = text[:MAX_CARD_RELAY_ERROR_DETAIL_CHARS].rstrip() + "..."
     return text
 
 
@@ -898,6 +908,7 @@ class RelayCardConnection:
         *,
         auth_token: str = "",
         session_id: str = "",
+        lease_token: str = "",
     ):
         normalized_endpoint = _normalize_card_relay_url(endpoint)
         if len(normalized_endpoint) == 0:
@@ -907,6 +918,10 @@ class RelayCardConnection:
         self._card_reset_url = _build_card_relay_card_reset_url(normalized_endpoint)
         self._timeout_seconds = max(1, int(timeout_seconds or DEFAULT_CARD_RELAY_TIMEOUT_SECONDS))
         self._auth_token = str(auth_token or "").strip()
+        # Cooperative card lease held by whoever owns this consumer. The
+        # relay refuses a caller that does not present the lease it is
+        # holding, so every request this connection makes carries it.
+        self._lease_token = str(lease_token or "").strip()
         self._connected = False
         self._atr: list[int] = []
         # Identifies this shell's work to the relay. The bridge
@@ -926,6 +941,11 @@ class RelayCardConnection:
     def auth_token(self) -> str:
         """Return the bearer token configured on this connection (or empty)."""
         return self._auth_token
+
+    @property
+    def lease_token(self) -> str:
+        """Return the card lease this connection presents (or empty)."""
+        return self._lease_token
 
     def connect(self, protocol: Any = None) -> None:
         """Connect to the physical card via the configured PCSC or serial backend."""
@@ -1005,12 +1025,18 @@ class RelayCardConnection:
         return data, sw1, sw2
 
     def _request_json(self, url: str, *, method: str, request_json: dict[str, Any] | None = None) -> dict[str, Any]:
+        # Only pass the header argument when a lease is actually held, so
+        # a connection without one calls exactly as it always has.
+        lease_headers: dict[str, Any] = {}
+        if len(self._lease_token) > 0:
+            lease_headers["extra_headers"] = {CARD_LEASE_HEADER: self._lease_token}
         return _request_card_relay_json(
             url,
             method=method,
             timeout_seconds=self._timeout_seconds,
             request_json=request_json,
             auth_token=self._auth_token,
+            **lease_headers,
         )
 
 
@@ -1036,12 +1062,20 @@ def create_card_connection(
     reader_index: int = 0,
     protocol: Any = None,
     readers_func: Callable[[], Any] | None = None,
+    reader_name: str = "",
 ):
     # Defer the import so the recorder module isn't dragged in until a
-    # connection is actually being created — keeps cold-start cheap for
+    # connection is actually being created -- keeps cold-start cheap for
     # CLI tools that never touch a card.
-    """Create and return a live card connection using the configured backend."""
+    """Create and return a live card connection using the configured backend.
+
+    *reader_name*, when it names a registered remote reader, selects that
+    reader's relay ahead of any ambient relay configuration: it is a
+    per-request choice, while the env var and the runtime marker are
+    process-wide defaults.
+    """
     from .apdu_recorder import wrap_connection
+    from .remote_readers import lookup_remote_reader
 
     if is_simulated_card_backend():
         from SIMCARD.connection import SimulatedCardConnection
@@ -1049,6 +1083,22 @@ def create_card_connection(
         connection = SimulatedCardConnection()
         connection.connect(protocol)
         return wrap_connection(connection, source="simulator")
+
+    remote_binding = lookup_remote_reader(reader_name)
+    if remote_binding is not None:
+        # No fallback here, unlike the marker branch below. The caller named
+        # this reader, so a dead relay must surface as a failure rather than
+        # silently binding the session to whichever card sits in the
+        # operator's first local reader.
+        remote_connection = RelayCardConnection(
+            remote_binding.relay_url,
+            auth_token=remote_binding.auth_token,
+        )
+        remote_connection.connect(protocol)
+        return wrap_connection(
+            remote_connection,
+            source=f"remote-reader:{remote_binding.name}",
+        )
 
     relay_url, relay_source = _resolve_card_relay_url()
     if len(relay_url) > 0:
@@ -1088,7 +1138,7 @@ def create_card_connection(
     connection = reader_list[reader_index].createConnection()
     # pyscard defaults disposition to ``SCARD_UNPOWER_CARD``, which means
     # the card gets power-cycled every time this connection closes. That
-    # is a problem whenever multiple handles share the same reader —
+    # is a problem whenever multiple handles share the same reader --
     # e.g. the reader-bar poll grabbing ATRs while an scp03 scan session
     # is live: when the poll handle disconnects, pcscd honours UNPOWER
     # and the live session's card state (selected DF, secure channel,
@@ -1099,7 +1149,7 @@ def create_card_connection(
     # same reader.
     try:
         from smartcard.scard import SCARD_LEAVE_CARD as _SCARD_LEAVE_CARD
-    except Exception:  # noqa: BLE001 — pyscard shim may omit scard consts
+    except Exception:  # noqa: BLE001 -- pyscard shim may omit scard consts
         _SCARD_LEAVE_CARD = 0
     def _connect_with_leave_card() -> None:
         try:
@@ -1126,6 +1176,6 @@ def create_card_connection(
     # the raw index when the reader exposes no name.
     try:
         reader_name = str(reader_list[reader_index]) or f"pcsc#{reader_index}"
-    except Exception:  # noqa: BLE001 — exotic reader objects
+    except Exception:  # noqa: BLE001 -- exotic reader objects
         reader_name = f"pcsc#{reader_index}"
     return wrap_connection(connection, source=reader_name)

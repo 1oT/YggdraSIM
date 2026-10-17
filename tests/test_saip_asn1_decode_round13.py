@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Round-13 EF-decoder spec-correctness tests.
 
 Targets two semantic bugs identified in the EF.SPN display-condition
@@ -30,9 +29,10 @@ class SpnDisplayConditionTests(unittest.TestCase):
         assert decoded is not None
         self.assertTrue(decoded["displayPlmnNameRequiredOnHomePlmn"])
         self.assertFalse(decoded["spnDisplayNotRequiredOnNonHomePlmn"])
-        # Legacy alias remains inverted for back-compat with the
-        # encoder's pre-round-13 fallback.
-        self.assertFalse(decoded["displayInHplmnRequired"])
+        # The inverted pre-round-13 alias is no longer emitted; only the
+        # encoder's fallback branch still understands it.
+        self.assertNotIn("displayInHplmnRequired", decoded)
+        self.assertNotIn("hideInOplmnIfEquivalentPlmn", decoded)
         self.assertEqual(decoded["serviceProviderName"], "Home")
 
     def test_b2_set_means_spn_display_not_required_on_non_home(self) -> None:
@@ -71,6 +71,17 @@ class SpnDisplayConditionTests(unittest.TestCase):
         self.assertEqual(encoded[0], 0x01)
         self.assertEqual(encoded[1:5], b"Home")
         self.assertTrue(all(b == 0xFF for b in encoded[5:]))
+
+    def test_encoder_spec_fields_clear_means_byte_zero(self) -> None:
+        encoded = encode_ef_spn(
+            {
+                "serviceProviderName": "Home",
+                "displayPlmnNameRequiredOnHomePlmn": False,
+                "spnDisplayNotRequiredOnNonHomePlmn": True,
+            },
+            target_length=17,
+        )
+        self.assertEqual(encoded[0], 0x02)
 
     def test_encoder_legacy_fallback_still_round_trips(self) -> None:
         # Old decoder output (pre-round-13) carried the inverted

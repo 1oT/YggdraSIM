@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 JSON serialization helpers for SAIP decoded profile documents (pySim / asn1tools).
 
@@ -252,6 +251,8 @@ _JSON_VALUE_LABELS: dict[str, str] = {
     "opt-usim": "Optional USIM tree",
     "isim": "ISIM application tree",
     "opt-isim": "Optional ISIM tree",
+    "iot": "IoT Minimal Profile tree (MF + ADF.USIM)",
+    "opt-iot": "Optional IoT tree",
     "telecom": "DF.TELECOM tree",
     "phonebook": "DF.PHONEBOOK tree",
     "df-5gs": "DF.5GS tree",
@@ -702,7 +703,7 @@ class TokenExpansionContext:
         the lint harness can surface it.
 
         When ``transform`` is set (``[#Func(NAME)]``), the length is
-        computed over the transformed bytes — this lets length-companion
+        computed over the transformed bytes -- this lets length-companion
         tokens stay in sync with EncodeEfImsi outputs whose byte length
         differs from the raw IMSI digit string.
         """
@@ -888,13 +889,37 @@ def ensure_workspace_pysim_on_path(
             root_text = str(candidate)
             if root_text not in sys.path:
                 sys.path.insert(0, root_text)
+            from yggdrasim_common.asn1tools_compat import (
+                install_object_identifier_arc2_decoding,
+            )
             from Tools.ProfilePackage.saip_pysim_compat import (
                 install_base_df_path_compatibility,
+                install_body_encoding_against_creation_content,
+                install_erased_state_file_fill,
+                install_extra_profile_elements,
+                install_gfm_mf_creation,
                 install_lossless_security_domain_encoding,
+                install_optional_security_domain_key_list,
+                install_phonebook_pbc_template,
+                install_proprietary_efinfo_without_descriptor,
+                install_record_aware_fill_pattern,
+                install_record_aware_template_default,
+                install_template_range_start_fids,
             )
 
             install_base_df_path_compatibility()
             install_lossless_security_domain_encoding()
+            install_optional_security_domain_key_list()
+            install_object_identifier_arc2_decoding()
+            install_erased_state_file_fill()
+            install_record_aware_fill_pattern()
+            install_record_aware_template_default()
+            install_proprietary_efinfo_without_descriptor()
+            install_body_encoding_against_creation_content()
+            install_gfm_mf_creation()
+            install_extra_profile_elements()
+            install_phonebook_pbc_template()
+            install_template_range_start_fids()
             return candidate
 
     try:
@@ -912,13 +937,37 @@ def ensure_workspace_pysim_on_path(
 
     package_path = getattr(pySim, "__file__", None)
     if isinstance(package_path, str) and len(package_path) > 0:
+        from yggdrasim_common.asn1tools_compat import (
+            install_object_identifier_arc2_decoding,
+        )
         from Tools.ProfilePackage.saip_pysim_compat import (
             install_base_df_path_compatibility,
+            install_body_encoding_against_creation_content,
+            install_erased_state_file_fill,
+            install_extra_profile_elements,
+            install_gfm_mf_creation,
             install_lossless_security_domain_encoding,
+            install_optional_security_domain_key_list,
+            install_phonebook_pbc_template,
+            install_proprietary_efinfo_without_descriptor,
+            install_record_aware_fill_pattern,
+            install_record_aware_template_default,
+            install_template_range_start_fids,
         )
 
         install_base_df_path_compatibility()
         install_lossless_security_domain_encoding()
+        install_optional_security_domain_key_list()
+        install_object_identifier_arc2_decoding()
+        install_erased_state_file_fill()
+        install_record_aware_fill_pattern()
+        install_record_aware_template_default()
+        install_proprietary_efinfo_without_descriptor()
+        install_body_encoding_against_creation_content()
+        install_gfm_mf_creation()
+        install_extra_profile_elements()
+        install_phonebook_pbc_template()
+        install_template_range_start_fids()
         installed_root = Path(package_path).resolve().parent
         return installed_root
 
@@ -1455,12 +1504,12 @@ def parse_editor_json_template_aware(
 
     Returns a three-tuple ``(document, placeholder_paths, undefined_tokens)``:
 
-    * ``document`` — the restored decoded document with undefined placeholders
+    * ``document`` -- the restored decoded document with undefined placeholders
       expanded to zero bytes. The document is still usable for structural
       validation (lint) but should not be re-encoded to DER.
-    * ``placeholder_paths`` — dotted paths (e.g. ``sections.header.iccid``) of
+    * ``placeholder_paths`` -- dotted paths (e.g. ``sections.header.iccid``) of
       every hex field that embedded at least one ``{NAME}`` / ``[NAME]`` token.
-    * ``undefined_tokens`` — names that had no entry in
+    * ``undefined_tokens`` -- names that had no entry in
       ``__ygg_token_defs__``.
     """
 

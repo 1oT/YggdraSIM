@@ -18,334 +18,398 @@
 # -----------------------------------------------------------------------------
 
 from dataclasses import dataclass
-from typing import List ,Optional
+from typing import List, Optional
 
-if __package__ :
-    from .utils import Utils ,Colors 
-    from .crypto import CryptoEngine 
-    from .config import ConfigManager ,enforce_demo_key_policy 
-else :
-    from utils import Utils ,Colors 
-    from crypto import CryptoEngine 
-    from config import ConfigManager ,enforce_demo_key_policy 
-
-
-@dataclass
-class OtaEnvelopeApdu :
-    index :int
-    total :int
-    apdu_hex :str
-    tp_ud_length :int
-    is_concatenated :bool
-    concat_ref :Optional [int ]
+if __package__:
+    from .utils import Utils, Colors
+    from .crypto import CryptoEngine
+    from .config import ConfigManager, enforce_demo_key_policy
+else:
+    from utils import Utils, Colors
+    from crypto import CryptoEngine
+    from config import ConfigManager, enforce_demo_key_policy
 
 
 @dataclass
-class OtaBuildPlan :
-    apdus :List [OtaEnvelopeApdu ]
-    reader_apdus :List [str ]
-    cipher_mode :str
-    mac_mode :str
-    cntr_hex :str
-    block_0348 :bytes
-    payload_hex :str
+class OtaEnvelopeApdu:
+    index: int
+    total: int
+    apdu_hex: str
+    tp_ud_length: int
+    is_concatenated: bool
+    concat_ref: Optional[int]
+
+
+@dataclass
+class OtaBuildPlan:
+    apdus: List[OtaEnvelopeApdu]
+    reader_apdus: List[str]
+    cipher_mode: str
+    mac_mode: str
+    cntr_hex: str
+    block_0348: bytes
+    payload_hex: str
 
     @property
-    def is_concatenated (self )->bool :
-        return len (self .apdus )>1
+    def is_concatenated(self) -> bool:
+        return len(self.apdus) > 1
 
 
-class OtaPacketBuilder :
+class OtaPacketBuilder:
     # SMS-DELIVER through TP-SCTS (TS 23.040 §9.2.2.1). TP-UDL follows and
     # is computed from the user data, so it is not part of the prefix.
-    SMS_TPDU_PREFIX =bytes .fromhex ("4005811250F341F622222222222222")
-    TPDU_PID_OFFSET =6
-    TPDU_DCS_OFFSET =7
+    # TP-PID '7F' is (U)SIM Data download and TP-DCS 'F6' is class 2,
+    # 8-bit data (TS 23.040 §9.2.3.9); ``_tpdu_prefix`` overwrites both
+    # from the configuration.
+    USIM_DATA_DOWNLOAD_PID = 0x7F
+    SMS_TPDU_PREFIX = bytes.fromhex("4005811250F37FF622222222222222")
+    TPDU_PID_OFFSET = 6
+    TPDU_DCS_OFFSET = 7
     # ENVELOPE (SMS-PP DOWNLOAD), 3GPP TS 31.111 §7.1.1.2: device
     # identities tag '02', source Network '83', destination UICC '81'
     # (TS 102 223 §8.7), then the Service Centre address object.
-    ENVELOPE_PREFIX =bytes .fromhex ("0202838106028001")
+    ENVELOPE_PREFIX = bytes.fromhex("0202838106028001")
     # TS 23.048 table 7: the concatenated UDH carries both the concatenation
     # control element and the Command Packet Identifier, so UDHL is '07' --
     # IEIa '00' with its three octets, then IEIb CPI '70' with a null IED.
-    CONCAT_UDH_PREFIX =bytes .fromhex ("070003")
-    CONCAT_UDH_CPI =bytes .fromhex ("7000")
+    CONCAT_UDH_PREFIX = bytes.fromhex("070003")
+    CONCAT_UDH_CPI = bytes.fromhex("7000")
     # TS 23.048 table 6: UDHL '02', IEIa CPI '70', IEIDL '00'.
-    SINGLE_UDH =bytes .fromhex ("027000")
-    DEFAULT_TP_UD_MAX =140 
+    SINGLE_UDH = bytes.fromhex("027000")
+    DEFAULT_TP_UD_MAX = 140
+    # TP-UD octets the concatenated UDH takes: UDHL, IEIa '00' with reference,
+    # total and sequence, then IEIb '70' with its null IED.
+    CONCAT_UDH_LEN = len(CONCAT_UDH_PREFIX) + 3 + len(CONCAT_UDH_CPI)
+    # The layout ``_build_0348_block`` emits: CPL (2) and CHL (1), then SPI
+    # (2), KIc (1), KID (1) and TAR (3) in clear; the ciphered part opens
+    # with CNTR (5), PCNTR (1) and the 8-octet CC ahead of the secured data.
+    COMMAND_HEADER_LEN = 3 + 7
+    CIPHERED_PREFIX_LEN = 5 + 1 + 8
 
-    def __init__ (self ,config :ConfigManager ):
-        self .cfg =config 
-
-    @staticmethod
-    def _encode_ber_length (length :int )->bytes :
-        if length <=0x7F :
-            return bytes ([length ])
-        if length <=0xFF :
-            return bytes ([0x81 ,length ])
-        if length <=0xFFFF :
-            return bytes ([0x82 ,(length >>8 )&0xFF ,length &0xFF ])
-        raise ValueError ("OTA BER length exceeds two-octet long-form support.")
+    def __init__(self, config: ConfigManager):
+        self.cfg = config
 
     @staticmethod
-    def _block_size_for_cipher (cipher_mode :str )->int :
-        if cipher_mode =="AES":
-            return 16 
-        return 8 
+    def _encode_ber_length(length: int) -> bytes:
+        if length <= 0x7F:
+            return bytes([length])
+        if length <= 0xFF:
+            return bytes([0x81, length])
+        if length <= 0xFFFF:
+            return bytes([0x82, (length >> 8) & 0xFF, length & 0xFF])
+        raise ValueError("OTA BER length exceeds two-octet long-form support.")
+
+    @staticmethod
+    def _block_size_for_cipher(cipher_mode: str) -> int:
+        if cipher_mode == "AES":
+            return 16
+        return 8
 
     @classmethod
-    def estimate_segment_count (cls ,payload_len :int ,cipher_mode :str ,max_tp_ud :int =None )->int :
+    def estimate_segment_count(
+        cls, payload_len: int, cipher_mode: str, max_tp_ud: int = None
+    ) -> int:
         """Return the number of SMS segments required for *payload_len* bytes with *cipher_mode* (TS 102 225 §7)."""
-        tp_ud_max =cls .DEFAULT_TP_UD_MAX if max_tp_ud is None else max_tp_ud 
-        block_size =cls ._block_size_for_cipher (cipher_mode )
-        pcntr =CryptoEngine .compute_pcntr (payload_len ,block_size ,8 )
-        ct_len =5 +1 +8 +payload_len +pcntr 
-        block_0348_len =3 +7 +ct_len 
-        single_tp_ud_len =1 +block_0348_len 
-        if single_tp_ud_len <=tp_ud_max :
-            return 1 
-        concat_budget =tp_ud_max -6 
-        if concat_budget <=0 :
-            raise ValueError ("TP-UD ceiling too small for concatenated SMS.")
-        return (block_0348_len +concat_budget -1 )//concat_budget 
+        tp_ud_max = cls.DEFAULT_TP_UD_MAX if max_tp_ud is None else max_tp_ud
+        block_size = cls._block_size_for_cipher(cipher_mode)
+        pcntr = CryptoEngine.compute_pcntr(payload_len, block_size, 8)
+        ct_len = cls.CIPHERED_PREFIX_LEN + payload_len + pcntr
+        block_0348_len = cls.COMMAND_HEADER_LEN + ct_len
+        single_tp_ud_len = len(cls.SINGLE_UDH) + block_0348_len
+        if single_tp_ud_len <= tp_ud_max:
+            return 1
+        concat_budget = tp_ud_max - cls.CONCAT_UDH_LEN
+        if concat_budget <= 0:
+            raise ValueError("TP-UD ceiling too small for concatenated SMS.")
+        return (block_0348_len + concat_budget - 1) // concat_budget
 
-    def _get_tp_ud_max (self )->int :
-        configured =self .cfg .get_int ("tp_ud_max")
-        if configured <=0 :
-            return self .DEFAULT_TP_UD_MAX 
-        if configured >140 :
-            return 140 
-        return configured 
+    @classmethod
+    def single_sms_payload_limit(cls, cipher_mode: str, max_tp_ud: int = None) -> int:
+        """Return the largest payload ``build_plan`` still delivers in one SMS.
 
-    def _concat_enabled (self )->bool :
-        raw_value =self .cfg .get ("concat_sms").strip ().lower ()
-        if raw_value in ["","1","true","on","yes","y"]:
-            return True 
-        return False 
+        Mirrors the layout ``_build_0348_block`` emits: the single-SMS UDH,
+        the command header, then the ciphered part padded to the block size
+        of *cipher_mode*. A caller sizing LOAD blocks for the compact remote
+        format subtracts the five TPDU header octets from this value.
+        """
+        tp_ud_max = cls.DEFAULT_TP_UD_MAX if max_tp_ud is None else max_tp_ud
+        block_size = cls._block_size_for_cipher(cipher_mode)
+        ciphered_max = tp_ud_max - len(cls.SINGLE_UDH) - cls.COMMAND_HEADER_LEN
+        ciphered_max -= ciphered_max % block_size
+        return max(0, ciphered_max - cls.CIPHERED_PREFIX_LEN)
+
+    def _get_tp_ud_max(self) -> int:
+        configured = self.cfg.get_int("tp_ud_max")
+        if configured <= 0:
+            return self.DEFAULT_TP_UD_MAX
+        if configured > 140:
+            return 140
+        return configured
+
+    def _concat_enabled(self) -> bool:
+        raw_value = self.cfg.get("concat_sms").strip().lower()
+        if raw_value in ["", "1", "true", "on", "yes", "y"]:
+            return True
+        return False
 
     @staticmethod
-    def _concat_reference (cntr_hex :str )->int :
-        try :
-            return int (cntr_hex ,16 )&0xFF 
-        except ValueError :
-            return 0 
+    def _concat_reference(cntr_hex: str) -> int:
+        try:
+            return int(cntr_hex, 16) & 0xFF
+        except ValueError:
+            return 0
 
-    def _build_0348_block (self ,payload :bytes )->tuple :
-        spi_hex =self .cfg .get ("spi")
-        kic_ind_hex =self .cfg .get ("kic_indicator")
-        kid_ind_hex =self .cfg .get ("kid_indicator")
-        tar_hex =self .cfg .get ("tar")
-        cntr_hex =self .cfg .get ("cntr")
-        enforce_demo_key_policy (self .cfg .get ("kic"),self .cfg .get ("kid"))
-        kic_key =Utils .to_bytes (self .cfg .get ("kic"))
-        kid_key =Utils .to_bytes (self .cfg .get ("kid"))
+    def _build_0348_block(self, payload: bytes) -> tuple:
+        spi_hex = self.cfg.get("spi")
+        kic_ind_hex = self.cfg.get("kic_indicator")
+        kid_ind_hex = self.cfg.get("kid_indicator")
+        tar_hex = self.cfg.get("tar")
+        cntr_hex = self.cfg.get("cntr")
+        enforce_demo_key_policy(self.cfg.get("kic"), self.cfg.get("kid"))
+        kic_key = Utils.to_bytes(self.cfg.get("kic"))
+        kid_key = Utils.to_bytes(self.cfg.get("kid"))
 
-        cipher_mode =CryptoEngine .get_algo_type (kic_ind_hex )
-        mac_mode =CryptoEngine .get_algo_type (kid_ind_hex )
-        block_size =self ._block_size_for_cipher (cipher_mode )
+        cipher_mode = CryptoEngine.get_algo_type(kic_ind_hex)
+        mac_mode = CryptoEngine.get_algo_type(kid_ind_hex)
+        block_size = self._block_size_for_cipher(cipher_mode)
 
-        param_data =(Utils .to_bytes (spi_hex )[:2 ]+Utils .to_bytes (kic_ind_hex )[:1 ]+
-        Utils .to_bytes (kid_ind_hex )[:1 ]+Utils .to_bytes (tar_hex )[:3 ])
-        cntr_bytes =Utils .to_bytes (cntr_hex )[:5 ]
+        param_data = (
+            Utils.to_bytes(spi_hex)[:2]
+            + Utils.to_bytes(kic_ind_hex)[:1]
+            + Utils.to_bytes(kid_ind_hex)[:1]
+            + Utils.to_bytes(tar_hex)[:3]
+        )
+        cntr_bytes = Utils.to_bytes(cntr_hex)[:5]
 
-        pcntr =CryptoEngine .compute_pcntr (len (payload ),block_size ,8 )
-        pcntr_byte =bytes ([pcntr ])
-        payload_padded =payload +(b'\x00'*pcntr )
+        pcntr = CryptoEngine.compute_pcntr(len(payload), block_size, 8)
+        pcntr_byte = bytes([pcntr])
+        payload_padded = payload + (b"\x00" * pcntr)
 
-        ct_len =5 +1 +8 +len (payload_padded )
+        ct_len = 5 + 1 + 8 + len(payload_padded)
         # TS 23.048 table 6: on SMS-PP the CPI is the UDH element IEIa='70',
         # not a body octet, and the SM opens with CPL over two octets
         # followed by a null CHI and a one-octet CHL. CHL counts from the SPI
         # to the end of the RC/CC/DS (2+1+1+3+5+1+8 = 0x15); CPL counts from
         # CHI to the end of the secured data. Both go into the CC.
-        chl_byte =b'\x15'
-        cpl_val =len (chl_byte )+len (param_data )+ct_len 
-        cpl_bytes =cpl_val .to_bytes (2 ,"big")
-        header_blob =cpl_bytes +chl_byte 
+        chl_byte = b"\x15"
+        cpl_val = len(chl_byte) + len(param_data) + ct_len
+        cpl_bytes = cpl_val.to_bytes(2, "big")
+        header_blob = cpl_bytes + chl_byte
 
-        mac_input =header_blob +param_data +cntr_bytes +pcntr_byte +payload_padded 
-        cc =CryptoEngine .compute_cc (mac_mode ,kid_key ,mac_input )
-        enc_input =cntr_bytes +pcntr_byte +cc +payload_padded 
-        ct =CryptoEngine .encrypt_ct (cipher_mode ,kic_key ,enc_input )
-        block_0348 =header_blob +param_data +ct 
+        mac_input = header_blob + param_data + cntr_bytes + pcntr_byte + payload_padded
+        cc = CryptoEngine.compute_cc(mac_mode, kid_key, mac_input)
+        enc_input = cntr_bytes + pcntr_byte + cc + payload_padded
+        ct = CryptoEngine.encrypt_ct(cipher_mode, kic_key, enc_input)
+        block_0348 = header_blob + param_data + ct
 
         return (
-        block_0348 ,
-        cipher_mode ,
-        mac_mode ,
-        cntr_hex ,
-        cpl_bytes ,
-        chl_byte ,
-        param_data ,
-        cntr_bytes ,
-        pcntr ,
-        cc ,
-        ct ,
+            block_0348,
+            cipher_mode,
+            mac_mode,
+            cntr_hex,
+            cpl_bytes,
+            chl_byte,
+            param_data,
+            cntr_bytes,
+            pcntr,
+            cc,
+            ct,
         )
 
-    def _tpdu_prefix (self ,template :bytes )->bytes :
-        prefix =bytearray (template )
-        prefix [self .TPDU_PID_OFFSET ]=int (self .cfg .get ("pid"),16 )&0xFF
-        prefix [self .TPDU_DCS_OFFSET ]=int (self .cfg .get ("dcs"),16 )&0xFF
-        return bytes (prefix )
+    def _tpdu_prefix(self, template: bytes) -> bytes:
+        prefix = bytearray(template)
+        prefix[self.TPDU_PID_OFFSET] = int(self.cfg.get("pid"), 16) & 0xFF
+        prefix[self.TPDU_DCS_OFFSET] = int(self.cfg.get("dcs"), 16) & 0xFF
+        return bytes(prefix)
 
-    def _build_single_sms_tpdu (self ,block_0348 :bytes )->tuple :
-        tp_ud =self .SINGLE_UDH +block_0348 
-        sms_tpdu =self ._tpdu_prefix (self .SMS_TPDU_PREFIX )+bytes ([len (tp_ud )])+tp_ud 
-        return sms_tpdu ,len (tp_ud )
+    def _build_single_sms_tpdu(self, block_0348: bytes) -> tuple:
+        tp_ud = self.SINGLE_UDH + block_0348
+        sms_tpdu = self._tpdu_prefix(self.SMS_TPDU_PREFIX) + bytes([len(tp_ud)]) + tp_ud
+        return sms_tpdu, len(tp_ud)
 
-    def _build_concat_sms_tpdu (self ,fragment :bytes ,concat_ref :int ,total :int ,sequence :int )->tuple :
-        tp_ud =(
-        self .CONCAT_UDH_PREFIX 
-        +bytes ([concat_ref ,total ,sequence ])
-        +self .CONCAT_UDH_CPI 
-        +fragment 
+    def _build_concat_sms_tpdu(
+        self, fragment: bytes, concat_ref: int, total: int, sequence: int
+    ) -> tuple:
+        tp_ud = (
+            self.CONCAT_UDH_PREFIX
+            + bytes([concat_ref, total, sequence])
+            + self.CONCAT_UDH_CPI
+            + fragment
         )
-        sms_tpdu =self ._tpdu_prefix (self .SMS_TPDU_PREFIX )+bytes ([len (tp_ud )])+tp_ud 
-        return sms_tpdu ,len (tp_ud )
+        sms_tpdu = self._tpdu_prefix(self.SMS_TPDU_PREFIX) + bytes([len(tp_ud)]) + tp_ud
+        return sms_tpdu, len(tp_ud)
 
-    def _wrap_sms_tpdu (self ,sms_tpdu :bytes ,allow_extended_apdu :bool =False )->str :
-        d1_content =self .ENVELOPE_PREFIX +bytes ([0x8B ])+self ._encode_ber_length (len (sms_tpdu ))+sms_tpdu 
-        d1_tag =bytes ([0xD1 ])+self ._encode_ber_length (len (d1_content ))+d1_content 
-        cla_byte =int (self .cfg .get ("cla"),16 )
-        if len (d1_tag )<=0xFF :
-            apdu =bytes ([cla_byte ,0xC2 ,0x00 ,0x00 ,len (d1_tag )])+d1_tag 
-            return apdu .hex ().upper ()
-        if allow_extended_apdu ==False :
-            raise ValueError ("OTA envelope exceeds APDU short-length capacity.")
-        if len (d1_tag )>0xFFFF :
-            raise ValueError ("OTA envelope exceeds APDU extended-length capacity.")
-        apdu =bytes ([
-        cla_byte ,
-        0xC2 ,
-        0x00 ,
-        0x00 ,
-        0x00 ,
-        (len (d1_tag )>>8 )&0xFF ,
-        len (d1_tag )&0xFF ,
-        ])+d1_tag 
-        return apdu .hex ().upper ()
+    def _wrap_sms_tpdu(self, sms_tpdu: bytes, allow_extended_apdu: bool = False) -> str:
+        d1_content = (
+            self.ENVELOPE_PREFIX
+            + bytes([0x8B])
+            + self._encode_ber_length(len(sms_tpdu))
+            + sms_tpdu
+        )
+        d1_tag = bytes([0xD1]) + self._encode_ber_length(len(d1_content)) + d1_content
+        cla_byte = int(self.cfg.get("cla"), 16)
+        if len(d1_tag) <= 0xFF:
+            apdu = bytes([cla_byte, 0xC2, 0x00, 0x00, len(d1_tag)]) + d1_tag
+            return apdu.hex().upper()
+        if not allow_extended_apdu:
+            raise ValueError("OTA envelope exceeds APDU short-length capacity.")
+        if len(d1_tag) > 0xFFFF:
+            raise ValueError("OTA envelope exceeds APDU extended-length capacity.")
+        apdu = (
+            bytes(
+                [
+                    cla_byte,
+                    0xC2,
+                    0x00,
+                    0x00,
+                    0x00,
+                    (len(d1_tag) >> 8) & 0xFF,
+                    len(d1_tag) & 0xFF,
+                ]
+            )
+            + d1_tag
+        )
+        return apdu.hex().upper()
 
-    def build_plan (self ,verbose :bool =False ,override_payload :str =None )->OtaBuildPlan :
+    def build_plan(
+        self, verbose: bool = False, override_payload: str = None
+    ) -> OtaBuildPlan:
         """Build the full OTA send plan: SPI bytes, CC, CT, and SMS-PP APDU list (TS 102 225 §7).
 
         Returns an ``OtaBuildPlan`` dataclass with the APDU hex list, keyset summary,
         and debug fields. Raises ``ValueError`` when the payload is empty.
         """
-        payload_hex =override_payload if override_payload else self .cfg .get ("payload")
-        if not payload_hex :
-            raise ValueError ("Payload is empty")
+        payload_hex = override_payload if override_payload else self.cfg.get("payload")
+        if not payload_hex:
+            raise ValueError("Payload is empty")
 
-        payload =Utils .to_bytes (payload_hex )
-        block_data =self ._build_0348_block (payload )
-        block_0348 =block_data [0 ]
-        cipher_mode =block_data [1 ]
-        mac_mode =block_data [2 ]
-        cntr_hex =block_data [3 ]
-        cpl_bytes =block_data [4 ]
-        chl_byte =block_data [5 ]
-        param_data =block_data [6 ]
-        cntr_bytes =block_data [7 ]
-        pcntr =block_data [8 ]
-        cc =block_data [9 ]
-        ct =block_data [10 ]
+        payload = Utils.to_bytes(payload_hex)
+        block_data = self._build_0348_block(payload)
+        block_0348 = block_data[0]
+        cipher_mode = block_data[1]
+        mac_mode = block_data[2]
+        cntr_hex = block_data[3]
+        cpl_bytes = block_data[4]
+        chl_byte = block_data[5]
+        param_data = block_data[6]
+        cntr_bytes = block_data[7]
+        pcntr = block_data[8]
+        cc = block_data[9]
+        ct = block_data[10]
 
-        tp_ud_max =self ._get_tp_ud_max ()
-        single_tp_ud_len =len (self .SINGLE_UDH )+len (block_0348 )
-        apdus :List [OtaEnvelopeApdu ]=[]
-        reader_apdus :List [str ]=[]
+        tp_ud_max = self._get_tp_ud_max()
+        single_tp_ud_len = len(self.SINGLE_UDH) + len(block_0348)
+        apdus: List[OtaEnvelopeApdu] = []
+        reader_apdus: List[str] = []
 
-        if single_tp_ud_len <=tp_ud_max :
-            sms_tpdu ,tp_ud_length =self ._build_single_sms_tpdu (block_0348 )
-            apdu_hex =self ._wrap_sms_tpdu (sms_tpdu )
-            apdus .append (OtaEnvelopeApdu (
-            index =0 ,
-            total =1 ,
-            apdu_hex =apdu_hex ,
-            tp_ud_length =tp_ud_length ,
-            is_concatenated =False ,
-            concat_ref =None ,
-            ))
-            reader_apdus .append (apdu_hex )
-        else :
-            if self ._concat_enabled ()==False :
-                raise ValueError ("Payload exceeds single-SMS capacity and concatenation is disabled.")
-
-            concat_budget =tp_ud_max -8 
-            if concat_budget <=0 :
-                raise ValueError ("TP-UD ceiling too small for concatenated SMS.")
-
-            concat_ref =self ._concat_reference (cntr_hex )
-            total =len (block_0348 )//concat_budget 
-            if len (block_0348 )%concat_budget !=0 :
-                total +=1 
-
-            start =0 
-            sequence =1 
-            while start <len (block_0348 ):
-                end =start +concat_budget 
-                fragment =block_0348 [start :end ]
-                sms_tpdu ,tp_ud_length =self ._build_concat_sms_tpdu (
-                fragment ,
-                concat_ref ,
-                total ,
-                sequence ,
+        if single_tp_ud_len <= tp_ud_max:
+            sms_tpdu, tp_ud_length = self._build_single_sms_tpdu(block_0348)
+            apdu_hex = self._wrap_sms_tpdu(sms_tpdu)
+            apdus.append(
+                OtaEnvelopeApdu(
+                    index=0,
+                    total=1,
+                    apdu_hex=apdu_hex,
+                    tp_ud_length=tp_ud_length,
+                    is_concatenated=False,
+                    concat_ref=None,
                 )
-                apdus .append (OtaEnvelopeApdu (
-                index =sequence -1 ,
-                total =total ,
-                apdu_hex =self ._wrap_sms_tpdu (sms_tpdu ),
-                tp_ud_length =tp_ud_length ,
-                is_concatenated =True ,
-                concat_ref =concat_ref ,
-                ))
-                start =end 
-                sequence +=1 
+            )
+            reader_apdus.append(apdu_hex)
+        else:
+            if not self._concat_enabled():
+                raise ValueError(
+                    "Payload exceeds single-SMS capacity and concatenation is disabled."
+                )
 
-            single_sms_tpdu ,_ =self ._build_single_sms_tpdu (block_0348 )
-            reader_apdus .append (self ._wrap_sms_tpdu (single_sms_tpdu ,allow_extended_apdu =True ))
+            concat_budget = tp_ud_max - self.CONCAT_UDH_LEN
+            if concat_budget <= 0:
+                raise ValueError("TP-UD ceiling too small for concatenated SMS.")
 
-        plan =OtaBuildPlan (
-        apdus =apdus ,
-        reader_apdus =reader_apdus ,
-        cipher_mode =cipher_mode ,
-        mac_mode =mac_mode ,
-        cntr_hex =cntr_hex ,
-        block_0348 =block_0348 ,
-        payload_hex =payload_hex ,
+            concat_ref = self._concat_reference(cntr_hex)
+            total = len(block_0348) // concat_budget
+            if len(block_0348) % concat_budget != 0:
+                total += 1
+
+            start = 0
+            sequence = 1
+            while start < len(block_0348):
+                end = start + concat_budget
+                fragment = block_0348[start:end]
+                sms_tpdu, tp_ud_length = self._build_concat_sms_tpdu(
+                    fragment,
+                    concat_ref,
+                    total,
+                    sequence,
+                )
+                apdus.append(
+                    OtaEnvelopeApdu(
+                        index=sequence - 1,
+                        total=total,
+                        apdu_hex=self._wrap_sms_tpdu(sms_tpdu),
+                        tp_ud_length=tp_ud_length,
+                        is_concatenated=True,
+                        concat_ref=concat_ref,
+                    )
+                )
+                start = end
+                sequence += 1
+
+            single_sms_tpdu, _ = self._build_single_sms_tpdu(block_0348)
+            reader_apdus.append(
+                self._wrap_sms_tpdu(single_sms_tpdu, allow_extended_apdu=True)
+            )
+
+        plan = OtaBuildPlan(
+            apdus=apdus,
+            reader_apdus=reader_apdus,
+            cipher_mode=cipher_mode,
+            mac_mode=mac_mode,
+            cntr_hex=cntr_hex,
+            block_0348=block_0348,
+            payload_hex=payload_hex,
         )
 
-        if verbose :
-            self ._print_verbose (
-            plan ,
-            cpl_bytes ,
-            chl_byte ,
-            param_data ,
-            cntr_bytes ,
-            pcntr ,
-            cc ,
-            ct ,
+        if verbose:
+            self._print_verbose(
+                plan,
+                cpl_bytes,
+                chl_byte,
+                param_data,
+                cntr_bytes,
+                pcntr,
+                cc,
+                ct,
             )
-        return plan 
+        return plan
 
-    def build (self ,verbose :bool =False ,override_payload :str =None )->str :
-        plan =self .build_plan (verbose =verbose ,override_payload =override_payload )
-        if len (plan .apdus )!=1 :
-            raise ValueError ("Payload requires concatenated SMS. Use build_plan() to inspect all segments.")
-        return plan .apdus [0 ].apdu_hex 
+    def build(self, verbose: bool = False, override_payload: str = None) -> str:
+        plan = self.build_plan(verbose=verbose, override_payload=override_payload)
+        if len(plan.apdus) != 1:
+            raise ValueError(
+                "Payload requires concatenated SMS. Use build_plan() to inspect all segments."
+            )
+        return plan.apdus[0].apdu_hex
 
-    def _print_verbose (self ,plan :OtaBuildPlan ,cpl ,chl ,params ,cntr ,pcntr ,cc ,ct ):
-        print (f"\n{Colors.CYAN}[=== 03.48 BLOCK BREAKDOWN ===]{Colors.ENDC}")
-        print (f"ALG:    {plan.cipher_mode} / {plan.mac_mode}")
-        print (f"CNTR:   {plan.cntr_hex}")
-        if plan .is_concatenated :
-            print (f"SMS:    {len(plan.apdus)} concatenated segments")
-        else :
-            print ("SMS:    single segment")
-        for apdu in plan .apdus :
-            label ="APDU"
-            if plan .is_concatenated :
-                label =f"APDU[{apdu.index +1}/{apdu.total}]"
-            print (f"{label}: {Colors.GREEN}{apdu.apdu_hex}{Colors.ENDC}")
-        if plan .is_concatenated and len (plan .reader_apdus )>0 :
-            print ("READER: direct reader mode uses reassembled ENVELOPE APDU")
+    def _print_verbose(self, plan: OtaBuildPlan, cpl, chl, params, cntr, pcntr, cc, ct):
+        print(f"\n{Colors.CYAN}[=== 03.48 BLOCK BREAKDOWN ===]{Colors.ENDC}")
+        print(f"ALG:    {plan.cipher_mode} / {plan.mac_mode}")
+        print(f"CNTR:   {plan.cntr_hex}")
+        pid_hex = str(self.cfg.get("pid") or "").strip().upper()
+        if pid_hex != f"{self.USIM_DATA_DOWNLOAD_PID:02X}":
+            print(
+                f"{Colors.FAIL}TP-PID: {pid_hex} is not (U)SIM Data download "
+                f"('7F', TS 23.040 §9.2.3.9); a modem will not hand this "
+                f"short message to the UICC. Use 'set pid 7F'.{Colors.ENDC}"
+            )
+        if plan.is_concatenated:
+            print(f"SMS:    {len(plan.apdus)} concatenated segments")
+        else:
+            print("SMS:    single segment")
+        for apdu in plan.apdus:
+            label = "APDU"
+            if plan.is_concatenated:
+                label = f"APDU[{apdu.index + 1}/{apdu.total}]"
+            print(f"{label}: {Colors.GREEN}{apdu.apdu_hex}{Colors.ENDC}")
+        if plan.is_concatenated and len(plan.reader_apdus) > 0:
+            print("READER: direct reader mode uses reassembled ENVELOPE APDU")

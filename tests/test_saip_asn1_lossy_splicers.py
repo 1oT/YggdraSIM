@@ -103,9 +103,9 @@ class AdnSplicerRoundtripTests(unittest.TestCase):
         self.assertEqual(encoded[alpha_len + 12], self.record[alpha_len + 12])
         self.assertEqual(encoded[alpha_len + 13], self.record[alpha_len + 13])
 
-    def test_preserves_cci_when_decoder_does_not_expose_it(self) -> None:
-        # Stamp a non-0xFF CCI in the original and verify it survives even
-        # though the decoded payload never contains the byte.
+    def test_preserves_cci_when_payload_omits_it(self) -> None:
+        # Stamp a non-0xFF CCI in the original and verify it survives when
+        # the payload drops the decoded byte.
         record = _build_adn_record(
             alpha_text="CAROL",
             number_len=5,
@@ -117,8 +117,9 @@ class AdnSplicerRoundtripTests(unittest.TestCase):
         record_hex = record.hex().upper()
         decoded = _decode_adn_like_record(record_hex)
         assert decoded is not None
-        self.assertNotIn("capabilityConfigurationIdentifier", decoded)
+        self.assertEqual(decoded["capabilityConfigurationIdentifier"], "0xAB")
         payload = dict(decoded)
+        payload.pop("capabilityConfigurationIdentifier")
         payload["_ygg_original_hex"] = record_hex
         payload["number"] = "999"
         payload["numberLength"] = 3

@@ -117,6 +117,8 @@ LOGOUT
 CLS
 OTA
 STK [single-command]
+STK ON
+STK OFF
 WIZARD
 PUT-KEY
 SET-STATUS
@@ -276,7 +278,7 @@ DISABLE-PROFILE <iccid-or-aid>
 DELETE-PROFILE <iccid-or-aid>
 METADATA <id|aid|alias>
 DISCOVER
-DOWNLOAD [matchingId]
+DOWNLOAD [matchingId] [--<n>[,<n>...]]
 EXIT
 QA
 ```
@@ -413,8 +415,6 @@ IPAd and handover commands:
 
 ```text
 IPAD-DISCOVER [packagePath]
-IPAD-LIVE [matchingId] [--debug]
-IPAD-TEST [matchingId] [--debug]
 HANDOVER-SET <transactionIdHex> [matchingId]
 HANDOVER-STATUS [--json|--yaml]
 EIM-ACKNOWLEDGE [transactionIdHex] [matchingId]
@@ -584,9 +584,6 @@ yggdrasim-scp11-live --cmd "DISABLE-PROFILE [ENTER ICCID / AID HERE]; EXIT"
 
 yggdrasim-scp11-live --cmd "DELETE-PROFILE [ENTER ICCID / AID HERE]; EXIT"
 
-yggdrasim-scp11-live --cmd "POLL; EXIT"
-
-
 yggdrasim-scp11-live --cmd "DISCOVER; STATUS; LIST; EXIT" | tee "[ENTER OUTPUT PATH HERE]"
 ```
 
@@ -664,15 +661,7 @@ yggdrasim-scp11-eim-local --cmd "DELETE-PROFILE [ENTER ICCID / AID / ALIAS HERE]
 
 yggdrasim-scp11-eim-local --cmd "IPAD-DISCOVER [ENTER PACKAGE PATH HERE]; EXIT"
 
-yggdrasim-scp11-eim-local --cmd "IPAD-LIVE [ENTER MATCHING ID HERE]; EXIT"
-
-yggdrasim-scp11-eim-local --cmd "IPAD-LIVE [ENTER MATCHING ID HERE] --debug; EXIT"
-
-yggdrasim-scp11-eim-local --cmd "IPAD-TEST [ENTER MATCHING ID HERE]; EXIT"
-
-
 yggdrasim-scp11-eim-local --cmd "HANDOVER-SET [ENTER TXID HEX HERE] [ENTER MATCHING ID HERE]; HANDOVER-STATUS; EXIT"
-
 
 yggdrasim-scp11-eim-local --cmd "HOTFOLDER [ENTER HOTFOLDER DIR HERE]; EXIT"
 

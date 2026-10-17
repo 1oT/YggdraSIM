@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 eSIM management relay entry point."""
 import argparse
 import sys
@@ -46,7 +45,7 @@ def _load_runtime_components():
 class SGP22Client:
     """SCP11 eSIM management relay entrypoint."""
 
-    def __init__(self):
+    def __init__(self, reader_name: str = ""):
         (
             config_cls,
             console_cls,
@@ -61,6 +60,18 @@ class SGP22Client:
         self._transport_mode_pcsc = transport_mode_pcsc
         self._orchestrator_cls = orchestrator_cls
         self.cfg = config_cls()
+        chosen = str(reader_name or "").strip()
+        if chosen:
+            from dataclasses import replace as dataclass_replace
+
+            from yggdrasim_common.remote_readers import REMOTE_READER_INDEX, resolve_reader_name
+
+            reader_index, resolved = resolve_reader_name(chosen)
+            self.cfg = dataclass_replace(
+                self.cfg,
+                READER_INDEX=reader_index,
+                READER_NAME=resolved if reader_index == REMOTE_READER_INDEX else "",
+            )
         self.apdu_channel = None
         self.profile_provider = None
         self.orchestrator = None
@@ -75,7 +86,17 @@ class SGP22Client:
     def _run_startup_preflight(self):
         errors, warnings = self.cfg.collect_startup_diagnostics()
 
-        if self.cfg.TRANSPORT_MODE == self._transport_mode_pcsc and not is_simulated_card_backend():
+        remote_name = str(getattr(self.cfg, "READER_NAME", "") or "").strip()
+        if remote_name:
+            # A remote reader has no PC/SC ordinal to range-check; what can be
+            # checked is that its link is still up.
+            from yggdrasim_common.remote_readers import is_remote_reader
+
+            if not is_remote_reader(remote_name):
+                errors.append(
+                    f"remote reader {remote_name!r} is not connected; connect it from Remote Lab first."
+                )
+        elif self.cfg.TRANSPORT_MODE == self._transport_mode_pcsc and not is_simulated_card_backend():
             try:
                 from smartcard.System import readers
             except Exception as error:
@@ -167,6 +188,12 @@ class SGP22Client:
 
 def entry() -> None:
     """Initialise eSIM management relay runtime components and start the operator REPL."""
+    # Launching this shell directly (yggdrasim-scp11-live) bypasses the
+    # launcher menu, which is the only other place persisted YGGDRASIM_*
+    # values reach os.environ.
+    from yggdrasim_common import env_flags
+
+    env_flags.apply_persisted_env_overrides()
     ensure_plugins_loaded()
     parser = argparse.ArgumentParser(description="SCP11 eSIM management relay shell")
     parser.add_argument(
@@ -194,6 +221,15 @@ def entry() -> None:
         help="Read newline-separated commands from stdin for non-interactive execution",
     )
     parser.add_argument(
+        "--reader",
+        type=str,
+        default="",
+        help=(
+            "Reader to open: an exact PC/SC reader name, or a Remote Lab reader "
+            "name (\"Remote Lab: <device>\") connected from the GUI. Default: the first PC/SC reader."
+        ),
+    )
+    parser.add_argument(
         "--dump-keybag",
         dest="dump_keybag",
         type=str,
@@ -207,7 +243,10 @@ def entry() -> None:
         ),
     )
     args = parser.parse_args()
-    set_global_debug(bool(getattr(args, "debug", False)))
+    # An absent --debug leaves the persisted YGGDRASIM_GLOBAL_DEBUG alone;
+    # forcing it off here used to overwrite the operator's stored value.
+    if bool(getattr(args, "debug", False)):
+        set_global_debug(True, persist=False)
 
     if getattr(args, "dump_keybag", None):
         print(
@@ -218,7 +257,11 @@ def entry() -> None:
         )
         sys.exit(2)
 
-    client = SGP22Client()
+    try:
+        client = SGP22Client(reader_name=str(getattr(args, "reader", "") or ""))
+    except RuntimeError as error:
+        print(f"[STARTUP ERROR] {error}")
+        sys.exit(2)
     if args.flow:
         client.run_flow()
         return

@@ -315,85 +315,305 @@ BER_TLV_TAGS: dict[int, str] = {
 TEST_IDENTIFIER_RANGES: dict[str, dict[str, Any]] = {
     "mccmnc": {
         "pattern": re.compile(r"^(00[1-9]|999)\s*/\s*\d{2,3}$"),
-        "description": "Test PLMN MCC/MNC per 3GPP TS 23.003 §2.2 (001/01, 999/99)",
+        "description": (
+            "Test PLMN: 001/01 (the default test USIM, 3GPP TS 31.124 v18.7 §27.22.2A) or the "
+            "shared MCC 999 for use inside a private network (ITU-T E.212 (06/2024) Appendix III)"
+        ),
         "example": "001/01",
     },
     "iccid": {
         "pattern": re.compile(r"^8988\d{15,16}$"),
-        "description": "Test ICCID per ITU-T E.118 'Universal' test range (8988 prefix)",
+        "description": (
+            "ICCID in the 8988 range this project reserves for test values (a project "
+            "convention: ITU-T E.118 (09/2025) §6 fixes a 19-digit PAN but defines no test IIN)"
+        ),
         "example": "8988201234567890123",
     },
     "imsi": {
         "pattern": re.compile(r"^00101\d{9,10}$"),
-        "description": "Test IMSI using test MCC 001 MNC 01",
+        "description": "Test IMSI under MCC 001 / MNC 01 (TS 31.124 v18.7 §27.22.2A uses 001 01 0123456789)",
         "example": "001010000000001",
     },
     "eid": {
-        "pattern": re.compile(r"^89049032\d{23}$"),
-        "description": "Test EID per SGP.22 §A.2 (89049032 prefix + 23 digits)",
-        "example": "89049032123456789012345678901234",
+        # 32 digits: the SGP.26 test EIN (8 digits) plus 24.
+        "pattern": re.compile(r"^89049032\d{24}$"),
+        "description": (
+            "Test EID under the SGP.26 v3.0.2 test EIN 89049032 (§3.2.1 Table 5 test eUICC, "
+            "Annex E.3 Table 55 permitedEins)"
+        ),
+        "example": "89049032123451234512345678901235",
     },
 }
 
-# A dotted quad is only a leak when it is routable and is not a spec clause.
+#: The converted standards library (``docs/tel-docs/converted``, gitignored). A
+#: fresh clone and the standalone build have none, and ``spec_section_lookup``
+#: then answers from ``SPEC_SECTIONS`` instead.
+SPEC_LIBRARY_ROOT = REPO_ROOT / "docs" / "tel-docs" / "converted"
+
+# Fallback index for hosts without the library. Every clause below was read
+# from the library copy of the named version; add a row only the same way.
 SPEC_SECTIONS: dict[str, dict[str, str]] = {
     "SGP.22": {
-        "url": "GSMA SGP.22 (Consumer RSP)",
-        "key_sections": "§2.4 ES10b interface, §2.5 ES10c interface, §3.1 Profile states, §5.7 ES10 command set, §A.2 Test EID",
+        "title": "GSMA SGP.22 RSP Technical Specification",
+        "version": "v3.1",
+        "key_sections": (
+            "§5.6 ES9+ (LPA -- SM-DP+), §5.7 ES10x (LPA -- eUICC), §5.7.2 Transport Command, "
+            "§5.7.8 GetEUICCInfo, §5.7.13 AuthenticateServer, §5.7.16 EnableProfile, "
+            "§5.7.20 GetEID, §5.7.22 GetRAT"
+        ),
     },
     "SGP.32": {
-        "url": "GSMA SGP.32 (IoT RSP)",
-        "key_sections": "§3 IPA architecture, §4 eIM interface, §6.5 EIM configuration, §7 ESipa commands",
+        "title": "GSMA SGP.32 eSIM IoT Technical Specification",
+        "version": "v1.2",
+        "key_sections": (
+            "§3 Procedures, §4 Data Elements, §5.9 ES10b (IPA -- eUICC), §5.9.1 LoadEuiccPackage, "
+            "§5.9.2 GetEUICCInfo, §5.14 ESipa (eIM -- IPA), Annex C ASN.1 Definitions, "
+            "Annex D Tag allocation"
+        ),
     },
     "SGP.02": {
-        "url": "GSMA SGP.02 (M2M RSP)",
-        "key_sections": "§2 Architecture, §3 ISD-R/ISD-P roles, §4 Profile download",
+        "title": "GSMA SGP.02 Remote Provisioning Architecture for Embedded UICC",
+        "version": "v4.2",
+        "key_sections": (
+            "§2.2 eUICC Architecture, §2.2.4 Profile Structure (MNO-SD), §3.1 Profile Download and "
+            "Installation, §3.2 Profile Enabling, §3.4 Profile Disabling"
+        ),
+    },
+    "SGP.26": {
+        "title": "GSMA SGP.26 RSP Test Certificates Definition",
+        "version": "v3.0.2",
+        "key_sections": (
+            "§3.1.1 CI Certificate, §3.2.1 eUICC Certificate (test EID "
+            "89049032123451234512345678901235), Annex E.3 Variables (permitedEins 89049032)"
+        ),
+    },
+    "SAIP": {
+        "title": "TCA eUICC Profile Package: Interoperable Format Technical Specification",
+        "version": "V3.4.1",
+        "key_sections": (
+            "§8.1.3 PE Header (PE order), §8.2.1 Profile header definition, §8.3.5 Generic File "
+            "management PE, §8.4.2 AKA Parameters PE, §8.4.3 CSIM Parameters PE, §8.5 PIN and PUK "
+            "codes, §8.6 Security domains, §8.7 Application loading and installation, §8.8 RFM "
+            "Parameters, §8.10 Profile Package end, Annex A (§9) File Structure Templates"
+        ),
     },
     "TS 102 221": {
-        "url": "ETSI TS 102 221 (UICC)",
-        "key_sections": "§7 File system, §8 Security, §11 File types, §13.1 SELECT, §13.2 READ BINARY, §13.3 UPDATE BINARY, §13.4 READ RECORD",
+        "title": "ETSI TS 102 221 UICC-Terminal interface",
+        "version": "v18.4",
+        "key_sections": (
+            "§8 Application and file structure, §9 Security features, §10.1 Command APDU, "
+            "§10.2.1 Status conditions returned by the UICC, §11 Commands, §11.1.1 SELECT, "
+            "§13 Application independent files, §13.1 EF_DIR, §13.2 EF_ICCID"
+        ),
     },
     "TS 102 222": {
-        "url": "ETSI TS 102 222 (Admin commands)",
-        "key_sections": "§5 CREATE FILE, §6 DELETE FILE, §7 TERMINATE DF/EF, §8 RESIZE FILE",
+        "title": "ETSI TS 102 222 Administrative commands",
+        "version": "v17.1",
+        "key_sections": (
+            "§6.3 CREATE FILE, §6.4 DELETE FILE, §6.5 DEACTIVATE FILE, §6.6 ACTIVATE FILE, "
+            "§6.7 TERMINATE DF, §6.8 TERMINATE EF, §6.9 TERMINATE CARD USAGE, §6.10 RESIZE FILE"
+        ),
     },
     "TS 102 223": {
-        "url": "ETSI TS 102 223 (SIM Toolkit)",
-        "key_sections": "§6 Proactive commands, §7 Envelope, §8 Terminal response, §9 Event download",
+        "title": "ETSI TS 102 223 Card Application Toolkit",
+        "version": "v18.3",
+        "key_sections": (
+            "§5 Profile download, §6 Proactive UICC, §6.4 Proactive UICC commands and procedures, "
+            "§7 ENVELOPE commands, §7.5 Event download, §8 COMPREHENSION-TLV data objects"
+        ),
     },
     "TS 102 225": {
-        "url": "ETSI TS 102 225 (Secured Packet)",
-        "key_sections": "§5 Secured packet structure, §6 Command/Response SPI encoding",
+        "title": "ETSI TS 102 225 Secured packet structure",
+        "version": "v19",
+        "key_sections": (
+            "§4 Overview of security system, §5 Generalized secured packet structure, "
+            "§5.1 Command packet structure, §5.2 Response Packet structure"
+        ),
     },
     "TS 102 226": {
-        "url": "ETSI TS 102 226 (Remote APDU for UICC)",
-        "key_sections": "§5 RAM commands, §6 RFM commands, §7 Access control",
+        "title": "ETSI TS 102 226 Remote APDU structure",
+        "version": "v19",
+        "key_sections": (
+            "§5 Remote APDU format, §6 Security parameters assigned to applications, "
+            "§7 Remote File Management (RFM), §8 Remote Application Management (RAM), "
+            "§8.3 RAM over HTTPS, §8.4 RAM over CoAP/DTLS"
+        ),
     },
     "TS 31.102": {
-        "url": "3GPP TS 31.102 (USIM)",
-        "key_sections": "§4 EF structure, §5 EF definitions (IMSI, LOCI, ACC, etc.), §7 USIM security",
+        "title": "3GPP TS 31.102 Characteristics of the USIM application",
+        "version": "v19.5",
+        "key_sections": (
+            "§4.2.2 EF_IMSI, §4.4 DFs at the USIM ADF level (§4.4.2 DF PHONEBOOK, §4.4.3 DF "
+            "GSM-ACCESS, §4.4.11 DF5GS, §4.4.12 DF SNPN, §4.4.13 DF 5G ProSe), §5.3 Subscription "
+            "related procedures"
+        ),
     },
     "TS 33.501": {
-        "url": "3GPP TS 33.501 (5G Security)",
-        "key_sections": "§6.1 5G AKA, §6.2 EAP-AKA', §C.3 SUCI calculation",
+        "title": "3GPP TS 33.501 Security architecture and procedures for 5G System",
+        "version": "v19.7",
+        "key_sections": (
+            "§6.1 Primary authentication and key agreement, §6.1.3.1 EAP-AKA', §6.1.3.2 5G AKA, "
+            "§6.2 Key hierarchy, key derivation, and distribution scheme, Annex C.3 ECIES"
+        ),
     },
     "TS 35.206": {
-        "url": "3GPP TS 35.206 (Milenage)",
-        "key_sections": "§3 Algorithm, §4 Test vectors, §5 OPC derivation",
+        "title": "3GPP TS 35.206 MILENAGE algorithm specification",
+        "version": "v19",
+        "key_sections": (
+            "§3 Algorithm framework, §4 Definition of the example algorithms, §5 Implementation "
+            "considerations; test data are TS 35.207 and TS 35.208"
+        ),
     },
     "TS 35.231": {
-        "url": "3GPP TS 35.231 (TUAK)",
-        "key_sections": "§3 Algorithm, §4 Test vectors",
+        "title": "3GPP TS 35.231 TUAK algorithm specification",
+        "version": "v19",
+        "key_sections": (
+            "§4 Preliminary information, §5 Inputs and outputs, §6 Definition of the example "
+            "algorithms, §7 Implementation considerations; test data are TS 35.232 and TS 35.233"
+        ),
     },
     "GPC v2.3.1": {
-        "url": "GlobalPlatform Card Specification v2.3.1",
-        "key_sections": "§11 Security domains, §11.8 INSTALL, §11.9 LOAD, §11.11 DELETE, §11.12 SET STATUS, §E SCP03",
-    },
-    "ISO 7816-4": {
-        "url": "ISO/IEC 7816-4 (APDU)",
-        "key_sections": "§5 APDU structure, §5.1.3 Status words, §6 Logical channels, §7 Secure messaging",
+        "title": "GlobalPlatform Card Specification (public review draft v2.3.1.49)",
+        "version": "v2.3.1",
+        "key_sections": (
+            "§7 Security Domains, §11.2 DELETE, §11.5 INSTALL, §11.6 LOAD, §11.8 PUT KEY, "
+            "§11.9 SELECT, §11.10 SET STATUS, §11.11 STORE DATA; SCP03 is Amendment D"
+        ),
     },
 }
+
+# A clause heading: number (or annex letter plus number) and a title. A table
+# row or a contents line keeps a run of spaces inside its "title"; a real
+# heading does not.
+_HEADING_RE = re.compile(
+    r"^\s*(?:#+\s*)?((?:\d+|[A-H](?=\.\d))(?:\.\d+)*)\.?\s+([A-Za-z(][^\n]{0,118})$"
+)
+_LEADER_RE = re.compile(r"\.{4,}|\s{3,}|(?:\s\.){3,}|\u2026")
+_TRAILING_PAGE_RE = re.compile(r"\s\d{1,4}$")
+_SLUG_VERSION_RE = re.compile(r"[vV](\d+(?:\.\d+)*)(p)?")
+
+
+def _slug_version(slug: str) -> tuple[int, ...]:
+    """Version of a library folder name: ``ts_102221v18.4`` -> (18, 4), ``v160200p`` -> (16, 2, 0)."""
+
+    match = _SLUG_VERSION_RE.search(slug)
+    if match is None:
+        return ()
+    digits = match.group(1)
+    if match.group(2) and "." not in digits and len(digits) == 6:
+        return (int(digits[0:2]), int(digits[2:4]), int(digits[4:6]))
+    return tuple(int(part) for part in digits.split("."))
+
+
+def _library_prefixes(spec_id: str) -> tuple[list[str], tuple[int, ...]]:
+    """Folder-name prefixes that hold ``spec_id``, plus the version it asks for."""
+
+    text = spec_id.strip()
+    wanted: tuple[int, ...] = ()
+    version = re.search(r"\s[vV](\d+(?:\.\d+)*)\s*$", text)
+    if version:
+        wanted = tuple(int(part) for part in version.group(1).split("."))
+        text = text[: version.start()].strip()
+    upper = text.upper()
+    if upper.startswith("SGP.") or upper.startswith("TS.") or upper.startswith("FS."):
+        return [f"{text}-v"], wanted
+    etsi = re.fullmatch(r"(?:(?:ETSI|3GPP)\s+)?TS\s*(\d{3})\s?(\d{3})", text, re.IGNORECASE)
+    if etsi:
+        return [f"ts_{etsi.group(1)}{etsi.group(2)}v"], wanted
+    third = re.fullmatch(r"(?:3GPP\s+)?TS\s*(\d{2})\.(\d{3})", text, re.IGNORECASE)
+    if third:
+        return [f"ts_1{third.group(1)}{third.group(2)}v"], wanted
+    if upper in {"GP", "GPC", "GP CS"}:
+        return ["GPC_CardSpecification_v"], wanted
+    if upper in {"SAIP", "TCA SAIP"}:
+        return ["Profile_interoperability_technical_specification_V"], wanted
+    rfc = re.fullmatch(r"RFC\s*(\d+)", text, re.IGNORECASE)
+    if rfc:
+        return [f"rfc{int(rfc.group(1))}"], wanted
+    itu = re.fullmatch(r"(?:ITU-T\s+)?([XE])\.(\d{3})", text, re.IGNORECASE)
+    if itu:
+        return [f"T-REC-{itu.group(1).upper()}.{itu.group(2)}-"], wanted
+    return [text], wanted
+
+
+def _library_document(spec_id: str) -> str | None:
+    """Newest library folder holding ``spec_id`` (or the requested version), else None."""
+
+    root = SPEC_LIBRARY_ROOT
+    if not root.is_dir():
+        return None
+    # A folder name is taken as given only when it names a direct child of
+    # the library; a path ("../x", "a/b") never leaves the root.
+    folder = spec_id.strip()
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", folder) and (root / folder / "pages").is_dir():
+        return folder
+    prefixes, wanted = _library_prefixes(spec_id)
+    candidates = [
+        entry.name
+        for entry in root.iterdir()
+        if entry.is_dir()
+        and (entry / "pages").is_dir()
+        and any(entry.name.startswith(prefix) for prefix in prefixes)
+    ]
+    if wanted:
+        candidates = [name for name in candidates if _slug_version(name)[: len(wanted)] == wanted]
+    if not candidates:
+        return None
+    return max(candidates, key=_slug_version)
+
+
+def _citation_label(slug: str) -> str:
+    """How a citation names the document in ``slug``: ``TS 31.102 v19.5``, ``SGP.22 v3.1``."""
+
+    version = ".".join(str(part) for part in _slug_version(slug))
+    etsi = re.match(r"ts_(\d{6})(-\d)?v", slug)
+    if etsi:
+        number = etsi.group(1)
+        part = etsi.group(2) or ""
+        name = (
+            f"TS {number[1:3]}.{number[3:]}{part}"
+            if number[0] == "1" and number[1] in "2345"
+            else f"TS {number[:3]} {number[3:]}{part}"
+        )
+        return f"{name} v{version}"
+    if slug.startswith("GPC_CardSpecification"):
+        return f"GPC v{version}"
+    if slug.startswith("Profile_interoperability_technical_specification"):
+        return f"TCA SAIP V{version}"
+    gsma = re.match(r"((?:SGP|TS|FS)\.\d+(?:-\d)?)-v", slug)
+    if gsma:
+        return f"{gsma.group(1)} v{version}"
+    if slug.startswith("rfc"):
+        return f"RFC {slug[3:]}"
+    itu = re.match(r"T-REC-([A-Z]\.\d+)-(\d{4})(\d{2})", slug)
+    if itu:
+        return f"ITU-T {itu.group(1)} ({itu.group(3)}/{itu.group(2)})"
+    return slug
+
+
+def _library_headings(slug: str) -> list[tuple[str, str, str]]:
+    """(clause, title, page file name) for every heading in the document, in page order."""
+
+    headings: list[tuple[str, str, str]] = []
+    pages = sorted(
+        (SPEC_LIBRARY_ROOT / slug / "pages").glob("page-*.md"),
+        key=lambda path: int(path.stem.split("-")[-1]),
+    )
+    for page_path in pages:
+        for line in page_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            match = _HEADING_RE.match(line)
+            if match is None:
+                continue
+            number, title = match.group(1), match.group(2).rstrip()
+            # Front matter reads like headings: an ETSI address ("650 Route des
+            # Lucioles") and the version-digit notes ("1 presented to ...;").
+            if _LEADER_RE.search(title) or title.endswith((";", ",", ".")):
+                continue
+            if number[0].isdigit() and int(number.split(".")[0]) > 60:
+                continue
+            headings.append((number, title, page_path.name))
+    return headings
+
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -402,10 +622,10 @@ SPEC_SECTIONS: dict[str, dict[str, str]] = {
 
 @mcp.tool(annotations=READ_ONLY)
 def validate_identifier(identifier_type: str, value: str) -> str:
-    """Check whether an ICCID, IMSI, EID, IMEI, or PLMN value uses the correct
-    test range per GSMA/3GPP/ITU-T reserved test values.
+    """Check whether an ICCID, IMSI, EID or MCC/MNC value sits in the test range
+    this project uses (see the test-identifier-ranges resource for the sources).
 
-    identifier_type: one of iccid, imsi, eid, imei, mccmnc.
+    identifier_type: one of iccid, imsi, eid, mccmnc.
     """
     identifier_type = identifier_type.lower().strip()
     if identifier_type not in TEST_IDENTIFIER_RANGES:
@@ -560,17 +780,61 @@ def ber_tlv_lookup(tag: str) -> str:
 
 
 @mcp.tool(annotations=READ_ONLY)
-def spec_section_lookup(spec_id: str) -> str:
-    """Return a summary of a specification and its key sections.
-    Known specs: SGP.02, SGP.22, SGP.32, TS 102 221-226, TS 31.102,
-    TS 33.501, TS 35.206, TS 35.231, GPC v2.3.1, ISO 7816-4.
+def spec_section_lookup(spec_id: str, clause: str = "") -> str:
+    """Find a clause in the standards library and return a versioned citation.
+
+    spec_id: 'SGP.22', 'SGP.32 v1.2', 'TS 102 221', 'TS 31.102', 'GPC v2.3.1',
+    'SAIP', 'RFC 8446', 'X.690', or a library folder name. The newest version in
+    the library wins unless one is named. clause: '11.1.1' returns that heading
+    and its page; empty returns the document outline. Without the library
+    (docs/tel-docs/converted) the answer comes from a short verified index.
     """
     spec_id = spec_id.strip()
-    for key, info in SPEC_SECTIONS.items():
-        if spec_id.upper() == key.upper():
-            return json.dumps({"spec": key, "full_name": info["url"], "key_sections": info["key_sections"]})
+    clause = clause.strip().lstrip("§").strip()
+    slug = _library_document(spec_id)
+    if slug is not None:
+        label = _citation_label(slug)
+        headings = _library_headings(slug)
+        if clause:
+            matches = [(title, page) for number, title, page in headings if number == clause]
+            if not matches:
+                return json.dumps({"error": f"Clause {clause} not found in {slug}.", "document": slug})
+            # A contents line that slipped past the filter ends in its page number.
+            title, page = next(
+                ((title, page) for title, page in matches if not _TRAILING_PAGE_RE.search(title)),
+                matches[-1],
+            )
+            return json.dumps(
+                {
+                    "spec": spec_id,
+                    "source": "library",
+                    "document": slug,
+                    "clause": clause,
+                    "title": title,
+                    "page_file": f"{slug}/pages/{page}",
+                    "citation": f"{label} Annex {clause}" if clause[0].isalpha() else f"{label} §{clause}",
+                }
+            )
+        outline: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for number, title, page in headings:
+            if number.count(".") > 1 or number in seen or _TRAILING_PAGE_RE.search(title):
+                continue
+            seen.add(number)
+            outline.append({"clause": number, "title": title, "page_file": f"{slug}/pages/{page}"})
+        return json.dumps(
+            {"spec": spec_id, "source": "library", "document": slug, "citation_label": label, "outline": outline[:80]}
+        )
 
-    return json.dumps({"error": f"Spec '{spec_id}' not found. Known: {list(SPEC_SECTIONS)}."})
+    for key, info in SPEC_SECTIONS.items():
+        if spec_id.upper() in {key.upper(), f"{key} {info['version']}".upper()}:
+            payload: dict[str, str] = {"spec": key, "source": "verified index (spec library not present)", **info}
+            if clause:
+                payload["note"] = "A clause lookup needs the spec library (docs/tel-docs/converted)."
+            return json.dumps(payload)
+    return json.dumps(
+        {"error": f"Spec '{spec_id}' is not in the spec library or the index. Indexed without the library: {list(SPEC_SECTIONS)}."}
+    )
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -686,6 +950,27 @@ async def pcsc_transmit(
     if declined is not None:
         return declined
 
+    # A Remote Lab reader is served by a relay, not by PC/SC: it resolves
+    # before enumeration, by its registered name, and never by substring so
+    # a partial name cannot pick the wrong rig.
+    remote_binding = _remote_reader_binding(reader_name)
+    if remote_binding is not None:
+        clean_remote = hex_apdu.strip().replace(" ", "").replace(":", "").replace("0x", "")
+        try:
+            remote_apdu = bytes.fromhex(clean_remote)
+        except ValueError:
+            return json.dumps({"error": "Invalid hex APDU."})
+        try:
+            from yggdrasim_common.card_backend import create_card_connection
+            from yggdrasim_common.remote_readers import REMOTE_READER_INDEX
+
+            remote_connection = create_card_connection(
+                reader_index=REMOTE_READER_INDEX, reader_name=remote_binding.name
+            )
+            remote_connection.connect()
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"error": f"Failed to connect to '{remote_binding.name}': {exc}"})
+        return _transmit_on_connection(remote_connection, remote_binding.name, hex_apdu, remote_apdu, timeout_ms)
     try:
         readers_fn, share_exclusive, exclusive_wrapper = _load_pcsc()
     except RuntimeError as exc:
@@ -729,6 +1014,27 @@ async def pcsc_transmit(
     except Exception as exc:
         return json.dumps({"error": f"Failed to connect to '{selected}': {exc}"})
 
+    return _transmit_on_connection(connection, selected, hex_apdu, apdu_bytes, timeout_ms)
+
+
+def _remote_reader_binding(reader_name: str):
+    """The registered Remote Lab binding for *reader_name*, or ``None``."""
+    cleaned = str(reader_name or "").strip()
+    if not cleaned:
+        return None
+    try:
+        from yggdrasim_common.remote_readers import lookup_remote_reader
+    except Exception:  # noqa: BLE001 -- lean install without the GUI package
+        return None
+    return lookup_remote_reader(cleaned)
+
+
+def _transmit_on_connection(connection: Any, selected: Any, hex_apdu: str, apdu_bytes: bytes, timeout_ms: int) -> str:
+    """Send one APDU on a connected card connection, then disconnect.
+
+    Shared by the PC/SC and the Remote Lab branches of ``pcsc_transmit`` so
+    the timeout, the disconnect and the result shape cannot drift apart.
+    """
     # Transmit with timeout (matches Tools/HilBridge/pcsc.py pattern)
     apdu_list = list(apdu_bytes)
     result_holder: list[tuple[list[int], int, int]] = []
@@ -744,14 +1050,16 @@ async def pcsc_transmit(
     worker.start()
     worker.join(timeout=max(0.1, timeout_ms / 1000.0))
 
-    # Disconnect
+    if worker.is_alive():
+        # The worker may still be inside connection.transmit(); disconnecting
+        # now would close the handle under it. Leave the abandoned thread to
+        # finish against the old connection and exit on its own.
+        return json.dumps({"error": f"PC/SC transmit timed out after {timeout_ms}ms."})
+
     try:
         connection.disconnect()
     except Exception:
         pass
-
-    if worker.is_alive():
-        return json.dumps({"error": f"PC/SC transmit timed out after {timeout_ms}ms."})
 
     if error_holder:
         return json.dumps({"error": f"PC/SC transmit failed: {error_holder[0]}"})
@@ -932,6 +1240,35 @@ def asn1_decode(hex_data: str) -> str:
         return json.dumps({"error": f"Decode failed: {exc}"})
 
 
+@mcp.tool(annotations=READ_ONLY)
+def context_decode(text: str, domain: str = "auto") -> str:
+    """Decode an APDU, a response, a bare TLV or a whole exchange trace with
+    the specification the CLA/INS pair selects.
+
+    UICC file commands decode against ETSI TS 102 221 (SELECT parameters,
+    FCP templates), CAT against TS 102 223 / TS 101 220 (proactive commands,
+    envelopes, terminal responses), GlobalPlatform against GPC v2.3.1
+    (GET STATUS registry entries, INSTALL fields, DELETE, STORE DATA,
+    GET DATA), ES10 STORE DATA against the compiled SGP.22 / SGP.32 ASN.1
+    modules, and AUTHENTICATE against TS 31.102. A trace carries state:
+    the selected file names READ BINARY content and '61 xx' chains the
+    following GET RESPONSE onto its command.
+
+    text: one hex string, or one exchange per line (markers >, <, ->, <-,
+    C:, R: and sw=XXXX are understood).
+    domain: auto, apdu, response, es10, gp, uicc, cat, tlv or sw.
+    """
+    try:
+        from Tools.Asn1TlvDecode.context import decode_context_text
+        from Tools.Asn1TlvDecode.main import DecodeError
+    except ImportError as exc:
+        return json.dumps({"error": f"Context decoder unavailable: {exc}"})
+    try:
+        return json.dumps(decode_context_text(text, hint=domain), indent=2)
+    except DecodeError as exc:
+        return json.dumps({"error": str(exc)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"Decode failed: {exc}"})
 _SGP32_DECODERS = {
     "euicc_info1": "decode_euicc_info1_summary",
     "notifications": "decode_notifications_response",
@@ -1163,7 +1500,7 @@ def ber_tlv_tag_table() -> str:
 
 @mcp.resource("yggdrasim://reference/spec-sections")
 def spec_section_table() -> str:
-    """The spec-section index."""
+    """The verified clause index spec_section_lookup falls back to without the spec library."""
 
     return json.dumps(SPEC_SECTIONS, indent=2)
 
@@ -1510,6 +1847,33 @@ class _ShellSpec:
     card_verbs: frozenset = frozenset()
 
 
+_SCP11_LIVE_SHELL = _ShellSpec(
+    module="SCP11.live.main",
+    summary="SGP.22/SGP.32 profile download and eUICC management (DRIVES A CARD)",
+    # Startup preflight enumerates PC/SC readers before any verb runs.
+    card=True,
+    read=frozenset({
+        "?", "AIDS", "DISCOVER", "EIM-DISCOVER", "ES9-CERT-INFO",
+        "GET-ALL-DATA", "GET-CERTS", "GET-EID", "GET-EIM-CONFIG",
+        "GET-ES9", "GET-EUICC-INFO1", "GET-EUICC-INFO2", "GET-METADATA",
+        "GET-NOTIFICATIONS", "GET-POL", "GET-RAT", "GET-SMDP", "H",
+        "HELP", "HELP-ALL", "INFO", "LIST", "METADATA", "Q", "QA",
+        "READ-METADATA", "SCAN", "STATUS", "EXIT", "QUIT",
+    }),
+    write=frozenset({
+        "CLEAR-NOTIFICATIONS", "DISABLE-PROFILE", "EIM-AUTHENTICATE",
+        "ENABLE-PROFILE", "REMOVE-NOTIFICATION", "SET-ES9", "SET-ES9-CA",
+        "SET-ES9-TLS", "SET-POL", "SET-SMDP", "STORE-METADATA",
+        "VERIFY-SCP11",
+    }),
+    destructive=frozenset({
+        # Each of these installs a profile, wipes session state, or runs
+        # a flow whose steps are chosen by the remote side.
+        "DELETE-PROFILE", "DOWNLOAD", "DOWNLOAD-AC", "DOWNLOAD-PROFILE",
+        "EIM-DOWNLOAD", "FLOW", "RESET",
+    }),
+)
+
 #: Only shells whose verbs were enumerated in full appear here. Guessing a
 #: classification for a card shell is how an agent wipes a card.
 _SHELLS: dict[str, _ShellSpec] = {
@@ -1521,18 +1885,23 @@ _SHELLS: dict[str, _ShellSpec] = {
             "CHECK", "DIFF", "DIFF-PRESET", "DUMP", "HELP", "INFO", "INSPECT",
             "LINT", "LIST-AKA", "LIST-TOKENS", "PRESETS", "PREVIEW-PRESET",
             "PROFILE-DIR", "PWD", "Q", "STATUS", "TREE", "USE", "OPEN",
-            "EXIT", "QUIT",
+            "EXIT", "QUIT",            "UNIVERSAL-TOKENS",
+            "TOKEN-LISTS",
         }),
         write=frozenset({
             # TOKENS dispatches its own SET / ADD / REMOVE subcommands, which
             # the leading-verb gate cannot see, so it sits at the write tier.
-            # LIST-TOKENS is the read-only way to see them.
+            # LIST-TOKENS is the read-only way to see them. RFM, TRIM and
+            # VARIABLES dispatch subcommands the same way and edit the open
+            # package or write a file, so they sit there too.
+            "RFM", "TRIM", "VARIABLES",
             "ADD-TOKEN", "APPLY-TEMPLATE", "APPLY-TOKENS", "ENCODE-JSON",
             "EXPORT-TOKENS", "EXPORT-TOKENS-CSV", "EXTRACT-APPS",
             "GENERATE-BATCH", "GENERATE-PROFILE", "GENERATE-TEMPLATE",
-            "IMPORT-TOKENS-CSV", "NEW-PROFILE", "NEW-TEMPLATE",
+            "IMPORT-TOKENS-CSV", "MATERIALISE-TEMPLATE", "MATERIALIZE-TEMPLATE",
+            "NEW-PROFILE", "NEW-TEMPLATE",
             "RENAME-TOKEN", "RETOKENISE-LENGTHS", "RETOKENIZE-LENGTHS",
-            "SET-TOKEN", "SPLIT", "TOKENS", "TOOL", "TRANSCODE-DIR",
+            "SET-TOKEN", "SPLIT", "TOKENS", "TOOL", "TRANSCODE-DIR",            "APPLY-UNIVERSAL-TOKENS",
         }),
         destructive=frozenset({
             "REMOVE-NAA", "REMOVE-TOKEN", "PROVISION-AKA", "RANDOMIZE-AKA",
@@ -1557,7 +1926,7 @@ _SHELLS: dict[str, _ShellSpec] = {
             "AUTH-SD", "CLEAR-GOLD-PROFILE", "DUMP-FS", "EXPORT-EUICC",
             "GOLD-PROFILE", "LOGOUT", "RESET", "RUN-AUTH-TEST", "SCP02-SD",
             "SCP03-SD", "SET-AID-ALIAS", "SET-DEFAULT", "SET-GOLD-PROFILE",
-            "STK", "UPDATE",
+            "STK", "TRACE", "UPDATE",
         }),
         destructive=frozenset({
             # Applet lifecycle, raw card writes, and key-bag export.
@@ -1618,32 +1987,7 @@ _SHELLS: dict[str, _ShellSpec] = {
             "EXPORT-KEYBAG",
         }),
     ),
-    "scp11_live": _ShellSpec(
-        module="SCP11.live.main",
-        summary="SGP.22/SGP.32 profile download and eUICC management (DRIVES A CARD)",
-        # Startup preflight enumerates PC/SC readers before any verb runs.
-        card=True,
-        read=frozenset({
-            "?", "AIDS", "DISCOVER", "EIM-DISCOVER", "ES9-CERT-INFO",
-            "GET-ALL-DATA", "GET-CERTS", "GET-EID", "GET-EIM-CONFIG",
-            "GET-ES9", "GET-EUICC-INFO1", "GET-EUICC-INFO2", "GET-METADATA",
-            "GET-NOTIFICATIONS", "GET-POL", "GET-RAT", "GET-SMDP", "H",
-            "HELP", "HELP-ALL", "INFO", "LIST", "METADATA", "Q", "QA",
-            "READ-METADATA", "SCAN", "STATUS", "EXIT", "QUIT",
-        }),
-        write=frozenset({
-            "CLEAR-NOTIFICATIONS", "DISABLE-PROFILE", "EIM-AUTHENTICATE",
-            "ENABLE-PROFILE", "REMOVE-NOTIFICATION", "SET-ES9", "SET-ES9-CA",
-            "SET-ES9-TLS", "SET-POL", "SET-SMDP", "STORE-METADATA",
-            "VERIFY-SCP11",
-        }),
-        destructive=frozenset({
-            # Each of these installs a profile, wipes session state, or runs
-            # a flow whose steps are chosen by the remote side.
-            "DELETE-PROFILE", "DOWNLOAD", "DOWNLOAD-AC", "DOWNLOAD-PROFILE",
-            "EIM-DOWNLOAD", "FLOW", "POLL", "RESET",
-        }),
-    ),
+    "scp11_live": _SCP11_LIVE_SHELL,
     "scp11_eim": _ShellSpec(
         module="SCP11.eim_local.main",
         summary="SGP.32 local eIM: author, lint, and issue eIM packages",
@@ -1675,7 +2019,7 @@ _SHELLS: dict[str, _ShellSpec] = {
             "DELETE", "DELETE-EIM", "DELETE-PROFILE", "EIM-PACKAGE-CLEAR",
             "EIM-PACKAGE-ISSUE", "EIM-PACKAGE-ISSUE-ALL", "EUICC-MEMORY-RESET",
             "HOTFOLDER-CAMPAIGN", "HOTFOLDER-CLEAR", "HOTFOLDER-FETCH",
-            "IPAD-LIVE", "IPAD-TEST", "ISDR-DELETE-EIM",
+            "ISDR-DELETE-EIM",
             "ISDR-EUICC-MEMORY-RESET", "ISDR-LOAD-PACKAGE", "ISDR-PACKAGE",
             "LOAD-EIM-PACKAGE", "LOAD-PROFILE", "METADATA-CLEAR",
             "POLL-CAMPAIGN", "PROFILE-CLEAR", "RESP-LOG-CLEAR",
@@ -1687,7 +2031,7 @@ _SHELLS: dict[str, _ShellSpec] = {
             "EIM-PACKAGE-ISSUE", "EIM-PACKAGE-ISSUE-ALL", "ENABLE",
             "ENABLE-PROFILE", "EUICC-MEMORY-RESET", "GET-EIM-CONFIG",
             "HOTFOLDER-CAMPAIGN", "HOTFOLDER-FETCH", "INFO", "IPAD-DISCOVER",
-            "IPAD-LIVE", "IPAD-TEST", "ISDR-ADD-EIM", "ISDR-ADD-INITIAL-EIM",
+            "ISDR-ADD-EIM", "ISDR-ADD-INITIAL-EIM",
             "ISDR-DELETE-EIM", "ISDR-EUICC-MEMORY-RESET",
             "ISDR-GET-EIM-CONFIG", "ISDR-LOAD-PACKAGE", "ISDR-PACKAGE",
             "LOAD-EIM-PACKAGE", "LOAD-PROFILE", "NOTIF-HYGIENE",
@@ -1696,26 +2040,15 @@ _SHELLS: dict[str, _ShellSpec] = {
     ),
     "scp11_relay": _ShellSpec(
         module="SCP11.relay.main",
-        summary="SGP.22 relay compatibility shell: ES2+/ES9+ and profile lifecycle (DRIVES A CARD)",
-        # Same startup preflight as scp11_live: readers are enumerated before
-        # the first verb runs, so HELP alone would touch hardware.
+        summary="SGP.22/SGP.32 relay compatibility shell: the live shell under its legacy entry point (DRIVES A CARD)",
+        # SCP11.relay aliases SCP11.live module for module, so the relay
+        # shell registers, and must classify, exactly the live verbs.
         card=True,
-        read=frozenset({
-            "?", "AIDS", "EIM-DISCOVER", "ES9-CERT-INFO", "GET-CERTS",
-            "GET-EID", "GET-EIM-CONFIG", "GET-ES9", "GET-EUICC-INFO1",
-            "GET-EUICC-INFO2", "GET-METADATA", "GET-NOTIFICATIONS",
-            "GET-POL", "GET-RAT", "GET-SMDP", "H", "HELP", "INFO", "LIST",
-            "Q", "QA", "READ-METADATA", "SCAN", "STATUS", "EXIT", "QUIT",
-        }),
-        write=frozenset({
-            "DISABLE-PROFILE", "EIM-AUTHENTICATE", "ENABLE-PROFILE",
-            "REMOVE-NOTIFICATION", "SET-ES9", "SET-ES9-CA", "SET-ES9-TLS",
-            "SET-POL", "SET-SMDP", "STORE-METADATA", "VERIFY-SCP11",
-        }),
-        destructive=frozenset({
-            # Each installs a profile or runs a flow the remote side steers.
-            "DELETE-PROFILE", "DOWNLOAD-AC", "EIM-DOWNLOAD", "FLOW",
-        }),
+        read=_SCP11_LIVE_SHELL.read,
+        write=_SCP11_LIVE_SHELL.write,
+        destructive=_SCP11_LIVE_SHELL.destructive,
+        interactive=_SCP11_LIVE_SHELL.interactive,
+        card_verbs=_SCP11_LIVE_SHELL.card_verbs,
     ),
     "suci_tool": _ShellSpec(
         module="Tools.SuciTool.main",
@@ -1738,9 +2071,32 @@ _SHELL_TIMEOUT_SECONDS = 120
 _SHELL_OUTPUT_LIMIT = 60_000
 
 
-def classify_shell_command(command: str, shell: str = "profile_package") -> dict[str, Any]:
-    """Classify one shell command by its leading verb."""
+def _without_log_modifier(command: str) -> tuple[str, bool]:
+    """``command`` without its ``--log <file>`` modifier, and whether it had one."""
+    try:
+        from yggdrasim_common.command_log import log_flag_present, strip_log_flag
+    except ImportError:
+        # The standalone package ships no shells to run the line; one that
+        # may carry the modifier still counts as writing a file.
+        return command, "--log" in command.lower()
+    return strip_log_flag(command), log_flag_present(command)
 
+
+def classify_shell_command(command: str, shell: str = "profile_package") -> dict[str, Any]:
+    """Classify one shell command by its leading verb.
+
+    Every shell takes ``--log <file>`` off a line and appends the command's
+    output to that file on this host, so the modifier comes off before the
+    verb is read and makes a reading command a write.
+    """
+    command, writes_log = _without_log_modifier(str(command or ""))
+    verdict = _classify_shell_verb(command, shell)
+    if writes_log and verdict["risk"] == "read":
+        return {**verdict, "risk": "write"}
+    return verdict
+
+
+def _classify_shell_verb(command: str, shell: str) -> dict[str, Any]:
     spec = _SHELLS.get(shell)
     verb = str(command or "").strip().split()[0].upper() if command.strip() else ""
     if not verb:
@@ -2409,7 +2765,13 @@ def card_session_open(
 
     index = int(reader_index)
     resolved_name = ""
-    if not simulated:
+    remote_binding = None if simulated else _remote_reader_binding(reader_name)
+    if remote_binding is not None:
+        from yggdrasim_common.remote_readers import REMOTE_READER_INDEX
+
+        index = REMOTE_READER_INDEX
+        resolved_name = remote_binding.name
+    elif not simulated:
         try:
             readers_fn, _share, _wrapper = _load_pcsc()
         except RuntimeError as exc:
@@ -2446,9 +2808,10 @@ def card_session_open(
         return json.dumps({"error": f"Unknown protocol {protocol!r}. Use T=0, T=1, or ''."})
 
     try:
-        connection = module.create_card_connection(
-            reader_index=index, protocol=wanted_protocol
-        )
+        open_kwargs = {"reader_index": index, "protocol": wanted_protocol}
+        if remote_binding is not None:
+            open_kwargs["reader_name"] = remote_binding.name
+        connection = module.create_card_connection(**open_kwargs)
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"error": f"Could not open a card session: {exc}"})
 

@@ -64,18 +64,18 @@ class LocationInformationEncodingTests(unittest.TestCase):
     def test_gsm_2digit_mnc_emits_seven_bytes(self) -> None:
         encoded = _encode_location_information_gsm("001", "01", 0x0001, 0x0001)
         self.assertEqual(len(encoded), 7)
-        # 3GPP TS 23.003 §2.2 test PLMN MCC=001 MNC=01 → packed BCD 00 F1 10
+        # Test PLMN MCC=001 MNC=01 (3GPP TS 31.124 v18.7 §27.22.2A) → packed BCD 00 F1 10
         self.assertEqual(encoded[:3], bytes.fromhex("00F110"))
         self.assertEqual(encoded[3:5], b"\x00\x01")
         self.assertEqual(encoded[5:], b"\x00\x01")
 
     def test_gsm_3digit_mnc_packs_third_digit_in_high_nibble(self) -> None:
-        encoded = _encode_location_information_gsm("310", "260", 0x1234, 0xABCD)
-        # 3GPP TS 24.008 §10.5.1.3 PLMN coding for MCC=310 MNC=260:
-        # - byte 1: MCC2 (1) | MCC1 (3) -> 0x13
-        # - byte 2: MNC3 (0) | MCC3 (0) -> 0x00
+        encoded = _encode_location_information_gsm("999", "260", 0x1234, 0xABCD)
+        # 3GPP TS 24.008 §10.5.1.3 PLMN coding for MCC=999 MNC=260:
+        # - byte 1: MCC2 (9) | MCC1 (9) -> 0x99
+        # - byte 2: MNC3 (0) | MCC3 (9) -> 0x09
         # - byte 3: MNC2 (6) | MNC1 (2) -> 0x62
-        self.assertEqual(encoded[:3], bytes.fromhex("130062"))
+        self.assertEqual(encoded[:3], bytes.fromhex("990962"))
         self.assertEqual(encoded[3:5], b"\x12\x34")
         self.assertEqual(encoded[5:], b"\xAB\xCD")
 

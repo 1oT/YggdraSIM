@@ -56,7 +56,7 @@
 }
 
 .saip-app-card--sd {
-  border-left: 3px solid rgba(163, 190, 140, 0.55);
+  border-left: 3px solid color-mix(in oklab, var(--ok) 55%, transparent);
   padding-left: 9px;
 }
 
@@ -92,7 +92,7 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg-muted);
@@ -104,21 +104,21 @@
  * accent) so PERSONALIZED / INSTALLED / LOCKED read as semantic
  * traffic-lights regardless of the active theme. */
 .saip-app-lifecycle.is-personalized {
-  border-color: rgba(163, 190, 140, 0.5);
-  background: rgba(163, 190, 140, 0.12);
-  color: #b4cf99;
+  border-color: color-mix(in oklab, var(--ok) 50%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
 }
 
 .saip-app-lifecycle.is-installed {
-  border-color: rgba(235, 203, 139, 0.5);
-  background: rgba(235, 203, 139, 0.10);
-  color: #ddc485;
+  border-color: color-mix(in oklab, var(--warn) 50%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 .saip-app-lifecycle.is-locked {
-  border-color: rgba(208, 135, 112, 0.5);
-  background: rgba(208, 135, 112, 0.12);
-  color: #e2a288;
+  border-color: color-mix(in oklab, var(--fail) 50%, transparent);
+  background: var(--fail-soft);
+  color: var(--fail);
 }
 
 .saip-app-lifecycle.is-unknown {
@@ -219,9 +219,9 @@
 
 .saip-app-priv--tar {
   font-family: var(--mono);
-  background: rgba(94, 129, 172, 0.12);
-  border-color: rgba(94, 129, 172, 0.45);
-  color: #8fa6cc;
+  background: var(--surface-alt);
+  border-color: var(--border-strong);
+  color: var(--fg-muted);
 }
 
 .saip-app-privs-hex {
@@ -299,6 +299,30 @@
 .saip-template-default-card .saip-edit-card-title,
 .saip-template-default-card h5 {
   color: var(--ok);
+}
+
+/* Linked file (TCA SAIP linkPath): the Data tab shows the source file's
+   bytes; the card names that file. */
+.saip-link-source-card {
+  background:
+    linear-gradient(90deg, var(--accent-soft), var(--accent-soft));
+  border-color: color-mix(in oklab, var(--accent) 38%, transparent);
+}
+
+.saip-link-source-card .saip-edit-card-title,
+.saip-link-source-card h5 {
+  color: var(--accent);
+}
+
+.saip-link-source-card--unresolved {
+  background:
+    linear-gradient(90deg, var(--warn-soft), var(--warn-soft));
+  border-color: color-mix(in oklab, var(--warn) 38%, transparent);
+}
+
+.saip-link-source-card--unresolved .saip-edit-card-title,
+.saip-link-source-card--unresolved h5 {
+  color: var(--warn);
 }
 
 .saip-file-card-title {
@@ -514,9 +538,73 @@
   font-style: italic;
 }
 
+/* One pill per DF the GFM creates files in; a click shows the first
+   file created there. The value keeps the mono font of the chip. */
+.saip-gfm-parent-chip-value {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+}
+
+.saip-gfm-df-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-alt);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.saip-gfm-df-pill:hover,
+.saip-gfm-df-pill:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.saip-gfm-df-pill-count {
+  font-size: 0.7rem;
+  color: var(--fg-muted);
+}
+
+/* The files of a GFM listed under the DF they are created in. The head
+   stays in view while a long DF scrolls under it. */
+.saip-gfm-list-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 52px;
+  gap: 6px;
+  padding: 5px 10px 3px 10px;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.saip-gfm-list-group-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saip-gfm-list-group-hex {
+  font-family: var(--mono);
+  text-transform: none;
+  text-align: right;
+}
+
 /* Inline file-creation form mounted at the top of the GFM card. The
    bar's parent field hides automatically when the parent chip above
-   shows ``data-state="bound"`` — the dispatcher then reuses that path. */
+   shows ``data-state="bound"`` -- the dispatcher then reuses that path. */
 .saip-gfm-addbar {
   display: flex;
   flex-wrap: wrap;
@@ -879,6 +967,16 @@
   text-transform: uppercase;
 }
 
+/* A placeholder literal is an identifier: its case and full length are
+   the information, so the chip shows it verbatim in the mono face. */
+.saip-form-section-chip--literal,
+.saip-form-lock-chip--literal {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
 .saip-form-section-body {
   padding: 4px 8px 6px 14px;
   display: flex;
@@ -886,6 +984,12 @@
   gap: 3px;
   border-top: 1px solid var(--border);
   background: var(--bg);
+}
+
+.saip-form-inline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .saip-form-row {
@@ -1100,28 +1204,6 @@
   padding: 2px 8px;
 }
 
-/* Inline tokenize button rendered next to every editable leaf in
-   the decoded form. Compact glyph style so it slots beside hex /
-   text inputs without disrupting the row rhythm. */
-.saip-form-tokenize {
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  padding: 1px 6px;
-  margin-left: 6px;
-  border: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
-  background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-  border-radius: 3px;
-  align-self: center;
-  white-space: nowrap;
-}
-
-.saip-form-tokenize:hover {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border-style: solid;
-}
-
 /* Token-bound row variant: same shell as the read-only row but
    tinted with the accent so the operator can scan for placeholder
    bindings at a glance. The chip carries [NAME] and the action
@@ -1208,7 +1290,7 @@
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;

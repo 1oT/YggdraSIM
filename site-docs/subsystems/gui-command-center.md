@@ -44,6 +44,14 @@ path for GUI lab development.
     generates an in-process bearer token, and tears down GUI-owned helpers
     on shutdown.
 
+    The window's page zoom is adjustable: Ctrl+plus, Ctrl+minus and
+    Ctrl+0 (or Ctrl+wheel) step it through the browser ladder (0.5 to
+    3), and the chosen factor is remembered across launches as the
+    `YGGDRASIM_GUI_ZOOM` env flag, which the Configuration view edits
+    as well. `1` (default) is the native size the layout is drawn for;
+    `auto` fits the layout to the window instead. A browser tab on
+    `--web-server` uses the browser's own zoom.
+
 === "Headless / remote lab"
 
     ```bash
@@ -67,17 +75,118 @@ path for GUI lab development.
     ssh -fN -L 8765:127.0.0.1:8765 user@lab-host
     ```
 
-## Workbench areas
+## Views
+
+The left rail switches between views; the reader strip and the live APDU dock
+stay with you across all of them.
+
+| View | Purpose |
+| --- | --- |
+| Overview | Module picker, plus the active card backend and where that selection came from. |
+| Command Center | The registry-backed action forms, grouped by subsystem into tabs. |
+| Remote Lab | Rig inventory, invites, sessions, and card offers against a [Remote Lab](remote-lab.md) agent. |
+| Plugin console | One view for every console a loaded plugin registers: its start form, action buttons, command line and live tables, or a run form with its current run and history, each console a leaf under *Plugin consoles*, a group shown only while a console is registered. See [Plugin Contract](../internals/plugin-contract.md#plugin-consoles). |
+| Registry browser | Introspection over `yggdrasim_common.registry`: subsystems, CLI modules, symbol lookups. |
+| Environment | Configuration (every `YGGDRASIM_*` flag, see [Environment Flags](../reference/env-flags.md)) and the loaded-plugin list. |
+| Terminal | A PTY running `python -m <module>`, restricted to the registry's CLI module allow-list. |
+| Host shell | Opt-in PTY on the operator's login shell. Hidden unless `YGGDRASIM_GUI_HOST_SHELL=1`. |
+| Card Bridge | Local bridge control plus the Remote Bridge onboarding for a stored host. See [Card Bridge](card-bridge.md). |
+| About | What this build is, and an in-app reader for the guides the release ships (`/api/guides`). |
+
+Within those views:
 
 | Area | Purpose |
 | --- | --- |
 | Reader strip | Lists local PC/SC readers and remote-card bridge rows from `/api/live/readers`. |
 | SCP03 workbench | Card session tabs, filesystem navigation, FCP/ARR display, records, binary reads, and custom APDUs. |
+| SAIP workbench | Profile-package inspection and editing: PE tree, hex pane, template placeholders, PE export and import. |
 | Command Center actions | Registry-backed forms for SCP03, SCP11, SCP80, SAIP, simulator, diagnostics, and HIL actions. |
 | Live APDU dock | WebSocket-fed APDU stream from the process-wide recorder, capped for long sessions. |
 | Card bridge panel | Remote-card bridge configuration, live probe, token posture, latency history, and remote HIL rig control. |
 | HIL module | Local/remote HIL health, decoded pcap snapshots, modem shell helper, GSMTAP capture review. |
-| Host shell | Opt-in PTY panel for lab hosts. Disabled unless `YGGDRASIM_GUI_HOST_SHELL=1`. |
+
+## Inside the workbenches
+
+### SAIP workbench
+
+Profile-package work happens on a PE tree beside a hex pane. Beyond opening,
+editing and saving a package, two actions move a single profile element
+between packages:
+
+- **Export PE** (`saip.export_pe`) writes one PE as a PE document
+  (`.pe.json`, schema `ygg.pe_document.v1`): the PE type and the tagged
+  decoded tree a saved package uses, and nothing about the package it came
+  from. A PE-Application therefore travels with its load block, the applet
+  bytes and every instance. The dialog names the file after the PE, and the
+  destination's extension picks DER or hex instead. In a template session you
+  choose whether the placeholder literals travel or the stored values are
+  substituted.
+- **Import PE** (`saip.import_pe`) puts one back into any package. It also
+  reads a tagged single-section document, the plain decoded JSON of one PE,
+  and DER or hex text. The tree has to encode before it reaches the sequence,
+  the DER an earlier release's document recorded is reported when it no
+  longer matches its tree, and the copy takes the next free identification so
+  the other PEs keep theirs.
+- **Save PE** (`saip.save_pe`) keeps the selected PE in the operator's PE
+  library under a name, as the same PE document, so a standardised element
+  (a PE-SD with its key set and privileges, say) is one click away in any
+  package; **PE library** (`saip.list_pe_library`, `saip.load_pe`,
+  `saip.delete_saved_pe`) lists the entries and loads one at a chosen
+  index or deletes it. The library is `~/.yggdrasim/saip_pe_library/`
+  (`YGGDRASIM_SAIP_PE_LIBRARY`), outside every checkout. A saved template
+  PE keeps its placeholder literals and registers them in the package it is
+  loaded into, answered from the test-value lists where they can be.
+
+**Add above** / **Add below** open the *Insert profile element* dialog:
+every `ProfileElement` type the SAIP module in use can carry
+(`saip.list_pe_types`, schema order, with a filter box), the presets of a
+type that has several, and the saved PEs of the PE library, inserted at
+the index the dialog shows. The Decoded view keeps its scroll offset, open
+folds and chosen tab per package and element, so switching between open
+packages and back lands where the operator left off, and a link path
+clicked in a PE-GFM entry opens the referenced file in the FS tree with the
+top tab following. The FCP editor of a GFM entry carries every `Fcp`
+member, `dfName` for an ADF included; for a link, EF size and the
+proprietary info rows are the conditional parameters that turn the link
+into an independent file.
+
+**Save as** names the format and the destination in one dialog: DER, HEX
+(`.hex` / `.txt`), ASN.1 value notation (`.asn`), tagged JSON (`.json`) and,
+for a template session, varder; a destination extension still names the
+format itself. The PE-SD card decodes each `sdPersoData` record into its
+DGI blocks under the raw hex and takes a new record (**Add DGI record**),
+which the server accepts only as whole DGI, length, value blocks.
+
+The Profile Header editor carries **Sync from EF.ICCID** and **Sync from
+EF.SMSP**: each copies a file's value into the header field that mirrors it --
+`iccid`, and the SMSC address of the SMS-PP bearer -- and applies it.
+
+### SCP03 workbench
+
+The Install tab's **Install script** button (`scp03.build_install_script`)
+builds the CAP install sequence without a card and offers a save-as picker
+with an overwrite switch. It is the same builder as the shell's Wizard 8
+(Full CAP Install Sequence) and writes a byte-identical file: the source CAP
+and the format as `#` comments, one APDU per line. An OTA-formatted file runs
+in the SCP80 shell with `script <file>`, an ISO-formatted one in the SCP03
+shell with `RUN <file>`.
+
+### Offline Tools
+
+Offline Tools opens on a context-aware decoder (`tool.decoder.context`). One
+paste box takes an APDU, a response, a bare TLV or a whole exchange trace;
+each command is classified by its CLA/INS pair and the payload decoded
+against the specification that governs it -- TS 102 221 SELECT parameters and
+FCP templates, TS 102 223 / TS 101 220 proactive commands, envelopes and
+terminal responses, GPC v2.3.1 GET STATUS entries, INSTALL, DELETE, STORE
+DATA and GET DATA, SCP03 INITIALIZE UPDATE, ES10 requests and responses named
+from their BF tag, and TS 31.102 AUTHENTICATE. A trace carries state: the
+selected file names READ BINARY content, and a `61 xx` word chains GET
+RESPONSE onto its command.
+
+The same engine backs `python -m Tools.Asn1TlvDecode --context` and the
+`context_decode` MCP tool, so a decode reads the same from the GUI, a
+terminal and an agent.
 
 ## Live APDU stream
 
@@ -101,7 +210,7 @@ workflow.
 ## Remote-card bridge controls
 
 The Card bridge view wraps the same `Tools.CardBridge` and HIL remote-card
-workflow documented in [Remote APDU Streaming](../how-to/remote-apdu-streaming.md).
+workflow documented in [Card Bridge over SSH](../how-to/remote-apdu-streaming.md).
 It is designed for the common lab topology:
 
 ```text
@@ -180,12 +289,15 @@ ssh -fN -L 8765:127.0.0.1:8765 lab-host
 | browser opens but actions return 401 | stale token in URL/local storage | reload from the printed URL or clear the browser tab state |
 | no APDUs appear | action did not use the shared card backend, or no card traffic happened yet | run a reader-backed action and check `/api/live/readers` |
 | Host shell is hidden | host shell intentionally disabled | set `YGGDRASIM_GUI_HOST_SHELL=1` and restart |
+| the desktop window's interface is too small or too large | page zoom remembered from an earlier session, or `YGGDRASIM_GUI_ZOOM` set in the environment | press Ctrl+0 in the window for the native size, or set the flag in Configuration |
 | file picker says a path is "outside the directories this server may browse" | `--web-server` limits listing to the picker's roots | add the directory to `YGGDRASIM_GUI_FS_ROOTS` and restart |
 | remote rig action hangs at SSH | key login not configured | verify `ssh -o BatchMode=yes <target> true` outside the GUI |
 
 ## Related pages
 
-- [Remote APDU Streaming](../how-to/remote-apdu-streaming.md)
+- [Card Bridge](card-bridge.md)
+- [Remote Lab](remote-lab.md)
+- [Card Bridge over SSH](../how-to/remote-apdu-streaming.md)
 - [Install RemSIM / APDU Streaming](../how-to/install-remsim-apdu-streaming.md)
 - [HIL Bridge](hil-bridge.md)
 - [Run a HIL Capture](../how-to/run-hil-capture.md)

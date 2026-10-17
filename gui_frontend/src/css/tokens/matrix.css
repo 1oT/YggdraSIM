@@ -29,6 +29,15 @@ html[data-theme="matrix"] {
   --warn-soft: rgba(255, 216, 102, 0.14);
   --fail: #ff4d4d;
   --fail-soft: rgba(255, 77, 77, 0.16);
+
+  /* Monochrome phosphor: file kinds stay a ramp of presence rather
+     than hues, since the accent already is the ok green. */
+  --tree-df-bg: var(--surface-alt);
+  --tree-df-fg: var(--fg);
+  --tree-df-edge: var(--border-strong);
+  --tree-ef-bg: transparent;
+  --tree-ef-fg: var(--fg-dim);
+  --tree-ef-edge: var(--border);
   --code-bg: #020805;
   --kbd-bg: #050f0a;
   --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.55);

@@ -16,118 +16,148 @@
 # -----------------------------------------------------------------------------
 
 """Reference-guide printer: renders built-in SCP03 quick-reference text to stdout."""
-import os 
-from SCP03 .config import Config 
 
-class ShellGuides :
+import os
+from SCP03.config import Config
+
+
+class ShellGuides:
     """Manages detailed interactive documentation and usage guides."""
 
-    @staticmethod 
-    def _link (text :str ,url :str )->str :
-        if not url :
-            return text 
+    @staticmethod
+    def _link(text: str, url: str) -> str:
+        if not url:
+            return text
         return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
-    @classmethod 
-    def print_guide (cls ,topic :str =""):
+    @classmethod
+    def print_guide(cls, topic: str = ""):
         """Print the named reference guide to stdout."""
-        original_topic =topic .upper ().strip ()
+        original_topic = topic.upper().strip()
 
-        while True :
-            os .system ('cls'if os .name =='nt'else 'clear')
-            current_topic =original_topic 
+        while True:
+            os.system("cls" if os.name == "nt" else "clear")
+            current_topic = original_topic
 
-            if not current_topic or current_topic =='WIZARD':
-                print (f"\n{Config.Colors.HEADER}=== YggdraSIM Guide Wizard ==={Config.Colors.ENDC}")
-                print ("Select a topic to explore:")
-                print (f"  {Config.Colors.CYAN}1.{Config.Colors.ENDC} GlobalPlatform Architecture (GP)")
-                print (f"  {Config.Colors.CYAN}2.{Config.Colors.ENDC} ETSI / 3GPP File System (ETSI)")
-                print (f"  {Config.Colors.CYAN}3.{Config.Colors.ENDC} GSMA eSIM & eUICC (GSMA)")
-                print (f"  {Config.Colors.CYAN}4.{Config.Colors.ENDC} Installation & APDU Chaining (INSTALL)")
-                print (f"  {Config.Colors.CYAN}5.{Config.Colors.ENDC} Cryptography & Security (SECURITY)")
-                print (f"  {Config.Colors.CYAN}6.{Config.Colors.ENDC} SCP80 / OTA Remote Management (OTA)")
-                print (f"  {Config.Colors.CYAN}7.{Config.Colors.ENDC} Configuration Files & Persistence (CONFIG)")
-                print (f"  {Config.Colors.CYAN}8.{Config.Colors.ENDC} SAIP Tool Workflows (SAIP)")
-                print (f"  {Config.Colors.CYAN}9.{Config.Colors.ENDC} SUCI Key Tool Workflows (SUCI)")
-                print (f"  {Config.Colors.CYAN}10.{Config.Colors.ENDC} CLI Entry Points & Piping (CLI)")
-                print (f"  {Config.Colors.CYAN}q.{Config.Colors.ENDC} Return to Shell")
+            if not current_topic or current_topic == "WIZARD":
+                print(
+                    f"\n{Config.Colors.HEADER}=== YggdraSIM Guide Wizard ==={Config.Colors.ENDC}"
+                )
+                print("Select a topic to explore:")
+                print(
+                    f"  {Config.Colors.CYAN}1.{Config.Colors.ENDC} GlobalPlatform Architecture (GP)"
+                )
+                print(
+                    f"  {Config.Colors.CYAN}2.{Config.Colors.ENDC} ETSI / 3GPP File System (ETSI)"
+                )
+                print(
+                    f"  {Config.Colors.CYAN}3.{Config.Colors.ENDC} GSMA eSIM & eUICC (GSMA)"
+                )
+                print(
+                    f"  {Config.Colors.CYAN}4.{Config.Colors.ENDC} Installation & APDU Chaining (INSTALL)"
+                )
+                print(
+                    f"  {Config.Colors.CYAN}5.{Config.Colors.ENDC} Cryptography & Security (SECURITY)"
+                )
+                print(
+                    f"  {Config.Colors.CYAN}6.{Config.Colors.ENDC} SCP80 / OTA Remote Management (OTA)"
+                )
+                print(
+                    f"  {Config.Colors.CYAN}7.{Config.Colors.ENDC} Configuration Files & Persistence (CONFIG)"
+                )
+                print(
+                    f"  {Config.Colors.CYAN}8.{Config.Colors.ENDC} SAIP Tool Workflows (SAIP)"
+                )
+                print(
+                    f"  {Config.Colors.CYAN}9.{Config.Colors.ENDC} SUCI Key Tool Workflows (SUCI)"
+                )
+                print(
+                    f"  {Config.Colors.CYAN}10.{Config.Colors.ENDC} CLI Entry Points & Piping (CLI)"
+                )
+                print(f"  {Config.Colors.CYAN}q.{Config.Colors.ENDC} Return to Shell")
 
-                choice =input ("\nChoice [1-10, q]: ").strip ().lower ()
-                if choice =='q':
-                    break 
-                elif choice =='exit':
-                    break 
-                elif choice =='1':
-                    current_topic ='GP'
-                elif choice =='2':
-                    current_topic ='ETSI'
-                elif choice =='3':
-                    current_topic ='GSMA'
-                elif choice =='4':
-                    current_topic ='INSTALL'
-                elif choice =='5':
-                    current_topic ='SECURITY'
-                elif choice =='6':
-                    current_topic ='OTA'
-                elif choice =='7':
-                    current_topic ='CONFIG'
-                elif choice =='8':
-                    current_topic ='SAIP'
-                elif choice =='9':
-                    current_topic ='SUCI'
-                elif choice =='10':
-                    current_topic ='CLI'
-                else :
-                    print (f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
-                    input (f"\n{Config.Colors.CYAN}[Press Enter to continue]{Config.Colors.ENDC}")
-                    continue 
+                choice = input("\nChoice [1-10, q]: ").strip().lower()
+                if choice == "q":
+                    break
+                elif choice == "exit":
+                    break
+                elif choice == "1":
+                    current_topic = "GP"
+                elif choice == "2":
+                    current_topic = "ETSI"
+                elif choice == "3":
+                    current_topic = "GSMA"
+                elif choice == "4":
+                    current_topic = "INSTALL"
+                elif choice == "5":
+                    current_topic = "SECURITY"
+                elif choice == "6":
+                    current_topic = "OTA"
+                elif choice == "7":
+                    current_topic = "CONFIG"
+                elif choice == "8":
+                    current_topic = "SAIP"
+                elif choice == "9":
+                    current_topic = "SUCI"
+                elif choice == "10":
+                    current_topic = "CLI"
+                else:
+                    print(
+                        f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}"
+                    )
+                    input(
+                        f"\n{Config.Colors.CYAN}[Press Enter to continue]{Config.Colors.ENDC}"
+                    )
+                    continue
 
-            os .system ('cls'if os .name =='nt'else 'clear')
+            os.system("cls" if os.name == "nt" else "clear")
 
-            if current_topic =='GP':
-                cls ._print_gp_guide ()
-            elif current_topic =='ETSI':
-                cls ._print_etsi_guide ()
-            elif current_topic =='GSMA':
-                cls ._print_gsma_guide ()
-            elif current_topic =='INSTALL':
-                cls ._print_install_guide ()
-            elif current_topic =='SECURITY':
-                cls ._print_security_guide ()
-            elif current_topic =='OTA':
-                cls ._print_ota_guide ()
-            elif current_topic =='CONFIG':
-                cls ._print_config_guide ()
-            elif current_topic =='SAIP':
-                cls ._print_saip_guide ()
-            elif current_topic =='SUCI':
-                cls ._print_suci_guide ()
-            elif current_topic =='CLI':
-                cls ._print_cli_guide ()
-            else :
-                print (f"{Config.Colors.FAIL}[!] Unknown guide topic: {current_topic}{Config.Colors.ENDC}")
-                break 
+            if current_topic == "GP":
+                cls._print_gp_guide()
+            elif current_topic == "ETSI":
+                cls._print_etsi_guide()
+            elif current_topic == "GSMA":
+                cls._print_gsma_guide()
+            elif current_topic == "INSTALL":
+                cls._print_install_guide()
+            elif current_topic == "SECURITY":
+                cls._print_security_guide()
+            elif current_topic == "OTA":
+                cls._print_ota_guide()
+            elif current_topic == "CONFIG":
+                cls._print_config_guide()
+            elif current_topic == "SAIP":
+                cls._print_saip_guide()
+            elif current_topic == "SUCI":
+                cls._print_suci_guide()
+            elif current_topic == "CLI":
+                cls._print_cli_guide()
+            else:
+                print(
+                    f"{Config.Colors.FAIL}[!] Unknown guide topic: {current_topic}{Config.Colors.ENDC}"
+                )
+                break
 
-            prompt_msg =f"\n{Config.Colors.CYAN}[Press Enter to return to menu, or 'q' to exit to shell]{Config.Colors.ENDC}: "
-            if original_topic :
-                if original_topic !='WIZARD':
-                    prompt_msg =f"\n{Config.Colors.CYAN}[Press Enter to return to shell]{Config.Colors.ENDC}: "
+            prompt_msg = f"\n{Config.Colors.CYAN}[Press Enter to return to menu, or 'q' to exit to shell]{Config.Colors.ENDC}: "
+            if original_topic:
+                if original_topic != "WIZARD":
+                    prompt_msg = f"\n{Config.Colors.CYAN}[Press Enter to return to shell]{Config.Colors.ENDC}: "
 
-            exit_choice =input (prompt_msg ).strip ().lower ()
+            exit_choice = input(prompt_msg).strip().lower()
 
-            if original_topic :
-                if original_topic !='WIZARD':
-                    break 
+            if original_topic:
+                if original_topic != "WIZARD":
+                    break
 
-            if exit_choice =='q':
-                break 
-            if exit_choice =='exit':
-                break 
+            if exit_choice == "q":
+                break
+            if exit_choice == "exit":
+                break
 
-    @classmethod 
-    def _print_gp_guide (cls ):
-        spec_url ="https://globalplatform.org/wp-content/uploads/2025/05/GPC_CardSpecification_v2.3.1.49_PublicRvw.pdf"
-        print (f"""
+    @classmethod
+    def _print_gp_guide(cls):
+        spec_url = "https://globalplatform.org/wp-content/uploads/2025/05/GPC_CardSpecification_v2.3.1.49_PublicRvw.pdf"
+        print(f"""
 {Config.Colors.HEADER}=== GlobalPlatform Architecture & APDU Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GPC Card Specification v2.3.1", spec_url)}
 
@@ -137,23 +167,26 @@ class ShellGuides :
    Application Providers or Controlling Authorities.
    - {Config.Colors.BOLD}SELECT (00 A4 04 00):{Config.Colors.ENDC} `00 A4 04 00 <Lc> <AID>`. Standard GP ISD AID: `A0 00 00 01 51 00 00 00`.
      Selecting an SD routes subsequent APDUs to its SCP handler (e.g. INITIALIZE UPDATE, EXTERNAL AUTH).
-   - {Config.Colors.BOLD}Privilege Bitmask (Tag C5):{Config.Colors.ENDC} 0x80=Security Domain, 0x40=DAP Verification, 0x20=Delegated Management,
-     0x10=Card Lock, 0x08=Card Terminate, 0x04=Default Selected, 0x02=CVM Management.
+   - {Config.Colors.BOLD}Privilege Bitmask (Tag C5):{Config.Colors.ENDC} byte 1 per GPC v2.3.1 Table 11-7: 0x80=Security Domain, 0x40=DAP Verification (with 0x80),
+     0x20=Delegated Management (with 0x80), 0x10=Card Lock, 0x08=Card Terminate, 0x04=Card Reset (formerly "Default Selected"),
+     0x02=CVM Management, 0x01=Mandated DAP Verification (with 0xC0). Bytes 2-3 (Tables 11-8/11-9) carry Trusted Path,
+     Authorized Management, Token Management, Global Delete/Lock/Registry, Final Application, Global Service, Receipt Generation, ...
 
 {Config.Colors.CYAN}2. SCP03 Handshake: INITIALIZE UPDATE (80 50) & EXTERNAL AUTHENTICATE (84 82){Config.Colors.ENDC}
    The secure channel is established before any protected GP commands.
-   - {Config.Colors.BOLD}INITIALIZE UPDATE:{Config.Colors.ENDC} `80 50 00 00 08 <Host_Challenge(8)>`. Sent in clear. Card returns:
-     Key Version Number (1), Key Identifier (1), Key Diversification Data (10), Card Challenge (8), Card Cryptogram (8).
+   - {Config.Colors.BOLD}INITIALIZE UPDATE:{Config.Colors.ENDC} `80 50 <KVN or 00> 00 08 <Host_Challenge(8)>`. Sent in clear. Card returns (GP Amd D v1.1.2 Table 7-3):
+     Key Diversification Data (10), Key Information (3: KVN, SCP identifier 03, "i"), Card Challenge (8), Card Cryptogram (8),
+     Sequence Counter (3, only when pseudo-random card challenges are configured).
      Session keys (S-ENC, S-MAC, S-RMAC) are derived via NIST SP 800-108 KDF from static K-ENC/K-MAC and Host+Card challenges.
    - {Config.Colors.BOLD}EXTERNAL AUTHENTICATE:{Config.Colors.ENDC} `84 82 <SecLevel> 00 10 <Host_Cryptogram(8)> <MAC(8)>`. CLA 84 = secure messaging.
      Host Cryptogram = CMAC(S-MAC, derivation_data). Card verifies cryptogram; on success the channel is opened (e.g. SecLevel 0x33 = C-MAC + C-DECRYPT + R-MAC + R-ENCRYPT).
 
-{Config.Colors.CYAN}3. Registry Discovery (GET STATUS - 80 F2) (GPCS 11.3){Config.Colors.ENDC}
+{Config.Colors.CYAN}3. Registry Discovery (GET STATUS - 80 F2) (GPCS 11.4){Config.Colors.ENDC}
    The GP Registry maps Executable Load Files (ELF), Executable Modules (EM), and Applications to lifecycles.
    - {Config.Colors.BOLD}APDU:{Config.Colors.ENDC} `80 F2 <P1> <P2> <Lc> <Search_Criteria>`. Search_Criteria often Tag 4F (AID) with length 00 for first/next.
-   - {Config.Colors.YELLOW}P1 (Target):{Config.Colors.ENDC} 0x80 = Issuer Security Domain / Card, 0x40 = Applications, 0x20 = Load File Data, 0x10 = Executable Load File and Executable Module.
-   - {Config.Colors.YELLOW}P2 (Sequence):{Config.Colors.ENDC} 0x00 = initial block; 0x01 (or next) = subsequent block. SW 63 10 = more data (increment P2).
-   - {Config.Colors.BOLD}Response (Tag E3):{Config.Colors.ENDC} Per-entry: AID (Tag 4F), Lifecycle State (Tag 9F70), Privileges (Tag C5). State: 00=LOADED, 01=OP_READY, 03=INSTALLED, 07=SELECTABLE, 0F=PERSONALIZED, 80=LOCKED, 83=TERMINATED.
+   - {Config.Colors.YELLOW}P1 (Target):{Config.Colors.ENDC} 0x80 = Issuer Security Domain only, 0x40 = Applications and Supplementary Security Domains, 0x20 = Executable Load Files only, 0x10 = Executable Load Files and their Executable Modules (GPC v2.3.1 §11.4.2.1).
+   - {Config.Colors.YELLOW}P2 (Sequence):{Config.Colors.ENDC} 0x02 = first/all occurrences in the TLV (E3) response format, 0x03 = next occurrences; b2 = 0 selects the deprecated legacy format (Table 11-34). SW 63 10 = more data available (repeat with "next").
+   - {Config.Colors.BOLD}Response (Tag E3):{Config.Colors.ENDC} Per-entry: AID (Tag 4F), Lifecycle State (Tag 9F70), Privileges (Tag C5). State (GPC v2.3.1 §11.1.1): ELF 01=LOADED; Application 03=INSTALLED, 07=SELECTABLE, b8 set (83)=LOCKED; SD adds 0F=PERSONALIZED; card/ISD 01=OP_READY, 07=INITIALIZED, 0F=SECURED, 7F=CARD_LOCKED, FF=TERMINATED.
 
 {Config.Colors.CYAN}4. GET DATA (80 CA) vs GET STATUS{Config.Colors.ENDC}
    GET DATA retrieves data objects from the current application/SD; GET STATUS retrieves registry entries.
@@ -162,12 +195,12 @@ class ShellGuides :
 
 {Config.Colors.CYAN}5. Object State Transitions (SET STATUS - 80 F0) (GPCS 11.10){Config.Colors.ENDC}
    Transitions lifecycle state of registry objects. Some transitions are irreversible (e.g. TERMINATED).
-   - {Config.Colors.BOLD}APDU:{Config.Colors.ENDC} `80 F0 <P1> <P2> <Lc> [Target_AID]`. P1 = target: 0x80 (ISD/Card), 0x40 (Application), 0x20 (Load File). P2 = new state (e.g. 0x07 Selectable, 0x80 Locked).
+   - {Config.Colors.BOLD}APDU:{Config.Colors.ENDC} `80 F0 <P1> <P2> <Lc> [Target_AID]`. P1 (Table 11-86): 0x80 = Issuer Security Domain (card state), 0x40 = Application or Supplementary SD, 0x60 = SD and its associated Applications. P2 = state control per §11.1.1: an SD changing another Application/SD uses only b8 (0x80 lock, 0x00 unlock); an entity setting its own state sends the target value (e.g. 0x07 SELECTABLE, 0x0F PERSONALIZED).
 
 {Config.Colors.CYAN}6. Key Rotation & Wrapping (PUT KEY - 80 D8) (GPCS 11.8){Config.Colors.ENDC}
    Static keys in the SD are updated via PUT KEY. Key material is encrypted (wrapped) so it is never sent in clear.
    - {Config.Colors.BOLD}APDU:{Config.Colors.ENDC} `80 D8 <P1_Old_KVN> <P2_Key_ID> <Lc> <KeyData>`. P1=00 provisions a new KVN.
-   - {Config.Colors.YELLOW}Key block (per key):{Config.Colors.ENDC} Key Type (88=AES, 81/82/83=DES), Key Length (10/18/20 for AES), Encrypted Key (DEK-wrapped), KCV Length (03), KCV (e.g. first 3 bytes of AES-ECB(key, 0x01..01)).
+   - {Config.Colors.YELLOW}Key block (per key):{Config.Colors.ENDC} Key Type (GPC v2.3.1 Table 11-16: 88=AES, 80=DES (deprecated), 85=pre-shared TLS key, A0-A8=RSA components, B0/B1=ECC public/private, F0=ECC parameter reference, FF=extended format), Key Length (10/18/20 for AES), Encrypted Key (DEK-wrapped), KCV Length (03), KCV (B.8: AES-ECB of sixteen 0x01 bytes, first 3 bytes).
    - {Config.Colors.YELLOW}DEK:{Config.Colors.ENDC} The Data Encryption Key (K-DEK) is used to wrap key material (e.g. AES-ECB per GPCS). Session keys are derived from K-ENC/K-MAC only.
 
 {Config.Colors.CYAN}7. Data Personalization (STORE DATA - 80 E2) (GPCS 11.11){Config.Colors.ENDC}
@@ -182,10 +215,10 @@ class ShellGuides :
    - {Config.Colors.YELLOW}CLA:{Config.Colors.ENDC} For extended length and channel: CLA = 0x00 | (channel & 0x03). Commands on that channel use this CLA.
 """)
 
-    @classmethod 
-    def _print_etsi_guide (cls ):
-        spec_url ="https://www.etsi.org/deliver/etsi_ts/102200_102299/102221/16.00.00_60/ts_102221v160000p.pdf"
-        print (f"""
+    @classmethod
+    def _print_etsi_guide(cls):
+        spec_url = "https://www.etsi.org/deliver/etsi_ts/102200_102299/102221/16.00.00_60/ts_102221v160000p.pdf"
+        print(f"""
 {Config.Colors.HEADER}=== ETSI / 3GPP File System & Access Control Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("ETSI TS 102 221 (UICC)", spec_url)}
 
@@ -193,33 +226,33 @@ class ShellGuides :
    UICC file tree: MF (root) -> DF/ADF (directories) -> EF (elementary files). Selection by 2-byte FID or path.
    - {Config.Colors.BOLD}SELECT (00 A4 00 04):{Config.Colors.ENDC} `00 A4 00 04 02 <FID>` or `00 A4 04 00 <Lc> <Path>` (path = concatenated FIDs).
    - {Config.Colors.BOLD}MF:{Config.Colors.ENDC} FID 3F00. Root. Contains EF-DIR (2F00), EF-ICCID (2FE2), EF-ARR (6F06), etc.
-   - {Config.Colors.BOLD}ADF-USIM:{Config.Colors.ENDC} Typically 7FFF or 7FF0. Contains EF-IMSI (6F07), EF-Keys (6F08), EF-LOCI (6F7E), etc. (3GPP TS 31.102).
-   - {Config.Colors.BOLD}FCP (Tag 62):{Config.Colors.ENDC} Returned in response. Tag 82 = File Descriptor (78=DF, 41=Transparent EF, 42=Linear Fixed, 43=Cyclic). Tag 83 = File ID (2 bytes). Tag 80 = File size (transparent). Tag 8A = Life Cycle (01/03/04/05). Tag 8B/8C/AB = Access conditions (read/update/admin).
+   - {Config.Colors.BOLD}ADF-USIM:{Config.Colors.ENDC} Selected by AID (listed in EF-DIR); the reserved FID 7FFF addresses the current ADF in paths (TS 102 221 §8.3). Contains EF-IMSI (6F07), EF-Keys (6F08), EF-LOCI (6F7E), etc. (3GPP TS 31.102).
+   - {Config.Colors.BOLD}FCP (Tag 62):{Config.Colors.ENDC} Returned in response. Tag 82 = File Descriptor (TS 102 221 §11.1.1.4.3: 38/78=DF or ADF, 41=transparent EF, 42=linear fixed, 46=cyclic, 39=BER-TLV EF; b7 = shareable; record files add record length and count). Tag 83 = File ID (2 bytes). Tag 80 = File size (EF), 81 = total file size. Tag 8A = Life Cycle (Table 11.7b: 01 creation, 03 initialisation, 05/07 activated, 04/06 deactivated, 0C-0F termination). Tag 8B (referenced) / 8C (compact) / AB (expanded) = security attributes.
 
-{Config.Colors.CYAN}2. Transparent EF — READ BINARY / UPDATE BINARY{Config.Colors.ENDC}
+{Config.Colors.CYAN}2. Transparent EF -- READ BINARY / UPDATE BINARY{Config.Colors.ENDC}
    - {Config.Colors.BOLD}READ BINARY:{Config.Colors.ENDC} `00 B0 <P1> <P2> <Le>`. P1|P2 = 2-byte offset (P1 high byte, P2 low byte). Le = number of bytes to read (00 = max).
    - {Config.Colors.BOLD}UPDATE BINARY:{Config.Colors.ENDC} `00 D6 <P1> <P2> <Lc> <Data>`. Same offset encoding. Short EF: single command; long EF: multiple commands with increasing offset.
 
-{Config.Colors.CYAN}3. Linear Fixed / Cyclic EF — Records{Config.Colors.ENDC}
+{Config.Colors.CYAN}3. Linear Fixed / Cyclic EF -- Records{Config.Colors.ENDC}
    - {Config.Colors.BOLD}READ RECORD:{Config.Colors.ENDC} `00 B2 <RecNbr> <Mode> <Le>`. Mode: 02=next, 03=previous, 04=absolute (RecNbr = record number).
    - {Config.Colors.BOLD}UPDATE RECORD:{Config.Colors.ENDC} `00 DC <RecNbr> <Mode> <Lc> <Data>`.
-   - {Config.Colors.BOLD}SEARCH RECORD:{Config.Colors.ENDC} `00 A2 <RecNbr> <Mode> <Lc> <Search_Pattern>`. Mode 04 = from record 1. Used for FDN, SMS, etc.
+   - {Config.Colors.BOLD}SEARCH RECORD:{Config.Colors.ENDC} `00 A2 <RecNbr> <Mode> <Lc> <Search_Pattern>`. P2 (Table 11.12): 04 = simple forward search from the record in P1, 05 = backward, 06 = enhanced search (2-byte search indication first), 07 = proprietary; P1 = 00 means the current record. Used for FDN, SMS, etc.
 
 {Config.Colors.CYAN}4. Administrative File Management (FS-ADMIN){Config.Colors.ENDC}
    Requires ADM (Administrative) privilege; typically VERIFY (00 20) with ADM key before CREATE/DELETE/ACTIVATE/DEACTIVATE.
    - {Config.Colors.BOLD}CREATE FILE (00 E0):{Config.Colors.ENDC} `00 E0 00 00 <Lc> <FCP_Template>`. Creates DF or EF under current DF. FCP defines type, size, access.
    - {Config.Colors.BOLD}DELETE FILE (00 E4):{Config.Colors.ENDC} `00 E4 00 00 02 <FID>`. Deletes immediate child of current DF.
-   - {Config.Colors.BOLD}RESIZE (80 D4):{Config.Colors.ENDC} Proprietary; resizes transparent or linear fixed EF when supported.
+   - {Config.Colors.BOLD}RESIZE FILE (80 D4):{Config.Colors.ENDC} TS 102 222 §6.10 (CLA 8X/CX, INS D4); the file's access rule names INS D4 through AM_DO tag 84.
 
 {Config.Colors.CYAN}5. File Life Cycle & Activation{Config.Colors.ENDC}
    - {Config.Colors.BOLD}DEACTIVATE FILE (00 04):{Config.Colors.ENDC} `00 04 00 00 00`. Life cycle 04 = Deactivated; read/update may be denied by ARR.
    - {Config.Colors.BOLD}ACTIVATE FILE (00 44):{Config.Colors.ENDC} `00 44 00 00 00`. Life cycle 05 = Operational (activated).
 """)
 
-    @classmethod 
-    def _print_gsma_guide (cls ):
-        main_url ="https://www.gsma.com/solutions-and-impact/technologies/esim/esim-specification/"
-        print (f"""
+    @classmethod
+    def _print_gsma_guide(cls):
+        main_url = "https://www.gsma.com/solutions-and-impact/technologies/esim/esim-specification/"
+        print(f"""
 {Config.Colors.HEADER}=== GSMA eSIM & eUICC Provisioning Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GSMA SGP.22 / SGP.02 / SGP.32", main_url)}
 
@@ -231,7 +264,7 @@ class ShellGuides :
    - {Config.Colors.BOLD}ISD-P (Issuer Security Domain Profile):{Config.Colors.ENDC} One Profile per ISD-P; contains MNO subscription (network apps, files, keys).
    - {Config.Colors.BOLD}ECASD (eUICC Controlling Authority SD):{Config.Colors.ENDC} Root of trust: CI key, EUM certificates, EID (eUICC ID). EID is a 32-digit (20-byte BCD) identifier.
 
-{Config.Colors.CYAN}2. ES10c — Local Profile Management (STORE DATA to ISD-R){Config.Colors.ENDC}
+{Config.Colors.CYAN}2. ES10c -- Local Profile Management (STORE DATA to ISD-R){Config.Colors.ENDC}
    All ES10c requests are STORE DATA (80 E2) with P1=91 (reference), data = BER-TLV. Response in response data or 91 xx (proactive).
    - {Config.Colors.BOLD}GetProfilesInfo (BF 2D):{Config.Colors.ENDC} `80 E2 91 00 03 BF 2D 00`. Returns list of Profiles: ICCID, state (Enabled/Disabled), Profile nickname, MNO name.
    - {Config.Colors.BOLD}EnableProfile (BF 31):{Config.Colors.ENDC} `80 E2 91 00 <Lc> BF 31 <Len> [A0 | A1 <ICCID>]`. Enables the Profile. Only one Enabled at a time unless MEP.
@@ -242,7 +275,7 @@ class ShellGuides :
 {Config.Colors.CYAN}3. eUICC Information (ES10b/ES10c){Config.Colors.ENDC}
    - {Config.Colors.BOLD}EuiccInfo1 (BF 20):{Config.Colors.ENDC} `80 E2 91 00 03 BF 20 00`. Returns eUICC firmware version (e.g. SVN).
    - {Config.Colors.BOLD}EuiccInfo2 (BF 22):{Config.Colors.ENDC} `80 E2 91 00 03 BF 22 00`. Returns capabilities (ExtExtCardResource, supported crypto, default SM-DP+ address list).
-   - {Config.Colors.BOLD}EID:{Config.Colors.ENDC} In practice the tool first tries direct `BF3E00` retrieval and only falls back to tagged forms when needed, because many cards expose EID more reliably through ES10 retrieval than classic GET DATA.
+   - {Config.Colors.BOLD}EID (BF 3E):{Config.Colors.ENDC} `80 E2 91 00 06 BF 3E 03 5C 01 5A`. The tagList `5C 01 5A` is mandatory (SGP.22 v3.1 §5.7.20); the bare `BF 3E 00` form is tried only when the tagged request fails. The tool reads the EID over ES10 rather than classic GET DATA because many cards expose it more reliably there.
 
 {Config.Colors.CYAN}4. SGP.32 IoT retrieval (ES10b, no auth){Config.Colors.ENDC}
    - {Config.Colors.BOLD}GetRAT (BF 43):{Config.Colors.ENDC} Rules Authorisation Table. Use MANAGE-PROFILE action 6.
@@ -264,23 +297,23 @@ class ShellGuides :
    No LPA on device; SM-SR pushes Profiles via SCP03/SCP80 remote scripts. MANAGE-PROFILE in YggdraSIM can scan/list Profiles via ETSI SELECT and registry read to the ISD-R, without using SGP.22 STORE DATA tags.
 """)
 
-    @classmethod 
-    def _print_install_guide (cls ):
-        print (f"""
+    @classmethod
+    def _print_install_guide(cls):
+        print(f"""
 {Config.Colors.HEADER}=== Install Wizard & APDU Builder Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. INSTALL Command Overview (GPCS 11.5){Config.Colors.ENDC}
    INSTALL [for load] creates a Load File container; LOAD (80 E8) sends the CAP/IJC bytes; INSTALL [for install] or [for install and make selectable] instantiates the applet with AID and privileges.
 
 {Config.Colors.CYAN}2. Wizard Options (WIZARD menu){Config.Colors.ENDC}
-   - {Config.Colors.BOLD}1 — INSTALL [for load] (GPCS 11.5.2.3.1):{Config.Colors.ENDC} P1=02. Registers a new Executable Load File (ELF) in the registry. Data: Load File AID (LV).
-   - {Config.Colors.BOLD}2 — INSTALL [for install] (11.5.2.3.2):{Config.Colors.ENDC} P1=04. Instantiates an applet from a loaded module. Requires Load File AID, Module AID, Applet AID, privileges, optional install params.
-   - {Config.Colors.BOLD}3 — INSTALL [for make selectable] (11.5.2.3.3):{Config.Colors.ENDC} Makes an installed applet selectable (assigns application AID, optional params).
-   - {Config.Colors.BOLD}4 — INSTALL [for extradition] (11.5.2.3.4):{Config.Colors.ENDC} Transfers control of an SSD to another CA (extradition token).
-   - {Config.Colors.BOLD}5 — INSTALL [for registry update] (11.5.2.3.5):{Config.Colors.ENDC} Updates registry metadata (e.g. AID, privileges) without re-loading.
-   - {Config.Colors.BOLD}6 — INSTALL [for personalization] (11.5.2.3.6):{Config.Colors.ENDC} DGI-based personalization; sends STORE DATA / personalization TLVs to the selected SD (requires transport).
-   - {Config.Colors.BOLD}7 — INSTALL [for install and make selectable] (11.5.2.3.7):{Config.Colors.ENDC} P1=0C. Single step: install applet and make it selectable.
-   - {Config.Colors.BOLD}8 — Full CAP Install Sequence:{Config.Colors.ENDC} Parses a CAP/IJC file, extracts Package/Applet AIDs, builds INSTALL [for load], LOAD (chunked), INSTALL [for install]. Supports OTA chunk sizes (e.g. SMS-PP block limits).
+   - {Config.Colors.BOLD}1 -- INSTALL [for load] (GPCS 11.5.2.3.1):{Config.Colors.ENDC} P1=02. Registers a new Executable Load File (ELF) in the registry. Data: Load File AID (LV).
+   - {Config.Colors.BOLD}2 -- INSTALL [for install] (11.5.2.3.2):{Config.Colors.ENDC} P1=04. Instantiates an applet from a loaded module. Requires Load File AID, Module AID, Applet AID, privileges, optional install params.
+   - {Config.Colors.BOLD}3 -- INSTALL [for make selectable] (11.5.2.3.3):{Config.Colors.ENDC} Makes an installed applet selectable (assigns application AID, optional params).
+   - {Config.Colors.BOLD}4 -- INSTALL [for extradition] (11.5.2.3.4):{Config.Colors.ENDC} Transfers control of an SSD to another CA (extradition token).
+   - {Config.Colors.BOLD}5 -- INSTALL [for registry update] (11.5.2.3.5):{Config.Colors.ENDC} Updates registry metadata (e.g. AID, privileges) without re-loading.
+   - {Config.Colors.BOLD}6 -- INSTALL [for personalization] (11.5.2.3.6):{Config.Colors.ENDC} DGI-based personalization; sends STORE DATA / personalization TLVs to the selected SD (requires transport).
+   - {Config.Colors.BOLD}7 -- INSTALL [for install and make selectable] (11.5.2.3.7):{Config.Colors.ENDC} P1=0C. Single step: install applet and make it selectable.
+   - {Config.Colors.BOLD}8 -- Full CAP Install Sequence:{Config.Colors.ENDC} Parses a CAP/IJC file, extracts Package/Applet AIDs, builds INSTALL [for load], LOAD (chunked), INSTALL [for install]. OTA formatting sizes each LOAD block to one SCP80 SMS (compact remote format, no Le). The wizard asks for the ADF AIDs the applet needs file access to (ETSI TS 102 226 Tag EA/81; Enter or N for none) and adds the UICC toolkit parameters (Tag 80) with them. The sequence can be saved as a script file (`#` comments, one APDU per line, every install parameter object decoded) for `script <file>` in the SCP80 shell or `RUN <file>` in the SCP03 shell.
 
 {Config.Colors.CYAN}2a. One-shot CAP install command{Config.Colors.ENDC}
    `INSTALL <cap/ijc> <INSTALL-for-install APDU>` parses the CAP/IJC, sends INSTALL [for load] and LOAD, then sends the supplied INSTALL [for install] or INSTALL [for install and make selectable] APDU unchanged. The command verifies that the APDU Load File AID matches the CAP package AID before loading.
@@ -298,44 +331,46 @@ class ShellGuides :
    `80 E6 <P1> 00 <Lc> <LoadFileAID_LV> <ModuleAID_LV> <AppletAID_LV> <Priv_LV> <Params_LV> <Token_LV>`. Mandatory empty fields encoded as length 00 (no value).
 
 {Config.Colors.CYAN}4. Applet Privileges (Priv_LV bitmask){Config.Colors.ENDC}
-   0x80=Security Domain, 0x40=DAP Verification, 0x20=Delegated Management, 0x10=Card Lock, 0x08=Card Terminate, 0x04=Default Selected, 0x02=CVM Management.
+   GPC v2.3.1 Table 11-7 (byte 1): 0x80=Security Domain, 0x40=DAP Verification (with 0x80), 0x20=Delegated Management (with 0x80), 0x10=Card Lock,
+   0x08=Card Terminate, 0x04=Card Reset (formerly "Default Selected"), 0x02=CVM Management, 0x01=Mandated DAP Verification (with 0xC0).
+   A 3-byte value adds Tables 11-8/11-9 (Trusted Path, Authorized Management, Token Management, Global Delete/Lock/Registry, Final Application, Global Service, ...).
 
 {Config.Colors.CYAN}5. Install Parameters (TLV){Config.Colors.ENDC}
    - {Config.Colors.BOLD}C9 (Application Specific):{Config.Colors.ENDC} Passed to applet install(). The builder accepts either a complete `C9` TLV such as `C900`, or a raw C9 value to wrap.
-   - {Config.Colors.BOLD}EF (GP System):{Config.Colors.ENDC} C6/C7=Memory Quotas, C8=Global Service, C9=Implicit Selection, CA/CB=Reserved Memory.
-   - {Config.Colors.BOLD}EA (UICC System, TS 102 226):{Config.Colors.ENDC} 80=Toolkit, 81=Access, 82=Admin, 83=Update, C3=DAP. ADP: 00=Full, 02=UICC, FF=None.
-   - {Config.Colors.BOLD}CA (SIM File Access):{Config.Colors.ENDC} Legacy 2G. ETSI TS 102 226 forbids CA and EA in the same install parameters; wizard enforces this.
+   - {Config.Colors.BOLD}EF (GP System Specific Parameters, GPC v2.3.1 §11.5.2.3.7):{Config.Colors.ENDC} C7=volatile memory quota (deprecated), C8=non-volatile memory quota, CB=global service parameters, D7/D8=reserved memory (deprecated), CA=TS 102 226 parameters, CF=implicit selection parameter; INSTALL [for load] uses C6/C8 as minimum memory requirements.
+   - {Config.Colors.BOLD}EA (UICC System Specific Parameters, TS 102 226 §8.2.1.3.2.2):{Config.Colors.ENDC} 80=UICC Toolkit Application parameters, C3=UICC Toolkit parameters DAP, 81=UICC Access Application parameters, 82=UICC Administrative Access parameters. ADP (§8.2.1.3.2.5.1): 00=full access, 02=UICC access mechanism (3-byte ADD), FF=no access.
+   - {Config.Colors.BOLD}CA (SIM File Access):{Config.Colors.ENDC} Legacy SIM file access and toolkit parameters (TS 102 226 §8.2.1.3.2.1). CA and EA together are rejected with 6A80 (§8.2.1.3.2.2); the wizard enforces this.
 """)
 
-    @classmethod 
-    def _print_security_guide (cls ):
-        print (f"""
+    @classmethod
+    def _print_security_guide(cls):
+        print(f"""
 {Config.Colors.HEADER}=== Cryptography & Security Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. Secure Channel Protocol 03 (SCP03){Config.Colors.ENDC}
    SCP03 provides confidentiality (C-DECRYPT/R-ENCRYPT) and integrity (C-MAC/R-MAC) over APDU payloads. Keys in `Workspace/SCP03/keys.ini`: K-ENC, K-MAC, K-DEK.
-   - {Config.Colors.BOLD}Session key derivation (NIST SP 800-108 KDF):{Config.Colors.ENDC} Context = Host Challenge (8) || Card Challenge (8) from INITIALIZE UPDATE response. S-ENC = KDF(K-ENC, 0x04, context, 128); S-MAC = KDF(K-MAC, 0x06, context, 128); S-RMAC = KDF(K-MAC, 0x07, context, 128). Key data = 11 bytes zero || constant || 0x00 || 0x00 0x40 || 0x01 || context; SessionKey = first 16 bytes of CMAC(StaticKey, key_data).
+   - {Config.Colors.BOLD}Session key derivation (NIST SP 800-108 KDF):{Config.Colors.ENDC} Context = Host Challenge (8) || Card Challenge (8) from INITIALIZE UPDATE response. S-ENC = KDF(K-ENC, 0x04, context, 128); S-MAC = KDF(K-MAC, 0x06, context, 128); S-RMAC = KDF(K-MAC, 0x07, context, 128). Derivation input = 11 bytes zero || constant || 0x00 || L || 0x01 || context, with L = 0x0080 for a 128-bit key (0x00C0 / 0x0100 for 192/256-bit keys, which run the CMAC twice with counter 0x02); L = 0x0040 is used only for the 64-bit host and card cryptograms (GP Amd D v1.1.2 §4.1.5). SessionKey = CMAC(StaticKey, input), 16 bytes.
    - {Config.Colors.BOLD}K-ENC / K-MAC:{Config.Colors.ENDC} Used only for derivation. S-ENC encrypts/decrypts payloads (AES-CBC, IV from SSC). S-MAC/S-RMAC for command/response MAC (8 bytes).
    - {Config.Colors.BOLD}K-DEK:{Config.Colors.ENDC} Not derived. Used to wrap key material in PUT KEY (e.g. AES-ECB or AES-CBC per implementation). Session keys are not used to wrap keys.
 
 {Config.Colors.CYAN}2. Key Rotation & Wrapping (PUT KEY - 80 D8){Config.Colors.ENDC}
-   New static keys are sent encrypted (wrapped) so they never appear in clear. Payload: New KVN (1 byte) then per key: Key Type (88=AES), Key Length, Encrypted Key (DEK-wrapped), KCV Length (3), KCV. KCV = first 3 bytes of AES-ECB(key, 0x01 repeated 16). KVN identifies the active key set on the card.
+   New static keys are sent encrypted (wrapped) so they never appear in clear. Payload: New KVN (1 byte) then per key: Key Type (88=AES), Key Length, Encrypted Key (DEK-wrapped), KCV Length (3), KCV. KCV = first 3 bytes of AES-ECB(key, 0x01 repeated 16) (GPC v2.3.1 B.8). KVN identifies the active key set on the card.
 
-{Config.Colors.CYAN}3. PIN & ADM (ISO 7816-4){Config.Colors.ENDC}
+{Config.Colors.CYAN}3. PIN & ADM (TS 102 221 §11.1.9 - §11.1.13){Config.Colors.ENDC}
    - {Config.Colors.BOLD}Padding:{Config.Colors.ENDC} PIN 8 bytes; shorter PINs right-padded with FF. Example: "1234" -> 31 32 33 34 FF FF FF FF.
-   - {Config.Colors.BOLD}VERIFY (00 20):{Config.Colors.ENDC} `00 20 00 <Ref> 08 <Padded_PIN>`. Ref: 0x00=CHV1, 0x0A=ADM, etc.
+   - {Config.Colors.BOLD}VERIFY (00 20):{Config.Colors.ENDC} `00 20 00 <Ref> 08 <Padded_PIN>`. Ref (TS 102 221 Table 9.3): 01=PIN (application PIN 1), 81=PIN2 (second PIN, app 1), 0A-0E=ADM1-ADM5, 8A-8E=ADM6-ADM10, 11=Universal PIN.
    - {Config.Colors.BOLD}CHANGE REFERENCE (00 24):{Config.Colors.ENDC} `00 24 00 <Ref> 10 <Padded_Old> <Padded_New>`.
    - {Config.Colors.YELLOW}SW 63 CX:{Config.Colors.ENDC} X = retries left. SW 69 83 = reference blocked.
 
 {Config.Colors.CYAN}4. Network Authentication (RUN-AUTH, 00 88){Config.Colors.ENDC}
-   INTERNAL AUTHENTICATE: card runs USIM/ISIM or GSM algorithm.
+   AUTHENTICATE (INS 88, TS 31.102 §7.1): the card runs the USIM/ISIM or GSM algorithm.
    - {Config.Colors.BOLD}USIM/ISIM (MILENAGE/TUAK):{Config.Colors.ENDC} Input: RAND (16), AUTN (16). Card verifies SQN/MAC; returns RES, CK, IK (and possibly other keys).
    - {Config.Colors.BOLD}GSM (COMP128):{Config.Colors.ENDC} Input: RAND (16). Returns SRES (4), Kc (8).
 """)
 
-    @classmethod 
-    def _print_config_guide (cls ):
-        print (f"""
+    @classmethod
+    def _print_config_guide(cls):
+        print(f"""
 {Config.Colors.HEADER}=== Configuration Files & Persistence Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. Config Directory (CONFIG_DIR){Config.Colors.ENDC}
@@ -359,9 +394,9 @@ class ShellGuides :
    - {Config.Colors.BOLD}`SCP11/local_access`:{Config.Colors.ENDC} local `AuthenticateServer` and `LOAD-PROFILE` path using certificate material in `Workspace/LocalSMDPP/certs`.
 """)
 
-    @classmethod 
-    def _print_ota_guide (cls ):
-        print (f"""
+    @classmethod
+    def _print_ota_guide(cls):
+        print(f"""
 {Config.Colors.HEADER}=== SCP80 OTA (Remote Management) Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} ETSI TS 102 225 (Secured Packet Structure), 3GPP TS 31.115 (OTA)
 
@@ -372,7 +407,7 @@ class ShellGuides :
    - {Config.Colors.BOLD}KIC / KID:{Config.Colors.ENDC} Key identifiers for ciphering and CC. Reference keys stored in the OTA Security Domain (or equivalent) for the given TAR.
 
 {Config.Colors.CYAN}2. Secured Packet Structure (ETSI TS 102 225){Config.Colors.ENDC}
-   Command Header List (CHL): SPI (1), KIC (1), KID (1), TAR (3), CNTR (5, counter), PCNTR (1, padding counter). Optional CC (e.g. 8 bytes) after payload; payload (and optionally CC) may be encrypted per SPI. Full packet is often sent in an Envelope (80 C2 00 00 Lc <Secured_Packet>) to the card.
+   Command header (TS 102 225 §5.1): CHL = command header length (1), SPI (2), KIc (1), KID (1), TAR (3), CNTR (5, counter), PCNTR (1, padding counter). Optional CC (e.g. 8 bytes) after payload; payload (and optionally CC) may be encrypted per SPI. Full packet is often sent in an Envelope (80 C2 00 00 Lc <Secured_Packet>) to the card.
 
 {Config.Colors.CYAN}3. Supported OTA Operations in YggdraSIM{Config.Colors.ENDC}
    - {Config.Colors.BOLD}READ/UPDATE:{Config.Colors.ENDC} Remote file read (00 B0) / update (00 D6) wrapped in a secured packet.
@@ -383,10 +418,10 @@ class ShellGuides :
    Configure TAR, SPI, KIC, KID, and keys in `ota_config.ini` (SCP80 module). Cipher and CC algorithm must match the card profile.
 """)
 
-    @classmethod 
-    def _print_saip_guide (cls ):
-        spec_url ="https://downloads.osmocom.org/docs/pysim/master/html/saip-tool.html"
-        print (f"""
+    @classmethod
+    def _print_saip_guide(cls):
+        spec_url = "https://downloads.osmocom.org/docs/pysim/master/html/saip-tool.html"
+        print(f"""
 {Config.Colors.HEADER}=== SAIP Tool Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Reference:{Config.Colors.ENDC} {cls._link("SAIP tool manual", spec_url)}
 
@@ -434,10 +469,12 @@ class ShellGuides :
      `RAW extract-pe --pe-file tests/header.der --identification 4`
 """)
 
-    @classmethod 
-    def _print_suci_guide (cls ):
-        spec_url ="https://downloads.osmocom.org/docs/pysim/master/html/suci-keytool.html"
-        print (f"""
+    @classmethod
+    def _print_suci_guide(cls):
+        spec_url = (
+            "https://downloads.osmocom.org/docs/pysim/master/html/suci-keytool.html"
+        )
+        print(f"""
 {Config.Colors.HEADER}=== SUCI Key Tool Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Reference:{Config.Colors.ENDC} {cls._link("SUCI key tool manual", spec_url)}
 
@@ -473,9 +510,9 @@ class ShellGuides :
      `DUMP COMPRESSED`
 """)
 
-    @classmethod 
-    def _print_cli_guide (cls ):
-        print (f"""
+    @classmethod
+    def _print_cli_guide(cls):
+        print(f"""
 {Config.Colors.HEADER}=== CLI Entry Points & Piping Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. Unified Launcher vs Module Entry Points{Config.Colors.ENDC}
@@ -518,6 +555,8 @@ class ShellGuides :
    - {Config.Colors.BOLD}Process stdout redirect:{Config.Colors.ENDC} `python3 -m Tools.ProfilePackage --cmd "USE reference_test_profile.txt; INFO" > saip_stdout.txt`
    - {Config.Colors.BOLD}Native SAIP dump export:{Config.Colors.ENDC} `python3 -m Tools.ProfilePackage --cmd "USE reference_test_profile.txt; DUMP ALL DECODED > reports/profile_dump.yaml"`
    - {Config.Colors.BOLD}Native SCP03 YAML export:{Config.Colors.ENDC} `python3 -m SCP03 --cmd "SCP03-SD; LIST" --out scp03_report.yaml`
+   - {Config.Colors.BOLD}Command log:{Config.Colors.ENDC} add `--log <file>` to any command line in any shell; it runs with debug output and everything it prints is appended to the file (`LIST --log logs/list.log`).
+   - {Config.Colors.BOLD}SCP03 trace:{Config.Colors.ENDC} `TRACE START logs/session.log` copies every command, with debug output, until `TRACE STOP`.
 
 {Config.Colors.CYAN}6. Shell Script Integration Notes{Config.Colors.ENDC}
    - Prefer `--cmd` when the module supports it, because it avoids prompt text in stdin handling.

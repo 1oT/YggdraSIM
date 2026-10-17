@@ -93,6 +93,10 @@ class ProfileProvider(ABC):
         pass
 
     @abstractmethod
+    def handle_notification_esipa(self, request_obj: EimPollRequest) -> dict:
+        pass
+
+    @abstractmethod
     def poll_eim(self, request_obj: EimPollRequest) -> EimPollResponse:
         pass
 
@@ -127,6 +131,9 @@ class RemoteEs9Provider(ProfileProvider):
 
     def provide_eim_package_result(self, request_obj: EimPollRequest) -> dict:
         return self._client.provide_eim_package_result(request_obj)
+
+    def handle_notification_esipa(self, request_obj: EimPollRequest) -> dict:
+        return self._client.handle_notification_esipa(request_obj)
 
     def poll_eim(self, request_obj: EimPollRequest) -> EimPollResponse:
         return self._client.poll_eim(request_obj)
@@ -269,6 +276,10 @@ class Sgp26LocalProvider(ProfileProvider):
     def provide_eim_package_result(self, request_obj: EimPollRequest) -> dict:
         self._ensure_chain()
         raise NotImplementedError("SGP.26 local provideEimPackageResult is not implemented yet")
+
+    def handle_notification_esipa(self, request_obj: EimPollRequest) -> dict:
+        self._ensure_chain()
+        raise NotImplementedError("SGP.26 local ESipa handleNotification is not implemented yet")
 
     def poll_eim(self, request_obj: EimPollRequest) -> EimPollResponse:
         self._ensure_chain()

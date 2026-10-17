@@ -843,65 +843,21 @@ end
 
 -- ------------------------------------------------------ channel payloads
 --- TLS record content types (RFC 8446 clause 5.1, RFC 5246 appendix A.1).
-local TLS_CONTENT_TYPES = {
-    [20] = "change_cipher_spec",
-    [21] = "alert",
-    [22] = "handshake",
-    [23] = "application_data",
-    [24] = "heartbeat",
-}
+-- Generated from yggdrasim_common/tls_tables.py; see tables.lua.
+local TLS_CONTENT_TYPES = tables.TLS_CONTENT_TYPES
 
 --- TLS alert levels (RFC 5246 clause 7.2).
-local TLS_ALERT_LEVELS = {
-    [1] = "warning",
-    [2] = "fatal",
-}
+-- Generated from yggdrasim_common/tls_tables.py; see tables.lua.
+local TLS_ALERT_LEVELS = tables.TLS_ALERT_LEVELS
 
 --- TLS AlertDescription values.
+-- Generated from yggdrasim_common/tls_tables.py; see tables.lua.
 --
 -- These are DECIMAL. bad_certificate is 42, which is 0x2A -- reading it
 -- as hex 0x42 gives 66, which is unassigned, so an operator chasing a
 -- certificate failure would see nothing. The distinction matters enough
 -- to state: every number below is decimal.
-local TLS_ALERT_DESCRIPTIONS = {
-    [0] = "close_notify",
-    [10] = "unexpected_message",
-    [20] = "bad_record_mac",
-    [21] = "decryption_failed",
-    [22] = "record_overflow",
-    [30] = "decompression_failure",
-    [40] = "handshake_failure",
-    [41] = "no_certificate",
-    [42] = "bad_certificate",
-    [43] = "unsupported_certificate",
-    [44] = "certificate_revoked",
-    [45] = "certificate_expired",
-    [46] = "certificate_unknown",
-    [47] = "illegal_parameter",
-    [48] = "unknown_ca",
-    [49] = "access_denied",
-    [50] = "decode_error",
-    [51] = "decrypt_error",
-    [52] = "too_many_cids_requested",
-    [60] = "export_restriction",
-    [70] = "protocol_version",
-    [71] = "insufficient_security",
-    [80] = "internal_error",
-    [86] = "inappropriate_fallback",
-    [90] = "user_canceled",
-    [100] = "no_renegotiation",
-    [109] = "missing_extension",
-    [110] = "unsupported_extension",
-    [111] = "certificate_unobtainable",
-    [112] = "unrecognized_name",
-    [113] = "bad_certificate_status_response",
-    [114] = "bad_certificate_hash_value",
-    [115] = "unknown_psk_identity",
-    [116] = "certificate_required",
-    [117] = "general_error",
-    [120] = "no_application_protocol",
-    [121] = "ech_required",
-}
+local TLS_ALERT_DESCRIPTIONS = tables.TLS_ALERT_DESCRIPTIONS
 
 function M.tls_content_type_name(value)
     return TLS_CONTENT_TYPES[value] or string.format("content type %d", value)
@@ -917,35 +873,12 @@ function M.tls_alert_description_name(value)
 end
 
 --- TLS handshake message types (RFC 8446 clause 4, RFC 5246 clause 7.4).
+-- Generated from yggdrasim_common/tls_tables.py; see tables.lua.
 --
 -- Only needed when a record is split across SEND DATA blocks and the
 -- stock dissector has nothing complete to work with; a whole record is
 -- always better served by handing it over.
-local TLS_HANDSHAKE_TYPES = {
-    [0] = "hello_request",
-    [1] = "client_hello",
-    [2] = "server_hello",
-    [3] = "hello_verify_request",
-    [4] = "new_session_ticket",
-    [5] = "end_of_early_data",
-    [8] = "encrypted_extensions",
-    [11] = "certificate",
-    [12] = "server_key_exchange",
-    [13] = "certificate_request",
-    [14] = "server_hello_done",
-    [15] = "certificate_verify",
-    [16] = "client_key_exchange",
-    [20] = "finished",
-    [21] = "certificate_url",
-    [22] = "certificate_status",
-    [24] = "key_update",
-    -- RFC 8879 certificate compression. Worth naming here in particular:
-    -- an SM-DP+ chain runs to kilobytes across ~236-byte channel-data
-    -- blocks, which is exactly the pressure that gets compression turned
-    -- on, so this is a likely handshake type on this transport.
-    [25] = "compressed_certificate",
-    [254] = "message_hash",
-}
+local TLS_HANDSHAKE_TYPES = tables.TLS_HANDSHAKE_TYPES
 
 function M.tls_handshake_type_name(value)
     return TLS_HANDSHAKE_TYPES[value]
@@ -1018,6 +951,143 @@ function M.peek_tls_record(values)
         record.handshake_type_name = M.tls_handshake_type_name(values[6])
     end
     return record
+end
+
+--- The host name a TLS ClientHello names in its SNI extension.
+--
+-- The counterpart to dns_qname for the other half of a BIP trace: once
+-- the IPAd has resolved the eIM or SM-DP+ it opens a TLS channel to the
+-- address, and from there the record layer is the only place the name
+-- still appears. Reading it keeps the host on the SEND DATA row that
+-- carries the ClientHello instead of only in the DNS exchange before it.
+--
+-- Hand-read rather than taken from the stock dissector's tree, for the
+-- same reason dns_qname is: what this lifts out is one string for the
+-- Detail column, and Wireshark still dissects the whole handshake below.
+--
+-- Only a ClientHello whose handshake message fits inside this record is
+-- read. A handshake split across records or across channel-data blocks
+-- returns nil rather than a guess -- BIP channel data is not reassembled,
+-- and a truncated host name is worse than none.
+--
+-- RFC 8446 clause 4.1.2 fixes the ClientHello layout and RFC 6066
+-- clause 3 the server_name extension; both are unchanged from TLS 1.2,
+-- so one walk covers every version that reaches a BIP channel.
+function M.tls_sni(values)
+    local record = M.peek_tls_record(values)
+    if record == nil or record.content_type ~= 22 or not record.complete then
+        return nil
+    end
+    -- peek_tls_record reads the handshake type from byte 6, so a record
+    -- declaring length 0 -- or any block cut between the type and the
+    -- 24-bit length behind it -- reaches here with fewer than 9 bytes.
+    if record.handshake_type ~= 1 or #values < 9 then
+        return nil
+    end
+    -- Handshake header: type (byte 6) then a 24-bit length. The body has
+    -- to end inside this record, or the ClientHello continues in one
+    -- that has not arrived.
+    local handshake_length = (values[7] * 65536) + (values[8] * 256) + values[9]
+    local limit = 9 + handshake_length
+    if limit > #values or handshake_length + 4 > record.length then
+        return nil
+    end
+
+    -- legacy_version (2) and random (32).
+    local index = 44
+    -- Each of the three vectors that precede the extensions is a length
+    -- followed by that many bytes; stepping over them is the whole reason
+    -- the extension offset cannot be a constant.
+    local function skip_vector(size_bytes)
+        if index + size_bytes - 1 > limit then
+            return false
+        end
+        local size = 0
+        for offset = 0, size_bytes - 1 do
+            size = (size * 256) + values[index + offset]
+        end
+        index = index + size_bytes + size
+        return index <= limit + 1
+    end
+    if not skip_vector(1) then      -- legacy_session_id
+        return nil
+    end
+    if not skip_vector(2) then      -- cipher_suites
+        return nil
+    end
+    if not skip_vector(1) then      -- legacy_compression_methods
+        return nil
+    end
+
+    -- Extensions are optional in the wire format, so their absence is a
+    -- ClientHello without SNI, not a malformed one.
+    if index + 1 > limit then
+        return nil
+    end
+    local extensions_end = index + 1 + ((values[index] * 256) + values[index + 1])
+    if extensions_end > limit then
+        return nil
+    end
+    index = index + 2
+
+    while index + 3 <= extensions_end do
+        local extension_type = (values[index] * 256) + values[index + 1]
+        local extension_length = (values[index + 2] * 256) + values[index + 3]
+        local body = index + 4
+        if body + extension_length - 1 > extensions_end then
+            return nil
+        end
+        if extension_type == 0 then
+            return M.server_name_list_host(values, body, body + extension_length - 1)
+        end
+        index = body + extension_length
+    end
+    return nil
+end
+
+--- The first host_name entry of a ServerNameList, as a string.
+--
+-- RFC 6066 clause 3: a two-byte list length, then entries of a one-byte
+-- NameType and a two-byte length. Only host_name (0) is defined, and the
+-- HostName is an ASCII domain name -- never a trailing dot, never a
+-- literal address -- so anything outside the host-name character set
+-- means these bytes are not the extension they claim to be.
+function M.server_name_list_host(values, first, last)
+    if first + 1 > last then
+        return nil
+    end
+    local list_end = first + 1 + ((values[first] * 256) + values[first + 1])
+    if list_end > last then
+        return nil
+    end
+    local index = first + 2
+    while index + 2 <= list_end do
+        local name_type = values[index]
+        local length = (values[index + 1] * 256) + values[index + 2]
+        local body = index + 3
+        if body + length - 1 > list_end then
+            return nil
+        end
+        if name_type == 0 then
+            if length == 0 then
+                return nil
+            end
+            local characters = {}
+            for offset = 0, length - 1 do
+                local character = string.char(values[body + offset])
+                -- The label set of dns_qname plus the separator, which
+                -- arrives inside the string here rather than as a
+                -- length prefix.
+                if not character:match("[%w%-_.]") then
+                    return nil
+                end
+                characters[offset + 1] = character
+            end
+            return table.concat(characters)
+        end
+        index = body + length
+    end
+    return nil
 end
 
 --- True when the bytes plausibly begin a DNS message.
@@ -1189,6 +1259,55 @@ function M.channel_payload_dissector(values, port, transport)
         return "tls"
     end
     return ""
+end
+
+--- The first question's QNAME from a DNS message, as a dotted name.
+--
+-- Mirrors the label walk in looks_like_dns -- which has already validated
+-- the message by the time this runs, so the payload dissector said "dns"
+-- -- and returns the name a SEND DATA / RECEIVE DATA row is really about:
+-- the host an IPAd resolves before it reaches the eIM or SM-DP+. *base*
+-- skips a DNS-over-TCP length prefix, exactly as looks_like_dns takes it.
+--
+-- A name that runs past the end of this block returns nil rather than a
+-- truncated string: BIP channel data is not reassembled (only RSP BPP
+-- is), so half a hostname in the Detail column is worse than none. A
+-- single DNS query fits one channel-data block, so this is the rare case
+-- in practice.
+function M.dns_qname(values, base)
+    base = base or 0
+    if values == nil or #values < base + 12 then
+        return nil
+    end
+    local labels = {}
+    local index = base + 13
+    while index <= #values do
+        local length = values[index]
+        if length == 0 then
+            if #labels == 0 then
+                return nil
+            end
+            return table.concat(labels, ".")
+        end
+        if length > 63 or index + length > #values then
+            return nil
+        end
+        local characters = {}
+        for offset = 1, length do
+            local character = string.char(values[index + offset])
+            -- RFC 1035 clause 2.3.1 and 3GPP TS 23.003 limit a label to
+            -- letters, digits and the hyphen; the underscore appears in
+            -- service labels (_acme-challenge). Anything else means these
+            -- bytes are not a name, so they are left to the stock dissector.
+            if not character:match("[%w%-_]") then
+                return nil
+            end
+            characters[offset] = character
+        end
+        labels[#labels + 1] = table.concat(characters)
+        index = index + length + 1
+    end
+    return nil
 end
 
 --- TLV walker options naming COMPREHENSION-TLV tags.

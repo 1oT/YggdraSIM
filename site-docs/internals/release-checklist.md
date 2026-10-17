@@ -21,6 +21,8 @@ release.
 
 - [ ] working tree is clean; `git status` shows what you expect
 - [ ] `pyproject.toml` `version` is bumped
+- [ ] `CHANGELOG.md` has a `## [X.Y.Z] -- YYYY-MM-DD` section and nothing
+      under `## [Unreleased]`; the tag gate refuses either omission
 - [ ] `README.md` is aligned with the behavior of the new release
 - [ ] `guides/CAPABILITIES.md` reflects any new or retired surface
 - [ ] `guides/ARCHITECTURE.md` reflects any new cross-module dependency
@@ -33,7 +35,7 @@ release.
       optional local developer tree (not as shipped content)
 - [ ] The local-only pre-release audit notes show no
       open action items that a release should ship with; anything
-      explicitly deferred to post-v1 is listed in the "Deferred" blocks
+      explicitly deferred is listed in the "Deferred" blocks
 - [ ] `pyflakes SCP03/ SCP11/ SCP80/ SIMCARD/ Tools/ main/ plugins/
       yggdrasim_common/` is clean modulo the two documented `# noqa:
       F401` probes and the `SCP11/shared` / `SCP11/relay` star-import
@@ -165,8 +167,10 @@ Windows x86_64 clean, Debian package) and the `publish-release` job. The
 - generates a `SHA256SUMS` manifest;
 - guards the matrix against silent drift with an explicit "required asset"
   list before calling `gh release create`;
-- calls `gh release create <tag> --notes-from-tag --verify-tag …`, which
-  reuses the annotated tag message as the public release notes.
+- reads the annotated tag message from the tag object the policy job
+  verified, judges it with `scripts/release/release_notes.py check`, calls
+  `gh release create <tag> --notes-file <notes> --verify-tag ...`, and reads
+  the page body back to compare it with the checked notes.
 
 The annotated `v*` path remains the only production publication path. It uses
 canonical installer-facing asset names and fails closed if any required
@@ -178,15 +182,37 @@ binaries and the release notes gain a *Code signing* section that says so;
 a partial set of secrets fails the build, because it is a misconfiguration
 rather than a decision.
 Before any platform build or signing step, CI also requires the tag to match
-`v<project.version>`, verifies that it is annotated, and confirms that its
+`v<project.version>`, verifies that it is annotated, confirms that its
 exact commit is reachable from `origin/main` or from an `origin/release/*`
-branch.
+branch, and judges the tag message and `CHANGELOG.md` with the release-note
+gate below.
 
 ### Annotated-tag-message contract
 
-The release page's body comes from the **annotated** tag message via
-`gh release create --notes-from-tag`. Tagging steps:
+The release page's body is the **annotated** tag message. Both
+`release-ref-policy` (before any platform builds) and `publish-release`
+(before `gh release create`) run `scripts/release/release_notes.py check`
+on it and fail closed when:
 
+- the message is empty, or is the tagged commit's message (a tag annotated
+  with `git log -1 --format=%B` output reads as a commit on the page);
+- the first line is not `YggdraSIM vX.Y.Z` for the tag being published;
+- no line is a Markdown list item (`- ...`), so the note names no change;
+- a line is a trailer (`...-by:` or `...-Session:`);
+- `CHANGELOG.md` in the tagged tree has no `## [X.Y.Z] -- YYYY-MM-DD`
+  section, that section is empty, or `## [Unreleased]` still carries
+  entries. The tagged tree ships whatever the changelog files under
+  Unreleased, so at a production tag that section is empty.
+
+`publish-release` reads the message from the tag object the policy job
+verified (`git/tags/<sha>` on the API), never from the checkout:
+`actions/checkout` re-points `refs/tags/<tag>` at the commit, which is how
+`gh release create --notes-from-tag` published the v2.1.0 commit message
+as its release notes. After creation the page body is read back and
+compared with the checked notes. Tagging steps:
+
+- [ ] move every `## [Unreleased]` entry into the `## [X.Y.Z] -- YYYY-MM-DD`
+      section of `CHANGELOG.md` in the commit the tag will point at
 - [ ] tag the release in git **with an annotation that reads as a
       release note** (covers headline behavioural changes, defaults,
       migration considerations):
@@ -195,15 +221,23 @@ The release page's body comes from the **annotated** tag message via
     git tag -a vX.Y.Z -m "$(cat <<'EOF'
     YggdraSIM vX.Y.Z
 
-    First / next … release. Notable changes:
+    First / next ... release. Notable changes:
 
-    - …
-    - …
+    - ...
+    - ...
     EOF
     )"
-    git push origin vX.Y.Z
     ```
 
+- [ ] run the gate on the local tag before the push; it reads the
+      annotated tag, the tagged commit and the tagged tree's
+      `CHANGELOG.md` from the checkout, and refuses a lightweight tag:
+
+    ```bash
+    python3 scripts/release/release_notes.py check --tag vX.Y.Z
+    ```
+
+- [ ] push the tag: `git push origin vX.Y.Z`
 - [ ] confirm the tagged commit is already reachable from `origin/main` or
       from a `release/<major>.<minor>.x` branch; the release policy gate
       rejects production tags made from arbitrary commits or unmerged

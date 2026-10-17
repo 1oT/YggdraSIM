@@ -171,7 +171,7 @@ vendored.
 - Use [Operator Surfaces](operator-surfaces.md) to choose the right module.
 - Use [Universal GUI Command Center](subsystems/gui-command-center.md) when
   you want a browser/desktop workbench with live APDU streaming.
-- Use [Remote APDU Streaming](how-to/remote-apdu-streaming.md) when the
+- Use [Card Bridge over SSH](how-to/remote-apdu-streaming.md) when the
   reader or HIL rig is on another host.
 - Use [Install RemSIM / APDU Streaming](how-to/install-remsim-apdu-streaming.md)
   before bringing up a SIMtrace2/RemSIM lab host.

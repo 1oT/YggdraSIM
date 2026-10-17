@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for PE-integrity, application, metadata, and file-descriptor lint rules.
 
 Covers: YRL-SEQ-010, YRL-PID-001/002, YRL-SDM-001..004,
@@ -108,7 +107,7 @@ def _codes(doc: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# YRL-SEQ-010 — duplicate singleton PE type
+# YRL-SEQ-010 -- duplicate singleton PE type
 # ---------------------------------------------------------------------------
 
 class SingletonDuplicateTests(unittest.TestCase):
@@ -130,7 +129,7 @@ class SingletonDuplicateTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-PID-001 / YRL-PID-002 — PE identification integrity
+# YRL-PID-001 / YRL-PID-002 -- PE identification integrity
 # ---------------------------------------------------------------------------
 
 class PeIdentificationTests(unittest.TestCase):
@@ -163,7 +162,7 @@ class PeIdentificationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-SDM-001..004 — securityDomain PE integrity
+# YRL-SDM-001..004 -- securityDomain PE integrity
 # ---------------------------------------------------------------------------
 
 class SecurityDomainTests(unittest.TestCase):
@@ -198,7 +197,7 @@ class SecurityDomainTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-JCA-001/002/003/010 — application load-block integrity
+# YRL-JCA-001/002/003/010 -- application load-block integrity
 # ---------------------------------------------------------------------------
 
 class AppLoadBlockTests(unittest.TestCase):
@@ -241,7 +240,7 @@ class AppLoadBlockTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-JCI-001..004 — application instance integrity
+# YRL-JCI-001..004 -- application instance integrity
 # ---------------------------------------------------------------------------
 
 class AppInstanceTests(unittest.TestCase):
@@ -292,7 +291,71 @@ class AppInstanceTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-MET-001 / YRL-MET-010 / YRL-MET-011 — metadata alignment
+# Application AIDs as the DER decoder hands them over (bytes)
+# ---------------------------------------------------------------------------
+
+# TCA SAIP v3.4.1 Annex C §11.2.11 (MNO-SD) and §11.2.13 (PE APPLICATION 1).
+_MNO_SD_AID = bytes.fromhex("A000000151000000")
+_PACKAGE_AID = bytes.fromhex("A000000559101001")
+_INSTANCE_AID = bytes.fromhex("A00000055910100111223301")
+
+
+def _decoded_sd_and_app(instance: dict, security_domain_aid: bytes | None = None) -> dict:
+    load_block: dict = {"loadPackageAID": _PACKAGE_AID, "loadBlockObject": b"\x01\x00\x00"}
+    if security_domain_aid is not None:
+        load_block["securityDomainAID"] = security_domain_aid
+    return _make_doc(
+        securityDomain={
+            "identification": 2,
+            "type": "securityDomain",
+            "instance": {
+                "applicationLoadPackageAID": bytes.fromhex("A0000001515350"),
+                "classAID": bytes.fromhex("A000000151535041"),
+                "instanceAID": _MNO_SD_AID,
+            },
+            "keyList": [{"keyVersionNumber": 1}],
+        },
+        application={
+            "identification": 10,
+            "type": "application",
+            "loadBlock": load_block,
+            "instanceList": [instance],
+        },
+    )
+
+
+class AppDecodedBytesAidTests(unittest.TestCase):
+    """A package decoded from DER carries every AID as bytes, not hex text."""
+
+    def test_matching_byte_aids_raise_nothing(self) -> None:
+        doc = _decoded_sd_and_app(
+            {
+                "applicationLoadPackageAID": _PACKAGE_AID,
+                "classAID": _PACKAGE_AID + bytes.fromhex("112233"),
+                "instanceAID": _INSTANCE_AID,
+                "extraditeSecurityDomainAID": _MNO_SD_AID,
+            },
+            security_domain_aid=_MNO_SD_AID,
+        )
+        codes = _codes(doc)
+        for rule in ("YRL-JCA-002", "YRL-JCA-010", "YRL-JCI-004", "YRL-SDM-005"):
+            self.assertNotIn(rule, codes)
+
+    def test_mismatching_byte_aids_still_fail(self) -> None:
+        doc = _decoded_sd_and_app(
+            {
+                "applicationLoadPackageAID": bytes.fromhex("A000000559101003"),
+                "instanceAID": _INSTANCE_AID,
+            },
+            security_domain_aid=bytes.fromhex("A00000055910100102736456616C7565"),
+        )
+        codes = _codes(doc)
+        self.assertIn("YRL-JCI-004", codes)
+        self.assertIn("YRL-JCA-010", codes)
+
+
+# ---------------------------------------------------------------------------
+# YRL-MET-001 / YRL-MET-010 / YRL-MET-011 -- metadata alignment
 # ---------------------------------------------------------------------------
 
 class MetadataAlignmentTests(unittest.TestCase):
@@ -318,7 +381,7 @@ class MetadataAlignmentTests(unittest.TestCase):
         return [f.code for f in report.findings]
 
     def test_met001_metadata_iccid_mismatch(self) -> None:
-        # Metadata carries a different ICCID string — linter compares via str().
+        # Metadata carries a different ICCID string -- linter compares via str().
         codes = self._lint_with_meta({"profile": {"iccid": "89882099999999991230"}})
         self.assertIn("YRL-MET-001", codes)
 
@@ -343,7 +406,7 @@ class MetadataAlignmentTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-002/003/005/006/019 — GFM file-descriptor and fileID checks
+# YRL-FIL-002/003/005/006/019 -- GFM file-descriptor and fileID checks
 # ---------------------------------------------------------------------------
 
 class FileDescriptorTests(unittest.TestCase):
@@ -400,7 +463,7 @@ class FileIdTests(unittest.TestCase):
         self.assertIn("YRL-FIL-006", codes)
 
     def test_fil006_wrong_length_file_id(self) -> None:
-        # 3 octets — must be exactly 2
+        # 3 octets -- must be exactly 2
         doc = _make_doc(
             gfm=_gfm_section(_gfm_cmd(file_descriptor="4121", file_id="6F0700"))
         )
@@ -442,7 +505,7 @@ class ShortEfidTests(unittest.TestCase):
         self.assertIn("YRL-FIL-019", codes)
 
     def test_fil019_wrong_length_short_efid(self) -> None:
-        # 2 octets — must be exactly 1
+        # 2 octets -- must be exactly 1
         doc = _make_doc(
             gfm=_gfm_section(_gfm_cmd(
                 file_descriptor="4121", file_id="6F07", short_efid="0700"

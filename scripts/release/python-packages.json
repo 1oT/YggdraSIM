@@ -20,7 +20,6 @@
     "Tools/ProfilePackage/saip_pysim_compat.py",
     "Tools/ProfilePackage/saip_variable_materialization.py",
     "yggdrasim_common/frozen_dispatch.py",
-    "yggdrasim_common/gui_server/action_security.py",
     "yggdrasim_common/secure_files.py"
   ],
   "packages": [
@@ -45,6 +44,7 @@
     "Tools.ApduFuzz",
     "Tools.Asn1TlvDecode",
     "Tools.CardBridge",
+    "Tools.CardClone",
     "Tools.EumDiag",
     "Tools.HilBridge",
     "Tools.ProfilePackage",

@@ -5,7 +5,7 @@
 
 The GUI's streaming routes build one :class:`threading.Event` per run and
 publish it on ``ActionContext.extras['cancel_event']``. Work reached
-through a console object -- an eIM poll loop, a STATUS watchdog -- runs
+through a console object -- an eIM poll loop, say -- runs
 in a worker thread that never sees that context, so the flag travels on
 the console itself under one documented attribute name. A plugin can
 then honour Stop without importing anything from the GUI server.

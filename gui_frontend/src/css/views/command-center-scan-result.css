@@ -28,7 +28,7 @@
   background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: 10px;
   /* The tree historically capped at 460px which left a third of the
      viewport empty on tall monitors and forced extra scrolling on
      deep ETSI hierarchies (MF/ADF.USIM/DF.GSM-ACCESS/...). Cap to a
@@ -36,22 +36,28 @@
      still leaves room for the dock + ribbon. The hard floor keeps it
      usable on very short windows. */
   min-height: 360px;
-  max-height: calc(100vh - 280px);
+  max-height: calc(100vh - var(--scp03-pane-reserve, 280px));
   overflow: auto;
   font-family: var(--font-mono);
   font-size: 12.5px;
 }
 
+/* Indentation is kept tight on purpose: every row already carries a
+   16px caret column and a kind chip before its name, so the nesting
+   reads from those and the guide line rather than from distance. An
+   ETSI hierarchy is commonly four deep (MF/ADF.USIM/DF.GSM-ACCESS/EF),
+   and the wide steps this replaced pushed a fourth-level name 145px
+   into the panel with the file id still right-aligned at the far edge. */
 .cc-tree-list {
   list-style: none;
   margin: 0;
-  padding-left: 14px;
+  padding-left: 4px;
 }
 
 .cc-tree-list .cc-tree-list {
-  padding-left: 18px;
+  padding-left: 12px;
   border-left: 1px dashed var(--border);
-  margin-left: 6px;
+  margin-left: 4px;
 }
 
 .cc-tree-list[hidden] {

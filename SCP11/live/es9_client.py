@@ -40,7 +40,12 @@ from yggdrasim_common.process_debug import (
 from yggdrasim_common.runtime_paths import ensure_runtime_dir, ensure_seeded_runtime_file, runtime_path
 from yggdrasim_common.terminal_output import status_print as print
 from SCP11.shared.gsma_error_codes import describe_sgp32_eim_package_error
-from SCP11.shared.tls_helpers import create_insecure_context, create_introspection_context
+from SCP11.shared.tls_helpers import (
+    PinnedTlsMismatchError,
+    create_insecure_context,
+    create_introspection_context,
+    pinning_required,
+)
 
 try:
     from .models import (
@@ -48,6 +53,7 @@ try:
         AuthenticateClientResponse,
         CancelSessionRequest,
         EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_ESIPA_JSON,
         EIM_TRANSPORT_MODE_REST_RESOURCE,
         EimPollRequest,
         EimPollResponse,
@@ -63,6 +69,7 @@ except ImportError:
         AuthenticateClientResponse,
         CancelSessionRequest,
         EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_ESIPA_JSON,
         EIM_TRANSPORT_MODE_REST_RESOURCE,
         EimPollRequest,
         EimPollResponse,
@@ -108,6 +115,12 @@ class _ManagedHttpResponse:
         return False
 
 
+# SGP.22 v3.1 section 6.5.1.4: the User-Agent product of an LPA in the Device;
+# SGP.32 v1.3 section 6.1: the product of an IPA in the Device.
+ES9_USER_AGENT = "gsma-rsp-lpad"
+ESIPA_USER_AGENT = "gsma-rsp-ipad"
+
+
 class Es9LikeClient:
     """Typed ES9-like HTTP client boundary used by SCP11 orchestration."""
 
@@ -121,7 +134,7 @@ class Es9LikeClient:
         eim_timeout_seconds: int | None = None,
         eim_transport_mode: str = EIM_TRANSPORT_MODE_ESIPA,
         eim_http_path: str = "/gsma/rsp2/asn1",
-        eim_http_protocol: str = "gsma/rsp/v2.1.0",
+        eim_http_protocol: str = "gsma/rsp/v1.3.0",
         eim_rest_create_path: str = "/edr/create",
         eim_rest_lookup_path_template: str = "/edr/lookup/{resource_id}",
     ):
@@ -252,11 +265,10 @@ class Es9LikeClient:
         payload = {
             "transactionId": request_obj.transaction_id,
             "authenticateServerResponse": request_obj.authenticate_server_response,
-            "smdpAddress": request_obj.smdp_address,
         }
         response = self._post_json("/gsma/rsp2/es9plus/authenticateClient", payload)
         return AuthenticateClientResponse(
-            transaction_id=self._string_field(response, "transactionID", request_obj.transaction_id),
+            transaction_id=self._string_field(response, "transactionId", request_obj.transaction_id),
             profile_metadata=response.get("profileMetadata"),
             smdp_signed2=self._string_field(response, "smdpSigned2"),
             smdp_signature2=self._string_field(response, "smdpSignature2"),
@@ -270,7 +282,6 @@ class Es9LikeClient:
         payload = {
             "transactionId": request_obj.transaction_id,
             "prepareDownloadResponse": request_obj.prepare_download_response,
-            "smdpAddress": request_obj.smdp_address,
         }
         response = self._post_json("/gsma/rsp2/es9plus/getBoundProfilePackage", payload)
         bpp = self._string_field(response, "boundProfilePackage")
@@ -319,12 +330,25 @@ class Es9LikeClient:
     def provide_eim_package_result(self, request_obj: EimPollRequest) -> dict:
         return self._dispatch_eim_request(request_obj)
 
+    def handle_notification_esipa(self, request_obj: EimPollRequest) -> dict:
+        """ESipa.HandleNotification: ``raw_body`` is a HandleNotificationEsipa (BF3D).
+
+        A Notification function, so the eIM answers HTTP 204 with an empty
+        body (SGP.32 v1.3 section 6.1, SGP.22 v3.1 section 6.3) and the
+        result is an empty dict.
+        """
+        if bytes(request_obj.raw_body or b"").startswith(bytes.fromhex("BF3D")) is False:
+            raise ValueError("ESipa.HandleNotification body is not a BF3D HandleNotificationEsipa.")
+        return self._dispatch_eim_request(request_obj)
+
     def poll_eim(self, request_obj: EimPollRequest) -> EimPollResponse:
         response = self._dispatch_eim_request(request_obj)
         return self._decode_eim_poll_response(response)
 
     def _dispatch_eim_request(self, request_obj: EimPollRequest) -> dict:
         base_url = self._resolve_eim_base_url(request_obj.eim_fqdn)
+        if self._eim_transport_mode == EIM_TRANSPORT_MODE_ESIPA_JSON:
+            return self._dispatch_eim_json_binding(base_url, request_obj)
         if request_obj.raw_body is not None and len(request_obj.raw_body) > 0:
             return self._post_eim_binary(
                 base_url,
@@ -395,6 +419,7 @@ class Es9LikeClient:
                 pinned_tls_public_key_data=request_obj.trusted_tls_public_key_data,
                 use_configured_ca_bundle=True,
                 tls_log_label="eIM",
+                user_agent=ESIPA_USER_AGENT,
             )
         if self._eim_transport_mode == EIM_TRANSPORT_MODE_REST_RESOURCE:
             return self._poll_eim_via_rest_resource(base_url, payload)
@@ -402,6 +427,136 @@ class Es9LikeClient:
             f"Unsupported eIM transport mode: {self._eim_transport_mode}. "
             f"Expected {EIM_TRANSPORT_MODE_ESIPA} or {EIM_TRANSPORT_MODE_REST_RESOURCE}."
         )
+
+    def _dispatch_eim_json_binding(self, base_url: str, request_obj: EimPollRequest) -> dict:
+        """ESipa over the SGP.32 v1.3 section 6.4 JSON binding.
+
+        GetEimPackage posts eidValue with the optional notifyStateChange,
+        stateChangeCause and rPlmn members to /gsma/rsp2/esipa/getEimPackage
+        and receives one of euiccPackageRequest, ipaEuiccDataRequest,
+        profileDownloadTriggerRequest (base64 DER) or eimPackageError.
+        ProvideEimPackageResult posts the base64 EimPackageResult to
+        /gsma/rsp2/esipa/provideEimPackageResult and receives the optional
+        eimAcknowledgements. HandleNotification posts the base64
+        ProvideEimPackageResult to /gsma/rsp2/esipa/handleNotification
+        (section 6.4.1.7) and has no response body.
+        """
+        raw_body = bytes(request_obj.raw_body or b"")
+        if raw_body.startswith(bytes.fromhex("BF50")):
+            path = "/gsma/rsp2/esipa/provideEimPackageResult"
+            payload = self._json_provide_eim_package_result_body(raw_body)
+        elif raw_body.startswith(bytes.fromhex("BF3D")):
+            return self._post_json_to_base_url(
+                base_url,
+                "/gsma/rsp2/esipa/handleNotification",
+                self._json_handle_notification_body(raw_body),
+                protocol_header=self._eim_http_protocol,
+                pinned_tls_public_key_data=request_obj.trusted_tls_public_key_data,
+                use_configured_ca_bundle=True,
+                tls_log_label="eIM",
+                user_agent=ESIPA_USER_AGENT,
+            )
+        else:
+            path = "/gsma/rsp2/esipa/getEimPackage"
+            payload = self._json_get_eim_package_body(raw_body, request_obj)
+        response = self._post_json_to_base_url(
+            base_url,
+            path,
+            payload,
+            protocol_header=self._eim_http_protocol,
+            pinned_tls_public_key_data=request_obj.trusted_tls_public_key_data,
+            use_configured_ca_bundle=True,
+            tls_log_label="eIM",
+            user_agent=ESIPA_USER_AGENT,
+        )
+        if path.endswith("/provideEimPackageResult"):
+            return self._decode_json_provide_eim_package_result_response(response)
+        return self._decode_json_get_eim_package_response(response)
+
+    def _json_get_eim_package_body(self, raw_body: bytes, request_obj: EimPollRequest) -> dict:
+        body: dict = {}
+        eid_digits = "".join(character for character in str(request_obj.eid or "") if character.isdigit())
+        if raw_body.startswith(bytes.fromhex("BF4F")):
+            root, _ = self._read_tlv_at(raw_body, 0)
+            value = root[1] if root is not None else b""
+            offset = 0
+            while offset < len(value):
+                item, offset = self._read_tlv_at(value, offset)
+                if item is None:
+                    break
+                tag_bytes, item_value, _ = item
+                if tag_bytes == b"\x5A":
+                    eid_digits = item_value.hex().upper()
+                elif tag_bytes == b"\x80":
+                    body["notifyStateChange"] = True
+                elif tag_bytes == b"\x81" and len(item_value) > 0:
+                    body["stateChangeCause"] = int.from_bytes(item_value, "big", signed=False)
+                elif tag_bytes == b"\x82" and len(item_value) > 0:
+                    body["rPlmn"] = base64.b64encode(item_value).decode("ascii")
+        if len(eid_digits) != 32:
+            raise ValueError("ESipa GetEimPackage needs the 32-digit EID as eidValue.")
+        return {"eidValue": eid_digits, **body}
+
+    def _json_provide_eim_package_result_body(self, raw_body: bytes) -> dict:
+        root, _ = self._read_tlv_at(raw_body, 0)
+        if root is None:
+            raise ValueError("ProvideEimPackageResult body is not a BF50 TLV.")
+        body: dict = {}
+        value = root[1]
+        offset = 0
+        while offset < len(value):
+            item, next_offset = self._read_tlv_at(value, offset)
+            if item is None:
+                break
+            tag_bytes, item_value, _ = item
+            if tag_bytes == b"\x5A":
+                body["eidValue"] = item_value.hex().upper()
+            else:
+                body["eimPackageResult"] = base64.b64encode(value[offset:next_offset]).decode("ascii")
+            offset = next_offset
+        if "eimPackageResult" not in body:
+            raise ValueError("ProvideEimPackageResult body carries no EimPackageResult.")
+        return body
+
+    def _json_handle_notification_body(self, raw_body: bytes) -> dict:
+        """JSON requestBody of ESipa.HandleNotification (SGP.32 v1.3 section 6.4.1.7).
+
+        This IPA sends only the provideEimPackageResult alternative of
+        HandleNotificationEsipa (section 6.3.2.4); the field carries its BF50 TLV.
+        """
+        root, _ = self._read_tlv_at(raw_body, 0)
+        if root is None:
+            raise ValueError("HandleNotificationEsipa body is not a BF3D TLV.")
+        alternative, alternative_end = self._read_tlv_at(root[1], 0)
+        if alternative is None or alternative[0] != bytes.fromhex("BF50"):
+            raise ValueError("HandleNotificationEsipa carries no provideEimPackageResult (BF50).")
+        return {"provideEimPackageResult": base64.b64encode(root[1][:alternative_end]).decode("ascii")}
+
+    def _decode_json_get_eim_package_response(self, response: dict) -> dict:
+        if isinstance(response, dict) is False:
+            return {"euiccPackageList": [], "pollingComplete": True}
+        for key in ("euiccPackageRequest", "ipaEuiccDataRequest", "profileDownloadTriggerRequest"):
+            value = response.get(key)
+            if isinstance(value, str) and len(value.strip()) > 0:
+                return {"euiccPackageList": [value.strip()], "pollingComplete": False}
+        if "eimPackageError" in response:
+            try:
+                code = int(response.get("eimPackageError"))
+            except (TypeError, ValueError):
+                code = 127
+            return {"euiccPackageList": [], "pollingComplete": True, "eimResultCode": code}
+        return {"euiccPackageList": [], "pollingComplete": True}
+
+    def _decode_json_provide_eim_package_result_response(self, response: dict) -> dict:
+        acknowledgements = ""
+        if isinstance(response, dict):
+            acknowledgements = str(response.get("eimAcknowledgements", "") or "").strip()
+        return {
+            "euiccPackageList": [],
+            "pollingComplete": True,
+            "packageFormat": "eimAcknowledgements" if len(acknowledgements) > 0 else "emptyResponse",
+            "eimAcknowledgements": acknowledgements,
+        }
 
     def _build_eim_json_payload(self, request_obj: EimPollRequest) -> dict:
         payload = {
@@ -427,6 +582,48 @@ class Es9LikeClient:
             payload["euiccChallenge"] = request_obj.euicc_challenge
         return payload
 
+    def _post_eim_binary_over_trust_path(
+        self,
+        request: urllib.request.Request,
+        endpoint: str,
+    ) -> bytes:
+        """Send the eIM POST over the configured HTTPS trust path."""
+        ssl_context = self._build_ssl_context_for_endpoint(
+            endpoint,
+            use_configured_ca_bundle=True,
+            log_label="eIM",
+        )
+        try:
+            response_handle = self._open_http_response(
+                request,
+                ssl_context,
+                endpoint,
+                label="eIM",
+                timeout_seconds=self._eim_timeout_seconds,
+            )
+            with response_handle as resp:
+                return self._read_http_response_bytes(resp, endpoint, label="eIM")
+        except Exception as error:
+            resolved_bundle = self._resolve_dynamic_ca_bundle_for_endpoint(
+                endpoint,
+                trust_hint_ci_pkid="",
+                initial_error=error,
+            )
+            if len(resolved_bundle) == 0:
+                raise IOError(
+                    f"ES9 request failed for {endpoint}: {error}"
+                ) from error
+            retry_ctx = self._create_default_context_with_bundle(resolved_bundle)
+            response_handle = self._open_http_response(
+                request,
+                retry_ctx,
+                endpoint,
+                label="eIM",
+                timeout_seconds=self._eim_timeout_seconds,
+            )
+            with response_handle as resp:
+                return self._read_http_response_bytes(resp, endpoint, label="eIM")
+
     def _post_eim_binary(
         self,
         base_url: str,
@@ -442,9 +639,12 @@ class Es9LikeClient:
             debug_print(f"[*] eIM request: POST {endpoint} body_len={len(body)} first={body[:min(32, len(body))].hex().upper()}")
         if body.startswith(bytes.fromhex("BF50")):
             debug_print(f"[*] eIM request full ProvideEimPackageResult hex={body_hex}")
+        elif body.startswith(bytes.fromhex("BF3D")):
+            debug_print(f"[*] eIM request full HandleNotificationEsipa hex={body_hex}")
         headers = {
             "Content-Type": "application/x-gsma-rsp-asn1",
             "Accept": "application/json, application/x-gsma-rsp-asn1",
+            "User-Agent": ESIPA_USER_AGENT,
         }
         if len(self._eim_http_protocol.strip()) > 0:
             headers["X-Admin-Protocol"] = self._eim_http_protocol
@@ -477,17 +677,23 @@ class Es9LikeClient:
                         endpoint,
                         label="eIM",
                     )
+            except PinnedTlsMismatchError:
+                if pinning_required():
+                    raise
+                # A rotated eIM leaf invalidates the BF55 pin without making
+                # the endpoint unreachable, so the poll continues over the
+                # CA-verified trust path instead of failing the whole sweep.
+                debug_print(
+                    "[*] eIM transport: BF55 pinned TLS key did not match; "
+                    "continuing over the CA-verified trust path."
+                )
+                raw = self._post_eim_binary_over_trust_path(request, endpoint)
             except Exception:
                 # Let the orchestrator's outer wrap supply the canonical
                 # ``Provider getEimPackage failed: ...`` prefix so it is
                 # not repeated twice in the surfaced error message.
                 raise
         else:
-            ssl_context = self._build_ssl_context_for_endpoint(
-                endpoint,
-                use_configured_ca_bundle=True,
-                log_label="eIM",
-            )
             if len(pinned_tls_public_key_data) == 0:
                 debug_print(
                     "[*] eIM transport: no pinned TLS public key available "
@@ -498,47 +704,7 @@ class Es9LikeClient:
                     "[*] eIM transport: BF55 TLS public key pinning disabled "
                     "for this runtime; using configured HTTPS trust path."
                 )
-            try:
-                response_handle = self._open_http_response(
-                    request,
-                    ssl_context,
-                    endpoint,
-                    label="eIM",
-                    timeout_seconds=self._eim_timeout_seconds,
-                )
-                with response_handle as resp:
-                    raw = self._read_http_response_bytes(
-                        resp,
-                        endpoint,
-                        label="eIM",
-                    )
-            except Exception as error:
-                resolved_bundle = self._resolve_dynamic_ca_bundle_for_endpoint(
-                    endpoint,
-                    trust_hint_ci_pkid="",
-                    initial_error=error,
-                )
-                if len(resolved_bundle) > 0:
-                    retry_ctx = self._create_default_context_with_bundle(
-                        resolved_bundle,
-                    )
-                    response_handle = self._open_http_response(
-                        request,
-                        retry_ctx,
-                        endpoint,
-                        label="eIM",
-                        timeout_seconds=self._eim_timeout_seconds,
-                    )
-                    with response_handle as resp:
-                        raw = self._read_http_response_bytes(
-                            resp,
-                            endpoint,
-                            label="eIM",
-                        )
-                else:
-                    raise IOError(
-                        f"ES9 request failed for {endpoint}: {error}"
-                    ) from error
+            raw = self._post_eim_binary_over_trust_path(request, endpoint)
         if len(raw) == 0:
             return {}
         is_json = raw.lstrip().startswith(b"{")
@@ -608,7 +774,9 @@ class Es9LikeClient:
         offset += 1
         if length_byte & 0x80:
             num_len = length_byte & 0x7F
-            if num_len > 2 or offset + num_len > len(data):
+            # The indefinite form (0x80) and the reserved 0xFF are not DER;
+            # four length octets cover any ESipa message (X.690 8.1.3.5).
+            if num_len == 0 or num_len > 4 or offset + num_len > len(data):
                 return None, offset
             length = 0
             for _ in range(num_len):
@@ -679,10 +847,14 @@ class Es9LikeClient:
                 except Exception:
                     pass
                 continue
+            # The acknowledged sequence numbers travel on in the JSON binding's
+            # form (base64 of the BF53 TLV), so the IPA can remove those
+            # results from the eUICC (SGP.32 v1.3 §3.3.1 step 15).
             if tag_bytes == b"\xBF\x50":
                 out["pollingComplete"] = True
                 if len(value) >= 3 and value.startswith(b"\xBF\x53"):
                     out["packageFormat"] = "eimAcknowledgements"
+                    out["eimAcknowledgements"] = base64.b64encode(value).decode("ascii")
                     continue
                 if len(value) == 2 and value == b"\x30\x00":
                     out["packageFormat"] = "emptyResponse"
@@ -694,6 +866,7 @@ class Es9LikeClient:
             if tag_bytes == b"\xBF\x53":
                 out["pollingComplete"] = True
                 out["packageFormat"] = "eimAcknowledgements"
+                out["eimAcknowledgements"] = base64.b64encode(raw_tlv).decode("ascii")
                 continue
             if tag_first == 0x04 and len(value) > 0:
                 try:
@@ -724,9 +897,36 @@ class Es9LikeClient:
                     out["pollingComplete"] = inner["pollingComplete"]
                 if out.get("eimResultCode") is None and inner.get("eimResultCode") is not None:
                     out["eimResultCode"] = inner["eimResultCode"]
+                if tag_bytes == b"\xBF\x4F":
+                    alternative = self._unrecognised_get_eim_package_alternative(value, inner)
+                    if len(alternative) > 0:
+                        packages.append(base64.b64encode(alternative).decode("ascii"))
+                        out["pollingComplete"] = False
         if packages:
             out["euiccPackageList"] = packages
         return out
+
+    def _unrecognised_get_eim_package_alternative(self, value: bytes, inner: dict) -> bytes:
+        """Return the GetEimPackageResponse alternative the parser found nothing in, or b"".
+
+        SGP.32 v1.3 §6.3.2.6 defines four alternatives: 'BF51', 'BF52', 'BF54'
+        and the eimPackageError INTEGER. An eIM may serve one of its own, and it
+        manages its pending packages when their result arrives (§5.14.6); one
+        dropped here stays pending and holds the packages queued behind it. It
+        is handed on as a package so the orchestrator answers it.
+        """
+        if inner.get("euiccPackageList") or inner.get("eimResultCode") is not None:
+            return b""
+        item, end = self._read_tlv_at(value, 0)
+        if item is None or end != len(value):
+            return b""
+        if item[0] in (b"\xBF\x51", b"\xBF\x52", b"\xBF\x54", b"\x02"):
+            return b""
+        debug_print(
+            f"[*] eIM response: GetEimPackageResponse alternative tag={item[0].hex().upper()} "
+            "is not defined by SGP.32; passing it on as a package."
+        )
+        return value[:end]
 
     def _poll_eim_via_rest_resource(self, base_url: str, payload: dict) -> dict:
         create_path = self._normalized_rest_create_path()
@@ -760,11 +960,12 @@ class Es9LikeClient:
         base_url: str,
         path: str,
         body: dict,
-        protocol_header: str = "gsma/rsp/v2.2.0",
+        protocol_header: str = "gsma/rsp/v2.1.0",
         pinned_tls_public_key_data: bytes = b"",
         trust_hint_ci_pkid: str = "",
         use_configured_ca_bundle: bool = True,
         tls_log_label: str = "ES9",
+        user_agent: str = ES9_USER_AGENT,
     ) -> dict:
         endpoint = base_url.rstrip("/") + path
         payload = json.dumps(body).encode("utf-8")
@@ -776,7 +977,7 @@ class Es9LikeClient:
             endpoint,
             data=payload,
             method="POST",
-            headers=self._build_json_headers(protocol_header),
+            headers=self._build_json_headers(protocol_header, user_agent),
         )
 
         ssl_context = None
@@ -828,10 +1029,13 @@ class Es9LikeClient:
         self._raise_for_execution_status(decoded, endpoint)
         return decoded
 
-    def _build_json_headers(self, protocol_header: str) -> dict:
+    def _build_json_headers(self, protocol_header: str, user_agent: str = ES9_USER_AGENT) -> dict:
+        # SGP.22 v3.1 section 6.5.1.4: a JSON binding is announced as
+        # application/json;charset=UTF-8 and every request names its product.
         headers = {
-            "Content-Type": "application/json",
+            "Content-Type": "application/json;charset=UTF-8",
             "Accept": "application/json",
+            "User-Agent": user_agent,
         }
         if len(protocol_header.strip()) > 0:
             headers["X-Admin-Protocol"] = protocol_header
@@ -904,18 +1108,21 @@ class Es9LikeClient:
                     encoding=serialization.Encoding.DER,
                     format=serialization.PublicFormat.SubjectPublicKeyInfo,
                 )
+                # This context was built with CERT_NONE, so the request body
+                # must not go out on it. Callers able to rebuild the connection
+                # over a CA-verified path catch PinnedTlsMismatchError there.
                 if hmac.compare_digest(presented_spki, pinned_tls_spki) is False:
-                    debug_print(
-                        f"[!] {label} transport: pinned TLS SPKI does not match "
-                        f"server certificate (presented={presented_spki.hex().upper()}). "
-                        f"Proceeding with standard TLS verification — connection is "
-                        f"still encrypted and authenticated via the system CA bundle."
+                    close_fn = getattr(connection, "close", None)
+                    if callable(close_fn):
+                        close_fn()
+                    raise PinnedTlsMismatchError(
+                        f"Pinned TLS public key mismatch for {label} endpoint "
+                        f"{endpoint}."
                     )
-                else:
-                    debug_print(
-                        f"[*] {label} transport: pinned TLS SPKI verified "
-                        f"on live connection."
-                    )
+                debug_print(
+                    f"[*] {label} transport: pinned TLS SPKI verified "
+                    f"on live connection."
+                )
 
         send_started_at = time.monotonic()
         request_body = request.data
@@ -1303,7 +1510,20 @@ class Es9LikeClient:
         use_configured_ca_bundle: bool = True,
     ) -> str:
         configured = self._ca_bundle_path.strip()
-        if use_configured_ca_bundle and len(configured) > 0 and os.path.exists(configured):
+        if use_configured_ca_bundle and len(configured) > 0:
+            # A configured anchor that has gone missing used to fall through
+            # to the per-host entry or the system store, so the operator kept
+            # believing traffic was pinned to their bundle while it ran on
+            # whatever else verified. The provider chain check already refuses
+            # the same path (FileNotFoundError out of
+            # verify_certificate_against_ca_bundle); this makes the transport
+            # agree instead of quietly substituting a different trust root.
+            if os.path.exists(configured) is False:
+                raise RuntimeError(
+                    f"Configured CA bundle not found: {configured}. Point "
+                    "ES9_CA_BUNDLE_PATH (console: SET-ES9-CA) at an existing "
+                    "PEM, or clear it with SET-ES9-CA NONE."
+                )
             return configured
         hostname, _ = self._endpoint_hostname_and_port(endpoint)
         if len(hostname) == 0:
@@ -1356,6 +1576,11 @@ class Es9LikeClient:
                 matched_subject = verify_certificate_against_ca_bundle(leaf_der, candidate_path)
             except Exception:
                 continue
+            if len(matched_subject) == 0:
+                # The helper returns "" rather than raising when pySim is
+                # absent, so an empty subject means no chain check ran and
+                # the candidate has not actually been vouched for.
+                continue
             if self._bundle_verifies_tls_handshake(endpoint, candidate_path, log_label="ES9") is False:
                 continue
             self._remember_dynamic_ca_bundle(
@@ -1378,7 +1603,13 @@ class Es9LikeClient:
                 matched_subject = verify_certificate_against_ca_bundle(leaf_der, presented_chain_bundle)
             except Exception:
                 matched_subject = ""
-            if self._bundle_verifies_tls_handshake(endpoint, presented_chain_bundle, log_label="ES9") is False:
+            # Without a chain match the handshake probe is the only gate, and
+            # it is tautological for a bundle built from the endpoint's own
+            # chain. Fall through to the leaf branch, which is the documented
+            # route for a chain that cannot be validated.
+            if len(matched_subject) == 0:
+                presented_chain_bundle = ""
+            elif self._bundle_verifies_tls_handshake(endpoint, presented_chain_bundle, log_label="ES9") is False:
                 presented_chain_bundle = ""
             else:
                 self._remember_dynamic_ca_bundle(
@@ -1546,10 +1777,11 @@ class Es9LikeClient:
                 break
             matches.sort(key=lambda item: (item[0], item[1]["path"]))
             next_candidate = matches[0][1]
-            if next_candidate["path"] in seen_paths:
+            chain_key = (next_candidate["path"], next_candidate["subject_key_identifier"])
+            if chain_key in seen_paths:
                 break
             chain.append(next_candidate)
-            seen_paths.add(next_candidate["path"])
+            seen_paths.add(chain_key)
             if next_candidate["self_signed"]:
                 break
             next_authority_key_id = next_candidate["authority_key_identifier"]
@@ -1565,17 +1797,19 @@ class Es9LikeClient:
     def _candidate_certificate_infos(self, trust_hint_ci_pkid: str) -> list[dict]:
         candidate_paths = self._candidate_ca_bundle_paths(trust_hint_ci_pkid)
         infos = []
-        seen_paths = set()
+        seen = set()
         for candidate_path in candidate_paths:
-            certificate_info = self._load_pem_certificate_info(candidate_path)
-            if certificate_info is None:
-                continue
-            if candidate_path in seen_paths:
-                continue
-            infos.append(certificate_info)
-            seen_paths.add(candidate_path)
+            for certificate_info in self._load_pem_certificate_infos(candidate_path):
+                key = (
+                    certificate_info["path"],
+                    certificate_info["subject_key_identifier"],
+                    certificate_info["subject_name"],
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                infos.append(certificate_info)
         return infos
-
     def _write_dynamic_validation_bundle(
         self,
         leaf_certificate: crypto_x509.Certificate,
@@ -1600,14 +1834,39 @@ class Es9LikeClient:
         return bundle_path
 
     def _load_pem_certificate_info(self, path: str) -> dict | None:
+        """Describe the trust anchor of a PEM file: its self-signed CA, else its first CA, else its first certificate."""
+        infos = self._load_pem_certificate_infos(path)
+        if len(infos) == 0:
+            return None
+        for predicate in (lambda info: info["is_ca"] and info["self_signed"], lambda info: info["is_ca"]):
+            for info in infos:
+                if predicate(info):
+                    return info
+        return infos[0]
+
+    def _load_pem_certificate_infos(self, path: str) -> list[dict]:
+        """Describe every certificate of a PEM file; a bundle holds a chain."""
         try:
             with open(path, "rb") as pem_file:
                 pem_data = pem_file.read()
-            with suppress_noisy_crypto_warnings():
-                certificate = crypto_x509.load_pem_x509_certificate(pem_data)
-        except Exception:
-            return None
+        except OSError:
+            return []
+        begin_marker = b"-----BEGIN CERTIFICATE-----"
+        end_marker = b"-----END CERTIFICATE-----"
+        infos: list[dict] = []
+        for segment in pem_data.split(end_marker):
+            if begin_marker not in segment:
+                continue
+            block = segment[segment.index(begin_marker):].strip() + b"\n" + end_marker + b"\n"
+            try:
+                with suppress_noisy_crypto_warnings():
+                    certificate = crypto_x509.load_pem_x509_certificate(block)
+            except Exception:
+                continue
+            infos.append(self._describe_certificate(path, certificate, block))
+        return infos
 
+    def _describe_certificate(self, path: str, certificate: crypto_x509.Certificate, pem_data: bytes) -> dict:
         try:
             ski_extension = certificate.extensions.get_extension_for_class(crypto_x509.SubjectKeyIdentifier)
             subject_key_identifier = ski_extension.value.digest.hex().upper()
@@ -1806,7 +2065,9 @@ class Es9LikeClient:
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
         if presented_spki != pinned_tls_public_key_data:
-            raise IOError("Pinned TLS public key mismatch for eIM endpoint.")
+            raise PinnedTlsMismatchError(
+                f"Pinned TLS public key mismatch for eIM endpoint {endpoint}."
+            )
         if self._certificate_matches_hostname(certificate, hostname) is False:
             raise IOError(f"eIM TLS certificate does not match hostname {hostname}.")
 

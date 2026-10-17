@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Unified profile-document loader for the SAIP diff engine.
 
@@ -13,7 +12,7 @@ dicts. In practice the operator will point it at either:
 * a ``*.der`` / ``*.pp`` / ``*.upp`` raw SAIP profile package, which
   can only be decoded via ``pySim.esim.saip.ProfileElementSequence``,
 * a ``*.txt`` / ``*.hex`` / ``*.varder`` ASCII hex-dump of a DER package
-  or vendor template — the same shape ``OPEN`` / ``USE`` accept via
+  or vendor template -- the same shape ``OPEN`` / ``USE`` accept via
   :meth:`Tools.ProfilePackage.saip_tool.SaipToolBridge._prepare_input_for_tool`.
   Whitespace and case are normalised before the bytes are handed to
   the DER decoder.
@@ -98,7 +97,7 @@ def _looks_like_simulator_manifest(payload: dict[str, Any]) -> bool:
 def _looks_like_ascii_hex(text: str) -> bool:
     """Heuristic: does *text* look like a hex-dump of a DER profile?
 
-    The check is intentionally cheap — we only inspect the first
+    The check is intentionally cheap -- we only inspect the first
     ``_HEX_SNIFF_HEAD_LIMIT`` characters, accept whitespace as a free
     separator (so multi-line ``xxd`` / ``hexdump -C``-style input is
     fine once column markers are stripped) and demand at least one
@@ -331,7 +330,7 @@ def load_profile_document(path: Path, *, workspace_root: Path) -> LoadedDocument
             )
 
         # Hex-text fallback. ``.txt`` / ``.hex`` / ``.varder`` profiles are ASCII
-        # hex dumps of a DER package — the same shape OPEN / USE
+        # hex dumps of a DER package -- the same shape OPEN / USE
         # accept. We honour the explicit suffix unconditionally and
         # fall back to a content sniff for extension-less inputs so a
         # mis-named file still lands in the right branch. Any failure

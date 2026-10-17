@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Plugin runtime gate for optional, operator-supplied extension code."""
 from __future__ import annotations
 
@@ -105,7 +104,7 @@ def _ensure_plugins_namespace(plugins_dir: str) -> None:
 
 
 def _plugin_label(source_path: str) -> str:
-    """Display name for a plugin path — ``pkg/`` for a directory plugin,
+    """Display name for a plugin path -- ``pkg/`` for a directory plugin,
     ``file.py`` for a single-file plugin. Kept in one place so the startup
     banner and the operator-facing status report always agree.
     """
@@ -393,7 +392,14 @@ class PluginManager:
                     continue
             extender = getattr(provider, "extend_target", None)
             if callable(extender):
-                extender(target)
+                # Plugin contract: a broken plugin's error is captured and reported, and the
+                # providers after it still extend the target.
+                try:
+                    extender(target)
+                except Exception as error:
+                    self._load_errors[f"{capability_name}:extend"] = (
+                        f"Plugin extension of {type(target).__name__} failed: {error}"
+                    )
             applied.add(capability_name)
             applied_providers.add(provider_identity)
         return target

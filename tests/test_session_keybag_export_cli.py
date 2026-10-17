@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import sys
@@ -16,6 +17,11 @@ from types import SimpleNamespace
 
 def _install_smartcard_stubs() -> None:
     if "smartcard" in sys.modules:
+        return
+    if importlib.util.find_spec("smartcard") is not None:
+        # pyscard is installed. The stub carries only the submodules this
+        # file needs, so leaving it in sys.modules would break every later
+        # test in the session that reaches smartcard.util.
         return
 
     smartcard_module = types.ModuleType("smartcard")
@@ -36,8 +42,10 @@ def _install_smartcard_stubs() -> None:
 _install_smartcard_stubs()
 
 
-from SCP03.interface.commands import CommandRegistry
-from SCP03.interface.shell import ShellDispatcher
+# The stubs installed above must be in sys.modules before the modules
+# under test import their smart-card dependencies.
+from SCP03.interface.commands import CommandRegistry  # noqa: E402
+from SCP03.interface.shell import ShellDispatcher  # noqa: E402
 
 
 _DUMMY_ENC = bytes.fromhex("0F0E0D0C0B0A09080706050403020100")
@@ -98,6 +106,7 @@ class _Scp03ShellExportKeybagTests(unittest.TestCase):
             _set_defaults=lambda *args, **kwargs: None,
             do_manage_binds=lambda *args, **kwargs: None,
             _toggle_debug=lambda *args, **kwargs: None,
+            _handle_trace=lambda *args, **kwargs: None,
             _handle_export_euicc=lambda *args, **kwargs: None,
             _handle_set_gold_profile=lambda *args, **kwargs: None,
             _handle_show_gold_profile=lambda *args, **kwargs: None,

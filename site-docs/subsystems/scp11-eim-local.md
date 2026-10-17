@@ -26,7 +26,6 @@ helpers on top of the local SCP11 stack.
 
 - `ADD-INITIAL-EIM`, `ADD-EIM`, `GET-EIM-CONFIG`, `DELETE-EIM`
 - `LOAD-EIM-PACKAGE` direct to ISD-R
-- localized relay runs through live or test relay orchestrators
 - hotfolder-driven package campaigns
 - counter and error-code inspection
 - response log capture, filtering, and clear-out
@@ -84,12 +83,12 @@ helpers on top of the local SCP11 stack.
 | `ISDR-DELETE-EIM` | direct-to-ISD-R variant of delete-eim |
 | `LOAD-EIM-PACKAGE` | load a generated eIM package onto the card |
 
+### IPAd discovery and handover
 
 | Command | Purpose |
 | --- | --- |
-| `IPAD-DISCOVER` | IPAd discovery via orchestrator |
-| `IPAD-LIVE` | localized IPAd run through live orchestrator |
-| `IPAD-TEST` | localized IPAd run through test orchestrator |
+| `IPAD-DISCOVER` | IPAd discovery against the card, with optional package selection |
+| `HANDOVER-SET` | seed the handover context by hand |
 | `HANDOVER-STATUS` | inspect the current handover state |
 
 ### Queues and campaigns

@@ -607,6 +607,7 @@
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 
@@ -788,7 +789,7 @@
   justify-content: center;
   min-width: 74px;
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1117,7 +1118,7 @@
 .cc-esim-action-tab-count {
   min-width: 18px;
   padding: 1px 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-hover);
   color: var(--fg-muted);
   font-size: 10px;

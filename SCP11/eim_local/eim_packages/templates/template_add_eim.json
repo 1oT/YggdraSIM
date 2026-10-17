@@ -5,7 +5,7 @@
   "sgp32": {
     "add_eim_request": {
       "include": true,
-      "eco_choice_tag_hex": "88",
+      "eco_choice_tag_hex": "A8",
       "eim_configuration_data_list": [
         {
           "include": true,

@@ -6,7 +6,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # Security Policy
 
 YggdraSIM is a **secure-element research and auditing toolkit**. The
-project owner — **1oT OÜ** — and the lead maintainer take security
+project owner -- **1oT OÜ** -- and the lead maintainer take security
 findings seriously, both in the toolkit itself and in the standards-
 adjacent surfaces it exercises (`SCP03`, `SCP11`, `SCP80`, `SIMCARD`,
 `Tools/HilBridge`, profile packaging, etc.).
@@ -17,10 +17,10 @@ Security fixes are accepted on the actively-maintained line:
 
 | Version line | Supported | Notes |
 | --- | --- | --- |
-| `2.0.x` (released `v2.0.0`) | Yes | Current release line, tracked on `release/2.0.x`. |
-| `1.0.x` (latest `v1.0.2`) | Yes | Security-maintenance line, tracked on `release/1.0.x`. |
+| `2.2.x` (released `v2.2.0`) | Yes | Current release line, tracked on `release/2.2.x`. |
+| `2.1.x` (latest `v2.1.0`) | Yes | Security-maintenance line, tracked on `release/2.1.x`. |
 | `main` | Yes | Active development; applicable fixes are back-ported to supported release lines. |
-| Any earlier RC tag (`Feb 2026 RCs`) | No | Superseded by `v1.0.0`. Re-base onto a supported line. |
+| `2.0.x`, `1.0.x` and any earlier RC tag | No | Superseded. Re-base onto a supported line. |
 
 ## How to report a vulnerability
 

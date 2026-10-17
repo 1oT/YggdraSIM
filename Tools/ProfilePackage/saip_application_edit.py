@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP ``PE-Application`` structured edit helpers.
 
-The PE-Application element (TCA SAIP §A.2 / GP Card Spec v2.3.1
-§11.5–11.6) carries an optional load-block descriptor and a list of
+The PE-Application element (TCA SAIP v3.4.1 §8.7 / GP Card Spec v2.3.1
+§11.5-11.6) carries an optional load-block descriptor and a list of
 SD-hosted applet instances. Operators routinely need to register new
 applet instances on an existing SSD, swap a load block for a newer
 applet revision, or drop a decommissioned instance. The generic
@@ -27,12 +26,18 @@ Decoded shape post ``build_decoded_document_from_sequence``::
       },
       "instanceList": [ApplicationInstance, ...]       # optional
     }
+
+An Application PE loads at most one package, and its instances install that
+package: "Multiple instances of the same ApplicationLoadPackage can be
+installed within one Application PE" (TCA SAIP v3.4.1 §8.7.1, page 59). The
+mutators keep every instance on that one package; a profile that already
+installs instances of several packages still opens, edits and round-trips.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Mapping
 
 
 _HEX_RE = re.compile(r"^[0-9A-Fa-f]+$")
@@ -86,8 +91,149 @@ def locate_application_sections(decoded_document: dict[str, Any]) -> list[tuple[
 
 
 # ----------------------------------------------------------------------
+# One load package per PE (TCA SAIP v3.4.1 §8.7.1)
+# ----------------------------------------------------------------------
+
+
+def _set_aid(value: Any) -> bytes | None:
+    """``value`` as an AID that names something; the all-zero filler AID does not."""
+    if isinstance(value, (bytes, bytearray)) and any(value):
+        return bytes(value)
+    return None
+
+
+def _instance_packages(application: Mapping[str, Any], *, skip: int | None = None) -> list[bytes]:
+    entries = application.get("instanceList")
+    if isinstance(entries, list) is False:
+        return []
+    out: list[bytes] = []
+    for index, entry in enumerate(entries):
+        if index == skip or isinstance(entry, dict) is False:
+            continue
+        aid = _set_aid(entry.get("applicationLoadPackageAID"))
+        if aid is not None:
+            out.append(aid)
+    return out
+
+
+def _load_package(application: Mapping[str, Any]) -> bytes | None:
+    load_block = application.get("loadBlock")
+    if isinstance(load_block, dict) is False:
+        return None
+    return _set_aid(load_block.get("loadPackageAID"))
+
+
+def own_package(application: Mapping[str, Any], *, skip: int | None = None) -> bytes | None:
+    """The package the PE's instances install, or None while nothing names one.
+
+    The load package when the PE loads one, else the package every instance
+    but ``skip`` installs.
+    """
+    loaded = _load_package(application)
+    if loaded is not None:
+        return loaded
+    packages = set(_instance_packages(application, skip=skip))
+    if len(packages) == 1:
+        return packages.pop()
+    return None
+
+
+def package_conflict(application: Mapping[str, Any]) -> str | None:
+    """Why the PE installs instances of more than one package, or None."""
+    packages = _instance_packages(application)
+    own = _load_package(application)
+    if own is None and len(packages) > 0:
+        own = packages[0]
+    foreign = sorted({aid for aid in packages if aid != own})
+    if len(foreign) == 0 or own is None:
+        return None
+    names = ", ".join(aid.hex().upper() for aid in foreign)
+    return (
+        f"an instance installs package {names}, not this PE's package "
+        f"{own.hex().upper()}: an Application PE installs instances of its one "
+        "load package (TCA SAIP v3.4.1 §8.7.1)."
+    )
+
+
+def _check_own_package(application: Mapping[str, Any], package: bytes, *, skip: int | None = None) -> None:
+    own = own_package(application, skip=skip)
+    if own is not None and package != own:
+        raise ValueError(
+            f"load package AID {package.hex().upper()} is not this PE's package "
+            f"{own.hex().upper()}: an Application PE installs instances of its one "
+            "load package (TCA SAIP v3.4.1 §8.7.1).",
+        )
+
+
+def _follow_package(application: dict[str, Any], old: bytes | None, new: bytes | None) -> int:
+    """Move the instances that installed ``old`` to ``new``; answers how many moved."""
+    if old is None or new is None or old == new:
+        return 0
+    moved = 0
+    for entry in application.get("instanceList") or []:
+        if isinstance(entry, dict) and _set_aid(entry.get("applicationLoadPackageAID")) == old:
+            entry["applicationLoadPackageAID"] = new
+            moved += 1
+    return moved
+
+
+def keep_one_package(before: Mapping[str, Any], after: dict[str, Any]) -> str:
+    """Hold ``after``, one member edit of ``before``, to the PE's one load package.
+
+    A load package AID the edit changed takes along the instances that
+    installed the old one, and an instance the edit added installs the PE's
+    package. An edit that leaves an instance on another package is refused,
+    unless ``before`` already installed several. Answers a note on what
+    followed, or "".
+    """
+    old = own_package(before)
+    new = _load_package(after)
+    notes: list[str] = []
+    moved = _follow_package(after, old, new)
+    if moved > 0 and new is not None:
+        notes.append(f"{moved} instance(s) now install package {new.hex().upper()}.")
+    own = new if new is not None else old
+    earlier = before.get("instanceList")
+    entries = after.get("instanceList")
+    if own is not None and isinstance(entries, list):
+        first_new = len(earlier) if isinstance(earlier, list) else 0
+        for entry in entries[first_new:]:
+            if isinstance(entry, dict) and _set_aid(entry.get("applicationLoadPackageAID")) is None:
+                entry["applicationLoadPackageAID"] = own
+                notes.append(f"The new instance installs package {own.hex().upper()}.")
+    conflict = package_conflict(after)
+    if conflict is not None and package_conflict(before) is None:
+        raise ValueError(conflict[0].upper() + conflict[1:])
+    return " ".join(notes)
+
+
+# ----------------------------------------------------------------------
 # Instance list mutators
 # ----------------------------------------------------------------------
+
+
+def _check_instance_identity(
+    *,
+    load_package_aid: bytes,
+    class_aid: bytes,
+    instance_aid: bytes,
+    privileges: bytes,
+    extradite_sd_aid: bytes,
+) -> None:
+    if not (5 <= len(load_package_aid) <= 16):
+        raise ValueError(f"load package AID must be 5..16 bytes; got {len(load_package_aid)}.")
+    if not (5 <= len(class_aid) <= 16):
+        raise ValueError(f"class AID must be 5..16 bytes; got {len(class_aid)}.")
+    if not (5 <= len(instance_aid) <= 16):
+        raise ValueError(f"instance AID must be 5..16 bytes; got {len(instance_aid)}.")
+    if len(privileges) == 0 or len(privileges) > 3:
+        raise ValueError(
+            f"privileges must be 1..3 bytes (GP §11.1.2); got {len(privileges)}.",
+        )
+    if len(extradite_sd_aid) > 0 and not (5 <= len(extradite_sd_aid) <= 16):
+        raise ValueError(
+            f"extradite SD AID must be 5..16 bytes; got {len(extradite_sd_aid)}.",
+        )
 
 
 def _build_instance(
@@ -102,16 +248,13 @@ def _build_instance(
     application_parameters: dict[str, bytes] | None,
     process_data: list[bytes],
 ) -> dict[str, Any]:
-    if not (5 <= len(load_package_aid) <= 16):
-        raise ValueError(f"load package AID must be 5..16 bytes; got {len(load_package_aid)}.")
-    if not (5 <= len(class_aid) <= 16):
-        raise ValueError(f"class AID must be 5..16 bytes; got {len(class_aid)}.")
-    if not (5 <= len(instance_aid) <= 16):
-        raise ValueError(f"instance AID must be 5..16 bytes; got {len(instance_aid)}.")
-    if len(privileges) == 0 or len(privileges) > 3:
-        raise ValueError(
-            f"privileges must be 1..3 bytes (GP §11.1.2); got {len(privileges)}.",
-        )
+    _check_instance_identity(
+        load_package_aid=load_package_aid,
+        class_aid=class_aid,
+        instance_aid=instance_aid,
+        privileges=privileges,
+        extradite_sd_aid=extradite_sd_aid,
+    )
     entry: dict[str, Any] = {
         "applicationLoadPackageAID": load_package_aid,
         "classAID": class_aid,
@@ -121,10 +264,6 @@ def _build_instance(
         "applicationSpecificParametersC9": application_specific_parameters,
     }
     if len(extradite_sd_aid) > 0:
-        if not (5 <= len(extradite_sd_aid) <= 16):
-            raise ValueError(
-                f"extradite SD AID must be 5..16 bytes; got {len(extradite_sd_aid)}.",
-            )
         entry["extraditeSecurityDomainAID"] = extradite_sd_aid
     if application_parameters is not None and len(application_parameters) > 0:
         entry["applicationParameters"] = application_parameters
@@ -152,9 +291,10 @@ def add_instance(
 
     The (instanceAID) is checked for uniqueness within the PE; the GP
     registry rejects duplicate AIDs at INSTALL [for install] time so we
-    refuse to author one here.
+    refuse to author one here. The instance installs the PE's own package.
     """
     load_package_aid = _hex_to_bytes(load_package_aid_hex, label="loadPackageAID")
+    _check_own_package(application, load_package_aid)
     class_aid = _hex_to_bytes(class_aid_hex, label="classAID")
     instance_aid = _hex_to_bytes(instance_aid_hex, label="instanceAID")
     privileges = _hex_to_bytes(privileges_hex, label="applicationPrivileges")
@@ -214,6 +354,78 @@ def add_instance(
     return f"added instance {instance_aid.hex().upper()}; instanceList size={len(instance_list)}."
 
 
+def update_instance(
+    application: dict[str, Any],
+    instance_aid_hex: str,
+    *,
+    load_package_aid_hex: str,
+    class_aid_hex: str,
+    new_instance_aid_hex: str,
+    privileges_hex: str,
+    lifecycle_state: int | str,
+    application_specific_parameters_hex: str,
+    extradite_sd_aid_hex: str,
+) -> str:
+    """Rewrite the INSTALL members of the instance ``instance_aid_hex`` names.
+
+    The instance keeps its place in ``instanceList`` and every member this
+    does not write (``systemSpecificParameters``, ``applicationParameters``,
+    ``processData``, ``controlReferenceTemplate``). An empty
+    ``new_instance_aid_hex`` keeps the AID; an empty extradite AID drops the
+    member, so the instance is associated to the MNO-SD (TCA SAIP v3.4.1
+    §8.7.3). A changed load package AID has to be the PE's own package.
+    """
+    target = _hex_to_bytes(instance_aid_hex, label="instanceAID")
+    instance_list = application.get("instanceList")
+    entries = instance_list if isinstance(instance_list, list) else []
+    position = next(
+        (
+            index for index, entry in enumerate(entries)
+            if isinstance(entry, dict) and entry.get("instanceAID") == target
+        ),
+        None,
+    )
+    if position is None:
+        raise LookupError(f"no instance with AID {target.hex().upper()} found.")
+    entry = entries[position]
+
+    load_package_aid = _hex_to_bytes(load_package_aid_hex, label="loadPackageAID")
+    class_aid = _hex_to_bytes(class_aid_hex, label="classAID")
+    instance_aid = _hex_to_bytes(new_instance_aid_hex, label="instanceAID") or target
+    privileges = _hex_to_bytes(privileges_hex, label="applicationPrivileges")
+    asp = _hex_to_bytes(application_specific_parameters_hex, label="applicationSpecificParametersC9")
+    extradite_sd_aid = _hex_to_bytes(extradite_sd_aid_hex, label="extraditeSecurityDomainAID")
+    lifecycle_int = _byte_or_default(lifecycle_state, 0x07)
+    _check_instance_identity(
+        load_package_aid=load_package_aid,
+        class_aid=class_aid,
+        instance_aid=instance_aid,
+        privileges=privileges,
+        extradite_sd_aid=extradite_sd_aid,
+    )
+    if load_package_aid != _set_aid(entry.get("applicationLoadPackageAID")):
+        _check_own_package(application, load_package_aid, skip=position)
+    for index, other in enumerate(entries):
+        if index != position and isinstance(other, dict) and other.get("instanceAID") == instance_aid:
+            raise ValueError(
+                f"instance AID {instance_aid.hex().upper()} already present in PE-Application.",
+            )
+
+    entry["applicationLoadPackageAID"] = load_package_aid
+    entry["classAID"] = class_aid
+    entry["instanceAID"] = instance_aid
+    entry["applicationPrivileges"] = privileges
+    entry["lifeCycleState"] = bytes([lifecycle_int])
+    entry["applicationSpecificParametersC9"] = asp
+    if len(extradite_sd_aid) > 0:
+        entry["extraditeSecurityDomainAID"] = extradite_sd_aid
+    else:
+        entry.pop("extraditeSecurityDomainAID", None)
+    if instance_aid != target:
+        return f"updated instance {instance_aid.hex().upper()} (was {target.hex().upper()})."
+    return f"updated instance {instance_aid.hex().upper()}."
+
+
 def remove_instance(application: dict[str, Any], instance_aid_hex: str) -> str:
     """Drop the ``ApplicationInstance`` with the given instance AID."""
     target = _hex_to_bytes(instance_aid_hex, label="instanceAID")
@@ -253,8 +465,10 @@ def set_load_block(
 
     The load-package AID and the load-block object are mandatory per
     GP Card Spec v2.3.1 §11.6. The four memory-limit fields and the
-    hash value are optional but routinely shipped.
+    hash value are optional but routinely shipped. The instances that
+    installed the PE's previous package install the new one.
     """
+    previous_package = own_package(application)
     load_package_aid = _hex_to_bytes(load_package_aid_hex, label="loadPackageAID")
     load_block_obj = _hex_to_bytes(load_block_object_hex, label="loadBlockObject")
     if not (5 <= len(load_package_aid) <= 16):
@@ -289,8 +503,12 @@ def set_load_block(
         load_block["hashValue"] = hv
 
     application["loadBlock"] = load_block
-    return f"loadBlock set; load package AID={load_package_aid.hex().upper()}, " \
-           f"loadBlockObject={len(load_block_obj)} bytes."
+    message = f"loadBlock set; load package AID={load_package_aid.hex().upper()}, " \
+              f"loadBlockObject={len(load_block_obj)} bytes."
+    moved = _follow_package(application, previous_package, load_package_aid)
+    if moved > 0:
+        message += f" {moved} instance(s) now install it."
+    return message
 
 
 def remove_load_block(application: dict[str, Any]) -> str:
@@ -334,7 +552,7 @@ def application_summary(application: dict[str, Any]) -> dict[str, Any]:
     instances_in = application.get("instanceList") or []
     instances_out: list[dict[str, Any]] = []
     if isinstance(instances_in, list):
-        for entry in instances_in:
+        for index, entry in enumerate(instances_in):
             if isinstance(entry, dict) is False:
                 continue
             lcs_raw = entry.get("lifeCycleState")
@@ -344,8 +562,14 @@ def application_summary(application: dict[str, Any]) -> dict[str, Any]:
                 else 0x07
             )
             app_params = entry.get("applicationParameters") or {}
+            process_data = entry.get("processData")
             instances_out.append(
                 {
+                    "index": index,
+                    "own_package_hex": _hex_or_empty(own_package(application, skip=index)),
+                    "process_data_hex_list": [
+                        _hex_or_empty(chunk) for chunk in process_data
+                    ] if isinstance(process_data, list) else [],
                     "load_package_aid_hex": _hex_or_empty(entry.get("applicationLoadPackageAID")),
                     "class_aid_hex": _hex_or_empty(entry.get("classAID")),
                     "instance_aid_hex": _hex_or_empty(entry.get("instanceAID")),
@@ -367,14 +591,22 @@ def application_summary(application: dict[str, Any]) -> dict[str, Any]:
                 }
             )
 
-    return {"load_block": load_block_summary, "instances": instances_out}
+    return {
+        "load_block": load_block_summary,
+        "instances": instances_out,
+        "own_package_hex": _hex_or_empty(own_package(application)),
+    }
 
 
 __all__ = [
     "add_instance",
     "application_summary",
+    "keep_one_package",
     "locate_application_sections",
+    "own_package",
+    "package_conflict",
     "remove_instance",
     "remove_load_block",
     "set_load_block",
+    "update_instance",
 ]

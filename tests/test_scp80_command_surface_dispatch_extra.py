@@ -2,6 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 import contextlib
+import importlib.util
 import io
 import sys
 import types
@@ -14,6 +15,11 @@ from yggdrasim_common.quit_control import QuitAllRequested
 
 def _install_smartcard_stubs() -> None:
     if "smartcard" in sys.modules:
+        return
+    if importlib.util.find_spec("smartcard") is not None:
+        # pyscard is installed. The stub carries only the submodules this
+        # file needs, so leaving it in sys.modules would break every later
+        # test in the session that reaches smartcard.util.
         return
 
     smartcard_module = types.ModuleType("smartcard")
@@ -50,7 +56,9 @@ def _install_smartcard_stubs() -> None:
 
 _install_smartcard_stubs()
 
-from SCP80.cli import OtaShell
+# The stubs installed above must be in sys.modules before the modules
+# under test import their smart-card dependencies.
+from SCP80.cli import OtaShell  # noqa: E402
 
 
 class _DummyConfig:

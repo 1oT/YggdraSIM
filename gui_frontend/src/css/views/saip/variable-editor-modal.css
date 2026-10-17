@@ -3,7 +3,9 @@
  * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
  */
 
-/* ---- SA-G1: variable editor modal ---------------------------------- */
+/* ---- SAIP modal host: action palette, form dialogs, add file --------- */
+/* The token editor is not one of these any more; it docks beside the
+   main column (views/saip/token-editor.css). */
 
 .saip-modal-host {
   position: fixed;
@@ -20,11 +22,14 @@
   pointer-events: auto;
 }
 
+/* No `backdrop-filter`: the desktop shell renders without GPU compositing,
+ * where a window-sized blur under the card is recomputed on the CPU for every
+ * caret blink, hover and scroll inside it (the Add PE dialog dropped to about
+ * 12 frames a second while typing). The scrim alone separates the card. */
 .saip-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: var(--scrim);
 }
 
 .saip-modal-card {
@@ -32,8 +37,8 @@
   z-index: 1;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
   width: min(720px, 92vw);
   max-height: 82vh;
   display: flex;
@@ -55,12 +60,6 @@
   font-size: 14px;
   font-weight: 600;
   color: var(--fg);
-}
-
-.saip-modal-sub {
-  font-size: 11px;
-  color: var(--fg-muted);
-  font-family: var(--mono);
 }
 
 .saip-modal-close {
@@ -105,8 +104,10 @@
 
 /* Generic ribbon form modal (Batch generate, Import PE, Export PE,
  * Batch lint, ARR sync). Stacked rows with label-on-top so picker
- * buttons sit beside the path field at any width. */
-.saip-form-row {
+ * buttons sit beside the path field at any width. Scoped to the modal
+ * host: the applications tab defines the same class as a two-column
+ * grid and loads later in the bundle. */
+.saip-form-modal-host .saip-form-row {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -130,7 +131,7 @@
 }
 
 .saip-form-text,
-.saip-form-select {
+.saip-form-modal-host .saip-form-select {
   flex: 1 1 auto;
   min-width: 0;
   background: var(--surface-alt);
@@ -143,7 +144,7 @@
 }
 
 .saip-form-text:focus,
-.saip-form-select:focus {
+.saip-form-modal-host .saip-form-select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
@@ -152,6 +153,14 @@
 .saip-form-text--invalid {
   border-color: var(--danger);
   background: var(--fail-soft);
+}
+
+/* A value the form shows and keeps (a PE-Application instance's package). */
+.saip-form-text[readonly] {
+  background: transparent;
+  border-style: dashed;
+  color: var(--fg-muted);
+  cursor: default;
 }
 
 .saip-form-hint {
@@ -205,10 +214,14 @@
   cursor: pointer;
 }
 
-.saip-action-palette-row:hover:not([disabled]),
+.saip-action-palette-row:hover:not([disabled]) {
+  border-color: var(--accent);
+}
+
 .saip-action-palette-row:focus-visible {
   border-color: var(--accent);
   outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring-soft);
 }
 
 .saip-action-palette-row[disabled] {

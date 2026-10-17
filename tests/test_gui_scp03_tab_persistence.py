@@ -14,7 +14,7 @@ we persist each tab's state under ``ygg.scp03.tab.<readerName>`` in
 Two tied-in fixes live next door and are pinned here as well:
 
 * ``scp03OpenSessionForTab`` must NOT early-return on an empty
-  ``pendingReader`` — the welcome panel's "Open default reader"
+  ``pendingReader`` -- the welcome panel's "Open default reader"
   button needs to dispatch ``scp03.scan`` with ``reader=""``.
 * ``readerBarActivate`` auto-opens the session for yellow pills
   (card present, no live session, no persisted cache) so pill
@@ -22,7 +22,7 @@ Two tied-in fixes live next door and are pinned here as well:
   through the welcome panel.
 
 All tests here are static-bundle contracts against ``app.js`` /
-``app.css`` — the persistence layer is pure frontend JavaScript
+``app.css`` -- the persistence layer is pure frontend JavaScript
 (no backend surface), so we pin the symbols + wiring rather than
 round-tripping through a live browser. Playwright covers the
 end-to-end UX separately.
@@ -78,7 +78,7 @@ def test_persist_tab_reads_expected_fields() -> None:
     start = js.index("function scp03PersistTab(")
     end = js.index("function scp03LoadPersisted(")
     body = js[start:end]
-    # Fields we commit to persisting — if any get renamed, hydration
+    # Fields we commit to persisting -- if any get renamed, hydration
     # needs to follow.
     for field in [
         "readerName",
@@ -96,7 +96,7 @@ def test_persist_tab_reads_expected_fields() -> None:
         assert field + ":" in body or "tab." + field in body, (
             f"scp03PersistTab is missing {field!r}"
         )
-    # Must NOT persist sessionId / status / pendingReader — those
+    # Must NOT persist sessionId / status / pendingReader -- those
     # are ephemeral and re-deriving them on load is safer than
     # trusting stale values.
     assert "sessionId:" not in body, "sessionId must not be persisted"
@@ -116,7 +116,7 @@ def test_persist_tab_caps_fcp_cache() -> None:
 
 
 def test_persist_tab_is_quota_safe() -> None:
-    """localStorage.setItem must be wrapped in a try/catch — quota errors
+    """localStorage.setItem must be wrapped in a try/catch -- quota errors
     and private-mode writes must not surface to the user."""
     js = _read("app.js")
     start = js.index("function scp03PersistTab(")
@@ -128,7 +128,7 @@ def test_persist_tab_is_quota_safe() -> None:
 
 
 def test_hydrate_clears_ephemeral_fields() -> None:
-    """Hydration must NOT restore sessionId / status / error — those are
+    """Hydration must NOT restore sessionId / status / error -- those are
     backend-owned and go stale across reloads."""
     js = _read("app.js")
     start = js.index("function scp03HydrateTabFromPersisted(")
@@ -140,7 +140,7 @@ def test_hydrate_clears_ephemeral_fields() -> None:
 
 
 def test_has_persisted_state_requires_tree() -> None:
-    """``scp03HasPersistedState`` must gate on scanData.tree — an empty
+    """``scp03HasPersistedState`` must gate on scanData.tree -- an empty
     tree is useless to the welcome panel."""
     js = _read("app.js")
     start = js.index("function scp03HasPersistedState(")
@@ -225,7 +225,7 @@ def test_rescan_persists_fresh_tree() -> None:
 
 
 def test_close_tab_purges_persistence() -> None:
-    """Closing a tab is the explicit 'forget this reader' gesture —
+    """Closing a tab is the explicit 'forget this reader' gesture --
     localStorage must be wiped so the next pill click starts fresh."""
     js = _read("app.js")
     start = js.index("async function scp03CloseTab(tabId")
@@ -239,11 +239,14 @@ def test_ribbon_tab_switch_persists() -> None:
     """Switching ribbon tabs (Home / Files / APDU / Admin) must persist
     so a reload restores the last-used tab."""
     js = _read("app.js")
-    # The ribbon tab click handler lives inside scp03BuildRibbon; we
-    # pin the specific tab.activeRibbonTab assignment + persist chain.
+    # The ribbon tab click handler lives inside scp03BuildRibbon. Bound
+    # the search by the end of that handler -- the loop that binds it --
+    # rather than by a character count, which the collapse branch grew
+    # past while the persist call stayed where it was.
     assert "tab.activeRibbonTab = ribTab.id" in js
-    tail = js[js.index("tab.activeRibbonTab = ribTab.id"):]
-    assert "scp03PersistTab(tab)" in tail[:400], (
+    remainder = js[js.index("tab.activeRibbonTab = ribTab.id"):]
+    body = remainder[: remainder.index("ribbonTabs.forEach(")]
+    assert "scp03PersistTab(tab)" in body, (
         "ribbon switch must trigger persistence"
     )
 
@@ -283,40 +286,46 @@ def test_open_session_persists_on_success() -> None:
     assert "scp03PersistTab(tab)" in body
 
 
-def test_reader_bar_activate_auto_opens_yellow_pill() -> None:
-    """Clicking a card-present reader with no SCP03 session must auto-open
-    the scan even though SCP03 is now a reader-scoped module."""
+def test_reader_bar_activate_never_scans_the_card() -> None:
+    """A reader picked from the top bar binds the reader and nothing more.
+
+    The pill used to auto-open a filesystem scan for a card-present reader
+    and to route the Overview to SCP03 so that scan had a surface; a reader
+    picked from any other module (a plugin console, the HIL bridge) then read
+    the card's file system unasked. A scan starts only from the Filesystem
+    leaf's own panel, by a click.
+    """
     js = _read("app.js")
     start = js.index("function readerBarActivate(")
     remainder = js[start:]
     next_fn = remainder.index("\n  function ")
     body = remainder[:next_fn]
-    assert 'commandState.activeSubsystem === "SCP03"' in body
-    assert "readerBarProbeHasCard(readerName)" in body
-    assert "!readerBarHasScp03Session(readerName)" in body
-    assert 'document.querySelector(".cc-wb-tabs.scp03-topbar")' in body
-    assert 'document.querySelector(".cc-wb-body")' in body
-    assert "scp03OpenSessionForTab(tab, tabBar, tabBody)" in body
+    assert "scp03OpenSessionForTab(" not in body
+    assert "readerBarProbeHasCard(readerName)" not in body
+    assert 'openCommandSubsystem("SCP03")' not in body
+    # The plugin consoles' reader fields follow the pill instead.
+    assert "pcFollowReaderPill(prevReader, readerName)" in body
 
 
-def test_reader_bar_activate_respects_persisted_state() -> None:
-    """A hydrated tab (persisted scanData, no live sessionId) must NOT
-    auto-open — the operator should see the Resume button and click it
-    deliberately so a stale tree is never silently trusted."""
+def test_scans_start_from_the_filesystem_panel_only() -> None:
+    """Every scan trigger is a click on the SCP03 surface: the welcome panel's
+    Open / Resume button, the reader switch confirmed on a bound tab, and the
+    rescan button. None runs on render or on a pill click."""
     js = _read("app.js")
-    start = js.index("function readerBarActivate(")
-    remainder = js[start:]
-    next_fn = remainder.index("\n  function ")
-    body = remainder[:next_fn]
-    assert "scp03HasPersistedState(tab)" in body
-    # The guard clauses bail before scp03OpenSessionForTab fires:
-    assert "if (tab.sessionId) return" in body
-    assert 'if (tab.status === "scanning") return' in body
+    calls = [
+        match.start()
+        for match in re.finditer(r"scp03OpenSessionForTab\(tab, tabBar, tabBody\)", js)
+        if not js[: match.start()].endswith("function ")
+    ]
+    assert len(calls) == 3, len(calls)
+    for at in calls:
+        before = js[max(0, at - 1600) : at]
+        assert 'addEventListener("click"' in before or "window.confirm(" in before, js[at - 200 : at]
 
 
 def test_open_session_notifies_reader_bar() -> None:
     """After a scan finishes, the reader bar must repaint so the green
-    dot lights up on the correct pill immediately — not on the next 5 s
+    dot lights up on the correct pill immediately -- not on the next 5 s
     poll tick."""
     js = _read("app.js")
     start = js.index("async function scp03OpenSessionForTab(")
@@ -365,7 +374,7 @@ def test_scan_failure_logs_to_bus() -> None:
 def test_empty_tab_tracks_persisted_timestamp() -> None:
     """Hydrated tabs need a ``persistedAt`` field so the welcome panel
     can show 'saved 15s ago'. This must be wired in hydration, and the
-    field is implicitly declared (JS is forgiving) — but the consumer
+    field is implicitly declared (JS is forgiving) -- but the consumer
     path in ``scp03BuildWelcomePanel`` must read it."""
     js = _read("app.js")
     assert "tab.persistedAt" in js, (

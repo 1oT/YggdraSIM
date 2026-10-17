@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for pure static helpers in ``SCP03.logic.fs.FileSystemController``.
 
 Covers: _classify_tree_node_kind, _is_hex_identifier, _build_select_command,
 _is_successful_select_response, _normalize_registry_path_tokens,
 _parse_fid_registry_line.
-All methods under test are @staticmethod or @classmethod — no transport
+All methods under test are @staticmethod or @classmethod -- no transport
 object is required.
 """
 
@@ -19,7 +18,7 @@ from SCP03.logic.fs import FileSystemController
 
 
 class ClassifyTreeNodeKindTests(unittest.TestCase):
-    """ETSI TS 102 221 §8.2–§8.3 node-kind classification."""
+    """ETSI TS 102 221 §8.2-§8.3 node-kind classification."""
 
     def test_mf(self) -> None:
         self.assertEqual(FileSystemController._classify_tree_node_kind("MF"), "mf")
@@ -91,9 +90,16 @@ class BuildSelectCommandTests(unittest.TestCase):
 
     def test_long_aid_uses_select_by_name(self) -> None:
         cmd = FileSystemController._build_select_command("A0000000871002")
-        # CLA=00 INS=A4 P1=04 P2=00 Lc=07 AID
+        # CLA=00 INS=A4 P1=04 P2=04 Lc=07 AID: TS 102 221 v18.4 table 11.2
+        # codes "return FCP template" as P2 '04'.
         self.assertIn("A0000000871002", cmd.upper())
-        self.assertTrue(cmd.upper().startswith("00A40400"))
+        self.assertTrue(cmd.upper().startswith("00A40404"))
+
+    def test_long_aid_takes_the_globalplatform_p2_on_request(self) -> None:
+        # GlobalPlatform Card Specification v2.3.1 table 11-81 codes the
+        # first-or-only-occurrence selection as P2 '00'.
+        cmd = FileSystemController._build_select_command("A000000151000000", p2="00")
+        self.assertEqual(cmd.upper(), "00A4040008A000000151000000")
 
     def test_lc_byte_matches_aid_length(self) -> None:
         aid = "A000000151000000"  # 8 bytes

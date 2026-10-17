@@ -58,7 +58,7 @@ first real card state is written.
     Save it. The `gpg.binary` and `gpg.timeout_seconds` keys are
     optional; they default to `"gpg"` on `PATH` and `120` seconds
     respectively. Raise the timeout if your deployment uses a smart
-    card–backed key that needs a physical touch or a slow
+    card-backed key that needs a physical touch or a slow
     `pinentry`.
 
 3. Trigger a write-path operation so stored payloads get enveloped.

@@ -48,10 +48,11 @@
 
 .theme-picker select:focus-visible {
   outline: none;
-  box-shadow: none;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
-/* Match the popup to the page theme — the old rule hard-coded a light
+/* Match the popup to the page theme -- the old rule hard-coded a light
    palette which looked broken on every dark theme (white-on-dark
    trigger + black-on-white popup). Now options track the active theme
    via ``--bg-elev`` / ``--fg``. */

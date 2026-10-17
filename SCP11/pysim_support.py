@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 pySim support: thin wrappers over pySim SAIP codec and OTA keyset for profile decoding and BPP signing."""
 import os
 from typing import Any, List, Optional
 
 from cryptography import x509 as crypto_x509
+
+from yggdrasim_common.process_debug import suppress_noisy_crypto_warnings
 
 try:
     from .pysim_path import ensure_repo_pysim_on_path
@@ -25,12 +26,25 @@ except Exception:
     pysim_x509 = None
 
 
+try:
+    from .rsp_v3_schema import compile_rsp_specification
+except ImportError:
+    from rsp_v3_schema import compile_rsp_specification
+
+
 _PY_SIM_RSP_ASN1 = None
 if compile_asn1_subdir is not None:
+    # The supplemented compile declares the SGP.22 v3.1 StoreMetadataRequest
+    # members upstream omits. Falling back to pySim's own compile keeps a
+    # schema the supplement cannot parse from costing the v2 surface as well;
+    # ``rsp_type_members`` reports which one the caller ended up with.
     try:
-        _PY_SIM_RSP_ASN1 = compile_asn1_subdir("rsp")
+        _PY_SIM_RSP_ASN1 = compile_rsp_specification()
     except Exception:
-        _PY_SIM_RSP_ASN1 = None
+        try:
+            _PY_SIM_RSP_ASN1 = compile_asn1_subdir("rsp")
+        except Exception:
+            _PY_SIM_RSP_ASN1 = None
 
 
 def pysim_available() -> bool:
@@ -50,6 +64,27 @@ def pysim_rsp_asn1() -> Optional[Any]:
     return _PY_SIM_RSP_ASN1
 
 
+def rsp_type_members(type_name: str) -> frozenset:
+    """Return the member names the compiled schema defines for a SEQUENCE type.
+
+    Empty when the codec is unavailable or the type is not a SEQUENCE, so a
+    caller cannot tell those apart from a type with no members and must treat
+    an empty result as "unknown" rather than "none defined".
+    """
+    asn1 = pysim_rsp_asn1()
+    if asn1 is None:
+        return frozenset()
+    try:
+        members = asn1.types[str(type_name)].type.root_members
+    except (AttributeError, KeyError, TypeError):
+        return frozenset()
+    return frozenset(
+        name
+        for name in (getattr(member, "name", None) for member in members)
+        if name is not None
+    )
+
+
 def encode_rsp_type(type_name: str, payload: Any) -> bytes:
     asn1 = pysim_rsp_asn1()
     if asn1 is None:
@@ -61,7 +96,18 @@ def decode_rsp_type(type_name: str, payload: bytes) -> Any:
     asn1 = pysim_rsp_asn1()
     if asn1 is None:
         return None
-    return asn1.decode(str(type_name), bytes(payload))
+    # The codec is an asn1tools compiler object, so the package imports
+    # whenever pySim resolved one.
+    import asn1tools
+
+    try:
+        return asn1.decode(str(type_name), bytes(payload))
+    except asn1tools.DecodeError as exc:
+        # These payloads come off a card or an SM-DP+, so one that does
+        # not decode is an expected condition rather than a codec fault.
+        # Rejecting with ValueError keeps asn1tools out of the except
+        # clause of every caller.
+        raise ValueError(f"Malformed {type_name}: {exc}") from exc
 
 
 def unwrap_tlv_octet_string(value: bytes, tag_bytes: bytes) -> bytes:
@@ -285,10 +331,11 @@ def _load_pem_certificates(bundle_path: str) -> List[crypto_x509.Certificate]:
     certificates = []
     marker = b"-----END CERTIFICATE-----"
     segments = bundle_data.split(marker)
-    for segment in segments:
-        cleaned = segment.strip()
-        if len(cleaned) == 0:
-            continue
-        pem_bytes = cleaned + b"\n" + marker + b"\n"
-        certificates.append(crypto_x509.load_pem_x509_certificate(pem_bytes))
+    with suppress_noisy_crypto_warnings():
+        for segment in segments:
+            cleaned = segment.strip()
+            if len(cleaned) == 0:
+                continue
+            pem_bytes = cleaned + b"\n" + marker + b"\n"
+            certificates.append(crypto_x509.load_pem_x509_certificate(pem_bytes))
     return certificates

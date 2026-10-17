@@ -5,13 +5,14 @@
 
 Round-12 closes the following:
 
-* 3GPP TS 31.103 §7.1 IMS AKA (``AUTHENTICATE`` P2=0x82). The ISIM
-  context routes through the same Milenage chain as UMTS AKA
-  (P2=0x81); the test confirms both paths return identical RES /
-  CK / IK material for a given (RAND, AUTN).
-* 3GPP TS 31.103 §4.2.2 / §4.2.4 / §4.2.5 ISIM EFs ``EF.IMPU``,
-  ``EF.DOMAIN`` and ``EF.AD`` are seeded under ADF.ISIM with
-  spec-compliant TLV encodings.
+* AUTHENTICATE contexts per selected application: TS 31.102 v19.5
+  Table 7.1.2-1 for the USIM, TS 31.103 v19 §7.1.2 for the ISIM.
+  IMS AKA is P2 '81' under the ISIM and answers RES, CK and IK
+  without Kc (§7.1.2.1); P2 '82' (VGCS/VBS, HTTP Digest) answers
+  '98 64'.
+* 3GPP TS 31.103 §4.2.2 / §4.2.4 / §4.2.5 ISIM EFs ``EF.IMPI``,
+  ``EF.IMPU``, ``EF.DOMAIN`` and ``EF.AD`` are seeded under ADF.ISIM
+  with their TLV encodings.
 * ETSI TS 102 223 §7.4 call-lifecycle event downloads:
   ``MT Call`` (0x00), ``Call Connected`` (0x01),
   ``Call Disconnected`` (0x02). Each latches its transaction id
@@ -33,10 +34,13 @@ from pathlib import Path
 
 os.environ.setdefault("YGGDRASIM_ALLOW_QUIRKS", "1")
 
+from SIMCARD.auth import build_milenage_autn, milenage_vectors
 from SIMCARD.engine import SimulatedSimCardEngine
-from SIMCARD.state import SimCardState
+from SIMCARD.etsi_fs import ISIM_AID, USIM_AID
+from SIMCARD.saip_profile import _finalize_image
+from SIMCARD.state import SimCardState, SimProfileFsNode, SimProfileImage
 from SIMCARD.toolkit import ToolkitLogic
-from SIMCARD.utils import tlv
+from SIMCARD.utils import decode_impi_ef, encode_impi_ef, tlv
 
 
 def _envelope(root_tag: bytes, *body: bytes) -> bytes:
@@ -82,24 +86,128 @@ class _EngineHarness(unittest.TestCase):
         self._td.cleanup()
 
 
-class IsimAuthenticateP2Tests(_EngineHarness):
-    """3GPP TS 31.103 §7.1 IMS AKA (``AUTHENTICATE`` P2=0x82)."""
+class AuthenticateContextTests(_EngineHarness):
+    """AUTHENTICATE P2 contexts (TS 31.102 v19.5 Table 7.1.2-1, TS 31.103 v19 §7.1.2)."""
 
-    def test_p2_82_reuses_usim_authentication_chain(self) -> None:
-        rand = bytes.fromhex("00112233445566778899AABBCCDDEEFF")
-        autn = bytes.fromhex("0F0E0D0C0B0A09080706050403020100")
-        body = (
-            bytes((len(rand),)) + rand + bytes((len(autn),)) + autn
-        )
+    K = bytes.fromhex("465B5CE8B199B49FAA5F0A2EE238A6BC")
+    OPC = bytes.fromhex("CD63CB71954A9F4E48A5994E37A02BAF")
+    RAND = bytes.fromhex("23553CBE9637A89D218AE64DAE47BF35")
+    AMF = bytes.fromhex("B9B9")
 
-        usim_data, usim_sw1, usim_sw2 = self.engine.auth.internal_authenticate(0x81, body)
-        ims_data, ims_sw1, ims_sw2 = self.engine.auth.internal_authenticate(0x82, body)
-        self.assertEqual((usim_sw1, usim_sw2), (ims_sw1, ims_sw2))
-        self.assertEqual(usim_data, ims_data)
+    def setUp(self) -> None:
+        super().setUp()
+        config = self.engine.state.profiles[0].auth_config
+        self.assertIsNotNone(config)
+        config.ki = self.K
+        config.opc = self.OPC
+        config.amf = self.AMF
+        config.sqn = b"\x00" * 6
+
+    def _select(self, aid_hex: str) -> None:
+        aid_bytes = bytes.fromhex(aid_hex)
+        _data, sw1, sw2 = self.engine.transmit(bytes([0x00, 0xA4, 0x04, 0x04, len(aid_bytes)]) + aid_bytes)
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+
+    def _authenticate(self, p2: int, body: bytes) -> tuple[bytes, int, int]:
+        return self.engine.transmit(bytes([0x00, 0x88, 0x00, p2, len(body)]) + body)
+
+    def _aka_body(self, sqn: bytes) -> bytes:
+        autn = build_milenage_autn(self.K, self.OPC, self.RAND, sqn, self.AMF)
+        return b"\x10" + self.RAND + b"\x10" + autn
+
+    def test_isim_ims_aka_answer_stops_at_ik(self) -> None:
+        self._select(ISIM_AID)
+        sqn = bytes.fromhex("000000000010")
+        data, sw1, sw2 = self._authenticate(0x81, self._aka_body(sqn))
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        vectors = milenage_vectors(self.K, self.OPC, self.RAND, sqn, self.AMF)
+        self.assertEqual(data, b"\xDB\x08" + vectors.res + b"\x10" + vectors.ck + b"\x10" + vectors.ik)
+
+    def test_usim_3g_answer_ends_with_kc(self) -> None:
+        self._select(USIM_AID)
+        sqn = bytes.fromhex("000000000010")
+        data, sw1, sw2 = self._authenticate(0x81, self._aka_body(sqn))
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        vectors = milenage_vectors(self.K, self.OPC, self.RAND, sqn, self.AMF)
+        self.assertEqual(data[-9:], b"\x08" + vectors.kc)
+        self.assertEqual(len(data), 53)
+
+    def test_p2_82_is_an_unsupported_context_on_both_applications(self) -> None:
+        # VGCS/VBS on the USIM, HTTP Digest on the ISIM: '98 64' (TS 31.102 v19.5 §7.3.1).
+        for aid in (USIM_AID, ISIM_AID):
+            with self.subTest(aid=aid):
+                self._select(aid)
+                _data, sw1, sw2 = self._authenticate(0x82, self._aka_body(bytes.fromhex("000000000020")))
+                self.assertEqual((sw1, sw2), (0x98, 0x64))
+
+    def test_isim_gsm_context_is_reserved(self) -> None:
+        self._select(ISIM_AID)
+        _data, sw1, sw2 = self._authenticate(0x80, b"\x10" + self.RAND)
+        self.assertEqual((sw1, sw2), (0x6A, 0x86))
+
+    def test_odd_ins_contexts_are_rfu_with_ins_88(self) -> None:
+        # MBMS '85' and Local Key Establishment '86' belong to INS '89'.
+        self._select(USIM_AID)
+        for p2 in (0x85, 0x86):
+            with self.subTest(p2=p2):
+                _data, sw1, sw2 = self._authenticate(p2, self._aka_body(bytes.fromhex("000000000030")))
+                self.assertEqual((sw1, sw2), (0x6A, 0x86))
 
     def test_unknown_p2_still_rejected(self) -> None:
         _data, sw1, sw2 = self.engine.auth.internal_authenticate(0x77, b"")
         self.assertEqual((sw1, sw2), (0x6A, 0x86))
+
+
+class IsimImpiEncodingTests(_EngineHarness):
+    """EF.IMPI holds the NAI as a tag-'80' TLV (TS 31.103 v19 §4.2.2)."""
+
+    def test_default_ef_impi_is_a_nai_tlv(self) -> None:
+        node = next(
+            node
+            for node in self.engine.state.nodes.values()
+            if node.kind == "ef" and node.fid.upper() == "6F02" and "ISIM" in str(node.node_id).upper()
+        )
+        body = bytes(node.data)
+        self.assertEqual(body[0], 0x80)
+        self.assertEqual(body[1], len(body) - 2)
+        self.assertIn(b"@", body[2:])
+
+    def test_codec_round_trip(self) -> None:
+        self.assertEqual(encode_impi_ef("user@example.test"), b"\x80\x11user@example.test")
+        self.assertEqual(decode_impi_ef(b"\x80\x11user@example.test" + b"\xFF" * 4), "user@example.test")
+
+    def test_decode_boundaries(self) -> None:
+        for body in (b"", b"\x80", b"\x80\x05ab", b"\x81\x01a", b"\x80\x02\xC3\x28"):
+            with self.subTest(body=body.hex()):
+                with self.assertRaises(ValueError):
+                    decode_impi_ef(body)
+
+    def test_profile_image_reads_tlv_and_legacy_bare_nai(self) -> None:
+        for body in (encode_impi_ef("tlv@example.test"), b"tlv@example.test"):
+            with self.subTest(body=body.hex()):
+                image = SimProfileImage(
+                    nodes=[
+                        SimProfileFsNode(path=("MF",), name="MF", kind="mf", fid="3F00"),
+                        SimProfileFsNode(path=("MF", "ADF.ISIM"), name="ADF.ISIM", kind="adf", fid="7FF2"),
+                        SimProfileFsNode(
+                            path=("MF", "ADF.ISIM", "EF.IMPI"),
+                            name="EF.IMPI",
+                            kind="ef",
+                            fid="6F02",
+                            structure="transparent",
+                            data=body,
+                        ),
+                    ],
+                )
+                finalized = _finalize_image(image)
+                self.assertIsNotNone(finalized)
+                self.assertEqual(finalized.impi, "tlv@example.test")
+
+    def test_profile_image_without_ef_impi_gets_a_tlv(self) -> None:
+        finalized = _finalize_image(SimProfileImage(impi="made@example.test"))
+        self.assertIsNotNone(finalized)
+        node = next(node for node in finalized.nodes if node.path == ("MF", "ADF.ISIM", "EF.IMPI"))
+        self.assertEqual(node.data, encode_impi_ef("made@example.test"))
 
 
 class IsimFilesystemTests(_EngineHarness):

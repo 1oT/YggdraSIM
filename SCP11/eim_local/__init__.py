@@ -32,7 +32,10 @@ def __getattr__(name):
 
         return ensure_handover_transaction
     if name in ("load_eim_package_document", "lint_eim_package_document"):
-        from .eim_package_codec import lint_eim_package_document, load_eim_package_document
+        from .eim_package_codec import (
+            lint_eim_package_document,
+            load_eim_package_document,
+        )
 
         mapping = {
             "load_eim_package_document": load_eim_package_document,

@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 from __future__ import annotations
 
 import pytest
 
 from SCP11.local_access.session import LocalIsdrSession
-from SCP11.orchestrator import SGP22Orchestrator
+from SCP11.live.orchestrator import SGP22Orchestrator
 from SIMCARD.sgp import SgpLogic
 
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-  // -- Command Center (R2-004 Phase C) -------------------------------------
+  // -- Command Center ------------------------------------------------------
 
   var commandState = {
     catalogue: null,
@@ -11,7 +11,7 @@
       tabs: [],
       activeTabId: null,
       tabSeq: 1,
-      // Scope ("all" | "filesystem" | "applications") — the left-nav
+      // Scope ("all" | "filesystem" | "applications") -- the left-nav
       // leaf the operator entered from. Filters the ribbon tabs and
       // hides the FS tree in Applications mode so the cognitive load
       // stays proportional to the task. Set by ``renderScp03Workbench``
@@ -33,12 +33,15 @@
       // SA-G1: ribbon + top-tab shell. The ribbon is the always-visible
       // command bar that is grouped around Profile Package /
       // Profile Element / File System / Variables / Validation / Help
-      // groups (re-themed for our palette). The variable editor moved
-      // out of the left pane into a modal launched from the ribbon, so
-      // the per-pkg ``activeTopTab`` only ever toggles between the
-      // three structural surfaces of the package itself.
-      variableModalOpen: false,
-      variableModalPackageId: null,
+      // groups (re-themed for our palette). The token editor moved
+      // out of the left pane into a dock at the right edge of the
+      // workbench (the ribbon button or Ctrl+E opens it), so the
+      // per-pkg ``activeTopTab`` only ever toggles between the three
+      // structural surfaces of the package itself.
+      tokenDockOpen: false,
+      tokenDockPackageId: null,
+      tokenDockFocusPending: false,
+      tokenDockReturnFocus: null,
     },
     hilWorkbench: {
       activeTab: "dissector",
@@ -70,6 +73,11 @@
       startInFlight: false,
       stopInFlight: false,
       cardBridgeLaunchInFlight: false,
+      cardBridgeStopInFlight: false,
+      // What this module last started, for the window before the rig
+      // poll has ever answered.
+      cardBridgeRigActive: false,
+      streamChooserOpen: false,
       paused: false,
       followTail: true,
       selectionFollowsTail: true,
@@ -90,6 +98,7 @@
       modemShellCapability: null,
       modemShellDevices: [],
       modemShellMetadataLoading: false,
+      modemShellMetadataLoadedAt: 0,
       modemShellStatusText: "idle",
       modemShellErrorText: "",
       modemShellSocket: null,
@@ -101,7 +110,9 @@
       packetClientHeight: 0,
       packetScrollBottomGap: 0,
       lastPacketScrollAt: 0,
-      packetScrollRestoring: false,
+      packetProgrammaticTop: null,
+      packetVirtualStart: -1,
+      packetVirtualCount: -1,
       packetSectionOpen: {},
       packetRenderPending: false,
       packetRenderTimerId: null,
@@ -159,7 +170,7 @@
       openPopover: null,
       openPopoverFor: "",
     },
-    // Per-reader session context — one entry per reader pill.
+    // Per-reader session context -- one entry per reader pill.
     // Swapping readers saves the current context under the old
     // reader's name and restores the context for the new reader.
 	    // This gives each reader its own completely independent
@@ -200,10 +211,18 @@
     { id: "csca", label: "SMS center", command: "AT+CSCA?" },
   ];
   var HIL_PACKET_FETCH_LIMIT = 5000;
+  // The client keeps every frame it has ever polled. A long streaming
+  // session is exactly the case that grows without bound, so the retained
+  // window is capped at the same order as the server-side cache; the list
+  // is virtualized, so this bounds heap rather than rendered nodes.
+  var HIL_PACKET_RETAIN_LIMIT = 20000;
 	  var HIL_PACKET_RENDER_LIMIT = 750;
 	  var HIL_PACKET_VIRTUAL_ROW_HEIGHT = 26;
 	  var HIL_PACKET_VIRTUAL_OVERSCAN = 16;
 	  var HIL_RAW_TRACE_LIMIT = 750;
+	  // Shown in the decoded pane while frames are still streaming in and
+	  // the tail frame's detail is deliberately not fetched on every poll.
+	  var HIL_DETAIL_LIVE_HINT = "Following live traffic. Decoded fields appear when the stream pauses or when a frame is selected.";
 	  var HIL_WORKBENCH_DEFAULT_STATE = JSON.parse(JSON.stringify(commandState.hilWorkbench || {}));
 	  var HIL_WORKBENCH_RUNTIME_KEYS = {
 	    refreshTimerId: true,
@@ -217,6 +236,11 @@
 	    packetPointerReleaseTimerId: true,
 	    timerStatusTimerId: true,
 	  };
+	  // Installed once per page. Both handler sets read
+	  // commandState.hilWorkbench at call time, so re-creating the
+	  // workbench state (tenant switch, reload) must not add another pair.
+	  var hilWindowPointerListenersInstalled = false;
+	  var hilMoreMenuDismissInstalled = false;
 	  var CC_READER_SESSION_SUBSYSTEMS = {
 	    "SCP03": true,
 	    "SCP80": true,
@@ -231,6 +255,9 @@
     "tool.euicc_info2.decode": true,
     "tool.saip.lint": true,
     "tool.tlv.decode": true,
+    // The decoder panel at the top of the surface owns these two.
+    "tool.decoder.context": true,
+    "tool.sw.lookup": true,
   };
   var CC_GLOBAL_DEBUG_FLAG = "YGGDRASIM_GLOBAL_DEBUG";
   var CC_TRUE_ENV_FLAG_VALUES = {
@@ -322,13 +349,14 @@
 	    state.startInFlight = false;
 	    state.stopInFlight = false;
 	    state.cardBridgeLaunchInFlight = false;
+	    state.cardBridgeStopInFlight = false;
 	    state.modemShellMetadataLoading = false;
 	    state.modemShellRunning = false;
 	    state.packetRenderPending = false;
 	    state.packetPointerActive = false;
 	    state.packetPointerId = null;
 	    state.packetHoverActive = false;
-	    state.packetScrollRestoring = false;
+	    state.packetProgrammaticTop = null;
 	    state.rawPendingRows = [];
 	    state.rawPendingDropCount = 0;
 	    return state;
@@ -498,6 +526,9 @@
     commandState.activeSubsystem = null;
     commandState.activeScope = "";
     commandState.activeLeafId = leafId || "";
+    if (viewName === "remote_lab" || viewName === "card_bridge") {
+      commandState.lastRemoteView = viewName;
+    }
     showView(viewName);
     ccHighlightLeaf(leafId || "");
     setStatusAction("viewing: " + viewName);
@@ -533,9 +564,14 @@
       loadCardBridge();
     } else if (viewName === "remote_lab") {
       loadRemoteLab();
+    } else if (viewName === "plugin_console") {
+      loadPluginConsole(commandState.activeLeafId);
     }
     if (viewName !== "card_bridge") {
       cbStopAutoRefresh();
+    }
+    if (viewName !== "plugin_console") {
+      pcStopPolling();
     }
   }
 
@@ -557,8 +593,43 @@
     return (data && data.note) || fallback || "";
   }
 
+  function ccActiveRemoteView() {
+    // One pill, two modules that can own what it reports. It goes where
+    // the work is: a held Remote Lab session first, because that is a
+    // reservation somebody else is waiting on, then a running Remote
+    // Bridge rig, then wherever the operator last was.
+    try {
+      if (
+        typeof remoteLabState === "object"
+        && remoteLabState
+        && Number(remoteLabState.activeSessionCount || 0) > 0
+      ) {
+        return "remote_lab";
+      }
+    } catch (_labErr) {
+      // fall through to the bridge check
+    }
+    try {
+      if (
+        typeof cbState === "object"
+        && cbState
+        && String(cbState.globalState || "") === "running"
+      ) {
+        return "card_bridge";
+      }
+    } catch (_bridgeErr) {
+      // fall through to the remembered view
+    }
+    return commandState.lastRemoteView || "remote_lab";
+  }
+
+  function ccRemoteLeafId(viewName) {
+    return viewName === "card_bridge" ? "leaf-adv-card-bridge" : "leaf-adv-remote-lab";
+  }
+
   function cbToggleTopbarRemoteBridge() {
-    ccOpenInspectView("remote_lab", "leaf-adv-remote-lab");
+    var view = ccActiveRemoteView();
+    ccOpenInspectView(view, ccRemoteLeafId(view));
   }
 
   function hilTopbarActions() {
@@ -633,7 +704,7 @@
   function wireCommandCenter() {
     wireTopbarBridgeControls();
     document.addEventListener("click", function (event) {
-      // Ignore clicks on the group header (expand/collapse) — that
+      // Ignore clicks on the group header (expand/collapse) -- that
       // has its own listener. We only care about leaf clicks here.
       if (event.target.closest(".cc-nav-group-header")) return;
       var nav = event.target.closest("#command-center-nav .subsystem-entry");
@@ -672,7 +743,7 @@
   function readerBarBootstrap() {
     // One-shot: wire the refresh button, install a visibilitychange
     // listener for polling pause/resume, kick off the initial fetch,
-    // and start the 5 s poll loop. Idempotent — subsequent calls are
+    // and start the 5 s poll loop. Idempotent -- subsequent calls are
     // cheap no-ops via the ``bootstrapped`` flag so callers can invoke
     // it from wherever without checking themselves.
     var bar = commandState.readerBar;
@@ -839,16 +910,37 @@
     var bar = commandState.readerBar;
     var changed = false;
     var emptyReaders = {};
-    (bar.readers || []).forEach(function (reader) {
+    var knownReaders = {};
+    var probed = Array.isArray(bar.readers) ? bar.readers : [];
+    probed.forEach(function (reader) {
       var name = readerBarCanonicalName(reader && reader.name);
       if (!name) return;
+      knownReaders[name] = true;
+      // A session-backed row (Remote Lab) is published for exactly as
+      // long as its session lives, and its ATR is read from that session
+      // rather than probed from a reader. An empty one therefore means
+      // "not cached yet", not "card removed" -- reading it as a removal
+      // wiped the session, dropped the tree and bounced the operator
+      // back to the reader picker on every 5 s poll tick.
+      if (reader && reader.session_backed) return;
       if (!String(reader && reader.atr_hex || "").trim()) {
         emptyReaders[name] = true;
       }
     });
 
+    // A reader that left the enumeration entirely is gone for real: an
+    // unplugged PC/SC reader, or a Remote Lab binding dropped by the
+    // release route. Requiring a non-empty enumeration keeps a transient
+    // empty listing from wiping every bound tab at once.
+    var anyProbed = probed.length > 0;
+    function readerIsLost(name) {
+      if (!name) return false;
+      if (emptyReaders[name]) return true;
+      return anyProbed && !knownReaders[name];
+    }
+
     var active = readerBarCanonicalName(bar.activeReader);
-    if (active && emptyReaders[active]) {
+    if (active && readerIsLost(active)) {
       bar.activeReader = "";
       ccRefreshReaderSessionFormFields("");
       changed = true;
@@ -859,7 +951,7 @@
       wb.tabs.forEach(function (tab) {
         if (!tab || !tab.sessionId) return;
         var bound = readerBarBoundName(tab);
-        if (!bound || !emptyReaders[bound]) return;
+        if (!readerIsLost(bound)) return;
         tab.sessionId = null;
         tab.atrHex = "";
         tab.errorKind = "no_card";
@@ -869,6 +961,14 @@
         tab.previewCache = null;
         tab.fcpCache = {};
         tab.lastRecoverAt = 0;
+        // The reader is gone, so the tree + FCP cache persisted under its
+        // name is stale as well. Drop it with the session instead of
+        // leaving the operator to click "Forget cached state" by hand.
+        if (typeof scp03PurgePersisted === "function") {
+          scp03PurgePersisted(bound);
+        }
+        tab.treeCollapsed = {};
+        tab.persistedAt = 0;
         changed = true;
       });
       if (changed) refreshSessionStatusMetric();
@@ -957,7 +1057,7 @@
         commandState.scp03Workbench.readersError = null;
       }
       // Clear the sticky "no_card" flag on any tab whose reader now
-      // reports an ATR again — the operator has reinserted the card
+      // reports an ATR again -- the operator has reinserted the card
       // (or the card finished booting its runtime). The next pill
       // click is allowed to auto-open cleanly; no need for a manual
       // welcome-panel trip first.
@@ -982,7 +1082,7 @@
       releasedEmptyBinding = readerBarPruneEmptyReaderBindings();
     } catch (err) {
       bar.error = String((err && err.message) || err);
-      // Don't clobber the cached readers on a transient failure —
+      // Don't clobber the cached readers on a transient failure --
       // operators still want to click their existing pills.
     } finally {
       bar.loading = false;
@@ -1009,7 +1109,7 @@
     //   - whether any SCP03 tab/HIL bridge is bound, or a reader-scoped
     //     module is bound while the latest probe still has an ATR (green),
     //   - whether the reader's most recent /api/live/readers probe
-    //     reported an ATR (yellow — card present, no session),
+    //     reported an ATR (yellow -- card present, no session),
     //   - else red.
     // "gray" is reserved for readers that disappear from the probe
     // but still hang around in ``scp03Workbench.tabs`` because the
@@ -1017,11 +1117,20 @@
     var probe = readerBarProbeFor(readerName);
     if (!probe) return "gray";
     var atr = String(probe.atr_hex || "").trim();
+    // A session-backed row (Remote Lab) only exists while its session is
+    // open, so the row itself -- not the ATR, which that route caches
+    // lazily -- is what says a card is there. Without this a live remote
+    // card read "not ready" in the picker and red on its pill.
+    var hasCard = atr.length > 0 || !!probe.session_backed;
     var hasRealSession = readerBarHasRealSession(readerName);
     var scopedBound = readerBarReaderScopedBoundName();
     var hasReaderScopedBinding = scopedBound && scopedBound === readerName;
-    if (atr.length > 0 && (hasRealSession || hasReaderScopedBinding)) return "green";
-    if (atr.length > 0) return "yellow";
+    if (hasCard && (hasRealSession || hasReaderScopedBinding)) return "green";
+    // A card streamed to another machine is in use, and nothing here
+    // holds a session for it, so the "card present, nobody using it"
+    // reading is the one thing it is not.
+    if (hasCard && String(probe.leased_by || "").trim().length > 0) return "green";
+    if (hasCard) return "yellow";
     return "red";
   }
 
@@ -1030,7 +1139,6 @@
     var host = $("topbar-readers-scroll");
     if (!host) return;
     readerBarNormalizeState();
-    host.innerHTML = "";
 
     var error = bar.error;
     var readers = [];
@@ -1062,7 +1170,7 @@
     });
 
     // Merge any readers that the probe no longer sees but which still
-    // hold an SCP03 session — we don't want the pill to vanish while
+    // hold an SCP03 session -- we don't want the pill to vanish while
     // the operator is mid-workflow (e.g. the reader briefly disconnects
     // from pcscd). Those orphan pills render with the gray dot.
     var wb = commandState.scp03Workbench;
@@ -1088,15 +1196,40 @@
       known[scopedName] = true;
     }
 
+    // The 5 s poll lands here whether or not anything changed. Rebuild
+    // the strip only when a pill's visible state moved; otherwise hover,
+    // focus and tooltip state on the existing pills survive the tick.
+    var signature = JSON.stringify([
+      String(error || ""),
+      bar.loading ? 1 : 0,
+      String(bar.activeReader || ""),
+      readers.map(function (reader) {
+        var name = String(reader && reader.name || "");
+        return [
+          name,
+          String(reader && reader.atr_hex || ""),
+          String(reader && reader.status || ""),
+          String(reader && reader.leased_by || ""),
+          readerBarDeriveStatus(name),
+          readerBarHasRealSession(name) ? 1 : 0,
+        ];
+      }),
+    ]);
+    if (signature === bar.lastRenderSignature && host.childNodes.length > 0) {
+      return;
+    }
+    bar.lastRenderSignature = signature;
+    host.innerHTML = "";
+
     if (readers.length === 0) {
       var hint = document.createElement("span");
       hint.className = "topbar-readers-hint";
       if (error) {
         hint.textContent = "readers unavailable: " + error;
       } else if (bar.loading) {
-        hint.textContent = "enumerating readers…";
+        hint.textContent = "enumerating readers...";
       } else {
-        hint.textContent = "no readers detected — click ↻ to re-enumerate";
+        hint.textContent = "no readers detected -- click ↻ to re-enumerate";
       }
       host.appendChild(hint);
       return;
@@ -1156,15 +1289,18 @@
     }
 
     var atr = String(reader.atr_hex || "").trim();
+    var leasedBy = String(reader.leased_by || "").trim();
     var tooltip = name + "\n";
-    if (status === "green") {
+    if (leasedBy) {
+      tooltip += "● streaming to " + leasedBy;
+    } else if (status === "green") {
       tooltip += readerBarHasRealSession(name)
         ? "● active session"
         : "● selected for this surface";
     } else if (status === "yellow") {
-      tooltip += "● card present — no session (click to open)";
+      tooltip += "● card present -- no session (click to open)";
     } else if (status === "red") {
-      tooltip += "● reader empty — no session";
+      tooltip += "● reader empty -- no session";
     } else {
       tooltip += "● reader offline";
     }
@@ -1215,7 +1351,7 @@
     // PC/SC reader names are painfully long (e.g. "SCM Microsystems Inc.
     // SCR 3310 [CCID Interface] 00 00"). We keep the first meaningful
     // word-group and trim anything after a double-space or final
-    // "HH HH" index — enough to tell two readers apart without blowing
+    // "HH HH" index -- enough to tell two readers apart without blowing
     // out the pill width.
     if (!name) return "reader";
     var s = String(name);
@@ -1225,7 +1361,7 @@
     s = s.replace(/\s*\[.*?\]\s*/g, " ").trim();
     if (s.length <= 26) return s;
     // Keep a meaningful head + tail.
-    return s.substring(0, 22) + "…";
+    return s.substring(0, 22) + "...";
   }
 
 	  function readerBarSaveCurrentContext(readerName) {
@@ -1311,49 +1447,24 @@
     // bound to this reader, hydrate from localStorage, and re-paint.
     readerBarSyncToScp03Tab(readerName);
 
-    // If the operator is on the Overview view, auto-navigate to the
-    // SCP03 workbench so the first pill click opens a scan surface
-    // immediately. When they are already deep in the SAIP workbench
-    // or raw shell, clicking a pill keeps them where they are.
+    // A pill click binds the reader and re-renders a reader-scoped surface
+    // for it. It never navigates elsewhere and never scans the card: the
+    // Filesystem leaf's own "Select a reader" panel is where a scan starts,
+    // so a reader picked from any other module leaves the card untouched.
     if (ccSubsystemRequiresReaderSession(commandState.activeSubsystem)) {
       openCommandSubsystem(commandState.activeSubsystem, {
         scope: commandState.activeScope || "all",
         leafId: commandState.activeLeafId || "",
       });
-	    } else if (commandState.activeSubsystem === null && !restoredInspectView) {
-	      var currentInspectView = ccCurrentActiveViewName();
-	      if (ccIsReaderScopedInspectView(currentInspectView)) {
-	        ccLoadStandaloneView(currentInspectView);
-	      } else {
-	        openCommandSubsystem("SCP03");
-	      }
-	    } else if (!savedCtx) {
-      // First time clicking this reader — stay in current subsystem
-      // but the subsystem should stay passive until the operator presses
-      // Refresh or runs a concrete action.
-    }
-
-    // If the selected reader has a card present and there is no live
-    // SCP03 session, auto-open a session immediately so operators do
-    // not need a second reader selector inside SCP03. Hydrated tabs
-    // still get Resume instead of a silent scan.
-    if (commandState.activeSubsystem === "SCP03"
-        && readerBarProbeHasCard(readerName)
-        && !readerBarHasScp03Session(readerName)) {
-      var wb = commandState.scp03Workbench;
-      if (wb) {
-        var tab = scp03FindTab(wb.activeTabId);
-        if (tab) {
-          if (tab.sessionId) return;
-          if (tab.status === "scanning") return;
-        }
-        if (tab && !tab.readerName && !scp03HasPersistedState(tab)) {
-          tab.pendingReader = readerName;
-          var tabBar = document.querySelector(".cc-wb-tabs.scp03-topbar");
-          var tabBody = document.querySelector(".cc-wb-body");
-          scp03OpenSessionForTab(tab, tabBar, tabBody);
-        }
+    } else if (commandState.activeSubsystem === null && !restoredInspectView) {
+      var currentInspectView = ccCurrentActiveViewName();
+      if (ccIsReaderScopedInspectView(currentInspectView)) {
+        ccLoadStandaloneView(currentInspectView);
       }
+    }
+    // A plugin console's reader fields follow the pill (plugin-console-forms.js).
+    if (typeof pcFollowReaderPill === "function") {
+      pcFollowReaderPill(prevReader, readerName);
     }
 
     // Update any open SCP03 workbench tab's scope caches so the
@@ -1376,7 +1487,7 @@
     if (!readerName) return;
     // Ensure a scp03Workbench tab exists for ``readerName`` and
     // promote it to active. Safe to call even when the SCP03
-    // workbench is not mounted — the tab is reused next time the
+    // workbench is not mounted -- the tab is reused next time the
     // operator navigates into SCP03.
     var wb = commandState.scp03Workbench;
     if (!wb || !Array.isArray(wb.tabs)) return;
@@ -1388,7 +1499,7 @@
       if (bound === readerName) { tab = t; break; }
     }
     if (!tab) {
-      // Reuse a truly-empty first tab if one exists — the workbench
+      // Reuse a truly-empty first tab if one exists -- the workbench
       // seeds an unbound tab on every open. Prefer that over stacking
       // more tabs than we need.
       for (var j = 0; j < wb.tabs.length; j++) {
@@ -1408,7 +1519,7 @@
         }
       }
       tab.pendingReader = readerName;
-      // Try to hydrate from localStorage — if this reader has been
+      // Try to hydrate from localStorage -- if this reader has been
       // used before (same host, same reader name), the persisted tree
       // + fcpCache + ribbon tab come back so the operator lands on
       // exactly where they left off instead of a blank welcome panel.
@@ -1436,7 +1547,7 @@
     if (!readerName) return;
     // Close the session bound to ``readerName`` (if any) AND remove
     // the matching scp03Workbench tab. This is the only path the
-    // pill's × button takes — the old per-tab "Close session" still
+    // pill's × button takes -- the old per-tab "Close session" still
     // exists behind the Admin ribbon for keyboard-only operators.
     var wb = commandState.scp03Workbench;
     if (!wb || !Array.isArray(wb.tabs)) {
@@ -1453,7 +1564,7 @@
     if (targetId && typeof scp03CloseTab === "function") {
       var tabBar = document.querySelector(".cc-wb-tabs.scp03-topbar");
       var tabBody = document.querySelector(".cc-wb-body");
-      // scp03CloseTab tolerates missing bar/body args — it just skips
+      // scp03CloseTab tolerates missing bar/body args -- it just skips
       // the DOM repaint. We still want to trigger it for the close
       // API call + bookkeeping side-effects.
       await scp03CloseTab(targetId, tabBar || document.createElement("div"),
@@ -1474,11 +1585,11 @@
   }
 
   function readerBarNotifySessionChanged() {
-    // Called by SCP03 flows (scp03Rescan, scp03CloseTab, …) after
+    // Called by SCP03 flows (scp03Rescan, scp03CloseTab, ...) after
     // their session_id / readerName state flips so the pill colour
     // updates without waiting for the next 5 s poll tick.
     readerBarRender();
-    // Refresh the popover too — if the operator just disconnected
+    // Refresh the popover too -- if the operator just disconnected
     // from inside the panel we want the buttons to flip enable
     // states without a second click.
     var bar = commandState.readerBar;
@@ -1712,7 +1823,7 @@
         setTimeout(function () { atrCode.classList.remove("is-copied"); }, 700);
       });
       // Intercept right-click so QtWebEngine does not invoke its native
-      // context menu — pywebview ≤5.x crashes on the feature-permission
+      // context menu -- pywebview ≤5.x crashes on the feature-permission
       // path under Qt6 (``QWebEnginePage.MediaAudioCapture`` was removed
       // upstream). Showing our own reader menu also matches the live
       // readers list affordance.
@@ -1746,7 +1857,7 @@
     connectBtn.disabled = !canConnect;
     if (!canConnect) {
       connectBtn.title = (status === "red")
-        ? "No card present — insert a card first."
+        ? "No card present -- insert a card first."
         : "Reader is offline.";
     } else if (status === "green") {
       connectBtn.title = hasRealSession
@@ -1825,7 +1936,7 @@
   }
 
   // Left-nav tree (GUI taxonomy, not the backend subsystem list). The
-  // backend action registry groups specs by a flat ``subsystem`` string —
+  // backend action registry groups specs by a flat ``subsystem`` string --
   // that's what the catalogue API returns. The sidebar we present to
   // operators is task-oriented instead: related subsystems are grouped
   // under a human label, and SCP03 is split by scope so the filesystem
@@ -1839,7 +1950,7 @@
   //     env_flags / backend / raw shell), which routes through
   //     ``showView`` instead.
   //
-  // ``stub: true`` means "no backend actions registered yet" — we still
+  // ``stub: true`` means "no backend actions registered yet" -- we still
   // render the leaf so the sidebar layout is stable as we light up new
   // surfaces, but clicking it shows a placeholder instead of a broken
   // empty workbench.
@@ -1847,7 +1958,7 @@
     {
       id: "group-card-admin",
       label: "Card Administration",
-      hint: "Direct APDU surfaces — files, applets, OTA.",
+      hint: "Direct APDU surfaces -- files, applets, OTA.",
       defaultOpen: true,
       children: [
         {
@@ -1868,14 +1979,14 @@
           id: "leaf-scp80",
           label: "Over-the-Air",
           subsystem: "SCP80",
-          hint: "ETSI TS 102 225 / 226 — SMS-PP & CAT-TP OTA",
+          hint: "ETSI TS 102 225 / 226 -- SMS-PP & CAT-TP OTA",
         },
       ],
     },
     {
       id: "group-esim",
       label: "eSIM (SCP11)",
-      hint: "Remote SIM provisioning — SGP.22 / SGP.32 flows.",
+      hint: "Remote SIM provisioning -- SGP.22 / SGP.32 flows.",
       defaultOpen: true,
       children: [
         {
@@ -1883,7 +1994,7 @@
           label: "Management",
           subsystem: "eSIM Management",
           requiresReader: true,
-          hint: "SM-DP+ / eIM relay management — TLS and ES9+",
+          hint: "SM-DP+ / eIM relay management -- TLS and ES9+",
         },
         {
           id: "leaf-esim-local-smdp",
@@ -1922,23 +2033,34 @@
       ],
     },
     {
-      id: "group-advanced",
-      label: "Advanced",
-      hint: "Low-level surfaces not part of the primary task tree.",
+      // Both entries move a card between two machines; they differ in who
+      // holds it and who may take the rig. Keeping them apart is what made
+      // the HIL panel look like the place to stream a card to a remote host.
+      id: "group-apdu-streaming",
+      label: "APDU Streaming",
+      hint: "Move a card between two machines, in either direction.",
       defaultOpen: false,
       children: [
         {
           id: "leaf-adv-remote-lab",
           label: "Remote Lab",
           inspectView: "remote_lab",
-          hint: "Self-hosted modem/card rig registry and one-click lab sessions",
+          hint: "Shared rigs reserved by token: take a rig's card, or offer yours to its modem",
         },
         {
           id: "leaf-adv-card-bridge",
           label: "Remote Bridge",
           inspectView: "card_bridge",
-          hint: "Prepare remote hosts for Remote Lab access",
+          hint: "Prepare a host over SSH and drive it yourself",
         },
+      ],
+    },
+    {
+      id: "group-advanced",
+      label: "Advanced",
+      hint: "Low-level surfaces not part of the primary task tree.",
+      defaultOpen: false,
+      children: [
         {
           id: "leaf-adv-hil",
           label: "HIL Bridge",
@@ -1961,7 +2083,7 @@
           id: "leaf-adv-host-shell",
           label: "Host shell",
           inspectView: "host_shell",
-          hint: "Free-form host shell — opt-in via YGGDRASIM_GUI_HOST_SHELL",
+          hint: "Free-form host shell -- opt-in via YGGDRASIM_GUI_HOST_SHELL",
         },
         {
           id: "leaf-adv-registry",
@@ -2088,7 +2210,7 @@
         // Only subsystem-backed leaves get the action-count badge; the
         // inspectView leaves (env_flags / backend / readers / shell)
         // route to the existing non-CC views and have no action list.
-        // Stub leaves render a neutral "—" dash instead of "0" so the
+        // Stub leaves render a neutral "--" dash instead of "0" so the
         // empty state reads as "not wired" rather than "broken".
         if (leaf.subsystem) {
           var count = (subsystems[leaf.subsystem] || []).length;
@@ -2259,18 +2381,18 @@
   function _ccNavGroupRememberState(groupId, value) {
     try {
       window.localStorage.setItem("yggdrasim:cc-nav:" + groupId, value);
-    } catch (_e) { /* storage disabled / quota — non-fatal */ }
+    } catch (_e) { /* storage disabled / quota -- non-fatal */ }
   }
 
   function openCommandSubsystem(subsystem, options) {
-    // ``options`` is optional — older callers (reader-pill auto-route,
+    // ``options`` is optional -- older callers (reader-pill auto-route,
     // startup bootstrap) pass only the subsystem string. When we're
     // already on the same subsystem and the caller didn't supply a
     // scope, preserve the current scope + leaf so clicking a reader
     // pill while in "Applications" (for example) doesn't silently
     // bounce the workbench back to the default "Filesystem" surface.
     // Without this preservation the nav selection drifts every time
-    // the operator switches between reader pills — the exact "session
+    // the operator switches between reader pills -- the exact "session
     // context aware split does not work properly" symptom reported.
     var opts = options || {};
     var sameSubsystem = commandState.activeSubsystem === subsystem;
@@ -2312,14 +2434,14 @@
     renderCommandSubsystem(subsystem, { scope: scope, leaf: leaf, stub: stub });
 
     // Popouts are still anchored to the SCP03 workbench regardless of
-    // scope — the visibility sync only cares about "are we looking at
+    // scope -- the visibility sync only cares about "are we looking at
     // an SCP03 surface or not". Scope changes within SCP03 therefore
     // keep the active tab's popouts visible.
     try {
       if (typeof scp03PopoutSyncForSubsystem === "function") {
         scp03PopoutSyncForSubsystem(subsystem);
       }
-    } catch (_err) { /* startup race — workbench not yet mounted */ }
+    } catch (_err) { /* startup race -- workbench not yet mounted */ }
 
     // If we stayed inside SCP03 and only the scope changed, update
     // any open tab's scope cache so the workbench remembers it on
@@ -2516,7 +2638,7 @@
         + '<p class="hint">' + escapeHtml(subtitle) + '</p>'
         + '<p>No actions are registered for this surface yet. It\u2019s '
         + 'reserved in the sidebar so the layout stays stable as the '
-        + 'subsystem is wired in — pick a sibling entry to get work done '
+        + 'subsystem is wired in -- pick a sibling entry to get work done '
         + 'right now.</p>'
         + '</article>';
       return;
@@ -2544,9 +2666,9 @@
       return;
     }
     // Everything else (SCP80, eSIM Management, SCP11 Local, Local eIM, SUCI,
-    // SIMCARD, HIL, Tools, …) used to render as a grid of
+    // SIMCARD, HIL, Tools, ...) used to render as a grid of
     // full-width action cards. That layout grew unwieldy once each
-    // subsystem picked up 10+ actions — operators had to scroll
+    // subsystem picked up 10+ actions -- operators had to scroll
     // past every form just to reach the relevant one. The compact
     // workbench mirrors the SCP03 Filesystem/Applications idiom:
     // a slim action picker on the left, the active card on the
@@ -2555,14 +2677,14 @@
   }
 
   // ------------------------------------------------------------------
-  // Subsystem-level action categorisation (Task 4 — eSIM nested nav).
+  // Subsystem-level action categorisation (Task 4 -- eSIM nested nav).
   //
   // Operators reported that the eSIM Management / SCP11 Local /
   // Local eIM workbenches grew long enough that the flat sidenav was
   // hard to scan. A 39-action subsystem is unusable without a typed
   // filter; even a 12-action one buries the lifecycle wizard underneath
-  // the inspection helpers. Grouping is a pure UI concern — the action
-  // registry is the source of truth — so we keep the category map on
+  // the inspection helpers. Grouping is a pure UI concern -- the action
+  // registry is the source of truth -- so we keep the category map on
   // the SPA side and key it by ``subsystem`` + action-ID suffix (the
   // segment after the last ``.``). Unmatched actions fall through to
   // a final "Other" group so newly-registered actions stay visible
@@ -2606,8 +2728,8 @@
         label: "Local SM-DP+ Provisioning",
         hint: "Local SGP.22 delivery, metadata, certificate inventory, and keybag handling.",
         suffixes: [
-          "load_profile", "get_certs_inventory", "store_metadata",
-          "update_metadata", "store_metadata_custom",
+          "load_profile", "get_certs_inventory", "import_certificate",
+          "store_metadata", "update_metadata", "store_metadata_custom",
           "store_metadata_custom_all", "metadata_lint", "export_keybag",
         ],
       },
@@ -2682,7 +2804,7 @@
         hint: "Hotfolder list, metadata, cycle, fetch.",
         suffixes: [
           "hotfolder_list", "hotfolder_metadata",
-          "hotfolder_metadata", "hotfolder_fetch",
+          "hotfolder_cycle", "hotfolder_fetch",
         ],
       },
       {
@@ -2855,7 +2977,8 @@
   function ccEsimActionFlavor(action) {
     var id = String(action && action.id || "").toLowerCase();
     var suffix = ccActionSuffix(id);
-    if (id.indexOf(".euicc_config_live.") !== -1) {
+    var flavorTags = action && Array.isArray(action.tags) ? action.tags : [];
+    if (flavorTags.indexOf("euicc-config") !== -1) {
       return "euicc_config";
     }
     if (
@@ -2908,7 +3031,10 @@
     return null;
   }
 
-  function ccFindCatalogueActionByTag(tag) {
+  // `accept` narrows a tag several actions share: the SAIP Tokens ribbon
+  // lists every "saip-ribbon-tokens-form" action, and only one of them is
+  // the token-configuration manager.
+  function ccFindCatalogueActionByTag(tag, accept) {
     var cat = commandState && commandState.catalogue;
     var subsystems = cat && cat.subsystems ? cat.subsystems : {};
     var names = Object.keys(subsystems);
@@ -2917,7 +3043,9 @@
       for (var j = 0; j < actions.length; j++) {
         var action = actions[j];
         var tags = action && Array.isArray(action.tags) ? action.tags : [];
-        if (tags.indexOf(tag) !== -1) return action;
+        if (tags.indexOf(tag) === -1) continue;
+        if (typeof accept === "function" && !accept(action)) continue;
+        return action;
       }
     }
     return null;
@@ -3076,7 +3204,7 @@
         "yggdrasim:cc-cat:" + subsystem + ":" + categoryId,
         value
       );
-    } catch (_e) { /* storage disabled / quota — non-fatal */ }
+    } catch (_e) { /* storage disabled / quota -- non-fatal */ }
   }
 
   // -- Ribbon button icon resolver ------------------------------------
@@ -4457,7 +4585,7 @@
       iccidInput = document.createElement("input");
       iccidInput.type = "text";
       iccidInput.className = "cc-local-eim-path-input cc-ota-config-input";
-      iccidInput.placeholder = "89014104211118510720";
+      iccidInput.placeholder = "89882012345678901230";
       iccidInput.autocomplete = "off";
       iccidWrap.appendChild(iccidInput);
       profileRow.appendChild(iccidWrap);
@@ -4590,7 +4718,7 @@
       return panel;
     }
 
-    // Mutation suffixes — actions that are NOT shown in the dashboard
+    // Mutation suffixes -- actions that are NOT shown in the dashboard
     // button strip (they're covered by dashboard sections or are heavy
     // discovery variants).
     var DASHBOARD_SKIP_SUFFIXES = [
@@ -4612,7 +4740,7 @@
       hotfolder_fetch: true,
       hotfolder_list: true,
       hotfolder_metadata: true,
-      hotfolder_metadata: true,
+      hotfolder_cycle: true,
       issue_package: true,
       list_fixtures: true,
       load_eim_package: true,
@@ -4849,6 +4977,12 @@
       if (profile.nickname || profile.profile_name) {
         _dashKv(meta, "Nickname", profile.nickname || profile.profile_name);
       }
+      // SGP.32 fallbackAttribute. At most one Profile carries it, and the
+      // eUICC omits the tag on every other one, so the row is shown only when
+      // the attribute came back set.
+      if (profile.fallback_attribute === true) {
+        _dashKv(meta, "Used as", "Fallback");
+      }
       card.appendChild(meta);
       return card;
     }
@@ -4888,11 +5022,11 @@
           noteSec.appendChild(noteHdr);
           var noteBody = document.createElement("div");
           noteBody.className = "cc-dash-section-body";
-          _dashKv(noteBody, "Session ID", String(snapshot.session_id).substring(0, 8) + "…");
+          _dashKv(noteBody, "Session ID", String(snapshot.session_id).substring(0, 8) + "...");
           noteSec.appendChild(noteBody);
           dashBody.appendChild(noteSec);
         }
-        return; // SCP03 card_info handled — skip eSIM sections below
+        return; // SCP03 card_info handled -- skip eSIM sections below
       }
 
       // --- Card Identity ---
@@ -4991,7 +5125,7 @@
       if (snapshot.eim_summary && snapshot.eim_summary.entries && snapshot.eim_summary.entries.length > 0) {
         eimEntries = snapshot.eim_summary.entries;
       } else if (snapshot.eim_configuration && typeof snapshot.eim_configuration === "string" && snapshot.eim_configuration.length > 20) {
-        // Raw hex — note presence but don't decode client-side
+        // Raw hex -- note presence but don't decode client-side
         var sec = document.createElement("div");
         sec.className = "cc-dash-section";
         var hdr = document.createElement("div");
@@ -5000,7 +5134,7 @@
         sec.appendChild(hdr);
         var body = document.createElement("div");
         body.className = "cc-dash-section-body";
-        _dashKv(body, "Raw payload", snapshot.eim_configuration.substring(0, 40) + "…");
+        _dashKv(body, "Raw payload", snapshot.eim_configuration.substring(0, 40) + "...");
         sec.appendChild(body);
         dashBody.appendChild(sec);
       }
@@ -5015,7 +5149,7 @@
         body.className = "cc-dash-section-body";
         eimEntries.forEach(function (entry, i) {
           var label = "Entry " + (i + 1);
-          if (entry.eim_fqdn) label += " — " + entry.eim_fqdn;
+          if (entry.eim_fqdn) label += " -- " + entry.eim_fqdn;
           if (entry.eim_id) label += " (" + entry.eim_id + ")";
           var div = document.createElement("div");
           div.className = "cc-dash-kv";
@@ -5845,6 +5979,9 @@
     if (subsystem === "Local eIM") {
       _appendCompactContent(_buildLocalEimOverviewPanel());
     }
+    if (subsystem === "Offline Tools") {
+      _appendCompactContent(_buildOfflineDecoderPanel(actions));
+    }
     if (mutationActions.length > 0) {
       var dashActions = document.createElement("div");
       dashActions.className = "cc-dash-actions";
@@ -6286,11 +6423,14 @@
     toolbar.setAttribute("role", "toolbar");
     toolbar.setAttribute("aria-label", "HIL actions");
 
-    var moduleGroup = document.createElement("div");
-    moduleGroup.className = "cc-hil-toolbar-group";
-    toolbar.appendChild(moduleGroup);
+    var sessionBusy = state.startInFlight || state.stopInFlight;
+    var liveActive = !!state.armed && hilIsLiveCaptureMode(state);
+    var offlineActive = !!state.armed && state.startMode === "offline";
 
-    moduleGroup.appendChild(hilToolbarButton(
+    // Session: the supervised live session and the Remote Bridge rig
+    // that feeds it. These are the toolbar's only backend-reaching buttons.
+    var sessionGroup = hilToolbarGroup(toolbar, "Session");
+    sessionGroup.appendChild(hilToolbarButton(
       state.startInFlight ? "more" : (state.armed ? "live" : "run"),
       state.startInFlight ? "Starting" : (state.armed ? "Running" : "Start"),
       "Start the supervised HIL session and attach the GUI decoder",
@@ -6298,46 +6438,63 @@
         hilStartLiveSession(actions, container, leaf);
       },
       state.armed,
-      state.startInFlight || state.stopInFlight
+      sessionBusy
     ));
-    moduleGroup.appendChild(hilToolbarButton("stop", "Stop", "Stop the supervised HIL session", function () {
+    sessionGroup.appendChild(hilToolbarButton("stop", "Stop", "Stop the supervised HIL session", function () {
       hilStopLiveSession(actions, container, leaf);
-    }, false, state.startInFlight || state.stopInFlight));
-    moduleGroup.appendChild(hilToolbarButton("refresh", "Refresh", "Refresh decoded packets", function () {
-      hilRefreshSnapshot({ force: true });
-    }, false, state.inflight || state.liveBaselinePending));
-    moduleGroup.appendChild(hilToolbarButton(
-      state.autoRefresh ? "pause" : "run",
-      state.autoRefresh ? "Auto on" : "Auto off",
-      "Toggle decoded packet auto-refresh",
+    }, false, sessionBusy));
+    // Start and stop share this seat: a second button would sit idle
+    // whichever way the stream is pointing, and the one that applies is
+    // the one the rig poll last reported on.
+    var streamRunning = hilRemoteBridgeIsRunning();
+    var streamBusy = state.cardBridgeLaunchInFlight || state.cardBridgeStopInFlight;
+    var streamIcon = "⇄";
+    var streamLabel = "Start APDU Stream";
+    if (state.cardBridgeLaunchInFlight) {
+      streamIcon = "...";
+      streamLabel = "Starting stream";
+    } else if (state.cardBridgeStopInFlight) {
+      streamIcon = "...";
+      streamLabel = "Stopping stream";
+    } else if (streamRunning) {
+      streamIcon = "stop";
+      streamLabel = "Stop APDU Stream";
+    }
+    sessionGroup.appendChild(hilToolbarButton(
+      streamIcon,
+      streamLabel,
+      hilRemoteBridgeButtonTitle(streamRunning),
       function () {
-        state.autoRefresh = !state.autoRefresh;
+        if (hilRemoteBridgeIsRunning()) {
+          hilStopCardBridgeRig(actions, container, leaf);
+          return;
+        }
+        // The rig is chosen here rather than inherited from whatever the
+        // Remote Bridge panel was last pointed at, which the old label
+        // could only report after the fact.
+        state.streamChooserOpen = !state.streamChooserOpen;
         renderHilWorkbench(container, actions, leaf);
+        if (state.streamChooserOpen && typeof cbRigLoadHosts === "function") {
+          Promise.resolve(cbRigLoadHosts())
+            .then(function () {
+              if (commandState.activeSubsystem === "HIL") {
+                renderHilWorkbench(container, actions, leaf);
+              }
+            })
+            .catch(function () {});
+        }
       },
-      state.autoRefresh
+      streamRunning || state.streamChooserOpen,
+      streamBusy
     ));
-    moduleGroup.appendChild(hilToolbarButton(
-      state.paused ? "run" : "pause",
-      state.paused ? "Resume" : "Pause",
-      "Pause decoded packet refresh",
-      function () {
-        state.paused = !state.paused;
-        if (!state.paused) hilRefreshSnapshot({ force: true });
-        renderHilWorkbench(container, actions, leaf);
-      },
-      state.paused
-    ));
-    moduleGroup.appendChild(hilToolbarButton(
-      state.viewMode === "context" ? "tree" : "list",
-      state.viewMode === "context" ? "Context" : "Flat",
-      "Toggle decoded packet grouping",
-      function () {
-        state.viewMode = state.viewMode === "context" ? "flat" : "context";
-        renderHilWorkbench(container, actions, leaf);
-      },
-      state.viewMode === "context"
-    ));
-    moduleGroup.appendChild(hilToolbarButton("open", "Open pcap", "Open a saved pcap path", function () {
+
+    // Source: what the dissector reads -- the live capture behind the
+    // session, or a saved pcap opened by path.
+    var sourceGroup = hilToolbarGroup(toolbar, "Source");
+    sourceGroup.appendChild(hilToolbarButton("live", "Live", "Follow the active live capture", function () {
+      hilFollowLiveCapture(actions, container, leaf);
+    }, liveActive));
+    sourceGroup.appendChild(hilToolbarButton("open", "Open pcap", "Open a saved pcap by path", function () {
       var nextPath = window.prompt("Capture path", state.capturePath || "");
       if (nextPath === null) return;
       state.capturePath = String(nextPath || "").trim();
@@ -6359,32 +6516,50 @@
       state.followTail = true;
       hilRefreshSnapshot({ force: true });
       renderHilWorkbench(container, actions, leaf);
-    }));
-    moduleGroup.appendChild(hilToolbarButton("live", "Live", "Use the active live capture", function () {
-      state.capturePath = "";
-      state.captureSource = "";
-      state.armed = true;
-      state.startMode = "decoded";
-      state.autoRefresh = true;
-      state.statusText = "live";
-      state.selectedFrameNumber = null;
-      state.selectionFollowsTail = true;
-      state.detail = "";
-      state.bytes = "";
-      state.detailRanges = [];
-      state.detailFrameNumber = 0;
-      state.liveBaselinePending = true;
-      hilResetDetailScroll();
-      hilResetPacketSections();
-      hilResetPacketScroll();
-      state.followTail = true;
-      hilEstablishLiveBaseline().then(function (baselineReady) {
+    }, offlineActive));
+
+    // View: how decoded packets are refreshed and grouped. None of
+    // these touch the session.
+    var viewGroup = hilToolbarGroup(toolbar, "View");
+    viewGroup.appendChild(hilToolbarButton("refresh", "Refresh", "Refresh decoded packets now", function () {
+      hilRefreshSnapshot({ force: true });
+    }, false, state.inflight || state.liveBaselinePending));
+    viewGroup.appendChild(hilToolbarButton(
+      "live",
+      "Auto-refresh",
+      state.autoRefresh
+        ? "Auto-refresh is on: decoded packets follow the capture. Click to turn it off."
+        : "Auto-refresh is off: use Refresh to pull new packets. Click to turn it on.",
+      function () {
+        state.autoRefresh = !state.autoRefresh;
         renderHilWorkbench(container, actions, leaf);
-        if (baselineReady) hilRefreshSnapshot({ force: false });
-      });
-      renderHilWorkbench(container, actions, leaf);
-    }));
-    moduleGroup.appendChild(hilToolbarButton("clear", "Clear view", "Clear the decoded view", function () {
+      },
+      state.autoRefresh
+    ));
+    viewGroup.appendChild(hilToolbarButton(
+      state.paused ? "run" : "pause",
+      state.paused ? "Resume" : "Pause",
+      "Pause decoded packet refresh without stopping the session",
+      function () {
+        state.paused = !state.paused;
+        if (!state.paused) hilRefreshSnapshot({ force: true });
+        renderHilWorkbench(container, actions, leaf);
+      },
+      state.paused
+    ));
+    viewGroup.appendChild(hilToolbarButton(
+      state.viewMode === "context" ? "tree" : "list",
+      state.viewMode === "context" ? "Context" : "Flat",
+      state.viewMode === "context"
+        ? "Packets are grouped by context. Click for a flat list."
+        : "Packets are listed flat. Click to group them by context.",
+      function () {
+        state.viewMode = state.viewMode === "context" ? "flat" : "context";
+        renderHilWorkbench(container, actions, leaf);
+      },
+      state.viewMode === "context"
+    ));
+    viewGroup.appendChild(hilToolbarButton("clear", "Clear view", "Clear the decoded view; the capture keeps running", function () {
       if (hilIsLiveCaptureMode(state)) {
         hilPromoteLiveBaselineFromRows(state.rows);
       }
@@ -6405,34 +6580,20 @@
       renderHilWorkbench(container, actions, leaf);
     }));
 
-    var bridgeGroup = document.createElement("div");
-    bridgeGroup.className = "cc-hil-toolbar-group cc-hil-toolbar-group--actions";
-    toolbar.appendChild(bridgeGroup);
-    bridgeGroup.appendChild(hilToolbarButton(
-      state.cardBridgeLaunchInFlight ? "..." : "⇄",
-      state.cardBridgeLaunchInFlight ? "Starting bridge" : "Remote Bridge",
-      "Launch the saved Remote Bridge rig sequence",
-      function () {
-        hilLaunchCardBridgeRig(actions, container, leaf);
-      },
-      state.cardBridgeLaunchInFlight,
-      state.cardBridgeLaunchInFlight
-    ));
-    actions.filter(function (action) {
+    var extraActions = actions.filter(function (action) {
       return action
         && action.id !== "hil.decode_snapshot"
         && action.id !== "hil.session_start"
         && action.id !== "hil.session_stop";
-    }).forEach(function (action) {
-      bridgeGroup.appendChild(hilToolbarButton(
-        _ccResolveIcon(action.id),
-        action.title || action.id,
-        action.description || action.id,
-        function () { _ccBuildActionPopout(action); }
-      ));
     });
+    if (extraActions.length > 0) {
+      var moreGroup = hilToolbarGroup(toolbar, "Backend");
+      moreGroup.classList.add("cc-hil-toolbar-group--actions");
+      moreGroup.appendChild(hilMoreMenu(extraActions));
+    }
 
     wb.appendChild(toolbar);
+    hilAppendStreamChooser(wb, actions, container, leaf);
 
     var tabs = document.createElement("div");
     tabs.className = "cc-hil-tabs";
@@ -6471,6 +6632,10 @@
           stopHilWorkbenchRuntime();
           return;
         }
+        // A hidden tab keeps its interval but skips the decode round
+        // trip; the next visible tick catches up from the last frame.
+        if (document.hidden) return;
+        if (Date.now() < Number(state.nextPollNotBefore || 0)) return;
         hilRefreshSnapshot({ force: false });
       }, 700);
     }
@@ -6515,9 +6680,116 @@
     } else if (state.activeTab === "modem") {
       return true;
     } else {
-      renderHilDissectorTab(body);
+      hilUpdateDissectorPane(body);
     }
     return true;
+  }
+
+  function hilFollowLiveCapture(actions, container, leaf) {
+    // Point the decoder at whatever capture is live. With a rig streaming,
+    // that resolves to the rig's own capture, mirrored here -- which is
+    // the whole point: the HIL bridge runs on the rig, not on this
+    // machine, and starting a local one finds no SIMtrace2.
+    var state = commandState.hilWorkbench;
+    state.capturePath = "";
+    state.captureSource = "";
+    state.armed = true;
+    state.startMode = "decoded";
+    state.autoRefresh = true;
+    state.statusText = "live";
+    state.selectedFrameNumber = null;
+    state.selectionFollowsTail = true;
+    state.detail = "";
+    state.bytes = "";
+    state.detailRanges = [];
+    state.detailFrameNumber = 0;
+    state.liveBaselinePending = true;
+    hilResetDetailScroll();
+    hilResetPacketSections();
+    hilResetPacketScroll();
+    state.followTail = true;
+    hilEstablishLiveBaseline().then(function (baselineReady) {
+      if (commandState.activeSubsystem !== "HIL") return;
+      renderHilWorkbench(container, actions, leaf);
+      if (baselineReady) hilRefreshSnapshot({ force: false });
+    });
+    renderHilWorkbench(container, actions, leaf);
+  }
+
+  function hilAppendStreamChooser(wb, actions, container, leaf) {
+    var state = commandState.hilWorkbench;
+    if (!state.streamChooserOpen) return;
+    // A rig that came up from another surface while this was open would
+    // leave a list of rigs to start under a button that says Stop.
+    if (hilRemoteBridgeIsRunning()) {
+      state.streamChooserOpen = false;
+      return;
+    }
+    var row = document.createElement("div");
+    row.className = "cc-hil-toolbar";
+    row.setAttribute("role", "toolbar");
+    row.setAttribute("aria-label", "Rig to stream the card to");
+    var group = hilToolbarGroup(row, "Rig");
+
+    var devices = [];
+    try {
+      devices = Array.isArray(cbRigHostState.devices) ? cbRigHostState.devices : [];
+    } catch (_err) {
+      devices = [];
+    }
+    var selected = "";
+    try {
+      selected = String(cbRigSelectedHostId || "");
+    } catch (_err) {
+      selected = "";
+    }
+
+    if (devices.length === 0) {
+      var empty = document.createElement("span");
+      empty.className = "cc-hil-toolbar-group-label";
+      empty.textContent = "No hosts saved yet -- add one in Remote Bridge.";
+      group.appendChild(empty);
+      wb.appendChild(row);
+      return;
+    }
+
+    devices.forEach(function (device) {
+      var id = String(device.id || "");
+      var name = String(device.name || id);
+      group.appendChild(hilToolbarButton(
+        "link",
+        name,
+        "Stream this machine's card to " + name,
+        function () {
+          hilStreamToHost(device, actions, container, leaf);
+        },
+        id === selected,
+        state.cardBridgeLaunchInFlight
+      ));
+    });
+    wb.appendChild(row);
+  }
+
+  async function hilStreamToHost(device, actions, container, leaf) {
+    var state = commandState.hilWorkbench;
+    if (state.cardBridgeLaunchInFlight) return;
+    try {
+      if (typeof cbRigApplyHost === "function") {
+        await cbRigApplyHost(device);
+      }
+    } catch (err) {
+      state.errorText = String((err && err.message) || err);
+      renderHilWorkbench(container, actions, leaf);
+      return;
+    }
+    state.streamChooserOpen = false;
+    var launched = await hilLaunchCardBridgeRig(actions, container, leaf);
+    if (!launched) return;
+    // The rig start has already brought the HIL service up on the rig
+    // (its rpi_hil_service step). Starting one here would look for a
+    // SIMtrace2 on this machine and time out; what is left to do is
+    // follow the capture that rig is now producing.
+    hilFollowLiveCapture(actions, container, leaf);
   }
 
   function hilToolbarButton(iconName, labelText, titleText, onClick, active, disabled) {
@@ -6526,6 +6798,7 @@
     btn.className = "cc-hil-action-btn" + (active ? " is-active" : "");
     btn.title = titleText || labelText || "";
     btn.disabled = !!disabled;
+    if (active !== undefined) btn.setAttribute("aria-pressed", String(!!active));
     var icon = document.createElement("span");
     icon.className = "cc-hil-action-icon";
     ccSetActionIcon(icon, iconName || "action");
@@ -6538,6 +6811,161 @@
       btn.addEventListener("click", onClick);
     }
     return btn;
+  }
+
+  function hilToolbarGroup(toolbar, labelText) {
+    var group = document.createElement("div");
+    group.className = "cc-hil-toolbar-group";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", labelText);
+    var label = document.createElement("span");
+    label.className = "cc-hil-toolbar-group-label";
+    label.textContent = labelText;
+    group.appendChild(label);
+    toolbar.appendChild(group);
+    return group;
+  }
+
+  function hilRemoteBridgeTarget() {
+    try {
+      if (typeof cbRigSelectedHostName === "function") {
+        var named = cbRigSelectedHostName();
+        if (named) return named;
+      }
+      if (typeof cbRigReadField === "function") {
+        return cbRigReadField("cb-rig-ssh-target") || "";
+      }
+    } catch (_err) {
+      return "";
+    }
+    return "";
+  }
+
+  function hilRemoteBridgeIsRunning() {
+    // The bridge on the rig, not the Card Bridge on this machine: a
+    // local bridge also runs for a Remote Lab card offer, and reading
+    // that as a stream would both hide the rig chooser and point this
+    // button at a teardown nothing here started. The rig poll writes
+    // the flag on every status refresh, start and stop, including the
+    // ones this toolbar fires; the module's own flag covers the window
+    // before that poll has ever answered.
+    try {
+      if (cbState.lastRemoteBridgeRunning === true) return true;
+      if (cbState.lastRemoteBridgeRunning === false) return false;
+    } catch (_err) {
+      // The rig module has not loaded; fall back on what was started here.
+    }
+    return !!commandState.hilWorkbench.cardBridgeRigActive;
+  }
+
+  function hilRemoteBridgeButtonTitle(running) {
+    // Start and this button sit side by side and do opposite things, so
+    // the difference is spelled out rather than implied: Start runs a
+    // bridge here, this one puts the card on another machine's modem.
+    var target = hilRemoteBridgeTarget();
+    if (running) {
+      if (!target) {
+        return (
+          "Stop the remote stream: the bridge on this machine, the SSH "
+          + "tunnel and the services on the rig. Stop, beside it, ends "
+          + "the supervised session here instead."
+        );
+      }
+      return (
+        "Stop the stream to " + target + ": the bridge on this machine, "
+        + "the SSH tunnel and the services on that rig. Stop, beside it, "
+        + "ends the supervised session here instead."
+      );
+    }
+    if (!target) {
+      return (
+        "Send this machine's card to a remote host's modem. Start, beside "
+        + "it, runs a bridge on this machine instead. No host is chosen "
+        + "yet: pick one under APDU Streaming, Remote Bridge."
+      );
+    }
+    return (
+      "Send this machine's card to the modem on " + target
+      + ". Start, beside it, runs a bridge on this machine instead."
+    );
+  }
+
+  // Backend actions that are not part of the session/source/view flow
+  // (status probes, service control, bridge configuration) live behind
+  // one overflow menu. A <details> element needs no open/close script
+  // of its own; the two document listeners that dismiss it are
+  // installed once per page.
+  function hilMoreMenu(extraActions) {
+    hilInstallMoreMenuDismiss();
+    var details = document.createElement("details");
+    details.className = "cc-hil-more";
+    var summary = document.createElement("summary");
+    summary.className = "cc-hil-action-btn cc-hil-more-summary";
+    summary.title = "Backend HIL actions: status probes, service control, bridge configuration";
+    var icon = document.createElement("span");
+    icon.className = "cc-hil-action-icon";
+    ccSetActionIcon(icon, "more");
+    var label = document.createElement("span");
+    label.className = "cc-hil-action-label";
+    label.textContent = "More";
+    var count = document.createElement("span");
+    count.className = "cc-hil-more-count";
+    count.textContent = String(extraActions.length);
+    summary.appendChild(icon);
+    summary.appendChild(label);
+    summary.appendChild(count);
+    details.appendChild(summary);
+    var menu = document.createElement("div");
+    menu.className = "cc-hil-more-menu";
+    menu.setAttribute("role", "menu");
+    extraActions.forEach(function (action) {
+      var item = document.createElement("button");
+      item.type = "button";
+      item.className = "cc-hil-more-item";
+      item.setAttribute("role", "menuitem");
+      var itemIcon = document.createElement("span");
+      itemIcon.className = "cc-hil-action-icon";
+      ccSetActionIcon(itemIcon, _ccResolveIcon(action.id));
+      var text = document.createElement("span");
+      text.className = "cc-hil-more-item-text";
+      var title = document.createElement("span");
+      title.className = "cc-hil-more-item-title";
+      title.textContent = action.title || action.id;
+      text.appendChild(title);
+      if (action.description) {
+        var desc = document.createElement("span");
+        desc.className = "cc-hil-more-item-desc";
+        desc.textContent = action.description;
+        text.appendChild(desc);
+      }
+      item.appendChild(itemIcon);
+      item.appendChild(text);
+      item.addEventListener("click", function () {
+        details.open = false;
+        _ccBuildActionPopout(action);
+      });
+      menu.appendChild(item);
+    });
+    details.appendChild(menu);
+    return details;
+  }
+
+  function hilInstallMoreMenuDismiss() {
+    if (hilMoreMenuDismissInstalled) return;
+    hilMoreMenuDismissInstalled = true;
+    document.addEventListener("click", function (event) {
+      document.querySelectorAll(".cc-hil-more[open]").forEach(function (menu) {
+        if (!menu.contains(event.target)) menu.open = false;
+      });
+    }, true);
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape") return;
+      document.querySelectorAll(".cc-hil-more[open]").forEach(function (menu) {
+        menu.open = false;
+        var summary = menu.querySelector("summary");
+        if (summary && typeof summary.focus === "function") summary.focus();
+      });
+    }, true);
   }
 
   function hilFindAction(actions, actionId) {
@@ -6670,20 +7098,20 @@
     }
   }
 
-	  async function hilStartLiveSession(actions, container, leaf) {
-	    var state = commandState.hilWorkbench;
-	    if (state.startInFlight || state.stopInFlight) return;
-	    var activeReader = ccActiveReaderName();
-	    if (!activeReader) {
-	      state.errorText = "Select a top-bar reader before starting HIL.";
-	      state.actionStatusText = state.errorText;
-	      renderHilWorkbench(container, actions, leaf);
-	      setStatusAction(state.errorText);
-	      return;
-	    }
-	    if (!hilFindAction(actions, "hil.session_start")) {
-	      state.errorText = "HIL start action is not registered by the backend.";
-	      renderHilWorkbench(container, actions, leaf);
+  async function hilStartLiveSession(actions, container, leaf) {
+    var state = commandState.hilWorkbench;
+    if (state.startInFlight || state.stopInFlight) return;
+    var activeReader = ccActiveReaderName();
+    if (!activeReader) {
+      state.errorText = "Select a top-bar reader before starting HIL.";
+      state.actionStatusText = state.errorText;
+      renderHilWorkbench(container, actions, leaf);
+      setStatusAction(state.errorText);
+      return;
+    }
+    if (!hilFindAction(actions, "hil.session_start")) {
+      state.errorText = "HIL start action is not registered by the backend.";
+      renderHilWorkbench(container, actions, leaf);
       return;
     }
     state.startInFlight = true;
@@ -6707,8 +7135,8 @@
     state.lastRenderedRawId = 0;
     state.refreshQueuedForce = false;
     state.refreshQueuedSelectedFrame = null;
-	    state.readerName = activeReader;
-	    state.readerIndex = -1;
+    state.readerName = activeReader;
+    state.readerIndex = -1;
     state.selectedFrameNumber = null;
     state.selectionFollowsTail = true;
     state.liveBaselinePending = true;
@@ -6727,12 +7155,16 @@
     state.actionStatusText = "starting HIL session";
     state.errorText = "";
     renderHilWorkbench(container, actions, leaf);
+    // Every outcome below funnels into the single render in ``finally``
+    // so the toolbar is rebuilt once, with the final state, instead of
+    // twice in a row.
+    var baselineReady = false;
     try {
-	      var resp = await hilRunActionRequest("hil.session_start", {
-	        mode: "decoded",
-	        reader_name: activeReader,
-	        reader_index: "",
-	      });
+      var resp = await hilRunActionRequest("hil.session_start", {
+        mode: "decoded",
+        reader_name: activeReader,
+        reader_index: "",
+      });
       var data = resp && resp.data ? resp.data : {};
       if (!resp || !resp.ok || data.ok === false) {
         state.armed = false;
@@ -6741,7 +7173,6 @@
         state.statusText = "start failed";
         state.errorText = (resp && resp.error) || data.note || "HIL start failed";
         state.actionStatusText = state.errorText;
-        renderHilWorkbench(container, actions, leaf);
         return;
       }
       state.armed = true;
@@ -6751,9 +7182,7 @@
       state.captureSource = String(data.capture_source || state.captureSource || "");
       state.actionStatusText = data.note ? String(data.note) : "HIL session active";
       hilApplyReaderBinding(data);
-      var baselineReady = await hilEstablishLiveBaseline();
-      renderHilWorkbench(container, actions, leaf);
-      if (baselineReady) hilRefreshSnapshot({ force: false });
+      baselineReady = await hilEstablishLiveBaseline();
     } catch (err) {
       state.armed = false;
       hilClearReaderBinding();
@@ -6761,11 +7190,11 @@
       state.statusText = "start failed";
       state.errorText = String((err && err.message) || err);
       state.actionStatusText = state.errorText;
-      renderHilWorkbench(container, actions, leaf);
     } finally {
       state.startInFlight = false;
       if (commandState.activeSubsystem === "HIL") {
         renderHilWorkbench(container, actions, leaf);
+        if (baselineReady) hilRefreshSnapshot({ force: false });
       }
     }
   }
@@ -6778,32 +7207,8 @@
     }
     if (state.startMode === "remote" || state.captureSource === "remote") {
       state.armed = false;
-      state.rows = [];
-      state.annotations = {};
-      state.detail = "";
-      state.bytes = "";
-      state.detailRanges = [];
-      state.detailFrameNumber = 0;
-      state.rawRows = [];
-      state.rawPendingRows = [];
-      state.rawPendingDropCount = 0;
-      state.rawSnapshotSeeded = false;
-      state.rawFrameSeen = {};
-      state.rawClearedFrameNumber = 0;
-      state.lastRenderedRawId = 0;
-      state.refreshQueuedForce = false;
-      state.refreshQueuedSelectedFrame = null;
-      state.captureSize = 0;
-      state.captureMtime = 0;
-      state.captureSource = "";
+      hilResetSessionViewState();
       hilClearReaderBinding();
-      state.selectedFrameNumber = null;
-      state.selectionFollowsTail = true;
-      hilResetLiveBaseline();
-      hilResetDetailScroll();
-      hilResetPacketSections();
-      state.followTail = true;
-      hilResetPacketScroll();
       state.statusText = "detached";
       state.actionStatusText = "Remote HIL view detached.";
       stopHilWorkbenchRuntime();
@@ -6825,44 +7230,18 @@
         state.statusText = "stop failed";
         state.errorText = (resp && resp.error) || data.note || "HIL stop failed";
         state.actionStatusText = state.errorText;
-        renderHilWorkbench(container, actions, leaf);
         return;
       }
       state.armed = false;
-      state.rows = [];
-      state.annotations = {};
-      state.detail = "";
-      state.bytes = "";
-      state.detailRanges = [];
-      state.detailFrameNumber = 0;
-      state.rawRows = [];
-      state.rawPendingRows = [];
-      state.rawPendingDropCount = 0;
-      state.rawSnapshotSeeded = false;
-      state.rawFrameSeen = {};
-      state.rawClearedFrameNumber = 0;
-      state.lastRenderedRawId = 0;
-      state.refreshQueuedForce = false;
-      state.refreshQueuedSelectedFrame = null;
-      state.captureSize = 0;
-      state.captureMtime = 0;
+      hilResetSessionViewState();
       hilClearReaderBinding();
-      state.selectedFrameNumber = null;
-      state.selectionFollowsTail = true;
-      hilResetLiveBaseline();
-      hilResetDetailScroll();
-      hilResetPacketSections();
-      state.followTail = true;
-      hilResetPacketScroll();
       state.statusText = data.note ? String(data.note) : "stopped";
       state.actionStatusText = state.statusText;
       stopHilWorkbenchRuntime();
-      renderHilWorkbench(container, actions, leaf);
     } catch (err) {
       state.statusText = "stop failed";
       state.errorText = String((err && err.message) || err);
       state.actionStatusText = state.errorText;
-      renderHilWorkbench(container, actions, leaf);
     } finally {
       state.stopInFlight = false;
       if (commandState.activeSubsystem === "HIL") {
@@ -6871,12 +7250,44 @@
     }
   }
 
+  // Shared by the stop and detach paths: drop every decoded/raw row and
+  // the selection so the next start begins from an empty view.
+  function hilResetSessionViewState() {
+    var state = commandState.hilWorkbench;
+    state.rows = [];
+    state.annotations = {};
+    state.detail = "";
+    state.bytes = "";
+    state.detailRanges = [];
+    state.detailFrameNumber = 0;
+    state.rawRows = [];
+    state.rawPendingRows = [];
+    state.rawPendingDropCount = 0;
+    state.rawSnapshotSeeded = false;
+    state.rawFrameSeen = {};
+    state.rawClearedFrameNumber = 0;
+    state.lastRenderedRawId = 0;
+    state.refreshQueuedForce = false;
+    state.refreshQueuedSelectedFrame = null;
+    state.captureSize = 0;
+    state.captureMtime = 0;
+    state.captureSource = "";
+    state.selectedFrameNumber = null;
+    state.selectionFollowsTail = true;
+    hilResetLiveBaseline();
+    hilResetDetailScroll();
+    hilResetPacketSections();
+    state.followTail = true;
+    hilResetPacketScroll();
+  }
+
   async function hilLaunchCardBridgeRig(actions, container, leaf) {
     var state = commandState.hilWorkbench;
-    if (state.cardBridgeLaunchInFlight) return;
+    if (state.cardBridgeLaunchInFlight) return false;
     state.cardBridgeLaunchInFlight = true;
     state.errorText = "";
     state.actionStatusText = "starting Remote Bridge rig";
+    var launched = false;
     renderHilWorkbench(container, actions, leaf);
     try {
       if (typeof cbRigStartAllFromSavedSettings !== "function") {
@@ -6890,20 +7301,67 @@
         var failure = describe(data, "Remote Bridge rig start failed.");
         state.errorText = failure;
         state.actionStatusText = failure;
+        launched = false;
       } else {
         state.errorText = "";
         state.actionStatusText = describe(data, "Remote host is active.");
+        state.cardBridgeRigActive = true;
+        launched = true;
       }
     } catch (err) {
       var message = String((err && err.message) || err);
       state.errorText = message;
       state.actionStatusText = message;
+      launched = false;
     } finally {
       state.cardBridgeLaunchInFlight = false;
       if (commandState.activeSubsystem === "HIL") {
         renderHilWorkbench(container, actions, leaf);
       }
     }
+    return launched;
+  }
+
+  async function hilStopCardBridgeRig(actions, container, leaf) {
+    var state = commandState.hilWorkbench;
+    if (state.cardBridgeStopInFlight || state.cardBridgeLaunchInFlight) return false;
+    state.cardBridgeStopInFlight = true;
+    state.streamChooserOpen = false;
+    state.errorText = "";
+    state.actionStatusText = "stopping Remote Bridge rig";
+    var stopped = false;
+    renderHilWorkbench(container, actions, leaf);
+    try {
+      if (typeof cbRigStopAllFromSavedSettings !== "function") {
+        throw new Error("Remote Bridge stop helper is unavailable.");
+      }
+      var data = await cbRigStopAllFromSavedSettings();
+      var describe = typeof cbRigDescribeAction === "function"
+        ? cbRigDescribeAction
+        : function (payload, fallback) { return (payload && payload.note) || fallback || ""; };
+      if (!data || data.ok === false) {
+        var failure = describe(data, "Remote Bridge rig stop failed.");
+        state.errorText = failure;
+        state.actionStatusText = failure;
+        stopped = false;
+      } else {
+        state.errorText = "";
+        state.actionStatusText = describe(data, "Remote host stopped.");
+        state.cardBridgeRigActive = false;
+        stopped = true;
+      }
+    } catch (err) {
+      var message = String((err && err.message) || err);
+      state.errorText = message;
+      state.actionStatusText = message;
+      stopped = false;
+    } finally {
+      state.cardBridgeStopInFlight = false;
+      if (commandState.activeSubsystem === "HIL") {
+        renderHilWorkbench(container, actions, leaf);
+      }
+    }
+    return stopped;
   }
 
   function renderHilDissectorTab(body) {
@@ -6921,7 +7379,140 @@
 
     var grid = document.createElement("div");
     grid.className = "cc-hil-dissector-grid";
+    grid.appendChild(hilBuildPacketListPane());
 
+    var columnDivider = hilPaneDivider("col", "Resize the context and frame panes");
+    grid.appendChild(columnDivider);
+
+    var detailPane = document.createElement("section");
+    detailPane.className = "cc-hil-pane cc-hil-detail-pane";
+    hilFillDetailPane(detailPane);
+    grid.appendChild(detailPane);
+
+    var sizes = hilReadPaneSizes();
+    function applyListWidth(width) {
+      var total = grid.clientWidth || 0;
+      var max = total > 0
+        ? Math.max(HIL_PANE_MIN_PX, total - HIL_PANE_MIN_PX)
+        : width;
+      var next = Math.min(Math.max(width, HIL_PANE_MIN_PX), max);
+      grid.style.gridTemplateColumns = next + "px 1px minmax(0, 1fr)";
+      return next;
+    }
+    if (Number(sizes.listWidth) > 0) {
+      applyListWidth(Number(sizes.listWidth));
+    }
+    hilInstallPaneDrag(columnDivider, {
+      axis: "x",
+      read: function () {
+        var pane = grid.firstChild;
+        return pane && pane.getBoundingClientRect
+          ? pane.getBoundingClientRect().width
+          : HIL_PANE_MIN_PX;
+      },
+      write: function (width) {
+        applyListWidth(width);
+      },
+      commit: function () {
+        var pane = grid.firstChild;
+        if (pane && pane.getBoundingClientRect) {
+          hilWritePaneSize("listWidth", pane.getBoundingClientRect().width);
+        }
+      },
+    });
+
+    body.appendChild(grid);
+    hilApplyByteHighlightClasses();
+  }
+
+  // Remembered per viewer, like the other view preferences: a pane size is
+  // a convenience, and losing it costs nothing but a drag.
+  var HIL_PANE_SIZE_KEY = "yggdrasim.hil.paneSizes";
+  var HIL_PANE_MIN_PX = 160;
+
+  function hilReadPaneSizes() {
+    try {
+      var raw = window.localStorage.getItem(HIL_PANE_SIZE_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch (_err) {}
+    return {};
+  }
+
+  function hilWritePaneSize(name, value) {
+    try {
+      var sizes = hilReadPaneSizes();
+      sizes[name] = Math.round(value);
+      window.localStorage.setItem(HIL_PANE_SIZE_KEY, JSON.stringify(sizes));
+    } catch (_err) {}
+  }
+
+  function hilPaneDivider(orientation, label) {
+    var divider = document.createElement("div");
+    divider.className = "cc-hil-pane-divider cc-hil-pane-divider--" + orientation;
+    divider.setAttribute("role", "separator");
+    divider.setAttribute("aria-orientation", orientation === "col" ? "vertical" : "horizontal");
+    divider.setAttribute("aria-label", label);
+    divider.tabIndex = 0;
+    return divider;
+  }
+
+  function hilInstallPaneDrag(divider, options) {
+    // Pointer capture rather than document-level listeners: the drag then
+    // survives the pointer leaving the handle, and ends with the gesture
+    // even if the pointer is released outside the window.
+    var opts = options || {};
+    var active = null;
+
+    divider.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0 && event.pointerType === "mouse") return;
+      active = {
+        id: event.pointerId,
+        origin: opts.axis === "x" ? event.clientX : event.clientY,
+        start: opts.read(),
+      };
+      divider.classList.add("is-dragging");
+      try {
+        divider.setPointerCapture(event.pointerId);
+      } catch (_err) {}
+      event.preventDefault();
+    });
+
+    divider.addEventListener("pointermove", function (event) {
+      if (!active || event.pointerId !== active.id) return;
+      var delta = (opts.axis === "x" ? event.clientX : event.clientY) - active.origin;
+      opts.write(active.start + delta);
+      event.preventDefault();
+    });
+
+    function finish(event) {
+      if (!active || (event && event.pointerId !== active.id)) return;
+      divider.classList.remove("is-dragging");
+      try {
+        divider.releasePointerCapture(active.id);
+      } catch (_err) {}
+      active = null;
+      if (typeof opts.commit === "function") opts.commit();
+    }
+
+    divider.addEventListener("pointerup", finish);
+    divider.addEventListener("pointercancel", finish);
+
+    // Keyboard: a separator that only answers to a pointer is unusable
+    // without one, and the handle is already focusable.
+    divider.addEventListener("keydown", function (event) {
+      var step = event.shiftKey ? 48 : 12;
+      var back = opts.axis === "x" ? "ArrowLeft" : "ArrowUp";
+      var forward = opts.axis === "x" ? "ArrowRight" : "ArrowDown";
+      if (event.key !== back && event.key !== forward) return;
+      opts.write(opts.read() + (event.key === back ? -step : step));
+      if (typeof opts.commit === "function") opts.commit();
+      event.preventDefault();
+    });
+  }
+
+  function hilBuildPacketListPane() {
+    var state = commandState.hilWorkbench;
     var listPane = document.createElement("section");
     listPane.className = "cc-hil-pane cc-hil-packet-pane";
     var listHead = document.createElement("div");
@@ -6956,8 +7547,8 @@
     list.addEventListener("lostpointercapture", function () {
       hilEndPacketPointerInteraction();
     });
-    if (!state.packetPointerReleaseListenersInstalled) {
-      state.packetPointerReleaseListenersInstalled = true;
+    if (!hilWindowPointerListenersInstalled) {
+      hilWindowPointerListenersInstalled = true;
       window.addEventListener("pointerup", function () {
         hilEndPacketPointerInteraction();
       }, true);
@@ -6966,54 +7557,201 @@
       }, true);
     }
     list.addEventListener("scroll", function () {
-      hilRememberPacketScroll(list);
-      if (!state.packetScrollRestoring) {
-        hilSchedulePacketVirtualRender(list);
-      }
+      if (hilRememberPacketScroll(list)) return;
+      hilSchedulePacketVirtualRender(list);
     });
     listPane.appendChild(list);
     renderHilPacketList(list);
-    grid.appendChild(listPane);
+    return listPane;
+  }
 
-    var detailPane = document.createElement("section");
-    detailPane.className = "cc-hil-pane cc-hil-detail-pane";
+  // Incremental repaint used by the poll loop and by frame selection:
+  // the status bar, the packet list and the frame detail each carry a
+  // render key, and only the parts whose key moved are rebuilt. Tearing
+  // the whole pane down on every changed 700 ms poll was the main
+  // source of HIL lag on busy captures.
+  function hilUpdateDissectorPane(body) {
+    var state = commandState.hilWorkbench;
+    var status = body.querySelector(":scope > .cc-hil-statusbar");
+    var grid = body.querySelector(":scope > .cc-hil-dissector-grid");
+    if (!status || !grid) {
+      renderHilDissectorTab(body);
+      return;
+    }
+    hilRenderStatusbar(status);
+    hilSyncDissectorError(body, grid);
+    var list = grid.querySelector(".cc-hil-packet-list");
+    if (list && list.getAttribute("data-render-key") !== hilPacketListRenderKey()) {
+      renderHilPacketList(list);
+    }
+    var detailPane = grid.querySelector(".cc-hil-detail-pane");
+    if (detailPane && state.detailRenderedKey !== hilDetailRenderKey()) {
+      hilFillDetailPane(detailPane);
+      hilApplyByteHighlightClasses();
+    }
+  }
+
+  function hilSyncDissectorError(body, grid) {
+    var state = commandState.hilWorkbench;
+    var text = String(state.errorText || "");
+    var existing = body.querySelector(":scope > .cc-error");
+    if (!text) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing) {
+      if (existing.textContent !== text) existing.textContent = text;
+      return;
+    }
+    body.insertBefore(renderErrorBlock(text), grid);
+  }
+
+  function hilPacketListRenderKey() {
+    var state = commandState.hilWorkbench;
+    var rows = state.rows || [];
+    return [
+      hilRowsRenderKey(rows),
+      state.viewMode === "context" ? hilContextTreeRenderKey(state.contextTree || []) : "",
+      String(state.viewMode || ""),
+      String(state.selectedFrameNumber || ""),
+      rows.length === 0 ? (state.inflight ? "loading" : (state.armed ? "armed" : "idle")) : "",
+    ].join("|");
+  }
+
+  function hilDetailRenderKey() {
+    var state = commandState.hilWorkbench;
+    return [
+      String(state.selectedFrameNumber || ""),
+      String(state.detailFrameNumber || 0),
+      String(Array.isArray(state.detailRanges) ? state.detailRanges.length : 0),
+      String(state.detail || ""),
+      String(state.bytes || ""),
+    ].join("|");
+  }
+
+  function hilFillDetailPane(detailPane) {
+    var state = commandState.hilWorkbench;
+    detailPane.innerHTML = "";
     var detailHead = document.createElement("div");
     detailHead.className = "cc-hil-pane-head";
     detailHead.textContent = state.selectedFrameNumber ? "Frame #" + state.selectedFrameNumber : "Frame";
     detailPane.appendChild(detailHead);
-    detailPane.appendChild(hilDecodedBlock("Decoded", state.detail || "No decoded frame selected.", "detail"));
-    detailPane.appendChild(hilBytesBlock("Bytes", state.bytes || "No byte view selected.", "bytes"));
-    grid.appendChild(detailPane);
+    var decoded = hilDecodedBlock("Decoded", state.detail || "No decoded frame selected.", "detail");
+    detailPane.appendChild(decoded);
 
-    body.appendChild(grid);
-    hilApplyByteHighlightClasses();
+    var rowDivider = hilPaneDivider("row", "Resize the decoded and bytes panes");
+    detailPane.appendChild(rowDivider);
+    detailPane.appendChild(hilBytesBlock("Bytes", state.bytes || "No byte view selected.", "bytes"));
+
+    var sizes = hilReadPaneSizes();
+    function applyDecodedHeight(height) {
+      var total = detailPane.clientHeight || 0;
+      var max = total > 0
+        ? Math.max(HIL_PANE_MIN_PX, total - HIL_PANE_MIN_PX)
+        : height;
+      var next = Math.min(Math.max(height, HIL_PANE_MIN_PX), max);
+      // Fixed basis on the top block, the bottom one takes what is left,
+      // so the split holds while the frame's content changes size.
+      decoded.style.flex = "0 0 " + next + "px";
+      return next;
+    }
+    if (Number(sizes.decodedHeight) > 0) {
+      applyDecodedHeight(Number(sizes.decodedHeight));
+    }
+    hilInstallPaneDrag(rowDivider, {
+      axis: "y",
+      read: function () {
+        return decoded.getBoundingClientRect().height;
+      },
+      write: function (height) {
+        applyDecodedHeight(height);
+      },
+      commit: function () {
+        hilWritePaneSize("decodedHeight", decoded.getBoundingClientRect().height);
+      },
+    });
+
+    state.detailRenderedKey = hilDetailRenderKey();
+  }
+
+  function hilFillStartGuide(host) {
+    host.classList.add("cc-hil-empty--guide");
+    var title = document.createElement("div");
+    title.className = "cc-hil-empty-title";
+    title.textContent = "No HIL session";
+    host.appendChild(title);
+    var steps = document.createElement("ol");
+    steps.className = "cc-hil-empty-steps";
+    [
+      "Select the PC/SC reader in the top bar.",
+      "Press Start to launch the supervised session and attach the decoder.",
+      "Or use Open pcap to inspect a saved capture.",
+    ].forEach(function (text) {
+      var item = document.createElement("li");
+      item.textContent = text;
+      steps.appendChild(item);
+    });
+    host.appendChild(steps);
   }
 
   function hilCapturePathFromRows(state) {
     return state.lastCapturePath || "";
   }
 
+  // EF.ICCID and EF.IMSI are read once per card session, usually within
+  // the first hundred frames, and the decoder backfills both onto every
+  // later frame of that session. Walking back from the newest frame
+  // therefore reports the card currently on the wire rather than the one
+  // a reset replaced.
+  function hilCardIdentity() {
+    var state = commandState.hilWorkbench;
+    var rows = state.rows || [];
+    var annotations = state.annotations || {};
+    var identity = { iccid: "", imsi: "" };
+    for (var index = rows.length - 1; index >= 0; index -= 1) {
+      var annotation = annotations[String(rows[index].number)];
+      if (!annotation) continue;
+      if (!identity.iccid) identity.iccid = String(annotation.card_session_iccid || "");
+      if (!identity.imsi) identity.imsi = String(annotation.card_session_imsi || "");
+      if (identity.iccid && identity.imsi) break;
+    }
+    return identity;
+  }
+
   function hilRenderStatusbar(status) {
     var state = commandState.hilWorkbench;
-    if (!status) return;
-    status.innerHTML = "";
-    status.appendChild(hilStatusChip("session", state.armed ? state.startMode || "live" : "stopped"));
-    status.appendChild(hilStatusChip("status", state.statusText));
+    if (!status) return false;
+    var chips = [];
+    chips.push(hilStatusChip("session", state.armed ? state.startMode || "live" : "stopped"));
+    chips.push(hilStatusChip("status", state.statusText));
     if (state.actionStatusText) {
-      status.appendChild(hilStatusChip("action", state.actionStatusText));
+      chips.push(hilStatusChip("action", state.actionStatusText));
     }
-    status.appendChild(hilStatusChip("packets", String(state.rows.length)));
-    status.appendChild(hilStatusChip("selected", state.selectedFrameNumber ? "#" + state.selectedFrameNumber : "-"));
+    chips.push(hilStatusChip("packets", String(state.rows.length)));
+    var identity = hilCardIdentity();
+    if (identity.iccid) chips.push(hilStatusChip("iccid", identity.iccid));
+    if (identity.imsi) chips.push(hilStatusChip("imsi", identity.imsi));
+    chips.push(hilStatusChip("selected", state.selectedFrameNumber ? "#" + state.selectedFrameNumber : "-"));
     hilRefreshTimerAnchor();
     hilActiveTimerStatusChips().forEach(function (chip) {
-      status.appendChild(chip);
+      chips.push(chip);
     });
     if (state.captureSource) {
-      status.appendChild(hilStatusChip("source", state.captureSource));
+      chips.push(hilStatusChip("source", state.captureSource));
     }
     var captureLabel = state.capturePath || hilCapturePathFromRows(state) || "live";
-    status.appendChild(hilStatusChip("capture", captureLabel));
-    if (state.paused) status.appendChild(hilStatusChip("paused", "yes"));
+    chips.push(hilStatusChip("capture", captureLabel));
+    if (state.paused) chips.push(hilStatusChip("paused", "yes"));
+    // The 500 ms timer ticker and every poll land here; skip the DOM
+    // swap when nothing the operator can see has changed.
+    var signature = chips.map(function (chip) { return chip.textContent; }).join(" | ");
+    if (status.getAttribute("data-signature") === signature) return false;
+    status.setAttribute("data-signature", signature);
+    status.innerHTML = "";
+    chips.forEach(function (chip) {
+      status.appendChild(chip);
+    });
+    return true;
   }
 
   function hilRefreshTimerStatusbar() {
@@ -7030,6 +7768,7 @@
     var state = commandState.hilWorkbench;
     if (!state || state.timerStatusTimerId !== null) return;
     state.timerStatusTimerId = setInterval(function () {
+      if (document.hidden) return;
       if (!hilRefreshTimerStatusbar()) {
         if (state.timerStatusTimerId !== null) {
           clearInterval(state.timerStatusTimerId);
@@ -7664,6 +8403,9 @@
     state.packetClientHeight = 0;
     state.packetScrollBottomGap = 0;
     state.lastPacketScrollAt = 0;
+    state.packetProgrammaticTop = null;
+    state.packetVirtualStart = -1;
+    state.packetVirtualCount = -1;
   }
 
   function hilStorePacketScroll(list, markUserScroll) {
@@ -7682,9 +8424,23 @@
     }
   }
 
-  function hilRememberPacketScroll(list) {
+  // A scroll event does not say who moved the list, and the event for a
+  // programmatic write is dispatched with the next rendering update, after
+  // any timer meant to bracket the write has already run. Matching the
+  // position the code asked for is the one test free of that ordering.
+  function hilConsumePacketProgrammaticScroll(list) {
     var state = commandState.hilWorkbench;
-    hilStorePacketScroll(list, !state.packetScrollRestoring);
+    var expected = state.packetProgrammaticTop;
+    if (typeof expected !== "number") return false;
+    if (Math.abs(Number(list.scrollTop || 0) - expected) > 1) return false;
+    state.packetProgrammaticTop = null;
+    return true;
+  }
+
+  function hilRememberPacketScroll(list) {
+    var programmatic = hilConsumePacketProgrammaticScroll(list);
+    hilStorePacketScroll(list, !programmatic);
+    return programmatic;
   }
 
   function hilCancelDeferredPacketRender() {
@@ -7770,7 +8526,7 @@
         hilSchedulePacketVirtualRender(list);
         return;
       }
-      renderHilPacketList(list, { preserveExactScroll: true });
+      renderHilPacketList(list, { preserveExactScroll: true, scrollOnly: true });
     }, 16);
   }
 
@@ -7819,41 +8575,34 @@
     hilRenderActivePaneOnly();
   }
 
+  // Runs straight after the reconcile, never from a frame callback. A
+  // deferred write lands once the compositor has applied another frame of
+  // the user's gesture, so it snaps the list back to where it was a frame
+  // earlier; at render rate that reads as a list moving a fraction of the
+  // distance the wheel asked for.
   function hilRestorePacketScroll(list, options) {
     var state = commandState.hilWorkbench;
     if (!list) return;
     var opts = options || {};
-    var applyScroll = function () {
-      state.packetScrollRestoring = true;
-      if (opts.preserveExactScroll) {
-        var exactMaxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
-        var exactTop = typeof opts.preservedTop === "number" && !isNaN(opts.preservedTop)
-          ? opts.preservedTop
-          : Number(state.packetScrollTop || 0);
-        list.scrollTop = Math.max(0, Math.min(exactTop, exactMaxTop));
-        hilStorePacketScroll(list, false);
-      } else if (state.followTail) {
-        list.scrollTop = list.scrollHeight || 0;
-        hilStorePacketScroll(list, false);
-      } else {
-        var maxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
-        var top = Number(state.packetScrollTop || 0);
-        if (typeof opts.preservedTop === "number" && !isNaN(opts.preservedTop)) {
-          top = opts.preservedTop;
-        }
-        top = Math.max(0, Math.min(top, maxTop));
-        list.scrollTop = top;
-        hilStorePacketScroll(list, false);
-      }
-      setTimeout(function () {
-        state.packetScrollRestoring = false;
-      }, 0);
-    };
-    if (window.requestAnimationFrame) {
-      window.requestAnimationFrame(applyScroll);
+    var maxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
+    var want;
+    if (!opts.preserveExactScroll && state.followTail) {
+      want = maxTop;
+    } else if (typeof opts.preservedTop === "number" && !isNaN(opts.preservedTop)) {
+      want = opts.preservedTop;
     } else {
-      setTimeout(applyScroll, 0);
+      want = Number(state.packetScrollTop || 0);
     }
+    want = Math.max(0, Math.min(want, maxTop));
+    // Equal-height rows behind exact spacers hold scrollHeight constant, so
+    // swapping the window leaves the position untouched and there is nothing
+    // to correct. Only a reconcile that moved it -- a collapsed section, a
+    // shorter list, a tail jump -- earns a write.
+    if (Math.abs(Number(list.scrollTop || 0) - want) > 1) {
+      state.packetProgrammaticTop = want;
+      list.scrollTop = want;
+    }
+    hilStorePacketScroll(list, false);
   }
 
   function hilResetLiveBaseline() {
@@ -7898,13 +8647,20 @@
       ? opts.preservedTop
       : (list.childNodes.length > 0 ? Number(list.scrollTop || 0) : null);
     var items = [];
-    list.innerHTML = "";
+    list.setAttribute("data-render-key", hilPacketListRenderKey());
     if (!state.rows || state.rows.length === 0) {
+      state.packetVirtualStart = -1;
+      state.packetVirtualCount = -1;
+      list.innerHTML = "";
       var empty = document.createElement("div");
       empty.className = "cc-hil-empty";
-      empty.textContent = state.inflight
-        ? "Loading packets..."
-        : (state.armed ? "No decoded packets." : "Start HIL or open a pcap to attach the dissector.");
+      if (state.inflight) {
+        empty.textContent = "Loading packets...";
+      } else if (state.armed) {
+        empty.textContent = "No decoded packets yet.";
+      } else {
+        hilFillStartGuide(empty);
+      }
       list.appendChild(empty);
       return;
     }
@@ -7914,14 +8670,21 @@
       items = hilBuildFlatPacketItems(state.rows, state.annotations || {});
     }
     if (items.length === 0) {
+      state.packetVirtualStart = -1;
+      state.packetVirtualCount = -1;
+      list.innerHTML = "";
       var noVisible = document.createElement("div");
       noVisible.className = "cc-hil-empty";
       noVisible.textContent = "No visible packets.";
       list.appendChild(noVisible);
       return;
     }
+    // The item path clears nothing: the reconcile below owns the children,
+    // and wiping them first would replace every row on every poll, which is
+    // the flicker this exists to remove.
     hilRenderPacketItems(list, items, {
       preserveExactScroll: !!opts.preserveExactScroll,
+      scrollOnly: !!opts.scrollOnly,
       preservedTop: preservedScrollTop,
     });
   }
@@ -8019,14 +8782,103 @@
     if (end - start < visibleCount) {
       start = Math.max(0, end - visibleCount);
     }
-    list.appendChild(hilPacketSpacer(start * rowHeight, "top"));
-    for (var i = start; i < end; i++) {
-      list.appendChild(hilPacketRenderItem(items[i]));
+    // Scrolling inside the overscan changes nothing that is mounted, so the
+    // reconcile and its scroll correction are skipped entirely. Without this
+    // a wheel gesture reconciles the whole window once per frame.
+    if (
+      opts.scrollOnly
+      && state.packetVirtualStart === start
+      && state.packetVirtualCount === items.length
+      && list.children.length > 0
+    ) {
+      return;
     }
-    list.appendChild(hilPacketSpacer((items.length - end) * rowHeight, "bottom"));
+    state.packetVirtualStart = start;
+    state.packetVirtualCount = items.length;
+    var topHeight = start * rowHeight;
+    var bottomHeight = (items.length - end) * rowHeight;
+    var desired = [
+      {
+        key: "spacer|top",
+        create: function () { return hilPacketSpacer(topHeight, "top"); },
+        update: function (node) { hilSetSpacerHeight(node, topHeight); },
+      },
+    ];
+    for (var i = start; i < end; i++) {
+      desired.push(hilPacketDesiredEntry(items[i]));
+    }
+    desired.push({
+      key: "spacer|bottom",
+      create: function () { return hilPacketSpacer(bottomHeight, "bottom"); },
+      update: function (node) { hilSetSpacerHeight(node, bottomHeight); },
+    });
+    hilReconcilePacketChildren(list, desired);
     hilRestorePacketScroll(list, {
       preserveExactScroll: !!opts.preserveExactScroll,
       preservedTop: targetTop,
+    });
+  }
+
+  function hilPacketItemKey(item) {
+    if (item && item.kind === "header") {
+      return "h|" + hilContextSectionKey(item.item) + "|" + (item.open ? "1" : "0");
+    }
+    var state = commandState.hilWorkbench;
+    var row = (item && item.row) || {};
+    var opts = (item && item.options) || {};
+    var annotation = (item && item.annotation) || null;
+    var frameNumber = parseInt(row.number || 0, 10);
+    // Everything the row renders from. A frame's decoded content does not
+    // change once it has arrived, so in practice this only moves when the
+    // selection or an annotation does.
+    return [
+      "p",
+      String(frameNumber),
+      state.selectedFrameNumber === frameNumber ? "1" : "0",
+      String(opts.depth || 0),
+      String(opts.groupName || ""),
+      String(opts.primary || ""),
+      String(opts.secondary || ""),
+      annotation && annotation.active_channel_count
+        ? String(annotation.active_channel_count)
+        : "",
+    ].join("|");
+  }
+
+  function hilReconcilePacketChildren(list, desired) {
+    // Rebuilding the list wholesale replaces the row under the pointer on
+    // every poll, which resets hover and flickers the cursor between
+    // states while packets keep arriving. Rows whose key is unchanged keep
+    // their DOM node instead, so only what actually differs is touched.
+    var reusable = {};
+    Array.prototype.forEach.call(list.children, function (child) {
+      var key = child.getAttribute && child.getAttribute("data-packet-key");
+      if (key && !reusable[key]) reusable[key] = child;
+    });
+
+    var next = [];
+    desired.forEach(function (entry) {
+      var node = reusable[entry.key];
+      if (node) {
+        delete reusable[entry.key];
+      } else {
+        node = entry.create();
+        node.setAttribute("data-packet-key", entry.key);
+      }
+      if (typeof entry.update === "function") entry.update(node);
+      next.push(node);
+    });
+
+    Array.prototype.slice.call(list.children).forEach(function (child) {
+      if (next.indexOf(child) === -1 && child.parentNode === list) {
+        list.removeChild(child);
+      }
+    });
+
+    next.forEach(function (node, index) {
+      if (list.childNodes[index] !== node) {
+        list.insertBefore(node, list.childNodes[index] || null);
+      }
     });
   }
 
@@ -8039,6 +8891,34 @@
       item && item.annotation || null,
       item && item.options || null
     );
+  }
+
+  function hilPacketDesiredEntry(item) {
+    var entry = {
+      key: hilPacketItemKey(item),
+      create: function () { return hilPacketRenderItem(item); },
+    };
+    if (item && item.kind === "header") {
+      entry.update = function (node) {
+        var header = item.item || {};
+        var text = String(header.display || header.label || "");
+        var label = node.querySelector && node.querySelector(".cc-hil-context-label");
+        if (label && label.textContent !== text) label.textContent = text;
+        // Depth moves when a card reset splits the tree into sessions, so
+        // a reused node would otherwise keep the indent it was built with.
+        var depth = Math.max(0, parseInt(header.depth || 0, 10) || 0);
+        var padding = String(10 + (depth * 18)) + "px";
+        if (node.style && node.style.paddingLeft !== padding) {
+          node.style.paddingLeft = padding;
+        }
+      };
+    }
+    return entry;
+  }
+
+  function hilSetSpacerHeight(node, height) {
+    var next = String(Math.max(0, Math.round(height || 0))) + "px";
+    if (node.style.height !== next) node.style.height = next;
   }
 
   function hilPacketSpacer(height, position) {
@@ -8246,13 +9126,23 @@
 
     var input = $("hil-modem-command");
     var current = String((input && input.value) || state.modemShellCommand || "").trim();
+    // A command is remembered across sessions, but which machine it opens
+    // is decided by whether a rig is streaming -- and that changes under
+    // it. A remembered local command left over from no-rig-running then
+    // opens this machine's ports while a rig holds the bench, which reads
+    // only as "no such device". Keep an override within its own context,
+    // not across a change of host.
+    var currentIsRemote = /^ssh(\s|$)/.test(current);
+    var nextIsRemote = /^ssh(\s|$)/.test(next);
     if (
       current.length === 0
       || current === previous
       || (current === HIL_MODEM_DEFAULT_COMMAND && next !== HIL_MODEM_DEFAULT_COMMAND)
+      || currentIsRemote !== nextIsRemote
     ) {
       state.modemShellCommand = next;
       if (input) input.value = next;
+      hilSaveModemShellCommand(next, { persist: true });
     }
     if (input) input.placeholder = next;
   }
@@ -8445,15 +9335,19 @@
     body.appendChild(shell);
     hilAttachModemShellTerminal(terminalHost);
     hilRenderModemShellMetadata();
-    if (!state.modemShellCapability && !state.modemShellMetadataLoading) {
-      hilLoadModemShellMetadata({ force: false });
-    }
+    // The resolved command depends on whether a remote rig is running, and
+    // that changes while this tab sits in the background. Loading the
+    // snapshot only once left a session started later pointed at the
+    // local port instead of the rig. The loader throttles itself.
+    hilLoadModemShellMetadata({ force: false });
   }
 
   async function hilLoadModemShellMetadata(options) {
     var opts = options || {};
     var state = commandState.hilWorkbench;
     if (state.modemShellMetadataLoading && !opts.force) return;
+    var loadedAt = Number(state.modemShellMetadataLoadedAt || 0);
+    if (!opts.force && loadedAt > 0 && (Date.now() - loadedAt) < 4000) return;
     state.modemShellMetadataLoading = true;
     hilRenderModemShellMetadata();
     try {
@@ -8469,6 +9363,7 @@
       state.modemShellErrorText = String((err && err.message) || err);
     } finally {
       state.modemShellMetadataLoading = false;
+      state.modemShellMetadataLoadedAt = Date.now();
       hilRenderModemShellMetadata();
     }
   }
@@ -8527,8 +9422,24 @@
     if (input) input.placeholder = hilPreferredModemShellCommand();
 
     if (!status) return;
+    // Where the command runs is not visible in the command itself, and a
+    // local one against a rig's port opens nothing and says only "no such
+    // file". Name the host, and say when the two disagree.
+    var target = String(state.modemShellRemoteTarget || "").trim();
+    var typed = String((input && input.value) || state.modemShellCommand || "").trim();
+    var runsRemote = /^ssh(\s|$)/.test(typed);
+    var whereSuffix = "";
+    if (typed) {
+      if (runsRemote) {
+        whereSuffix = " -- on " + (hilModemCommandTarget(typed) || "the remote host");
+      } else if (target) {
+        whereSuffix = " -- on this machine, not " + target;
+      } else {
+        whereSuffix = " -- on this machine";
+      }
+    }
     if (running) {
-      status.textContent = state.modemShellStatusText || "running";
+      status.textContent = (state.modemShellStatusText || "running") + whereSuffix;
     } else if (state.modemShellErrorText) {
       status.textContent = "error: " + state.modemShellErrorText;
     } else if (state.modemShellMetadataLoading) {
@@ -8536,8 +9447,20 @@
     } else if (capDisabled) {
       status.textContent = "disabled: " + String(capability.reason || "not available");
     } else {
-      status.textContent = state.modemShellStatusText || "idle";
+      status.textContent = (state.modemShellStatusText || "idle") + whereSuffix;
     }
+  }
+
+  function hilModemCommandTarget(command) {
+    // The ssh target is the first bare word after the options.
+    var parts = String(command || "").trim().split(/\s+/);
+    for (var i = 1; i < parts.length; i += 1) {
+      var word = parts[i];
+      if (word === "-o" || word === "-i") { i += 1; continue; }
+      if (word.charAt(0) === "-") continue;
+      return word;
+    }
+    return "";
   }
 
   function hilUseSelectedModemDevice() {
@@ -9112,23 +10035,28 @@
     var state = commandState.hilWorkbench;
     var rawVisible = hilRawPaneIsVisible();
     var limit = hilRawTraceLimit();
+    var shifted = false;
     while (state.rawRows.length > limit) {
-      var shifted = state.rawRows.shift();
+      var dropped = state.rawRows.shift();
+      shifted = true;
       if (rawVisible) {
         state.rawPendingDropCount = Number(state.rawPendingDropCount || 0) + 1;
       }
-      var shiftedFrame = hilRawTraceFrameFromId(shifted && shifted.id);
-      if (shiftedFrame && state.rawFrameSeen) {
-        delete state.rawFrameSeen[String(shiftedFrame)];
+      var droppedFrame = hilRawTraceFrameFromId(dropped && dropped.id);
+      if (droppedFrame && state.rawFrameSeen) {
+        delete state.rawFrameSeen[String(droppedFrame)];
       }
     }
+    // The seen-frame sweep walks every retained row; only pay for it
+    // when the ring actually dropped an entry.
+    if (!shifted || !state.rawFrameSeen) return;
     var minFrame = null;
     (state.rawRows || []).forEach(function (row) {
       var frame = hilRawTraceFrameFromId(row && row.id);
       if (!frame) return;
       if (minFrame === null || frame < minFrame) minFrame = frame;
     });
-    if (minFrame === null || !state.rawFrameSeen) return;
+    if (minFrame === null) return;
     Object.keys(state.rawFrameSeen).forEach(function (key) {
       var frame = parseInt(key, 10);
       if (!isNaN(frame) && frame < minFrame) delete state.rawFrameSeen[key];
@@ -9349,6 +10277,7 @@
             context_after_frame: contextAfterFrame,
             known_capture_size: state.captureSize || 0,
             known_capture_mtime: state.captureMtime || 0,
+            known_detail_frame: Number(state.detailFrameNumber || 0),
             limit: hilPacketFetchLimit(),
           },
         }),
@@ -9366,6 +10295,10 @@
       shouldRender = true;
     } finally {
       state.inflight = false;
+      // Keep the decode duty cycle at or below one half: a poll that took
+      // 900 ms is not followed by another one 700 ms after it started.
+      var refreshDurationMs = Math.max(0, Date.now() - Number(state.lastRefreshAt || 0));
+      state.nextPollNotBefore = Date.now() + refreshDurationMs;
       if (commandState.activeSubsystem === "HIL" && (shouldRender || opts.force)) {
         if (hilShouldDeferPacketRender(opts)) {
           hilScheduleDeferredPacketRender();
@@ -9390,7 +10323,12 @@
     var state = commandState.hilWorkbench;
     if (opts.force) return true;
     if (state.activeTab !== "dissector") return false;
-    if (!selectedFrame) return true;
+    if (!selectedFrame) {
+      // Following the tail: while frames are still streaming in, skip
+      // the three per-frame tshark passes and let the decoded pane
+      // catch up once the stream pauses.
+      return !state.lastPollAddedRows;
+    }
     if (Number(state.detailFrameNumber || 0) !== Number(selectedFrame || 0)) return true;
     var detailText = String(state.detail || "");
     if (!detailText || detailText === "Loading decoded fields...") return true;
@@ -9403,11 +10341,36 @@
     var previousContextTreeKey = hilContextTreeRenderKey(state.contextTree || []);
     var previousStatus = state.lastStableStatusText || state.statusText || "";
     var previousError = state.errorText || "";
+    var previousCaptureSize = Number(state.captureSize || 0);
+    var incomingCaptureSize = Number(data.capture_size || 0);
+    // A failed remote sync falls back to a different file on this machine,
+    // so sizes from the two are not comparable: a stale local capture
+    // looks like a truncation, and its frames would then be merged into
+    // the live list as if they belonged to the rig.
+    var previousCapturePath = String(state.lastCapturePath || "");
+    var incomingCapturePath = String(data.capture_path || "");
+    var captureFileChanged = (
+      previousCapturePath.length > 0
+      && incomingCapturePath.length > 0
+      && incomingCapturePath !== previousCapturePath
+    );
+    // A rig restart truncates the capture and renumbers its frames from 1.
+    // The delta cursor is the highest frame already held, so it then sits
+    // past the end of the new capture, every later poll matches nothing,
+    // and the list stops updating without reporting anything. A capture
+    // that shrank is the signal to drop what was accumulated and refetch.
+    var captureRestarted = captureFileChanged || (
+      !captureFileChanged
+      && previousCaptureSize > 0
+      && incomingCaptureSize > 0
+      && incomingCaptureSize < previousCaptureSize
+    );
     state.captureSize = Number(data.capture_size || state.captureSize || 0);
     state.captureMtime = Number(data.capture_mtime || state.captureMtime || 0);
     if (data.not_modified === true) {
       state.statusText = previousStatus || "ok";
       state.errorText = "";
+      state.lastPollAddedRows = false;
       return previousError !== "" || !!hilActiveTimerSummary();
     }
     var rawRows = Array.isArray(data.rows) ? data.rows : [];
@@ -9421,6 +10384,16 @@
     var previousDetailRanges = Array.isArray(state.detailRanges) ? state.detailRanges : [];
     var previousDetailRangesKey = JSON.stringify(previousDetailRanges);
     var incremental = data.incremental === true;
+    if (captureRestarted) {
+      incremental = false;
+      state.rows = [];
+      state.annotations = {};
+      state.contextTree = [];
+      state.liveBaselineFrameNumber = 0;
+      state.liveBaselineCaptureSize = incomingCaptureSize;
+      state.liveBaselineCaptureMtime = Number(data.capture_mtime || 0);
+    }
+    state.lastPollAddedRows = incremental && incomingRows.length > 0;
     var nextRows = incremental
       ? hilMergePacketRows(state.rows || [], incomingRows)
       : incomingRows;
@@ -9444,6 +10417,24 @@
     if (filtered.baselineActive && incomingRows.length === 0 && data.ok !== false) {
       baseStatus = "waiting for new packets";
     }
+    if (captureRestarted) {
+      baseStatus = captureFileChanged
+        ? "capture source changed -- reloading packets"
+        : "capture restarted -- reloading packets";
+    }
+    // The server tail-slices a catch-up poll to its row limit. Saying so
+    // keeps the missing frames from reading as a gap in the card's traffic.
+    var droppedFrames = Number(data.dropped_frames || 0);
+    if (droppedFrames > 0) {
+      var throughFrame = Number(data.dropped_through_frame || 0);
+      var skipped = droppedFrames + " older frame"
+        + (droppedFrames === 1 ? "" : "s")
+        + " skipped to catch up"
+        + (throughFrame > 0 ? " (through #" + throughFrame + ")" : "");
+      // data.note carries the decode diagnostics on this path, so the gap
+      // is appended rather than written over them.
+      baseStatus = baseStatus ? baseStatus + " | " + skipped : skipped;
+    }
     state.statusText = baseStatus;
     state.errorText = data.ok === false ? String(data.note || "decode refresh failed") : "";
     var frameNumbers = {};
@@ -9453,7 +10444,11 @@
       frameNumbers[frameNumber] = true;
       lastFrameNumber = frameNumber;
     });
-    var selectedFromData = parseInt(data.selected_frame || 0, 10);
+    // ``selected_auto`` marks a frame the server picked itself (the tail)
+    // rather than one this client asked for; it carries the detail but
+    // must never pin the selection.
+    var detailFrameFromData = parseInt(data.selected_frame || 0, 10);
+    var selectedFromData = data.selected_auto === true ? 0 : detailFrameFromData;
     var selectedFromDataVisible = !!(selectedFromData && frameNumbers[selectedFromData]);
     var nextSelected = null;
     var nextFollowTail = !!state.followTail;
@@ -9484,7 +10479,7 @@
       state.bytes = "";
       state.detailRanges = [];
       state.detailFrameNumber = 0;
-    } else if (selectedFromDataVisible && selectedFromData === nextSelected && detailIncluded) {
+    } else if (detailFrameFromData && detailFrameFromData === nextSelected && detailIncluded) {
       state.detail = data.detail || "";
       state.bytes = data.bytes || "";
       state.detailRanges = Array.isArray(data.detail_ranges) ? data.detail_ranges : [];
@@ -9493,11 +10488,11 @@
       state.detail = previousDetail;
       state.bytes = previousBytes;
       state.detailRanges = previousDetailRanges;
-      if (!state.detailFrameNumber && previousDetail) {
+      if (!state.detailFrameNumber && previousDetail && previousDetail !== HIL_DETAIL_LIVE_HINT) {
         state.detailFrameNumber = nextSelected || 0;
       }
     } else {
-      state.detail = "";
+      state.detail = (!detailIncluded && nextSelectionFollowsTail) ? HIL_DETAIL_LIVE_HINT : "";
       state.bytes = "";
       state.detailRanges = [];
       state.detailFrameNumber = 0;
@@ -9607,6 +10602,9 @@
     }
     (existingRows || []).forEach(push);
     (incomingRows || []).forEach(push);
+    if (merged.length > HIL_PACKET_RETAIN_LIMIT) {
+      return merged.slice(merged.length - HIL_PACKET_RETAIN_LIMIT);
+    }
     return merged;
   }
 
@@ -9792,9 +10790,26 @@
     });
   }
 
+  // The ribbon tag places a form in the SAIP Tokens group, and the built-in
+  // universal test-value editor carries it next to the plugin's
+  // token-configuration manager. Only the manager speaks the catalogue and
+  // registry protocol below, so the tag alone never selects it: the form
+  // must also carry the inputs that protocol reads and writes.
+  var CC_SAIP_TOKEN_CONFIGURATION_MANAGER_INPUTS = [
+    "configuration_id",
+    "registry_json",
+    "reload_current",
+    "list_configurations",
+  ];
+
   function ccIsSaipTokenConfigurationManager(action) {
     var actionTags = action && Array.isArray(action.tags) ? action.tags : [];
-    return actionTags.indexOf(CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG) !== -1;
+    if (actionTags.indexOf(CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG) === -1) {
+      return false;
+    }
+    return CC_SAIP_TOKEN_CONFIGURATION_MANAGER_INPUTS.every(function (fieldName) {
+      return ccActionHasInput(action, fieldName);
+    });
   }
 
   function ccIsSaipTokenConfigurationGenerator(action) {
@@ -9832,7 +10847,7 @@
       : "Token configuration for template generation");
     var loading = document.createElement("option");
     loading.value = "";
-    loading.textContent = "Loading token configurations…";
+    loading.textContent = "Loading token configurations...";
     select.appendChild(loading);
     select.disabled = true;
     control.parentNode.replaceChild(select, control);
@@ -9916,7 +10931,8 @@
 
   async function ccFetchTokenConfigurationCatalogue() {
     var managerAction = ccFindCatalogueActionByTag(
-      CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG
+      CC_SAIP_TOKEN_CONFIGURATION_MANAGER_TAG,
+      ccIsSaipTokenConfigurationManager
     );
     if (!managerAction) {
       throw new Error("Token configuration manager action is unavailable.");
@@ -10089,9 +11105,236 @@
     }, 0);
   }
 
+  var CC_SAIP_UNIVERSAL_TOKENS_ACTION_ID = "saip.universal_tokens";
+
+  function ccIsSaipUniversalTokensEditor(action) {
+    return Boolean(action)
+      && action.id === CC_SAIP_UNIVERSAL_TOKENS_ACTION_ID
+      && ccActionHasInput(action, "contents");
+  }
+
+  var CC_SAIP_TOKEN_LIST_BROWSE = "__browse__";
+
+  // The editor's `list` input is a selector text ("universal", a library
+  // name, a path). The form shows it as a select fed by the catalogue every
+  // response carries; "Other file" reveals the `path` row and its picker.
+  function ccTokenListSelect(form) {
+    var control = form && form.elements.namedItem("list");
+    if (!control) return null;
+    if (String(control.tagName || "").toUpperCase() === "SELECT") return control;
+    var select = document.createElement("select");
+    select.id = control.id;
+    select.name = control.name;
+    select.className = control.className;
+    select.dataset.saipTokenListSelector = String(control.value || "universal");
+    select.setAttribute("aria-label", "Test-value list to view or edit");
+    var loading = document.createElement("option");
+    loading.value = String(control.value || "universal");
+    loading.textContent = "Loading lists\u2026";
+    select.appendChild(loading);
+    control.parentNode.replaceChild(select, control);
+    return select;
+  }
+
+  function ccTokenListPathRow(form) {
+    return ccActionFieldRow(form, "path");
+  }
+
+  function ccPopulateTokenListSelect(select, rows, selected) {
+    if (!select) return;
+    var wanted = String(selected || select.dataset.saipTokenListSelector || "universal");
+    select.innerHTML = "";
+    var listed = false;
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      if (!row || !row.selector) return;
+      var option = document.createElement("option");
+      option.value = String(row.selector);
+      var counts = typeof row.entry_count === "number"
+        ? " \u2014 " + row.entry_count + " entr" + (row.entry_count === 1 ? "y" : "ies")
+          + (row.problem_count ? ", " + row.problem_count + " rejected" : "")
+        : "";
+      option.textContent = String(row.name || row.selector)
+        + (row.exists === false ? " (missing)" : counts);
+      if (String(row.selector) === wanted) {
+        option.selected = true;
+        listed = true;
+      }
+      select.appendChild(option);
+    });
+    if (!listed && wanted && wanted !== CC_SAIP_TOKEN_LIST_BROWSE) {
+      var current = document.createElement("option");
+      current.value = wanted;
+      current.textContent = wanted;
+      current.selected = true;
+      select.appendChild(current);
+    }
+    var browse = document.createElement("option");
+    browse.value = CC_SAIP_TOKEN_LIST_BROWSE;
+    browse.textContent = "Other file\u2026";
+    if (wanted === CC_SAIP_TOKEN_LIST_BROWSE) browse.selected = true;
+    select.appendChild(browse);
+    select.dataset.saipTokenListSelector = String(select.value || "universal");
+  }
+
+  function ccApplyUniversalTokensContents(action, form, data) {
+    if (!form || !data) return false;
+    var applied = false;
+    var select = ccTokenListSelect(form);
+    var ref = data.list && typeof data.list === "object" ? data.list : null;
+    if (select && Array.isArray(data.lists)) {
+      var selector = ref && ref.selector ? String(ref.selector) : select.value;
+      var pathInput = form.elements.namedItem("path");
+      var pathText = pathInput ? String(pathInput.value || "").trim() : "";
+      ccPopulateTokenListSelect(
+        select,
+        data.lists,
+        ref && ref.kind === "path" && pathText ? CC_SAIP_TOKEN_LIST_BROWSE : selector
+      );
+      var pathRow = ccTokenListPathRow(form);
+      if (pathRow) pathRow.hidden = select.value !== CC_SAIP_TOKEN_LIST_BROWSE;
+      applied = true;
+    }
+    if (typeof data.contents === "string") {
+      var contentsInput = form.elements.namedItem("contents");
+      if (contentsInput) contentsInput.value = data.contents;
+      (action && action.inputs || []).forEach(function (field) {
+        if (field && field.name === "contents") field.default = data.contents;
+      });
+      form.dataset.saipTokenListDirty = "false";
+      applied = true;
+    }
+    var saveAs = form.elements.namedItem("save_as");
+    if (saveAs && (data.saved || data.deleted)) saveAs.value = "";
+    var deleteInput = form.elements.namedItem("delete");
+    if (deleteInput && deleteInput.type === "checkbox") deleteInput.checked = false;
+    return applied;
+  }
+
+  async function ccReadTokenList(action, form, runBtn, statusEl, resultEl, selector) {
+    var contentsInput = form.elements.namedItem("contents");
+    var select = ccTokenListSelect(form);
+    var previousRunDisabled = Boolean(runBtn.disabled);
+    runBtn.disabled = true;
+    if (contentsInput) contentsInput.disabled = true;
+    if (select) select.disabled = true;
+    ccSetActionStatus(statusEl, "running", "Reading the list\u2026");
+    try {
+      var pathInput = form.elements.namedItem("path");
+      var pathText = pathInput ? String(pathInput.value || "").trim() : "";
+      var inputs = {};
+      if (selector === CC_SAIP_TOKEN_LIST_BROWSE) {
+        if (pathText) inputs.path = pathText;
+        else inputs.list = "universal";
+      } else {
+        inputs.list = String(selector || "universal");
+      }
+      var response = await apiFetch(
+        "/api/actions/" + encodeURIComponent(action.id) + "/run",
+        { method: "POST", body: JSON.stringify({ inputs: inputs }) }
+      );
+      if (!response || !response.ok) {
+        throw new Error(
+          response && response.error
+            ? response.error
+            : "Could not read the list."
+        );
+      }
+      ccApplyUniversalTokensContents(action, form, response.data || {});
+      if (selector === CC_SAIP_TOKEN_LIST_BROWSE && select) {
+        ccPopulateTokenListSelect(select, response.data.lists, CC_SAIP_TOKEN_LIST_BROWSE);
+        var pathRow = ccTokenListPathRow(form);
+        if (pathRow) pathRow.hidden = false;
+      }
+      ccSetActionStatus(statusEl, "ready");
+    } catch (error) {
+      // An unreadable list is reported, not fatal: the operator can still
+      // type a list into the box and save it.
+      ccSetActionStatus(statusEl, "error", "Read error");
+      resultEl.innerHTML = "";
+      resultEl.appendChild(renderErrorBlock(
+        String(error && error.message || error)
+      ));
+      logBus.emit({
+        level: "error",
+        source: action.id,
+        message: String(error && error.message || error),
+      });
+    } finally {
+      runBtn.disabled = previousRunDisabled;
+      if (contentsInput) contentsInput.disabled = false;
+      if (select) select.disabled = false;
+    }
+  }
+
+  // The catalogue serialises a field default once, when the server imports
+  // the action module, so the contents box would show the list as it was at
+  // start-up and go stale after every save. Read the selected list when the
+  // form opens and whenever the selector changes; a run without Save is
+  // exactly that read.
+  function ccInitializeUniversalTokensEditor(
+    action, form, runBtn, statusEl, resultEl
+  ) {
+    var contentsInput = form && form.elements.namedItem("contents");
+    if (!contentsInput
+        || (form.dataset && form.dataset.saipUniversalTokensLoading === "true")) {
+      return;
+    }
+    form.dataset.saipUniversalTokensLoading = "true";
+    var select = ccTokenListSelect(form);
+    var pathRow = ccTokenListPathRow(form);
+    if (pathRow) pathRow.hidden = true;
+    contentsInput.addEventListener("input", function () {
+      form.dataset.saipTokenListDirty = "true";
+    });
+    if (select && select.dataset.saipTokenListChangeBound !== "true") {
+      select.dataset.saipTokenListChangeBound = "true";
+      select.addEventListener("change", function () {
+        var chosen = String(select.value || "universal");
+        if (form.dataset.saipTokenListDirty === "true"
+            && !window.confirm("Discard the unsaved edits in the list contents?")) {
+          select.value = select.dataset.saipTokenListSelector || "universal";
+          return;
+        }
+        var pathInput = form.elements.namedItem("path");
+        if (chosen === CC_SAIP_TOKEN_LIST_BROWSE) {
+          if (pathRow) pathRow.hidden = false;
+          select.dataset.saipTokenListSelector = chosen;
+          if (pathInput && String(pathInput.value || "").trim()) {
+            ccReadTokenList(action, form, runBtn, statusEl, resultEl, chosen);
+          }
+          return;
+        }
+        if (pathInput) pathInput.value = "";
+        if (pathRow) pathRow.hidden = true;
+        ccReadTokenList(action, form, runBtn, statusEl, resultEl, chosen);
+      });
+      var pathInput = form.elements.namedItem("path");
+      if (pathInput) {
+        pathInput.addEventListener("change", function () {
+          if (select.value !== CC_SAIP_TOKEN_LIST_BROWSE) return;
+          if (!String(pathInput.value || "").trim()) return;
+          ccReadTokenList(action, form, runBtn, statusEl, resultEl, CC_SAIP_TOKEN_LIST_BROWSE);
+        });
+      }
+    }
+    window.setTimeout(async function () {
+      try {
+        await ccReadTokenList(
+          action, form, runBtn, statusEl, resultEl,
+          select ? String(select.value || "universal") : "universal"
+        );
+      } finally {
+        form.dataset.saipUniversalTokensLoading = "false";
+      }
+    }, 0);
+  }
+
   function ccInitializeSaipTokenConfigurationForm(
     action, form, runBtn, statusEl, resultEl
   ) {
+    if (ccIsSaipUniversalTokensEditor(action)) {
+      ccInitializeUniversalTokensEditor(action, form, runBtn, statusEl, resultEl);
+    }
     if (ccIsSaipTokenConfigurationGenerator(action)) {
       ccInitializeTokenConfigurationGenerator(form, runBtn, statusEl, resultEl);
     }
@@ -10282,7 +11525,18 @@
         "generator"
       );
     }
-    if (actionTags.indexOf("saip-ribbon-tokens-form") !== -1) {
+    if (ccIsSaipUniversalTokensEditor(action)) {
+      // A whole list is edited here, not a one-line value: size the box
+      // like the manager's registry editor.
+      var listInput = form.querySelector('[name="contents"]');
+      if (listInput && String(listInput.tagName || "").toUpperCase() === "TEXTAREA") {
+        listInput.rows = Math.max(Number(listInput.rows || 0), 22);
+        listInput.spellcheck = false;
+        listInput.setAttribute("autocomplete", "off");
+        listInput.setAttribute("autocapitalize", "off");
+      }
+    }
+    if (ccIsSaipTokenConfigurationManager(action)) {
       ccReplaceTokenConfigurationInput(form, "configuration_id", "manager");
       var registryInput = form.querySelector('[name="registry_json"]');
       if (registryInput && String(registryInput.tagName || "").toUpperCase() === "TEXTAREA") {
@@ -10302,8 +11556,7 @@
   }
 
   function ccApplyTokenRegistryActionResult(action, form, data) {
-    var actionTags = action && Array.isArray(action.tags) ? action.tags : [];
-    if (actionTags.indexOf("saip-ribbon-tokens-form") === -1 || !data) {
+    if (!ccIsSaipTokenConfigurationManager(action) || !data) {
       return false;
     }
     var catalogueApplied = ccApplyTokenConfigurationCatalogue(data);
@@ -10634,7 +11887,7 @@
       var browse = document.createElement("button");
       browse.type = "button";
       browse.className = "btn btn-small cc-path-browse";
-      browse.textContent = "Browse…";
+      browse.textContent = "Browse...";
       browse.title = field.kind === "directory"
         ? "Pick a folder"
         : (field.kind === "save_path" ? "Pick a save location" : "Pick a file");
@@ -10728,7 +11981,7 @@
         opt.value = row.name;
         opt.textContent = row.name;
         if (row.atr_hex) {
-          opt.textContent += " · " + row.atr_hex.substring(0, 12) + "…";
+          opt.textContent += " · " + row.atr_hex.substring(0, 12) + "...";
         }
         select.appendChild(opt);
       });
@@ -10959,13 +12212,20 @@
         logBus.emit({
           level: "error",
           source: action.id,
-          message: "run: failed — " + responseError,
+          message: "run: failed -- " + responseError,
         });
         return;
       }
-      ccSetActionStatus(statusEl, "success");
-      setEsimInlinePaneStatus("ok");
-      setInlineActionPaneStatus("ok");
+      var blockedData = ccRedactActionResult(action, resp.data || {});
+      var refused = !!CC_BLOCKED_MATERIALIZATION_STAGES[
+        String(blockedData.materialization_state || "")
+      ];
+      ccSetActionStatus(statusEl, refused ? "blocked" : "success");
+      setEsimInlinePaneStatus(refused ? "error" : "ok");
+      setInlineActionPaneStatus(refused ? "error" : "ok");
+      if (refused) {
+        ccRenderBlockedActionSummary(blockedData, resultEl);
+      }
       if (action && action.subsystem === "SCP03"
           && resp.data && resp.data.session_authenticated === false) {
         var genericScp03Tab = scp03LookupTabForSessionId(inputs.session_id);
@@ -10974,15 +12234,22 @@
           scp03RefreshAuthChip();
         }
       }
-      renderActionResult(
-        action,
-        ccRedactActionResult(action, resp.data || {}),
-        resultEl
-      );
-      resultEl.dataset.state = "success";
-      ccFocusActionResult(resultEl, false);
+      renderActionResult(action, blockedData, resultEl);
+      resultEl.dataset.state = refused ? "error" : "success";
+      ccFocusActionResult(resultEl, refused);
       var actionTags = action && Array.isArray(action.tags) ? action.tags : [];
       ccApplyTokenRegistryActionResult(action, form, resp.data || {});
+      if (ccIsSaipUniversalTokensEditor(action) && resp.data) {
+        // A plain run reads the list back: keep unsaved edits in the box
+        // and refresh only the selector; a save or delete refreshes both.
+        ccApplyUniversalTokensContents(
+          action,
+          form,
+          (resp.data.saved === true || resp.data.deleted === true)
+            ? resp.data
+            : { list: resp.data.list, lists: resp.data.lists }
+        );
+      }
       // Optional SAIP package-form contributions (for example an Excel
       // filesystem generator) need manual inputs before they can create a
       // session, so they cannot use the no-input package-session ribbon
@@ -11023,9 +12290,11 @@
         }
       }
       logBus.emit({
-        level: "info",
+        level: refused ? "warn" : "info",
         source: action.id,
-        message: "run: ok",
+        message: refused
+          ? "run: blocked \u2014 " + String(blockedData.materialization_state || "")
+          : "run: ok",
       });
     } catch (err) {
       ccSetActionStatus(statusEl, "error");
@@ -11191,7 +12460,7 @@
 
       sock.onopen = function () {
         if (cancelBtn) cancelBtn.disabled = false;
-        appendLogRow(log, "info", "connected — sending start frame");
+        appendLogRow(log, "info", "connected -- sending start frame");
         logBus.emit({
           level: "info",
           source: action.id,
@@ -11620,6 +12889,11 @@
     hasMeta = ccEsimAppendDashKv(meta, "ICCID", profile && profile.iccid) || hasMeta;
     hasMeta = ccEsimAppendDashKv(meta, "AID", profile && profile.aid) || hasMeta;
     hasMeta = ccEsimAppendDashKv(meta, "Nickname", profile && (profile.nickname || profile.profile_name)) || hasMeta;
+    // SGP.32 fallbackAttribute; omitted by the eUICC on every Profile that is
+    // not the Fallback Profile, so only a set attribute earns a row.
+    if (profile && profile.fallback_attribute === true) {
+      hasMeta = ccEsimAppendDashKv(meta, "Used as", "Fallback") || hasMeta;
+    }
     if (hasMeta) card.appendChild(meta);
     return card;
   }
@@ -12011,6 +13285,665 @@
     }
   }
 
+  // --- Offline Tools: context decoder --------------------------------------
+  //
+  // One paste box for an APDU, a response, a bare TLV or a whole trace. The
+  // backend classifies each command by CLA/INS/P1/P2 and decodes the payload
+  // against that specification, so the panel only has to render what comes
+  // back: a context banner, per-exchange header semantics, payload trees
+  // and status words.
+
+  var CC_DECODER_ACTION_ID = "tool.decoder.context";
+  var CC_DECODER_DEBOUNCE_MS = 400;
+  var CC_DECODER_CONTEXTS = [
+    ["auto", "Auto-detect"],
+    ["apdu", "Command APDU"],
+    ["response", "Response (data + SW)"],
+    ["es10", "ES10 (SGP.22 / SGP.32)"],
+    ["gp", "GlobalPlatform"],
+    ["uicc", "UICC (TS 102 221)"],
+    ["cat", "CAT (TS 102 223)"],
+    ["tlv", "Raw BER-TLV"],
+    ["sw", "Status word"],
+  ];
+  // Sample inputs use the standards' own test bodies (the 3GPP USIM AID,
+  // the GSMA ISD-R AID, the DISPLAY TEXT example of TS 102 223 v18.3
+  // Annex B) and the project's 8988 test IIN.
+  var CC_DECODER_EXAMPLES = [
+    {
+      label: "SELECT USIM by AID with FCP response",
+      text: "> 00A4040407A0000000871002\n< 621E820278218302 7FF08407A0000000871002A50380017 18A01058B032F0601C606900140830101 9000",
+    },
+    {
+      label: "GET STATUS applications with a registry entry",
+      text: "> 80F24002024F0000\n< E31E4F10A0000005591010FFFFFFFF89000001009F70010FC5039EFE80 9000",
+    },
+    {
+      label: "INSTALL [for install and make selectable]",
+      text: "80E60C002B10A0000005591010FFFFFFFF890000010000 10A0000005591010FFFFFFFF8900001000 0380C000 02C900 00 00",
+    },
+    {
+      label: "ES10 ProfileInfoList request and response",
+      text: "> 80E2910003BF2D0000\n< BF2D14A012E3105A0A988802214365870921F39F700101 9000",
+    },
+    {
+      label: "FETCH DISPLAY TEXT (TS 102 223 Annex B)",
+      text: "> 8012000011\n< D00F8103012100820281028D0404434154 9000",
+    },
+    {
+      label: "AUTHENTICATE 3G/EPS/5G context",
+      text: "> 00880081221000112233445566778899AABBCCDDEEFF10FFEEDDCCBBAA9988776655443322110000\n< DB080011223344556677 08AABBCCDDEEFF0011 088877665544332211 9000",
+    },
+    {
+      label: "Status word only",
+      text: "6A82",
+    },
+  ];
+
+  function _decoderStorageKey() {
+    return "yggdrasim:cc-decoder:last";
+  }
+
+  function _decoderRememberInput(text, context) {
+    try {
+      window.localStorage.setItem(_decoderStorageKey(), JSON.stringify({
+        text: String(text || "").slice(0, 20000),
+        context: String(context || "auto"),
+      }));
+    } catch (_err) { /* storage unavailable */ }
+  }
+
+  function _decoderRecallInput() {
+    try {
+      var raw = window.localStorage.getItem(_decoderStorageKey());
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.text !== "string") return null;
+      return parsed;
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  function _buildOfflineDecoderPanel(actions) {
+    var available = (actions || []).some(function (action) {
+      return action && action.id === CC_DECODER_ACTION_ID;
+    });
+    var panel = document.createElement("section");
+    panel.className = "cc-decoder";
+    panel.setAttribute("data-cc-decoder", "1");
+
+    var head = document.createElement("div");
+    head.className = "cc-decoder-head";
+    var title = document.createElement("h3");
+    title.className = "cc-decoder-title";
+    title.textContent = "Decoder";
+    head.appendChild(title);
+    var hint = document.createElement("p");
+    hint.className = "cc-decoder-hint";
+    hint.textContent = "Paste an APDU, a response, a bare TLV or a whole trace. "
+      + "The CLA/INS pair picks the specification: UICC file commands, CAT, "
+      + "GlobalPlatform, ES10 and 3GPP authentication decode against their own tables.";
+    head.appendChild(hint);
+    panel.appendChild(head);
+
+    if (!available) {
+      var missing = document.createElement("p");
+      missing.className = "cc-decoder-status cc-decoder-status--error";
+      missing.textContent = "The context decoder action is not registered by the backend.";
+      panel.appendChild(missing);
+      return panel;
+    }
+
+    var toolbar = document.createElement("div");
+    toolbar.className = "cc-decoder-toolbar";
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", "Decoder controls");
+
+    var contextLabel = document.createElement("label");
+    contextLabel.className = "cc-decoder-control";
+    var contextText = document.createElement("span");
+    contextText.textContent = "Context";
+    contextLabel.appendChild(contextText);
+    var contextSelect = document.createElement("select");
+    contextSelect.className = "cc-decoder-select";
+    contextSelect.setAttribute("aria-label", "Decode context");
+    CC_DECODER_CONTEXTS.forEach(function (pair) {
+      var option = document.createElement("option");
+      option.value = pair[0];
+      option.textContent = pair[1];
+      contextSelect.appendChild(option);
+    });
+    contextLabel.appendChild(contextSelect);
+    toolbar.appendChild(contextLabel);
+
+    var exampleLabel = document.createElement("label");
+    exampleLabel.className = "cc-decoder-control";
+    var exampleText = document.createElement("span");
+    exampleText.textContent = "Example";
+    exampleLabel.appendChild(exampleText);
+    var exampleSelect = document.createElement("select");
+    exampleSelect.className = "cc-decoder-select";
+    exampleSelect.setAttribute("aria-label", "Load an example input");
+    var examplePlaceholder = document.createElement("option");
+    examplePlaceholder.value = "";
+    examplePlaceholder.textContent = "Load an example\u2026";
+    exampleSelect.appendChild(examplePlaceholder);
+    CC_DECODER_EXAMPLES.forEach(function (example, index) {
+      var option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = example.label;
+      exampleSelect.appendChild(option);
+    });
+    exampleLabel.appendChild(exampleSelect);
+    toolbar.appendChild(exampleLabel);
+
+    var spacer = document.createElement("span");
+    spacer.className = "cc-decoder-toolbar-spacer";
+    toolbar.appendChild(spacer);
+
+    var decodeBtn = document.createElement("button");
+    decodeBtn.type = "button";
+    decodeBtn.className = "btn btn-primary btn-small";
+    decodeBtn.textContent = "Decode";
+    toolbar.appendChild(decodeBtn);
+    var clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "btn btn-small";
+    clearBtn.textContent = "Clear";
+    toolbar.appendChild(clearBtn);
+    var copyNotationBtn = document.createElement("button");
+    copyNotationBtn.type = "button";
+    copyNotationBtn.className = "btn btn-small";
+    copyNotationBtn.textContent = "Copy text";
+    copyNotationBtn.disabled = true;
+    toolbar.appendChild(copyNotationBtn);
+    var copyJsonBtn = document.createElement("button");
+    copyJsonBtn.type = "button";
+    copyJsonBtn.className = "btn btn-small";
+    copyJsonBtn.textContent = "Copy JSON";
+    copyJsonBtn.disabled = true;
+    toolbar.appendChild(copyJsonBtn);
+    panel.appendChild(toolbar);
+
+    var input = document.createElement("textarea");
+    input.className = "cc-decoder-input";
+    input.rows = 5;
+    input.spellcheck = false;
+    input.setAttribute("aria-label", "Hex input");
+    input.placeholder = "00A4040407A0000000871002\n< 62...9000";
+    panel.appendChild(input);
+
+    var status = document.createElement("div");
+    status.className = "cc-decoder-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.textContent = "Waiting for input.";
+    panel.appendChild(status);
+
+    var result = document.createElement("div");
+    result.className = "cc-decoder-result";
+    panel.appendChild(result);
+
+    var runState = { timer: null, seq: 0, lastData: null };
+
+    function setStatus(text, tone) {
+      status.textContent = text;
+      status.className = "cc-decoder-status" + (tone ? " cc-decoder-status--" + tone : "");
+    }
+
+    function runDecode() {
+      var text = String(input.value || "");
+      if (text.trim().length === 0) {
+        result.innerHTML = "";
+        runState.lastData = null;
+        copyNotationBtn.disabled = true;
+        copyJsonBtn.disabled = true;
+        setStatus("Waiting for input.", "");
+        return;
+      }
+      var seq = ++runState.seq;
+      setStatus("Decoding\u2026", "busy");
+      _decoderRememberInput(text, contextSelect.value);
+      apiFetch("/api/actions/" + encodeURIComponent(CC_DECODER_ACTION_ID) + "/run", {
+        method: "POST",
+        body: JSON.stringify({ inputs: { input_text: text, context: contextSelect.value } }),
+      }).then(function (resp) {
+        if (seq !== runState.seq) return;
+        if (!resp || !resp.ok) {
+          runState.lastData = null;
+          copyNotationBtn.disabled = true;
+          copyJsonBtn.disabled = true;
+          result.innerHTML = "";
+          setStatus((resp && resp.error) || "decode failed", "error");
+          return;
+        }
+        runState.lastData = resp.data || {};
+        result.innerHTML = "";
+        renderContextDecodeResult(runState.lastData, result);
+        copyNotationBtn.disabled = false;
+        copyJsonBtn.disabled = false;
+        setStatus(_decoderSummaryText(runState.lastData), "ok");
+      }).catch(function (err) {
+        if (seq !== runState.seq) return;
+        setStatus(String((err && err.message) || err), "error");
+      });
+    }
+
+    function scheduleDecode() {
+      if (runState.timer) clearTimeout(runState.timer);
+      runState.timer = setTimeout(function () {
+        runState.timer = null;
+        runDecode();
+      }, CC_DECODER_DEBOUNCE_MS);
+    }
+
+    input.addEventListener("input", scheduleDecode);
+    contextSelect.addEventListener("change", runDecode);
+    decodeBtn.addEventListener("click", function () {
+      if (runState.timer) clearTimeout(runState.timer);
+      runState.timer = null;
+      runDecode();
+    });
+    clearBtn.addEventListener("click", function () {
+      input.value = "";
+      exampleSelect.value = "";
+      runDecode();
+      input.focus();
+    });
+    exampleSelect.addEventListener("change", function () {
+      var example = CC_DECODER_EXAMPLES[parseInt(exampleSelect.value, 10)];
+      if (!example) return;
+      input.value = example.text;
+      contextSelect.value = "auto";
+      runDecode();
+    });
+    copyNotationBtn.addEventListener("click", function () {
+      if (runState.lastData) ccCopyPlainText(String(runState.lastData.notation || ""), copyNotationBtn);
+    });
+    copyJsonBtn.addEventListener("click", function () {
+      if (runState.lastData) ccCopyPlainText(JSON.stringify(runState.lastData, null, 2), copyJsonBtn);
+    });
+    input.addEventListener("keydown", function (event) {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        decodeBtn.click();
+      }
+    });
+
+    var recalled = _decoderRecallInput();
+    if (recalled && recalled.text) {
+      input.value = recalled.text;
+      if (CC_DECODER_CONTEXTS.some(function (pair) { return pair[0] === recalled.context; })) {
+        contextSelect.value = recalled.context;
+      }
+      scheduleDecode();
+    }
+    return panel;
+  }
+
+  function _decoderSummaryText(data) {
+    if (!data || typeof data !== "object") return "decoded";
+    if (data.inputKind === "trace") {
+      return String(data.exchangeCount || 0) + " exchanges · "
+        + ((data.domains || []).join(", ") || "mixed");
+    }
+    var kinds = {
+      apdu: "1 command", response: "1 response", tlv: "bare TLV", sw: "status word",
+    };
+    var context = data.context || {};
+    var parts = [kinds[data.inputKind] || "1 exchange"];
+    if (context.label) parts.push(context.label);
+    if (data.schema && data.schema.available && context.domain === "es10") parts.push("schema decode");
+    return parts.join(" · ");
+  }
+
+  function _decoderChip(text, kind) {
+    var chip = document.createElement("span");
+    chip.className = "cc-decoder-chip" + (kind ? " cc-decoder-chip--" + kind : "");
+    chip.textContent = text;
+    return chip;
+  }
+
+  function _decoderDomainChip(domain) {
+    var labels = {
+      uicc: "UICC", cat: "CAT", gp: "GlobalPlatform", es10: "ES10", auth: "3GPP AUTH",
+      tlv: "BER-TLV", sw: "SW", trace: "Trace", chained: "GET RESPONSE", unknown: "Unknown",
+    };
+    return _decoderChip(labels[domain] || String(domain || "?"), "domain-" + String(domain || "unknown"));
+  }
+
+  function renderContextDecodeResult(data, container) {
+    if (!data || typeof data !== "object") {
+      container.appendChild(renderDecodedBlock(data, null, { omitHead: true }));
+      return;
+    }
+    var root = document.createElement("div");
+    root.className = "cc-decoder-output";
+    var context = data.context || {};
+    var banner = document.createElement("div");
+    banner.className = "cc-decoder-banner";
+    banner.appendChild(_decoderDomainChip(context.domain || data.inputKind));
+    var bannerText = document.createElement("div");
+    bannerText.className = "cc-decoder-banner-text";
+    var bannerTitle = document.createElement("div");
+    bannerTitle.className = "cc-decoder-banner-title";
+    bannerTitle.textContent = context.label || String(data.inputKind || "decoded");
+    bannerText.appendChild(bannerTitle);
+    if (context.summary) {
+      var bannerSummary = document.createElement("div");
+      bannerSummary.className = "cc-decoder-banner-summary";
+      bannerSummary.textContent = context.summary;
+      bannerText.appendChild(bannerSummary);
+    }
+    if (context.spec) {
+      var bannerSpec = document.createElement("div");
+      bannerSpec.className = "cc-decoder-spec";
+      bannerSpec.textContent = context.spec;
+      bannerText.appendChild(bannerSpec);
+    }
+    banner.appendChild(bannerText);
+    var schema = data.schema || {};
+    banner.appendChild(_decoderChip(
+      schema.available ? "GSMA schema: " + String(schema.typeCount || 0) + " types" : "GSMA schema unavailable",
+      schema.available ? "ok" : "warn"
+    ));
+    root.appendChild(banner);
+
+    if (data.inputKind === "sw" && data.sw) {
+      root.appendChild(_decoderSwBlock(data.sw));
+    } else if (Array.isArray(data.exchanges)) {
+      var single = data.exchanges.length === 1;
+      data.exchanges.forEach(function (exchange) {
+        root.appendChild(_decoderExchangeCard(exchange, single));
+      });
+    } else {
+      if (data.payload) root.appendChild(_decoderPayloadBlock(data.payload));
+      if (data.sw) root.appendChild(_decoderSwBlock(data.sw));
+    }
+    (context.notes || []).forEach(function (note) {
+      root.appendChild(_decoderNote(note));
+    });
+    container.appendChild(root);
+  }
+
+  function _decoderNote(text) {
+    var note = document.createElement("p");
+    note.className = "cc-decoder-note";
+    note.textContent = String(text || "");
+    return note;
+  }
+
+  function _decoderSwBlock(sw) {
+    var block = document.createElement("div");
+    block.className = "cc-decoder-sw" + (sw.ok ? " is-ok" : " is-error");
+    var code = document.createElement("code");
+    code.className = "cc-decoder-sw-code";
+    code.textContent = String(sw.sw || "????");
+    block.appendChild(code);
+    var meaning = document.createElement("span");
+    meaning.className = "cc-decoder-sw-meaning";
+    meaning.textContent = String(sw.meaning || "");
+    block.appendChild(meaning);
+    if (sw.followUp) {
+      var follow = document.createElement("span");
+      follow.className = "cc-decoder-sw-follow";
+      follow.textContent = "→ " + String(sw.followUp);
+      block.appendChild(follow);
+    }
+    return block;
+  }
+
+  function _decoderExchangeCard(exchange, expanded) {
+    var card = document.createElement("article");
+    card.className = "cc-decoder-exchange";
+    var context = exchange.context || {};
+    var command = exchange.command || null;
+    var response = exchange.response || null;
+
+    var head = document.createElement("div");
+    head.className = "cc-decoder-exchange-head";
+    var index = document.createElement("span");
+    index.className = "cc-decoder-exchange-index";
+    index.textContent = "#" + String(exchange.index || "");
+    head.appendChild(index);
+    head.appendChild(_decoderDomainChip(context.domain));
+    var name = document.createElement("span");
+    name.className = "cc-decoder-exchange-name";
+    name.textContent = command ? String(command.name || command.hex || "command") : "response";
+    head.appendChild(name);
+    if (command && command.cla) {
+      var bytes = document.createElement("code");
+      bytes.className = "cc-decoder-exchange-bytes";
+      bytes.textContent = [command.cla, command.ins, command.p1, command.p2].join(" ")
+        + (command.lc != null ? " · Lc " + command.lc : "")
+        + (command.le != null ? " · Le " + command.le : "")
+        + (command.case ? " · case " + command.case : "");
+      head.appendChild(bytes);
+    }
+    if (context.summary) {
+      var summary = document.createElement("span");
+      summary.className = "cc-decoder-exchange-summary";
+      summary.textContent = context.summary;
+      head.appendChild(summary);
+    }
+    card.appendChild(head);
+
+    if (command && command.error) {
+      card.appendChild(renderErrorBlock(command.error));
+    }
+    if (command && Array.isArray(command.header) && command.header.length > 0) {
+      var details = document.createElement("details");
+      details.className = "cc-decoder-details";
+      details.open = !!expanded;
+      var summaryEl = document.createElement("summary");
+      summaryEl.textContent = "Header semantics" + (context.spec ? " · " + context.spec : "");
+      details.appendChild(summaryEl);
+      details.appendChild(_decoderFieldTable(command.header));
+      card.appendChild(details);
+    }
+    if (command && command.payload) {
+      card.appendChild(_decoderPayloadBlock(command.payload, "Command data"));
+    } else if (command && command.dataHex) {
+      card.appendChild(_decoderFieldTable([{ label: "Data", value: formatHexInline(command.dataHex) }]));
+    }
+    if (response) {
+      var responseBlock = document.createElement("div");
+      responseBlock.className = "cc-decoder-response";
+      if (response.sw) responseBlock.appendChild(_decoderSwBlock(response.sw));
+      if (response.chained) {
+        responseBlock.appendChild(_decoderNote(
+          "Response continues in the next GET RESPONSE"
+          + (response.partialBytes ? " (" + response.partialBytes + " byte(s) held)" : "") + "."
+        ));
+      }
+      if (response.payload) {
+        responseBlock.appendChild(_decoderPayloadBlock(response.payload, "Response data"));
+      } else if (response.dataHex && !response.chained) {
+        responseBlock.appendChild(_decoderFieldTable([{ label: "Data", value: formatHexInline(response.dataHex) }]));
+      }
+      card.appendChild(responseBlock);
+    }
+    (context.notes || []).forEach(function (note) {
+      card.appendChild(_decoderNote(note));
+    });
+    return card;
+  }
+
+  function _decoderFieldTable(fields) {
+    var table = document.createElement("table");
+    table.className = "cc-decoder-fields";
+    var body = document.createElement("tbody");
+    (fields || []).forEach(function (entry) {
+      var row = document.createElement("tr");
+      var label = document.createElement("th");
+      label.scope = "row";
+      label.textContent = String(entry.label || "");
+      row.appendChild(label);
+      var value = document.createElement("td");
+      var code = document.createElement("code");
+      code.textContent = entry.value == null ? "" : String(entry.value);
+      value.appendChild(code);
+      row.appendChild(value);
+      var meaning = document.createElement("td");
+      meaning.className = "cc-decoder-meaning";
+      meaning.textContent = String(entry.meaning || "");
+      if (entry.spec) {
+        var spec = document.createElement("span");
+        spec.className = "cc-decoder-spec";
+        spec.textContent = String(entry.spec);
+        meaning.appendChild(spec);
+      }
+      row.appendChild(meaning);
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    return table;
+  }
+
+  function _decoderPayloadBlock(payload, roleLabel) {
+    var block = document.createElement("section");
+    block.className = "cc-decoder-payload cc-decoder-payload--" + String(payload.kind || "generic");
+    var head = document.createElement("div");
+    head.className = "cc-decoder-payload-head";
+    if (roleLabel) {
+      var role = document.createElement("span");
+      role.className = "cc-decoder-payload-role";
+      role.textContent = roleLabel;
+      head.appendChild(role);
+    }
+    var title = document.createElement("span");
+    title.className = "cc-decoder-payload-title";
+    title.textContent = String(payload.title || payload.kind || "payload");
+    head.appendChild(title);
+    if (payload.spec) {
+      var spec = document.createElement("span");
+      spec.className = "cc-decoder-spec";
+      spec.textContent = String(payload.spec);
+      head.appendChild(spec);
+    }
+    block.appendChild(head);
+    if (Array.isArray(payload.fields) && payload.fields.length > 0) {
+      block.appendChild(_decoderFieldTable(payload.fields));
+    }
+    if (payload.schema) {
+      var schemaWrap = document.createElement("div");
+      schemaWrap.className = "cc-decoder-schema";
+      var schemaHead = document.createElement("div");
+      schemaHead.className = "cc-decoder-schema-head";
+      schemaHead.textContent = "Schema decode · " + String(payload.schemaType || "")
+        + ((payload.schemaSource || []).length ? " · " + payload.schemaSource.join(", ") : "");
+      schemaWrap.appendChild(schemaHead);
+      schemaWrap.appendChild(_decoderSchemaNodes([payload.schema], 0));
+      block.appendChild(schemaWrap);
+    }
+    if (Array.isArray(payload.nodes) && payload.nodes.length > 0) {
+      if (payload.schema) {
+        var rawDetails = document.createElement("details");
+        rawDetails.className = "cc-decoder-details";
+        var rawSummary = document.createElement("summary");
+        rawSummary.textContent = "BER-TLV tree";
+        rawDetails.appendChild(rawSummary);
+        rawDetails.appendChild(_decoderNodes(payload.nodes, 0));
+        block.appendChild(rawDetails);
+      } else {
+        block.appendChild(_decoderNodes(payload.nodes, 0));
+      }
+    }
+    (payload.notes || []).forEach(function (note) {
+      block.appendChild(_decoderNote(note));
+    });
+    return block;
+  }
+
+  function _decoderNodes(nodes, level) {
+    var list = document.createElement("ul");
+    list.className = "cc-decoder-tree" + (level === 0 ? " cc-decoder-tree--root" : "");
+    (nodes || []).forEach(function (node) {
+      var item = document.createElement("li");
+      item.className = "cc-decoder-node";
+      var row = document.createElement("div");
+      row.className = "cc-decoder-node-row";
+      if (node.tag) {
+        var tag = document.createElement("code");
+        tag.className = "cc-decoder-node-tag";
+        tag.textContent = String(node.tag);
+        if (node.comprehensionRequired === true) tag.title = "comprehension required";
+        row.appendChild(tag);
+      }
+      var name = document.createElement("span");
+      name.className = "cc-decoder-node-name";
+      name.textContent = String(node.name || "");
+      if (node.spec) name.title = String(node.spec);
+      row.appendChild(name);
+      var length = document.createElement("span");
+      length.className = "cc-decoder-node-length";
+      length.textContent = String(node.length == null ? "" : node.length) + " B";
+      row.appendChild(length);
+      var hasChildren = Array.isArray(node.children) && node.children.length > 0;
+      if (node.decoded != null && typeof node.decoded !== "object") {
+        var decoded = document.createElement("span");
+        decoded.className = "cc-decoder-node-decoded";
+        decoded.textContent = String(node.decoded);
+        row.appendChild(decoded);
+      }
+      if (!hasChildren && node.valueHex) {
+        var value = document.createElement("code");
+        value.className = "cc-decoder-node-value";
+        value.textContent = formatHexInline(String(node.valueHex));
+        row.appendChild(value);
+      }
+      item.appendChild(row);
+      if (hasChildren) {
+        item.appendChild(_decoderNodes(node.children, level + 1));
+      }
+      list.appendChild(item);
+    });
+    return list;
+  }
+
+  function _decoderSchemaNodes(nodes, level) {
+    var list = document.createElement("ul");
+    list.className = "cc-decoder-tree cc-decoder-tree--schema" + (level === 0 ? " cc-decoder-tree--root" : "");
+    (nodes || []).forEach(function (node) {
+      var item = document.createElement("li");
+      item.className = "cc-decoder-node";
+      var row = document.createElement("div");
+      row.className = "cc-decoder-node-row";
+      var name = document.createElement("span");
+      name.className = "cc-decoder-node-name";
+      name.textContent = String(node.name || "");
+      row.appendChild(name);
+      var kind = String(node.kind || "");
+      if (kind === "choice") {
+        row.appendChild(_decoderChip("choice: " + String(node.choice || ""), "muted"));
+      } else if (kind === "sequence" || kind === "list") {
+        row.appendChild(_decoderChip(kind + (node.children ? " · " + node.children.length : ""), "muted"));
+      } else if (kind === "octets") {
+        if (node.decoded != null) {
+          var decoded = document.createElement("span");
+          decoded.className = "cc-decoder-node-decoded";
+          decoded.textContent = String(node.decoded);
+          row.appendChild(decoded);
+        }
+        var octets = document.createElement("code");
+        octets.className = "cc-decoder-node-value";
+        octets.textContent = formatHexInline(String(node.valueHex || ""));
+        row.appendChild(octets);
+      } else if (node.value !== undefined) {
+        var value = document.createElement("span");
+        value.className = "cc-decoder-node-decoded";
+        value.textContent = typeof node.value === "object" ? JSON.stringify(node.value) : String(node.value);
+        row.appendChild(value);
+      }
+      item.appendChild(row);
+      if (Array.isArray(node.children) && node.children.length > 0) {
+        item.appendChild(_decoderSchemaNodes(node.children, level + 1));
+      }
+      list.appendChild(item);
+    });
+    return list;
+  }
   function renderAsn1TlvDecodeResult(data, container) {
     if (!data || typeof data !== "object") {
       container.appendChild(renderDecodedBlock(data, null, { omitHead: true }));
@@ -12126,19 +14059,25 @@
     var semantic = data.semantic && typeof data.semantic === "object"
       ? data.semantic
       : {};
+    // TCA eUICC Profile Package V3.4.1 section 8.11 EUICCResponse: a list of
+    // PEStatus entries, an optional profileInstallationAborted flag and an
+    // optional statusMessage.
+    var peStatus = Array.isArray(semantic.pe_status) ? semantic.pe_status : [];
+    var hasSemantics = peStatus.length > 0 || semantic.ok !== undefined;
     var metaRows = [
-      { label: "Format", value: data.format || "SIMa response" },
+      { label: "Format", value: data.format || "EUICCResponse" },
       { label: "Input", value: String(data.input_length || 0) + " B" },
       { label: "Status", value: data.complete ? "complete" : "incomplete" },
     ];
-    if (semantic.choice) {
-      metaRows.push({ label: "Result", value: String(semantic.choice) });
+    if (hasSemantics) {
+      metaRows.push({ label: "Result", value: semantic.ok ? "all PEs ok" : "failure" });
+      metaRows.push({ label: "PE statuses", value: String(peStatus.length) });
     }
-    if (semantic.result_code !== undefined) {
-      metaRows.push({ label: "Code", value: String(semantic.result_code) });
+    if (semantic.profile_installation_aborted) {
+      metaRows.push({ label: "Aborted", value: "profileInstallationAborted" });
     }
-    if (semantic.result_detail !== undefined) {
-      metaRows.push({ label: "Detail", value: String(semantic.result_detail) });
+    if (semantic.status_message) {
+      metaRows.push({ label: "Message", value: String(semantic.status_message) });
     }
 
     var sheet = document.createElement("div");
@@ -12150,7 +14089,7 @@
     summaryHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
     var summaryTitle = document.createElement("span");
     summaryTitle.className = "cc-action-datasheet-main-title";
-    summaryTitle.textContent = "SIMa final result";
+    summaryTitle.textContent = "EUICCResponse status";
     summaryHead.appendChild(summaryTitle);
     if (data.summary) {
       var summarySub = document.createElement("span");
@@ -12164,26 +14103,44 @@
     summaryBody.className = "cc-sima-summary";
     var resultChip = document.createElement("span");
     resultChip.className = "cc-sima-result-chip";
-    if (semantic.choice === "successResult") {
+    if (hasSemantics && semantic.ok) {
       resultChip.classList.add("cc-sima-result-chip--success");
-    } else if (semantic.choice === "failureResult") {
+    } else if (hasSemantics) {
       resultChip.classList.add("cc-sima-result-chip--failure");
     }
-    resultChip.textContent = semantic.choice || "unknown result";
+    resultChip.textContent = hasSemantics
+      ? (semantic.ok ? "all PEs ok" : "profile installation failed")
+      : "not an EUICCResponse";
     summaryBody.appendChild(resultChip);
-    if (semantic.result_code !== undefined) {
+    peStatus.forEach(function (entry, index) {
       var code = document.createElement("code");
       code.className = "cc-sima-code";
-      code.textContent = "resultCode=" + semantic.result_code;
+      var text = "peStatus[" + index + "].status=" + String(entry.status_name || "unknown") + "(" + String(entry.status) + ")";
+      if (entry.identification !== null && entry.identification !== undefined) {
+        text += " identification=" + entry.identification;
+      }
+      if (entry.additional_information !== null && entry.additional_information !== undefined) {
+        text += " additional-information=" + entry.additional_information;
+      }
+      if (entry.offset !== null && entry.offset !== undefined) {
+        text += " offset=" + entry.offset;
+      }
+      code.textContent = text;
       summaryBody.appendChild(code);
+    });
+    if (semantic.profile_installation_aborted) {
+      var aborted = document.createElement("code");
+      aborted.className = "cc-sima-code";
+      aborted.textContent = "profileInstallationAborted";
+      summaryBody.appendChild(aborted);
     }
-    if (semantic.result_detail !== undefined) {
-      var detail = document.createElement("code");
-      detail.className = "cc-sima-code";
-      detail.textContent = "resultDetail=" + semantic.result_detail;
-      summaryBody.appendChild(detail);
+    if (semantic.status_message) {
+      var message = document.createElement("code");
+      message.className = "cc-sima-code";
+      message.textContent = "statusMessage=" + String(semantic.status_message);
+      summaryBody.appendChild(message);
     }
-    if (!semantic.choice && data.error) {
+    if (!hasSemantics && data.error) {
       var error = document.createElement("span");
       error.className = "cc-error-block";
       error.textContent = data.error;
@@ -12198,7 +14155,7 @@
       treeHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
       var treeTitle = document.createElement("span");
       treeTitle.className = "cc-action-datasheet-main-title";
-      treeTitle.textContent = "SIMa TLV tree";
+      treeTitle.textContent = "EUICCResponse TLV tree";
       treeHead.appendChild(treeTitle);
       var treeSub = document.createElement("span");
       treeSub.className = "cc-action-datasheet-main-sub";
@@ -12239,6 +14196,89 @@
     container.appendChild(sheet);
   }
 
+  // A generator action answers HTTP 200 whether or not it produced anything:
+  // the pipeline reports refusal in `materialization_state`, and returns
+  // before writing an artifact or opening a session. Reported as a plain
+  // success, such a run looks identical to one that wrote a template, and
+  // the reason is buried in the result JSON.
+  var CC_BLOCKED_MATERIALIZATION_STAGES = {
+    NO_COMPATIBLE_FILESYSTEM_LAYOUT:
+      "No adapter recognised the workbook layout.",
+    BLOCKED_BY_INTENT:
+      "The workbook contents are incomplete \u2014 nothing was written.",
+    BLOCKED_BY_PLAN:
+      "The workbook imported, but its files cannot be placed \u2014 nothing was written.",
+    BLOCKED_BY_COMPILATION:
+      "The placed files cannot be built into a package \u2014 nothing was written.",
+  };
+
+  function ccCollectBlockingDiagnostics(data) {
+    var groups = [];
+    var byCode = {};
+    ["filesystem_intent", "filesystem_plan"].forEach(function (key) {
+      var stage = data && data[key];
+      var items = stage && Array.isArray(stage.diagnostics) ? stage.diagnostics : [];
+      items.forEach(function (item) {
+        if (!item || String(item.severity || "") !== "ERROR") return;
+        var code = String(item.code || "diagnostic");
+        var group = byCode[code];
+        if (!group) {
+          group = { code: code, message: String(item.message || ""), cells: [] };
+          byCode[code] = group;
+          groups.push(group);
+        }
+        var ref = item.source_ref && item.source_ref.cell_or_range;
+        if (ref) group.cells.push(String(ref));
+      });
+    });
+    return groups;
+  }
+
+  function ccRenderBlockedActionSummary(data, container) {
+    var state = String((data && data.materialization_state) || "");
+    var headline = CC_BLOCKED_MATERIALIZATION_STAGES[state];
+    if (!headline) return false;
+
+    var block = document.createElement("div");
+    block.className = "cc-error";
+    block.setAttribute("role", "alert");
+    block.tabIndex = -1;
+
+    var title = document.createElement("div");
+    title.textContent = headline;
+    block.appendChild(title);
+
+    // A compilation refusal carries its reason as text, not as diagnostics.
+    var detail = String((data && data.compilation_error) || "");
+    if (detail) {
+      var detailEl = document.createElement("div");
+      detailEl.textContent = detail;
+      block.appendChild(detailEl);
+    }
+
+    ccCollectBlockingDiagnostics(data).forEach(function (group) {
+      var line = document.createElement("div");
+      var count = group.cells.length;
+      line.textContent =
+        group.code
+        + (count > 1 ? " \u00D7 " + count : "")
+        + " \u2014 "
+        + group.message;
+      block.appendChild(line);
+      if (!count) return;
+      var where = document.createElement("div");
+      var shown = group.cells.slice(0, 8);
+      where.className = "cc-warn";
+      where.textContent =
+        "at " + shown.join(", ")
+        + (count > shown.length ? " (+" + (count - shown.length) + " more)" : "");
+      block.appendChild(where);
+    });
+
+    container.appendChild(block);
+    return true;
+  }
+
   function renderActionResult(action, data, container) {
     pipeApduSignals(action, data);
     var kind = action.output_kind || "json";
@@ -12259,6 +14299,9 @@
     }
     if (kind === "asn1_tlv") {
       return renderAsn1TlvDecodeResult(data, container);
+    }
+    if (kind === "context_decode") {
+      return renderContextDecodeResult(data, container);
     }
     if (kind === "sima_response") {
       return renderSimaResponseResult(data, container);
@@ -12449,12 +14492,12 @@
   // by a tag dictionary covering ISO 7816-4 FCP, ETSI TS 102 221 TERMINAL
   // CAPABILITY, SGP.22 §5.7 (ES10/ES11 application tags), and SGP.32 §6
   // (eIM data structures). Unknown tags still show the hex tag so nothing
-  // is hidden — they just do not get a friendly label.
+  // is hidden -- they just do not get a friendly label.
   //
   // Lookup is two-tier:
-  //   1. Path (parent.tag) match — disambiguates context-sensitive tags
+  //   1. Path (parent.tag) match -- disambiguates context-sensitive tags
   //      such as 0x80 (file-size in FCP, defaultDpAddress in BF3C, etc.).
-  //   2. Tag-only match — generic fallback.
+  //   2. Tag-only match -- generic fallback.
   //
   // Per-row "raw" affordance survives via the chip on hover (Alt+click
   // copies the hex tag to clipboard) so the byte view is never lost.
@@ -12971,7 +15014,7 @@
   //     stringified payload when they need byte-perfect parity with
   //     CLI output.
 
-  // Heuristic — strings that look like hex (even length, all hex
+  // Heuristic -- strings that look like hex (even length, all hex
   // chars, ≥4 chars). Used for byte-grouping inside
   // ``renderPrettyValue``.
   function looksLikeHex(text) {
@@ -12992,7 +15035,7 @@
     span.className = "cc-pv";
     if (value === null || value === undefined) {
       span.classList.add("cc-pv--null");
-      span.textContent = value === null ? "null" : "—";
+      span.textContent = value === null ? "null" : "--";
       return span;
     }
     if (typeof value === "boolean") {
@@ -13024,7 +15067,7 @@
   }
 
   // Service-table detector. EF.UST / EF.IST / EF_PSISMSC and friends
-  // share a bitmap shape — the backend collapses them into a payload
+  // share a bitmap shape -- the backend collapses them into a payload
   // that carries both ``active`` and ``inactive`` lists plus a
   // ``service_table`` marker so the GUI can switch to a checklist
   // layout. Operators asked for parity with what is *not* set so they
@@ -13131,7 +15174,7 @@
   // Standards-aligned label translations for SAIP field keys. The keys
   // pySim emits are spec-faithful camelCase (``applicationLoadPackageAID``,
   // ``minimumSecurityLevel``) which is fine for API surfaces but
-  // unhelpful inside an editor — operators recognise the wording from
+  // unhelpful inside an editor -- operators recognise the wording from
   // [TCA PP TS] / GP CPS chapters they spend their day in. Map them.
   // Lookup is case-insensitive.
   var _SAIP_PRETTY_FIELD_KEY = (function () {
@@ -13219,6 +15262,13 @@
       ["keyComponents", "Key components"],
       ["usageQualifier", "Usage qualifier"],
       ["keyAccess", "Key access"],
+      ["keyUsageQualifier", "Key usage qualifier"],
+      ["keyIdentifier", "Key identifier"],
+      ["keyVersionNumber", "Key version number"],
+      ["keyCounterValue", "Key counter value"],
+      ["keyType", "Key type"],
+      ["keyData", "Key data"],
+      ["macLength", "MAC length"],
       ["versionNumber", "Version number"],
       ["securityDomainPersonalizationData", "SD personalization data"],
       ["openPersonalizationData", "OPEN personalization data"],
@@ -13235,15 +15285,16 @@
       ["securityDomainAID", "Security domain AID"],
       ["associatedSecurityDomainAID", "Associated SD AID"],
       ["applicationParameters", "Application parameters"],
-      // PE-RFM (TCA PP TS §14)
+      // PE-RFM (TCA SAIP v3.4.1 §8.8)
       ["rfm", "RFM"],
       ["tarList", "TAR list"],
       ["toolkitApplicationReferences", "Toolkit application references (TAR)"],
       ["uiccAccessDomain", "UICC access domain"],
       ["uiccAdminAccessDomain", "UICC admin access domain"],
+      ["adfRFMAccess", "ADF RFM access"],
+      ["adfAID", "ADF AID"],
       ["adfAccessDomain", "ADF access domain"],
       ["adfAdminAccessDomain", "ADF admin access domain"],
-      ["rfmLoopCount", "RFM loop count"],
       // PE-RAM (TCA PP TS §14)
       ["ram", "RAM"],
       // common
@@ -13304,9 +15355,9 @@
       if (allPrim) {
         // Heuristic: collapse to a horizontal chip strip ONLY when
         // every entry is a short tag-style value (numbers, booleans,
-        // short tokens, or hex). Human-readable strings — anything
+        // short tokens, or hex). Human-readable strings -- anything
         // with a colon, whitespace, slash, or beyond a small length
-        // budget — get stacked vertically so the operator can scan
+        // budget -- get stacked vertically so the operator can scan
         // them like a list. The classic offender is the EF.ARR
         // decoder which returns rows like
         // ``"READ: ADM1"`` / ``"UPDATE/APPEND: Always"``.
@@ -13349,7 +15400,7 @@
       });
       return arr;
     }
-    // Object — render as a nested definition list. At the configured
+    // Object -- render as a nested definition list. At the configured
     // depth threshold, wrap the body in a <details> so the operator can
     // keep the outer view scannable.
     var keys = Object.keys(value);
@@ -13401,7 +15452,7 @@
     var bar = document.createElement("div");
     bar.className = "cc-decoded-tools";
 
-    // Stage-edit button — surfaced for every decoded EF that carries
+    // Stage-edit button -- surfaced for every decoded EF that carries
     // its original bytes (``meta.rawHex``). Service-table payloads get
     // the purpose-built checklist; everything else falls back to the
     // generic side-by-side hex editor (``scp03ShowGenericStaging``).
@@ -13416,7 +15467,7 @@
         stageHandler = function () {
           scp03ShowServiceTableStaging(decoded, meta.rawHex);
         };
-        stageTitle = "Open the service-table staging panel — toggle "
+        stageTitle = "Open the service-table staging panel -- toggle "
           + "service flags and preview the resulting hex without "
           + "writing to the card.";
       } else if (typeof scp03ShowGenericStaging === "function") {
@@ -13559,11 +15610,11 @@
   function renderScp03Workbench(container, actions, options) {
     var opts = options || {};
     // Scope determines which ribbon tabs / panels the workbench shows:
-    //   "filesystem"   — tree + FCP preview + FS action bar; ribbon
+    //   "filesystem"   -- tree + FCP preview + FS action bar; ribbon
     //                    filtered to navigation / inspection / APDU
-    //   "applications" — session header + GP ribbon (auth, registry,
+    //   "applications" -- session header + GP ribbon (auth, registry,
     //                    install, eUICC, admin, APDU). Tree hidden.
-    //   "all"          — every panel + every ribbon tab (classic view)
+    //   "all"          -- every panel + every ribbon tab (classic view)
     // Stored on the workbench so ribbon-tab switches and persistence
     // helpers can read it back without the opts object.
     var scope = opts.scope || "all";
@@ -13602,7 +15653,7 @@
     renderScp03Tabs(tabBar, tabBody);
     // Ensure the top-bar pill strip reflects the current active tab
     // (e.g. on direct deep-link into SCP03 the pills may not have
-    // rendered yet — readerBarBootstrap kicked off async).
+    // rendered yet -- readerBarBootstrap kicked off async).
     if (typeof readerBarNotifySessionChanged === "function") {
       readerBarNotifySessionChanged();
     }
@@ -13639,7 +15690,7 @@
       // Mirrors the "optimistic UI" pattern so the file view never
       // goes blank during an eUICC → Files context switch.
       fcpCache: {},
-      // Wall-clock of the last successful recovery — shown in the
+      // Wall-clock of the last successful recovery -- shown in the
       // "refreshing / recovering" banner so operators can see how
       // recently we re-anchored the card. Populated by
       // ``scp03RecoverSession``.
@@ -13653,10 +15704,13 @@
       errorKind: "",
       // New in v2: ribbon-tab selection persists per session tab.
       activeRibbonTab: "home",
+      // Ribbon button groups hidden to give the tree / detail panes the
+      // vertical space. The tab strip stays visible either way.
+      ribbonCollapsed: false,
       // Reader the user has "pointed" this tab at, even before they
-      // start scanning — lets the sidebar drive the workflow end to end.
+      // start scanning -- lets the sidebar drive the workflow end to end.
       pendingReader: "",
-      // Per-tab APDU console state — the "APDU" ribbon tab's panel
+      // Per-tab APDU console state -- the "APDU" ribbon tab's panel
       // is a stateful workbench: the last typed APDU survives a ribbon
       // tab switch, and the history log keeps the last 20 sent APDUs
       // so operators can re-send / copy without re-typing. Each session
@@ -13670,7 +15724,7 @@
       //
       // Every SCP03 action used to drop its card into the ``.cc-wb-extras``
       // strip below the file tree; on a busy session (card_info + GP
-      // status + eUICC info + key-info + …) the extras strip grew into a
+      // status + eUICC info + key-info + ...) the extras strip grew into a
       // scrollable tower that hid the tree. The popout system keeps each
       // action's output in a draggable/resizable floating window keyed by
       // ``<title>``, so clicking the same action twice just brings the
@@ -13680,7 +15734,7 @@
       //
       // Keys are the action title strings (e.g. ``"ATR details"``,
       // ``"GP registry"``) because that's what the callers already pass
-      // to ``scp03BuildExtrasCard`` — no signature churn required at the
+      // to ``scp03BuildExtrasCard`` -- no signature churn required at the
       // 60+ call sites.
       popouts: {},
       // Per-tab secure-session auth cache.
@@ -13688,14 +15742,14 @@
       // Populated by ``scp03.auth_scp03`` / ``scp03.auth_scp02`` responses
       // and by ``scp03.auth_status`` probes when a tab is restored from
       // ``localStorage``. The GUI consults this before firing any
-      // ``requires_auth`` action (PUT KEY, INSTALL [for …], SET STATUS,
-      // DELETE, fs_create_file, etc.) — if ``authenticated`` is false we
+      // ``requires_auth`` action (PUT KEY, INSTALL [for ...], SET STATUS,
+      // DELETE, fs_create_file, etc.) -- if ``authenticated`` is false we
       // open the auth prompt modal first, let the operator pick a
       // protocol / Target AID / optional key override, run AUTH, then
       // chain into the original action on success. Values here are
       // purely metadata (protocol name, target AID hex, KVN, sec level,
       // wall-clock stamp of the last successful AUTH); key material is
-      // never cached frontend-side — the overrides live only as long
+      // never cached frontend-side -- the overrides live only as long
       // as the submit handler that passed them.
       authStatus: { authenticated: false, protocol: "", targetAid: "",
                     kvn: "", secLevel: "", at: 0, overridesApplied: [] },
@@ -13739,7 +15793,7 @@
       if (tab.sessionId) {
         label.textContent = tab.readerName || "reader";
       } else if (tab.pendingReader) {
-        label.textContent = tab.pendingReader + " — pending";
+        label.textContent = tab.pendingReader + " -- pending";
       } else {
         label.textContent = "New session";
       }
@@ -13798,7 +15852,8 @@
     shell.appendChild(readerPane);
 
     var main = document.createElement("div");
-    main.className = "scp03-session-main";
+    main.className = "scp03-session-main"
+      + (tab.ribbonCollapsed ? " is-ribbon-collapsed" : "");
     // Priority order for the main column:
     //   scanning  → loading state (rescan in flight, old session wiped)
     //   sessionId → active workbench
@@ -13818,23 +15873,23 @@
     // Intermediate panel shown while a (re-)scan is in flight against a
     // tab that no longer has a valid session_id. Replaces the welcome
     // panel so the user gets immediate, unambiguous feedback that a
-    // scan is running — otherwise the UI briefly looks like the tab
+    // scan is running -- otherwise the UI briefly looks like the tab
     // was closed.
     var panel = document.createElement("div");
     panel.className = "scp03-session-welcome";
     installMaximizable(panel);
     var h = document.createElement("h3");
-    h.textContent = "Scanning…";
+    h.textContent = "Scanning...";
     panel.appendChild(h);
     var hint = document.createElement("p");
     hint.className = "hint";
     hint.textContent = "Walking the live file system from MF on reader '"
       + (tab.readerName || "(default)") + "'. This usually finishes in a "
-      + "second or two — the tree + FCP preview will appear automatically.";
+      + "second or two -- the tree + FCP preview will appear automatically.";
     panel.appendChild(hint);
     var spinner = document.createElement("p");
     spinner.className = "loading";
-    spinner.textContent = "scan in progress…";
+    spinner.textContent = "scan in progress...";
     panel.appendChild(spinner);
     return panel;
   }
@@ -13899,7 +15954,7 @@
     if (wb.readersLoading && wb.readers.length === 0) {
       var loading = document.createElement("li");
       loading.className = "scp03-reader-empty";
-      loading.textContent = "probing PC/SC…";
+      loading.textContent = "probing PC/SC...";
       list.appendChild(loading);
     } else if (wb.readersError) {
       var errLi = document.createElement("li");
@@ -14012,7 +16067,7 @@
     if (tab.sessionId && tab.readerName !== readerName) {
       var keep = window.confirm(
         "This tab is currently bound to '" + tab.readerName + "' "
-          + "(session " + (tab.sessionId || "?").substring(0, 8) + "…). "
+          + "(session " + (tab.sessionId || "?").substring(0, 8) + "...). "
           + "\n\nSwitch to '" + readerName + "'? "
           + "The existing session will be closed."
       );
@@ -14036,7 +16091,7 @@
         method: "POST",
         body: JSON.stringify({ inputs: { session_id: tab.sessionId } }),
       });
-    } catch (_err) { /* ignore — we're replacing the session anyway */ }
+    } catch (_err) { /* ignore -- we're replacing the session anyway */ }
     tab.sessionId = null;
     tab.atrHex = "";
     tab.readerName = "";
@@ -14056,9 +16111,9 @@
   // scp03 error classification. The backend annotates well-known
   // non-transient failures with a prefix so the frontend can branch:
   //
-  //   "no_card:"       — reader is empty; no point retrying,
+  //   "no_card:"       -- reader is empty; no point retrying,
   //                      show a clear "insert a card" banner.
-  //   "session_gone:"  — session_id was reaped (idle timeout) or the
+  //   "session_gone:"  -- session_id was reaped (idle timeout) or the
   //                      GUI is carrying a stale id from localStorage.
   //                      No session to recover to; the tab must be
   //                      re-opened.
@@ -14078,11 +16133,11 @@
   }
 
   async function scp03OpenSessionForTab(tab, tabBar, tabBody) {
-    // ``tab.pendingReader`` is optional — an empty string means "use the
+    // ``tab.pendingReader`` is optional -- an empty string means "use the
     // default / first PC/SC reader" (the backend resolves index 0). We
-    // used to early-return on empty, which left the "Open default reader"
-    // button silently broken. Now we always dispatch scan and let the
-    // backend pick.
+    // An early return on empty left the "Open default reader" button
+    // silently broken, so scan is always dispatched and the backend
+    // picks.
     var target = tab.pendingReader || "";
     tab.status = "scanning";
     tab.error = null;
@@ -14097,7 +16152,7 @@
         tab.error = resp.error || "scan failed";
         tab.errorKind = scp03ClassifyError(resp.error);
         tab.status = "idle";
-        // "no_card" gets a WARN level — it's routine operator feedback
+        // "no_card" gets a WARN level -- it's routine operator feedback
         // ("no card in reader X"), not a forensic event. Everything else
         // stays at ERROR so real regressions stay loud.
         logBus.emit({
@@ -14112,7 +16167,7 @@
       } else {
         var data = resp.data || {};
         tab.sessionId = data.session_id || null;
-        // Trust the backend's echoed reader name — scp03.scan normalises
+        // Trust the backend's echoed reader name -- scp03.scan normalises
         // empty input to "(default)" and resolves the actual PC/SC name
         // when one was passed. This keeps tab.readerName in sync with the
         // pill strip, which fetches names from the same /api/live/readers
@@ -14130,7 +16185,7 @@
           level: "info",
           source: "scp03.scan",
           message: "session " + (tab.sessionId || "?").substring(0, 8)
-            + " opened on '" + (tab.readerName || "(default)") + "' — "
+            + " opened on '" + (tab.readerName || "(default)") + "' -- "
             + ((data.tree && data.tree.length) || 0) + " roots",
         });
         // Best-effort persist so the tree + selection + FCP cache
@@ -14139,7 +16194,7 @@
         scp03PersistTab(tab);
 
         // Auto-fetch card overview (ICCID, eID, standard) for the
-        // Home tab dashboard. Fire-and-forget — if it fails the
+        // Home tab dashboard. Fire-and-forget -- if it fails the
         // header chips simply won't show the extra fields.
         if (tab.sessionId) {
           apiFetch("/api/actions/scp03.card_info/run", {
@@ -14203,7 +16258,7 @@
       var cacheSize = tab.fcpCache ? Object.keys(tab.fcpCache).length : 0;
       hint.textContent = "Restored from last session on '"
         + (displayReader || "(default)")
-        + "' — " + treeSize + " root node"
+        + "' -- " + treeSize + " root node"
         + (treeSize === 1 ? "" : "s") + ", " + cacheSize + " cached file"
         + (cacheSize === 1 ? "" : "s") + " (saved " + ageStr + "). "
         + "Click Resume to open a fresh secure channel and re-sync "
@@ -14214,7 +16269,7 @@
     } else {
       hint.textContent = "Pick a reader from the top bar. "
         + "The scan walks the live file system from MF and opens a "
-        + "secure channel — everything you dispatch in this tab will "
+        + "secure channel -- everything you dispatch in this tab will "
         + "target that reader.";
     }
     panel.appendChild(hint);
@@ -14255,7 +16310,7 @@
     bar.appendChild(refreshBtn);
 
     // Operators who want to start clean from a hydrated tab can hit
-    // Forget — wipes localStorage for this reader AND clears the
+    // Forget -- wipes localStorage for this reader AND clears the
     // in-memory caches, leaving the tab in the pristine "unbound"
     // state. The pill stays active so a follow-up click re-opens the
     // reader without any ghosts.
@@ -14286,7 +16341,7 @@
       var errSlot = document.createElement("div");
       errSlot.className = "cc-wb-error";
       // "no_card" gets a friendly inline notice rather than the generic
-      // error block — it's routine operator feedback, not a bug. Users
+      // error block -- it's routine operator feedback, not a bug. Users
       // should see "insert a card" + a Retry button, not a stack trace.
       if (tab.errorKind === "no_card") {
         var notice = document.createElement("div");
@@ -14322,7 +16377,7 @@
   //
   // Centralised glyph vocabulary so the ribbon stays visually
   // consistent. Uses a deliberately small set of neutral / minimalist
-  // Unicode forms — geometric circled-operators (⊕ ⊖ ⊘ ⊙ ⊚ ⊜ ⊞ ⊟ ⊡),
+  // Unicode forms -- geometric circled-operators (⊕ ⊖ ⊘ ⊙ ⊚ ⊜ ⊞ ⊟ ⊡),
   // simple arrows (↻ ↺ ↶ ↪ ⇄ ⤓ ⬇ ↑), squares (▣ ▤ ▦ ▩), and a handful
   // of long-standing ETSI/GP iconography (✓ ✗ ★ ⓘ). Anything heraldic,
   // emoji-flavoured, or themed (fleur-de-lis, atom, lightning, cloud-
@@ -14393,6 +16448,7 @@
     resetKeys:        "\u21BA", // ↺
     // Install
     installCap:       "\u2B07", // ⬇
+    installScript:    "\u2913", // ⤓
     installApp:       "\u2295", // ⊕
     makeSelectable:   "\u2713", // ✓
     extradition:      "\u21C4", // ⇄
@@ -14403,7 +16459,7 @@
     channel:          "\u229C", // ⊜
     runAuth:          "\u25B6", // ▶
     stkShell:         "\u25B6", // ▶
-    otaShell:         "\u2601", // ☁  (kept — universally semantic for OTA)
+    otaShell:         "\u2601", // ☁  (kept -- universally semantic for OTA)
     runScript:        "\u25B6", // ▶
     fsReport:         "\u2398", // ⎘
     guides:           "\u24D8", // ⓘ
@@ -14493,7 +16549,7 @@
       }
     );
     var selectByAidBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.selectArbitrary, label: "SELECT…", title: "SELECT an arbitrary AID / file identifier" },
+      { icon: SCP03_ICONS.selectArbitrary, label: "SELECT...", title: "SELECT an arbitrary AID / file identifier" },
       function () { scp03PromptSelect(tab, tabBar, tabBody); }
     );
     var listAppsBtn = scp03MakeRibbonButton(
@@ -14505,7 +16561,7 @@
       function () { scp03ReadBinary(tab); }
     );
     var readRecBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.readRecord, label: "RECORD…", title: "READ RECORD (00B2) — pick N / range / ALL" },
+      { icon: SCP03_ICONS.readRecord, label: "RECORD...", title: "READ RECORD (00B2) -- pick N / range / ALL" },
       function () { scp03ReadRecord(tab); }
     );
     var arrBtn = scp03MakeRibbonButton(
@@ -14527,11 +16583,11 @@
       function () { scp03ShowCardInfo(tab); }
     );
     var decodeBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.decode, label: "Decode…", title: "Decode arbitrary hex as BER-TLV or GP registry stream" },
+      { icon: SCP03_ICONS.decode, label: "Decode...", title: "Decode arbitrary hex as BER-TLV or GP registry stream" },
       function () { scp03ShowDecode(tab); }
     );
     var dumpFsBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.dumpToDisk, label: "Dump FS…", title: "Dump the live FS to disk under <dir>/FS_DUMP/<ICCID>/" },
+      { icon: SCP03_ICONS.dumpToDisk, label: "Dump FS...", title: "Dump the live FS to disk under <dir>/FS_DUMP/<ICCID>/" },
       function () { scp03DumpFs(tab); }
     );
     var diagGroup = scp03MakeRibbonGroup(
@@ -14563,19 +16619,19 @@
 
     // Registry
     var regAppsBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.apps, label: "Apps", title: "GET STATUS P1=40 — installed applications" },
-      function () { scp03ShowRegistry(tab, "scp03.registry_apps", "GP registry — APPS"); }
+      { icon: SCP03_ICONS.apps, label: "Apps", title: "GET STATUS P1=40 -- installed applications" },
+      function () { scp03ShowRegistry(tab, "scp03.registry_apps", "GP registry -- APPS"); }
     );
     var regPkgsBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.packages, label: "Packages", title: "GET STATUS P1=20 — loaded packages" },
-      function () { scp03ShowRegistry(tab, "scp03.registry_pkgs", "GP registry — PACKAGES"); }
+      { icon: SCP03_ICONS.packages, label: "Packages", title: "GET STATUS P1=20 -- loaded packages" },
+      function () { scp03ShowRegistry(tab, "scp03.registry_pkgs", "GP registry -- PACKAGES"); }
     );
     var regSdBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.securityDomains, label: "Sec. domains", title: "GET STATUS P1=80 — security domains" },
-      function () { scp03ShowRegistry(tab, "scp03.registry_sd", "GP registry — SD"); }
+      { icon: SCP03_ICONS.securityDomains, label: "Sec. domains", title: "GET STATUS P1=80 -- security domains" },
+      function () { scp03ShowRegistry(tab, "scp03.registry_sd", "GP registry -- SD"); }
     );
     var getDataBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.getData, label: "GET DATA…", title: "80CA P1 P2 00 — fetch arbitrary DO by tag" },
+      { icon: SCP03_ICONS.getData, label: "GET DATA...", title: "80CA P1 P2 00 -- fetch arbitrary DO by tag" },
       function () { scp03ShowGetData(tab); }
     );
     var aidsBtn = scp03MakeRibbonButton(
@@ -14589,7 +16645,7 @@
 
     // Profiles
     var listProfilesBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.profiles, label: "Profiles", title: "ES10c GetProfilesInfo — structured list" },
+      { icon: SCP03_ICONS.profiles, label: "Profiles", title: "ES10c GetProfilesInfo -- structured list" },
       function () { scp03ShowListProfiles(tab); }
     );
     var profileScanBtn = scp03MakeRibbonButton(
@@ -14601,10 +16657,10 @@
       [listProfilesBtn, profileScanBtn]
     );
 
-    // Mutation (destructive) — every button in this group is gated
+    // Mutation (destructive) -- every button in this group is gated
     // by ``scp03GateOpen`` so the auth prompt fires before the
     // inline form even renders. The inline forms can still be
-    // opened offline (session_id might be null when reloaded) —
+    // opened offline (session_id might be null when reloaded) --
     // the gate re-authenticates against the correct AID on the fly.
     var setStatusBtn = scp03MakeRibbonButton(
       { icon: SCP03_ICONS.setStatus, label: "Set status", title: "GP SET STATUS (lifecycle byte)" },
@@ -14627,7 +16683,7 @@
       scp03GateOpen(tab, "scp03.delete", function () { scp03ShowDelete(tab); })
     );
     var storeDataBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.storeData, label: "STORE DATA…", title: "GP STORE DATA (auto-chunk supported)" },
+      { icon: SCP03_ICONS.storeData, label: "STORE DATA...", title: "GP STORE DATA (auto-chunk supported)" },
       scp03GateOpen(tab, "scp03.store_data", function () { scp03ShowStoreData(tab); })
     );
     var updateBinBtn = scp03MakeRibbonButton(
@@ -14727,7 +16783,7 @@
       [setGoldBtn, showGoldBtn, clearGoldBtn, profileDiffBtn]
     );
 
-    // Crypto (C-4, offline — no card session)
+    // Crypto (C-4, offline -- no card session)
     var deriveOpcBtn = scp03MakeRibbonButton(
       { icon: SCP03_ICONS.deriveOpc, label: "Derive OPc", title: "3GPP TS 35.206 Milenage OPc derivation" },
       function () { scp03ShowDeriveOpc(tab); }
@@ -14759,7 +16815,7 @@
       [showConfigBtn, aidAliasBtn, setDefaultsBtn]
     );
 
-    // Install (C-5, GP mutation — destructive). Every INSTALL [for …]
+    // Install (C-5, GP mutation -- destructive). Every INSTALL [for ...]
     // variant and PUT KEY cross the SCP secure-messaging envelope, so
     // an authenticated session is non-negotiable. The gate short-
     // circuits the form opening until AUTH resolves; without it the
@@ -14773,6 +16829,13 @@
       { icon: SCP03_ICONS.installCap, label: "Install CAP", title: "INSTALL [for load] + LOAD + INSTALL [for install]" },
       scp03GateOpen(tab, "scp03.install_cap", function () { scp03ShowInstallCap(tab); })
     );
+    // No card: the sequence is planned from the CAP alone, so the button
+    // stays outside the auth gate.
+    var installScriptBtn = scp03MakeRibbonButton(
+      { icon: SCP03_ICONS.installScript, label: "Install script",
+        title: "Build INSTALL [for load] + LOAD + INSTALL [for install] as a script file (no card)" },
+      function () { scp03ShowBuildInstallScript(tab); }
+    );
     var installAppBtn = scp03MakeRibbonButton(
       { icon: SCP03_ICONS.installApp, label: "Install app", title: "INSTALL [for install] on an already-loaded package" },
       scp03GateOpen(tab, "scp03.install_app", function () { scp03ShowInstallApp(tab); })
@@ -14783,35 +16846,35 @@
         function () { scp03ShowInstallMakeSelectable(tab); })
     );
     var installExtraditionBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.extradition, label: "Extradition", title: "INSTALL [for extradition] — re-bind instance to target SD" },
+      { icon: SCP03_ICONS.extradition, label: "Extradition", title: "INSTALL [for extradition] -- re-bind instance to target SD" },
       scp03GateOpen(tab, "scp03.install_extradition",
         function () { scp03ShowInstallExtradition(tab); })
     );
     var installPersoBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.perso, label: "Perso", title: "INSTALL [for personalization] — open perso channel" },
+      { icon: SCP03_ICONS.perso, label: "Perso", title: "INSTALL [for personalization] -- open perso channel" },
       scp03GateOpen(tab, "scp03.install_personalization",
         function () { scp03ShowInstallPersonalization(tab); })
     );
     var installRegBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.registryUpdate, label: "Reg. update", title: "INSTALL [for registry update] — change privileges / params" },
+      { icon: SCP03_ICONS.registryUpdate, label: "Reg. update", title: "INSTALL [for registry update] -- change privileges / params" },
       scp03GateOpen(tab, "scp03.install_registry_update",
         function () { scp03ShowInstallRegistryUpdate(tab); })
     );
     var installGroup = scp03MakeRibbonGroup(
       "Install",
-      [putKeyBtn, installCapBtn, installAppBtn, installMakeSelBtn,
+      [putKeyBtn, installCapBtn, installScriptBtn, installAppBtn, installMakeSelBtn,
        installExtraditionBtn, installPersoBtn, installRegBtn]
     );
 
     // NOTE: The legacy FS-Admin ribbon group (CREATE / DELETE / RESIZE /
     // Lifecycle / SEARCH RECORD / SUSPEND) was relocated in 2026-04-23 to
-    // the contextual action bar rendered by ``scp03BuildFsActionBar`` —
+    // the contextual action bar rendered by ``scp03BuildFsActionBar`` --
     // the strip sits next to the ``fid:`` badge in the FCP preview and
     // gates each action by the currently-selected file kind (DF / ADF
     // / EF-transparent / EF-linear / EF-cyclic). The button handlers
     // still hop into the same ``scp03ShowFs*(tab)`` wizards; only the
     // entry point moved. If you need a global (no selection) entry
-    // point back, wire it in via the Admin ribbon tab — not Files —
+    // point back, wire it in via the Admin ribbon tab -- not Files --
     // since the Files tab itself was retired as part of this change.
 
     // Live AAA (C-5, PIN / Channel / AUTHENTICATE)
@@ -14820,7 +16883,7 @@
       function () { scp03ShowManagePin(tab); }
     );
     var manageChannelBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.channel, label: "Channel", title: "MANAGE CHANNEL (0070) — open / close logical channel" },
+      { icon: SCP03_ICONS.channel, label: "Channel", title: "MANAGE CHANNEL (0070) -- open / close logical channel" },
       function () { scp03ShowManageChannel(tab); }
     );
     var runAuthLiveBtn = scp03MakeRibbonButton(
@@ -14834,8 +16897,8 @@
 
     // Sub-shells (C-6, PTY handoff)
     var stkShellBtn = scp03MakeRibbonButton(
-      { icon: SCP03_ICONS.stkShell, label: "STK shell",
-        title: "Launch SCP03 \u2192 STK-SHELL sub-REPL in the Terminal view" },
+      { icon: SCP03_ICONS.stkShell, label: "STK mode",
+        title: "Launch SCP03 with STK ON in the Terminal view" },
       function () { scp03ShowOpenStkShell(tab); }
     );
     var otaShellBtn = scp03MakeRibbonButton(
@@ -14883,7 +16946,7 @@
     // finally admin the session.
     //
     // Tabs with ``panel: fn`` render a dedicated workbench panel
-    // (full-width form + output) in place of the group strip — used
+    // (full-width form + output) in place of the group strip -- used
     // by the APDU console. Tabs with ``groups: [...]`` render the
     // classic icon-button strip.
     var allRibbonTabs = [
@@ -14893,7 +16956,7 @@
       { id: "registry", label: "Registry",   groups: [registryGroup, mutateGroup] },
       { id: "install",  label: "Install",    groups: [installGroup] },
       // The former "Files" ribbon tab (fsAdminGroup) was retired in
-      // favour of the contextual action bar in the FCP preview — see
+      // favour of the contextual action bar in the FCP preview -- see
       // ``scp03BuildFsActionBar``. Operators now pick a file in the
       // scan tree and hit the exact action that's legal for that node.
       { id: "euicc",    label: "eUICC",      groups: [profileGroup, euiccGroup, snapshotGroup, exportGroup] },
@@ -14923,7 +16986,7 @@
     var activeId = tab.activeRibbonTab || "home";
     if (!ribbonTabs.some(function (t) { return t.id === activeId; })) {
       // Default primary tab per scope: Home for filesystem, Auth for
-      // applications — both match what the operator most likely wants
+      // applications -- both match what the operator most likely wants
       // to do first.
       activeId = scope === "applications" ? "auth" : "home";
       tab.activeRibbonTab = activeId;
@@ -14937,6 +17000,12 @@
 
     function activateRibbonTab(ribTab, returnFocus) {
       tab.activeRibbonTab = ribTab.id;
+      if (tab.ribbonCollapsed) {
+        // Picking a category while the toolbar is hidden has to reveal it,
+        // otherwise the click reads as a no-op.
+        tab.ribbonCollapsed = false;
+        scp03ApplyRibbonCollapse(tab);
+      }
       scp03RepaintRibbon(tab, tabBar, tabBody);
       // Persist the ribbon selection so a reload restores the same
       // category. The repaint replaces the clicked button, so explicitly
@@ -14987,6 +17056,31 @@
       });
       strip.appendChild(btn);
     });
+
+    // Collapse control: hides the button groups but keeps the tab strip,
+    // so the operator can still switch category (and expand again) while
+    // the freed vertical space goes to the tree / detail panes.
+    var collapsed = !!tab.ribbonCollapsed;
+    var collapseBtn = document.createElement("button");
+    collapseBtn.type = "button";
+    collapseBtn.className = "scp03-ribbon-collapse";
+    collapseBtn.setAttribute("aria-expanded", String(!collapsed));
+    collapseBtn.setAttribute("aria-controls", panelId);
+    collapseBtn.title = collapsed
+      ? "Show the action toolbar"
+      : "Hide the action toolbar to free vertical space";
+    var caret = document.createElement("span");
+    caret.className = "scp03-ribbon-collapse-caret";
+    caret.textContent = collapsed ? "▼" : "▲";
+    collapseBtn.appendChild(caret);
+    var collapseLabel = document.createElement("span");
+    collapseLabel.textContent = collapsed ? "Show tools" : "Hide tools";
+    collapseBtn.appendChild(collapseLabel);
+    collapseBtn.addEventListener("click", function () {
+      scp03ToggleRibbonCollapse(tab, tabBar, tabBody);
+    });
+    strip.appendChild(collapseBtn);
+
     ribbon.appendChild(strip);
 
     var section = document.createElement("div");
@@ -15000,7 +17094,7 @@
     section.tabIndex = 0;
     var activeTab = ribbonTabs.find(function (t) { return t.id === activeId; });
     if (activeTab && typeof activeTab.panel === "function") {
-      // Custom workbench panel (e.g. the APDU console) — render it
+      // Custom workbench panel (e.g. the APDU console) -- render it
       // in place of the group strip. The panel function owns its own
       // layout, styling, and lifecycle (form state lives on ``tab``).
       section.classList.add("scp03-ribbon-section--panel");
@@ -15015,6 +17109,22 @@
     return ribbon;
   }
 
+  function scp03ApplyRibbonCollapse(tab) {
+    // The reserve variable that sizes the tree / detail panes lives on the
+    // session column, not on the ribbon, so the class goes there.
+    var main = document.querySelector(".scp03-session-main");
+    if (main) {
+      main.classList.toggle("is-ribbon-collapsed", !!(tab && tab.ribbonCollapsed));
+    }
+  }
+
+  function scp03ToggleRibbonCollapse(tab, tabBar, tabBody) {
+    tab.ribbonCollapsed = !tab.ribbonCollapsed;
+    scp03ApplyRibbonCollapse(tab);
+    scp03RepaintRibbon(tab, tabBar, tabBody);
+    try { scp03PersistTab(tab); } catch (_err) {}
+  }
+
   function scp03RepaintRibbon(tab, tabBar, tabBody) {
     // Rebuild just the ribbon in place so switching the primary
     // ribbon tab does NOT wipe the scan tree / selection / extras.
@@ -15024,7 +17134,7 @@
     // when the click handler captured ``oldRibbon`` and when the
     // promise microtask fires), the ``replaceChild`` throws
     // ``HierarchyRequestError``. Fall back to a full tab-body
-    // rerender in that case — correctness first, visual continuity
+    // rerender in that case -- correctness first, visual continuity
     // second.
     var oldRibbon = document.querySelector(".scp03-session-main .scp03-ribbon-v2");
     if (!oldRibbon || !oldRibbon.parentNode) {
@@ -15145,7 +17255,7 @@
     var raw = "";
     try {
       raw = window.prompt(
-        "SELECT — enter AID or file identifier (hex, e.g. A0000000871002 or 7FFF):",
+        "SELECT -- enter AID or file identifier (hex, e.g. A0000000871002 or 7FFF):",
         ""
       );
     } catch (_err) { raw = ""; }
@@ -15192,9 +17302,9 @@
       logBus.emit({
         level: "info",
         source: "scp03.select",
-        message: "SELECT ok — selected=" + (data.selected ? "yes" : "no")
+        message: "SELECT ok -- selected=" + (data.selected ? "yes" : "no")
           + " fid=" + (data.fid || "?")
-          + (fcpHex ? " fcp=" + fcpHex.substring(0, 32) + "…" : ""),
+          + (fcpHex ? " fcp=" + fcpHex.substring(0, 32) + "..." : ""),
       });
     } catch (err) {
       logBus.emit({
@@ -15206,7 +17316,7 @@
   }
 
   function scp03BuildActiveSessionPanel(tab, tabBar, tabBody) {
-    // Read scope from the workbench — scope is set by
+    // Read scope from the workbench -- scope is set by
     // ``renderScp03Workbench`` before this panel is built. Apps and
     // Filesystem each drop half of the visual surface to reduce
     // cognitive load; "all" keeps the classic layout for direct
@@ -15225,7 +17335,7 @@
     // reaching for the ribbon (green when authenticated, otherwise a
     // neutral "not authenticated" pill that flips on the next AUTH).
     // The scope chip makes it obvious which surface the operator is
-    // looking at — it's easy to miss that the ribbon filtered when
+    // looking at -- it's easy to miss that the ribbon filtered when
     // switching between Filesystem and Applications.
     var header = document.createElement("div");
     header.className = "cc-scan-header";
@@ -15263,8 +17373,8 @@
 
     // Applications scope hides the scan tree / FCP preview entirely:
     // everything in that view is driven from the ribbon (GP registry,
-    // install, put-key, eUICC, APDU console). The filesystem scope —
-    // and the classic "all" scope — keep the tree + breadcrumb +
+    // install, put-key, eUICC, APDU console). The filesystem scope --
+    // and the classic "all" scope -- keep the tree + breadcrumb +
     // preview intact since the tree is the primary selector.
     var tree = null;
     var preview = null;
@@ -15299,7 +17409,7 @@
       hint.className = "cc-apps-hint";
       hint.innerHTML = ''
         + '<p><strong>Applications view.</strong> The file system tree '
-        + 'is hidden here — switch to <em>Card Administration \u203A '
+        + 'is hidden here -- switch to <em>Card Administration \u203A '
         + 'File system</em> when you need to walk MF/ADF/DF/EF nodes. '
         + 'Ribbon actions (Auth, Registry, Install, eUICC, APDU, '
         + 'Admin) target the same session, so an SCP03 handshake here '
@@ -15365,14 +17475,14 @@
     tab.lastRecoverAt = 0;
     tab.sessionId = null;
     commandState.scp03Session = null;
-    // Immediate repaint — the user clicked a button, they should see
+    // Immediate repaint -- the user clicked a button, they should see
     // the UI reset instantly instead of the old tree lingering while
     // the backend scan runs. The welcome panel will render briefly.
     renderScp03Tabs(tabBar, tabBody);
 
     // Best-effort teardown of the previous session so the PC/SC handle
     // is released before we ask the backend to open a fresh one. We
-    // ignore failures here — scan() will open a new transporter either
+    // ignore failures here -- scan() will open a new transporter either
     // way, and we'd rather not block the rescan on this cleanup call.
     if (previousSession) {
       try {
@@ -15381,7 +17491,7 @@
           body: JSON.stringify({ inputs: { session_id: previousSession } }),
         });
       } catch (_err) {
-        // Swallow — stale sessions get GC'd on the backend anyway.
+        // Swallow -- stale sessions get GC'd on the backend anyway.
       }
     }
 
@@ -15394,7 +17504,7 @@
         tab.error = resp.error || "rescan failed";
         tab.status = "idle";
         renderScp03Tabs(tabBar, tabBody);
-        // Pill colour may have flipped (session creation failed) — repaint.
+        // Pill colour may have flipped (session creation failed) -- repaint.
         if (typeof readerBarNotifySessionChanged === "function") {
           readerBarNotifySessionChanged();
         }
@@ -15408,7 +17518,7 @@
       tab.status = "open";
       commandState.scp03Session = tab.sessionId;
       // Persist the fresh scan tree keyed by reader so a reload lands
-      // back on the same tree (sessionId is deliberately not saved —
+      // back on the same tree (sessionId is deliberately not saved --
       // see scp03PersistTab). Also wipes any stale fcpCache from the
       // previous session because the scan just cleared them upstream.
       scp03PersistTab(tab);
@@ -15431,13 +17541,13 @@
   }
 
   async function scp03ListApps(tab) {
-    // ``scp03BuildExtrasCard`` now hands us a popout body — we can
+    // ``scp03BuildExtrasCard`` now hands us a popout body -- we can
     // stamp a loading placeholder straight onto it and replace the
     // contents when the network round-trip returns, mirroring every
     // other C-1 action dispatcher.
     var card = scp03BuildExtrasCard("EF.DIR applications");
     if (!card) return;
-    card.innerHTML = '<p class="loading">listing EF.DIR applications…</p>';
+    card.innerHTML = '<p class="loading">listing EF.DIR applications...</p>';
     try {
       var resp = await apiFetch("/api/actions/scp03.list_apps/run", {
         method: "POST",
@@ -15467,7 +17577,7 @@
   // session the strip grew into a vertically-stacked tower that hid
   // the tree and pushed the fold down screen-fulls. Operator feedback:
   // "can we make these action buttons spawn in a pop-out window
-  // instead?" — so ``scp03BuildExtrasCard`` now creates a **floating,
+  // instead?" -- so ``scp03BuildExtrasCard`` now creates a **floating,
   // draggable, resizable window** positioned over the workbench
   // (``position: fixed`` at the document level, z-stacked) while the
   // tree + preview stay in the operator's viewport untouched. Windows
@@ -15491,7 +17601,7 @@
   // Action forms and action results render in normal document flow,
   // inside the surface that opened them. ``ccInlinePanel`` returns the
   // body element the caller fills, which is the same contract the
-  // floating popout builders had — so call sites are unaffected by the
+  // floating popout builders had -- so call sites are unaffected by the
   // shell they get.
   //
   // Deduplication is by key within one stack: re-running an action
@@ -15508,7 +17618,7 @@
   }
 
   // The newest panel carries the accent edge. This is the only ordering
-  // signal a panel gets — there is no z-order to maintain.
+  // signal a panel gets -- there is no z-order to maintain.
   function ccPanelMarkLatest(stack) {
     if (!stack || !stack.querySelectorAll) return;
     var panels = stack.querySelectorAll(".cc-panel");
@@ -15545,12 +17655,65 @@
     if (restoreFocus !== false) ccPanelRestoreFocus(panel);
   }
 
-  // Close the last panel in the surface the operator is looking at.
-  // A true modal owns Escape while it is open, so defer to one.
-  function ccPanelCloseLast() {
+  // -- Escape ----------------------------------------------------------
+  //
+  // Escape closes the panel the focus is in, else the newest panel on
+  // the page. A transient surface that answers Escape itself keeps it
+  // while it is on screen: a dialog (modal or not), a menu, the
+  // maximised-pane backdrop, and an auto-hidden sidebar or top bar that
+  // holds the focus. Being mounted is not the test -- the guide viewer
+  // stays in the DOM behind ``data-state="hidden"`` and a context-menu
+  // root stays mounted without ``is-open`` -- so a surface counts only
+  // while it is rendered.
+
+  var CC_ESCAPE_OWNER_SELECTOR = [
+    '[role="dialog"]',
+    '[role="alertdialog"]',
+    '[role="menu"]',
+    ".cc-max-backdrop",
+  ].join(", ");
+
+  // The auto-hide controllers in ``trailing.js`` conceal the sidebar /
+  // top bar on Escape while it is revealed; the shell carries the state.
+  var CC_ESCAPE_CHROME_SELECTOR = [
+    '#app[data-sidebar-revealed="true"] #module-navigation',
+    '#app[data-topbar-revealed="true"] .topbar',
+  ].join(", ");
+
+  function ccElementRendered(el) {
+    if (!el || !el.isConnected || el.hidden) return false;
+    if (el.getAttribute("aria-hidden") === "true") return false;
+    if (typeof el.getClientRects === "function" && el.getClientRects().length === 0) {
+      return false;
+    }
+    return true;
+  }
+
+  function ccEscapeOwnedElsewhere(target) {
+    if (target && typeof target.closest === "function"
+        && target.closest(CC_ESCAPE_CHROME_SELECTOR)) {
+      return true;
+    }
+    return Array.prototype.some.call(
+      document.querySelectorAll(CC_ESCAPE_OWNER_SELECTOR),
+      ccElementRendered
+    );
+  }
+
+  // The panel holding the focus, else the newest one on the page.
+  function ccPanelForEscape(target) {
+    if (target && typeof target.closest === "function") {
+      var focused = target.closest(".cc-panel-stack > .cc-panel");
+      if (focused) return focused;
+    }
     var panels = document.querySelectorAll(".cc-panel-stack > .cc-panel");
-    if (!panels.length) return false;
-    ccPanelRemove(panels[panels.length - 1]);
+    return panels.length ? panels[panels.length - 1] : null;
+  }
+
+  function ccPanelCloseLast(target) {
+    var panel = ccPanelForEscape(target);
+    if (!panel) return false;
+    ccPanelRemove(panel);
     return true;
   }
 
@@ -15558,15 +17721,9 @@
     if (commandState._panelEscapeBound) return;
     commandState._panelEscapeBound = true;
     document.addEventListener("keydown", function (ev) {
-      if (ev.key !== "Escape") return;
-      var modalOpen = Array.prototype.some.call(
-        document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
-        function (dialog) {
-          return dialog && dialog.isConnected && !dialog.hidden;
-        }
-      );
-      if (modalOpen) return;
-      if (ccPanelCloseLast()) {
+      if (ev.key !== "Escape" || ev.isComposing || ev.defaultPrevented) return;
+      if (ccEscapeOwnedElsewhere(ev.target)) return;
+      if (ccPanelCloseLast(ev.target)) {
         ev.preventDefault();
         ev.stopPropagation();
       }
@@ -15643,8 +17800,8 @@
     var closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "cc-panel-btn cc-panel-close";
-    closeBtn.title = "Close panel";
-    closeBtn.setAttribute("aria-label", "Close panel");
+    closeBtn.title = "Close panel (Esc)";
+    closeBtn.setAttribute("aria-label", "Close panel (Esc)");
     closeBtn.textContent = "\u00D7"; // x
     closeBtn.addEventListener("click", function () {
       ccPanelRemove(panel);
@@ -15698,7 +17855,7 @@
   }
 
   // ------------------------------------------------------------------
-  // Generic result panel (compact workbench — eSIM Management / Tools / …)
+  // Generic result panel (compact workbench -- eSIM Management / Tools / ...)
   // ------------------------------------------------------------------
   // Docks into the workbench the action was launched from, so the panel
   // lives and dies with that surface. Falls back to the active view
@@ -15783,7 +17940,7 @@
   function scp03PopoutSyncForSubsystem(subsystem) {
     // Thin wrapper so ``openCommandSubsystem`` can flip popout
     // visibility when the operator navigates between subsystems. The
-    // underlying logic is identical to the tab-switch path — both end
+    // underlying logic is identical to the tab-switch path -- both end
     // up in ``scp03PopoutSyncVisibilityToActiveTab`` which honours the
     // ``activeSubsystem`` guard.
     scp03PopoutSyncVisibilityToActiveTab();
@@ -15844,9 +18001,9 @@
 
   function scp03RenderTextLines(card, lines) {
     // Split a text-line array into three buckets:
-    //   • headings   — lines that end with ":" (visual section breaks)
-    //   • kv rows    — "Key: value" where the key half is short and ASCII
-    //   • remainder  — anything else (hex dumps, wrapped narration, etc.)
+    //   • headings   -- lines that end with ":" (visual section breaks)
+    //   • kv rows    -- "Key: value" where the key half is short and ASCII
+    //   • remainder  -- anything else (hex dumps, wrapped narration, etc.)
     // KV + headings render as structured Key-Value blocks. The raw
     // remainder drops into a collapsed <details> so the card stops
     // looking like a terminal paste.
@@ -15909,7 +18066,7 @@
 
     if (remainder.length > 0) {
       if (!producedStructured && remainder.length <= 3) {
-        // Very short free-form output — show it inline without the
+        // Very short free-form output -- show it inline without the
         // fold-out wrapper so one-liners don't feel hidden.
         var note = document.createElement("p");
         note.className = "cc-empty cc-empty-plain";
@@ -16037,7 +18194,7 @@
   async function scp03ShowAtr(tab) {
     var card = scp03BuildExtrasCard("ATR details");
     if (!card) return;
-    card.appendChild(loadingEl("reading ATR…"));
+    card.appendChild(loadingEl("reading ATR..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.atr/run", {
         method: "POST",
@@ -16064,7 +18221,7 @@
   async function scp03ShowCardInfo(tab) {
     var card = scp03BuildExtrasCard("Card info");
     if (!card) return;
-    card.appendChild(loadingEl("probing card…"));
+    card.appendChild(loadingEl("probing card..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.card_info/run", {
         method: "POST",
@@ -16097,7 +18254,7 @@
   async function scp03Reset(tab, tabBar, tabBody) {
     var card = scp03BuildExtrasCard("Reset card");
     if (!card) return;
-    card.appendChild(loadingEl("resetting…"));
+    card.appendChild(loadingEl("resetting..."));
     var resetOk = false;
     var data = {};
     try {
@@ -16133,13 +18290,13 @@
     // this tab (tree, FCP preview, secure-channel context) is stale. If
     // the caller passed the tab-bar/body refs we chain an automatic
     // rescan so the user doesn't have to click "Rescan" immediately
-    // after — the ribbon showed "scanning" briefly and then paints the
+    // after -- the ribbon showed "scanning" briefly and then paints the
     // fresh tree. Without this, the UI silently kept the old tree and
     // any follow-up SELECT would fail against the reset card.
     if (resetOk && tabBar && tabBody) {
       var note = document.createElement("p");
       note.className = "hint";
-      note.textContent = "Re-walking file system after reset…";
+      note.textContent = "Re-walking file system after reset...";
       card.appendChild(note);
       // Fire-and-forget: scp03Rescan handles its own repaints and error
       // surfacing. Any failure lands on the tab header via tab.error.
@@ -16152,7 +18309,7 @@
   // Common APDUs surfaced as one-click presets. Chosen for the first
   // 30 seconds of a card bring-up: identify, navigate, inspect keys /
   // certs, and hop the main security domains. The list is deliberately
-  // short — anything more exotic the operator types manually, and the
+  // short -- anything more exotic the operator types manually, and the
   // history pane keeps it for re-send. Hex is upper-case because every
   // other surface in this repo normalises to upper on display.
   var SCP03_APDU_PRESETS = [
@@ -16160,13 +18317,13 @@
     { label: "SELECT EF.ICCID",        apdu: "00A40004022FE2" },
     { label: "SELECT EF.DIR",          apdu: "00A40004022F00" },
     { label: "READ BINARY (entire EF)", apdu: "00B0000000" },
-    { label: "GET DATA — EID (5A)",    apdu: "80CA5A00" },
-    { label: "GET DATA — IIN (42)",    apdu: "80CA4200" },
-    { label: "GET DATA — CIN (45)",    apdu: "80CA4500" },
-    { label: "GET DATA — Key Info (E0)", apdu: "80CAE000" },
-    { label: "GET DATA — CPLC (9F7F)", apdu: "80CA9F7F00" },
-    { label: "GET STATUS — ISDs (F0)", apdu: "80F280020243C0000000" },
-    { label: "GET STATUS — Apps (40)", apdu: "80F240020243C0000000" },
+    { label: "GET DATA -- EID (5A)",    apdu: "80CA5A00" },
+    { label: "GET DATA -- IIN (42)",    apdu: "80CA4200" },
+    { label: "GET DATA -- CIN (45)",    apdu: "80CA4500" },
+    { label: "GET DATA -- Key Info (E0)", apdu: "80CAE000" },
+    { label: "GET DATA -- CPLC (9F7F)", apdu: "80CA9F7F00" },
+    { label: "GET STATUS -- ISDs (F0)", apdu: "80F280020243C0000000" },
+    { label: "GET STATUS -- Apps (40)", apdu: "80F240020243C0000000" },
     { label: "SELECT ISD-R",           apdu: "00A4040010A0000005591010FFFFFFFF8900000100" },
     { label: "SELECT ECASD",           apdu: "00A4040010A0000005591010FFFFFFFF8900000200" },
   ];
@@ -16344,7 +18501,7 @@
       + "Transmit any ISO 7816-4 APDU on the active session. "
       + "The console auto-follows 61xx with GET RESPONSE and retries "
       + "6Cxx with the card's suggested Le. The card's current DF / "
-      + "AID is left wherever your APDU put it — the next Files-tab "
+      + "AID is left wherever your APDU put it -- the next Files-tab "
       + "click re-anchors MF automatically.";
     header.appendChild(subtitle);
     panel.appendChild(header);
@@ -16352,7 +18509,7 @@
     if (!tab.sessionId) {
       var noSess = document.createElement("p");
       noSess.className = "cc-hint cc-hint-warn";
-      noSess.textContent = "No active session — pick a reader on the left and run ‘Rescan’ first.";
+      noSess.textContent = "No active session -- pick a reader on the left and run 'Rescan' first.";
       panel.appendChild(noSess);
       return panel;
     }
@@ -16370,7 +18527,7 @@
     presetSel.className = "scp03-apdu-preset-select";
     var optBlank = document.createElement("option");
     optBlank.value = "";
-    optBlank.textContent = "— pick a common APDU —";
+    optBlank.textContent = "-- pick a common APDU --";
     presetSel.appendChild(optBlank);
     SCP03_APDU_PRESETS.forEach(function (preset) {
       var opt = document.createElement("option");
@@ -16498,12 +18655,12 @@
         { label: "INS",  value: bd.ins },
         { label: "P1",   value: bd.p1 },
         { label: "P2",   value: bd.p2 },
-        { label: "Lc",   value: bd.lc || "—" },
+        { label: "Lc",   value: bd.lc || "--" },
         { label: "Data", value: bd.dataLength + " B"
           + (bd.dataHex ? " · " + bd.dataHex : "") },
         { label: "Le",   value: bd.le
           ? (bd.le + (bd.leValue != null ? " (" + bd.leValue + ")" : ""))
-          : "—" },
+          : "--" },
         { label: "Case", value: bd.case || "?" },
         { label: "Bytes", value: String(bd.byteCount) },
       ];
@@ -16517,7 +18674,7 @@
       var bodyRow = document.createElement("tr");
       fields.forEach(function (f) {
         var td = document.createElement("td");
-        td.textContent = f.value || "—";
+        td.textContent = f.value || "--";
         bodyRow.appendChild(td);
       });
       table.appendChild(bodyRow);
@@ -16538,7 +18695,16 @@
       }
     }
 
-    input.addEventListener("input", refreshBreakdown);
+    // The breakdown table is rebuilt from scratch; do it once per pause
+    // in typing rather than on every keystroke.
+    var breakdownTimer = null;
+    input.addEventListener("input", function () {
+      if (breakdownTimer) clearTimeout(breakdownTimer);
+      breakdownTimer = setTimeout(function () {
+        breakdownTimer = null;
+        refreshBreakdown();
+      }, 120);
+    });
     input.addEventListener("change", refreshBreakdown);
 
     presetSel.addEventListener("change", function () {
@@ -16610,7 +18776,7 @@
       return;
     }
     outHost.innerHTML = "";
-    outHost.appendChild(loadingEl("transmitting " + norm.hex + "…"));
+    outHost.appendChild(loadingEl("transmitting " + norm.hex + "..."));
     var started = Date.now();
     try {
       var resp = await apiFetch("/api/actions/scp03.send_apdu/run", {
@@ -16708,7 +18874,7 @@
       card.appendChild(invalidation);
     }
 
-    // Breakdown echo — small because we already showed it above the
+    // Breakdown echo -- small because we already showed it above the
     // input; surfacing it here is a receipt so the operator can
     // cite it in a bug report without copying the input field.
     var bd = data.breakdown || {};
@@ -16819,7 +18985,7 @@
     if (!Array.isArray(tab.apduHistory) || tab.apduHistory.length === 0) {
       var empty = document.createElement("p");
       empty.className = "cc-hint";
-      empty.textContent = "History is empty — sent APDUs will appear here.";
+      empty.textContent = "History is empty -- sent APDUs will appear here.";
       container.appendChild(empty);
       return;
     }
@@ -16891,7 +19057,7 @@
         try {
           navigator.clipboard.writeText(entry.apdu || "");
         } catch (_err) {
-          // Clipboard API unavailable in some embedded webviews —
+          // Clipboard API unavailable in some embedded webviews --
           // fall back to a hidden-textarea trick so the Copy button
           // still works under pywebview / GTK.
           var ta = document.createElement("textarea");
@@ -16950,7 +19116,7 @@
     form.addEventListener("submit", async function (ev) {
       ev.preventDefault();
       out.innerHTML = "";
-      out.appendChild(loadingEl("decoding…"));
+      out.appendChild(loadingEl("decoding..."));
       try {
         var resp = await apiFetch("/api/actions/scp03.decode/run", {
           method: "POST",
@@ -17002,7 +19168,7 @@
     } else {
       path = tab.selectedPath;
     }
-    card.appendChild(loadingEl("reading…"));
+    card.appendChild(loadingEl("reading..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.read_binary/run", {
         method: "POST",
@@ -17054,7 +19220,7 @@
     var selector = "";
     try {
       selector = window.prompt(
-        "RECORD selector — enter N / Start-End / ALL (e.g. 1, 1-5, ALL):",
+        "RECORD selector -- enter N / Start-End / ALL (e.g. 1, 1-5, ALL):",
         "ALL"
       );
     } catch (_e) { selector = ""; }
@@ -17070,7 +19236,7 @@
       if (path === null) path = "";
     }
 
-    card.appendChild(loadingEl("reading records…"));
+    card.appendChild(loadingEl("reading records..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.read_record/run", {
         method: "POST",
@@ -17105,13 +19271,13 @@
     var path = "";
     try {
       path = window.prompt(
-        "ARR scope — leave blank for current, or type MF / USIM / FID:",
+        "ARR scope -- leave blank for current, or type MF / USIM / FID:",
         ""
       );
     } catch (_e) { path = ""; }
     if (path === null) { scp03GetExtrasSlot().innerHTML = ""; return; }
 
-    card.appendChild(loadingEl("reading ARR…"));
+    card.appendChild(loadingEl("reading ARR..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.arr/run", {
         method: "POST",
@@ -17146,7 +19312,7 @@
     } catch (_e) { outDir = ""; }
     if (outDir === null) { scp03GetExtrasSlot().innerHTML = ""; return; }
 
-    card.appendChild(loadingEl("dumping FS (this may take a while)…"));
+    card.appendChild(loadingEl("dumping FS (this may take a while)..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.dump_fs/run", {
         method: "POST",
@@ -17184,7 +19350,7 @@
 
   function scp03BuildInlineForm(card, fields, submitLabel, onSubmit) {
     // ``fields`` : [{ name, label, placeholder, value, required, kind?, choices?, help? }]
-    // ``kind`` — defaults to "text". Also supports "select" (use ``choices`` :
+    // ``kind`` -- defaults to "text". Also supports "select" (use ``choices`` :
     // array of strings), "bool" (checkbox) and "textarea" (multi-line hex).
     // Returns a handle with { form, inputs, submit }. The caller wires
     // ``onSubmit(values)``; this helper only lays out the DOM + disables
@@ -17348,7 +19514,7 @@
       "Authenticate",
       async function (values) {
         out.innerHTML = "";
-        out.appendChild(loadingEl("authenticating…"));
+        out.appendChild(loadingEl("authenticating..."));
         try {
           var resp = await apiFetch("/api/actions/" + actionId + "/run", {
             method: "POST",
@@ -17377,7 +19543,7 @@
           }
           // Mirror the auth result into the per-tab cache so
           // subsequent ``requires_auth`` actions bypass the popout
-          // gate. A failed auth clears the flag — scp03ClearTabAuth
+          // gate. A failed auth clears the flag -- scp03ClearTabAuth
           // is cheap and keeps the cache honest.
           if (data.ok && data.authenticated) {
             scp03UpdateTabAuthFromResponse(tab, data);
@@ -17423,7 +19589,7 @@
   async function scp03Logout(tab) {
     var card = scp03BuildExtrasCard("Logout (secure session)");
     if (!card) return;
-    card.appendChild(loadingEl("closing secure session…"));
+    card.appendChild(loadingEl("closing secure session..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.logout/run", {
         method: "POST",
@@ -17436,7 +19602,7 @@
       }
       var data = resp.data || {};
       var st = data.status || {};
-      // Logout tore down the secure channel — flush the per-tab
+      // Logout tore down the secure channel -- flush the per-tab
       // cache so the next destructive click re-prompts rather than
       // trusting a stale "authenticated" flag.
       scp03ClearTabAuth(tab);
@@ -17476,7 +19642,7 @@
       "Fetch keys",
       async function (values) {
         out.innerHTML = "";
-        out.appendChild(loadingEl("reading key template…"));
+        out.appendChild(loadingEl("reading key template..."));
         try {
           var resp = await apiFetch("/api/actions/scp03.keys/run", {
             method: "POST",
@@ -17502,7 +19668,7 @@
           if (Array.isArray(data.entries) && data.entries.length > 0) {
             scp03DatasheetAppendMain(ds, renderObjectTable(data.entries));
           } else {
-            scp03DatasheetAppendEmpty(ds, "(no key entries — are you authenticated?)");
+            scp03DatasheetAppendEmpty(ds, "(no key entries -- are you authenticated?)");
           }
           scp03DatasheetAppendRawHex(
             ds,
@@ -17528,7 +19694,7 @@
   async function scp03ShowRegistry(tab, actionId, title) {
     var card = scp03BuildExtrasCard(title);
     if (!card) return;
-    card.appendChild(loadingEl("fetching registry…"));
+    card.appendChild(loadingEl("fetching registry..."));
     try {
       var resp = await apiFetch("/api/actions/" + actionId + "/run", {
         method: "POST",
@@ -17550,7 +19716,7 @@
       if (Array.isArray(data.entries) && data.entries.length > 0) {
         scp03DatasheetAppendMain(ds, renderObjectTable(data.entries));
       } else {
-        scp03DatasheetAppendEmpty(ds, "(no entries — are you authenticated?)");
+        scp03DatasheetAppendEmpty(ds, "(no entries -- are you authenticated?)");
       }
       scp03DatasheetAppendRawHex(
         ds,
@@ -17579,12 +19745,12 @@
       [
         { name: "p1", label: "P1", placeholder: "e.g. 9F", required: true },
         { name: "p2", label: "P2", placeholder: "e.g. 7F", required: true,
-          help: "80CA P1 P2 00 — common tags: 9F7F (CPLC), 00E0 (key info), 00CF (CIN)." },
+          help: "80CA P1 P2 00 -- common tags: 9F7F (CPLC), 00E0 (key info), 00CF (CIN)." },
       ],
       "GET DATA",
       async function (values) {
         out.innerHTML = "";
-        out.appendChild(loadingEl("issuing GET DATA…"));
+        out.appendChild(loadingEl("issuing GET DATA..."));
         try {
           var resp = await apiFetch("/api/actions/scp03.get_data/run", {
             method: "POST",
@@ -17636,7 +19802,7 @@
   async function scp03ShowAidRegistry(tab) {
     var card = scp03BuildExtrasCard("AID registry (aid.txt)");
     if (!card) return;
-    card.appendChild(loadingEl("loading aliases…"));
+    card.appendChild(loadingEl("loading aliases..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.list_aids/run", {
         method: "POST",
@@ -17676,7 +19842,7 @@
   async function scp03ShowListProfiles(tab) {
     var card = scp03BuildExtrasCard("Profiles (ES10c)");
     if (!card) return;
-    card.appendChild(loadingEl("retrieving profile list…"));
+    card.appendChild(loadingEl("retrieving profile list..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.list_profiles/run", {
         method: "POST",
@@ -17699,7 +19865,7 @@
       if (Array.isArray(data.profiles) && data.profiles.length > 0) {
         scp03DatasheetAppendMain(ds, renderObjectTable(data.profiles));
       } else {
-        scp03DatasheetAppendEmpty(ds, "(no profiles returned — is this an eUICC?)");
+        scp03DatasheetAppendEmpty(ds, "(no profiles returned -- is this an eUICC?)");
       }
       scp03DatasheetAppendRawHex(
         ds,
@@ -17721,7 +19887,7 @@
   async function scp03ShowProfileScan(tab) {
     var card = scp03BuildExtrasCard("eUICC scan (SGP.22 / SGP.32)");
     if (!card) return;
-    card.appendChild(loadingEl("running eUICC scan…"));
+    card.appendChild(loadingEl("running eUICC scan..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.profile_scan/run", {
         method: "POST",
@@ -17787,9 +19953,9 @@
   // -- Auth gate -------------------------------------------------------
   //
   // Actions flagged ``requires_auth: true`` by the backend registry
-  // (PUT KEY / INSTALL [for …] / SET STATUS / DELETE / fs_create_file
+  // (PUT KEY / INSTALL [for ...] / SET STATUS / DELETE / fs_create_file
   // / fs_delete_file / fs_resize / fs_lifecycle / update_binary /
-  // update_record / store_data / export_keybag …) will bounce with
+  // update_record / store_data / export_keybag ...) will bounce with
   // 69 82 unless the active session has run ``scp03.auth_scp03`` (or
   // scp02) first. The ribbon used to just drop a "Requires an
   // authenticated secure session" banner next to the form; in practice
@@ -17799,8 +19965,8 @@
   // intercepting the click, opening a compact auth-prompt popout, and
   // chaining into the original handler only once AUTH succeeds.
   //
-  // ``tab.authStatus`` is updated from every auth response we see —
-  // including passive ``scp03.auth_status`` probes — so repeated
+  // ``tab.authStatus`` is updated from every auth response we see --
+  // including passive ``scp03.auth_status`` probes -- so repeated
   // install calls on the same tab don't re-prompt. A ``logout`` /
   // ``recover_session`` clears it back to ``{authenticated:false}``.
 
@@ -17833,7 +19999,7 @@
   }
 
   function scp03UpdateTabAuthFromResponse(tab, data) {
-    // Shared ingestion path — both the auth prompt and the standalone
+    // Shared ingestion path -- both the auth prompt and the standalone
     // ``Authenticate SCP03`` ribbon action funnel successful responses
     // through here so ``tab.authStatus`` stays consistent regardless of
     // which entry point the operator used. Failures clear the flag so
@@ -17864,7 +20030,7 @@
   }
 
   async function scp03RefreshTabAuthStatus(tab) {
-    // Best-effort passive probe — used when a tab is rehydrated from
+    // Best-effort passive probe -- used when a tab is rehydrated from
     // ``localStorage`` on page reload. The sessionId may still be live
     // backend-side (the idle reaper's window is generous), in which
     // case we should adopt the existing SCP state instead of forcing
@@ -17886,7 +20052,7 @@
         });
         return tab.authStatus;
       }
-    } catch (_err) { /* offline / server gone — keep cached value */ }
+    } catch (_err) { /* offline / server gone -- keep cached value */ }
     return tab.authStatus || null;
   }
 
@@ -17903,7 +20069,7 @@
     intro.textContent = "This command requires an authenticated SCP session. "
       + "Pick the protocol + Security Domain you want to authenticate against. "
       + "Leave the ENC / MAC / DEK fields blank to use the keys loaded from "
-      + "your Workspace keybag — supply overrides only when the live card is "
+      + "your Workspace keybag -- supply overrides only when the live card is "
       + "keyed differently.";
     body.appendChild(intro);
 
@@ -17924,7 +20090,7 @@
     //     which command is gated behind the prompt.
     //   - allowSkipPrompt: when true, callers get a straight ``true``
     //     back without showing UI if ``tab.authStatus.authenticated``
-    //     is already truthy. Default true — we only bypass callers
+    //     is already truthy. Default true -- we only bypass callers
     //     explicitly need to force re-auth (currently nobody, but the
     //     hook is here for the "force re-auth" item in the ribbon).
     var opts = options || {};
@@ -17991,7 +20157,7 @@
         "Authenticate",
         async function (values) {
           shell.out.innerHTML = "";
-          shell.out.appendChild(loadingEl("authenticating…"));
+          shell.out.appendChild(loadingEl("authenticating..."));
           var actionId = (String(values.protocol || "SCP03").toUpperCase() === "SCP02")
             ? "scp03.auth_scp02"
             : "scp03.auth_scp03";
@@ -18058,7 +20224,7 @@
               }, 450);
             } else {
               shell.out.appendChild(renderErrorBlock(
-                "authenticate failed — session still unauthenticated. "
+                "authenticate failed -- session still unauthenticated. "
                 + "Check KVN / keys / target AID and retry."
               ));
               if (data.trace) {
@@ -18086,7 +20252,7 @@
       // The operator may dismiss the popout before authenticating; we
       // can't hook "X button pressed" because the popout system keeps
       // the node alive for reuse, so we sample the auth state a few
-      // seconds later — if the panel closed without success, resolve
+      // seconds later -- if the panel closed without success, resolve
       // false so the pending action handler sees the cancel.
       var resolved = false;
       var originalResolve = resolve;
@@ -18100,9 +20266,18 @@
       if (popout) {
         var closeBtn = popout.querySelector(".cc-panel-close");
         if (closeBtn) {
-          closeBtn.addEventListener("click", function () {
-            if (!scp03HasLiveAuth(tab)) resolve(false);
-          }, { once: true });
+          // One listener per panel. A retry after a failed attempt only
+          // swaps the resolver it notifies, so repeated attempts do not
+          // stack closures on the surviving close button.
+          popout._authCancelResolve = resolve;
+          if (closeBtn.dataset.authCancelBound !== "1") {
+            closeBtn.dataset.authCancelBound = "1";
+            closeBtn.addEventListener("click", function () {
+              var pending = popout._authCancelResolve;
+              popout._authCancelResolve = null;
+              if (pending && !scp03HasLiveAuth(tab)) pending(false);
+            });
+          }
         }
       }
     });
@@ -18110,7 +20285,7 @@
 
   function scp03RunActionWithOutput(out, actionId, inputs, onOk) {
     out.innerHTML = "";
-    out.appendChild(loadingEl("running " + actionId + "…"));
+    out.appendChild(loadingEl("running " + actionId + "..."));
     return apiFetch("/api/actions/" + actionId + "/run", {
       method: "POST",
       body: JSON.stringify({ inputs: inputs }),
@@ -18164,7 +20339,7 @@
     // operator was mid-click (tree / breadcrumb / popout closures
     // captured by the active handler get orphaned, which triggers
     // ``HierarchyRequestError`` in the next replaceChild on the old
-    // refs). We now just repaint the auth chip in place — the chip
+    // refs). We now just repaint the auth chip in place -- the chip
     // is the only piece of the session panel that depends on
     // ``tab.authStatus``.
     scp03RefreshAuthChip();
@@ -18195,7 +20370,7 @@
 
   function scp03GateOpen(tab, actionId, handler) {
     // Ribbon / FS-admin click wrapper. Accepts the same
-    // ``function () { scp03Show…(tab); }`` style callbacks used
+    // ``function () { scp03Show...(tab); }`` style callbacks used
     // throughout the workbench and returns a replacement click
     // handler that first checks whether the action requires auth.
     //
@@ -18205,7 +20380,7 @@
     // pre-filled action form behind the scenes (operator is likely
     // re-considering the destructive action, not context-switching).
     //
-    // Actions without ``requires_auth`` pass straight through — the
+    // Actions without ``requires_auth`` pass straight through -- the
     // wrapper is a no-op in that case, which makes it safe to wrap
     // every ribbon button preemptively without audit-tracking the
     // full spec list.
@@ -18226,14 +20401,14 @@
     // Per operator feedback (2026-04-23): render the captured trace
     // **inline** in the action card body rather than hiding it behind
     // a "Show trace (N lines)" disclosure. Operators want CLI-parity
-    // at a glance — the compact printers driving most of these traces
+    // at a glance -- the compact printers driving most of these traces
     // already emit screen-ready text, so surfacing it directly removes
     // an unnecessary click. Raw hex disclosures stay unchanged; they
     // remain collapsible because hex is a debug/audit aid, not the
     // primary read-out.
     //
     // Short traces (single "Response: <hex>" style strings) still render
-    // OK here — the .cc-log-inline box is tight enough that a one-liner
+    // OK here -- the .cc-log-inline box is tight enough that a one-liner
     // doesn't look out of place. Long traces get a max-height scroller
     // from the CSS so they don't push everything else off-screen.
     if (!trace) return;
@@ -18615,7 +20790,7 @@
   async function scp03ShowCertInfo(tab) {
     var card = scp03BuildExtrasCard("ECASD / certificate info");
     if (!card) return;
-    card.appendChild(loadingEl("walking ECASD tags…"));
+    card.appendChild(loadingEl("walking ECASD tags..."));
     try {
       var resp = await apiFetch("/api/actions/scp03.cert_info/run", {
         method: "POST",
@@ -18715,7 +20890,7 @@
     if (!card) return;
     scp03BuildDestructiveBanner(
       card,
-      "Writes live SCP03 session keys to disk — keep the resulting "
+      "Writes live SCP03 session keys to disk -- keep the resulting "
         + "file paired with its .pcap and protect it accordingly."
     );
     var out = document.createElement("div");
@@ -18811,7 +20986,7 @@
     } else {
       var emptyPv = document.createElement("p");
       emptyPv.className = "cc-empty";
-      emptyPv.textContent = "(no structured decode — inspect compact printer trace or raw TLV)";
+      emptyPv.textContent = "(no structured decode -- inspect compact printer trace or raw TLV)";
       main.appendChild(emptyPv);
     }
     if (payload.trace && String(payload.trace).trim().length > 0) {
@@ -18980,7 +21155,7 @@
     // Render the SGP.32 bulk retrieval as a proper structured module:
     // one titled sub-card per ES10 section (Scan, RAT, Notifications,
     // eIM config, Certs). Each sub-card shows the parsed lines (via
-    // scp03RenderTextLines — KV aware), a status pill, the ES10 tag,
+    // scp03RenderTextLines -- KV aware), a status pill, the ES10 tag,
     // and keeps the raw hex + raw trace tucked behind <details> so the
     // output no longer looks like a terminal dump.
     var payload = data || {};
@@ -19013,7 +21188,7 @@
     if (sections.length === 0) {
       var none = document.createElement("p");
       none.className = "hint";
-      none.textContent = "(no sections returned — fallback trace below)";
+      none.textContent = "(no sections returned -- fallback trace below)";
       container.appendChild(none);
       scp03RenderTrace(container, payload.trace || "");
       return;
@@ -19041,7 +21216,7 @@
       var summary = document.createElement("summary");
       summary.textContent = "Full merged trace (" + lineCount + " line"
         + (lineCount === 1 ? "" : "s")
-        + ") — copy for bug reports";
+        + ") -- copy for bug reports";
       details.appendChild(summary);
       var pre = document.createElement("pre");
       pre.className = "cc-log";
@@ -19059,7 +21234,7 @@
       + escapeHtml(entry.status || "unknown");
     installMaximizable(host);
 
-    // Header — title, ES10 tag, status pill.
+    // Header -- title, ES10 tag, status pill.
     var hdr = document.createElement("header");
     hdr.className = "cc-sgp32-section-head";
     var title = document.createElement("h4");
@@ -19083,7 +21258,7 @@
     hdr.appendChild(chips);
     host.appendChild(hdr);
 
-    // Optional note — shown above the body so operators see the
+    // Optional note -- shown above the body so operators see the
     // "why" when a section is empty / errored.
     if (entry.note) {
       var note = document.createElement("p");
@@ -19092,7 +21267,7 @@
       host.appendChild(note);
     }
 
-    // Per-section trace — rendered inline via the shared helper (which
+    // Per-section trace -- rendered inline via the shared helper (which
     // now emits a <pre class="cc-log cc-log-inline"> directly, no more
     // "Show trace" disclosure). Compact-printer stdout mirrors the CLI
     // screen dump so this gives operators CLI-parity at a glance.
@@ -19102,11 +21277,11 @@
     } else if (entry.status === "ok") {
       var placeholder = document.createElement("p");
       placeholder.className = "hint";
-      placeholder.textContent = "(retrieval ok — printer emitted no output)";
+      placeholder.textContent = "(retrieval ok -- printer emitted no output)";
       host.appendChild(placeholder);
     }
 
-    // Hex body — collapsed by default (as per the user's explicit
+    // Hex body -- collapsed by default (as per the user's explicit
     // request to keep the raw-hex disclosure behaviour unchanged).
     if (entry.hex) {
       var hexDetails = document.createElement("details");
@@ -19157,7 +21332,7 @@
 
     var formFields = [
       { name: "target", label: "Target (AID / ICCID)", required: true,
-        placeholder: "A0000005591010…  or  89XXXXXXXXXXXXXXXXXF" },
+        placeholder: "A0000005591010...  or  89XXXXXXXXXXXXXXXXXF" },
     ];
     if (action === "delete") {
       formFields.push({
@@ -19287,7 +21462,7 @@
         { name: "standard", label: "Standard", value: "SGP.32",
           help: "SGP.32 / SGP.22 / SGP.02" },
         { name: "authenticate_sd", label: "Authenticate SD", value: "false",
-          help: "true/false — run SCP03 auth before MNO-SD phase of combined diff." },
+          help: "true/false -- run SCP03 auth before MNO-SD phase of combined diff." },
       ],
       "Save gold profile",
       async function (values) {
@@ -19326,7 +21501,7 @@
         { label: "Path", value: data.path || "(not set)" },
         { label: "Standard", value: data.standard || "SGP.32" },
         { label: "Authenticate SD", value: data.authenticate_sd ? "true" : "false" },
-        { label: "File exists", value: data.path ? (data.exists ? "yes" : "no") : "—" },
+        { label: "File exists", value: data.path ? (data.exists ? "yes" : "no") : "--" },
       ]);
       if (data.error) {
         sheet.appendChild(renderErrorBlock(data.error));
@@ -19436,7 +21611,7 @@
     maskLbl.className = "cc-toggle";
     var maskBox = document.createElement("input");
     maskBox.type = "checkbox";
-    maskBox.checked = true;
+    maskBox.checked = false;
     maskLbl.appendChild(maskBox);
     var maskTxt = document.createElement("span");
     maskTxt.textContent = "Mask key material";
@@ -19480,7 +21655,7 @@
         }
 
         var aidHdr = document.createElement("h5");
-        aidHdr.textContent = "AID registry (" + (data.aid_count || 0) + " entries — " + (data.aid_file || "") + ")";
+        aidHdr.textContent = "AID registry (" + (data.aid_count || 0) + " entries -- " + (data.aid_file || "") + ")";
         sheet.appendChild(aidHdr);
         scp03RenderAidEntries(sheet, data.aid_entries || []);
 
@@ -19559,7 +21734,7 @@
       [
         { name: "confirm", label: "Confirm", required: true,
           placeholder: "type RESET",
-          help: "Case-insensitive — must equal the word RESET." },
+          help: "Case-insensitive -- must equal the word RESET." },
       ],
       "Reset keys",
       async function (values) {
@@ -19596,7 +21771,7 @@
     scp03DatasheetAppendMetaKvl(sheet, baseRows);
     if (Array.isArray(data.parent_select_trace) && data.parent_select_trace.length > 0) {
       var selectRows = data.parent_select_trace.map(function (row) {
-        return { label: "SELECT " + (row.fid || ""), value: (row.sw || "") + " — " + (row.status || "") };
+        return { label: "SELECT " + (row.fid || ""), value: (row.sw || "") + " -- " + (row.status || "") };
       });
       scp03DatasheetAppendMetaKvl(sheet, selectRows);
     }
@@ -19670,6 +21845,19 @@
     card.appendChild(out);
   }
 
+  function scp03AttachPathPicker(input, mode) {
+    // ``attachPathPicker`` moves the input into the row it returns, so the
+    // row has to go where the input stood. A ``replaceChild`` on the input's
+    // new parent asks that row to replace a child of itself
+    // (HierarchyRequestError) and leaves the field detached from the form.
+    if (!input || typeof attachPathPicker !== "function") return;
+    var parent = input.parentNode;
+    var next = input.nextSibling;
+    var wrapped = attachPathPicker(input, mode);
+    if (!parent || !wrapped || wrapped === input || wrapped.parentNode === parent) return;
+    parent.insertBefore(wrapped, next);
+  }
+
   async function scp03ShowInstallCap(tab) {
     var card = scp03BuildExtrasCard("Install CAP file");
     if (!card) return;
@@ -19685,7 +21873,7 @@
       [
         { name: "cap_path", label: "CAP file path", required: true,
           placeholder: "/path/to/applet.cap",
-          help: "Double-click or Browse… to pick a .cap / .ijc file." },
+          help: "Double-click or Browse... to pick a .cap / .ijc file." },
         { name: "privileges", label: "Privileges (hex)", value: "00" },
         { name: "install_params", label: "Install params (hex)", value: "C900" },
         { name: "instantiate", label: "Instantiate after load", kind: "bool", value: true,
@@ -19726,14 +21914,117 @@
         });
       }
     );
-    var capInput = handle.inputs.cap_path;
-    if (capInput && typeof attachPathPicker === "function") {
-      var wrapped = attachPathPicker(capInput, "open");
-      if (capInput.parentNode && wrapped && wrapped !== capInput) {
-        capInput.parentNode.replaceChild(wrapped, capInput);
+    scp03AttachPathPicker(handle.inputs.cap_path, "open");
+    card.appendChild(out);
+  }
+
+  async function scp03ShowBuildInstallScript(tab) {
+    // SCP03 shell wizard 8 writes the same file through the same builder,
+    // so the two surfaces stay byte-identical. Nothing here touches the
+    // card: the sequence is planned from the CAP alone.
+    var card = scp03BuildExtrasCard("Install script");
+    if (!card) return;
+    var out = document.createElement("div");
+    out.className = "cc-wb-extras-out";
+    var handle = scp03BuildInlineForm(
+      card,
+      [
+        { name: "cap_path", label: "CAP file path", required: true,
+          placeholder: "/path/to/applet.cap",
+          help: "Double-click or Browse... to pick a .cap / .ijc file." },
+        { name: "privileges", label: "Privileges (hex)", value: "00" },
+        { name: "install_params", label: "Install params (hex)", value: "C900" },
+        { name: "adf_aids", label: "ADF AIDs granted file access (hex, comma separated)",
+          placeholder: "A0000000871002FFFFFFFF8988000001",
+          help: "ETSI TS 102 226 Tag EA/81: full access to the shared UICC file system and each listed ADF. Blank = no UICC access parameters." },
+        { name: "uicc_toolkit", label: "Add UICC toolkit parameters (Tag 80)", kind: "bool", value: true,
+          help: "Priority 01, no timers, menus or channels; added with the ADF AIDs." },
+        { name: "target_app_aid", label: "Override applet AID (hex)",
+          help: "Blank = the first applet AID in the CAP." },
+        { name: "target_module_aid", label: "Override module AID (hex)",
+          help: "Blank = same as the applet AID." },
+        { name: "transport", label: "Format", kind: "select", value: "ota",
+          choices: [
+            { value: "ota", label: "OTA: SCP80 compact remote format, one SMS per LOAD block, no Le" },
+            { value: "iso", label: "ISO: Le 00, 240-octet LOAD blocks" },
+          ] },
+        { name: "ota_cipher", label: "OTA keyset cipher", kind: "select", value: "AES",
+          choices: ["AES", "3DES"],
+          help: "Sizes each LOAD block to one SMS for the KIc/KID cipher." },
+        { name: "output_path", label: "Script file",
+          placeholder: "<cap stem>_install.txt beside the CAP",
+          help: "Blank = show only. Double-click or Browse... to pick where to save." },
+        { name: "overwrite", label: "Overwrite existing file", kind: "bool", value: false },
+      ],
+      "Build",
+      async function (values) {
+        await scp03RunActionWithOutput(out, "scp03.build_install_script", {
+          cap_path: (values.cap_path || "").trim(),
+          privileges: (values.privileges || "00").trim(),
+          install_params: (values.install_params || "C900").trim(),
+          adf_aids: (values.adf_aids || "").trim(),
+          uicc_toolkit: !!values.uicc_toolkit,
+          target_app_aid: (values.target_app_aid || "").trim(),
+          target_module_aid: (values.target_module_aid || "").trim(),
+          transport: values.transport || "ota",
+          ota_cipher: values.ota_cipher || "AES",
+          output_path: (values.output_path || "").trim(),
+          overwrite: !!values.overwrite,
+        }, function (data, sheet) {
+          var format = (data.transport === "ota")
+            ? ("OTA / " + (data.cipher_mode || "") + " keyset, "
+               + String(data.chunk_size) + " LOAD data octets per SMS")
+            : ("ISO / " + String(data.chunk_size) + "-octet LOAD blocks, Le 00");
+          scp03DatasheetAppendMetaKvl(sheet, [
+            { label: "CAP", value: data.cap_path || "" },
+            { label: "Package AID", value: data.package_aid || "" },
+            { label: "Applet AID", value: data.applet_aid || "" },
+            { label: "Module AID", value: data.module_aid || "" },
+            { label: "UICC access (Tag EA)", value: data.uicc_system_parameters || "(none)" },
+            { label: "Format", value: format },
+            { label: "LOAD blocks", value: String(data.block_count == null ? "" : data.block_count) },
+            { label: "Script file", value: data.written ? (data.script_path || "") : "(not written)" },
+          ]);
+          if (data.script_path && !data.written) {
+            scp03DatasheetAppendWarn(sheet, data.note || "");
+          }
+          scp03DatasheetAppendTraceMain(sheet, data.script, "Script");
+          logBus.emit({
+            level: "info",
+            source: "scp03.build_install_script",
+            message: "install script " + (data.cap_path || "?") + " → "
+              + (data.written ? ("written to " + data.script_path) : "built, not written"),
+          });
+        });
       }
+    );
+    var capInput = handle.inputs.cap_path;
+    var outInput = handle.inputs.output_path;
+    scp03AttachPathPicker(capInput, "open");
+    scp03AttachPathPicker(outInput, "save");
+    // Suggest the wizard's default destination once a CAP is chosen, and
+    // keep following the CAP until the operator types a path of their own.
+    if (capInput && outInput) {
+      var suggested = "";
+      capInput.addEventListener("input", function () {
+        var current = outInput.value.trim();
+        if (current !== "" && current !== suggested) return;
+        suggested = scp03DefaultInstallScriptPath(capInput.value);
+        outInput.value = suggested;
+      });
     }
     card.appendChild(out);
+  }
+
+  function scp03DefaultInstallScriptPath(capPath) {
+    var text = String(capPath || "").trim();
+    if (text === "") return "";
+    var cut = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
+    var dir = (cut >= 0) ? text.slice(0, cut + 1) : "";
+    var base = (cut >= 0) ? text.slice(cut + 1) : text;
+    var dot = base.lastIndexOf(".");
+    var stem = (dot > 0) ? base.slice(0, dot) : base;
+    return dir + stem + "_install.txt";
   }
 
   async function scp03ShowInstallApp(tab) {
@@ -19741,7 +22032,7 @@
     if (!card) return;
     scp03BuildDestructiveBanner(
       card,
-      "INSTALL [for install] — instantiate an applet from a package "
+      "INSTALL [for install] -- instantiate an applet from a package "
         + "already loaded on the card."
     );
     var out = document.createElement("div");
@@ -19915,14 +22206,14 @@
   }
 
   // =========================================================================
-  // FS — CREATE FILE wizard (ETSI TS 102 222 §6.1 + §6.2)
+  // FS -- CREATE FILE wizard (ETSI TS 102 222 §6.1 + §6.2)
   //
   // Replaces the flat "paste raw FCP hex" form with a guided two-step flow:
   //   1. Pick file type (DF/ADF, Transparent EF, Linear Fixed EF) and fill
   //      in only the fields that type requires. Irrelevant fields stay
-  //      hidden — the CLI wizard asks every question unconditionally and
+  //      hidden -- the CLI wizard asks every question unconditionally and
   //      the GUI inherits that weirdness.
-  //   2. Click "Preview FCP" — the backend ``scp03.fs_build_fcp`` composes
+  //   2. Click "Preview FCP" -- the backend ``scp03.fs_build_fcp`` composes
   //      the TLV wire offline (no card transmit) and returns a per-tag
   //      breakdown. The wizard renders that as an annotated table so the
   //      operator sees exactly what will hit the card before confirming.
@@ -19933,7 +22224,7 @@
   // =========================================================================
 
   async function scp03ShowFsCreateFile(tab) {
-    var card = scp03BuildExtrasCard("FS — CREATE FILE (00E0)");
+    var card = scp03BuildExtrasCard("FS -- CREATE FILE (00E0)");
     if (!card) return;
     scp03BuildDestructiveBanner(
       card,
@@ -19942,7 +22233,7 @@
         + "\u201CRaw FCP\u201D lets you paste a pre-built template."
     );
 
-    // Mode toggle — Guided (default) vs Raw FCP.
+    // Mode toggle -- Guided (default) vs Raw FCP.
     var modeBar = document.createElement("div");
     modeBar.className = "cc-fs-mode-bar";
     var btnGuided = document.createElement("button");
@@ -20080,7 +22371,7 @@
     var inputs = {};
     var state = { fileType: "DF_ADF", built: null };
 
-    // Step 1 — file type selector.
+    // Step 1 -- file type selector.
     var typeRow = document.createElement("div");
     typeRow.className = "cc-form-row cc-fs-wizard-row";
     var typeLab = document.createElement("label");
@@ -20093,6 +22384,8 @@
       { val: "DF_ADF",          lbl: "DF / ADF (Dedicated File)" },
       { val: "TRANSPARENT_EF",  lbl: "Transparent EF" },
       { val: "LINEAR_FIXED_EF", lbl: "Linear Fixed EF" },
+      { val: "CYCLIC_EF",       lbl: "Cyclic EF" },
+      { val: "BER_TLV_EF",      lbl: "BER-TLV structure EF" },
     ].forEach(function (opt) {
       var o = document.createElement("option");
       o.value = opt.val;
@@ -20113,10 +22406,10 @@
 
     function renderFieldsForType() {
       fieldsHost.innerHTML = "";
-      // Clear stale inputs — avoids leaking DF's c6_hex into an EF build.
+      // Clear stale inputs -- avoids leaking DF's c6_hex into an EF build.
       Object.keys(inputs).forEach(function (k) { delete inputs[k]; });
 
-      // Common to every type — path + security attribute.
+      // Common to every type -- path + security attribute.
       fieldsHost.appendChild(scp03MakeWizardField(inputs, "full_path",
         "Full hex path", {
           placeholder: "3F007F105F01",
@@ -20173,9 +22466,16 @@
             placeholder: "05",
             help: "1-byte SFI, or empty \u2192 emit 88 00 (no SFI).",
           }));
-      } else if (state.fileType === "LINEAR_FIXED_EF") {
-        typeHint.textContent = "Linear fixed EFs store N equal-length "
-          + "records. The wizard computes total size = rec_len \u00D7 num_rec.";
+      } else if (state.fileType === "LINEAR_FIXED_EF"
+                 || state.fileType === "CYCLIC_EF") {
+        if (state.fileType === "CYCLIC_EF") {
+          typeHint.textContent = "Cyclic EFs store N equal-length records "
+            + "and overwrite the oldest on update. The wizard computes "
+            + "total size = rec_len \u00D7 num_rec.";
+        } else {
+          typeHint.textContent = "Linear fixed EFs store N equal-length "
+            + "records. The wizard computes total size = rec_len \u00D7 num_rec.";
+        }
         fieldsHost.appendChild(scp03MakeWizardField(inputs, "rec_len_hex",
           "Record length (hex bytes)", {
             placeholder: "14",
@@ -20195,6 +22495,33 @@
             placeholder: "04",
             help: "1-byte SFI, or empty \u2192 emit 88 00 (no SFI).",
           }));
+      } else if (state.fileType === "BER_TLV_EF") {
+        typeHint.textContent = "BER-TLV structure EFs hold retrievable data "
+          + "objects. Tag 80 reserves the body including the administrative "
+          + "overhead; tag A5 carries the file details and maximum size.";
+        fieldsHost.appendChild(scp03MakeWizardField(inputs, "file_size_hex",
+          "Reserved body size (hex bytes)", {
+            placeholder: "0100",
+            help: "Bytes reserved for the data objects and their overhead.",
+            required: true,
+            decimalMirror: true,
+          }));
+        fieldsHost.appendChild(scp03MakeWizardField(inputs, "file_details_hex",
+          "File details (tag 84, 1 byte)", {
+            placeholder: "01",
+            help: "01 = DER coding only; empty defaults to 01.",
+          }));
+        fieldsHost.appendChild(scp03MakeWizardField(inputs, "max_file_size_hex",
+          "Maximum file size (tag 86, optional)", {
+            placeholder: "0200",
+            help: "Upper bound the file may grow to, or empty to omit.",
+            decimalMirror: true,
+          }));
+        fieldsHost.appendChild(scp03MakeWizardField(inputs, "sfi_hex",
+          "Short File Identifier (1 byte, optional)", {
+            placeholder: "06",
+            help: "1-byte SFI, or empty \u2192 emit 88 00 (no SFI).",
+          }));
       }
 
       fieldsHost.appendChild(scp03MakeWizardField(inputs, "prop_a5_hex",
@@ -20212,7 +22539,7 @@
       renderFieldsForType();
     });
 
-    // Step 2 — Preview button + preview host.
+    // Step 2 -- Preview button + preview host.
     var bar = document.createElement("div");
     bar.className = "cc-action-bar";
     var previewBtn = document.createElement("button");
@@ -20306,7 +22633,7 @@
     rows.push({ label: "Full FCP hex", value: built.fcp_hex || "" });
     scp03RenderKeyValueRows(host, rows);
 
-    // Per-tag breakdown table — this is the real value of the preview.
+    // Per-tag breakdown table -- this is the real value of the preview.
     if (Array.isArray(built.breakdown) && built.breakdown.length > 0) {
       var wrap = document.createElement("div");
       wrap.className = "cc-fs-breakdown-wrap";
@@ -20338,7 +22665,7 @@
       host.appendChild(wrap);
     }
 
-    // Commit button — fires the destructive 00E0 CREATE FILE APDU.
+    // Commit button -- fires the destructive 00E0 CREATE FILE APDU.
     var bar = document.createElement("div");
     bar.className = "cc-action-bar";
     var createBtn = document.createElement("button");
@@ -20379,7 +22706,7 @@
     wrap.className = "cc-fs-raw";
     var note = document.createElement("p");
     note.className = "hint";
-    note.textContent = "Raw mode — paste a complete FCP template "
+    note.textContent = "Raw mode -- paste a complete FCP template "
       + "(including outer tag 62). No validation beyond even-length hex.";
     wrap.appendChild(note);
 
@@ -20433,13 +22760,13 @@
   }
 
   // =========================================================================
-  // FS — DELETE FILE wizard
+  // FS -- DELETE FILE wizard
   // Pre-fills FID + parent from the tab's current selection when available
   // so operators don't have to type the hex they can already see in the
   // scan tree. Confirm token is required (backend enforces =="DELETE").
   // =========================================================================
   async function scp03ShowFsDeleteFile(tab) {
-    var card = scp03BuildExtrasCard("FS — DELETE FILE (00E4)");
+    var card = scp03BuildExtrasCard("FS -- DELETE FILE (00E4)");
     if (!card) return;
     scp03BuildDestructiveBanner(
       card,
@@ -20505,7 +22832,7 @@
       return res;
     }
     // The scan tree gives us paths like "MF/EF.ICCID" or "MF/ADF_USIM/EF_IMSI"
-    // — the GUI path-walker resolves those on SELECT. For the wizard we
+    // -- the GUI path-walker resolves those on SELECT. For the wizard we
     // want the raw 2-byte FID if we can find it. If tab.previewCache
     // carries the FCP we can pull tag 83, otherwise we leave blank and
     // let the operator type.
@@ -20518,18 +22845,18 @@
       res.note = "Auto-filled from current selection: " + path + ".";
     } else {
       res.note = "Current selection: " + path
-        + ". No FCP cached yet — type the FID manually, or reload the file "
+        + ". No FCP cached yet -- type the FID manually, or reload the file "
         + "to populate it.";
     }
     return res;
   }
 
   // =========================================================================
-  // FS — RESIZE FILE wizard
+  // FS -- RESIZE FILE wizard
   // Dual-size layout with decimal mirrors + "use current selection" auto-fill.
   // =========================================================================
   async function scp03ShowFsResize(tab) {
-    var card = scp03BuildExtrasCard("FS — RESIZE FILE (80D4)");
+    var card = scp03BuildExtrasCard("FS -- RESIZE FILE (80D4)");
     if (!card) return;
     scp03BuildDestructiveBanner(
       card,
@@ -20615,12 +22942,12 @@
   }
 
   // =========================================================================
-  // FS — UPDATE wizard router
+  // FS -- UPDATE wizard router
   //
   // Branches between UPDATE BINARY (00D6) for transparent EFs and
   // UPDATE RECORD (00DC) for linear-fixed / cyclic EFs. Both branches
-  // share the "Path" + "Data" plumbing — only the record-number field
-  // differs — so we keep them in sibling functions and dispatch from
+  // share the "Path" + "Data" plumbing -- only the record-number field
+  // differs -- so we keep them in sibling functions and dispatch from
   // here based on the gating ``kind`` already resolved by the action
   // bar (avoids re-deriving it in every call site).
   // =========================================================================
@@ -20638,9 +22965,9 @@
     if (wizard) {
       return wizard(tab, kind);
     }
-    // Defensive — the button gate should have prevented us getting
+    // Defensive -- the button gate should have prevented us getting
     // here. Surface a small explanatory card so we don't silently noop.
-    var card = scp03BuildExtrasCard("FS — UPDATE");
+    var card = scp03BuildExtrasCard("FS -- UPDATE");
     if (!card) return;
     var note = document.createElement("p");
     note.className = "cc-fs-op-hint";
@@ -20651,7 +22978,7 @@
 
   // ASCII mirror for hex payload fields. Mirrors the helper baked into
   // the SEARCH RECORD wizard, isolated here so the UPDATE forms stay
-  // legible when an operator pastes a hex blob — they instantly see
+  // legible when an operator pastes a hex blob -- they instantly see
   // whether the body is text-like or pure binary.
   function scp03AttachHexAsciiMirror(field, input) {
     var ascii = document.createElement("div");
@@ -20661,7 +22988,7 @@
       var hex = (input.value || "").replace(/\s+/g, "");
       if (hex.length === 0) { ascii.textContent = ""; return; }
       if (hex.length % 2 !== 0) {
-        ascii.textContent = "(odd-length hex — pad with a nibble)";
+        ascii.textContent = "(odd-length hex -- pad with a nibble)";
         return;
       }
       if (!/^[0-9A-Fa-f]+$/.test(hex)) {
@@ -20680,17 +23007,17 @@
   }
 
   // -------------------------------------------------------------------------
-  // FS — UPDATE BINARY (00D6) wizard
+  // FS -- UPDATE BINARY (00D6) wizard
   // Transparent-EF only. Path defaults to the current selection so the
   // common case ("read EF, edit, write back") is one paste away.
   // -------------------------------------------------------------------------
   async function scp03ShowFsUpdateBinary(tab) {
-    var card = scp03BuildExtrasCard("FS — UPDATE BINARY (00D6)");
+    var card = scp03BuildExtrasCard("FS -- UPDATE BINARY (00D6)");
     if (!card) return;
     scp03BuildDestructiveBanner(
       card,
       "UPDATE BINARY overwrites this transparent EF in place. "
-        + "There is no implicit backup — read the body first if you "
+        + "There is no implicit backup -- read the body first if you "
         + "need to roll back."
     );
 
@@ -20801,20 +23128,20 @@
   }
 
   // -------------------------------------------------------------------------
-  // FS — UPDATE RECORD (00DC) wizard
+  // FS -- UPDATE RECORD (00DC) wizard
   // Linear-fixed / cyclic EF. Surfaces the cached record_count when we
   // have it, so the operator knows the legal range without re-reading.
   // -------------------------------------------------------------------------
   async function scp03ShowFsUpdateRecord(tab, kind) {
     var label = (kind === "cyclic") ? "cyclic" : "linear-fixed";
     var card = scp03BuildExtrasCard(
-      "FS — UPDATE RECORD (00DC) — " + label);
+      "FS -- UPDATE RECORD (00DC) -- " + label);
     if (!card) return;
     scp03BuildDestructiveBanner(
       card,
       "UPDATE RECORD overwrites a single record in this " + label
         + " EF. Cyclic EFs roll the oldest entry off the end on each "
-        + "write — review the record number carefully."
+        + "write -- review the record number carefully."
     );
 
     var explain = document.createElement("p");
@@ -20940,13 +23267,13 @@
   }
 
   // =========================================================================
-  // Service-table staging — mock-update an EF.UST / EF.IST / generic
+  // Service-table staging -- mock-update an EF.UST / EF.IST / generic
   // bitmap EF without touching the card.
   //
   // The user wanted a "what if I flipped these flags?" view: toggle
   // checkboxes, watch the resulting hex update live, and (optionally)
   // hand the new bytes off to UPDATE BINARY without doing the bit-math
-  // by hand. Backend is ``scp03.stage_service_table`` — pure local
+  // by hand. Backend is ``scp03.stage_service_table`` -- pure local
   // encoder, no card I/O, no auth gate.
   // =========================================================================
   function scp03InferServiceTableKind(decoded) {
@@ -20960,7 +23287,7 @@
   function scp03ParseServiceLabel(label) {
     // Accepts entries shaped either ``"<n>: <name>"`` (UST / IST) or
     // a bare ``"<n>"`` (generic). Returns ``{ n, name }`` or null if
-    // we can't parse the row safely (defensive — backend should never
+    // we can't parse the row safely (defensive -- backend should never
     // emit those).
     var text = String(label == null ? "" : label).trim();
     if (text.length === 0) return null;
@@ -20997,7 +23324,7 @@
   }
 
   function scp03FormatHexGroups(hex) {
-    // Group on byte boundaries with a single space between each pair —
+    // Group on byte boundaries with a single space between each pair --
     // matches the CLI ``...`` dump style. Operators copy this straight
     // into UPDATE BINARY where the dispatcher strips whitespace anyway.
     var cleaned = String(hex || "").replace(/\s+/g, "").toUpperCase();
@@ -21074,7 +23401,7 @@
     meta.appendChild(diffChip);
     preview.appendChild(meta);
 
-    // Action bar — Copy hex / Reset / Send to UPDATE BINARY
+    // Action bar -- Copy hex / Reset / Send to UPDATE BINARY
     var actions = document.createElement("div");
     actions.className = "cc-svc-stage-actions";
 
@@ -21177,7 +23504,7 @@
     var stageInFlight = null;
 
     async function refreshPreview() {
-      // Single in-flight guard — if the operator hammers checkboxes
+      // Single in-flight guard -- if the operator hammers checkboxes
       // we want the *latest* request to win, so we abort by overwriting
       // the inFlight token rather than chaining promises.
       var token = {};
@@ -21293,7 +23620,7 @@
         return;
       }
       if (typeof scp03ShowFsUpdateBinary !== "function") return;
-      // Honour the auth gate — UPDATE BINARY is flagged
+      // Honour the auth gate -- UPDATE BINARY is flagged
       // ``requires_auth=True``, so the existing ``scp03GateOpen``
       // helper will pop the credential modal first if needed.
       try {
@@ -21358,7 +23685,7 @@
   }
 
   // =========================================================================
-  // Generic stage-edit popout — for any decoded EF that is NOT a
+  // Generic stage-edit popout -- for any decoded EF that is NOT a
   // service-table bitmap. The service-table flow keeps its purpose-built
   // checklist; everything else gets a side-by-side hex editor seeded
   // with the current bytes, with the structured pretty view rendered
@@ -21545,7 +23872,7 @@
         return;
       }
       decodeBody.innerHTML = "";
-      decodeBody.appendChild(loadingEl("decoding staged bytes…"));
+      decodeBody.appendChild(loadingEl("decoding staged bytes..."));
       apiFetch("/api/actions/scp03.decode/run", {
         method: "POST",
         body: JSON.stringify({
@@ -21588,11 +23915,22 @@
       });
     }
 
+    // One decode round trip per pause in typing, not one per keystroke;
+    // the byte count and diff chip below stay synchronous.
+    var decodePreviewTimer = null;
+    function scheduleDecodedPreview(stagedHex) {
+      if (decodePreviewTimer) clearTimeout(decodePreviewTimer);
+      decodePreviewTimer = setTimeout(function () {
+        decodePreviewTimer = null;
+        refreshDecodedPreview(stagedHex);
+      }, 250);
+    }
+
     function refreshChip() {
       var staged = scp03StageHexNormalise(editor.value);
       var bytes = staged.length / 2;
       var changed = scp03StageBytesChanged(startHex, staged);
-      refreshDecodedPreview(staged);
+      scheduleDecodedPreview(staged);
       counts.textContent = bytes + " B staged \u00B7 "
         + startBytes + " B current";
       if (staged.length === 0) {
@@ -21600,7 +23938,7 @@
         diffChip.classList.remove("is-changed");
         return;
       }
-      // Odd hex length is a typo — surface it before the operator
+      // Odd hex length is a typo -- surface it before the operator
       // hands the bytes to UPDATE BINARY where the dispatcher will
       // reject the request anyway.
       if (staged.length % 2 !== 0) {
@@ -21676,8 +24014,8 @@
   }
 
   // =========================================================================
-  // FS — lifecycle wizard (ACTIVATE / DEACTIVATE / TERMINATE_DF / TERMINATE_EF)
-  // Per-op explanation panel + conditional confirm token — only required for
+  // FS -- lifecycle wizard (ACTIVATE / DEACTIVATE / TERMINATE_DF / TERMINATE_EF)
+  // Per-op explanation panel + conditional confirm token -- only required for
   // the two terminal-state operations.
   // =========================================================================
   var _FS_LIFECYCLE_OPS = {
@@ -21708,7 +24046,7 @@
   };
 
   async function scp03ShowFsLifecycle(tab) {
-    var card = scp03BuildExtrasCard("FS — lifecycle");
+    var card = scp03BuildExtrasCard("FS -- lifecycle");
     if (!card) return;
     scp03BuildDestructiveBanner(
       card,
@@ -21810,12 +24148,12 @@
   }
 
   // =========================================================================
-  // FS — SEARCH RECORD wizard
+  // FS -- SEARCH RECORD wizard
   // Hex needle field + live ASCII mirror so operators can verify the
   // string they're scanning for ("3034" = "04").
   // =========================================================================
   async function scp03ShowFsSearchRecord(tab) {
-    var card = scp03BuildExtrasCard("FS — SEARCH RECORD (00A2)");
+    var card = scp03BuildExtrasCard("FS -- SEARCH RECORD (00A2)");
     if (!card) return;
 
     var explain = document.createElement("p");
@@ -21902,11 +24240,11 @@
   }
 
   // =========================================================================
-  // FS — SUSPEND UICC wizard
+  // FS -- SUSPEND UICC wizard
   // Explains the session-terminating side effects up front. Typed confirm.
   // =========================================================================
   async function scp03ShowFsSuspendUicc(tab) {
-    var card = scp03BuildExtrasCard("FS — SUSPEND UICC (8076)");
+    var card = scp03BuildExtrasCard("FS -- SUSPEND UICC (8076)");
     if (!card) return;
     scp03BuildDestructiveBanner(
       card,
@@ -21976,7 +24314,7 @@
         { name: "op", label: "Operation", kind: "select",
           choices: ["VERIFY", "CHANGE", "DISABLE", "ENABLE", "UNBLOCK"], required: true },
         { name: "pin_ref", label: "PIN reference (hex)", value: "01", required: true,
-          help: "01 = PIN1, 81 = PIN2, 0A = ADM1, …" },
+          help: "01 = PIN1, 81 = PIN2, 0A = ADM1, ..." },
         { name: "pin", label: "Current PIN (ASCII)", placeholder: "1234",
           secret: true, maxLength: 8, help: "1..8 ASCII characters." },
         { name: "new_pin", label: "New PIN (ASCII)", secret: true,
@@ -22116,11 +24454,11 @@
   }
 
   async function scp03ShowOpenStkShell(_tab) {
-    await scp03LaunchSubShell("SCP03", "STK-SHELL\r", "STK sub-shell");
+    await scp03LaunchSubShell("SCP03", "STK ON\r", "STK mode");
     logBus.emit({
       level: "info",
       source: "scp03.stk_shell",
-      message: "handoff \u2192 python -m SCP03 (auto STK-SHELL)",
+      message: "handoff \u2192 python -m SCP03 (auto STK ON)",
     });
   }
 
@@ -22177,17 +24515,11 @@
     );
     var pathInput = handle.inputs.script_path;
     if (pathInput && typeof attachPathPicker === "function") {
-      var wrapped = attachPathPicker(pathInput, "open");
-      if (pathInput.parentNode && wrapped && wrapped !== pathInput) {
-        pathInput.parentNode.replaceChild(wrapped, pathInput);
-      }
+      scp03AttachPathPicker(pathInput, "open");
     }
     var yamlInput = handle.inputs.yaml_out;
     if (yamlInput && typeof attachPathPicker === "function") {
-      var yamlWrapped = attachPathPicker(yamlInput, "save");
-      if (yamlInput.parentNode && yamlWrapped && yamlWrapped !== yamlInput) {
-        yamlInput.parentNode.replaceChild(yamlWrapped, yamlInput);
-      }
+      scp03AttachPathPicker(yamlInput, "save");
     }
     card.appendChild(out);
   }
@@ -22228,10 +24560,7 @@
     );
     var filenameInput = handle.inputs.filename;
     if (filenameInput && typeof attachPathPicker === "function") {
-      var wrapped = attachPathPicker(filenameInput, "save");
-      if (filenameInput.parentNode && wrapped && wrapped !== filenameInput) {
-        filenameInput.parentNode.replaceChild(wrapped, filenameInput);
-      }
+      scp03AttachPathPicker(filenameInput, "save");
     }
     card.appendChild(out);
   }
@@ -22299,9 +24628,6 @@
           placeholder: "23553CBE9637A89D218AE64DAE47BF35" },
         { name: "autn", label: "AUTN (16 bytes / 32 hex, USIM/ISIM)",
           placeholder: "55F328B43577B9B94A9FFAC354DFAFB3" },
-        { name: "reveal_sensitive", label: "Reveal derived CK / IK / Kc",
-          kind: "bool",
-          help: "Off by default. Revealed values remain visible in this browser result." },
       ],
       "Authenticate",
       async function (values) {
@@ -22310,7 +24636,6 @@
           context: values.context || "USIM",
           rand: (values.rand || "").trim(),
           autn: (values.autn || "").trim(),
-          reveal_sensitive: !!values.reveal_sensitive,
         }, function (data, sheet) {
           var rows = [
             { label: "Context", value: data.context || "" },
@@ -22325,12 +24650,6 @@
           if (resp.kc) rows.push({ label: "Kc", value: resp.kc });
           if (resp.sres) rows.push({ label: "SRES", value: resp.sres });
           if (resp.auts) rows.push({ label: "AUTS", value: resp.auts });
-          if (resp.derived_keys_redacted) {
-            rows.push({
-              label: "Derived keys",
-              value: "REDACTED (enable the reveal option to display CK / IK / Kc)",
-            });
-          }
           scp03DatasheetAppendMetaKvl(sheet, rows);
           if (resp.parse_warning) {
             scp03DatasheetAppendWarn(sheet, resp.parse_warning);
@@ -22384,14 +24703,14 @@
         // Best-effort; backend close is idempotent.
       }
     }
-    // Closing a tab is an explicit "forget this reader" action — the
+    // Closing a tab is an explicit "forget this reader" action -- the
     // user clicked × on the pill, not just navigated away. Purge the
     // persisted state so the next pill-click on this reader starts
     // fresh. (Resuming a closed tab later is cheap: re-scan + re-read.)
     if (tab.readerName) {
       scp03PurgePersisted(tab.readerName);
     }
-    // Floating popouts are bound to the tab — explicit close is the
+    // Floating popouts are bound to the tab -- explicit close is the
     // operator's "forget this session" gesture, so tear the windows
     // down alongside the session + persisted cache.
     scp03PopoutCloseAllForTab(tab);

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SAIP placeholder transformation functions.
 
 Covers ``SwapNibbles(NAME)`` and ``EncodeEfImsi(NAME)`` inside hex
@@ -50,7 +49,7 @@ class EncodeEfImsiTransformTests(unittest.TestCase):
 
     def test_encode_ef_imsi_ascii_15_digit(self) -> None:
         ctx = TokenExpansionContext(
-            # ASCII bytes for "001010123456789" (15 digits — odd; parity nibble 0x9).
+            # ASCII bytes for "001010123456789" (15 digits -- odd; parity nibble 0x9).
             defs={"IMSI": {"hex": "303031303130313233343536373839"}},
             style="bracket",
         )
@@ -61,7 +60,7 @@ class EncodeEfImsiTransformTests(unittest.TestCase):
 
     def test_encode_ef_imsi_ascii_14_digit_pads_with_f(self) -> None:
         ctx = TokenExpansionContext(
-            # ASCII bytes for "00101012345678" (14 digits — even; parity nibble 0x1).
+            # ASCII bytes for "00101012345678" (14 digits -- even; parity nibble 0x1).
             defs={"IMSI": {"hex": "3030313031303132333435363738"}},
             style="bracket",
         )

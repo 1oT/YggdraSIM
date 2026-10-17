@@ -28,7 +28,7 @@
   background: var(--surface);
   color: var(--fg);
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   max-height: 480px;
   overflow: auto;
@@ -77,6 +77,21 @@
   background: var(--accent-soft);
 }
 
+/* Hex-pane scope switch (whole file vs a single record window). It
+   rides in the pane head, so it drops the standalone bar's bottom
+   margin and shrinks to sit on one 28px row. */
+.saip-file-data-viewbar--pane {
+  align-self: center;
+  margin: 0 0 0 auto;
+  padding: 1px;
+}
+
+.saip-file-data-viewbar--pane .saip-file-data-viewbtn {
+  min-width: 0;
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
 .saip-file-data-view {
   flex: 1 1 auto;
   min-height: 0;
@@ -108,7 +123,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-alt);
   overflow: hidden;
 }

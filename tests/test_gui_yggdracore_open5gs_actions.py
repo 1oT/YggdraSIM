@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""GUI Open5GS action conformance tests (Phase 2).
+"""GUI Open5GS action conformance tests.
 
 Locks the six BYO Open5GS actions registered by
 ``yggdrasim_common.gui_server.actions.yggdracore``:
@@ -275,13 +275,12 @@ class ReadRemovePurgeDispatchTests(unittest.TestCase):
         yggdracore_actions.set_open5gs_repository_for_testing(None)
         reset_default_subscription_store()
 
-    def test_read_returns_sanitised_doc(self) -> None:
+    def test_read_returns_the_stored_keys(self) -> None:
         result = yggdracore_actions._dispatch_open5gs_read(_ctx(), imsi=_IMSI)
         self.assertTrue(result["found"])
         sec = result["subscriber"]["security"]
-        # Fingerprint format documented in the bridge module.
-        self.assertRegex(sec["k"], r"\(16 bytes\)$")
-        self.assertRegex(sec["opc"], r"\(16 bytes\)$")
+        self.assertEqual(sec["k"], _K_HEX)
+        self.assertEqual(sec["opc"], _OPC_HEX)
 
     def test_read_unknown_imsi_returns_found_false(self) -> None:
         result = yggdracore_actions._dispatch_open5gs_read(_ctx(), imsi="999999999999999")

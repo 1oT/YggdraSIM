@@ -43,7 +43,7 @@ and orientation.
   permission.
 - Submitting operator secrets, real subscriber identities (`IMSI`,
   `ICCID`, `EID`), production `AES` / `DES` / `ECC` keys, certified
-  profile bundles, or vendor-confidential APDU traces — see
+  profile bundles, or vendor-confidential APDU traces -- see
   `CONTRIBUTING.md` for the data-hygiene rules.
 - Using the project to attack, surveil, or compromise live mobile
   network infrastructure or third-party subscribers. YggdraSIM is a

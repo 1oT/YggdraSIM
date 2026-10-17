@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Map Profile Element boundaries between decoded JSON and concatenated DER hex.
 
@@ -265,7 +264,7 @@ def enclosing_json_value_span(text: str, lo: int, hi: int) -> tuple[int, int]:
 
     s_floor = max(0, lo - 500_000)
     candidates: list[tuple[int, int, int, int]] = []
-    # (t, e, span_len, kind_rank) — kind_rank 0 = object/array (prefer), 1 = primitive
+    # (t, e, span_len, kind_rank) -- kind_rank 0 = object/array (prefer), 1 = primitive
 
     s = lo
     while s >= s_floor:

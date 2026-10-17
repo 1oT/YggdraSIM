@@ -15,13 +15,17 @@ CSS_ROOT = ROOT / "gui_frontend" / "src" / "css"
 TOKEN_ROOT = CSS_ROOT / "tokens"
 
 THEMES = {
+    "catppuccin-frappe",
     "catppuccin-latte",
+    "catppuccin-macchiato",
     "catppuccin-mocha",
     "dracula",
     "github-dark",
     "github-light",
+    "graphite-light",
     "gruv-dark",
     "ink-light",
+    "islands-light",
     "matrix",
     "nord-dark",
     "nord-light",
@@ -119,6 +123,33 @@ def test_theme_gradients_keep_their_text_contrast() -> None:
                     f"{path.stem}: brand gradient {stop} is {ratio:.2f}:1"
                 )
     assert not failures, "\n".join(failures)
+
+
+def test_every_theme_declares_a_native_control_colour_scheme() -> None:
+    """Each theme lands in exactly one `color-scheme` block in base-resets.
+
+    A theme absent from both leaves native controls, popup menus and
+    scrollbars on the browser default rather than the selected palette, and
+    nothing else in the suite notices.
+    """
+    css = (CSS_ROOT / "layout" / "base-resets.css").read_text(encoding="utf-8")
+    coverage: dict[str, set[str]] = {"dark": set(), "light": set()}
+    for match in re.finditer(
+        r"([^{}]*?)\{\s*color-scheme:\s*(dark|light);\s*\}", css
+    ):
+        selector, scheme = match.group(1), match.group(2)
+        named = set(re.findall(r'data-theme="([\w-]+)"', selector))
+        if 'data-theme$="-light"' in selector:
+            named |= {theme for theme in THEMES if theme.endswith("-light")}
+        coverage[scheme] |= named
+
+    missing = sorted(THEMES - coverage["dark"] - coverage["light"])
+    both = sorted(coverage["dark"] & coverage["light"] & THEMES)
+    assert not missing, (
+        "themes with no color-scheme in layout/base-resets.css: "
+        + ", ".join(missing)
+    )
+    assert not both, "themes declared both dark and light: " + ", ".join(both)
 
 
 def test_base_tokens_bridge_legacy_names_to_canonical_palette() -> None:
@@ -266,6 +297,35 @@ def test_only_chrome_and_transient_overlays_position_against_the_viewport() -> N
     assert found == FIXED_POSITION_SURFACES
 
 
+# The desktop shell renders without GPU compositing, so a blur over a
+# window-sized layer is recomputed on the CPU for every repaint inside or
+# under it: the SAIP Add PE dialog dropped to about 12 frames a second
+# while typing behind a 2px backdrop blur. Only the resting top bar keeps
+# its glass, which costs nothing measurable at rest; the overlays sit on the
+# plain scrim.
+BACKDROP_FILTER_SURFACES = {".topbar"}
+
+
+def test_no_overlay_blurs_the_window_behind_it() -> None:
+    found: set[str] = set()
+    for path in sorted(CSS_ROOT.rglob("*.css")):
+        css = re.sub(
+            r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.DOTALL
+        )
+        for match in re.finditer(r"(?<![-\w])backdrop-filter:\s*([^;]+);", css):
+            if match.group(1).strip() == "none":
+                continue
+            selector = (
+                css[: match.start()]
+                .rsplit("}", 1)[-1]
+                .split("{")[0]
+                .strip()
+                .replace("\n", " ")
+            )
+            found.add(selector)
+    assert found == BACKDROP_FILTER_SURFACES
+
+
 def test_action_output_renders_as_inline_panels() -> None:
     """The floating action-window system must not come back."""
     bundle = (
@@ -402,3 +462,29 @@ def test_no_var_fallback_shadows_a_token_every_theme_defines() -> None:
             if token[2:] in everywhere:
                 offenders.append(f"{relative}: {token} has a dead fallback")
     assert not offenders, "\n".join(sorted(set(offenders)))
+
+def test_text_colour_never_hardcodes_a_literal_outside_the_token_files() -> None:
+    """A literal `color:` cannot follow the theme.
+
+    Seven SAIP views carried Nord dark pastels, so on every light theme they
+    rendered at roughly 1.5:1 against the panel -- below the 4.5:1 the theme
+    files themselves are held to. Colour reaches a rule through a token or it
+    does not reach it at all.
+    """
+
+    offenders: list[str] = []
+    for path in sorted(CSS_ROOT.rglob("*.css")):
+        relative = path.relative_to(CSS_ROOT).as_posix()
+        if relative.startswith("tokens/"):
+            continue
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            stripped = line.strip()
+            if not stripped.startswith("color:"):
+                continue
+            if "var(" in stripped:
+                continue
+            if re.search(r"#[0-9a-fA-F]{3,8}\b", stripped):
+                offenders.append(f"{relative}:{number}: {stripped}")
+    assert offenders == [], offenders

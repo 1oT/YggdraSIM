@@ -6,7 +6,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # Diagnostics Toolbox
 
 Four v1-era capabilities ship as standalone tooling next to the
-core YggdraSIM subsystems. Each is additive — nothing existing
+core YggdraSIM subsystems. Each is additive -- nothing existing
 changes behaviour unless the new command is explicitly invoked.
 
 | Capability | Entry point | Safety posture |
@@ -56,12 +56,12 @@ diff), `h` toggles the hex-diff overlay (see below), `q` quits.
 
 The decoded pane has two display modes, switched with `h`:
 
-* **JSON view** (default) — the leaf under the tree cursor is
+* **JSON view** (default) -- the leaf under the tree cursor is
   rendered using the read-only decoder cascade as a pretty-printed
   JSON object. No diff colouring is applied inside the pane; the
   side-by-side tree above carries the diff signal via its op
   markers and op colours.
-* **Hex-diff overlay** — when the leaf carries a flat hex blob,
+* **Hex-diff overlay** -- when the leaf carries a flat hex blob,
   the pane switches to an xxd-style 16-byte-per-line panel with a
   byte-level diff against the other side. Diverging bytes are
   painted on a directional background: red on the A side
@@ -102,7 +102,7 @@ every PE that would otherwise hide the real semantic differences.
 
 Pass `BY-CMD-INDEX` to opt back to the raw command-index
 comparison (the pre-canonical noisy view, including the PE-header
-`identification` field) — useful when verifying that two encoders
+`identification` field) -- useful when verifying that two encoders
 emit byte-for-byte identical SAIP, or when chasing a regression in
 the file-management command stream itself.
 
@@ -151,15 +151,15 @@ yggdrasim-profile-autoload --store-root ... \
 ```
 
 Available template variables in `--launcher` (single-brace Python
-`str.format` style — unknown names are substituted with the empty
+`str.format` style -- unknown names are substituted with the empty
 string rather than raising):
 
-- `{iccid}` — the newly seen ICCID
-- `{profile}` — the preferred profile file path
-- `{profile_path}` — alias of `{profile}`; kept for older scripts
-- `{profile_dir}` — the per-profile directory
-- `{manifest}` — the manifest JSON path (empty string if absent)
-- `{python}` — `sys.executable`
+- `{iccid}` -- the newly seen ICCID
+- `{profile}` -- the preferred profile file path
+- `{profile_path}` -- alias of `{profile}`; kept for older scripts
+- `{profile_dir}` -- the per-profile directory
+- `{manifest}` -- the manifest JSON path (empty string if absent)
+- `{python}` -- `sys.executable`
 
 If no `--launcher` is supplied the watcher falls back to
 `python -m Tools.ProfilePackage --cmd "USE <profile>; INFO; TREE; EXIT"`,
@@ -230,7 +230,7 @@ card).
 
 Operates the *server* side of an ES8+ / BPP provisioning flow. The
 operator supplies ShS-ENC, ShS-MAC, and (optionally) DEK for a
-given ICCID — material that a production EUM or SM-DP+ retains
+given ICCID -- material that a production EUM or SM-DP+ retains
 in its session database. The tooling writes an on-disk JSON
 repository and hands it to a Wireshark/tshark Lua dissector that
 annotates BF36 Bound Profile Package TLVs with the matched keys,

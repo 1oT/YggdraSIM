@@ -37,7 +37,9 @@ class BatchEntryReaderTests(unittest.TestCase):
             with mock.patch("sys.stdin", io.StringIO("AUTH-SD\n# skip\nLIST\n")):
                 scp03_main.entry_stdin(yaml_out="report.yaml")
 
-        mocked_entry_cmd.assert_called_once_with("AUTH-SD; LIST", yaml_out="report.yaml")
+        mocked_entry_cmd.assert_called_once_with(
+            "AUTH-SD; LIST", yaml_out="report.yaml", reader_name="",
+        )
 
     def test_profile_package_entry_stdin_batches_commands(self) -> None:
         with mock.patch.object(profile_package_main, "entry_cmd") as mocked_entry_cmd:
@@ -58,7 +60,9 @@ class BatchEntryReaderTests(unittest.TestCase):
             with mock.patch("sys.stdin", io.StringIO("STATUS\n# skip\nHELP\n")):
                 scp11_local_access_main.entry_stdin()
 
-        mocked_entry_cmd.assert_called_once_with("STATUS; HELP")
+        # The shells pass the --reader choice through since ba780ba2; no
+        # choice means the empty name, which selects the reader interactively.
+        mocked_entry_cmd.assert_called_once_with("STATUS; HELP", reader_name="")
 
     def test_eim_local_entry_stdin_batches_commands(self) -> None:
         with mock.patch.object(scp11_eim_local_main, "entry_cmd") as mocked_entry_cmd:
@@ -74,7 +78,9 @@ class StandaloneRouteTests(unittest.TestCase):
             with mock.patch("sys.argv", ["prog", "--cmd", "AUTH-SD; LIST", "--out", "report.yaml"]):
                 scp03_main.run_standalone()
 
-        mocked_entry_cmd.assert_called_once_with("AUTH-SD; LIST", yaml_out="report.yaml")
+        mocked_entry_cmd.assert_called_once_with(
+            "AUTH-SD; LIST", yaml_out="report.yaml", reader_name="",
+        )
 
     def test_scp80_standalone_routes_stdin_to_batch_mode(self) -> None:
         with mock.patch("SCP80.cli.OtaShell.run_commands", autospec=True) as mocked_batch:

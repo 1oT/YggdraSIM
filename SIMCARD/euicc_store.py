@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eUICC profile store: on-disk JSON persistence for installed profiles and associated metadata."""
 from __future__ import annotations
 
@@ -109,7 +108,7 @@ def load_euicc_store_into_state(store_path: str, state: SimCardState) -> bool:
     # and labels) is operator configuration and comes from
     # ``isdr_config.json`` / quirks. Persisting it back here would mean a
     # stale cache pins a value forever and silently overrides any later
-    # change in ``isdr_config.json`` — which is what bit the simulated
+    # change in ``isdr_config.json`` -- which is what bit the simulated
     # ATR after the ISO 7816-3 fix landed. Root CI PKID is protected key
     # material for the eUICC store, so it is still restored below.
     apply_euicc_state_payload(state, payload, apply_identity=False)
@@ -186,6 +185,8 @@ def _serialize_state(state: SimCardState) -> dict[str, Any]:
         ],
         "eum_certificate_der_hex": bytes(state.eum_certificate_der or b"").hex().upper(),
         "euicc_certificate_der_hex": bytes(state.euicc_certificate_der or b"").hex().upper(),
+        "conformance_strict": bool(state.conformance_strict),
+        "ci_certificates_der_hex": [bytes(item).hex().upper() for item in state.ci_certificates],
         "scp03_keys": {
             "kenc_hex": bytes(state.scp03_keys.kenc).hex().upper(),
             "kmac_hex": bytes(state.scp03_keys.kmac).hex().upper(),
@@ -404,6 +405,15 @@ def apply_euicc_state_payload(
         state.eum_certificate_der = _hex_bytes(payload.get("eum_certificate_der_hex"), fallback=b"")
     if "euicc_certificate_der_hex" in payload:
         state.euicc_certificate_der = _hex_bytes(payload.get("euicc_certificate_der_hex"), fallback=b"")
+    if "conformance_strict" in payload:
+        state.conformance_strict = payload.get("conformance_strict") is True
+    raw_ci_certificates = payload.get("ci_certificates_der_hex")
+    if isinstance(raw_ci_certificates, list):
+        state.ci_certificates = [
+            certificate
+            for certificate in (_hex_bytes(item, fallback=b"") for item in raw_ci_certificates)
+            if len(certificate) > 0
+        ]
 
     scp03_keys = payload.get("scp03_keys")
     if isinstance(scp03_keys, dict):

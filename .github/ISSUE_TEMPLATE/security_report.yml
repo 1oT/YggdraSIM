@@ -52,7 +52,7 @@ body:
       label: Impact (if the gap were exploited)
       description: |
         Describe the theoretical impact. If you know of a PoC, do NOT
-        paste it here — use Security Advisories.
+        paste it here -- use Security Advisories.
     validations:
       required: true
 

@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Tests for ``saip_gfm_select`` — single-DF-context GFM helpers."""
+"""Tests for ``saip_gfm_select`` -- single-DF-context GFM helpers."""
 
 from __future__ import annotations
 

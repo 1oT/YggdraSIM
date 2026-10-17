@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""``/api/actions/*`` — Command Center route layer.
+"""``/api/actions/*`` -- Command Center route layer.
 
 Exposes three endpoints:
 
-* ``GET  /api/actions``            — catalogue (grouped by subsystem)
-* ``POST /api/actions/{id}/run``   — dispatch a synchronous action
-* ``WS   /api/actions/{id}/stream``— dispatch a streaming action
+* ``GET  /api/actions``            -- catalogue (grouped by subsystem)
+* ``POST /api/actions/{id}/run``   -- dispatch a synchronous action
+* ``WS   /api/actions/{id}/stream``-- dispatch a streaming action
 
 The router intentionally has no per-action knowledge. It:
 
@@ -18,7 +17,7 @@ The router intentionally has no per-action knowledge. It:
 4. Wraps the result (or the async-generator's events) in a small JSON
    envelope so the UI always sees ``{"ok": bool, ...}``.
 
-``/api/sessions`` is also exposed here as a sibling — dispatchers that
+``/api/sessions`` is also exposed here as a sibling -- dispatchers that
 open a card session return a ``session_id`` the UI can later list or
 close through this endpoint.
 """
@@ -42,7 +41,6 @@ from yggdrasim_common.gui_server.actions.registry import (
     ensure_builtin_actions_loaded,
 )
 from yggdrasim_common.gui_server.actions.registry import ActionContext
-from yggdrasim_common.gui_server.action_security import scrub_action_result
 from yggdrasim_common.gui_server.auth import (
     compare_tokens,
     token_id,
@@ -123,7 +121,7 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
     if spec.streams:
         raise HTTPException(
             status_code=400,
-            detail=f"action {action_id!r} is streaming — use the WebSocket endpoint.",
+            detail=f"action {action_id!r} is streaming -- use the WebSocket endpoint.",
         )
     if spec.dispatcher is None:
         raise HTTPException(
@@ -160,7 +158,7 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
             action_id=action_id,
             error=f"{type(runtime_error).__name__}: {runtime_error}",
         )
-    except Exception as server_error:  # noqa: BLE001 — surface the class + message
+    except Exception as server_error:  # noqa: BLE001 -- surface the class + message
         _LOGGER.exception("action dispatch failed: %s", action_id)
         return RunResponse(
             ok=False,
@@ -169,7 +167,7 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
         )
 
     if isinstance(result, dict):
-        payload = scrub_action_result(action_id, result)
+        payload = dict(result)
     else:
         payload = {"value": result}
     if spec.subsystem == "SCP03":
@@ -188,6 +186,31 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
     return RunResponse(ok=True, action_id=action_id, data=payload)
 
 
+def _session_for_serialisation(coerced: dict[str, Any]) -> Any:
+    """Return the live card session this call targets, or None.
+
+    A session owns one physical card and one PC/SC connection, so two
+    dispatchers running against it concurrently interleave APDUs on the
+    same channel and mutate the same file-system cursor. A missing or
+    already-reaped session is not an error here -- the dispatcher itself
+    reports that far more precisely than this helper could.
+    """
+    session_id = str(coerced.get("session_id") or "").strip()
+    if len(session_id) == 0:
+        return None
+    try:
+        return get_manager().get(session_id)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _call_dispatcher_locked(dispatcher: Any, session: Any, ctx: ActionContext, coerced: dict[str, Any]) -> Any:
+    # Acquired on the worker thread, never on the event loop, so a slow
+    # card operation blocks only its own thread.
+    with session._lock:
+        return dispatcher(ctx, **coerced)
+
+
 async def _invoke_dispatcher(spec: ActionSpec, ctx: ActionContext, coerced: dict[str, Any]) -> Any:
     dispatcher = spec.dispatcher
     if dispatcher is None:
@@ -195,8 +218,12 @@ async def _invoke_dispatcher(spec: ActionSpec, ctx: ActionContext, coerced: dict
 
     if inspect.iscoroutinefunction(dispatcher):
         return await dispatcher(ctx, **coerced)
-    # Sync dispatcher → push off the event loop thread.
-    return await asyncio.to_thread(dispatcher, ctx, **coerced)
+    # Sync dispatcher → push off the event loop thread, serialised per
+    # session so concurrent requests cannot interleave APDUs on one card.
+    session = _session_for_serialisation(coerced)
+    if session is None:
+        return await asyncio.to_thread(dispatcher, ctx, **coerced)
+    return await asyncio.to_thread(_call_dispatcher_locked, dispatcher, session, ctx, coerced)
 
 
 # ----------------------------------------------------------------------
@@ -320,8 +347,6 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
     try:
         async for event in async_iter:
             try:
-                if isinstance(event, dict):
-                    event = scrub_action_result(action_id, event)
                 await websocket.send_text(json.dumps(event))
             except Exception:
                 break
@@ -353,7 +378,7 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
         if inspect.isasyncgen(async_iter):
             try:
                 await async_iter.aclose()
-            except Exception:  # noqa: BLE001 — best-effort cleanup
+            except Exception:  # noqa: BLE001 -- best-effort cleanup
                 pass
         try:
             await websocket.close()

@@ -19,7 +19,7 @@ handover testing.
   - `GET-EIM-CONFIG`
   - `DELETE-EIM`
 - direct package execution against `ISD-R`
-  orchestrators
+- `IPAd` discovery and the handover context
 - indirect and direct profile download package testing
 - `BF50` result serialization, queue work, and response reporting
 
@@ -87,35 +87,20 @@ Primary commands:
 - `DELETE-EIM`
 - `ISDR-DELETE-EIM`
 
-### 3.2 Localized IPAd
+### 3.2 IPAd discovery and handover
 
-Use localized `IPAd` when:
+Use the `IPAd` side of the shell when:
 
-- the discovery/download flow should run through the live or test relay shell
-- the eIM endpoint must resolve locally instead of leaving the workstation
-- the operator wants relay-style discovery with local interception
+- the card's eIM-facing state should be read before a package is issued
+- a profile download must carry the transaction reference of the eIM exchange
+  that asked for it
 
 Primary commands:
 
 - `IPAD-DISCOVER`
-- `IPAD-LIVE`
-- `IPAD-TEST`
-- `PATHS`
-
-
-
-- the relay orchestrator should drive the timing while the eIM/SM-DP+ side
-  stays local
-
-Primary commands:
-
 - `HANDOVER-SET`
 - `HANDOVER-STATUS`
 - `PATHS`
-
-Practical split:
-
-  points in builds that provide them
 
 ## 4. Identity and certificate model
 
@@ -270,10 +255,11 @@ This is the fastest way to validate:
 Use `EUICC-MEMORY-RESET` only when the test case explicitly requires card-side
 reset behavior.
 
-## 8. Workflow: localized `IPAd`
+## 8. Workflow: `IPAd` discovery
 
-Localized `IPAd` lets the live/test relay orchestrator drive the relay-side
-logic while endpoint resolution stays local.
+`IPAD-DISCOVER [packagePath]` runs IPAd discovery against the card, syncs the
+pending notifications, and, given a path, selects that eIM package for the next
+issue.
 
 ### 8.1 Prepare
 
@@ -283,89 +269,40 @@ STATUS
 IPAD-DISCOVER
 ```
 
-`PATHS` shows the active Direct Auth path plus the localized bridge endpoints
+`PATHS` lists the path families the shell offers and their endpoints.
 
 Before proving a simulated-card loop:
 
 - make sure the simulated card's BF55 view matches the intended eIM by checking `Workspace/SIMCARD/eim_identity.json` or the wrapper `eIM identity` override
 - do not assume that changing `Workspace/LocalEIM/eim_identity.json` alone changes what the simulated card advertises
 
-### 8.2 Run the localized relay path
-
-Live-default relay orchestrator:
-
-```text
-IPAD-LIVE [matchingId] [--debug]
-```
-
-Test-default relay orchestrator:
-
-```text
-IPAD-TEST [matchingId] [--debug]
-```
-
-These commands use the same relay-side package exchange path as the live/test
-shell `DOWNLOAD` command, but the eIM / SM-DP+ traffic is intercepted and
-terminated by the local bridge. Use `--debug` when you want raw APDU hex and
-server-tagged labels such as `[eIM]` and `[SM-DP+]`; omit it for concise
-operator output.
-
-Provide a `matchingId` when the scenario depends on a specific package
-selection:
-
-```text
-IPAD-LIVE EIM-FIRST-TEST
-```
-
-### 8.3 Inspect the result
+### 8.2 Inspect the result
 
 ```text
 RESP-LOG 20
 HOTFOLDER-LIST --json
 ```
 
+## 9. Workflow: handover context
 
-more here than in Direct Auth.
+The handover context is the eIM transaction reference -- a transaction ID and
+an optional `matchingId` -- that the shell holds for the profile download that
+follows an eIM exchange.
 
-### 9.1 Seed handover
+### 9.1 Seed the context
 
 ```text
+HANDOVER-SET <transactionIdHex> [matchingId]
 HANDOVER-STATUS
 ```
 
+`HANDOVER-SET` records the reference by hand; `HANDOVER-STATUS` prints it with
+the profile path, the notification policy and where the reference came from.
+
 ### 9.2 Continue with the linked download
 
-```text
-```
-
-
-Live orchestrator:
-
-```text
-```
-
-Test orchestrator:
-
-```text
-```
-
-`POLL` in the live/test shells. It does not send synthetic TIMER EXPIRATION
-envelopes. Instead, each completed STATUS response is counted as 30 seconds of
-card-side elapsed time.
-
-Extension note:
-
-  extension registers those verbs.
-
-With explicit attempts, a one-hour virtual timer, optional throttle, and
-post-status loops:
-
-```text
-```
-
-Practical rule:
-
-  `HANDOVER-SET`
+Issue the indirect profile download package (section 10.1). If the context was
+lost, seed it again with `HANDOVER-SET`.
 
 ## 10. Workflow: indirect and direct profile download packages
 
@@ -508,16 +445,7 @@ Check:
 If the source is not already `BF36`, the shell must be able to build a
 session-bound BPP for the current session.
 
-### 13.4 Localized relay does not hit the expected endpoint
-
-Check:
-
-- `PATHS`
-- active identity endpoint values in `STATUS`
-- package `runtime.bip_endpoints`
-- chosen live/test orchestrator command
-
-### 13.5 Pending notifications remain on the card
+### 13.4 Pending notifications remain on the card
 
 Run:
 
@@ -533,7 +461,8 @@ commands.
 Focused test command:
 
 ```bash
-python -m pytest tests/test_scp11_eim_local.py
+python -m pytest tests/test_eim_local_exchange_and_reset_options.py \
+    tests/test_eim_local_ipa_euicc_data_request.py tests/test_scp11_eim_packages.py
 ```
 
 Recommended shell-side validation after changes:
@@ -555,9 +484,9 @@ For most sessions, this order keeps the shell deterministic:
 3. run `STATUS`
 4. run `PATHS`
 5. lint the package that will be issued
-7. inspect `RESP-LOG`
-8. drain notifications if needed with `NOTIF-HYGIENE 0`
-9. export campaign reports when running queues over time
+6. inspect `RESP-LOG`
+7. drain notifications if needed with `NOTIF-HYGIENE 0`
+8. export campaign reports when running queues over time
 
 ## 16. Related documents
 

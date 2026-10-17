@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP03/logic/stk.py StkController.resolve_event_code.
 
 The method is stateless (reads only CLASS-level EVENT_NAME_MAP),
-so a bare __new__ instance is sufficient — no transport required.
+so a bare __new__ instance is sufficient -- no transport required.
 """
 
 from __future__ import annotations

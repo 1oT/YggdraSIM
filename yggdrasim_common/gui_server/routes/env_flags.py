@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""``/api/env_flags/*`` — view / edit over the YGGDRASIM_* registry.
+"""``/api/env_flags/*`` -- view / edit over the YGGDRASIM_* registry.
 
 The GUI's "Env flags" pane surfaces the same data the launcher menu
 ``[E]`` shows: name, category, summary, default hint, current resolved
 source. Writes mirror the menu's ``set`` / ``clear`` operations via
 :func:`yggdrasim_common.env_flags.set_flag_value` and
-:func:`yggdrasim_common.env_flags.clear_flag_value` — session-only flags
+:func:`yggdrasim_common.env_flags.clear_flag_value` -- session-only flags
 never hit disk, persistable flags (``PERSIST_FILE`` /
 ``PERSIST_HOME``) land in the same ``state/env_overrides.json`` /
 ``~/.yggdrasim/env_overrides.json`` files the CLI manages.

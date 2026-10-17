@@ -129,7 +129,9 @@ class CliBatchEntrypointTests(unittest.TestCase):
         with mock.patch.object(scp11_local_access_main, "entry_cmd") as mocked_entry_cmd:
             with mock.patch("sys.argv", ["prog", "--cmd", "HELP; EXIT"]):
                 scp11_local_access_main.run_standalone()
-        mocked_entry_cmd.assert_called_once_with("HELP; EXIT")
+        # The shell passes the --reader choice through since ba780ba2; no
+        # flag means the empty name, which selects the reader interactively.
+        mocked_entry_cmd.assert_called_once_with("HELP; EXIT", reader_name="")
 
     def test_local_smdpp_standalone_accepts_debug_flag(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=False):
@@ -139,19 +141,19 @@ class CliBatchEntrypointTests(unittest.TestCase):
                 debug_value = os.environ.get(GLOBAL_DEBUG_ENV)
 
         self.assertEqual(debug_value, "1")
-        mocked_entry_cmd.assert_called_once_with("HELP; EXIT")
+        mocked_entry_cmd.assert_called_once_with("HELP; EXIT", reader_name="")
 
     def test_local_smdpp_standalone_routes_stdin(self) -> None:
         with mock.patch.object(scp11_local_access_main, "entry_stdin") as mocked_entry_stdin:
             with mock.patch("sys.argv", ["prog", "--stdin"]):
                 scp11_local_access_main.run_standalone()
-        mocked_entry_stdin.assert_called_once_with()
+        mocked_entry_stdin.assert_called_once_with(reader_name="")
 
     def test_local_smdpp_standalone_without_flags_routes_entry(self) -> None:
         with mock.patch.object(scp11_local_access_main, "entry") as mocked_entry:
             with mock.patch("sys.argv", ["prog"]):
                 scp11_local_access_main.run_standalone()
-        mocked_entry.assert_called_once_with()
+        mocked_entry.assert_called_once_with(reader_name="")
 
     def test_local_eim_standalone_routes_cmd(self) -> None:
         with mock.patch.object(scp11_eim_local_main, "ensure_plugins_loaded"):
@@ -216,7 +218,7 @@ class CliBatchEntrypointTests(unittest.TestCase):
         with mock.patch.object(scp03_main, "entry_stdin") as mocked_entry_stdin:
             with mock.patch("sys.argv", ["prog", "--stdin"]):
                 scp03_main.run_standalone()
-        mocked_entry_stdin.assert_called_once_with(yaml_out=None)
+        mocked_entry_stdin.assert_called_once_with(yaml_out=None, reader_name="")
 
     def test_scp03_standalone_accepts_debug_flag(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=False):
@@ -229,13 +231,13 @@ class CliBatchEntrypointTests(unittest.TestCase):
                 debug_value = os.environ.get(GLOBAL_DEBUG_ENV)
 
         self.assertEqual(debug_value, "1")
-        mocked_entry_cmd.assert_called_once_with("AUTH-SD; LIST", yaml_out=None)
+        mocked_entry_cmd.assert_called_once_with("AUTH-SD; LIST", yaml_out=None, reader_name="")
 
     def test_scp03_standalone_without_flags_routes_entry(self) -> None:
         with mock.patch.object(scp03_main, "entry") as mocked_entry:
             with mock.patch("sys.argv", ["prog"]):
                 scp03_main.run_standalone()
-        mocked_entry.assert_called_once_with()
+        mocked_entry.assert_called_once_with(reader_name="")
 
     def test_profile_package_standalone_routes_stdin(self) -> None:
         with mock.patch.object(profile_package_main, "entry_stdin") as mocked_entry_stdin:

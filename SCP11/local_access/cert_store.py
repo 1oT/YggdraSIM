@@ -421,7 +421,7 @@ class LocalSgp26CertStore:
             path,
             protect_plaintext_on_read=self._path_is_under_root(path, self.override_cert_root),
         )
-        if path.lower().endswith(".pem"):
+        if cert_data.lstrip().startswith(b"-----BEGIN"):
             return crypto_x509.load_pem_x509_certificate(cert_data)
         return crypto_x509.load_der_x509_certificate(cert_data)
 

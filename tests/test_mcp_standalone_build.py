@@ -162,7 +162,7 @@ def test_the_card_transport_chain_is_fully_vendored(generated: Path) -> None:
             top_level.update(alias.name.split(".")[0] for alias in node.names)
     assert not top_level & {"yggdrasim_common", "SIMCARD", "SCP03", "Tools"}, top_level
 
-    for sibling in ("secure_files", "runtime_paths", "apdu_recorder"):
+    for sibling in ("secure_files", "runtime_paths", "apdu_recorder", "remote_readers"):
         assert (generated / "_vendor" / f"{sibling}.py").is_file(), sibling
 
 

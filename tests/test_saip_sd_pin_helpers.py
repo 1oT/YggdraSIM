@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for the SecurityDomain symbolic decoder + PIN shared-context helper."""
 
 from __future__ import annotations
@@ -67,7 +66,9 @@ class LifeCycleTests(unittest.TestCase):
 
     def test_decode_known_byte(self) -> None:
         self.assertEqual(sd_decode.decode_life_cycle("0F")["name"], "PERSONALIZED")
-        self.assertEqual(sd_decode.decode_life_cycle("FF")["name"], "TERMINATED")
+        # 'FF' is a card state (GP Card Spec v2.3.1 Table 11-6), not one an
+        # application or security domain instance takes (Tables 11-4, 11-5).
+        self.assertEqual(sd_decode.decode_life_cycle("FF")["name"], "CUSTOM")
 
     def test_decode_custom_byte(self) -> None:
         result = sd_decode.decode_life_cycle("AA")
@@ -87,11 +88,26 @@ class LifeCycleTests(unittest.TestCase):
 
     def test_catalog_is_sorted(self) -> None:
         cat = sd_decode.life_cycle_catalog()
-        self.assertEqual(len(cat), 6)
+        self.assertEqual(len(cat), 4)
         self.assertEqual(cat[0]["name"], "INSTALLED")
 
 
 class PinSharedContextTests(unittest.TestCase):
+    """The pinCodes CHOICE (TCA SAIP v3.4.1 page 52) as the codec holds it:
+    ``("pinconfig", [...])`` or ``("filePath", b"...")``. Writers produce that
+    tuple; readers also accept the older dict spellings."""
+
+    def test_get_shared_from_the_codec_tuple(self) -> None:
+        pe = {"pin-Header": {}, "pinCodes": ("filePath", bytes.fromhex("7FF0"))}
+        result = pin_ctx.get_shared_context(pe)
+        self.assertTrue(result["shared"])
+        self.assertEqual(result["file_path_hex"], "7FF0")
+
+    def test_get_local_from_the_codec_tuple_counts_the_pins(self) -> None:
+        pe = {"pin-Header": {}, "pinCodes": ("pinconfig", [{"keyReference": 1}, {"keyReference": 10}])}
+        result = pin_ctx.get_shared_context(pe)
+        self.assertFalse(result["shared"])
+        self.assertEqual(result["pin_count"], 2)
 
     def test_get_shared_when_filepath_present(self) -> None:
         pe = {"pin-Header": {}, "filePath": bytes.fromhex("7FFF")}
@@ -113,17 +129,27 @@ class PinSharedContextTests(unittest.TestCase):
         self.assertEqual(result["file_path_hex"], "7FFF")
 
     def test_set_shared_replaces_pinconfig(self) -> None:
-        pe = {"pin-Header": {}, "pinconfig": [{"keyReference": "pinAppl1"}]}
+        pe = {"pin-Header": {}, "pinCodes": ("pinconfig", [{"keyReference": 1}])}
         msg = pin_ctx.set_shared_context(pe, file_path_hex="7F10")
-        self.assertNotIn("pinconfig", pe)
-        self.assertEqual(pe["filePath"], bytes.fromhex("7F10"))
+        self.assertEqual(pe["pinCodes"], ("filePath", bytes.fromhex("7F10")))
         self.assertIn("7F10", msg)
 
+    def test_set_shared_drops_the_older_spellings(self) -> None:
+        pe = {"pin-Header": {}, "pinconfig": [{"keyReference": "pinAppl1"}]}
+        pin_ctx.set_shared_context(pe, file_path_hex="7F10")
+        self.assertNotIn("pinconfig", pe)
+        self.assertEqual(pe["pinCodes"], ("filePath", bytes.fromhex("7F10")))
+
     def test_set_local_clears_filepath(self) -> None:
-        pe = {"pin-Header": {}, "filePath": b"\x7f\xff"}
+        pe = {"pin-Header": {}, "pinCodes": ("filePath", b"\x7f\xff")}
         pin_ctx.set_local_context(pe)
-        self.assertNotIn("filePath", pe)
-        self.assertEqual(pe["pinconfig"], [])
+        self.assertEqual(pe["pinCodes"], ("pinconfig", []))
+
+    def test_set_local_keeps_the_pins_of_a_local_context(self) -> None:
+        pins = [{"keyReference": 1}]
+        pe = {"pin-Header": {}, "pinCodes": ("pinconfig", pins)}
+        pin_ctx.set_local_context(pe)
+        self.assertEqual(pe["pinCodes"], ("pinconfig", pins))
 
     def test_set_shared_rejects_oversize(self) -> None:
         with self.assertRaises(ValueError):
@@ -132,12 +158,12 @@ class PinSharedContextTests(unittest.TestCase):
     def test_set_shared_strips_slashes(self) -> None:
         pe = {"pin-Header": {}}
         pin_ctx.set_shared_context(pe, file_path_hex="7F10/5F3A")
-        self.assertEqual(pe["filePath"], bytes.fromhex("7F105F3A"))
+        self.assertEqual(pe["pinCodes"], ("filePath", bytes.fromhex("7F105F3A")))
 
     def test_set_shared_empty_path_yields_mf(self) -> None:
-        pe = {"pin-Header": {}, "pinconfig": []}
+        pe = {"pin-Header": {}, "pinCodes": ("pinconfig", [])}
         msg = pin_ctx.set_shared_context(pe, file_path_hex="")
-        self.assertEqual(pe["filePath"], b"")
+        self.assertEqual(pe["pinCodes"], ("filePath", b""))
         self.assertIn("MF", msg)
 
 

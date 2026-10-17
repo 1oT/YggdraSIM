@@ -1,16 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""YggdraCore stub-AUSF Command Center actions (Phase 1c + 2).
+"""YggdraCore stub-AUSF Command Center actions.
 
 Surface-level glue between the Command Center and the in-process
 :class:`Tools.YggdraCore.subscription_store.SubscriptionStore` +
 :class:`Tools.YggdraCore.ausf_stub.AusfStub` singletons, plus the
-Phase-2 BYO Open5GS bridge. Lets the operator drive the test rig
+BYO Open5GS bridge. Lets the operator drive the test rig
 end-to-end from the GUI without ever opening a terminal:
 
-Stub AUSF (Phase 1c):
+Stub AUSF:
 
 * ``yggdracore.subscription_upsert``  -- add / update a subscriber
 * ``yggdracore.subscription_list``    -- list registered subscribers
@@ -20,7 +19,7 @@ Stub AUSF (Phase 1c):
 * ``yggdracore.status``               -- diagnostics snapshot
 * ``yggdracore.clear_auth_contexts``  -- drop in-flight auth contexts
 
-BYO Open5GS bridge (Phase 2):
+BYO Open5GS bridge:
 
 * ``yggdracore.open5gs_status``       -- detect Open5GS install + Mongo
 * ``yggdracore.open5gs_provision``    -- push one subscription to Mongo
@@ -306,9 +305,8 @@ SUBSCRIPTION_LIST_SPEC = ActionSpec(
     title="Subscription \u2014 list",
     description=(
         "List every subscriber currently held by the YggdraCore "
-        "subscription store. K / OPc are intentionally redacted; the "
-        "diagnostic surface only shows SUPI, MCC, MNC, AMF, SQN, RID, "
-        "AKMA-enabled flag, and the formatted serving network name."
+        "subscription store: SUPI, MCC, MNC, K, OPc, AMF, SQN, RID, the "
+        "AKMA-enabled flag and the formatted serving network name."
     ),
     inputs=(),
     output_kind="json",
@@ -397,7 +395,7 @@ get_registry().register(CLEAR_AUTH_CONTEXTS_SPEC)
 
 
 # ----------------------------------------------------------------------
-# Phase 2 -- BYO Open5GS bridge
+# BYO Open5GS bridge
 # ----------------------------------------------------------------------
 
 
@@ -685,9 +683,8 @@ OPEN5GS_READ_SPEC = ActionSpec(
     subsystem="YggdraCore",
     title="Open5GS \u2014 read subscriber",
     description=(
-        "Fetch one subscriber by IMSI. K and OPc are redacted to a "
-        "fingerprint of the form ``ABCD\u2026EFGH (16 bytes)`` -- the "
-        "full key material is never echoed back through the GUI."
+        "Fetch one subscriber by IMSI. The document comes back as stored, "
+        "K and OPc included."
     ),
     inputs=(
         ActionField(

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP03 card-side crypto: INITIALIZE-UPDATE / EXTERNAL AUTHENTICATE response and per-APDU MAC+ENC envelope (GlobalPlatform Card Specification v2.3)."""
 from __future__ import annotations
 
@@ -64,7 +63,7 @@ class Scp03CardLogic:
         return bool(command[0] & 0x04)
 
     def handle_initialize_update(self, kvn: int, host_challenge: bytes) -> tuple[bytes, int, int]:
-        """GP Card Spec v2.3.1 §7.1 INITIALIZE UPDATE — derives session keys and returns card challenge.
+        """GP Card Spec v2.3.1 §7.1 INITIALIZE UPDATE -- derives session keys and returns card challenge.
 
         Selects key-version-number *kvn* from the static key set, generates an 8-byte
         card challenge, and writes the derived session keys into ``state.scp03_session``.
@@ -108,7 +107,7 @@ class Scp03CardLogic:
         return response, 0x90, 0x00
 
     def handle_external_authenticate(self, security_level: int, payload: bytes) -> tuple[bytes, int, int]:
-        """GP Card Spec v2.3.1 §7.1 EXTERNAL AUTHENTICATE — verifies host cryptogram and opens session.
+        """GP Card Spec v2.3.1 §7.1 EXTERNAL AUTHENTICATE -- verifies host cryptogram and opens session.
 
         Checks the host C-MAC against the session S-MAC key; on success marks
         ``session.authenticated = True`` and records the negotiated security level.

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for PE dependency-ordering lint rules.
 
 Covers: YRL-DEP-OPTUSIM-001, YRL-DEP-OPTISIM-001, YRL-DEP-GSM-001,
-        YRL-DEP-PBOOK-001, YRL-DEP-5GS-001, YRL-DEP-SAIP-001.
+        YRL-DEP-PBOOK-001, YRL-DEP-5GS-001, YRL-DEP-SAIP-001,
+        YRL-DEP-OPTIOT-001 and the PE-IoT host of an IoT Minimal Profile.
 
 Each rule fires when a dependent PE appears before its required PE,
 or when the required PE is absent entirely.
@@ -218,6 +218,51 @@ class DepCombinedTests(unittest.TestCase):
             "YRL-DEP-SAIP-001",
         ):
             self.assertIn(rule, codes)
+
+
+class DepIotMinimalProfileTests(unittest.TestCase):
+    """PE-IoT hosts the USIM ADF of an IoT Minimal Profile (TCA SAIP v3.4.1 §8.3.4.8)."""
+
+    def test_opt_iot_without_iot_fires(self) -> None:
+        codes = _codes(_doc("header", "mf", "usim", "opt-iot", "end"))
+        self.assertIn("YRL-DEP-OPTIOT-001", codes)
+
+    def test_opt_iot_before_iot_fires(self) -> None:
+        codes = _codes(_doc("header", "opt-iot", "iot", "end"))
+        self.assertIn("YRL-DEP-OPTIOT-001", codes)
+
+    def test_opt_iot_after_iot_passes(self) -> None:
+        codes = _codes(_doc("header", "iot", "opt-iot", "end"))
+        self.assertNotIn("YRL-DEP-OPTIOT-001", codes)
+
+    def test_iot_hosts_the_usim_dependents(self) -> None:
+        doc = _doc(
+            "header", "iot", "opt-iot",
+            "gsm-access", "phonebook", "df-5gs", "df-saip", "df-snpn", "df-5gprose",
+            "end",
+        )
+        codes = _codes(doc)
+        for rule in (
+            "YRL-DEP-OPTIOT-001",
+            "YRL-DEP-GSM-001",
+            "YRL-DEP-PBOOK-001",
+            "YRL-DEP-5GS-001",
+            "YRL-DEP-SAIP-001",
+            "YRL-DEP-SNPN-001",
+            "YRL-DEP-5GPROSE-001",
+        ):
+            self.assertNotIn(rule, codes)
+
+    def test_usim_dependents_before_iot_fire(self) -> None:
+        codes = _codes(_doc("header", "df-5gs", "phonebook", "iot", "end"))
+        self.assertIn("YRL-DEP-5GS-001", codes)
+        self.assertIn("YRL-DEP-PBOOK-001", codes)
+
+    def test_missing_host_names_both_candidates(self) -> None:
+        findings = _lint(_doc("header", "mf", "df-5gs", "end"))
+        messages = [f.message for f in findings if f.code == "YRL-DEP-5GS-001"]
+        self.assertEqual(len(messages), 1)
+        self.assertIn("PE-USIM or PE-IOT", messages[0])
 
 
 if __name__ == "__main__":

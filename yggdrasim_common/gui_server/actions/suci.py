@@ -1,27 +1,26 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SUCI Command Center actions.
 
 Wraps the ``Tools.SuciTool`` shell surface into structured Offline Tools
 actions. The underlying ``SuciKeyToolBridge`` calls the external
-``suci-keytool`` binary — operators must have it installed
+``suci-keytool`` binary -- operators must have it installed
 (``YGGDRASIM_SUCI_TOOL`` env var, or ``suci-keytool`` on ``$PATH``).
 
 Actions registered:
 
-* ``suci.status``          — report active key file + tool command.
-* ``suci.use_key_file``    — select the active SUCI key file.
-* ``suci.set_tool_command``— override the ``suci-keytool`` binary path.
-* ``suci.generate_key``    — run ``suci-keytool ... generate-key --curve``.
-* ``suci.dump_pub_key``    — run ``suci-keytool ... dump-pub-key``,
+* ``suci.status``          -- report active key file + tool command.
+* ``suci.use_key_file``    -- select the active SUCI key file.
+* ``suci.set_tool_command``-- override the ``suci-keytool`` binary path.
+* ``suci.generate_key``    -- run ``suci-keytool ... generate-key --curve``.
+* ``suci.dump_pub_key``    -- run ``suci-keytool ... dump-pub-key``,
   with optional ``--compressed``.
 
 All dispatchers instantiate a fresh ``SuciKeyToolBridge`` rooted at the
 runtime workspace root so repeated calls don't share mutable state.
 Key-file state intentionally lives only for the duration of a single
-request — the GUI passes the active key file through the ``key_file``
+request -- the GUI passes the active key file through the ``key_file``
 input on every generate / dump call.
 """
 
@@ -47,7 +46,7 @@ def _resolve_key_file(explicit: str | None) -> str:
         return explicit.strip()
     if _last_key_file:
         return _last_key_file
-    raise ValueError("no key file selected — run 'Use key file' first or provide a path.")
+    raise ValueError("no key file selected -- run 'Use key file' first or provide a path.")
 
 
 def _build_bridge() -> Any:
@@ -189,7 +188,7 @@ def _dispatch_dump_pub_key(
         parsed = _parse_pub_key_output(payload["stdout"])
         payload["public_key_hex"] = parsed.get("public_key_hex", "")
         payload["curve"] = parsed.get("curve", "")
-        payload["note"] = f"public key ({payload['curve']}): {payload['public_key_hex'][:32]}…" if payload["public_key_hex"] else "public key dumped; see stdout."
+        payload["note"] = f"public key ({payload['curve']}): {payload['public_key_hex'][:32]}..." if payload["public_key_hex"] else "public key dumped; see stdout."
     else:
         payload["public_key_hex"] = ""
         payload["curve"] = ""

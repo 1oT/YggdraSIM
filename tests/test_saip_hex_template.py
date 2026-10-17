@@ -54,7 +54,7 @@ class TestInlinePlaceholderParsing(unittest.TestCase):
 
     def test_detect_ignores_ygg_simple_placeholder(self) -> None:
         # {IMSI} (the native YggdraSIM form) must NOT be picked up by the
-        # typed-placeholder regex — that surface is handled elsewhere.
+        # typed-placeholder regex -- that surface is handled elsewhere.
         self.assertFalse(detect_inline_placeholders("AA{IMSI}BB"))
 
     def test_detect_returns_true_for_compact_typed_placeholder(self) -> None:
@@ -316,7 +316,7 @@ class TestSubstituteInlineInEditorJson(unittest.TestCase):
     ``lint_profile_json_buffer`` calls
     :func:`substitute_inline_placeholders_in_editor_json` so that
     ``bytes.fromhex`` never sees a placeholder literal. The paths it
-    returns are fed into the linter as ``placeholder_paths`` — the
+    returns are fed into the linter as ``placeholder_paths`` -- the
     FAIL/WARN → INFO downgrade then makes sure a template-bearing
     buffer renders softer than a genuinely broken profile.
     """

@@ -15,7 +15,7 @@
 #     python -m mkdocs build -f mkdocs.oneot.yml
 # --------------------------------------------------------------------------
 
-site_name: YggdraSIM — A 1oT OSS initiative
+site_name: YggdraSIM -- A 1oT OSS initiative
 site_description: Secure-element, eUICC, OTA, SCP11, HIL bridge, and SAIP toolkit documentation.
 site_author: Hampus Hellsberg
 site_url: https://1ot.github.io/YggdraSIM/oneot/
@@ -179,7 +179,7 @@ nav:
       - Download a Profile (Local Access): how-to/download-a-profile-local.md
       - Enable, Disable, Delete a Profile: how-to/enable-disable-delete-profile.md
       - Inspect and Transcode SAIP: how-to/inspect-and-transcode-saip.md
-      - Remote APDU Streaming: how-to/remote-apdu-streaming.md
+      - Card Bridge over SSH: how-to/remote-apdu-streaming.md
       - Install RemSIM / APDU Streaming: how-to/install-remsim-apdu-streaming.md
       - Run a HIL Capture: how-to/run-hil-capture.md
       - Replay a HIL pcap offline: how-to/replay-hil-pcap-offline.md

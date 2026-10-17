@@ -3,7 +3,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-# Installation — Full Flavor (HIL-Capable)
+# Installation -- Full Flavor (HIL-Capable)
 
 The **full** flavor is the Linux-only superset of YggdraSIM. It packages
 everything the clean flavor offers plus:
@@ -43,8 +43,8 @@ yggdrasim-gui-linux-arm64-full-<version>
 
 Two full bundles are published:
 
-- `linux-x86_64-full` — desktop / server / lab hosts.
-- `linux-arm64-full`  — Raspberry Pi OS 64-bit and other arm64 Linux
+- `linux-x86_64-full` -- desktop / server / lab hosts.
+- `linux-arm64-full`  -- Raspberry Pi OS 64-bit and other arm64 Linux
   hosts. The arm64 bundle is built through QEMU/Buildx inside CI; see
   [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) for Pi-specific
   setup.
@@ -87,7 +87,7 @@ The `--doctor` probe adds HIL-specific rows:
 [+] lsusb (USB identity): /usr/bin/lsusb
 ```
 
-Rows marked `INFO` instead of `OK` are optional — the supervisor falls
+Rows marked `INFO` instead of `OK` are optional -- the supervisor falls
 back to `lsusb` polling when `pyudev` is missing, and the decoded view
 degrades gracefully when `termshark` is absent.
 
@@ -148,7 +148,7 @@ The `[full]` extra covers:
 kept in `[build]` and `[test]`; this prevents production full-runtime
 installs from carrying development tools.
 
-Note: `[full]` by itself includes the headless web-server stack but not
+`[full]` by itself includes the headless web-server stack but not
 the optional desktop GUI dependency (`pywebview`). Use
 `pip install -e '.[full,gui]'` for desktop mode. See
 `BUILD_AND_PACKAGING.md` §"Optional extras orthogonal to the flavor

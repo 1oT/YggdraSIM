@@ -24,9 +24,9 @@
 from __future__ import annotations
 
 import atexit
-import sys 
-import os 
-import importlib 
+import sys
+import os
+import importlib
 import shutil
 import subprocess
 import threading
@@ -34,39 +34,41 @@ import time
 import argparse
 from pathlib import Path
 
-try :
+try:
     import readline
-except ImportError :
-    readline =None
+except ImportError:
+    readline = None
 
 
-CURRENT_DIR =os .path .dirname (os .path .abspath (__file__ ))
-PROJECT_ROOT =None 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = None
 
-if getattr (sys ,'frozen',False )and hasattr (sys ,'_MEIPASS'):
-    PROJECT_ROOT =sys ._MEIPASS 
-else :
-
-    possible_roots =[
-    CURRENT_DIR ,
-    os .path .dirname (CURRENT_DIR ),
-    os .path .dirname (os .path .dirname (CURRENT_DIR ))
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    PROJECT_ROOT = sys._MEIPASS
+else:
+    possible_roots = [
+        CURRENT_DIR,
+        os.path.dirname(CURRENT_DIR),
+        os.path.dirname(os.path.dirname(CURRENT_DIR)),
     ]
 
-    for candidate in possible_roots :
-        if os .path .exists (os .path .join (candidate ,"SCP03")):
-            PROJECT_ROOT =candidate 
-            break 
+    for candidate in possible_roots:
+        if os.path.exists(os.path.join(candidate, "SCP03")):
+            PROJECT_ROOT = candidate
+            break
 
-if PROJECT_ROOT is None :
-    PROJECT_ROOT =CURRENT_DIR 
+if PROJECT_ROOT is None:
+    PROJECT_ROOT = CURRENT_DIR
 
-if PROJECT_ROOT not in sys .path :
-    sys .path .insert (0 ,PROJECT_ROOT )
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-from yggdrasim_common.plugin_runtime import ensure_plugins_loaded ,plugin_load_errors 
-from yggdrasim_common.frozen_dispatch import dispatch_internal_entry
-from yggdrasim_common.card_backend import (
+# These imports resolve against the path inserted above, so they
+# cannot be hoisted to the top of the module.
+from yggdrasim_common.launcher_menu import plugin_launcher_menu  # noqa: E402
+from yggdrasim_common.plugin_runtime import ensure_plugins_loaded, plugin_load_errors  # noqa: E402
+from yggdrasim_common.frozen_dispatch import dispatch_internal_entry  # noqa: E402
+from yggdrasim_common.card_backend import (  # noqa: E402
     CARD_BACKEND_ENV,
     CARD_RELAY_TOKEN_FILE_ENV,
     CARD_RELAY_URL_ENV,
@@ -100,24 +102,25 @@ from yggdrasim_common.card_backend import (
     set_sim_profile_store_path,
     set_sim_quirks_path,
 )
-from yggdrasim_common.process_debug import (
+from yggdrasim_common.process_debug import (  # noqa: E402
     add_debug_argument,
     install_noisy_warning_filters,
     set_global_debug,
 )
-from yggdrasim_common.quit_control import QuitAllRequested
-from yggdrasim_common.remote_card_args import (
+from yggdrasim_common.quit_control import QuitAllRequested  # noqa: E402
+from yggdrasim_common.remote_card_args import (  # noqa: E402
     add_remote_card_arguments as _add_remote_card_arguments,
     apply_remote_card_arguments as _apply_remote_card_arguments,
     describe_remote_card_state as _describe_remote_card_state,
 )
-from yggdrasim_common import flavor as yggdrasim_flavor
-from yggdrasim_common import env_flags as yggdrasim_env_flags
-from yggdrasim_common.nord_palette import NordHex as _NordHex
-try :
+from yggdrasim_common import flavor as yggdrasim_flavor  # noqa: E402
+from yggdrasim_common import env_flags as yggdrasim_env_flags  # noqa: E402
+from yggdrasim_common.cli_theme import ThemedColorsMeta as _ThemedColorsMeta  # noqa: E402
+
+try:
     from yggdrasim_common import hil_bridge_runtime
-except ImportError :
-    hil_bridge_runtime =None
+except ImportError:
+    hil_bridge_runtime = None
 
 # Persisted YGGDRASIM_* overrides must land in os.environ before plugin
 # loading, because YGGDRASIM_ALLOW_PLUGINS / YGGDRASIM_DISALLOW_PLUGINS
@@ -126,20 +129,18 @@ except ImportError :
 # Any value already set in the environment (e.g. from the shell, systemd,
 # or an argparse --flag in run_cli) is left untouched so explicit
 # invocations keep priority.
-_APPLIED_PERSISTED_OVERRIDES =yggdrasim_env_flags .apply_persisted_env_overrides ()
+_APPLIED_PERSISTED_OVERRIDES = yggdrasim_env_flags.apply_persisted_env_overrides()
 
 
-DIRS ={
-"LICENSE":os .path .join (PROJECT_ROOT ,"LICENSE")
-}
+DIRS = {"LICENSE": os.path.join(PROJECT_ROOT, "LICENSE")}
 
-MAIN_HISTORY_FILE =os .path .join (os .path .expanduser ("~"),".yggdrasim_main_history")
+MAIN_HISTORY_FILE = os.path.join(os.path.expanduser("~"), ".yggdrasim_main_history")
 
 
-_PLUGIN_LOAD_BANNER_EMITTED =False 
+_PLUGIN_LOAD_BANNER_EMITTED = False
 
 
-def _emit_plugin_load_banner (stream =None )->None :
+def _emit_plugin_load_banner(stream=None) -> None:
     """Surface plugin load errors once per process on launcher start.
 
     Errors stored by :class:`PluginManager` are opaque to downstream
@@ -148,950 +149,1025 @@ def _emit_plugin_load_banner (stream =None )->None :
     tell whether the plugin file threw at import time or whether the
     gate env flag was simply off.
     """
-    global _PLUGIN_LOAD_BANNER_EMITTED 
-    if _PLUGIN_LOAD_BANNER_EMITTED :
-        return 
-    _PLUGIN_LOAD_BANNER_EMITTED =True 
-    try :
-        errors =plugin_load_errors ()
-    except (RuntimeError ,OSError ):
-        return 
-    if not errors :
-        return 
-    target =stream if stream is not None else sys .stderr 
-    try :
-        target .write ("[plugins] one or more entries did not load:\n")
-        for key ,message in sorted (errors .items ()):
-            if key =="__gate__":
-                target .write (f"  - gate: {message}\n")
-                continue 
-            target .write (f"  - {key}: {message}\n")
-    except (OSError ,ValueError ):
-        pass 
+    global _PLUGIN_LOAD_BANNER_EMITTED
+    if _PLUGIN_LOAD_BANNER_EMITTED:
+        return
+    _PLUGIN_LOAD_BANNER_EMITTED = True
+    try:
+        errors = plugin_load_errors()
+    except (RuntimeError, OSError):
+        return
+    if not errors:
+        return
+    target = stream if stream is not None else sys.stderr
+    if target is None:
+        # No console (pythonw, a console=False build); the GUI lists the
+        # same errors under Environment -> Configuration -> Plugins.
+        return
+    try:
+        target.write("[plugins] one or more entries did not load:\n")
+        for key, message in sorted(errors.items()):
+            if key == "__gate__":
+                target.write(f"  - gate: {message}\n")
+                continue
+            target.write(f"  - {key}: {message}\n")
+    except (OSError, ValueError):
+        pass
 
-class Colors :
-    """ANSI terminal colours sourced from the canonical Nord palette.
 
-    Hex constants and the ``_hex_to_ansi`` helper stay on the class so
-    third-party launchers that introspect ``main.Colors`` keep working;
-    the values themselves now flow from
-    :mod:`yggdrasim_common.nord_palette`.
+class Colors(metaclass=_ThemedColorsMeta):
+    """ANSI terminal colours read from the active CLI theme.
+
+    The ``_hex_to_ansi`` helper stays on the class so third-party
+    launchers that introspect ``main.Colors`` keep working. Every
+    colour attribute and its ``_HEX`` counterpart resolve on first read
+    from :mod:`yggdrasim_common.cli_theme`, so ``YGGDRASIM_CLI_THEME``
+    re-tints the launcher without the default theme changing a byte.
     """
 
+    _ROLE_MAP = {
+        "HEADER": "HEADER",
+        "BLUE": "BLUE",
+        "CYAN": "CYAN",
+        "GREEN": "GREEN",
+        "WARNING": "WARNING",
+        "FAIL": "FAIL",
+        "BROWN": "BROWN",
+        "WHITE": "WHITE",
+    }
+
     @staticmethod
-    def _hex_to_ansi (hex_color ):
-        hex_value =hex_color .lstrip ('#')
-        red =int (hex_value [0 :2 ],16 )
-        green =int (hex_value [2 :4 ],16 )
-        blue =int (hex_value [4 :6 ],16 )
-        return f'\033[38;2;{red};{green};{blue}m'
+    def _hex_to_ansi(hex_color):
+        hex_value = hex_color.lstrip("#")
+        red = int(hex_value[0:2], 16)
+        green = int(hex_value[2:4], 16)
+        blue = int(hex_value[4:6], 16)
+        return f"\033[38;2;{red};{green};{blue}m"
 
-    HEADER_HEX =_NordHex .FROST_TEAL
-    BLUE_HEX =_NordHex .FROST_BLUE
-    CYAN_HEX =_NordHex .FROST_CYAN
-    GREEN_HEX =_NordHex .AURORA_GREEN
-    WARNING_HEX =_NordHex .AURORA_YELLOW
-    FAIL_HEX =_NordHex .AURORA_RED
-    BROWN_HEX =_NordHex .AURORA_ORANGE
-    WHITE_HEX =_NordHex .SNOW_2
 
-    HEADER =_hex_to_ansi .__func__ (HEADER_HEX )
-    BLUE =_hex_to_ansi .__func__ (BLUE_HEX )
-    CYAN =_hex_to_ansi .__func__ (CYAN_HEX )
-    GREEN =_hex_to_ansi .__func__ (GREEN_HEX )
-    WARNING =_hex_to_ansi .__func__ (WARNING_HEX )
-    FAIL =_hex_to_ansi .__func__ (FAIL_HEX )
-    BROWN =_hex_to_ansi .__func__ (BROWN_HEX )
-    WHITE =_hex_to_ansi .__func__ (WHITE_HEX )
-    ENDC ='\033[0m'
-    BOLD ='\033[1m'
-
-def setup_paths ():
+def setup_paths():
     """Ensures PROJECT_ROOT is in sys.path."""
-    if PROJECT_ROOT not in sys .path :
-        sys .path .insert (0 ,PROJECT_ROOT )
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
 
 
-def setup_history ():
-    if readline is None :
+def setup_history():
+    if readline is None:
         return
-    try :
-        if os .path .exists (MAIN_HISTORY_FILE ):
-            readline .read_history_file (MAIN_HISTORY_FILE )
-        readline .set_history_length (1000 )
-    except OSError :
+    try:
+        if os.path.exists(MAIN_HISTORY_FILE):
+            readline.read_history_file(MAIN_HISTORY_FILE)
+        readline.set_history_length(1000)
+    except OSError:
         pass
-    atexit .register (save_history )
+    atexit.register(save_history)
 
-    try :
-        if readline .__doc__ is not None and "libedit"in readline .__doc__ :
-            readline .parse_and_bind ("bind ^I rl_complete")
-        else :
-            readline .parse_and_bind ("tab: complete")
-    except OSError :
+    try:
+        if readline.__doc__ is not None and "libedit" in readline.__doc__:
+            readline.parse_and_bind("bind ^I rl_complete")
+        else:
+            readline.parse_and_bind("tab: complete")
+    except OSError:
         pass
 
 
-def save_history ():
-    if readline is None :
+def save_history():
+    if readline is None:
         return
-    try :
-        readline .write_history_file (MAIN_HISTORY_FILE )
-    except OSError :
+    try:
+        readline.write_history_file(MAIN_HISTORY_FILE)
+    except OSError:
         pass
 
-def clear_screen ():
-    os .system ('cls'if os .name =='nt'else 'clear')
 
-def pause ():
-    input (f"\n{Colors.CYAN}Press Enter to return to menu...{Colors.ENDC}")
+def clear_screen():
+    os.system("cls" if os.name == "nt" else "clear")
 
 
-def _display_sim_profile_store_override ()->str :
-    current_override =get_sim_profile_store_path ()
-    if len (current_override )>0 :
+def pause():
+    input(f"\n{Colors.CYAN}Press Enter to return to menu...{Colors.ENDC}")
+
+
+def _display_sim_profile_store_override() -> str:
+    current_override = get_sim_profile_store_path()
+    if len(current_override) > 0:
         return current_override
     return "(derived from eUICC store root + active EID)"
 
 
-def _format_value_source (value_text :str ,source_text :str )->str :
-    normalized_value =str (value_text or "").strip ()
-    normalized_source =str (source_text or "").strip ()
-    if len (normalized_source )==0 :
+def _format_value_source(value_text: str, source_text: str) -> str:
+    normalized_value = str(value_text or "").strip()
+    normalized_source = str(source_text or "").strip()
+    if len(normalized_source) == 0:
         return normalized_value
     return f"{normalized_value} [{normalized_source}]"
 
 
-def _quirks_value_display ()->str :
+def _quirks_value_display() -> str:
     # When the operator has explicitly opted out the resolver returns
     # the empty string AND flags the source as "disabled". Rendering
     # "(workspace default unavailable)" on that path would be
     # misleading, so we surface the opt-out intent literally.
-    if is_sim_quirks_disabled ():
+    if is_sim_quirks_disabled():
         return "(none - simulator runs with empty quirks registry)"
-    current =get_sim_quirks_path ()
-    if len (current )>0 :
+    current = get_sim_quirks_path()
+    if len(current) > 0:
         return current
     return "(workspace default unavailable)"
 
 
-def _build_active_backend_banner_lines ()->list [str ]:
-    backend_summary =describe_card_backend ()
-    backend_color =Colors .CYAN if get_card_backend ()=="sim" else Colors .WARNING
-    backend_display =_format_value_source (backend_summary ,get_card_backend_source ())
-    lines =[
-    f" {Colors.BOLD}{Colors.WHITE}Active card backend:{Colors.ENDC} "
-    f"{Colors.BOLD}{backend_color}{backend_display}{Colors.ENDC}"
+def _build_active_backend_banner_lines() -> list[str]:
+    backend_summary = describe_card_backend()
+    backend_color = Colors.CYAN if get_card_backend() == "sim" else Colors.WARNING
+    backend_display = _format_value_source(backend_summary, get_card_backend_source())
+    lines = [
+        f" {Colors.BOLD}{Colors.WHITE}Active card backend:{Colors.ENDC} "
+        f"{Colors.BOLD}{backend_color}{backend_display}{Colors.ENDC}"
     ]
-    if get_card_backend ()=="sim":
-        isdr_display =_format_value_source (
-        get_sim_isdr_config_path ()or '(workspace default unavailable)',
-        get_sim_isdr_config_source (),
+    if get_card_backend() == "sim":
+        isdr_display = _format_value_source(
+            get_sim_isdr_config_path() or "(workspace default unavailable)",
+            get_sim_isdr_config_source(),
         )
-        quirks_display =_format_value_source (
-        _quirks_value_display (),
-        get_sim_quirks_source (),
+        quirks_display = _format_value_source(
+            _quirks_value_display(),
+            get_sim_quirks_source(),
         )
-        eim_identity_display =_format_value_source (
-        get_sim_eim_identity_path ()or '(workspace default unavailable)',
-        get_sim_eim_identity_source (),
+        eim_identity_display = _format_value_source(
+            get_sim_eim_identity_path() or "(workspace default unavailable)",
+            get_sim_eim_identity_source(),
         )
-        euicc_display =_format_value_source (
-        get_sim_euicc_store_root ()or get_default_sim_euicc_store_root (),
-        get_sim_euicc_store_root_source (),
+        euicc_display = _format_value_source(
+            get_sim_euicc_store_root() or get_default_sim_euicc_store_root(),
+            get_sim_euicc_store_root_source(),
         )
-        profile_display =_format_value_source (
-        _display_sim_profile_store_override (),
-        get_sim_profile_store_path_source (),
+        profile_display = _format_value_source(
+            _display_sim_profile_store_override(),
+            get_sim_profile_store_path_source(),
         )
-        lines .extend ([
-        f"   ISDR config          : {isdr_display}",
-        f"   Quirks file          : {quirks_display}",
-        f"   eIM identity         : {eim_identity_display}",
-        f"   eUICC store root     : {euicc_display}",
-        f"   Profile store        : {profile_display}",
-        ])
+        lines.extend(
+            [
+                f"   ISDR config          : {isdr_display}",
+                f"   Quirks file          : {quirks_display}",
+                f"   eIM identity         : {eim_identity_display}",
+                f"   eUICC store root     : {euicc_display}",
+                f"   Profile store        : {profile_display}",
+            ]
+        )
     return lines
 
 
-def _apply_runtime_path_override (user_input :str ,setter ,success_label :str ,cleared_label :str )->None :
-    normalized_input =str (user_input or "").strip ()
-    if normalized_input .upper ()=="NONE":
-        setter ("")
-        print (f"\n{Colors.GREEN}[+] {cleared_label}{Colors.ENDC}")
+def _apply_runtime_path_override(
+    user_input: str, setter, success_label: str, cleared_label: str
+) -> None:
+    normalized_input = str(user_input or "").strip()
+    if normalized_input.upper() == "NONE":
+        setter("")
+        print(f"\n{Colors.GREEN}[+] {cleared_label}{Colors.ENDC}")
         return
-    setter (normalized_input )
-    print (f"\n{Colors.GREEN}[+] {success_label}: {normalized_input}{Colors.ENDC}")
+    setter(normalized_input)
+    print(f"\n{Colors.GREEN}[+] {success_label}: {normalized_input}{Colors.ENDC}")
 
 
-def _normalized_runtime_path (path_text :str )->str :
-    return os .path .normcase (
-    os .path .abspath (os .path .expanduser (str (path_text or "").strip ()))
+def _normalized_runtime_path(path_text: str) -> str:
+    return os.path.normcase(
+        os.path.abspath(os.path.expanduser(str(path_text or "").strip()))
     )
 
 
-def _path_is_same_or_child (candidate_path :str ,parent_path :str )->bool :
-    candidate =str (candidate_path or "").strip ()
-    parent =str (parent_path or "").strip ()
-    if len (candidate )==0 or len (parent )==0 :
+def _path_is_same_or_child(candidate_path: str, parent_path: str) -> bool:
+    candidate = str(candidate_path or "").strip()
+    parent = str(parent_path or "").strip()
+    if len(candidate) == 0 or len(parent) == 0:
         return False
-    try :
-        return os .path .commonpath ([_normalized_runtime_path (candidate ),_normalized_runtime_path (parent )])==_normalized_runtime_path (parent )
-    except (ValueError ,OSError ):
+    try:
+        return os.path.commonpath(
+            [_normalized_runtime_path(candidate), _normalized_runtime_path(parent)]
+        ) == _normalized_runtime_path(parent)
+    except (ValueError, OSError):
         return False
 
 
-def _remove_runtime_target (path_text :str )->bool :
-    normalized =str (path_text or "").strip ()
-    if len (normalized )==0 :
+def _remove_runtime_target(path_text: str) -> bool:
+    normalized = str(path_text or "").strip()
+    if len(normalized) == 0:
         return False
-    absolute_path =_normalized_runtime_path (normalized )
-    if absolute_path in ("",os .path .sep ):
+    absolute_path = _normalized_runtime_path(normalized)
+    if absolute_path in ("", os.path.sep):
         return False
-    if os .path .isdir (absolute_path ):
-        shutil .rmtree (absolute_path ,ignore_errors =False )
+    if os.path.isdir(absolute_path):
+        shutil.rmtree(absolute_path, ignore_errors=False)
         return True
-    if os .path .exists (absolute_path ):
-        os .remove (absolute_path )
+    if os.path.exists(absolute_path):
+        os.remove(absolute_path)
         return True
     return False
 
 
-def _reset_simulator_baseline ()->None :
-    selected_euicc_store_root =get_sim_euicc_store_root ()
-    selected_profile_store_override =get_sim_profile_store_path ()
-    selected_eim_identity =get_sim_eim_identity_path ()
-    default_isdr_config =get_default_sim_isdr_config_path ()
-    default_quirks =get_default_sim_quirks_path ()
-    default_eim_identity =get_default_sim_eim_identity_path ()
-    print (f"\n{Colors.WARNING}[!] This will delete simulator state and restore workspace personality defaults.{Colors.ENDC}")
-    print (f"    eUICC store root     : {selected_euicc_store_root}")
-    if len (selected_profile_store_override )>0 :
-        print (f"    Profile store override: {selected_profile_store_override}")
-    if _normalized_runtime_path (selected_eim_identity )!=_normalized_runtime_path (default_eim_identity ):
-        print (f"    eIM identity override: {selected_eim_identity}")
-    print (f"    Workspace ISDR config : {default_isdr_config}")
-    print (f"    Workspace quirks file : {default_quirks}")
-    print (f"    Workspace eIM identity: {default_eim_identity}")
-    confirm =input ("Type Y to continue: ").strip ().upper ()
-    if confirm not in ("Y","YES"):
-        print (f"\n{Colors.WARNING}[*] Simulator baseline reset cancelled.{Colors.ENDC}")
+def _reset_simulator_baseline() -> None:
+    selected_euicc_store_root = get_sim_euicc_store_root()
+    selected_profile_store_override = get_sim_profile_store_path()
+    selected_eim_identity = get_sim_eim_identity_path()
+    default_isdr_config = get_default_sim_isdr_config_path()
+    default_quirks = get_default_sim_quirks_path()
+    default_eim_identity = get_default_sim_eim_identity_path()
+    print(
+        f"\n{Colors.WARNING}[!] This will delete simulator state and restore workspace personality defaults.{Colors.ENDC}"
+    )
+    print(f"    eUICC store root     : {selected_euicc_store_root}")
+    if len(selected_profile_store_override) > 0:
+        print(f"    Profile store override: {selected_profile_store_override}")
+    if _normalized_runtime_path(selected_eim_identity) != _normalized_runtime_path(
+        default_eim_identity
+    ):
+        print(f"    eIM identity override: {selected_eim_identity}")
+    print(f"    Workspace ISDR config : {default_isdr_config}")
+    print(f"    Workspace quirks file : {default_quirks}")
+    print(f"    Workspace eIM identity: {default_eim_identity}")
+    confirm = input("Type Y to continue: ").strip().upper()
+    if confirm not in ("Y", "YES"):
+        print(f"\n{Colors.WARNING}[*] Simulator baseline reset cancelled.{Colors.ENDC}")
         return
-    try :
-        profile_store_removed =False
-        if len (selected_profile_store_override )>0 and _path_is_same_or_child (
-        selected_profile_store_override ,
-        selected_euicc_store_root ,
-        )is False :
-            profile_store_removed =_remove_runtime_target (selected_profile_store_override )
-        euicc_store_removed =_remove_runtime_target (selected_euicc_store_root )
-        isdr_removed =_remove_runtime_target (default_isdr_config )
-        quirks_removed =_remove_runtime_target (default_quirks )
-        eim_identity_removed =_remove_runtime_target (default_eim_identity )
-        set_card_backend ("sim")
-        set_sim_isdr_config_path ("")
-        set_sim_quirks_path ("")
-        set_sim_eim_identity_path ("")
-        set_sim_euicc_store_root ("")
-        set_sim_profile_store_path ("")
-        reseeded_isdr_config =get_default_sim_isdr_config_path ()
-        reseeded_quirks =get_default_sim_quirks_path ()
-        reseeded_eim_identity =get_default_sim_eim_identity_path ()
-        fresh_euicc_store_root =get_default_sim_euicc_store_root ()
-        print (f"\n{Colors.GREEN}[+] Simulator baseline reset complete.{Colors.ENDC}")
-        print (f"    Removed eUICC store  : {'yes'if euicc_store_removed else 'already empty / missing'}")
-        if len (selected_profile_store_override )>0 :
-            print (f"    Removed profile store: {'yes'if profile_store_removed else 'not needed / missing'}")
-        print (f"    Reset ISDR config    : {'yes'if isdr_removed else 'reseeded from template'}")
-        print (f"    Reset quirks file    : {'yes'if quirks_removed else 'reseeded from template'}")
-        print (f"    Reset eIM identity   : {'yes'if eim_identity_removed else 'reseeded from template'}")
-        print (f"    Active backend       : {describe_card_backend ()}")
-        print (f"    Fresh eUICC root     : {fresh_euicc_store_root}")
-        print (f"    Workspace ISDR config: {reseeded_isdr_config}")
-        print (f"    Workspace quirks file: {reseeded_quirks}")
-        print (f"    Workspace eIM identity: {reseeded_eim_identity}")
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Simulator baseline reset failed: {e}{Colors.ENDC}")
+    try:
+        profile_store_removed = False
+        if (
+            len(selected_profile_store_override) > 0
+            and _path_is_same_or_child(
+                selected_profile_store_override,
+                selected_euicc_store_root,
+            )
+            is False
+        ):
+            profile_store_removed = _remove_runtime_target(
+                selected_profile_store_override
+            )
+        euicc_store_removed = _remove_runtime_target(selected_euicc_store_root)
+        isdr_removed = _remove_runtime_target(default_isdr_config)
+        quirks_removed = _remove_runtime_target(default_quirks)
+        eim_identity_removed = _remove_runtime_target(default_eim_identity)
+        set_card_backend("sim")
+        set_sim_isdr_config_path("")
+        set_sim_quirks_path("")
+        set_sim_eim_identity_path("")
+        set_sim_euicc_store_root("")
+        set_sim_profile_store_path("")
+        reseeded_isdr_config = get_default_sim_isdr_config_path()
+        reseeded_quirks = get_default_sim_quirks_path()
+        reseeded_eim_identity = get_default_sim_eim_identity_path()
+        fresh_euicc_store_root = get_default_sim_euicc_store_root()
+        print(f"\n{Colors.GREEN}[+] Simulator baseline reset complete.{Colors.ENDC}")
+        print(
+            f"    Removed eUICC store  : {'yes' if euicc_store_removed else 'already empty / missing'}"
+        )
+        if len(selected_profile_store_override) > 0:
+            print(
+                f"    Removed profile store: {'yes' if profile_store_removed else 'not needed / missing'}"
+            )
+        print(
+            f"    Reset ISDR config    : {'yes' if isdr_removed else 'reseeded from template'}"
+        )
+        print(
+            f"    Reset quirks file    : {'yes' if quirks_removed else 'reseeded from template'}"
+        )
+        print(
+            f"    Reset eIM identity   : {'yes' if eim_identity_removed else 'reseeded from template'}"
+        )
+        print(f"    Active backend       : {describe_card_backend()}")
+        print(f"    Fresh eUICC root     : {fresh_euicc_store_root}")
+        print(f"    Workspace ISDR config: {reseeded_isdr_config}")
+        print(f"    Workspace quirks file: {reseeded_quirks}")
+        print(f"    Workspace eIM identity: {reseeded_eim_identity}")
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Simulator baseline reset failed: {e}{Colors.ENDC}")
 
 
-def _import_simulator_profile (artifact_path :str ,enable_profile :bool ,persist_backend :bool =True )->int :
-    normalized_path =str (artifact_path or "").strip ()
-    if len (normalized_path )==0 :
-        print (f"{Colors.FAIL}[!] Simulator profile import path was empty.{Colors.ENDC}")
+def _import_simulator_profile(
+    artifact_path: str, enable_profile: bool, persist_backend: bool = True
+) -> int:
+    normalized_path = str(artifact_path or "").strip()
+    if len(normalized_path) == 0:
+        print(f"{Colors.FAIL}[!] Simulator profile import path was empty.{Colors.ENDC}")
         return 1
-    if get_card_backend ()!="sim":
-        set_card_backend ("sim",persist =persist_backend )
-    try :
+    if get_card_backend() != "sim":
+        set_card_backend("sim", persist=persist_backend)
+    try:
         from SIMCARD.engine import SimulatedSimCardEngine
         from SIMCARD.profile_import import import_profile_artifact
-        engine =SimulatedSimCardEngine (
-        quirks_path =get_sim_quirks_path (),
-        isdr_config_path =get_sim_isdr_config_path (),
-        euicc_store_root =get_sim_euicc_store_root (),
-        profile_store_path =get_sim_profile_store_path (),
+
+        engine = SimulatedSimCardEngine(
+            quirks_path=get_sim_quirks_path(),
+            isdr_config_path=get_sim_isdr_config_path(),
+            euicc_store_root=get_sim_euicc_store_root(),
+            profile_store_path=get_sim_profile_store_path(),
         )
-        import_result =import_profile_artifact (
-        normalized_path ,
-        engine .state .profile_store_path ,
-        enable =bool (enable_profile ),
+        import_result = import_profile_artifact(
+            normalized_path,
+            engine.state.profile_store_path,
+            enable=bool(enable_profile),
         )
-        print (
-        f"{Colors.GREEN}[+] Imported simulator profile:{Colors.ENDC} "
-        f"{import_result.profile_name} "
-        f"(ICCID {import_result.iccid}, AID {import_result.aid}, source {import_result.profile_source})"
+        print(
+            f"{Colors.GREEN}[+] Imported simulator profile:{Colors.ENDC} "
+            f"{import_result.profile_name} "
+            f"(ICCID {import_result.iccid}, AID {import_result.aid}, source {import_result.profile_source})"
         )
-        print (f"    Store path: {import_result.store_path}")
+        print(f"    Store path: {import_result.store_path}")
         return 0
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] Simulator profile import failed: {e}{Colors.ENDC}")
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] Simulator profile import failed: {e}{Colors.ENDC}")
         return 1
 
 
-def configure_card_backend ():
-    while True :
-        clear_screen ()
-        current_isdr_config =get_sim_isdr_config_path ()
-        default_isdr_config =get_default_sim_isdr_config_path ()
-        default_quirks =get_default_sim_quirks_path ()
-        current_eim_identity =get_sim_eim_identity_path ()
-        default_eim_identity =get_default_sim_eim_identity_path ()
-        current_euicc_store_root =get_sim_euicc_store_root ()
-        default_euicc_store_root =get_default_sim_euicc_store_root ()
-        print (f"{Colors.HEADER}=== Card Backend / Simulator Settings ==={Colors.ENDC}\n")
-        backend_display =_format_value_source (describe_card_backend (),get_card_backend_source ())
-        isdr_display =_format_value_source (current_isdr_config or '(workspace default unavailable)',get_sim_isdr_config_source ())
-        quirks_display =_format_value_source (_quirks_value_display (),get_sim_quirks_source ())
-        eim_identity_display =_format_value_source (current_eim_identity or '(workspace default unavailable)',get_sim_eim_identity_source ())
-        euicc_display =_format_value_source (current_euicc_store_root or default_euicc_store_root ,get_sim_euicc_store_root_source ())
-        profile_display =_format_value_source (_display_sim_profile_store_override (),get_sim_profile_store_path_source ())
-        print (f"Active backend       : {Colors.BOLD}{backend_display}{Colors.ENDC}")
-        print (f"ISDR config          : {isdr_display}")
-        print (f"Quirks file          : {quirks_display}")
-        print (f"eIM identity         : {eim_identity_display}")
-        print (f"eUICC store root     : {euicc_display}")
-        print (f"Profile store        : {profile_display}")
-        print ("")
-        print (f"  {Colors.GREEN}[1]{Colors.ENDC} Use physical card reader")
-        print (f"  {Colors.CYAN}[2]{Colors.ENDC} Use simulated SIM card")
-        print (f"  {Colors.CYAN}[3]{Colors.ENDC} Set / clear ISDR config path")
-        print (f"  {Colors.CYAN}[4]{Colors.ENDC} Set / clear quirks file path")
-        if is_sim_quirks_disabled ():
-            print (f"  {Colors.CYAN}[D]{Colors.ENDC} Re-enable simulator quirks (resolve workspace default)")
-        else :
-            print (f"  {Colors.CYAN}[D]{Colors.ENDC} Disable simulator quirks (run with empty registry)")
-        print (f"  {Colors.CYAN}[E]{Colors.ENDC} Set / clear eIM identity path")
-        print (f"  {Colors.CYAN}[5]{Colors.ENDC} Set / clear eUICC store root")
-        print (f"  {Colors.CYAN}[6]{Colors.ENDC} Set / clear profile store override")
-        print (f"  {Colors.CYAN}[7]{Colors.ENDC} Import simulator profile artifact")
-        print (f"  {Colors.CYAN}[8]{Colors.ENDC} Reset simulator overrides to workspace defaults")
-        print (f"  {Colors.WARNING}[9]{Colors.ENDC} Reset simulator state + workspace personality to baseline")
-        print (f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
-        choice =input ("\nSelect action: ").strip ().upper ()
-        if choice in ("Q",""):
+def configure_card_backend():
+    while True:
+        clear_screen()
+        current_isdr_config = get_sim_isdr_config_path()
+        default_isdr_config = get_default_sim_isdr_config_path()
+        default_quirks = get_default_sim_quirks_path()
+        current_eim_identity = get_sim_eim_identity_path()
+        default_eim_identity = get_default_sim_eim_identity_path()
+        current_euicc_store_root = get_sim_euicc_store_root()
+        default_euicc_store_root = get_default_sim_euicc_store_root()
+        print(
+            f"{Colors.HEADER}=== Card Backend / Simulator Settings ==={Colors.ENDC}\n"
+        )
+        backend_display = _format_value_source(
+            describe_card_backend(), get_card_backend_source()
+        )
+        isdr_display = _format_value_source(
+            current_isdr_config or "(workspace default unavailable)",
+            get_sim_isdr_config_source(),
+        )
+        quirks_display = _format_value_source(
+            _quirks_value_display(), get_sim_quirks_source()
+        )
+        eim_identity_display = _format_value_source(
+            current_eim_identity or "(workspace default unavailable)",
+            get_sim_eim_identity_source(),
+        )
+        euicc_display = _format_value_source(
+            current_euicc_store_root or default_euicc_store_root,
+            get_sim_euicc_store_root_source(),
+        )
+        profile_display = _format_value_source(
+            _display_sim_profile_store_override(), get_sim_profile_store_path_source()
+        )
+        print(f"Active backend       : {Colors.BOLD}{backend_display}{Colors.ENDC}")
+        print(f"ISDR config          : {isdr_display}")
+        print(f"Quirks file          : {quirks_display}")
+        print(f"eIM identity         : {eim_identity_display}")
+        print(f"eUICC store root     : {euicc_display}")
+        print(f"Profile store        : {profile_display}")
+        print("")
+        print(f"  {Colors.GREEN}[1]{Colors.ENDC} Use physical card reader")
+        print(f"  {Colors.CYAN}[2]{Colors.ENDC} Use simulated SIM card")
+        print(f"  {Colors.CYAN}[3]{Colors.ENDC} Set / clear ISDR config path")
+        print(f"  {Colors.CYAN}[4]{Colors.ENDC} Set / clear quirks file path")
+        if is_sim_quirks_disabled():
+            print(
+                f"  {Colors.CYAN}[D]{Colors.ENDC} Re-enable simulator quirks (resolve workspace default)"
+            )
+        else:
+            print(
+                f"  {Colors.CYAN}[D]{Colors.ENDC} Disable simulator quirks (run with empty registry)"
+            )
+        print(f"  {Colors.CYAN}[E]{Colors.ENDC} Set / clear eIM identity path")
+        print(f"  {Colors.CYAN}[5]{Colors.ENDC} Set / clear eUICC store root")
+        print(f"  {Colors.CYAN}[6]{Colors.ENDC} Set / clear profile store override")
+        print(f"  {Colors.CYAN}[7]{Colors.ENDC} Import simulator profile artifact")
+        print(
+            f"  {Colors.CYAN}[8]{Colors.ENDC} Reset simulator overrides to workspace defaults"
+        )
+        print(
+            f"  {Colors.WARNING}[9]{Colors.ENDC} Reset simulator state + workspace personality to baseline"
+        )
+        print(f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
+        choice = input("\nSelect action: ").strip().upper()
+        if choice in ("Q", ""):
             return
-        if choice =='1':
-            set_card_backend ("reader")
-            print (f"\n{Colors.GREEN}[+] Card backend set to physical reader.{Colors.ENDC}")
-            pause ()
+        if choice == "1":
+            set_card_backend("reader")
+            print(
+                f"\n{Colors.GREEN}[+] Card backend set to physical reader.{Colors.ENDC}"
+            )
+            pause()
             continue
-        if choice =='2':
-            set_card_backend ("sim")
-            print (f"\n{Colors.GREEN}[+] Card backend set to simulated SIM card.{Colors.ENDC}")
-            print (f"    Backend summary: {describe_card_backend ()}")
-            pause ()
+        if choice == "2":
+            set_card_backend("sim")
+            print(
+                f"\n{Colors.GREEN}[+] Card backend set to simulated SIM card.{Colors.ENDC}"
+            )
+            print(f"    Backend summary: {describe_card_backend()}")
+            pause()
             continue
-        if choice =='3':
-            user_input =input (
-            "Enter ISDR config path "
-            f"[blank=keep current, NONE=use workspace default, default hint={default_isdr_config}]: "
-            ).strip ()
-            if len (user_input )>0 :
-                _apply_runtime_path_override (
-                user_input ,
-                set_sim_isdr_config_path ,
-                "ISDR config override set",
-                "ISDR config override cleared; workspace default will be used if present",
+        if choice == "3":
+            user_input = input(
+                "Enter ISDR config path "
+                f"[blank=keep current, NONE=use workspace default, default hint={default_isdr_config}]: "
+            ).strip()
+            if len(user_input) > 0:
+                _apply_runtime_path_override(
+                    user_input,
+                    set_sim_isdr_config_path,
+                    "ISDR config override set",
+                    "ISDR config override cleared; workspace default will be used if present",
                 )
-            pause ()
+            pause()
             continue
-        if choice =='4':
-            user_input =input (
-            "Enter quirks override path "
-            f"[blank=keep current, NONE=use workspace default, default hint={default_quirks}]: "
-            ).strip ()
-            if len (user_input )>0 :
-                _apply_runtime_path_override (
-                user_input ,
-                set_sim_quirks_path ,
-                "Quirks override set",
-                "Quirks override cleared; workspace default will be used if present",
+        if choice == "4":
+            user_input = input(
+                "Enter quirks override path "
+                f"[blank=keep current, NONE=use workspace default, default hint={default_quirks}]: "
+            ).strip()
+            if len(user_input) > 0:
+                _apply_runtime_path_override(
+                    user_input,
+                    set_sim_quirks_path,
+                    "Quirks override set",
+                    "Quirks override cleared; workspace default will be used if present",
                 )
-            pause ()
+            pause()
             continue
-        if choice =='D':
-            if is_sim_quirks_disabled ():
-                set_sim_quirks_path ("")
-                print (
-                f"\n{Colors.GREEN}[+] Simulator quirks re-enabled. "
-                f"The workspace default at {default_quirks} will be used if present.{Colors.ENDC}"
+        if choice == "D":
+            if is_sim_quirks_disabled():
+                set_sim_quirks_path("")
+                print(
+                    f"\n{Colors.GREEN}[+] Simulator quirks re-enabled. "
+                    f"The workspace default at {default_quirks} will be used if present.{Colors.ENDC}"
                 )
-            else :
-                set_sim_quirks_path ("none")
-                print (
-                f"\n{Colors.GREEN}[+] Simulator quirks disabled. "
-                f"Loader will skip {default_quirks} and boot with an empty registry.{Colors.ENDC}"
+            else:
+                set_sim_quirks_path("none")
+                print(
+                    f"\n{Colors.GREEN}[+] Simulator quirks disabled. "
+                    f"Loader will skip {default_quirks} and boot with an empty registry.{Colors.ENDC}"
                 )
-            pause ()
+            pause()
             continue
-        if choice =='E':
-            user_input =input (
-            "Enter eIM identity path "
-            f"[blank=keep current, NONE=use workspace default, default hint={default_eim_identity}]: "
-            ).strip ()
-            if len (user_input )>0 :
-                _apply_runtime_path_override (
-                user_input ,
-                set_sim_eim_identity_path ,
-                "eIM identity override set",
-                "eIM identity override cleared; workspace default will be used if present",
+        if choice == "E":
+            user_input = input(
+                "Enter eIM identity path "
+                f"[blank=keep current, NONE=use workspace default, default hint={default_eim_identity}]: "
+            ).strip()
+            if len(user_input) > 0:
+                _apply_runtime_path_override(
+                    user_input,
+                    set_sim_eim_identity_path,
+                    "eIM identity override set",
+                    "eIM identity override cleared; workspace default will be used if present",
                 )
-            pause ()
+            pause()
             continue
-        if choice =='5':
-            user_input =input (
-            "Enter eUICC store root "
-            f"[blank=keep current, NONE=use workspace default, default hint={default_euicc_store_root}]: "
-            ).strip ()
-            if len (user_input )>0 :
-                _apply_runtime_path_override (
-                user_input ,
-                set_sim_euicc_store_root ,
-                "eUICC store root set",
-                "eUICC store root override cleared; workspace default will be used",
+        if choice == "5":
+            user_input = input(
+                "Enter eUICC store root "
+                f"[blank=keep current, NONE=use workspace default, default hint={default_euicc_store_root}]: "
+            ).strip()
+            if len(user_input) > 0:
+                _apply_runtime_path_override(
+                    user_input,
+                    set_sim_euicc_store_root,
+                    "eUICC store root set",
+                    "eUICC store root override cleared; workspace default will be used",
                 )
-            pause ()
+            pause()
             continue
-        if choice =='6':
-            user_input =input (
-            "Enter profile store override "
-            "[blank=keep current, NONE=use derived EID-scoped store under the selected eUICC root]: "
-            ).strip ()
-            if len (user_input )>0 :
-                _apply_runtime_path_override (
-                user_input ,
-                set_sim_profile_store_path ,
-                "Profile store override set",
-                "Profile store override cleared; derived EID-scoped store will be used",
+        if choice == "6":
+            user_input = input(
+                "Enter profile store override "
+                "[blank=keep current, NONE=use derived EID-scoped store under the selected eUICC root]: "
+            ).strip()
+            if len(user_input) > 0:
+                _apply_runtime_path_override(
+                    user_input,
+                    set_sim_profile_store_path,
+                    "Profile store override set",
+                    "Profile store override cleared; derived EID-scoped store will be used",
                 )
-            pause ()
+            pause()
             continue
-        if choice =='7':
-            artifact_path =input (
-            "Enter profile path (.der/.bin/.txt/.hex/tagged SAIP JSON/profile_image.json): "
-            ).strip ()
-            enable_input =input ("Enable imported profile immediately? [Y/n]: ").strip ().lower ()
-            enable_profile =enable_input not in ("n","no","0")
-            _import_simulator_profile (artifact_path ,enable_profile )
-            pause ()
+        if choice == "7":
+            artifact_path = input(
+                "Enter profile path (.der/.bin/.txt/.hex/tagged SAIP JSON/profile_image.json): "
+            ).strip()
+            enable_input = (
+                input("Enable imported profile immediately? [Y/n]: ").strip().lower()
+            )
+            enable_profile = enable_input not in ("n", "no", "0")
+            _import_simulator_profile(artifact_path, enable_profile)
+            pause()
             continue
-        if choice =='8':
-            set_card_backend ("sim")
-            set_sim_isdr_config_path ("")
-            set_sim_quirks_path ("")
-            set_sim_eim_identity_path ("")
-            set_sim_euicc_store_root ("")
-            set_sim_profile_store_path ("")
-            print (f"\n{Colors.GREEN}[+] Simulator overrides reset to workspace defaults / derived paths.{Colors.ENDC}")
-            pause ()
+        if choice == "8":
+            set_card_backend("sim")
+            set_sim_isdr_config_path("")
+            set_sim_quirks_path("")
+            set_sim_eim_identity_path("")
+            set_sim_euicc_store_root("")
+            set_sim_profile_store_path("")
+            print(
+                f"\n{Colors.GREEN}[+] Simulator overrides reset to workspace defaults / derived paths.{Colors.ENDC}"
+            )
+            pause()
             continue
-        if choice =='9':
-            _reset_simulator_baseline ()
-            pause ()
+        if choice == "9":
+            _reset_simulator_baseline()
+            pause()
             continue
-        print (f"\n{Colors.FAIL}[!] Invalid backend selection.{Colors.ENDC}")
-        pause ()
+        print(f"\n{Colors.FAIL}[!] Invalid backend selection.{Colors.ENDC}")
+        pause()
 
 
-
-def _hil_bridge_service_state_text (service_state :dict )->str :
-    error_text =str (service_state .get ("error","")or "").strip ()
-    load_state =str (service_state .get ("loadState","")or "").strip ()
-    unit_file_state =str (service_state .get ("unitFileState","")or "").strip ()
-    active_state =str (service_state .get ("activeState","")or "").strip ()
-    sub_state =str (service_state .get ("subState","")or "").strip ()
-    if len (error_text )>0 and len (load_state )==0 and len (active_state )==0 :
+def _hil_bridge_service_state_text(service_state: dict) -> str:
+    error_text = str(service_state.get("error", "") or "").strip()
+    load_state = str(service_state.get("loadState", "") or "").strip()
+    unit_file_state = str(service_state.get("unitFileState", "") or "").strip()
+    active_state = str(service_state.get("activeState", "") or "").strip()
+    sub_state = str(service_state.get("subState", "") or "").strip()
+    if len(error_text) > 0 and len(load_state) == 0 and len(active_state) == 0:
         return f"Unavailable ({error_text})"
-    display_parts =[]
-    if len (load_state )>0 :
-        display_parts .append (f"load={load_state}")
-    if len (unit_file_state )>0 :
-        display_parts .append (f"unit={unit_file_state}")
-    if len (active_state )>0 :
-        display_parts .append (f"active={active_state}")
-    if len (sub_state )>0 :
-        display_parts .append (f"sub={sub_state}")
-    if len (display_parts )==0 :
-        if len (error_text )>0 :
+    display_parts = []
+    if len(load_state) > 0:
+        display_parts.append(f"load={load_state}")
+    if len(unit_file_state) > 0:
+        display_parts.append(f"unit={unit_file_state}")
+    if len(active_state) > 0:
+        display_parts.append(f"active={active_state}")
+    if len(sub_state) > 0:
+        display_parts.append(f"sub={sub_state}")
+    if len(display_parts) == 0:
+        if len(error_text) > 0:
             return error_text
         return "unknown"
-    return ", ".join (display_parts )
+    return ", ".join(display_parts)
 
 
-_HIL_BRIDGE_VIEW_MODE_RAW ="raw"
-_HIL_BRIDGE_VIEW_MODE_RAW_WIRESHARK ="raw_wireshark"
-_HIL_BRIDGE_VIEW_MODE_TERMSHARK ="termshark"
-_HIL_BRIDGE_CAPTURE_INTERFACE_ENV ="YGGDRASIM_HIL_CAPTURE_INTERFACE"
-_HIL_BRIDGE_WIRESHARK_BIN_ENV ="YGGDRASIM_HIL_WIRESHARK_BIN"
-_HIL_BRIDGE_TERMSHARK_BIN_ENV ="YGGDRASIM_HIL_TERMSHARK_BIN"
-_HIL_BRIDGE_TERMSHARK_WARMUP_ENV ="YGGDRASIM_HIL_TERMSHARK_WARMUP_SECONDS"
+_HIL_BRIDGE_VIEW_MODE_RAW = "raw"
+_HIL_BRIDGE_VIEW_MODE_RAW_WIRESHARK = "raw_wireshark"
+_HIL_BRIDGE_VIEW_MODE_TERMSHARK = "termshark"
+_HIL_BRIDGE_CAPTURE_INTERFACE_ENV = "YGGDRASIM_HIL_CAPTURE_INTERFACE"
+_HIL_BRIDGE_WIRESHARK_BIN_ENV = "YGGDRASIM_HIL_WIRESHARK_BIN"
+_HIL_BRIDGE_TERMSHARK_BIN_ENV = "YGGDRASIM_HIL_TERMSHARK_BIN"
+_HIL_BRIDGE_TERMSHARK_WARMUP_ENV = "YGGDRASIM_HIL_TERMSHARK_WARMUP_SECONDS"
 
 
-def _normalize_hil_bridge_view_mode (value_text :str )->str :
-    normalized_value =str (value_text or "").strip ().lower ()
-    if normalized_value in ("1","raw","raw-apdu","raw_apdu"):
+def _normalize_hil_bridge_view_mode(value_text: str) -> str:
+    normalized_value = str(value_text or "").strip().lower()
+    if normalized_value in ("1", "raw", "raw-apdu", "raw_apdu"):
         return _HIL_BRIDGE_VIEW_MODE_RAW
-    if normalized_value in ("2","raw+wireshark","raw_wireshark","wireshark"):
+    if normalized_value in ("2", "raw+wireshark", "raw_wireshark", "wireshark"):
         return _HIL_BRIDGE_VIEW_MODE_RAW_WIRESHARK
-    if normalized_value in ("3","termshark"):
+    if normalized_value in ("3", "termshark"):
         return _HIL_BRIDGE_VIEW_MODE_TERMSHARK
     return ""
 
 
-def _hil_bridge_view_mode_label (view_mode :str )->str :
-    normalized_mode =_normalize_hil_bridge_view_mode (view_mode )
-    if normalized_mode ==_HIL_BRIDGE_VIEW_MODE_RAW_WIRESHARK :
+def _hil_bridge_view_mode_label(view_mode: str) -> str:
+    normalized_mode = _normalize_hil_bridge_view_mode(view_mode)
+    if normalized_mode == _HIL_BRIDGE_VIEW_MODE_RAW_WIRESHARK:
         return "Raw APDU stream + Wireshark"
-    if normalized_mode ==_HIL_BRIDGE_VIEW_MODE_TERMSHARK :
+    if normalized_mode == _HIL_BRIDGE_VIEW_MODE_TERMSHARK:
         return "Decoded APDU view in terminal"
     return "Raw APDU stream only"
 
 
-def _hil_bridge_view_mode_uses_gsmtap (view_mode :str )->bool :
-    normalized_mode =_normalize_hil_bridge_view_mode (view_mode )
-    return normalized_mode !=_HIL_BRIDGE_VIEW_MODE_RAW
+def _hil_bridge_view_mode_uses_gsmtap(view_mode: str) -> bool:
+    normalized_mode = _normalize_hil_bridge_view_mode(view_mode)
+    return normalized_mode != _HIL_BRIDGE_VIEW_MODE_RAW
 
 
-def _hil_bridge_capture_interface ()->str :
-    override_value =str (os .environ .get (_HIL_BRIDGE_CAPTURE_INTERFACE_ENV ,"")or "").strip ()
-    if len (override_value )>0 :
+def _hil_bridge_capture_interface() -> str:
+    override_value = str(
+        os.environ.get(_HIL_BRIDGE_CAPTURE_INTERFACE_ENV, "") or ""
+    ).strip()
+    if len(override_value) > 0:
         return override_value
-    if sys .platform =="darwin":
+    if sys.platform == "darwin":
         return "lo0"
     return "lo"
 
 
-def _hil_bridge_gsmtap_capture_filter ()->str :
+def _hil_bridge_gsmtap_capture_filter() -> str:
     return "udp port 4729"
 
 
-def _hil_bridge_capture_binary_path (default_name :str ,env_name :str )->str :
-    override_value =str (os .environ .get (env_name ,"")or "").strip ()
-    if len (override_value )>0 :
-        resolved_override =shutil .which (override_value )
-        if resolved_override is not None :
+def _hil_bridge_capture_binary_path(default_name: str, env_name: str) -> str:
+    override_value = str(os.environ.get(env_name, "") or "").strip()
+    if len(override_value) > 0:
+        resolved_override = shutil.which(override_value)
+        if resolved_override is not None:
             return resolved_override
-        expanded_override =os .path .abspath (os .path .expanduser (override_value ))
-        if os .path .isfile (expanded_override ):
+        expanded_override = os.path.abspath(os.path.expanduser(override_value))
+        if os.path.isfile(expanded_override):
             return expanded_override
         return ""
-    resolved_default =shutil .which (default_name )
-    if resolved_default is None :
+    resolved_default = shutil.which(default_name)
+    if resolved_default is None:
         return ""
     return resolved_default
 
 
-def _hil_bridge_wireshark_binary_path ()->str :
-    return _hil_bridge_capture_binary_path ("wireshark",_HIL_BRIDGE_WIRESHARK_BIN_ENV )
+def _hil_bridge_wireshark_binary_path() -> str:
+    return _hil_bridge_capture_binary_path("wireshark", _HIL_BRIDGE_WIRESHARK_BIN_ENV)
 
 
-def _hil_bridge_termshark_binary_path ()->str :
-    return _hil_bridge_capture_binary_path ("termshark",_HIL_BRIDGE_TERMSHARK_BIN_ENV )
+def _hil_bridge_termshark_binary_path() -> str:
+    return _hil_bridge_capture_binary_path("termshark", _HIL_BRIDGE_TERMSHARK_BIN_ENV)
 
 
-def _hil_bridge_tshark_binary_path ()->str :
-    resolved_binary =shutil .which ("tshark")
-    if resolved_binary is None :
+def _hil_bridge_tshark_binary_path() -> str:
+    resolved_binary = shutil.which("tshark")
+    if resolved_binary is None:
         return ""
     return resolved_binary
 
 
-def _hil_bridge_termshark_runtime_root ()->str :
-    return os .path .join (PROJECT_ROOT ,"state","hil_termshark")
+def _hil_bridge_termshark_runtime_root() -> str:
+    return os.path.join(PROJECT_ROOT, "state", "hil_termshark")
 
 
-def _hil_bridge_termshark_config_home ()->str :
-    return os .path .join (_hil_bridge_termshark_runtime_root (),"config")
+def _hil_bridge_termshark_config_home() -> str:
+    return os.path.join(_hil_bridge_termshark_runtime_root(), "config")
 
 
-def _hil_bridge_termshark_cache_home ()->str :
-    return os .path .join (_hil_bridge_termshark_runtime_root (),"cache")
+def _hil_bridge_termshark_cache_home() -> str:
+    return os.path.join(_hil_bridge_termshark_runtime_root(), "cache")
 
 
-def _hil_bridge_termshark_capture_path ()->str :
-    return os .path .join (_hil_bridge_termshark_runtime_root (),"live_capture.pcap")
+def _hil_bridge_termshark_capture_path() -> str:
+    return os.path.join(_hil_bridge_termshark_runtime_root(), "live_capture.pcap")
 
 
-def _hil_bridge_termshark_capture_pcap_wrapper_path ()->str :
-    return os .path .join (PROJECT_ROOT ,"Tools","HilBridge","termshark_capture_pcap.py")
+def _hil_bridge_termshark_capture_pcap_wrapper_path() -> str:
+    return os.path.join(PROJECT_ROOT, "Tools", "HilBridge", "termshark_capture_pcap.py")
 
 
-def _hil_bridge_termshark_capture_mirror_path ()->str :
-    return os .path .join (PROJECT_ROOT ,"Tools","HilBridge","termshark_capture_mirror.py")
+def _hil_bridge_termshark_capture_mirror_path() -> str:
+    return os.path.join(
+        PROJECT_ROOT, "Tools", "HilBridge", "termshark_capture_mirror.py"
+    )
 
 
-def _hil_bridge_termshark_capture_command ()->str :
-    capture_wrapper_path =_hil_bridge_termshark_capture_pcap_wrapper_path ()
-    if os .path .isfile (capture_wrapper_path ):
+def _hil_bridge_termshark_capture_command() -> str:
+    capture_wrapper_path = _hil_bridge_termshark_capture_pcap_wrapper_path()
+    if os.path.isfile(capture_wrapper_path):
         return capture_wrapper_path
-    tshark_binary =shutil .which ("tshark")
-    if tshark_binary is not None :
+    tshark_binary = shutil.which("tshark")
+    if tshark_binary is not None:
         return tshark_binary
-    dumpcap_binary =shutil .which ("dumpcap")
-    if dumpcap_binary is not None :
+    dumpcap_binary = shutil.which("dumpcap")
+    if dumpcap_binary is not None:
         return dumpcap_binary
     return "tshark"
 
 
-def _hil_bridge_termshark_dumpcap_command ()->str :
-    dumpcap_binary =shutil .which ("dumpcap")
-    if dumpcap_binary is not None :
+def _hil_bridge_termshark_dumpcap_command() -> str:
+    dumpcap_binary = shutil.which("dumpcap")
+    if dumpcap_binary is not None:
         return dumpcap_binary
-    tshark_binary =shutil .which ("tshark")
-    if tshark_binary is not None :
+    tshark_binary = shutil.which("tshark")
+    if tshark_binary is not None:
         return tshark_binary
     return "dumpcap"
 
 
-def _hil_bridge_live_capture_command ()->str :
-    dumpcap_binary =shutil .which ("dumpcap")
-    if dumpcap_binary is not None :
+def _hil_bridge_live_capture_command() -> str:
+    dumpcap_binary = shutil.which("dumpcap")
+    if dumpcap_binary is not None:
         return dumpcap_binary
-    tshark_binary =shutil .which ("tshark")
-    if tshark_binary is not None :
+    tshark_binary = shutil.which("tshark")
+    if tshark_binary is not None:
         return tshark_binary
     return "dumpcap"
 
 
-def _hil_bridge_terminfo_supports (term_name :str )->bool :
-    normalized_term =str (term_name or "").strip ()
-    if len (normalized_term )==0 :
+def _hil_bridge_terminfo_supports(term_name: str) -> bool:
+    normalized_term = str(term_name or "").strip()
+    if len(normalized_term) == 0:
         return False
-    infocmp_binary =shutil .which ("infocmp")
-    if infocmp_binary is None :
+    infocmp_binary = shutil.which("infocmp")
+    if infocmp_binary is None:
         return normalized_term in {
-        "screen-256color",
-        "tmux-256color",
-        "xterm-256color",
-        "xterm",
+            "screen-256color",
+            "tmux-256color",
+            "xterm-256color",
+            "xterm",
         }
-    try :
-        completed =subprocess .run (
-        [infocmp_binary ,normalized_term ],
-        stdout =subprocess .DEVNULL ,
-        stderr =subprocess .DEVNULL ,
-        check =False ,
-        timeout =1 ,
+    try:
+        completed = subprocess.run(
+            [infocmp_binary, normalized_term],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=1,
         )
-    except (OSError ,subprocess .SubprocessError ):
+    except (OSError, subprocess.SubprocessError):
         return False
-    return completed .returncode ==0 
+    return completed.returncode == 0
 
 
-def _hil_bridge_termshark_term_value ()->str :
-    current_term =str (os .environ .get ("TERM","")or "").strip ()
-    normalized_current =current_term .lower ()
-    if len (current_term )>0 and normalized_current !="dumb":
-        if "256"in normalized_current or "truecolor"in normalized_current :
-            if _hil_bridge_terminfo_supports (current_term ):
+def _hil_bridge_termshark_term_value() -> str:
+    current_term = str(os.environ.get("TERM", "") or "").strip()
+    normalized_current = current_term.lower()
+    if len(current_term) > 0 and normalized_current != "dumb":
+        if "256" in normalized_current or "truecolor" in normalized_current:
+            if _hil_bridge_terminfo_supports(current_term):
                 return current_term
-    for candidate in ("screen-256color","tmux-256color","xterm-256color","xterm"):
-        if _hil_bridge_terminfo_supports (candidate ):
+    for candidate in ("screen-256color", "tmux-256color", "xterm-256color", "xterm"):
+        if _hil_bridge_terminfo_supports(candidate):
             return candidate
-    if len (current_term )>0 and normalized_current !="dumb":
+    if len(current_term) > 0 and normalized_current != "dumb":
         return current_term
     return "xterm"
 
 
-def _hil_bridge_termshark_config_toml (term_value :str )->str :
-    normalized_term =str (term_value or "").strip ()
-    capture_command =_hil_bridge_termshark_capture_command ()
-    dumpcap_command =_hil_bridge_termshark_dumpcap_command ()
+def _hil_bridge_termshark_config_toml(term_value: str) -> str:
+    normalized_term = str(term_value or "").strip()
+    capture_command = _hil_bridge_termshark_capture_command()
+    dumpcap_command = _hil_bridge_termshark_dumpcap_command()
     return (
-    "[main]\n"
-    "  colors = false\n"
-    f'  capture-command = "{capture_command}"\n'
-    f'  dumpcap = "{dumpcap_command}"\n'
-    "  ignore-base16-colors = true\n"
-    "  respect-colorterm = true\n"
-    '  tshark-args = ["-d", "udp.port==4729,gsmtap"]\n'
-    f'  term = "{normalized_term}"\n'
+        "[main]\n"
+        "  colors = false\n"
+        f'  capture-command = "{capture_command}"\n'
+        f'  dumpcap = "{dumpcap_command}"\n'
+        "  ignore-base16-colors = true\n"
+        "  respect-colorterm = true\n"
+        '  tshark-args = ["-d", "udp.port==4729,gsmtap"]\n'
+        f'  term = "{normalized_term}"\n'
     )
 
 
-def _ensure_hil_bridge_termshark_profile (term_value :str )->tuple [str ,str ]:
-    config_home =_hil_bridge_termshark_config_home ()
-    cache_home =_hil_bridge_termshark_cache_home ()
-    termshark_config_dir =os .path .join (config_home ,"termshark")
-    os .makedirs (termshark_config_dir ,exist_ok =True )
-    os .makedirs (cache_home ,exist_ok =True )
-    config_path =os .path .join (termshark_config_dir ,"termshark.toml")
-    with open (config_path ,"w",encoding ="utf-8")as handle :
-        handle .write (_hil_bridge_termshark_config_toml (term_value ))
-    return config_home ,cache_home
+def _ensure_hil_bridge_termshark_profile(term_value: str) -> tuple[str, str]:
+    config_home = _hil_bridge_termshark_config_home()
+    cache_home = _hil_bridge_termshark_cache_home()
+    termshark_config_dir = os.path.join(config_home, "termshark")
+    os.makedirs(termshark_config_dir, exist_ok=True)
+    os.makedirs(cache_home, exist_ok=True)
+    config_path = os.path.join(termshark_config_dir, "termshark.toml")
+    with open(config_path, "w", encoding="utf-8") as handle:
+        handle.write(_hil_bridge_termshark_config_toml(term_value))
+    return config_home, cache_home
 
 
-def _hil_bridge_termshark_environment ()->dict [str ,str ]:
-    term_value =_hil_bridge_termshark_term_value ()
-    config_home ,cache_home =_ensure_hil_bridge_termshark_profile (term_value )
-    environment =dict (os .environ )
-    environment ["TERM"]=term_value 
-    environment ["COLORTERM"]="truecolor"
-    environment ["XDG_CONFIG_HOME"]=config_home 
-    environment ["XDG_CACHE_HOME"]=cache_home 
+def _hil_bridge_termshark_environment() -> dict[str, str]:
+    term_value = _hil_bridge_termshark_term_value()
+    config_home, cache_home = _ensure_hil_bridge_termshark_profile(term_value)
+    environment = dict(os.environ)
+    environment["TERM"] = term_value
+    environment["COLORTERM"] = "truecolor"
+    environment["XDG_CONFIG_HOME"] = config_home
+    environment["XDG_CACHE_HOME"] = cache_home
     return environment
 
 
-def _hil_bridge_termshark_warmup_seconds ()->float :
-    raw_value =str (os .environ .get (_HIL_BRIDGE_TERMSHARK_WARMUP_ENV ,"")or "").strip ()
-    if len (raw_value )==0 :
+def _hil_bridge_termshark_warmup_seconds() -> float:
+    raw_value = str(os.environ.get(_HIL_BRIDGE_TERMSHARK_WARMUP_ENV, "") or "").strip()
+    if len(raw_value) == 0:
         return 2.0
-    try :
-        parsed_value =float (raw_value )
-    except (TypeError ,ValueError ):
+    try:
+        parsed_value = float(raw_value)
+    except (TypeError, ValueError):
         return 2.0
-    return max (0.0 ,min (10.0 ,parsed_value ))
+    return max(0.0, min(10.0, parsed_value))
 
 
-def _hil_bridge_termshark_log_path ()->str :
-    return os .path .join (_hil_bridge_termshark_cache_home (),"termshark","termshark.log")
+def _hil_bridge_termshark_log_path() -> str:
+    return os.path.join(
+        _hil_bridge_termshark_cache_home(), "termshark", "termshark.log"
+    )
 
 
-def _hil_bridge_termshark_cache_pcaps_root ()->str :
-    return os .path .join (_hil_bridge_termshark_cache_home (),"termshark","pcaps")
+def _hil_bridge_termshark_cache_pcaps_root() -> str:
+    return os.path.join(_hil_bridge_termshark_cache_home(), "termshark", "pcaps")
 
 
-def _hil_bridge_read_text_file_tail (path_text :str ,max_bytes :int =16384 )->str :
-    normalized_path =str (path_text or "").strip ()
-    if len (normalized_path )==0 :
+def _hil_bridge_read_text_file_tail(path_text: str, max_bytes: int = 16384) -> str:
+    normalized_path = str(path_text or "").strip()
+    if len(normalized_path) == 0:
         return ""
-    read_limit =16384
-    try :
-        parsed_limit =int (max_bytes or 16384 )
-    except (TypeError ,ValueError ):
-        parsed_limit =16384
-    if parsed_limit >0 :
-        read_limit =parsed_limit
-    try :
-        with open (normalized_path ,"rb")as handle :
-            handle .seek (0 ,os .SEEK_END )
-            file_size =handle .tell ()
-            if file_size <=0 :
+    read_limit = 16384
+    try:
+        parsed_limit = int(max_bytes or 16384)
+    except (TypeError, ValueError):
+        parsed_limit = 16384
+    if parsed_limit > 0:
+        read_limit = parsed_limit
+    try:
+        with open(normalized_path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            file_size = handle.tell()
+            if file_size <= 0:
                 return ""
-            read_size =min (read_limit ,file_size )
-            if file_size >read_size :
-                handle .seek (-read_size ,os .SEEK_END )
-            else :
-                handle .seek (0 )
-            payload =handle .read ()
-    except OSError :
+            read_size = min(read_limit, file_size)
+            if file_size > read_size:
+                handle.seek(-read_size, os.SEEK_END)
+            else:
+                handle.seek(0)
+            payload = handle.read()
+    except OSError:
         return ""
-    try :
-        return payload .decode ("utf-8",errors ="ignore")
-    except (UnicodeDecodeError ,AttributeError ):
+    try:
+        return payload.decode("utf-8", errors="ignore")
+    except (UnicodeDecodeError, AttributeError):
         return ""
 
 
-def _hil_bridge_existing_file_size (path_text :str )->int :
-    normalized_path =str (path_text or "").strip ()
-    if len (normalized_path )==0 :
+def _hil_bridge_existing_file_size(path_text: str) -> int:
+    normalized_path = str(path_text or "").strip()
+    if len(normalized_path) == 0:
         return -1
-    try :
-        return int (os .path .getsize (normalized_path ))
-    except OSError :
+    try:
+        return int(os.path.getsize(normalized_path))
+    except OSError:
         return -1
 
 
-def _hil_bridge_latest_termshark_cache_pcap_path ()->str :
-    pcaps_root =_hil_bridge_termshark_cache_pcaps_root ()
-    try :
-        candidate_names =os .listdir (pcaps_root )
-    except OSError :
+def _hil_bridge_latest_termshark_cache_pcap_path() -> str:
+    pcaps_root = _hil_bridge_termshark_cache_pcaps_root()
+    try:
+        candidate_names = os.listdir(pcaps_root)
+    except OSError:
         return ""
-    candidate_paths =[]
-    for raw_name in candidate_names :
-        current_path =os .path .join (pcaps_root ,str (raw_name or ""))
-        if os .path .isfile (current_path )==False :
+    candidate_paths = []
+    for raw_name in candidate_names:
+        current_path = os.path.join(pcaps_root, str(raw_name or ""))
+        if not os.path.isfile(current_path):
             continue
-        candidate_paths .append (current_path )
-    if len (candidate_paths )==0 :
+        candidate_paths.append(current_path)
+    if len(candidate_paths) == 0:
         return ""
-    candidate_paths .sort (key =os .path .getmtime ,reverse =True )
-    return str (candidate_paths [0 ]or "")
+    candidate_paths.sort(key=os.path.getmtime, reverse=True)
+    return str(candidate_paths[0] or "")
 
 
-def _hil_bridge_wait_for_termshark_log_marker (
-    marker_text :str ,
-    timeout_seconds :float ,
-    cancel_event =None ,
-)->bool :
-    normalized_marker =str (marker_text or "").strip ()
-    if len (normalized_marker )==0 :
+def _hil_bridge_wait_for_termshark_log_marker(
+    marker_text: str,
+    timeout_seconds: float,
+    cancel_event=None,
+) -> bool:
+    normalized_marker = str(marker_text or "").strip()
+    if len(normalized_marker) == 0:
         return False
-    wait_budget =max (0.0 ,float (timeout_seconds or 0.0 ))
-    deadline =time .monotonic ()+wait_budget
-    while True :
-        if cancel_event is not None and cancel_event .is_set ():
+    wait_budget = max(0.0, float(timeout_seconds or 0.0))
+    deadline = time.monotonic() + wait_budget
+    while True:
+        if cancel_event is not None and cancel_event.is_set():
             return False
-        current_log_tail =_hil_bridge_read_text_file_tail (_hil_bridge_termshark_log_path ())
-        if normalized_marker in current_log_tail :
+        current_log_tail = _hil_bridge_read_text_file_tail(
+            _hil_bridge_termshark_log_path()
+        )
+        if normalized_marker in current_log_tail:
             return True
-        if time .monotonic ()>=deadline :
+        if time.monotonic() >= deadline:
             return False
-        time .sleep (0.1)
+        time.sleep(0.1)
 
 
-def _hil_bridge_wait_for_termshark_capture_bytes (
-    timeout_seconds :float ,
-    cancel_event =None ,
-)->bool :
-    wait_budget =max (0.0 ,float (timeout_seconds or 0.0 ))
-    deadline =time .monotonic ()+wait_budget
-    external_capture_path =_hil_bridge_termshark_capture_path ()
-    while True :
-        if cancel_event is not None and cancel_event .is_set ():
+def _hil_bridge_wait_for_termshark_capture_bytes(
+    timeout_seconds: float,
+    cancel_event=None,
+) -> bool:
+    wait_budget = max(0.0, float(timeout_seconds or 0.0))
+    deadline = time.monotonic() + wait_budget
+    external_capture_path = _hil_bridge_termshark_capture_path()
+    while True:
+        if cancel_event is not None and cancel_event.is_set():
             return False
-        latest_cache_pcap_path =_hil_bridge_latest_termshark_cache_pcap_path ()
-        cache_path_ready =len (str (latest_cache_pcap_path or "").strip ())>0 
-        cache_pcap_size =_hil_bridge_existing_file_size (latest_cache_pcap_path )
-        external_capture_size =_hil_bridge_existing_file_size (external_capture_path )
-        if cache_pcap_size >24 :
+        latest_cache_pcap_path = _hil_bridge_latest_termshark_cache_pcap_path()
+        cache_path_ready = len(str(latest_cache_pcap_path or "").strip()) > 0
+        cache_pcap_size = _hil_bridge_existing_file_size(latest_cache_pcap_path)
+        external_capture_size = _hil_bridge_existing_file_size(external_capture_path)
+        if cache_pcap_size > 24:
             return True
-        if cache_path_ready ==False and external_capture_size >24 :
+        if not cache_path_ready and external_capture_size > 24:
             return True
-        if time .monotonic ()>=deadline :
+        if time.monotonic() >= deadline:
             return False
-        time .sleep (0.1)
+        time.sleep(0.1)
 
 
-def _hil_bridge_clear_termshark_cache_pcaps ()->None :
-    pcaps_root =_hil_bridge_termshark_cache_pcaps_root ()
-    try :
-        candidate_names =os .listdir (pcaps_root )
-    except OSError :
+def _hil_bridge_clear_termshark_cache_pcaps() -> None:
+    pcaps_root = _hil_bridge_termshark_cache_pcaps_root()
+    try:
+        candidate_names = os.listdir(pcaps_root)
+    except OSError:
         return
-    for raw_name in candidate_names :
-        current_path =os .path .join (pcaps_root ,str (raw_name or ""))
-        if os .path .isfile (current_path )==False :
+    for raw_name in candidate_names:
+        current_path = os.path.join(pcaps_root, str(raw_name or ""))
+        if not os.path.isfile(current_path):
             continue
-        try :
-            os .remove (current_path )
-        except OSError :
+        try:
+            os.remove(current_path)
+        except OSError:
             pass
 
 
-def _hil_bridge_send_termshark_wake_packet (cancel_event =None )->None :
+def _hil_bridge_send_termshark_wake_packet(cancel_event=None) -> None:
     import socket
-    from Tools.HilBridge.protocol import GSMTAP_SIM_APDU ,build_gsmtap_packet ,build_simtrace_apdu_payload
+    from Tools.HilBridge.protocol import (
+        GSMTAP_SIM_APDU,
+        build_gsmtap_packet,
+        build_simtrace_apdu_payload,
+    )
 
-    wake_payload =build_simtrace_apdu_payload (b"\x00\xA4\x04\x00",b"\x90\x00")
-    packet =build_gsmtap_packet (wake_payload ,subtype =GSMTAP_SIM_APDU ,uplink =True )
-    wake_socket =socket .socket (socket .AF_INET ,socket .SOCK_DGRAM )
-    try :
-        for _ in range (2 ):
-            if cancel_event is not None and cancel_event .is_set ():
+    wake_payload = build_simtrace_apdu_payload(b"\x00\xa4\x04\x00", b"\x90\x00")
+    packet = build_gsmtap_packet(wake_payload, subtype=GSMTAP_SIM_APDU, uplink=True)
+    wake_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        for _ in range(2):
+            if cancel_event is not None and cancel_event.is_set():
                 return
-            wake_socket .sendto (packet ,("127.0.0.1",4729 ))
-            time .sleep (0.15)
-    finally :
-        wake_socket .close ()
+            wake_socket.sendto(packet, ("127.0.0.1", 4729))
+            time.sleep(0.15)
+    finally:
+        wake_socket.close()
 
 
-def _hil_bridge_prime_termshark_for_bridge_start (
-    base_wait_seconds :float ,
-    cancel_event =None ,
-)->None :
-    wait_budget =max (0.0 ,float (base_wait_seconds or 0.0 ))
-    iface_wait_seconds =max (0.5 ,min (3.0 ,wait_budget if wait_budget >0.0 else 1.0 ))
-    capture_wait_seconds =max (1.0 ,wait_budget )
-    _hil_bridge_wait_for_termshark_log_marker (
-    "Started Iface command",
-    iface_wait_seconds ,
-    cancel_event =cancel_event ,
+def _hil_bridge_prime_termshark_for_bridge_start(
+    base_wait_seconds: float,
+    cancel_event=None,
+) -> None:
+    wait_budget = max(0.0, float(base_wait_seconds or 0.0))
+    iface_wait_seconds = max(0.5, min(3.0, wait_budget if wait_budget > 0.0 else 1.0))
+    capture_wait_seconds = max(1.0, wait_budget)
+    _hil_bridge_wait_for_termshark_log_marker(
+        "Started Iface command",
+        iface_wait_seconds,
+        cancel_event=cancel_event,
     )
-    if cancel_event is not None and cancel_event .is_set ():
+    if cancel_event is not None and cancel_event.is_set():
         return
-    _hil_bridge_send_termshark_wake_packet (cancel_event =cancel_event )
-    if cancel_event is not None and cancel_event .is_set ():
+    _hil_bridge_send_termshark_wake_packet(cancel_event=cancel_event)
+    if cancel_event is not None and cancel_event.is_set():
         return
-    _hil_bridge_wait_for_termshark_capture_bytes (
-    capture_wait_seconds ,
-    cancel_event =cancel_event ,
+    _hil_bridge_wait_for_termshark_capture_bytes(
+        capture_wait_seconds,
+        cancel_event=cancel_event,
     )
-    if cancel_event is not None and cancel_event .is_set ():
+    if cancel_event is not None and cancel_event.is_set():
         return
-    time .sleep (0.4)
+    time.sleep(0.4)
 
 
-def _hil_bridge_command_uses_gsmtap (command_value )->bool |None :
-    if isinstance (command_value ,list )==False :
+def _hil_bridge_command_uses_gsmtap(command_value) -> bool | None:
+    if not isinstance(command_value, list):
         return None
-    if len (command_value )==0 :
+    if len(command_value) == 0:
         return None
-    for raw_value in command_value :
-        if str (raw_value or "").strip ()=="--no-gsmtap":
+    for raw_value in command_value:
+        if str(raw_value or "").strip() == "--no-gsmtap":
             return False
     return True
 
 
-def _hil_bridge_command_capture_path (command_value )->str |None :
-    if isinstance (command_value ,list )==False :
+def _hil_bridge_command_capture_path(command_value) -> str | None:
+    if not isinstance(command_value, list):
         return None
-    capture_flag ="--gsmtap-capture-path"
-    for index ,raw_value in enumerate (command_value ):
-        current_value =str (raw_value or "").strip ()
-        if current_value ==capture_flag :
-            if index +1 >=len (command_value ):
+    capture_flag = "--gsmtap-capture-path"
+    for index, raw_value in enumerate(command_value):
+        current_value = str(raw_value or "").strip()
+        if current_value == capture_flag:
+            if index + 1 >= len(command_value):
                 return ""
-            return str (command_value [index +1 ]or "").strip ()
-        if current_value .startswith (f"{capture_flag}="):
-            return current_value .split ("=",1 )[1 ].strip ()
+            return str(command_value[index + 1] or "").strip()
+        if current_value.startswith(f"{capture_flag}="):
+            return current_value.split("=", 1)[1].strip()
     return ""
 
 
-def _hil_bridge_capture_path_for_view_mode (view_mode :str )->str :
-    normalized_mode =_normalize_hil_bridge_view_mode (view_mode )
-    if normalized_mode !=_HIL_BRIDGE_VIEW_MODE_TERMSHARK :
+def _hil_bridge_capture_path_for_view_mode(view_mode: str) -> str:
+    normalized_mode = _normalize_hil_bridge_view_mode(view_mode)
+    if normalized_mode != _HIL_BRIDGE_VIEW_MODE_TERMSHARK:
         return ""
-    return _hil_bridge_termshark_capture_path ()
+    return _hil_bridge_termshark_capture_path()
 
 
-def _prompt_hil_bridge_view_mode ()->str :
-    while True :
-        clear_screen ()
-        print (f"{Colors.HEADER}=== HIL Bridge Start Mode ==={Colors.ENDC}\n")
-        print ("Choose how the live session should attach after the bridge starts:\n")
-        print (f"  {Colors.CYAN}[1]{Colors.ENDC} Raw APDU flow only")
-        print (f"  {Colors.CYAN}[2]{Colors.ENDC} Raw APDU flow + launch Wireshark")
-        print (f"  {Colors.CYAN}[3]{Colors.ENDC} Decoded APDU view inside the terminal (replaces raw APDU view)")
-        print (f"  {Colors.WHITE}[Q]{Colors.ENDC} Back")
-        choice =input ("\nSelect start mode: ").strip ().upper ()
-        if choice in ("Q",""):
+def _prompt_hil_bridge_view_mode() -> str:
+    while True:
+        clear_screen()
+        print(f"{Colors.HEADER}=== HIL Bridge Start Mode ==={Colors.ENDC}\n")
+        print("Choose how the live session should attach after the bridge starts:\n")
+        print(f"  {Colors.CYAN}[1]{Colors.ENDC} Raw APDU flow only")
+        print(f"  {Colors.CYAN}[2]{Colors.ENDC} Raw APDU flow + launch Wireshark")
+        print(
+            f"  {Colors.CYAN}[3]{Colors.ENDC} Decoded APDU view inside the terminal (replaces raw APDU view)"
+        )
+        print(f"  {Colors.WHITE}[Q]{Colors.ENDC} Back")
+        choice = input("\nSelect start mode: ").strip().upper()
+        if choice in ("Q", ""):
             return ""
-        normalized_mode =_normalize_hil_bridge_view_mode (choice )
-        if len (normalized_mode )>0 :
+        normalized_mode = _normalize_hil_bridge_view_mode(choice)
+        if len(normalized_mode) > 0:
             return normalized_mode
-        print (f"\n{Colors.FAIL}[!] Invalid HIL bridge start mode.{Colors.ENDC}")
-        pause ()
+        print(f"\n{Colors.FAIL}[!] Invalid HIL bridge start mode.{Colors.ENDC}")
+        pause()
 
 
-def _resolve_supervisor_quirks_env ()->tuple [str ,str ]:
+def _resolve_supervisor_quirks_env() -> tuple[str, str]:
     """Resolve the ``(YGGDRASIM_SIM_QUIRKS, YGGDRASIM_ALLOW_QUIRKS)`` pair
     that should be propagated to the HIL bridge supervisor unit.
 
     The bridge child enforces the same ``YGGDRASIM_ALLOW_QUIRKS`` gate
     as every other simulator entry point (``SIMCARD/quirks.py``).
     Without an explicit opt-in, ``load_quirk_registry`` raises
-    ``PermissionError`` whenever a quirks file is resolvable on disk —
+    ``PermissionError`` whenever a quirks file is resolvable on disk --
     which crashes the supervisor child immediately and traps the
     wizard in a restart-backoff loop. We therefore mirror the
     launcher's quirks env state into the unit:
@@ -1102,33 +1178,33 @@ def _resolve_supervisor_quirks_env ()->tuple [str ,str ]:
     * If the launcher does not have the gate set, deliberately fall
       back to ``YGGDRASIM_SIM_QUIRKS=none`` so the bridge child boots
       with an empty quirks registry instead of crash-looping. This
-      keeps the supervisor safe-by-default — operators who want
+      keeps the supervisor safe-by-default -- operators who want
       quirks in the supervisor must opt in just like everywhere else.
     """
-    allow_value =str (os .environ .get ("YGGDRASIM_ALLOW_QUIRKS","")or "").strip ()
-    quirks_path =get_sim_quirks_path ()
-    if len (allow_value )>0 :
-        return (quirks_path ,allow_value )
-    if len (quirks_path )==0 :
-        return ("","")
-    return ("none","")
+    allow_value = str(os.environ.get("YGGDRASIM_ALLOW_QUIRKS", "") or "").strip()
+    quirks_path = get_sim_quirks_path()
+    if len(allow_value) > 0:
+        return (quirks_path, allow_value)
+    if len(quirks_path) == 0:
+        return ("", "")
+    return ("none", "")
 
 
-def _extract_hil_bridge_command_option (command_parts ,option_name :str )->str :
-    normalized_option =str (option_name or "").strip ()
-    if len (normalized_option )==0 or isinstance (command_parts ,(list ,tuple ))is False :
+def _extract_hil_bridge_command_option(command_parts, option_name: str) -> str:
+    normalized_option = str(option_name or "").strip()
+    if len(normalized_option) == 0 or isinstance(command_parts, (list, tuple)) is False:
         return ""
-    prefix =normalized_option +"="
-    for index ,raw_part in enumerate (command_parts ):
-        part_text =str (raw_part or "").strip ()
-        if part_text ==normalized_option and index +1 <len (command_parts ):
-            return str (command_parts [index +1 ]or "").strip ()
-        if part_text .startswith (prefix ):
-            return part_text [len (prefix ):].strip ()
+    prefix = normalized_option + "="
+    for index, raw_part in enumerate(command_parts):
+        part_text = str(raw_part or "").strip()
+        if part_text == normalized_option and index + 1 < len(command_parts):
+            return str(command_parts[index + 1] or "").strip()
+        if part_text.startswith(prefix):
+            return part_text[len(prefix) :].strip()
     return ""
 
 
-def _resolve_hil_remote_card_service_settings (supervisor_state )->tuple [str ,str ]:
+def _resolve_hil_remote_card_service_settings(supervisor_state) -> tuple[str, str]:
     """Resolve remote-card flags for the HIL supervisor service.
 
     Current CLI environment values come from ``--remote-card-*`` or the
@@ -1136,524 +1212,576 @@ def _resolve_hil_remote_card_service_settings (supervisor_state )->tuple [str ,s
     as a fallback so changing capture mode does not silently drop a
     remote-card HIL service configuration.
     """
-    state =dict (supervisor_state or {})
-    remote_card_url =str (os .environ .get (CARD_RELAY_URL_ENV ,"")or "").strip ()
-    remote_card_token_file =str (os .environ .get (CARD_RELAY_TOKEN_FILE_ENV ,"")or "").strip ()
-    bridge_command =state .get ("bridgeCommand",[])
-    if len (remote_card_url )==0 :
-        remote_card_url =str (state .get ("remoteCardUrl","")or "").strip ()
-    if len (remote_card_url )==0 :
-        remote_card_url =_extract_hil_bridge_command_option (bridge_command ,"--remote-card-url")
-    if len (remote_card_token_file )==0 :
-        remote_card_token_file =str (state .get ("remoteCardTokenFile","")or "").strip ()
-    if len (remote_card_token_file )==0 :
-        remote_card_token_file =_extract_hil_bridge_command_option (
-        bridge_command ,
-        "--remote-card-token-file",
+    state = dict(supervisor_state or {})
+    remote_card_url = str(os.environ.get(CARD_RELAY_URL_ENV, "") or "").strip()
+    remote_card_token_file = str(
+        os.environ.get(CARD_RELAY_TOKEN_FILE_ENV, "") or ""
+    ).strip()
+    bridge_command = state.get("bridgeCommand", [])
+    if len(remote_card_url) == 0:
+        remote_card_url = str(state.get("remoteCardUrl", "") or "").strip()
+    if len(remote_card_url) == 0:
+        remote_card_url = _extract_hil_bridge_command_option(
+            bridge_command, "--remote-card-url"
         )
-    return remote_card_url ,remote_card_token_file
+    if len(remote_card_token_file) == 0:
+        remote_card_token_file = str(state.get("remoteCardTokenFile", "") or "").strip()
+    if len(remote_card_token_file) == 0:
+        remote_card_token_file = _extract_hil_bridge_command_option(
+            bridge_command,
+            "--remote-card-token-file",
+        )
+    return remote_card_url, remote_card_token_file
 
 
-def _build_hil_bridge_service_options (
-    gsmtap_enabled :bool =True ,
-    gsmtap_capture_path :str ="",
-)->hil_bridge_runtime .HilBridgeUserServiceOptions :
-    supervisor_state =hil_bridge_runtime .read_supervisor_state ()
-    python_executable =hil_bridge_runtime .guess_bridge_python_executable (
-    supervisor_state ,
-    fallback =sys .executable ,
+def _build_hil_bridge_service_options(
+    gsmtap_enabled: bool = True,
+    gsmtap_capture_path: str = "",
+) -> hil_bridge_runtime.HilBridgeUserServiceOptions:
+    supervisor_state = hil_bridge_runtime.read_supervisor_state()
+    python_executable = hil_bridge_runtime.guess_bridge_python_executable(
+        supervisor_state,
+        fallback=sys.executable,
     )
-    reader_index =0 
-    raw_reader_index =supervisor_state .get ("readerIndex",0 )
-    try :
-        reader_index =int (raw_reader_index or 0 )
-    except (TypeError ,ValueError ):
-        reader_index =0 
-    bridge_port =9997 
-    raw_bridge_port =supervisor_state .get ("bridgePort",9997 )
-    try :
-        bridge_port =int (raw_bridge_port or 9997 )
-    except (TypeError ,ValueError ):
-        bridge_port =9997 
-    remsim_args =hil_bridge_runtime .extract_remsim_extra_args_from_supervisor_state (supervisor_state )
-    remsim_args +=hil_bridge_runtime .split_shell_like_arguments (
-    os .environ .get (hil_bridge_runtime .REMSIM_ARGS_ENV ,"")
+    reader_index = 0
+    raw_reader_index = supervisor_state.get("readerIndex", 0)
+    try:
+        reader_index = int(raw_reader_index or 0)
+    except (TypeError, ValueError):
+        reader_index = 0
+    bridge_port = 9997
+    raw_bridge_port = supervisor_state.get("bridgePort", 9997)
+    try:
+        bridge_port = int(raw_bridge_port or 9997)
+    except (TypeError, ValueError):
+        bridge_port = 9997
+    remsim_args = hil_bridge_runtime.extract_remsim_extra_args_from_supervisor_state(
+        supervisor_state
     )
-    documentation_path =os .path .join (PROJECT_ROOT ,"guides","HIL_BRIDGE_GUIDE.md")
-    quirks_env_value ,allow_quirks_env_value =_resolve_supervisor_quirks_env ()
-    environment_overrides =[
-    (CARD_BACKEND_ENV ,get_card_backend ()),
-    (SIM_ISDR_CONFIG_ENV ,get_sim_isdr_config_path ()),
-    (SIM_QUIRKS_ENV ,quirks_env_value ),
-    (SIM_EIM_IDENTITY_ENV ,get_sim_eim_identity_path ()),
-    (SIM_EUICC_STORE_ENV ,get_sim_euicc_store_root ()),
+    remsim_args += hil_bridge_runtime.split_shell_like_arguments(
+        os.environ.get(hil_bridge_runtime.REMSIM_ARGS_ENV, "")
+    )
+    documentation_path = os.path.join(PROJECT_ROOT, "guides", "HIL_BRIDGE_GUIDE.md")
+    quirks_env_value, allow_quirks_env_value = _resolve_supervisor_quirks_env()
+    environment_overrides = [
+        (CARD_BACKEND_ENV, get_card_backend()),
+        (SIM_ISDR_CONFIG_ENV, get_sim_isdr_config_path()),
+        (SIM_QUIRKS_ENV, quirks_env_value),
+        (SIM_EIM_IDENTITY_ENV, get_sim_eim_identity_path()),
+        (SIM_EUICC_STORE_ENV, get_sim_euicc_store_root()),
     ]
-    if len (allow_quirks_env_value )>0 :
-        environment_overrides .append (("YGGDRASIM_ALLOW_QUIRKS",allow_quirks_env_value ))
-    current_profile_store_override =get_sim_profile_store_path ()
-    if len (current_profile_store_override )>0 :
-        environment_overrides .append ((SIM_PROFILE_STORE_ENV ,current_profile_store_override ))
-    remote_card_url ,remote_card_token_file =_resolve_hil_remote_card_service_settings (supervisor_state )
+    if len(allow_quirks_env_value) > 0:
+        environment_overrides.append(("YGGDRASIM_ALLOW_QUIRKS", allow_quirks_env_value))
+    current_profile_store_override = get_sim_profile_store_path()
+    if len(current_profile_store_override) > 0:
+        environment_overrides.append(
+            (SIM_PROFILE_STORE_ENV, current_profile_store_override)
+        )
+    remote_card_url, remote_card_token_file = _resolve_hil_remote_card_service_settings(
+        supervisor_state
+    )
     (
-    simtrace_reset_mode ,
-    uhubctl_binary ,
-    uhubctl_location ,
-    uhubctl_port ,
-    )=hil_bridge_runtime .resolve_simtrace_reset_service_settings ()
-    return hil_bridge_runtime .HilBridgeUserServiceOptions (
-    python_executable =python_executable ,
-    working_directory =PROJECT_ROOT ,
-    reader_index =reader_index ,
-    host ="127.0.0.1",
-    port =bridge_port ,
-    advertise_host ="127.0.0.1",
-    usb_vidpid =hil_bridge_runtime .DEFAULT_USB_VIDPID ,
-    gsmtap_enabled =bool (gsmtap_enabled ),
-    gsmtap_capture_path =str (gsmtap_capture_path or "").strip (),
-    card_trace_enabled =hil_bridge_runtime .resolve_card_trace_enabled (),
-    remote_card_url =remote_card_url ,
-    remote_card_token_file =remote_card_token_file ,
-    remsim_binary =str (os .environ .get (hil_bridge_runtime .REMSIM_BINARY_ENV ,"")or "").strip (),
-    remsim_args =remsim_args ,
-    simtrace_reset_mode =simtrace_reset_mode ,
-    uhubctl_binary =uhubctl_binary ,
-    uhubctl_location =uhubctl_location ,
-    uhubctl_port =uhubctl_port ,
-    documentation_path =documentation_path ,
-    environment_overrides =tuple (environment_overrides ),
+        simtrace_reset_mode,
+        uhubctl_binary,
+        uhubctl_location,
+        uhubctl_port,
+    ) = hil_bridge_runtime.resolve_simtrace_reset_service_settings()
+    return hil_bridge_runtime.HilBridgeUserServiceOptions(
+        python_executable=python_executable,
+        working_directory=PROJECT_ROOT,
+        reader_index=reader_index,
+        host="127.0.0.1",
+        port=bridge_port,
+        advertise_host="127.0.0.1",
+        usb_vidpid=hil_bridge_runtime.DEFAULT_USB_VIDPID,
+        gsmtap_enabled=bool(gsmtap_enabled),
+        gsmtap_capture_path=str(gsmtap_capture_path or "").strip(),
+        card_trace_enabled=hil_bridge_runtime.resolve_card_trace_enabled(),
+        remote_card_url=remote_card_url,
+        remote_card_token_file=remote_card_token_file,
+        remsim_binary=str(
+            os.environ.get(hil_bridge_runtime.REMSIM_BINARY_ENV, "") or ""
+        ).strip(),
+        remsim_args=remsim_args,
+        simtrace_reset_mode=simtrace_reset_mode,
+        uhubctl_binary=uhubctl_binary,
+        uhubctl_location=uhubctl_location,
+        uhubctl_port=uhubctl_port,
+        documentation_path=documentation_path,
+        environment_overrides=tuple(environment_overrides),
     )
 
 
-def _ensure_hil_bridge_user_service (
-    gsmtap_enabled :bool =True ,
-    gsmtap_capture_path :str ="",
-)->tuple [str ,bool ]:
-    options =_build_hil_bridge_service_options (
-    gsmtap_enabled =gsmtap_enabled ,
-    gsmtap_capture_path =gsmtap_capture_path ,
+def _ensure_hil_bridge_user_service(
+    gsmtap_enabled: bool = True,
+    gsmtap_capture_path: str = "",
+) -> tuple[str, bool]:
+    options = _build_hil_bridge_service_options(
+        gsmtap_enabled=gsmtap_enabled,
+        gsmtap_capture_path=gsmtap_capture_path,
     )
-    unit_text =hil_bridge_runtime .render_user_service_unit (options )
-    written_path ,unit_changed =hil_bridge_runtime .write_user_service_if_changed (
-    unit_text ,
-    service_name =options .service_name ,
+    unit_text = hil_bridge_runtime.render_user_service_unit(options)
+    written_path, unit_changed = hil_bridge_runtime.write_user_service_if_changed(
+        unit_text,
+        service_name=options.service_name,
     )
-    if unit_changed :
-        hil_bridge_runtime .daemon_reload_user_services ()
-    try :
-        hil_bridge_runtime .disable_user_service (options .service_name )
-    except (OSError ,RuntimeError ):
+    if unit_changed:
+        hil_bridge_runtime.daemon_reload_user_services()
+    try:
+        hil_bridge_runtime.disable_user_service(options.service_name)
+    except (OSError, RuntimeError):
         pass
-    return written_path ,unit_changed 
+    return written_path, unit_changed
 
 
-def _hil_bridge_log_line_is_apdu_related (line_text :str )->bool :
-    normalized_line =str (line_text or "").strip ()
-    if len (normalized_line )==0 :
+def _hil_bridge_log_line_is_apdu_related(line_text: str) -> bool:
+    normalized_line = str(line_text or "").strip()
+    if len(normalized_line) == 0:
         return False
-    apdu_markers =(
-    "Modem -> bridge APDU",
-    "Card -> modem APDU",
-    "Card boundary -> card",
-    "Card boundary <- card",
-    "Relay -> card APDU",
-    "Card -> relay APDU",
-    "Bridge -> modem APDU",
-    "Bridge -> modem proactive",
+    apdu_markers = (
+        "Modem -> bridge APDU",
+        "Card -> modem APDU",
+        "Card boundary -> card",
+        "Card boundary <- card",
+        "Relay -> card APDU",
+        "Card -> relay APDU",
+        "Bridge -> modem APDU",
+        "Bridge -> modem proactive",
     )
-    for marker in apdu_markers :
-        if marker in normalized_line :
+    for marker in apdu_markers:
+        if marker in normalized_line:
             return True
     return False
 
 
-def _hil_bridge_apdu_dissector_args ()->list :
+def _hil_bridge_apdu_dissector_args() -> list:
     """Return the ``-X lua_script:`` pair for the bundled APDU dissector.
 
     Empty when the dissector is absent or switched off, so a partial
     install can never stop Wireshark from launching.
     """
-    try :
-        from Tools .ApduDissector .tshark_runner import dissector_arguments
-    except ImportError :
+    try:
+        from Tools.ApduDissector.tshark_runner import dissector_arguments
+    except ImportError:
         return []
-    try :
-        return dissector_arguments ()
-    except OSError :
+    try:
+        return dissector_arguments()
+    except OSError:
         return []
 
 
-def _launch_hil_bridge_wireshark ()->None :
-    wireshark_binary =_hil_bridge_wireshark_binary_path ()
-    if len (wireshark_binary )==0 :
-        raise RuntimeError (
-        "Wireshark is not available. Install `wireshark` or set "
-        f"{_HIL_BRIDGE_WIRESHARK_BIN_ENV}."
+def _launch_hil_bridge_wireshark() -> None:
+    wireshark_binary = _hil_bridge_wireshark_binary_path()
+    if len(wireshark_binary) == 0:
+        raise RuntimeError(
+            "Wireshark is not available. Install `wireshark` or set "
+            f"{_HIL_BRIDGE_WIRESHARK_BIN_ENV}."
         )
-    capture_interface =_hil_bridge_capture_interface ()
-    command =[
-    wireshark_binary ,
-    "-k",
-    "-i",
-    capture_interface ,
-    "-f",
-    _hil_bridge_gsmtap_capture_filter (),
-    *_hil_bridge_apdu_dissector_args (),
-    "-style",
-    "Adwaita-Dark",
+    capture_interface = _hil_bridge_capture_interface()
+    command = [
+        wireshark_binary,
+        "-k",
+        "-i",
+        capture_interface,
+        "-f",
+        _hil_bridge_gsmtap_capture_filter(),
+        *_hil_bridge_apdu_dissector_args(),
     ]
-    subprocess .Popen (
-    command ,
-    stdin =subprocess .DEVNULL ,
-    stdout =subprocess .DEVNULL ,
-    stderr =subprocess .DEVNULL ,
-    start_new_session =True ,
+    subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
 
 
-def _stop_hil_bridge_service_quietly (service_name :str )->None :
-    normalized_service_name =str (service_name or hil_bridge_runtime .DEFAULT_SERVICE_NAME )
-    try :
-        hil_bridge_runtime .stop_user_service (normalized_service_name )
-    except (OSError ,RuntimeError ):
+def _stop_hil_bridge_service_quietly(service_name: str) -> None:
+    normalized_service_name = str(
+        service_name or hil_bridge_runtime.DEFAULT_SERVICE_NAME
+    )
+    try:
+        hil_bridge_runtime.stop_user_service(normalized_service_name)
+    except (OSError, RuntimeError):
         pass
 
 
-def _activate_hil_bridge_service (
+def _activate_hil_bridge_service(
     *,
-    active_before :bool ,
-    needs_restart :bool ,
-    service_name :str ="",
-)->dict :
-    normalized_service_name =str (service_name or hil_bridge_runtime .DEFAULT_SERVICE_NAME )
-    try :
-        if active_before ==False :
-            hil_bridge_runtime .clear_supervisor_state ()
-            hil_bridge_runtime .clear_card_relay_state ()
-            hil_bridge_runtime .start_user_service (normalized_service_name )
-        elif needs_restart :
-            hil_bridge_runtime .clear_supervisor_state ()
-            hil_bridge_runtime .clear_card_relay_state ()
-            hil_bridge_runtime .restart_user_service (normalized_service_name )
-        return hil_bridge_runtime .wait_for_bridge_ready ()
-    except Exception :
-        if active_before ==False :
-            _stop_hil_bridge_service_quietly (normalized_service_name )
-        raise 
+    active_before: bool,
+    needs_restart: bool,
+    service_name: str = "",
+) -> dict:
+    normalized_service_name = str(
+        service_name or hil_bridge_runtime.DEFAULT_SERVICE_NAME
+    )
+    try:
+        if not active_before:
+            hil_bridge_runtime.clear_supervisor_state()
+            hil_bridge_runtime.clear_card_relay_state()
+            hil_bridge_runtime.start_user_service(normalized_service_name)
+        elif needs_restart:
+            hil_bridge_runtime.clear_supervisor_state()
+            hil_bridge_runtime.clear_card_relay_state()
+            hil_bridge_runtime.restart_user_service(normalized_service_name)
+        return hil_bridge_runtime.wait_for_bridge_ready()
+    except Exception:
+        if not active_before:
+            _stop_hil_bridge_service_quietly(normalized_service_name)
+        raise
 
 
-def _stop_hil_bridge_from_attached_view (service_name :str ,reason_text :str )->None :
-    print (f"\n{Colors.WARNING}[*] {reason_text}{Colors.ENDC}")
-    try :
-        hil_bridge_runtime .stop_user_service (service_name )
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] Could not stop HIL session: {e}{Colors.ENDC}")
-    else :
-        print (f"{Colors.GREEN}[+] HIL session stopped.{Colors.ENDC}")
-        print ("    Supervisor, bridge, and REMSIM subprocesses were stopped together.")
+def _stop_hil_bridge_from_attached_view(service_name: str, reason_text: str) -> None:
+    print(f"\n{Colors.WARNING}[*] {reason_text}{Colors.ENDC}")
+    try:
+        hil_bridge_runtime.stop_user_service(service_name)
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] Could not stop HIL session: {e}{Colors.ENDC}")
+    else:
+        print(f"{Colors.GREEN}[+] HIL session stopped.{Colors.ENDC}")
+        print("    Supervisor, bridge, and REMSIM subprocesses were stopped together.")
 
 
-def _cleanup_hil_bridge_attached_process (process )->None :
-    if process is None :
+def _cleanup_hil_bridge_attached_process(process) -> None:
+    if process is None:
         return
-    process_running =True
-    try :
-        if hasattr (process ,"poll"):
-            process_running =process .poll ()is None
-    except (OSError ,ValueError ):
-        process_running =True
-    if process_running :
-        try :
-            process .terminate ()
-        except (OSError ,ProcessLookupError ):
+    process_running = True
+    try:
+        if hasattr(process, "poll"):
+            process_running = process.poll() is None
+    except (OSError, ValueError):
+        process_running = True
+    if process_running:
+        try:
+            process.terminate()
+        except (OSError, ProcessLookupError):
             pass
-    try :
-        process .wait (timeout =1.0 )
-    except (subprocess .TimeoutExpired ,OSError ):
-        try :
-            process .kill ()
-        except (OSError ,ProcessLookupError ):
+    try:
+        process.wait(timeout=1.0)
+    except (subprocess.TimeoutExpired, OSError):
+        try:
+            process.kill()
+        except (OSError, ProcessLookupError):
             pass
 
 
-def _view_hil_bridge_termshark_stream (
-    service_name :str ,
+def _view_hil_bridge_termshark_stream(
+    service_name: str,
     *,
-    startup_callback =None ,
-    startup_delay_seconds :float =0.0 ,
-)->None :
+    startup_callback=None,
+    startup_delay_seconds: float = 0.0,
+) -> None:
     from Tools.HilBridge.live_decode_tui import run_live_decode_tui
     from Tools.HilBridge.live_decode_view import resolve_tshark_binary
 
-    normalized_service_name =str (service_name or hil_bridge_runtime .DEFAULT_SERVICE_NAME )
-    tshark_binary =resolve_tshark_binary ()
-    if len (tshark_binary )==0 :
-        print (
-        f"\n{Colors.FAIL}[!] tshark is not available. Install `tshark` to use the "
-        f"in-terminal decoded HIL view.{Colors.ENDC}"
+    normalized_service_name = str(
+        service_name or hil_bridge_runtime.DEFAULT_SERVICE_NAME
+    )
+    tshark_binary = resolve_tshark_binary()
+    if len(tshark_binary) == 0:
+        print(
+            f"\n{Colors.FAIL}[!] tshark is not available. Install `tshark` to use the "
+            f"in-terminal decoded HIL view.{Colors.ENDC}"
         )
-        pause ()
+        pause()
         return
-    capture_filter =_hil_bridge_gsmtap_capture_filter ()
-    capture_path =_hil_bridge_termshark_capture_path ()
-    runtime_root =_hil_bridge_termshark_runtime_root ()
-    os .makedirs (runtime_root ,exist_ok =True )
-    if startup_callback is not None :
-        try :
-            os .remove (capture_path )
-        except FileNotFoundError :
+    capture_filter = _hil_bridge_gsmtap_capture_filter()
+    capture_path = _hil_bridge_termshark_capture_path()
+    runtime_root = _hil_bridge_termshark_runtime_root()
+    os.makedirs(runtime_root, exist_ok=True)
+    if startup_callback is not None:
+        try:
+            os.remove(capture_path)
+        except FileNotFoundError:
             pass
-    startup_cancel =threading .Event ()
-    startup_thread =None 
-    startup_state ={
-    "activation_attempted":False ,
-    "activation_complete":startup_callback is None ,
-    "error":"",
+    startup_cancel = threading.Event()
+    startup_thread = None
+    startup_state = {
+        "activation_attempted": False,
+        "activation_complete": startup_callback is None,
+        "error": "",
     }
 
-    def _run_startup_after_warmup ()->None :
-        wait_budget =max (0.0 ,float (startup_delay_seconds or 0.0 ))
-        if wait_budget >0.0 :
-            deadline =time .monotonic ()+wait_budget
-            while True :
-                if startup_cancel .is_set ():
+    def _run_startup_after_warmup() -> None:
+        wait_budget = max(0.0, float(startup_delay_seconds or 0.0))
+        if wait_budget > 0.0:
+            deadline = time.monotonic() + wait_budget
+            while True:
+                if startup_cancel.is_set():
                     return
-                remaining =deadline -time .monotonic ()
-                if remaining <=0.0 :
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
                     break
-                time .sleep (min (0.1 ,remaining ))
-        if startup_cancel .is_set ():
+                time.sleep(min(0.1, remaining))
+        if startup_cancel.is_set():
             return
-        startup_state ["activation_attempted"]=True 
-        try :
-            startup_callback ()
-        except Exception as e :
-            startup_state ["error"]=str (e )
+        startup_state["activation_attempted"] = True
+        try:
+            startup_callback()
+        except Exception as e:
+            startup_state["error"] = str(e)
             return
-        startup_state ["activation_complete"]=True 
+        startup_state["activation_complete"] = True
 
-    try :
-        if startup_callback is not None :
-            startup_thread =threading .Thread (
-            target =_run_startup_after_warmup ,
-            daemon =True ,
+    try:
+        if startup_callback is not None:
+            startup_thread = threading.Thread(
+                target=_run_startup_after_warmup,
+                daemon=True,
             )
-            startup_thread .start ()
-        run_live_decode_tui (
-        capture_path ,
-        service_name =normalized_service_name ,
-        capture_filter =capture_filter ,
-        startup_state =startup_state ,
-        tshark_binary =tshark_binary ,
+            startup_thread.start()
+        run_live_decode_tui(
+            capture_path,
+            service_name=normalized_service_name,
+            capture_filter=capture_filter,
+            startup_state=startup_state,
+            tshark_binary=tshark_binary,
         )
-        startup_cancel .set ()
-        if startup_thread is not None :
-            startup_thread .join (timeout =0.2 )
-        if len (str (startup_state .get ("error","")or "").strip ())>0 :
-            print (
-            f"\n{Colors.FAIL}[!] Could not start HIL session after decoded-view warm-up: "
-            f"{startup_state ['error']}{Colors.ENDC}"
+        startup_cancel.set()
+        if startup_thread is not None:
+            startup_thread.join(timeout=0.2)
+        if len(str(startup_state.get("error", "") or "").strip()) > 0:
+            print(
+                f"\n{Colors.FAIL}[!] Could not start HIL session after decoded-view warm-up: "
+                f"{startup_state['error']}{Colors.ENDC}"
             )
             return
-        if startup_callback is not None :
-            if bool (startup_state .get ("activation_complete",False ))==False :
-                if bool (startup_state .get ("activation_attempted",False )):
-                    _stop_hil_bridge_service_quietly (normalized_service_name )
+        if startup_callback is not None:
+            if not bool(startup_state.get("activation_complete", False)):
+                if bool(startup_state.get("activation_attempted", False)):
+                    _stop_hil_bridge_service_quietly(normalized_service_name)
                 return
-        _stop_hil_bridge_from_attached_view (
-        normalized_service_name ,
-        "Terminal decode view exited. Stopping the HIL session..." ,
+        _stop_hil_bridge_from_attached_view(
+            normalized_service_name,
+            "Terminal decode view exited. Stopping the HIL session...",
         )
-    except KeyboardInterrupt :
-        startup_cancel .set ()
-        _stop_hil_bridge_from_attached_view (
-        normalized_service_name ,
-        "Ctrl+C received. Stopping the HIL session..." ,
+    except KeyboardInterrupt:
+        startup_cancel.set()
+        _stop_hil_bridge_from_attached_view(
+            normalized_service_name,
+            "Ctrl+C received. Stopping the HIL session...",
         )
-    except Exception as e :
-        startup_cancel .set ()
-        print (f"\n{Colors.FAIL}[!] Could not open the terminal decode view: {e}{Colors.ENDC}")
-    finally :
-        startup_cancel .set ()
-        if startup_thread is not None :
-            startup_thread .join (timeout =0.2 )
-        pause ()
+    except Exception as e:
+        startup_cancel.set()
+        print(
+            f"\n{Colors.FAIL}[!] Could not open the terminal decode view: {e}{Colors.ENDC}"
+        )
+    finally:
+        startup_cancel.set()
+        if startup_thread is not None:
+            startup_thread.join(timeout=0.2)
+        pause()
 
 
-def _view_hil_bridge_live_stream (service_name :str ,gsmtap_enabled :bool =True )->None :
-    normalized_service_name =str (service_name or hil_bridge_runtime .DEFAULT_SERVICE_NAME )
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Live HIL APDU Stream ==={Colors.ENDC}\n")
-    print (f"Service   : {normalized_service_name}")
-    print ("Source    : systemd user journal")
-    if gsmtap_enabled :
-        print ("Feed      : raw APDU log lines + GSMTAP to Wireshark")
-    else :
-        print ("Feed      : raw APDU log lines only")
-    print ("Stop      : Ctrl+C")
-    print ("")
-    print (f"{Colors.WARNING}[*] Waiting for modem/card traffic...{Colors.ENDC}")
-    command =[
-    "journalctl",
-    "--user",
-    "-u",
-    normalized_service_name ,
-    "-f",
-    "-n",
-    "0",
-    "-o",
-    "cat",
+def _view_hil_bridge_live_stream(
+    service_name: str, gsmtap_enabled: bool = True
+) -> None:
+    normalized_service_name = str(
+        service_name or hil_bridge_runtime.DEFAULT_SERVICE_NAME
+    )
+    clear_screen()
+    print(f"{Colors.HEADER}=== Live HIL APDU Stream ==={Colors.ENDC}\n")
+    print(f"Service   : {normalized_service_name}")
+    print("Source    : systemd user journal")
+    if gsmtap_enabled:
+        print("Feed      : raw APDU log lines + GSMTAP to Wireshark")
+    else:
+        print("Feed      : raw APDU log lines only")
+    print("Stop      : Ctrl+C")
+    print("")
+    print(f"{Colors.WARNING}[*] Waiting for modem/card traffic...{Colors.ENDC}")
+    command = [
+        "journalctl",
+        "--user",
+        "-u",
+        normalized_service_name,
+        "-f",
+        "-n",
+        "0",
+        "-o",
+        "cat",
     ]
-    process =None
-    try :
-        process =subprocess .Popen (
-        command ,
-        stdout =subprocess .PIPE ,
-        stderr =subprocess .STDOUT ,
-        text =True ,
-        bufsize =1 ,
+    process = None
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
-        if process .stdout is None :
-            raise RuntimeError ("journalctl did not provide a readable stdout stream.")
-        for raw_line in process .stdout :
-            line_text =str (raw_line or "").rstrip ("\n")
-            if _hil_bridge_log_line_is_apdu_related (line_text )==False :
+        if process.stdout is None:
+            raise RuntimeError("journalctl did not provide a readable stdout stream.")
+        for raw_line in process.stdout:
+            line_text = str(raw_line or "").rstrip("\n")
+            if not _hil_bridge_log_line_is_apdu_related(line_text):
                 continue
-            print (line_text )
-    except KeyboardInterrupt :
-        _stop_hil_bridge_from_attached_view (
-        normalized_service_name ,
-        "Ctrl+C received. Stopping the HIL session..." ,
+            print(line_text)
+    except KeyboardInterrupt:
+        _stop_hil_bridge_from_attached_view(
+            normalized_service_name,
+            "Ctrl+C received. Stopping the HIL session...",
         )
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Could not attach to the HIL live stream: {e}{Colors.ENDC}")
-    finally :
-        _cleanup_hil_bridge_attached_process (process )
-        pause ()
+    except Exception as e:
+        print(
+            f"\n{Colors.FAIL}[!] Could not attach to the HIL live stream: {e}{Colors.ENDC}"
+        )
+    finally:
+        _cleanup_hil_bridge_attached_process(process)
+        pause()
 
 
-def _start_hil_bridge_session (view_mode :str ="")->None :
-    requested_view_mode =_normalize_hil_bridge_view_mode (view_mode )
-    if len (requested_view_mode )==0 :
-        requested_view_mode =_prompt_hil_bridge_view_mode ()
-    if len (requested_view_mode )==0 :
+def _start_hil_bridge_session(view_mode: str = "") -> None:
+    requested_view_mode = _normalize_hil_bridge_view_mode(view_mode)
+    if len(requested_view_mode) == 0:
+        requested_view_mode = _prompt_hil_bridge_view_mode()
+    if len(requested_view_mode) == 0:
         return
-    effective_view_mode =requested_view_mode
-    if effective_view_mode ==_HIL_BRIDGE_VIEW_MODE_RAW_WIRESHARK and len (_hil_bridge_wireshark_binary_path ())==0 :
-        print (
-        f"\n{Colors.WARNING}[*] Wireshark is not available. Falling back to raw APDU flow only.{Colors.ENDC}"
+    effective_view_mode = requested_view_mode
+    if (
+        effective_view_mode == _HIL_BRIDGE_VIEW_MODE_RAW_WIRESHARK
+        and len(_hil_bridge_wireshark_binary_path()) == 0
+    ):
+        print(
+            f"\n{Colors.WARNING}[*] Wireshark is not available. Falling back to raw APDU flow only.{Colors.ENDC}"
         )
-        effective_view_mode =_HIL_BRIDGE_VIEW_MODE_RAW
-    if effective_view_mode ==_HIL_BRIDGE_VIEW_MODE_TERMSHARK and len (_hil_bridge_tshark_binary_path ())==0 :
-        print (
-        f"\n{Colors.WARNING}[*] tshark is not available. Falling back to raw APDU flow only.{Colors.ENDC}"
+        effective_view_mode = _HIL_BRIDGE_VIEW_MODE_RAW
+    if (
+        effective_view_mode == _HIL_BRIDGE_VIEW_MODE_TERMSHARK
+        and len(_hil_bridge_tshark_binary_path()) == 0
+    ):
+        print(
+            f"\n{Colors.WARNING}[*] tshark is not available. Falling back to raw APDU flow only.{Colors.ENDC}"
         )
-        effective_view_mode =_HIL_BRIDGE_VIEW_MODE_RAW
-    gsmtap_enabled =_hil_bridge_view_mode_uses_gsmtap (effective_view_mode )
-    requested_capture_path =_hil_bridge_capture_path_for_view_mode (effective_view_mode )
-    supervisor_state =hil_bridge_runtime .read_supervisor_state ()
-    service_state =hil_bridge_runtime .query_user_service_state ()
-    active_before =str (service_state .get ("activeState","")or "").strip ()=="active"
-    active_gsmtap_enabled =_hil_bridge_command_uses_gsmtap (supervisor_state .get ("bridgeCommand",[]))
-    active_capture_path =_hil_bridge_command_capture_path (supervisor_state .get ("bridgeCommand",[]))
-    try :
-        written_path ,unit_changed =_ensure_hil_bridge_user_service (
-        gsmtap_enabled =gsmtap_enabled ,
-        gsmtap_capture_path =requested_capture_path ,
+        effective_view_mode = _HIL_BRIDGE_VIEW_MODE_RAW
+    gsmtap_enabled = _hil_bridge_view_mode_uses_gsmtap(effective_view_mode)
+    requested_capture_path = _hil_bridge_capture_path_for_view_mode(effective_view_mode)
+    supervisor_state = hil_bridge_runtime.read_supervisor_state()
+    service_state = hil_bridge_runtime.query_user_service_state()
+    active_before = str(service_state.get("activeState", "") or "").strip() == "active"
+    active_gsmtap_enabled = _hil_bridge_command_uses_gsmtap(
+        supervisor_state.get("bridgeCommand", [])
+    )
+    active_capture_path = _hil_bridge_command_capture_path(
+        supervisor_state.get("bridgeCommand", [])
+    )
+    try:
+        written_path, unit_changed = _ensure_hil_bridge_user_service(
+            gsmtap_enabled=gsmtap_enabled,
+            gsmtap_capture_path=requested_capture_path,
         )
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Could not start HIL session: {e}{Colors.ENDC}")
-        pause ()
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Could not start HIL session: {e}{Colors.ENDC}")
+        pause()
         return
-    needs_restart =(
-    active_before
-    and (
-    unit_changed 
-    or (
-    active_gsmtap_enabled is not None 
-    and bool (active_gsmtap_enabled )!=bool (gsmtap_enabled )
+    needs_restart = active_before and (
+        unit_changed
+        or (
+            active_gsmtap_enabled is not None
+            and bool(active_gsmtap_enabled) != bool(gsmtap_enabled)
+        )
+        or str(active_capture_path or "").strip()
+        != str(requested_capture_path or "").strip()
     )
-    or str (active_capture_path or "").strip ()!=str (requested_capture_path or "").strip ()
-    )
-    )
-    if effective_view_mode ==_HIL_BRIDGE_VIEW_MODE_TERMSHARK and (active_before ==False or needs_restart ):
-        warmup_seconds =_hil_bridge_termshark_warmup_seconds ()
+    if effective_view_mode == _HIL_BRIDGE_VIEW_MODE_TERMSHARK and (
+        not active_before or needs_restart
+    ):
+        warmup_seconds = _hil_bridge_termshark_warmup_seconds()
 
-        def _start_hil_after_termshark_warmup ()->dict :
-            return _activate_hil_bridge_service (
-            active_before =active_before ,
-            needs_restart =needs_restart ,
-            service_name =hil_bridge_runtime .DEFAULT_SERVICE_NAME ,
+        def _start_hil_after_termshark_warmup() -> dict:
+            return _activate_hil_bridge_service(
+                active_before=active_before,
+                needs_restart=needs_restart,
+                service_name=hil_bridge_runtime.DEFAULT_SERVICE_NAME,
             )
 
-        if active_before and needs_restart :
-            print (f"\n{Colors.GREEN}[+] HIL session will restart after decoded-view warm-up.{Colors.ENDC}")
-        else :
-            print (f"\n{Colors.GREEN}[+] HIL session will start after decoded-view warm-up.{Colors.ENDC}")
-        print (f"    User service path: {written_path}")
-        print (f"    View mode        : {_hil_bridge_view_mode_label (effective_view_mode )}")
-        print ("    GSMTAP mirror    : UDP 4729")
-        print (f"    Warm-up delay    : {warmup_seconds :.1f}s")
-        print ("    The decoded terminal view will open first, then the bridge will start.")
-        _view_hil_bridge_termshark_stream (
-        hil_bridge_runtime .DEFAULT_SERVICE_NAME ,
-        startup_callback =_start_hil_after_termshark_warmup ,
-        startup_delay_seconds =warmup_seconds ,
+        if active_before and needs_restart:
+            print(
+                f"\n{Colors.GREEN}[+] HIL session will restart after decoded-view warm-up.{Colors.ENDC}"
+            )
+        else:
+            print(
+                f"\n{Colors.GREEN}[+] HIL session will start after decoded-view warm-up.{Colors.ENDC}"
+            )
+        print(f"    User service path: {written_path}")
+        print(
+            f"    View mode        : {_hil_bridge_view_mode_label(effective_view_mode)}"
+        )
+        print("    GSMTAP mirror    : UDP 4729")
+        print(f"    Warm-up delay    : {warmup_seconds:.1f}s")
+        print(
+            "    The decoded terminal view will open first, then the bridge will start."
+        )
+        _view_hil_bridge_termshark_stream(
+            hil_bridge_runtime.DEFAULT_SERVICE_NAME,
+            startup_callback=_start_hil_after_termshark_warmup,
+            startup_delay_seconds=warmup_seconds,
         )
         return
-    try :
-        status_payload =_activate_hil_bridge_service (
-        active_before =active_before ,
-        needs_restart =needs_restart ,
-        service_name =hil_bridge_runtime .DEFAULT_SERVICE_NAME ,
+    try:
+        status_payload = _activate_hil_bridge_service(
+            active_before=active_before,
+            needs_restart=needs_restart,
+            service_name=hil_bridge_runtime.DEFAULT_SERVICE_NAME,
         )
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Could not start HIL session: {e}{Colors.ENDC}")
-        pause ()
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Could not start HIL session: {e}{Colors.ENDC}")
+        pause()
         return
-    if active_before and needs_restart :
-        print (f"\n{Colors.GREEN}[+] HIL session was restarted to apply the requested capture mode and env overrides.{Colors.ENDC}")
-    elif active_before :
-        print (f"\n{Colors.GREEN}[+] HIL session is already active.{Colors.ENDC}")
-    else :
-        print (f"\n{Colors.GREEN}[+] HIL session started.{Colors.ENDC}")
-    print (f"    User service path: {written_path}")
-    print (f"    View mode        : {_hil_bridge_view_mode_label (effective_view_mode )}")
-    print (f"    APDU relay URL   : {status_payload .get ('apduUrl','')}")
-    card_backend =str (status_payload .get ("cardBackend","")or "").strip ()
-    if len (card_backend )>0 :
-        print (f"    Card backend     : {card_backend}")
-    card_source =str (status_payload .get ("reader","")or "").strip ()
-    if len (card_source )>0 :
-        print (f"    Card source      : {card_source}")
-    atr_hex =str (status_payload .get ("atr","")or "").strip ()
-    if len (atr_hex )>0 :
-        print (f"    ATR              : {atr_hex}")
-    if gsmtap_enabled :
-        print ("    GSMTAP mirror    : UDP 4729")
-    else :
-        print ("    GSMTAP mirror    : disabled for raw-only mode")
-    print ("    Starting HIL also launches the bridge and REMSIM subprocesses.")
-    print ("    After changing simulator/backend settings, stop and start HIL to rebind the card side.")
-    if effective_view_mode ==_HIL_BRIDGE_VIEW_MODE_RAW_WIRESHARK :
-        print ("    Launching Wireshark for live GSMTAP decode...")
-        try :
-            _launch_hil_bridge_wireshark ()
-        except Exception as e :
-            print (f"{Colors.WARNING}[*] Could not launch Wireshark: {e}{Colors.ENDC}")
-        print ("    Press Ctrl+C in the live APDU view to stop the HIL session.")
-        print ("    Attaching to the live APDU stream view...")
-        _view_hil_bridge_live_stream (hil_bridge_runtime .DEFAULT_SERVICE_NAME ,gsmtap_enabled =True )
+    if active_before and needs_restart:
+        print(
+            f"\n{Colors.GREEN}[+] HIL session was restarted to apply the requested capture mode and env overrides.{Colors.ENDC}"
+        )
+    elif active_before:
+        print(f"\n{Colors.GREEN}[+] HIL session is already active.{Colors.ENDC}")
+    else:
+        print(f"\n{Colors.GREEN}[+] HIL session started.{Colors.ENDC}")
+    print(f"    User service path: {written_path}")
+    print(f"    View mode        : {_hil_bridge_view_mode_label(effective_view_mode)}")
+    print(f"    APDU relay URL   : {status_payload.get('apduUrl', '')}")
+    card_backend = str(status_payload.get("cardBackend", "") or "").strip()
+    if len(card_backend) > 0:
+        print(f"    Card backend     : {card_backend}")
+    card_source = str(status_payload.get("reader", "") or "").strip()
+    if len(card_source) > 0:
+        print(f"    Card source      : {card_source}")
+    atr_hex = str(status_payload.get("atr", "") or "").strip()
+    if len(atr_hex) > 0:
+        print(f"    ATR              : {atr_hex}")
+    if gsmtap_enabled:
+        print("    GSMTAP mirror    : UDP 4729")
+    else:
+        print("    GSMTAP mirror    : disabled for raw-only mode")
+    print("    Starting HIL also launches the bridge and REMSIM subprocesses.")
+    print(
+        "    After changing simulator/backend settings, stop and start HIL to rebind the card side."
+    )
+    if effective_view_mode == _HIL_BRIDGE_VIEW_MODE_RAW_WIRESHARK:
+        print("    Launching Wireshark for live GSMTAP decode...")
+        try:
+            _launch_hil_bridge_wireshark()
+        except Exception as e:
+            print(f"{Colors.WARNING}[*] Could not launch Wireshark: {e}{Colors.ENDC}")
+        print("    Press Ctrl+C in the live APDU view to stop the HIL session.")
+        print("    Attaching to the live APDU stream view...")
+        _view_hil_bridge_live_stream(
+            hil_bridge_runtime.DEFAULT_SERVICE_NAME, gsmtap_enabled=True
+        )
         return
-    if effective_view_mode ==_HIL_BRIDGE_VIEW_MODE_TERMSHARK :
-        print ("    The decoded APDU view will replace the raw APDU stream in this terminal.")
-        _view_hil_bridge_termshark_stream (hil_bridge_runtime .DEFAULT_SERVICE_NAME )
+    if effective_view_mode == _HIL_BRIDGE_VIEW_MODE_TERMSHARK:
+        print(
+            "    The decoded APDU view will replace the raw APDU stream in this terminal."
+        )
+        _view_hil_bridge_termshark_stream(hil_bridge_runtime.DEFAULT_SERVICE_NAME)
         return
-    print ("    Press Ctrl+C in the live APDU view to stop the HIL session.")
-    print ("    Attaching to the live APDU stream view...")
-    _view_hil_bridge_live_stream (hil_bridge_runtime .DEFAULT_SERVICE_NAME ,gsmtap_enabled =gsmtap_enabled )
+    print("    Press Ctrl+C in the live APDU view to stop the HIL session.")
+    print("    Attaching to the live APDU stream view...")
+    _view_hil_bridge_live_stream(
+        hil_bridge_runtime.DEFAULT_SERVICE_NAME, gsmtap_enabled=gsmtap_enabled
+    )
 
 
-def _open_hil_bridge_pcap_offline (pcap_path :str ,*,keybag_path :str ="")->int :
+def _open_hil_bridge_pcap_offline(pcap_path: str, *, keybag_path: str = "") -> int:
     """Open a saved pcap in the HIL decode TUI without starting the bridge.
 
     Offline review mode reuses `run_live_decode_tui` with `live_capture=False`
@@ -1663,919 +1791,1041 @@ def _open_hil_bridge_pcap_offline (pcap_path :str ,*,keybag_path :str ="")->int 
     named `<pcap>.keys.json` is found) the TUI annotator layers SCP03 /
     SCP11c plaintext views on top of ciphered APDUs.
     """
-    from Tools.HilBridge.live_decode_tui import run_live_decode_tui 
-    from Tools.HilBridge.live_decode_view import resolve_tshark_binary 
+    from Tools.HilBridge.live_decode_tui import run_live_decode_tui
+    from Tools.HilBridge.live_decode_view import resolve_tshark_binary
 
-    normalized_pcap =str (pcap_path or "").strip ()
-    if len (normalized_pcap )==0 :
-        print (f"\n{Colors.FAIL}[!] No pcap path was provided.{Colors.ENDC}")
-        return 1 
-    pcap_abs_path =os .path .abspath (os .path .expanduser (normalized_pcap ))
-    if os .path .isfile (pcap_abs_path )==False :
-        print (f"\n{Colors.FAIL}[!] pcap file not found: {pcap_abs_path}{Colors.ENDC}")
-        return 1 
-    tshark_binary =resolve_tshark_binary ()
-    if len (tshark_binary )==0 :
-        print (
-        f"\n{Colors.FAIL}[!] tshark is not available. Install `tshark` to use "
-        f"the offline HIL decode view.{Colors.ENDC}"
+    normalized_pcap = str(pcap_path or "").strip()
+    if len(normalized_pcap) == 0:
+        print(f"\n{Colors.FAIL}[!] No pcap path was provided.{Colors.ENDC}")
+        return 1
+    pcap_abs_path = os.path.abspath(os.path.expanduser(normalized_pcap))
+    if not os.path.isfile(pcap_abs_path):
+        print(f"\n{Colors.FAIL}[!] pcap file not found: {pcap_abs_path}{Colors.ENDC}")
+        return 1
+    tshark_binary = resolve_tshark_binary()
+    if len(tshark_binary) == 0:
+        print(
+            f"\n{Colors.FAIL}[!] tshark is not available. Install `tshark` to use "
+            f"the offline HIL decode view.{Colors.ENDC}"
         )
-        return 1 
+        return 1
 
-    resolved_keybag =str (keybag_path or "").strip ()
-    if len (resolved_keybag )==0 :
-        sidecar_candidate =pcap_abs_path +".keys.json"
-        if os .path .isfile (sidecar_candidate ):
-            resolved_keybag =sidecar_candidate 
-        else :
-            stem_candidate =os .path .splitext (pcap_abs_path )[0 ]+".keys.json"
-            if os .path .isfile (stem_candidate ):
-                resolved_keybag =stem_candidate 
+    resolved_keybag = str(keybag_path or "").strip()
+    if len(resolved_keybag) == 0:
+        sidecar_candidate = pcap_abs_path + ".keys.json"
+        if os.path.isfile(sidecar_candidate):
+            resolved_keybag = sidecar_candidate
+        else:
+            stem_candidate = os.path.splitext(pcap_abs_path)[0] + ".keys.json"
+            if os.path.isfile(stem_candidate):
+                resolved_keybag = stem_candidate
 
-    capture_filter =_hil_bridge_gsmtap_capture_filter ()
-    print (f"\n{Colors.GREEN}[+] Opening pcap in offline HIL decode view.{Colors.ENDC}")
-    print (f"    Pcap file   : {pcap_abs_path}")
-    if len (resolved_keybag )>0 :
-        print (f"    Keybag file : {resolved_keybag}")
-    else :
-        print ("    Keybag file : (none — ciphered APDUs will stay wrapped)")
-    print ("    Mode        : offline review (no bridge, no live FIFO)")
-    try :
-        run_live_decode_tui (
-        pcap_abs_path ,
-        service_name ="offline-review",
-        capture_filter =capture_filter ,
-        startup_state ={"activation_complete":True },
-        tshark_binary =tshark_binary ,
-        live_capture =False ,
-        keybag_path =resolved_keybag ,
+    capture_filter = _hil_bridge_gsmtap_capture_filter()
+    print(f"\n{Colors.GREEN}[+] Opening pcap in offline HIL decode view.{Colors.ENDC}")
+    print(f"    Pcap file   : {pcap_abs_path}")
+    if len(resolved_keybag) > 0:
+        print(f"    Keybag file : {resolved_keybag}")
+    else:
+        print("    Keybag file : (none -- ciphered APDUs will stay wrapped)")
+    print("    Mode        : offline review (no bridge, no live FIFO)")
+    try:
+        run_live_decode_tui(
+            pcap_abs_path,
+            service_name="offline-review",
+            capture_filter=capture_filter,
+            startup_state={"activation_complete": True},
+            tshark_binary=tshark_binary,
+            live_capture=False,
+            keybag_path=resolved_keybag,
         )
-    except KeyboardInterrupt :
-        pass 
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Offline HIL decode view error: {e}{Colors.ENDC}")
-        return 1 
-    return 0 
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Offline HIL decode view error: {e}{Colors.ENDC}")
+        return 1
+    return 0
 
 
-def _stop_hil_bridge_session ()->None :
-    service_state =hil_bridge_runtime .query_user_service_state ()
-    active_state =str (service_state .get ("activeState","")or "").strip ()
-    if active_state !="active":
-        print (f"\n{Colors.GREEN}[+] HIL session is already stopped.{Colors.ENDC}")
-        pause ()
+def _stop_hil_bridge_session() -> None:
+    service_state = hil_bridge_runtime.query_user_service_state()
+    active_state = str(service_state.get("activeState", "") or "").strip()
+    if active_state != "active":
+        print(f"\n{Colors.GREEN}[+] HIL session is already stopped.{Colors.ENDC}")
+        pause()
         return
-    try :
-        hil_bridge_runtime .stop_user_service ()
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Could not stop HIL session: {e}{Colors.ENDC}")
-        pause ()
+    try:
+        hil_bridge_runtime.stop_user_service()
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Could not stop HIL session: {e}{Colors.ENDC}")
+        pause()
         return
-    print (f"\n{Colors.GREEN}[+] HIL session stopped.{Colors.ENDC}")
-    print ("    Supervisor, bridge, and REMSIM subprocesses were stopped together.")
-    pause ()
+    print(f"\n{Colors.GREEN}[+] HIL session stopped.{Colors.ENDC}")
+    print("    Supervisor, bridge, and REMSIM subprocesses were stopped together.")
+    pause()
 
 
-def _manage_local_hil_bridge ()->None :
-    while True :
-        clear_screen ()
-        supervisor_state =hil_bridge_runtime .read_supervisor_state ()
-        relay_state =hil_bridge_runtime .read_card_relay_state ()
-        service_state =hil_bridge_runtime .query_user_service_state ()
-        live_status ={}
-        live_status_error =""
-        status_url =str (relay_state .get ("statusUrl","")or "").strip ()
-        if str (service_state .get ("activeState","")or "").strip ()=="active"and len (status_url )>0 :
-            try :
-                live_status =hil_bridge_runtime .read_bridge_status ()
-            except Exception as e :
-                live_status_error =str (e )
-        print (f"{Colors.HEADER}=== Local SIMtrace2 HIL Bridge Session ==={Colors.ENDC}\n")
-        print ("Manual HIL mode: start only when you explicitly need live modem/card tracing.")
-        print ("Start mode now lets you choose raw APDU only, raw APDU + Wireshark, or the decoded in-terminal view.\n")
-        print (f"Service             : {_hil_bridge_service_state_text (service_state )}")
-        fragment_path =str (service_state .get ("fragmentPath","")or "").strip ()
-        if len (fragment_path )>0 :
-            print (f"Service unit path   : {fragment_path}")
-        print (f"Supervisor status   : {supervisor_state .get ('status','unknown')}")
-        print (f"USB present         : {supervisor_state .get ('usbPresent',False)}")
-        print (f"Bridge running      : {supervisor_state .get ('bridgeRunning',False)}")
-        print (f"REMSIM running      : {supervisor_state .get ('remsimClientRunning',False)}")
-        reason_text =str (supervisor_state .get ("reason","")or "").strip ()
-        if len (reason_text )>0 :
-            print (f"Supervisor reason   : {reason_text}")
-        next_remote_card_url ,next_remote_card_token_file =_resolve_hil_remote_card_service_settings (supervisor_state )
-        if len (next_remote_card_url )>0 :
-            print ("Next start card     : Remote Card Bridge")
-            print (f"Remote card URL     : {next_remote_card_url}")
-            if len (next_remote_card_token_file )>0 :
-                print (f"Remote token file   : {next_remote_card_token_file}")
-        else :
-            print ("Next start card     : local reader/backend settings")
-        _print_hil_card_bridge_status ()
-        relay_status ="missing"
-        if len (live_status )>0 :
-            relay_status =str (live_status .get ("status","ok")or "").strip ()or "ok"
-        elif len (relay_state )>0 :
-            relay_status =str (relay_state .get ("status","ok")or "").strip ()or "ok"
-        print (f"Relay status        : {relay_status}")
-        relay_url =str (live_status .get ("apduUrl",relay_state .get ("apduUrl",""))or "").strip ()
-        if len (relay_url )>0 :
-            print (f"Relay APDU URL      : {relay_url}")
-        card_backend =str (live_status .get ("cardBackend",relay_state .get ("cardBackend",""))or "").strip ()
-        if len (card_backend )>0 :
-            print (f"Card backend        : {card_backend}")
-        card_source =str (live_status .get ("reader",relay_state .get ("reader",""))or "").strip ()
-        if len (card_source )>0 :
-            print (f"Card source         : {card_source}")
-        atr_hex =str (live_status .get ("atr",relay_state .get ("atr",""))or "").strip ()
-        if len (atr_hex )>0 :
-            print (f"ATR                 : {atr_hex}")
-        print (f"Control connected   : {live_status .get ('controlConnected',relay_state .get ('controlConnected',False ))}")
-        print (f"Bankd connected     : {live_status .get ('bankdConnected',relay_state .get ('bankdConnected',False ))}")
-        if len (live_status_error )>0 :
-            print (f"Live status note    : {live_status_error}")
-        print ("")
-        print (f"  {Colors.CYAN}[1]{Colors.ENDC} Start HIL session (uses the remote card above when configured)")
-        print (f"  {Colors.CYAN}[2]{Colors.ENDC} Stop HIL session")
-        print (f"  {Colors.CYAN}[3]{Colors.ENDC} Start Card Bridge for next HIL start")
-        print (f"  {Colors.CYAN}[4]{Colors.ENDC} Stop Card Bridge")
-        print (f"  {Colors.CYAN}[5]{Colors.ENDC} Open saved .pcap (offline review, no bridge)")
-        print (f"  {Colors.WHITE}[R]{Colors.ENDC} Refresh status")
-        print (f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
-        choice =input ("\nSelect action: ").strip ().upper ()
-        if choice in ("Q",""):
+def _manage_local_hil_bridge() -> None:
+    while True:
+        clear_screen()
+        supervisor_state = hil_bridge_runtime.read_supervisor_state()
+        relay_state = hil_bridge_runtime.read_card_relay_state()
+        service_state = hil_bridge_runtime.query_user_service_state()
+        live_status = {}
+        live_status_error = ""
+        status_url = str(relay_state.get("statusUrl", "") or "").strip()
+        if (
+            str(service_state.get("activeState", "") or "").strip() == "active"
+            and len(status_url) > 0
+        ):
+            try:
+                live_status = hil_bridge_runtime.read_bridge_status()
+            except Exception as e:
+                live_status_error = str(e)
+        print(
+            f"{Colors.HEADER}=== Local SIMtrace2 HIL Bridge Session ==={Colors.ENDC}\n"
+        )
+        print(
+            "Manual HIL mode: start only when you explicitly need live modem/card tracing."
+        )
+        print(
+            "Start mode now lets you choose raw APDU only, raw APDU + Wireshark, or the decoded in-terminal view.\n"
+        )
+        print(f"Service             : {_hil_bridge_service_state_text(service_state)}")
+        fragment_path = str(service_state.get("fragmentPath", "") or "").strip()
+        if len(fragment_path) > 0:
+            print(f"Service unit path   : {fragment_path}")
+        print(f"Supervisor status   : {supervisor_state.get('status', 'unknown')}")
+        print(f"USB present         : {supervisor_state.get('usbPresent', False)}")
+        print(f"Bridge running      : {supervisor_state.get('bridgeRunning', False)}")
+        print(
+            f"REMSIM running      : {supervisor_state.get('remsimClientRunning', False)}"
+        )
+        reason_text = str(supervisor_state.get("reason", "") or "").strip()
+        if len(reason_text) > 0:
+            print(f"Supervisor reason   : {reason_text}")
+        next_remote_card_url, next_remote_card_token_file = (
+            _resolve_hil_remote_card_service_settings(supervisor_state)
+        )
+        if len(next_remote_card_url) > 0:
+            print("Next start card     : Remote Card Bridge")
+            print(f"Remote card URL     : {next_remote_card_url}")
+            if len(next_remote_card_token_file) > 0:
+                print(f"Remote token file   : {next_remote_card_token_file}")
+        else:
+            print("Next start card     : local reader/backend settings")
+        _print_hil_card_bridge_status()
+        relay_status = "missing"
+        if len(live_status) > 0:
+            relay_status = str(live_status.get("status", "ok") or "").strip() or "ok"
+        elif len(relay_state) > 0:
+            relay_status = str(relay_state.get("status", "ok") or "").strip() or "ok"
+        print(f"Relay status        : {relay_status}")
+        relay_url = str(
+            live_status.get("apduUrl", relay_state.get("apduUrl", "")) or ""
+        ).strip()
+        if len(relay_url) > 0:
+            print(f"Relay APDU URL      : {relay_url}")
+        card_backend = str(
+            live_status.get("cardBackend", relay_state.get("cardBackend", "")) or ""
+        ).strip()
+        if len(card_backend) > 0:
+            print(f"Card backend        : {card_backend}")
+        card_source = str(
+            live_status.get("reader", relay_state.get("reader", "")) or ""
+        ).strip()
+        if len(card_source) > 0:
+            print(f"Card source         : {card_source}")
+        atr_hex = str(live_status.get("atr", relay_state.get("atr", "")) or "").strip()
+        if len(atr_hex) > 0:
+            print(f"ATR                 : {atr_hex}")
+        print(
+            f"Control connected   : {live_status.get('controlConnected', relay_state.get('controlConnected', False))}"
+        )
+        print(
+            f"Bankd connected     : {live_status.get('bankdConnected', relay_state.get('bankdConnected', False))}"
+        )
+        if len(live_status_error) > 0:
+            print(f"Live status note    : {live_status_error}")
+        print("")
+        print(
+            f"  {Colors.CYAN}[1]{Colors.ENDC} Start HIL session (uses the remote card above when configured)"
+        )
+        print(f"  {Colors.CYAN}[2]{Colors.ENDC} Stop HIL session")
+        print(f"  {Colors.CYAN}[3]{Colors.ENDC} Start Card Bridge for next HIL start")
+        print(f"  {Colors.CYAN}[4]{Colors.ENDC} Stop Card Bridge")
+        print(
+            f"  {Colors.CYAN}[5]{Colors.ENDC} Open saved .pcap (offline review, no bridge)"
+        )
+        print(f"  {Colors.WHITE}[R]{Colors.ENDC} Refresh status")
+        print(f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
+        choice = input("\nSelect action: ").strip().upper()
+        if choice in ("Q", ""):
             return
-        if choice =='1':
-            _start_hil_bridge_session ()
+        if choice == "1":
+            _start_hil_bridge_session()
             continue
-        if choice =='2':
-            _stop_hil_bridge_session ()
+        if choice == "2":
+            _stop_hil_bridge_session()
             continue
-        if choice =='3':
-            _start_card_bridge_for_hil_session ()
+        if choice == "3":
+            _start_card_bridge_for_hil_session()
             continue
-        if choice =='4':
-            _stop_card_bridge_for_hil_session ()
+        if choice == "4":
+            _stop_card_bridge_for_hil_session()
             continue
-        if choice =='5':
-            _prompt_open_hil_bridge_pcap_offline ()
+        if choice == "5":
+            _prompt_open_hil_bridge_pcap_offline()
             continue
-        if choice =='R':
+        if choice == "R":
             continue
-        print (f"\n{Colors.FAIL}[!] Invalid HIL bridge selection.{Colors.ENDC}")
-        pause ()
+        print(f"\n{Colors.FAIL}[!] Invalid HIL bridge selection.{Colors.ENDC}")
+        pause()
 
 
-def _card_bridge_remote_rig_status_snapshot ()->dict :
-    try :
-        payload =_run_card_bridge_action ("card_bridge.remote_rig_status",{})
-    except Exception as e :
-        print (f"Remote rig status   : unavailable ({e})")
+def _card_bridge_remote_rig_status_snapshot() -> dict:
+    try:
+        payload = _run_card_bridge_action("card_bridge.remote_rig_status", {})
+    except Exception as e:
+        print(f"Remote rig status   : unavailable ({e})")
         return {}
-    lines =payload .get ("lines",[])
-    if isinstance (lines ,list )and len (lines )>0 :
-        print ("Remote rig status:")
-        _print_key_value_lines (lines )
-    note =str (payload .get ("note","")or "").strip ()
-    if len (note )>0 :
-        print (f"Remote rig note     : {note}")
+    lines = payload.get("lines", [])
+    if isinstance(lines, list) and len(lines) > 0:
+        print("Remote rig status:")
+        _print_key_value_lines(lines)
+    note = str(payload.get("note", "") or "").strip()
+    if len(note) > 0:
+        print(f"Remote rig note     : {note}")
     return payload
 
 
-def _card_bridge_remote_rig_state_snapshot ()->dict :
-    try :
-        payload =_run_card_bridge_action ("card_bridge.remote_rig_status",{})
-    except Exception :
+def _card_bridge_remote_rig_state_snapshot() -> dict:
+    try:
+        payload = _run_card_bridge_action("card_bridge.remote_rig_status", {})
+    except Exception:
         return {}
-    state =payload .get ("state",{})
-    return dict (state )if isinstance (state ,dict )else {}
+    state = payload.get("state", {})
+    return dict(state) if isinstance(state, dict) else {}
 
 
-def _local_hil_available ()->bool :
-    if hil_bridge_runtime is None :
+def _local_hil_available() -> bool:
+    if hil_bridge_runtime is None:
         return False
-    return len (yggdrasim_flavor .hil_bridge_unavailable_reason ())==0
+    return len(yggdrasim_flavor.hil_bridge_unavailable_reason()) == 0
 
 
-def _stop_hil_session_one_shot ()->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Stop HIL Session ==={Colors.ENDC}\n")
-    print ("This stops the saved remote HIL service, SSH tunnel, and local Card Bridge.")
-    if _local_hil_available ():
-        print ("If a direct local SIMtrace2 HIL service is active, it is stopped as well.")
-    if _prompt_yes_no ("Stop HIL session now",False )is False :
-        print (f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
-        pause ()
-        return
-    saved_state =_card_bridge_remote_rig_state_snapshot ()
-    remote_payload ={}
-    try :
-        remote_payload =_run_card_bridge_action (
-        "card_bridge.remote_rig_stop",
-        {
-        "ssh_target":str (saved_state .get ("ssh_target","")or "").strip (),
-        "identity_file":str (saved_state .get ("identity_file","")or "").strip (),
-        "service_name":str (saved_state .get ("service_name","")or "yggdrasim-hil-supervisor.service").strip (),
-        "local_gui_port":_state_int_value (saved_state ,"local_gui_port",27854 ),
-        "remote_workdir":str (saved_state .get ("remote_workdir","")or "~/YggdraSIM").strip (),
-        "remote_python":str (saved_state .get ("remote_python","")or "~/YggdraSIM/.venv/bin/python").strip (),
-        "confirm":True ,
-        },
+def _stop_hil_session_one_shot() -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== Stop HIL Session ==={Colors.ENDC}\n")
+    print("This stops the saved remote HIL service, SSH tunnel, and local Card Bridge.")
+    if _local_hil_available():
+        print(
+            "If a direct local SIMtrace2 HIL service is active, it is stopped as well."
         )
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Remote HIL rig stop failed: {e}{Colors.ENDC}")
-    else :
-        print ("")
-        _print_card_bridge_result (remote_payload )
-        _print_card_bridge_remote_rig_steps (remote_payload )
-    if _local_hil_available ():
-        try :
-            service_state =hil_bridge_runtime .query_user_service_state ()
-            active_state =str (service_state .get ("activeState","")or "").strip ()
-            if active_state =="active":
-                hil_bridge_runtime .stop_user_service ()
-                print (f"\n{Colors.GREEN}[+] Direct local SIMtrace2 HIL service stopped.{Colors.ENDC}")
-        except Exception as e :
-            print (f"\n{Colors.WARNING}[*] Direct local HIL stop check failed: {e}{Colors.ENDC}")
-    if bool (remote_payload .get ("ok",False )):
-        print (f"\n{Colors.GREEN}[+] HIL session stop completed.{Colors.ENDC}")
-    pause ()
-
-
-def manage_hil_bridge ()->None :
-    if _local_hil_available ():
-        _manage_local_hil_bridge ()
+    if _prompt_yes_no("Stop HIL session now", False) is False:
+        print(f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
+        pause()
         return
-    while True :
-        clear_screen ()
-        print (f"{Colors.HEADER}=== Local SIMtrace2 HIL Bridge Session ==={Colors.ENDC}\n")
-        reason =yggdrasim_flavor .hil_bridge_unavailable_reason ()
-        if len (reason )>0 :
-            print (f"{Colors.WARNING}[*] {reason}{Colors.ENDC}")
-        else :
-            print (f"{Colors.WARNING}[*] Local HIL bridge runtime is not available in this build.{Colors.ENDC}")
-        print ("Card Bridge remains available for publishing a local PC/SC reader.")
-        _print_hil_card_bridge_status ()
-        print ("")
-        print (f"  {Colors.CYAN}[3]{Colors.ENDC} Start Card Bridge")
-        print (f"  {Colors.CYAN}[4]{Colors.ENDC} Stop Card Bridge")
-        print (f"  {Colors.WHITE}[R]{Colors.ENDC} Refresh status")
-        print (f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
-        choice =input ("\nSelect action: ").strip ().upper ()
-        if choice in ("Q",""):
+    saved_state = _card_bridge_remote_rig_state_snapshot()
+    remote_payload = {}
+    try:
+        remote_payload = _run_card_bridge_action(
+            "card_bridge.remote_rig_stop",
+            {
+                "ssh_target": str(saved_state.get("ssh_target", "") or "").strip(),
+                "identity_file": str(
+                    saved_state.get("identity_file", "") or ""
+                ).strip(),
+                "service_name": str(
+                    saved_state.get("service_name", "")
+                    or "yggdrasim-hil-supervisor.service"
+                ).strip(),
+                "local_gui_port": _state_int_value(
+                    saved_state, "local_gui_port", 27854
+                ),
+                "remote_workdir": str(
+                    saved_state.get("remote_workdir", "") or "~/YggdraSIM"
+                ).strip(),
+                "remote_python": str(
+                    saved_state.get("remote_python", "")
+                    or "~/YggdraSIM/.venv/bin/python"
+                ).strip(),
+                "confirm": True,
+            },
+        )
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Remote HIL rig stop failed: {e}{Colors.ENDC}")
+    else:
+        print("")
+        _print_card_bridge_result(remote_payload)
+        _print_card_bridge_remote_rig_steps(remote_payload)
+    if _local_hil_available():
+        try:
+            service_state = hil_bridge_runtime.query_user_service_state()
+            active_state = str(service_state.get("activeState", "") or "").strip()
+            if active_state == "active":
+                hil_bridge_runtime.stop_user_service()
+                print(
+                    f"\n{Colors.GREEN}[+] Direct local SIMtrace2 HIL service stopped.{Colors.ENDC}"
+                )
+        except Exception as e:
+            print(
+                f"\n{Colors.WARNING}[*] Direct local HIL stop check failed: {e}{Colors.ENDC}"
+            )
+    if bool(remote_payload.get("ok", False)):
+        print(f"\n{Colors.GREEN}[+] HIL session stop completed.{Colors.ENDC}")
+    pause()
+
+
+def manage_hil_bridge() -> None:
+    if _local_hil_available():
+        _manage_local_hil_bridge()
+        return
+    while True:
+        clear_screen()
+        print(
+            f"{Colors.HEADER}=== Local SIMtrace2 HIL Bridge Session ==={Colors.ENDC}\n"
+        )
+        reason = yggdrasim_flavor.hil_bridge_unavailable_reason()
+        if len(reason) > 0:
+            print(f"{Colors.WARNING}[*] {reason}{Colors.ENDC}")
+        else:
+            print(
+                f"{Colors.WARNING}[*] Local HIL bridge runtime is not available in this build.{Colors.ENDC}"
+            )
+        print("Card Bridge remains available for publishing a local PC/SC reader.")
+        _print_hil_card_bridge_status()
+        print("")
+        print(f"  {Colors.CYAN}[3]{Colors.ENDC} Start Card Bridge")
+        print(f"  {Colors.CYAN}[4]{Colors.ENDC} Stop Card Bridge")
+        print(f"  {Colors.WHITE}[R]{Colors.ENDC} Refresh status")
+        print(f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
+        choice = input("\nSelect action: ").strip().upper()
+        if choice in ("Q", ""):
             return
-        if choice =="3":
-            _start_card_bridge_for_hil_session ()
+        if choice == "3":
+            _start_card_bridge_for_hil_session()
             continue
-        if choice =="4":
-            _stop_card_bridge_for_hil_session ()
+        if choice == "4":
+            _stop_card_bridge_for_hil_session()
             continue
-        if choice =="R":
+        if choice == "R":
             continue
-        print (f"\n{Colors.FAIL}[!] Invalid HIL selection.{Colors.ENDC}")
-        pause ()
+        print(f"\n{Colors.FAIL}[!] Invalid HIL selection.{Colors.ENDC}")
+        pause()
 
 
-def _prompt_open_hil_bridge_pcap_offline ()->None :
-    try :
-        from Tools.HilBridge.live_decode_tui import pick_capture_file_path 
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Could not load capture file picker: {e}{Colors.ENDC}")
-        pause ()
-        return 
-    default_dir =_hil_bridge_termshark_runtime_root ()
-    selected_path =""
-    try :
-        picked =pick_capture_file_path (last_open_directory =default_dir )
-        if picked is not None :
-            selected_path =str (picked )
-    except RuntimeError as e :
-        print (f"\n{Colors.WARNING}[*] Native picker unavailable: {e}{Colors.ENDC}")
-    except Exception as e :
-        print (f"\n{Colors.WARNING}[*] Native picker failed: {e}{Colors.ENDC}")
-    if len (selected_path )==0 :
-        print ("\nEnter the path to a saved .pcap / .pcapng (blank to cancel).")
-        prompted =input ("pcap path: ").strip ()
-        if len (prompted )==0 :
-            return 
-        selected_path =prompted 
-    print ("\nOptionally, enter the path to a keybag JSON for SCP03/SCP11c unwrap.")
-    print ("Leave blank to auto-discover `<pcap>.keys.json` in the same directory.")
-    keybag_input =input ("keybag path: ").strip ()
-    exit_code =_open_hil_bridge_pcap_offline (selected_path ,keybag_path =keybag_input )
-    if exit_code !=0 :
-        pause ()
+def _prompt_open_hil_bridge_pcap_offline() -> None:
+    try:
+        from Tools.HilBridge.live_decode_tui import pick_capture_file_path
+    except Exception as e:
+        print(
+            f"\n{Colors.FAIL}[!] Could not load capture file picker: {e}{Colors.ENDC}"
+        )
+        pause()
+        return
+    default_dir = _hil_bridge_termshark_runtime_root()
+    selected_path = ""
+    try:
+        picked = pick_capture_file_path(last_open_directory=default_dir)
+        if picked is not None:
+            selected_path = str(picked)
+    except RuntimeError as e:
+        print(f"\n{Colors.WARNING}[*] Native picker unavailable: {e}{Colors.ENDC}")
+    except Exception as e:
+        print(f"\n{Colors.WARNING}[*] Native picker failed: {e}{Colors.ENDC}")
+    if len(selected_path) == 0:
+        print("\nEnter the path to a saved .pcap / .pcapng (blank to cancel).")
+        prompted = input("pcap path: ").strip()
+        if len(prompted) == 0:
+            return
+        selected_path = prompted
+    print("\nOptionally, enter the path to a keybag JSON for SCP03/SCP11c unwrap.")
+    print("Leave blank to auto-discover `<pcap>.keys.json` in the same directory.")
+    keybag_input = input("keybag path: ").strip()
+    exit_code = _open_hil_bridge_pcap_offline(selected_path, keybag_path=keybag_input)
+    if exit_code != 0:
+        pause()
 
 
-def _run_card_bridge_action (action_id :str ,inputs :dict |None =None )->dict :
+def _run_card_bridge_action(action_id: str, inputs: dict | None = None) -> dict:
     """Run a Card Bridge action dispatcher from the terminal menu."""
     from yggdrasim_common.gui_server.actions import card_bridge as _card_bridge_actions
-    from yggdrasim_common.gui_server.actions.registry import ActionContext ,get_registry
+    from yggdrasim_common.gui_server.actions.registry import ActionContext, get_registry
 
     # Importing the module registers the action specs as a side effect.
     del _card_bridge_actions
-    spec =get_registry ().get (action_id )
-    if spec .dispatcher is None :
-        raise RuntimeError (f"Card Bridge action has no dispatcher: {action_id}")
-    result =spec .dispatcher (ActionContext (),**(inputs or {}))
-    if isinstance (result ,dict ):
+    spec = get_registry().get(action_id)
+    if spec.dispatcher is None:
+        raise RuntimeError(f"Card Bridge action has no dispatcher: {action_id}")
+    result = spec.dispatcher(ActionContext(), **(inputs or {}))
+    if isinstance(result, dict):
         return result
-    return {"value":result}
+    return {"value": result}
 
 
-def _print_hil_card_bridge_status ()->None :
-    try :
-        rig_payload =_run_card_bridge_action ("card_bridge.remote_rig_status",{})
-    except Exception as e :
-        print (f"Card Bridge         : status unavailable ({e})")
+def _print_hil_card_bridge_status() -> None:
+    try:
+        rig_payload = _run_card_bridge_action("card_bridge.remote_rig_status", {})
+    except Exception as e:
+        print(f"Card Bridge         : status unavailable ({e})")
         return
-    state =rig_payload .get ("state",{})
-    if isinstance (state ,dict )is False :
-        state ={}
-    running =bool (state .get ("local_card_bridge_running",False ))
-    pid =str (state .get ("local_card_bridge_pid","")or "").strip ()or "-"
-    port =str (state .get ("local_card_bridge_port","")or "").strip ()or "8642"
-    print (f"Card Bridge         : {'running'if running else 'stopped'}")
-    print (f"Card Bridge pid     : {pid}")
-    if running :
-        print (f"Card Bridge URL     : http://127.0.0.1:{port}/apdu")
-    try :
-        config_payload =_run_card_bridge_action ("card_bridge.status",{})
-    except Exception :
-        config_payload ={}
-    summary =str (config_payload .get ("summary","")or "").strip ()
-    if len (summary )>0 :
-        print (f"Card Bridge config  : {summary}")
+    state = rig_payload.get("state", {})
+    if isinstance(state, dict) is False:
+        state = {}
+    running = bool(state.get("local_card_bridge_running", False))
+    pid = str(state.get("local_card_bridge_pid", "") or "").strip() or "-"
+    port = str(state.get("local_card_bridge_port", "") or "").strip() or "8642"
+    print(f"Card Bridge         : {'running' if running else 'stopped'}")
+    print(f"Card Bridge pid     : {pid}")
+    if running:
+        print(f"Card Bridge URL     : http://127.0.0.1:{port}/apdu")
+    try:
+        config_payload = _run_card_bridge_action("card_bridge.status", {})
+    except Exception:
+        config_payload = {}
+    summary = str(config_payload.get("summary", "") or "").strip()
+    if len(summary) > 0:
+        print(f"Card Bridge config  : {summary}")
 
 
-def _print_key_value_lines (lines )->None :
+def _print_key_value_lines(lines) -> None:
     for entry in lines or []:
-        if isinstance (entry ,dict )==False :
+        if not isinstance(entry, dict):
             continue
-        key =str (entry .get ("key","")or "").strip ()
-        value =str (entry .get ("value","")or "").strip ()
-        if len (key )==0 :
+        key = str(entry.get("key", "") or "").strip()
+        value = str(entry.get("value", "") or "").strip()
+        if len(key) == 0:
             continue
-        print (f"  {key:<22}: {value}")
+        print(f"  {key:<22}: {value}")
 
 
-def _print_card_bridge_result (payload :dict )->None :
-    ok_value =payload .get ("ok",None )
-    if ok_value is not None :
-        status_color =Colors.GREEN if bool (ok_value )else Colors.FAIL
-        print (f"{status_color}{'[+]'if bool(ok_value)else '[-]'} ok={bool(ok_value)}{Colors.ENDC}")
-    note =str (payload .get ("note","")or payload .get ("summary","")or payload .get ("reason","")or "").strip ()
-    if len (note )>0 :
-        print (f"  Note                  : {note}")
-    if isinstance (payload .get ("lines"),list ):
-        _print_key_value_lines (payload .get ("lines"))
-    for key ,label in (
-    ("pid","PID"),
-    ("port","Port"),
-    ("url","URL"),
-    ("remote_card_url","Remote card URL"),
-    ("local_gui_url","Local GUI URL"),
-    ("log_path","Log path"),
-    ("token_file","Token file"),
-    ("token_fingerprint","Token fingerprint"),
-    ("auth_posture","Auth posture"),
-    ("reader","Reader"),
-    ("atr_hex","ATR"),
-    ("ping_latency_ms","Ping latency ms"),
-    ("status_latency_ms","Status latency ms"),
+def _print_card_bridge_result(payload: dict) -> None:
+    ok_value = payload.get("ok", None)
+    if ok_value is not None:
+        status_color = Colors.GREEN if bool(ok_value) else Colors.FAIL
+        print(
+            f"{status_color}{'[+]' if bool(ok_value) else '[-]'} ok={bool(ok_value)}{Colors.ENDC}"
+        )
+    note = str(
+        payload.get("note", "")
+        or payload.get("summary", "")
+        or payload.get("reason", "")
+        or ""
+    ).strip()
+    if len(note) > 0:
+        print(f"  Note                  : {note}")
+    if isinstance(payload.get("lines"), list):
+        _print_key_value_lines(payload.get("lines"))
+    for key, label in (
+        ("pid", "PID"),
+        ("port", "Port"),
+        ("url", "URL"),
+        ("remote_card_url", "Remote card URL"),
+        ("local_gui_url", "Local GUI URL"),
+        ("log_path", "Log path"),
+        ("token_file", "Token file"),
+        ("token_fingerprint", "Token fingerprint"),
+        ("auth_posture", "Auth posture"),
+        ("reader", "Reader"),
+        ("atr_hex", "ATR"),
+        ("ping_latency_ms", "Ping latency ms"),
+        ("status_latency_ms", "Status latency ms"),
     ):
-        value =payload .get (key ,None )
-        if value is None or str (value ).strip ()=="":
+        value = payload.get(key, None)
+        if value is None or str(value).strip() == "":
             continue
-        print (f"  {label:<22}: {value}")
-    log_tail =str (payload .get ("log_tail","")or "").strip ()
-    if len (log_tail )>0 :
-        print ("\n--- log tail ---")
-        print (log_tail )
+        print(f"  {label:<22}: {value}")
+    log_tail = str(payload.get("log_tail", "") or "").strip()
+    if len(log_tail) > 0:
+        print("\n--- log tail ---")
+        print(log_tail)
 
 
-def _card_bridge_default_token_file (port :int =8642 )->str :
+def _card_bridge_default_token_file(port: int = 8642) -> str:
     from yggdrasim_common.card_bridge_auth import default_token_file_for_port
 
-    return str (default_token_file_for_port (int (port or 8642 )))
+    return str(default_token_file_for_port(int(port or 8642)))
 
 
-def _prompt_int_value (label :str ,default :int )->int :
-    raw_value =input (f"{label} [{default}]: ").strip ()
-    if len (raw_value )==0 :
-        return int (default )
-    return int (raw_value )
+def _prompt_int_value(label: str, default: int) -> int:
+    raw_value = input(f"{label} [{default}]: ").strip()
+    if len(raw_value) == 0:
+        return int(default)
+    return int(raw_value)
 
 
-def _prompt_yes_no (label :str ,default :bool =False )->bool :
-    suffix ="Y/n"if default else "y/N"
-    raw_value =input (f"{label} [{suffix}]: ").strip ().lower ()
-    if len (raw_value )==0 :
-        return bool (default )
-    return raw_value in ("y","yes","true","1","on")
+def _prompt_yes_no(label: str, default: bool = False) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    raw_value = input(f"{label} [{suffix}]: ").strip().lower()
+    if len(raw_value) == 0:
+        return bool(default)
+    return raw_value in ("y", "yes", "true", "1", "on")
 
 
-def _prompt_text_value (label :str ,default :str ="")->str :
-    default_text =str (default or "").strip ()
-    suffix =f" [{default_text}]"if len (default_text )>0 else ""
-    raw_value =input (f"{label}{suffix}: ").strip ()
-    if len (raw_value )==0 :
+def _prompt_text_value(label: str, default: str = "") -> str:
+    default_text = str(default or "").strip()
+    suffix = f" [{default_text}]" if len(default_text) > 0 else ""
+    raw_value = input(f"{label}{suffix}: ").strip()
+    if len(raw_value) == 0:
         return default_text
     return raw_value
 
 
-def _state_int_value (state :dict ,key :str ,default :int )->int :
-    try :
-        return int (state .get (key ,default )or default )
-    except (TypeError ,ValueError ):
-        return int (default )
+def _state_int_value(state: dict, key: str, default: int) -> int:
+    try:
+        return int(state.get(key, default) or default)
+    except (TypeError, ValueError):
+        return int(default)
 
 
-def _configured_card_bridge_port_for_hil (default :int =8642 )->int :
-    candidate_url =str (os .environ .get (CARD_RELAY_URL_ENV ,"")or "").strip ()
-    if len (candidate_url )>0 :
-        try :
+def _configured_card_bridge_port_for_hil(default: int = 8642) -> int:
+    candidate_url = str(os.environ.get(CARD_RELAY_URL_ENV, "") or "").strip()
+    if len(candidate_url) > 0:
+        try:
             from urllib.parse import urlparse
 
-            parsed =urlparse (candidate_url )
-            if parsed .port is not None :
-                return int (parsed .port )
-        except (TypeError ,ValueError ,OSError ):
+            parsed = urlparse(candidate_url)
+            if parsed.port is not None:
+                return int(parsed.port)
+        except (TypeError, ValueError, OSError):
             pass
-    try :
-        state =_card_bridge_remote_rig_state_snapshot ()
-    except Exception :
-        state ={}
-    return _state_int_value (state ,"local_card_bridge_port",default )
+    try:
+        state = _card_bridge_remote_rig_state_snapshot()
+    except Exception:
+        state = {}
+    return _state_int_value(state, "local_card_bridge_port", default)
 
 
-def _configured_card_bridge_token_file_for_hil (port :int )->str :
-    token_file =str (os .environ .get (CARD_RELAY_TOKEN_FILE_ENV ,"")or "").strip ()
-    if len (token_file )>0 :
+def _configured_card_bridge_token_file_for_hil(port: int) -> str:
+    token_file = str(os.environ.get(CARD_RELAY_TOKEN_FILE_ENV, "") or "").strip()
+    if len(token_file) > 0:
         return token_file
-    return _card_bridge_default_token_file (port )
+    return _card_bridge_default_token_file(port)
 
 
-def _print_card_bridge_copy_paste (port :int ,token_file :str )->None :
-    token_path =str (token_file or _card_bridge_default_token_file (port ))
-    print ("\nCopy/paste helpers:")
-    print (f"  export YGGDRASIM_CARD_RELAY_URL=http://127.0.0.1:{port}/apdu")
-    print (f"  export YGGDRASIM_CARD_RELAY_TOKEN_FILE={token_path}")
-    print (
-    "  ssh -fN -L "
-    f"{port}:127.0.0.1:{port} <reader-host>"
-    )
-    print (
-    "  ssh -fN -R "
-    f"{port}:127.0.0.1:{port} <rig-host>"
-    )
+def _print_card_bridge_copy_paste(port: int, token_file: str) -> None:
+    token_path = str(token_file or _card_bridge_default_token_file(port))
+    print("\nCopy/paste helpers:")
+    print(f"  export YGGDRASIM_CARD_RELAY_URL=http://127.0.0.1:{port}/apdu")
+    print(f"  export YGGDRASIM_CARD_RELAY_TOKEN_FILE={token_path}")
+    print(f"  ssh -fN -L {port}:127.0.0.1:{port} <reader-host>")
+    print(f"  ssh -fN -R {port}:127.0.0.1:{port} <rig-host>")
 
 
-def _prompt_card_bridge_local_start (
+def _prompt_card_bridge_local_start(
     *,
-    title :str ="Start Local Card Bridge",
-    configure_cli_session :bool =False ,
-)->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== {title} ==={Colors.ENDC}\n")
-    try :
-        port =_prompt_int_value ("Port",8642 )
-        reader_name =input ("Reader name substring [blank=use reader index]: ").strip ()
-        reader_index =0
-        if len (reader_name )==0 :
-            reader_index =_prompt_int_value ("Reader index",0 )
-        default_token_file =_card_bridge_default_token_file (port )
-        token_file =input (f"Token file [blank={default_token_file}]: ").strip ()
-        if len (token_file )==0 :
-            token_file =default_token_file
-        timeout_ms =_prompt_int_value ("APDU timeout ms",30000 )
-        reuse_existing =_prompt_yes_no ("Reuse a reachable bridge already listening on this port",True )
-        restart =False
-        if reuse_existing is False :
-            restart =_prompt_yes_no ("Restart an owned Card Bridge if already running",False )
-        if _prompt_yes_no ("Start Card Bridge now",False )is False :
-            print (f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
-            pause ()
-            return
-        payload =_run_card_bridge_action (
-        "card_bridge.local_start",
-        {
-        "port":port ,
-        "reader_index":reader_index ,
-        "reader_name":reader_name ,
-        "token_file":token_file ,
-        "apdu_timeout_ms":timeout_ms ,
-        "restart":restart ,
-        "reuse_existing":reuse_existing ,
-        "confirm":True ,
-        },
+    title: str = "Start Local Card Bridge",
+    configure_cli_session: bool = False,
+) -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== {title} ==={Colors.ENDC}\n")
+    try:
+        port = _prompt_int_value("Port", 8642)
+        reader_name = input("Reader name substring [blank=use reader index]: ").strip()
+        reader_index = 0
+        if len(reader_name) == 0:
+            reader_index = _prompt_int_value("Reader index", 0)
+        default_token_file = _card_bridge_default_token_file(port)
+        token_file = input(f"Token file [blank={default_token_file}]: ").strip()
+        if len(token_file) == 0:
+            token_file = default_token_file
+        timeout_ms = _prompt_int_value("APDU timeout ms", 30000)
+        reuse_existing = _prompt_yes_no(
+            "Reuse a reachable bridge already listening on this port", True
         )
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Could not start Card Bridge: {e}{Colors.ENDC}")
-        pause ()
-        return
-    print ("")
-    _print_card_bridge_result (payload )
-    if bool (payload .get ("ok",False )):
-        actual_port =int (payload .get ("port",port )or port )
-        if configure_cli_session :
-            namespace =argparse .Namespace (
-            remote_card_url =f"http://127.0.0.1:{actual_port}/apdu",
-            remote_card_token_file =token_file ,
+        restart = False
+        if reuse_existing is False:
+            restart = _prompt_yes_no(
+                "Restart an owned Card Bridge if already running", False
             )
-            state =_apply_remote_card_arguments (namespace )
-            print (f"\n{Colors.GREEN}[+] HIL next-start card configured: {_describe_remote_card_state(state)}{Colors.ENDC}")
-        else :
-            _print_card_bridge_copy_paste (actual_port ,token_file )
-    pause ()
-
-
-def _start_card_bridge_for_hil_session ()->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Start Card Bridge for HIL Session ==={Colors.ENDC}\n")
-    port =_configured_card_bridge_port_for_hil (8642 )
-    token_file =_configured_card_bridge_token_file_for_hil (port )
-    print (f"Port              : {port}")
-    print ("Reader index      : 0")
-    print (f"Token file        : {token_file}")
-    print ("Mode              : reuse existing listener, no prompt")
-    try :
-        payload =_run_card_bridge_action (
-        "card_bridge.local_start",
-        {
-        "port":port ,
-        "reader_index":0 ,
-        "reader_name":"",
-        "token_file":token_file ,
-        "apdu_timeout_ms":30000 ,
-        "restart":False ,
-        "reuse_existing":True ,
-        "confirm":True ,
-        },
+        if _prompt_yes_no("Start Card Bridge now", False) is False:
+            print(f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
+            pause()
+            return
+        payload = _run_card_bridge_action(
+            "card_bridge.local_start",
+            {
+                "port": port,
+                "reader_index": reader_index,
+                "reader_name": reader_name,
+                "token_file": token_file,
+                "apdu_timeout_ms": timeout_ms,
+                "restart": restart,
+                "reuse_existing": reuse_existing,
+                "confirm": True,
+            },
         )
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Could not start Card Bridge: {e}{Colors.ENDC}")
-        pause ()
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Could not start Card Bridge: {e}{Colors.ENDC}")
+        pause()
         return
-    print ("")
-    _print_card_bridge_result (payload )
-    if bool (payload .get ("ok",False )):
-        actual_port =int (payload .get ("port",port )or port )
-        namespace =argparse .Namespace (
-        remote_card_url =f"http://127.0.0.1:{actual_port}/apdu",
-        remote_card_token_file =token_file ,
+    print("")
+    _print_card_bridge_result(payload)
+    if bool(payload.get("ok", False)):
+        actual_port = int(payload.get("port", port) or port)
+        if configure_cli_session:
+            namespace = argparse.Namespace(
+                remote_card_url=f"http://127.0.0.1:{actual_port}/apdu",
+                remote_card_token_file=token_file,
+            )
+            state = _apply_remote_card_arguments(namespace)
+            print(
+                f"\n{Colors.GREEN}[+] HIL next-start card configured: {_describe_remote_card_state(state)}{Colors.ENDC}"
+            )
+        else:
+            _print_card_bridge_copy_paste(actual_port, token_file)
+    pause()
+
+
+def _start_card_bridge_for_hil_session() -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== Start Card Bridge for HIL Session ==={Colors.ENDC}\n")
+    port = _configured_card_bridge_port_for_hil(8642)
+    token_file = _configured_card_bridge_token_file_for_hil(port)
+    print(f"Port              : {port}")
+    print("Reader index      : 0")
+    print(f"Token file        : {token_file}")
+    print("Mode              : reuse existing listener, no prompt")
+    try:
+        payload = _run_card_bridge_action(
+            "card_bridge.local_start",
+            {
+                "port": port,
+                "reader_index": 0,
+                "reader_name": "",
+                "token_file": token_file,
+                "apdu_timeout_ms": 30000,
+                "restart": False,
+                "reuse_existing": True,
+                "confirm": True,
+            },
         )
-        state =_apply_remote_card_arguments (namespace )
-        print (f"\n{Colors.GREEN}[+] HIL next-start card configured: {_describe_remote_card_state(state)}{Colors.ENDC}")
-    print ("\nUse [CB] for custom reader, port, token, or audit settings.")
-    pause ()
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Could not start Card Bridge: {e}{Colors.ENDC}")
+        pause()
+        return
+    print("")
+    _print_card_bridge_result(payload)
+    if bool(payload.get("ok", False)):
+        actual_port = int(payload.get("port", port) or port)
+        namespace = argparse.Namespace(
+            remote_card_url=f"http://127.0.0.1:{actual_port}/apdu",
+            remote_card_token_file=token_file,
+        )
+        state = _apply_remote_card_arguments(namespace)
+        print(
+            f"\n{Colors.GREEN}[+] HIL next-start card configured: {_describe_remote_card_state(state)}{Colors.ENDC}"
+        )
+    print("\nUse [CB] for custom reader, port, token, or audit settings.")
+    pause()
 
 
-def _stop_card_bridge_local (
+def _stop_card_bridge_local(
     *,
-    title :str ="Stop Local Card Bridge",
-    clear_cli_session :bool =False ,
-)->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== {title} ==={Colors.ENDC}\n")
-    if _prompt_yes_no ("Stop the locally managed Card Bridge",False )is False :
-        print (f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
-        pause ()
+    title: str = "Stop Local Card Bridge",
+    clear_cli_session: bool = False,
+) -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== {title} ==={Colors.ENDC}\n")
+    if _prompt_yes_no("Stop the locally managed Card Bridge", False) is False:
+        print(f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
+        pause()
         return
-    try :
-        payload =_run_card_bridge_action ("card_bridge.local_stop",{"confirm":True })
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Could not stop Card Bridge: {e}{Colors.ENDC}")
-        pause ()
+    try:
+        payload = _run_card_bridge_action("card_bridge.local_stop", {"confirm": True})
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Could not stop Card Bridge: {e}{Colors.ENDC}")
+        pause()
         return
-    _print_card_bridge_result (payload )
-    if clear_cli_session and bool (payload .get ("ok",False )):
-        namespace =argparse .Namespace (
-        remote_card_url ="",
-        remote_card_token_file ="",
+    _print_card_bridge_result(payload)
+    if clear_cli_session and bool(payload.get("ok", False)):
+        namespace = argparse.Namespace(
+            remote_card_url="",
+            remote_card_token_file="",
         )
-        state =_apply_remote_card_arguments (namespace )
-        print (f"\n{Colors.GREEN}[+] HIL next-start card cleared: {_describe_remote_card_state(state)}{Colors.ENDC}")
-    pause ()
+        state = _apply_remote_card_arguments(namespace)
+        print(
+            f"\n{Colors.GREEN}[+] HIL next-start card cleared: {_describe_remote_card_state(state)}{Colors.ENDC}"
+        )
+    pause()
 
 
-def _stop_card_bridge_for_hil_session ()->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Stop Card Bridge for HIL Session ==={Colors.ENDC}\n")
-    try :
-        payload =_run_card_bridge_action ("card_bridge.local_stop",{"confirm":True })
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Could not stop Card Bridge: {e}{Colors.ENDC}")
-        pause ()
+def _stop_card_bridge_for_hil_session() -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== Stop Card Bridge for HIL Session ==={Colors.ENDC}\n")
+    try:
+        payload = _run_card_bridge_action("card_bridge.local_stop", {"confirm": True})
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Could not stop Card Bridge: {e}{Colors.ENDC}")
+        pause()
         return
-    _print_card_bridge_result (payload )
-    namespace =argparse .Namespace (
-    remote_card_url ="",
-    remote_card_token_file ="",
+    _print_card_bridge_result(payload)
+    namespace = argparse.Namespace(
+        remote_card_url="",
+        remote_card_token_file="",
     )
-    state =_apply_remote_card_arguments (namespace )
-    print (f"\n{Colors.GREEN}[+] HIL next-start card cleared: {_describe_remote_card_state(state)}{Colors.ENDC}")
-    pause ()
+    state = _apply_remote_card_arguments(namespace)
+    print(
+        f"\n{Colors.GREEN}[+] HIL next-start card cleared: {_describe_remote_card_state(state)}{Colors.ENDC}"
+    )
+    pause()
 
 
-def _probe_card_bridge_configured ()->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Probe Remote APDU / Card Bridge ==={Colors.ENDC}\n")
-    try :
-        payload =_run_card_bridge_action ("card_bridge.probe",{"use_configured":True })
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] Probe failed: {e}{Colors.ENDC}")
-        pause ()
+def _probe_card_bridge_configured() -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== Probe Remote APDU / Card Bridge ==={Colors.ENDC}\n")
+    try:
+        payload = _run_card_bridge_action("card_bridge.probe", {"use_configured": True})
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] Probe failed: {e}{Colors.ENDC}")
+        pause()
         return
-    _print_card_bridge_result (payload )
-    pause ()
+    _print_card_bridge_result(payload)
+    pause()
 
 
-def _configure_remote_card_for_cli_session ()->None :
+def _configure_remote_card_for_cli_session() -> None:
     import argparse
 
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Configure Remote APDU Consumer ==={Colors.ENDC}\n")
-    print ("This only affects the current CLI process and tools launched from it.")
-    print ("Pass an empty URL to clear the current remote-card setting.\n")
-    current_url =os .environ .get ("YGGDRASIM_CARD_RELAY_URL","")
-    current_token =os .environ .get ("YGGDRASIM_CARD_RELAY_TOKEN_FILE","")
-    url =input (f"Remote APDU URL [current={current_url or 'not set'}]: ").strip ()
-    token_file =input (f"Token file [current={current_token or 'not set'}]: ").strip ()
-    namespace =argparse .Namespace (
-    remote_card_url =url ,
-    remote_card_token_file =token_file ,
+    clear_screen()
+    print(f"{Colors.HEADER}=== Configure Remote APDU Consumer ==={Colors.ENDC}\n")
+    print("This only affects the current CLI process and tools launched from it.")
+    print("Pass an empty URL to clear the current remote-card setting.\n")
+    current_url = os.environ.get("YGGDRASIM_CARD_RELAY_URL", "")
+    current_token = os.environ.get("YGGDRASIM_CARD_RELAY_TOKEN_FILE", "")
+    url = input(f"Remote APDU URL [current={current_url or 'not set'}]: ").strip()
+    token_file = input(f"Token file [current={current_token or 'not set'}]: ").strip()
+    namespace = argparse.Namespace(
+        remote_card_url=url,
+        remote_card_token_file=token_file,
     )
-    state =_apply_remote_card_arguments (namespace )
-    print (f"\n{Colors.GREEN}[+] {_describe_remote_card_state(state)}{Colors.ENDC}")
-    pause ()
+    state = _apply_remote_card_arguments(namespace)
+    print(f"\n{Colors.GREEN}[+] {_describe_remote_card_state(state)}{Colors.ENDC}")
+    pause()
 
 
-def _show_card_bridge_ssh_recipe ()->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Card Bridge SSH Recipe ==={Colors.ENDC}\n")
-    try :
-        port =_prompt_int_value ("Card Bridge port",8642 )
-    except ValueError :
-        port =8642
-    token_file =input (f"Token file [blank={_card_bridge_default_token_file(port)}]: ").strip ()
-    if len (token_file )==0 :
-        token_file =_card_bridge_default_token_file (port )
-    print ("")
-    _print_card_bridge_copy_paste (port ,token_file )
-    print ("\nUse -L when the YggdraSIM CLI runs away from the reader host.")
-    print ("Use -R when a remote rig must consume a card attached to this workstation.")
-    pause ()
+def _show_card_bridge_ssh_recipe() -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== Card Bridge SSH Recipe ==={Colors.ENDC}\n")
+    try:
+        port = _prompt_int_value("Card Bridge port", 8642)
+    except ValueError:
+        port = 8642
+    token_file = input(
+        f"Token file [blank={_card_bridge_default_token_file(port)}]: "
+    ).strip()
+    if len(token_file) == 0:
+        token_file = _card_bridge_default_token_file(port)
+    print("")
+    _print_card_bridge_copy_paste(port, token_file)
+    print("\nUse -L when the YggdraSIM CLI runs away from the reader host.")
+    print("Use -R when a remote rig must consume a card attached to this workstation.")
+    pause()
 
 
-def _print_card_bridge_remote_rig_steps (payload :dict )->None :
-    steps =payload .get ("steps",[])
-    if isinstance (steps ,list )==False or len (steps )==0 :
+def _print_card_bridge_remote_rig_steps(payload: dict) -> None:
+    steps = payload.get("steps", [])
+    if not isinstance(steps, list) or len(steps) == 0:
         return
-    print ("\n--- steps ---")
-    for step in steps :
-        if isinstance (step ,dict )==False :
+    print("\n--- steps ---")
+    for step in steps:
+        if not isinstance(step, dict):
             continue
-        step_name =str (step .get ("name","")or "").strip ()or "step"
-        ok =bool (step .get ("ok",False ))
-        status_text ="ok"if ok else "failed"
-        note =str (step .get ("note","")or "").strip ()
-        color =Colors .GREEN if ok else Colors .FAIL
-        print (f"{color}{status_text:>6}{Colors.ENDC} {step_name}")
-        if len (note )>0 :
-            print (f"       {note}")
+        step_name = str(step.get("name", "") or "").strip() or "step"
+        ok = bool(step.get("ok", False))
+        status_text = "ok" if ok else "failed"
+        note = str(step.get("note", "") or "").strip()
+        color = Colors.GREEN if ok else Colors.FAIL
+        print(f"{color}{status_text:>6}{Colors.ENDC} {step_name}")
+        if len(note) > 0:
+            print(f"       {note}")
 
 
-def _remote_rig_payload_token_file (payload :dict ,fallback_port :int )->str :
-    for step in payload .get ("steps",[])or []:
-        if isinstance (step ,dict )==False :
+def _remote_rig_payload_token_file(payload: dict, fallback_port: int) -> str:
+    for step in payload.get("steps", []) or []:
+        if not isinstance(step, dict):
             continue
-        token_file =str (step .get ("token_file","")or "").strip ()
-        if len (token_file )>0 :
+        token_file = str(step.get("token_file", "") or "").strip()
+        if len(token_file) > 0:
             return token_file
-    return _card_bridge_default_token_file (fallback_port )
+    return _card_bridge_default_token_file(fallback_port)
 
 
-def _apply_card_bridge_remote_rig_session (payload :dict ,local_card_port :int )->None :
-    if bool (payload .get ("ok",False ))is False :
+def _apply_card_bridge_remote_rig_session(payload: dict, local_card_port: int) -> None:
+    if bool(payload.get("ok", False)) is False:
         return
-    token_file =_remote_rig_payload_token_file (payload ,local_card_port )
-    namespace =argparse .Namespace (
-    remote_card_url =f"http://127.0.0.1:{int(local_card_port)}/apdu",
-    remote_card_token_file =token_file ,
+    token_file = _remote_rig_payload_token_file(payload, local_card_port)
+    namespace = argparse.Namespace(
+        remote_card_url=f"http://127.0.0.1:{int(local_card_port)}/apdu",
+        remote_card_token_file=token_file,
     )
-    state =_apply_remote_card_arguments (namespace )
-    print (f"\n{Colors.GREEN}[+] Current CLI session configured: {_describe_remote_card_state(state)}{Colors.ENDC}")
+    state = _apply_remote_card_arguments(namespace)
+    print(
+        f"\n{Colors.GREEN}[+] Current CLI session configured: {_describe_remote_card_state(state)}{Colors.ENDC}"
+    )
 
 
-def _prompt_card_bridge_remote_rig_start ()->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Start Remote HIL Rig ==={Colors.ENDC}\n")
-    print ("This mirrors the GUI remote-rig flow: start the local Card Bridge, open the SSH reverse tunnel,")
-    print ("sync the token, install/restart the remote HIL service, and verify modem/card readiness.\n")
-    saved_state =_card_bridge_remote_rig_state_snapshot ()
-    default_ssh_target =str (saved_state .get ("ssh_target","")or "").strip ()
-    default_identity_file =str (saved_state .get ("identity_file","")or "").strip ()
-    default_local_card_port =_state_int_value (saved_state ,"local_card_bridge_port",8642 )
-    default_remote_card_port =_state_int_value (saved_state ,"remote_card_port",default_local_card_port )
-    default_local_gui_port =_state_int_value (saved_state ,"local_gui_port",27854 )
-    default_remote_gui_port =_state_int_value (saved_state ,"remote_gui_port",27854 )
-    ssh_target =_prompt_text_value ("SSH target", default_ssh_target )
-    if len (ssh_target )==0 :
-        print (f"\n{Colors.WARNING}[*] Cancelled; SSH target is required.{Colors.ENDC}")
-        pause ()
+def _prompt_card_bridge_remote_rig_start() -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== Start Remote HIL Rig ==={Colors.ENDC}\n")
+    print(
+        "This mirrors the GUI remote-rig flow: start the local Card Bridge, open the SSH reverse tunnel,"
+    )
+    print(
+        "sync the token, install/restart the remote HIL service, and verify modem/card readiness.\n"
+    )
+    saved_state = _card_bridge_remote_rig_state_snapshot()
+    default_ssh_target = str(saved_state.get("ssh_target", "") or "").strip()
+    default_identity_file = str(saved_state.get("identity_file", "") or "").strip()
+    default_local_card_port = _state_int_value(
+        saved_state, "local_card_bridge_port", 8642
+    )
+    default_remote_card_port = _state_int_value(
+        saved_state, "remote_card_port", default_local_card_port
+    )
+    default_local_gui_port = _state_int_value(saved_state, "local_gui_port", 27854)
+    default_remote_gui_port = _state_int_value(saved_state, "remote_gui_port", 27854)
+    ssh_target = _prompt_text_value("SSH target", default_ssh_target)
+    if len(ssh_target) == 0:
+        print(f"\n{Colors.WARNING}[*] Cancelled; SSH target is required.{Colors.ENDC}")
+        pause()
         return
-    identity_file =_prompt_text_value ("SSH identity file", default_identity_file )
-    reader_name =_prompt_text_value ("Reader name substring [blank=use reader index]", "")
-    reader_index =0
-    if len (reader_name )==0 :
-        reader_index =_prompt_int_value ("Reader index",0 )
-    local_card_port =_prompt_int_value ("Local Card Bridge port",default_local_card_port )
-    remote_card_port =_prompt_int_value ("Remote rig Card Bridge port",default_remote_card_port )
-    forward_gui =_prompt_yes_no ("Forward the remote GUI back to this machine",False )
-    advanced =_prompt_yes_no ("Show advanced remote service settings",False )
-    service_name =str (saved_state .get ("service_name","")or "yggdrasim-hil-supervisor.service").strip ()
-    remote_workdir =str (saved_state .get ("remote_workdir","")or "~/YggdraSIM").strip ()
-    remote_python =str (saved_state .get ("remote_python","")or "~/YggdraSIM/.venv/bin/python").strip ()
-    remote_token_file =str (
-    saved_state .get ("remote_token_file","")or f"~/.config/yggdrasim/card_bridge/{remote_card_port}.token"
-    ).strip ()
-    remsim_binary ="osmo-remsim-client-st2"
-    usb_vidpid =hil_bridge_runtime .DEFAULT_USB_VIDPID if hil_bridge_runtime is not None else "1d50:60e3"
-    hil_port =9997
-    apdu_timeout_ms =30000
-    gsmtap_capture_path =""
-    restart_processes =True
-    install_service =True
-    if advanced :
-        service_name =_prompt_text_value ("Remote systemd service",service_name )
-        remote_workdir =_prompt_text_value ("Remote repo directory",remote_workdir )
-        remote_python =_prompt_text_value ("Remote Python",remote_python )
-        remote_token_file =_prompt_text_value ("Remote token file",remote_token_file )
-        remsim_binary =_prompt_text_value ("Remote REMSIM binary",remsim_binary )
-        usb_vidpid =_prompt_text_value ("SIMtrace2 VID:PID",usb_vidpid )
-        hil_port =_prompt_int_value ("Remote HIL port",hil_port )
-        apdu_timeout_ms =_prompt_int_value ("APDU timeout ms",apdu_timeout_ms )
-        gsmtap_capture_path =_prompt_text_value ("Remote GSMTAP capture path [blank=default]", "")
-        restart_processes =_prompt_yes_no ("Restart owned local/SSH processes if needed",True )
-        install_service =_prompt_yes_no ("Install/restart remote HIL service",True )
-    print ("")
-    print (f"SSH target       : {ssh_target}")
-    print (f"Card tunnel      : localhost:{local_card_port} -> remote localhost:{remote_card_port}")
-    print (f"Remote card URL  : http://127.0.0.1:{remote_card_port}/apdu")
-    print (f"Remote token file: {remote_token_file}")
-    print (f"Remote service   : {service_name}")
-    if _prompt_yes_no ("Start/verify the remote rig now",False )is False :
-        print (f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
-        pause ()
-        return
-    try :
-        payload =_run_card_bridge_action (
-        "card_bridge.remote_rig_start",
-        {
-        "ssh_target":ssh_target ,
-        "identity_file":identity_file ,
-        "reader_index":reader_index ,
-        "reader_name":reader_name ,
-        "local_card_port":local_card_port ,
-        "remote_card_port":remote_card_port ,
-        "remote_card_url":f"http://127.0.0.1:{remote_card_port}/apdu",
-        "remote_token_file":remote_token_file ,
-        "local_gui_port":default_local_gui_port ,
-        "remote_gui_port":default_remote_gui_port ,
-        "service_name":service_name ,
-        "remote_workdir":remote_workdir ,
-        "remote_python":remote_python ,
-        "remsim_binary":remsim_binary ,
-        "usb_vidpid":usb_vidpid ,
-        "hil_port":hil_port ,
-        "apdu_timeout_ms":apdu_timeout_ms ,
-        "gsmtap_capture_path":gsmtap_capture_path ,
-        "forward_gui":forward_gui ,
-        "restart_processes":restart_processes ,
-        "install_service":install_service ,
-        "confirm":True ,
-        },
+    identity_file = _prompt_text_value("SSH identity file", default_identity_file)
+    reader_name = _prompt_text_value(
+        "Reader name substring [blank=use reader index]", ""
+    )
+    reader_index = 0
+    if len(reader_name) == 0:
+        reader_index = _prompt_int_value("Reader index", 0)
+    local_card_port = _prompt_int_value(
+        "Local Card Bridge port", default_local_card_port
+    )
+    remote_card_port = _prompt_int_value(
+        "Remote rig Card Bridge port", default_remote_card_port
+    )
+    forward_gui = _prompt_yes_no("Forward the remote GUI back to this machine", False)
+    advanced = _prompt_yes_no("Show advanced remote service settings", False)
+    service_name = str(
+        saved_state.get("service_name", "") or "yggdrasim-hil-supervisor.service"
+    ).strip()
+    remote_workdir = str(saved_state.get("remote_workdir", "") or "~/YggdraSIM").strip()
+    remote_python = str(
+        saved_state.get("remote_python", "") or "~/YggdraSIM/.venv/bin/python"
+    ).strip()
+    from yggdrasim_common.gui_server.actions.card_bridge import (
+        _normalize_remote_card_token_path,
+        _remote_card_token_path,
+    )
+
+    # Saved state predates the current default on a host set up by an
+    # older release, so the prompt shows the path the action will use.
+    remote_token_file = _normalize_remote_card_token_path(
+        saved_state.get("remote_token_file", "")
+        or _remote_card_token_path(remote_card_port)
+    )
+    remsim_binary = "osmo-remsim-client-st2"
+    usb_vidpid = (
+        hil_bridge_runtime.DEFAULT_USB_VIDPID
+        if hil_bridge_runtime is not None
+        else "1d50:60e3"
+    )
+    hil_port = 9997
+    apdu_timeout_ms = 30000
+    gsmtap_capture_path = ""
+    restart_processes = True
+    install_service = True
+    if advanced:
+        service_name = _prompt_text_value("Remote systemd service", service_name)
+        remote_workdir = _prompt_text_value("Remote repo directory", remote_workdir)
+        remote_python = _prompt_text_value("Remote Python", remote_python)
+        remote_token_file = _prompt_text_value("Remote token file", remote_token_file)
+        remsim_binary = _prompt_text_value("Remote REMSIM binary", remsim_binary)
+        usb_vidpid = _prompt_text_value("SIMtrace2 VID:PID", usb_vidpid)
+        hil_port = _prompt_int_value("Remote HIL port", hil_port)
+        apdu_timeout_ms = _prompt_int_value("APDU timeout ms", apdu_timeout_ms)
+        gsmtap_capture_path = _prompt_text_value(
+            "Remote GSMTAP capture path [blank=default]", ""
         )
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Remote rig start failed: {e}{Colors.ENDC}")
-        pause ()
-        return
-    print ("")
-    _print_card_bridge_result (payload )
-    _print_card_bridge_remote_rig_steps (payload )
-    _apply_card_bridge_remote_rig_session (payload ,local_card_port )
-    pause ()
-
-
-def _prompt_card_bridge_remote_rig_stop ()->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Stop Remote HIL Rig ==={Colors.ENDC}\n")
-    print ("Stops the saved remote HIL service when an SSH target is known, then closes the SSH tunnel and local Card Bridge.\n")
-    ssh_target =_prompt_text_value ("SSH target [blank=use saved target]", "")
-    identity_file =_prompt_text_value ("SSH identity file [blank=use saved/default]", "")
-    service_name =_prompt_text_value ("Remote systemd service","yggdrasim-hil-supervisor.service")
-    if _prompt_yes_no ("Stop the remote rig now",False )is False :
-        print (f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
-        pause ()
-        return
-    try :
-        payload =_run_card_bridge_action (
-        "card_bridge.remote_rig_stop",
-        {
-        "ssh_target":ssh_target ,
-        "identity_file":identity_file ,
-        "service_name":service_name ,
-        "confirm":True ,
-        },
+        restart_processes = _prompt_yes_no(
+            "Restart owned local/SSH processes if needed", True
         )
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Remote rig stop failed: {e}{Colors.ENDC}")
-        pause ()
+        install_service = _prompt_yes_no("Install/restart remote HIL service", True)
+    print("")
+    print(f"SSH target       : {ssh_target}")
+    print(
+        f"Card tunnel      : localhost:{local_card_port} -> remote localhost:{remote_card_port}"
+    )
+    print(f"Remote card URL  : http://127.0.0.1:{remote_card_port}/apdu")
+    print(f"Remote token file: {remote_token_file}")
+    print(f"Remote service   : {service_name}")
+    if _prompt_yes_no("Start/verify the remote rig now", False) is False:
+        print(f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
+        pause()
         return
-    print ("")
-    _print_card_bridge_result (payload )
-    _print_card_bridge_remote_rig_steps (payload )
-    pause ()
-
-
-def _prompt_card_bridge_remote_rig_status ()->None :
-    clear_screen ()
-    print (f"{Colors.HEADER}=== Remote HIL Rig Status ==={Colors.ENDC}\n")
-    ssh_target =_prompt_text_value ("SSH target [blank=local Card Bridge/tunnel only]", "")
-    identity_file =_prompt_text_value ("SSH identity file [blank=default ssh config]", "")
-    service_name =_prompt_text_value ("Remote systemd service","yggdrasim-hil-supervisor.service")
-    try :
-        payload =_run_card_bridge_action (
-        "card_bridge.remote_rig_status",
-        {
-        "ssh_target":ssh_target ,
-        "identity_file":identity_file ,
-        "service_name":service_name ,
-        },
+    try:
+        payload = _run_card_bridge_action(
+            "card_bridge.remote_rig_start",
+            {
+                "ssh_target": ssh_target,
+                "identity_file": identity_file,
+                "reader_index": reader_index,
+                "reader_name": reader_name,
+                "local_card_port": local_card_port,
+                "remote_card_port": remote_card_port,
+                "remote_card_url": f"http://127.0.0.1:{remote_card_port}/apdu",
+                "remote_token_file": remote_token_file,
+                "local_gui_port": default_local_gui_port,
+                "remote_gui_port": default_remote_gui_port,
+                "service_name": service_name,
+                "remote_workdir": remote_workdir,
+                "remote_python": remote_python,
+                "remsim_binary": remsim_binary,
+                "usb_vidpid": usb_vidpid,
+                "hil_port": hil_port,
+                "apdu_timeout_ms": apdu_timeout_ms,
+                "gsmtap_capture_path": gsmtap_capture_path,
+                "forward_gui": forward_gui,
+                "restart_processes": restart_processes,
+                "install_service": install_service,
+                "confirm": True,
+            },
         )
-    except Exception as e :
-        print (f"\n{Colors.FAIL}[!] Remote rig status failed: {e}{Colors.ENDC}")
-        pause ()
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Remote rig start failed: {e}{Colors.ENDC}")
+        pause()
         return
-    print ("")
-    _print_card_bridge_result (payload )
-    pause ()
+    print("")
+    _print_card_bridge_result(payload)
+    _print_card_bridge_remote_rig_steps(payload)
+    _apply_card_bridge_remote_rig_session(payload, local_card_port)
+    pause()
 
 
-def _print_card_bridge_status ()->None :
-    try :
-        status_payload =_run_card_bridge_action ("card_bridge.status")
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] Status failed: {e}{Colors.ENDC}")
+def _prompt_card_bridge_remote_rig_stop() -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== Stop Remote HIL Rig ==={Colors.ENDC}\n")
+    print(
+        "Stops the saved remote HIL service when an SSH target is known, then closes the SSH tunnel and local Card Bridge.\n"
+    )
+    ssh_target = _prompt_text_value("SSH target [blank=use saved target]", "")
+    identity_file = _prompt_text_value(
+        "SSH identity file [blank=use saved/default]", ""
+    )
+    service_name = _prompt_text_value(
+        "Remote systemd service", "yggdrasim-hil-supervisor.service"
+    )
+    if _prompt_yes_no("Stop the remote rig now", False) is False:
+        print(f"\n{Colors.WARNING}[*] Cancelled.{Colors.ENDC}")
+        pause()
         return
-    _print_card_bridge_result (status_payload )
+    try:
+        payload = _run_card_bridge_action(
+            "card_bridge.remote_rig_stop",
+            {
+                "ssh_target": ssh_target,
+                "identity_file": identity_file,
+                "service_name": service_name,
+                "confirm": True,
+            },
+        )
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Remote rig stop failed: {e}{Colors.ENDC}")
+        pause()
+        return
+    print("")
+    _print_card_bridge_result(payload)
+    _print_card_bridge_remote_rig_steps(payload)
+    pause()
 
 
-def manage_card_bridge ()->None :
-    while True :
-        clear_screen ()
-        print (f"{Colors.HEADER}=== Card Bridge / Remote APDU Streaming ==={Colors.ENDC}\n")
-        print ("Publish a local PC/SC reader, consume a tunneled remote reader, or copy SSH tunnel commands.\n")
-        _print_card_bridge_status ()
-        print ("")
-        print (f"  {Colors.CYAN}[1]{Colors.ENDC} Start local Card Bridge")
-        print (f"  {Colors.CYAN}[2]{Colors.ENDC} Stop local Card Bridge")
-        print (f"  {Colors.CYAN}[3]{Colors.ENDC} Probe configured remote APDU bridge")
-        print (f"  {Colors.CYAN}[4]{Colors.ENDC} Configure remote APDU consumer for this CLI session")
-        print (f"  {Colors.CYAN}[5]{Colors.ENDC} Show SSH tunnel commands")
-        print (f"  {Colors.WHITE}[B]{Colors.ENDC} Open HIL session start/stop menu")
-        print (f"  {Colors.WHITE}[R]{Colors.ENDC} Refresh status")
-        print (f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
-        choice =input ("\nSelect action: ").strip ().upper ()
-        if choice in ("Q",""):
+def _prompt_card_bridge_remote_rig_status() -> None:
+    clear_screen()
+    print(f"{Colors.HEADER}=== Remote HIL Rig Status ==={Colors.ENDC}\n")
+    ssh_target = _prompt_text_value(
+        "SSH target [blank=local Card Bridge/tunnel only]", ""
+    )
+    identity_file = _prompt_text_value(
+        "SSH identity file [blank=default ssh config]", ""
+    )
+    service_name = _prompt_text_value(
+        "Remote systemd service", "yggdrasim-hil-supervisor.service"
+    )
+    try:
+        payload = _run_card_bridge_action(
+            "card_bridge.remote_rig_status",
+            {
+                "ssh_target": ssh_target,
+                "identity_file": identity_file,
+                "service_name": service_name,
+            },
+        )
+    except Exception as e:
+        print(f"\n{Colors.FAIL}[!] Remote rig status failed: {e}{Colors.ENDC}")
+        pause()
+        return
+    print("")
+    _print_card_bridge_result(payload)
+    pause()
+
+
+def _print_card_bridge_status() -> None:
+    try:
+        status_payload = _run_card_bridge_action("card_bridge.status")
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] Status failed: {e}{Colors.ENDC}")
+        return
+    _print_card_bridge_result(status_payload)
+
+
+def manage_card_bridge() -> None:
+    while True:
+        clear_screen()
+        print(
+            f"{Colors.HEADER}=== Card Bridge / APDU Streaming ==={Colors.ENDC}\n"
+        )
+        print(
+            "Publish a local PC/SC reader, consume a tunneled remote reader, or copy SSH tunnel commands.\n"
+        )
+        _print_card_bridge_status()
+        print("")
+        print(f"  {Colors.CYAN}[1]{Colors.ENDC} Start local Card Bridge")
+        print(f"  {Colors.CYAN}[2]{Colors.ENDC} Stop local Card Bridge")
+        print(f"  {Colors.CYAN}[3]{Colors.ENDC} Probe configured remote APDU bridge")
+        print(
+            f"  {Colors.CYAN}[4]{Colors.ENDC} Configure remote APDU consumer for this CLI session"
+        )
+        print(f"  {Colors.CYAN}[5]{Colors.ENDC} Show SSH tunnel commands")
+        print(f"  {Colors.WHITE}[B]{Colors.ENDC} Open HIL session start/stop menu")
+        print(f"  {Colors.WHITE}[R]{Colors.ENDC} Refresh status")
+        print(f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
+        choice = input("\nSelect action: ").strip().upper()
+        if choice in ("Q", ""):
             return
-        if choice =="1":
-            _prompt_card_bridge_local_start ()
+        if choice == "1":
+            _prompt_card_bridge_local_start()
             continue
-        if choice =="2":
-            _stop_card_bridge_local ()
+        if choice == "2":
+            _stop_card_bridge_local()
             continue
-        if choice =="3":
-            _probe_card_bridge_configured ()
+        if choice == "3":
+            _probe_card_bridge_configured()
             continue
-        if choice =="4":
-            _configure_remote_card_for_cli_session ()
+        if choice == "4":
+            _configure_remote_card_for_cli_session()
             continue
-        if choice =="5":
-            _show_card_bridge_ssh_recipe ()
+        if choice == "5":
+            _show_card_bridge_ssh_recipe()
             continue
-        if choice =="B":
-            manage_hil_bridge ()
+        if choice == "B":
+            manage_hil_bridge()
             continue
-        if choice =="R":
+        if choice == "R":
             continue
-        print (f"\n{Colors.FAIL}[!] Invalid Card Bridge selection.{Colors.ENDC}")
-        pause ()
+        print(f"\n{Colors.FAIL}[!] Invalid Card Bridge selection.{Colors.ENDC}")
+        pause()
 
 
-def manage_env_flags ()->None :
+def manage_env_flags() -> None:
     """Launch the YGGDRASIM_* environment flag editor.
 
     ``main/`` is not a Python package at runtime (``main.py`` runs as
@@ -2585,374 +2835,419 @@ def manage_env_flags ()->None :
     the editor are passed in explicitly so the editor module does not
     have to reach back into ``__main__``.
     """
-    try :
-        import importlib .util 
-        module_path =os .path .join (CURRENT_DIR ,"env_flags_ui.py")
-        module_spec =importlib .util .spec_from_file_location (
-        "yggdrasim_env_flags_ui",module_path ,
+    try:
+        import importlib.util
+
+        module_path = os.path.join(CURRENT_DIR, "env_flags_ui.py")
+        module_spec = importlib.util.spec_from_file_location(
+            "yggdrasim_env_flags_ui",
+            module_path,
         )
-        if module_spec is None or module_spec .loader is None :
-            raise RuntimeError (f"Could not locate env_flags_ui at {module_path}")
-        env_flags_ui_module =importlib .util .module_from_spec (module_spec )
+        if module_spec is None or module_spec.loader is None:
+            raise RuntimeError(f"Could not locate env_flags_ui at {module_path}")
+        env_flags_ui_module = importlib.util.module_from_spec(module_spec)
         # Expose the module under sys.modules so any relative imports it
         # grows later can still resolve the symbolic name we used above.
-        sys .modules [module_spec .name ]=env_flags_ui_module 
-        module_spec .loader .exec_module (env_flags_ui_module )
-        env_flags_ui_module .run (Colors ,clear_screen ,pause )
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] Environment Flags editor error: {e}{Colors.ENDC}")
-        pause ()
+        sys.modules[module_spec.name] = env_flags_ui_module
+        module_spec.loader.exec_module(env_flags_ui_module)
+        env_flags_ui_module.run(Colors, clear_screen, pause)
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] Environment Flags editor error: {e}{Colors.ENDC}")
+        pause()
 
 
-def run_scp03 ():
+def run_scp03():
     """Wrapper for SCP03 Package."""
-    try :
-        import SCP03 .main as scp03_entry 
-        importlib .reload (scp03_entry )
-        scp03_entry .entry ()
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP03 Error: {e}{Colors.ENDC}")
-        pause ()
+    try:
+        import SCP03.main as scp03_entry
 
-def run_scp03_script ():
+        importlib.reload(scp03_entry)
+        scp03_entry.entry()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP03 Error: {e}{Colors.ENDC}")
+        pause()
+
+
+def run_scp03_script():
     """Wrapper for SCP03 Script Execution."""
-    clear_screen ()
-    print (f"{Colors.HEADER}=== SCP03 Script Execution ==={Colors.ENDC}")
-    script_path =input ("Enter path to script file: ").strip ()
-    if not script_path :
-        return 
-    try :
-        import SCP03 .main as scp03_entry 
-        importlib .reload (scp03_entry )
-        scp03_entry .run_script (script_path )
-        pause ()
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP03 Script Error: {e}{Colors.ENDC}")
-        pause ()
+    clear_screen()
+    print(f"{Colors.HEADER}=== SCP03 Script Execution ==={Colors.ENDC}")
+    script_path = input("Enter path to script file: ").strip()
+    if not script_path:
+        return
+    try:
+        import SCP03.main as scp03_entry
 
-def run_scp03_report ():
+        importlib.reload(scp03_entry)
+        scp03_entry.run_script(script_path)
+        pause()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP03 Script Error: {e}{Colors.ENDC}")
+        pause()
+
+
+def run_scp03_report():
     """Wrapper for SCP03 Report & DUMP-FS."""
-    try :
-        import SCP03 .main as scp03_entry 
-        importlib .reload (scp03_entry )
-        scp03_entry .run_report_wizard ()
-        pause ()
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP03 Report Error: {e}{Colors.ENDC}")
-        pause ()
+    try:
+        import SCP03.main as scp03_entry
 
-def run_scp80 ():
+        importlib.reload(scp03_entry)
+        scp03_entry.run_report_wizard()
+        pause()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP03 Report Error: {e}{Colors.ENDC}")
+        pause()
+
+
+def run_scp80():
     """Wrapper for modularized SCP80 Package."""
 
-    scp80_path =os .path .join (PROJECT_ROOT ,"SCP80")
-    if scp80_path not in sys .path :
-        sys .path .insert (0 ,scp80_path )
+    scp80_path = os.path.join(PROJECT_ROOT, "SCP80")
+    if scp80_path not in sys.path:
+        sys.path.insert(0, scp80_path)
 
-    try :
+    try:
+        import SCP80
 
-        import SCP80 
-        importlib .reload (SCP80 )
+        importlib.reload(SCP80)
 
-        if hasattr (SCP80 ,'shell'):
-            SCP80 .shell ()
-        else :
+        if hasattr(SCP80, "shell"):
+            SCP80.shell()
+        else:
+            from SCP80.cli import OtaShell
 
-            from SCP80 .cli import OtaShell 
-            OtaShell ().run ()
+            OtaShell().run()
 
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP80 Error: {e}{Colors.ENDC}")
-        pause ()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP80 Error: {e}{Colors.ENDC}")
+        pause()
 
-def run_scp80_script ():
+
+def run_scp80_script():
     """Wrapper for SCP80 Script Execution."""
-    clear_screen ()
-    print (f"{Colors.CYAN}=== SCP80 OTA Script Execution ==={Colors.ENDC}")
-    script_path =input ("Enter path to script file: ").strip ()
-    if not script_path :
-        return 
+    clear_screen()
+    print(f"{Colors.CYAN}=== SCP80 OTA Script Execution ==={Colors.ENDC}")
+    script_path = input("Enter path to script file: ").strip()
+    if not script_path:
+        return
 
-    scp80_path =os .path .join (PROJECT_ROOT ,"SCP80")
-    if scp80_path not in sys .path :
-        sys .path .insert (0 ,scp80_path )
+    scp80_path = os.path.join(PROJECT_ROOT, "SCP80")
+    if scp80_path not in sys.path:
+        sys.path.insert(0, scp80_path)
 
-    try :
-        import SCP80 
-        importlib .reload (SCP80 )
+    try:
+        import SCP80
 
-        from SCP80 .cli import OtaShell 
-        app =OtaShell ()
-        app .do_script (script_path )
-        pause ()
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP80 Script Error: {e}{Colors.ENDC}")
-        pause ()
+        importlib.reload(SCP80)
 
-def run_scp11_live ():
+        from SCP80.cli import OtaShell
+
+        app = OtaShell()
+        app.do_script(script_path)
+        pause()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP80 Script Error: {e}{Colors.ENDC}")
+        pause()
+
+
+def run_scp11_live():
     """Wrapper for the SCP11 eSIM management relay package."""
-    try :
-        import SCP11 .live .main as scp11_entry
-        importlib .reload (scp11_entry )
-        client =scp11_entry .SGP22Client ()
-        client .run_shell ()
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] eSIM Management Relay Error: {e}{Colors.ENDC}")
-        pause ()
+    try:
+        import SCP11.live.main as scp11_entry
 
-def run_scp11_local ():
+        importlib.reload(scp11_entry)
+        client = scp11_entry.SGP22Client()
+        client.run_shell()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] eSIM Management Relay Error: {e}{Colors.ENDC}")
+        pause()
+
+
+def run_scp11_local():
     """Wrapper for the Local SMDPP shell."""
-    try :
-        import SCP11 .local_access .main as scp11_local_entry
-        importlib .reload (scp11_local_entry )
-        scp11_local_entry .entry ()
-    except SystemExit :
-        pass
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP11 Local SMDPP Error: {e}{Colors.ENDC}")
-        pause ()
+    try:
+        import SCP11.local_access.main as scp11_local_entry
 
-def run_scp11_eim_local ():
+        importlib.reload(scp11_local_entry)
+        scp11_local_entry.entry()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP11 Local SMDPP Error: {e}{Colors.ENDC}")
+        pause()
+
+
+def run_scp11_eim_local():
     """Wrapper for the Local eIM shell."""
-    try :
-        import SCP11 .eim_local .main as eim_local_entry
-        importlib .reload (eim_local_entry )
-        eim_local_entry .entry ()
-    except SystemExit :
-        pass
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP11 Local eIM Error: {e}{Colors.ENDC}")
-        pause ()
+    try:
+        import SCP11.eim_local.main as eim_local_entry
 
-def run_profile_package ():
+        importlib.reload(eim_local_entry)
+        eim_local_entry.entry()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP11 Local eIM Error: {e}{Colors.ENDC}")
+        pause()
+
+
+def run_profile_package():
     """Wrapper for SAIP profile package tooling."""
-    try :
-        import Tools .ProfilePackage .main as profile_package_entry
-        importlib .reload (profile_package_entry )
-        profile_package_entry .entry ()
-    except SystemExit :
-        pass
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SAIP Tool Error: {e}{Colors.ENDC}")
-        pause ()
+    try:
+        import Tools.ProfilePackage.main as profile_package_entry
 
-def run_suci_tool ():
+        importlib.reload(profile_package_entry)
+        profile_package_entry.entry()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SAIP Tool Error: {e}{Colors.ENDC}")
+        pause()
+
+
+def run_suci_tool():
     """Wrapper for SUCI key tooling."""
-    try :
-        import Tools .SuciTool .main as suci_tool_entry
-        importlib .reload (suci_tool_entry )
-        suci_tool_entry .entry ()
-    except SystemExit :
+    try:
+        import Tools.SuciTool.main as suci_tool_entry
+
+        importlib.reload(suci_tool_entry)
+        suci_tool_entry.entry()
+    except SystemExit:
         pass
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SUCI Tool Error: {e}{Colors.ENDC}")
-        pause ()
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SUCI Tool Error: {e}{Colors.ENDC}")
+        pause()
 
-def show_license ():
-    clear_screen ()
 
-    print (f"{Colors.HEADER}")
-    print (r" __   __               _               ____ ___ __  __ ")
-    print (r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
-    print (r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
-    print (r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
-    print (r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
-    print (r"      |___/  |___/                                     ")
-    print (r"            _     ___ ____ _____ _   _ ____  _____     ")
-    print (r"           | |   |_ _/ ___| ____| \ | / ___|| ____|    ")
-    print (r"           | |    | | |   |  _| |  \| \___ \|  _|      ")
-    print (r"           | |___ | | |___| |___| |\  |___) | |___     ")
-    print (r"           |_____|___\____|_____|_| \_|____/|_____|    ")
-    print (f"{Colors.ENDC}")
+def show_license():
+    clear_screen()
 
-    print (f"{Colors.HEADER}=== GPLv3 LICENSE ==={Colors.ENDC}\n")
-    license_path =DIRS ["LICENSE"]
+    print(f"{Colors.HEADER}")
+    print(r" __   __               _               ____ ___ __  __ ")
+    print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
+    print(r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
+    print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
+    print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
+    print(r"      |___/  |___/                                     ")
+    print(r"            _     ___ ____ _____ _   _ ____  _____     ")
+    print(r"           | |   |_ _/ ___| ____| \ | / ___|| ____|    ")
+    print(r"           | |    | | |   |  _| |  \| \___ \|  _|      ")
+    print(r"           | |___ | | |___| |___| |\  |___) | |___     ")
+    print(r"           |_____|___\____|_____|_| \_|____/|_____|    ")
+    print(f"{Colors.ENDC}")
 
-    if os .path .exists (license_path ):
-        with open (license_path ,'r',encoding ='utf-8')as f :
-            lines =f .readlines ()
-            for i ,line in enumerate (lines ):
-                print (line ,end ='')
+    print(f"{Colors.HEADER}=== GPLv3 LICENSE ==={Colors.ENDC}\n")
+    license_path = DIRS["LICENSE"]
 
-                if (i +1 )%20 ==0 :
-                    input (f"\n{Colors.CYAN}-- More ({i+1}/{len(lines)}) - Press Enter to continue --{Colors.ENDC}")
-    else :
-        print (f"{Colors.FAIL}License file not found at: {license_path}{Colors.ENDC}")
+    if os.path.exists(license_path):
+        with open(license_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            for i, line in enumerate(lines):
+                print(line, end="")
 
-    pause ()
+                if (i + 1) % 20 == 0:
+                    input(
+                        f"\n{Colors.CYAN}-- More ({i + 1}/{len(lines)}) - Press Enter to continue --{Colors.ENDC}"
+                    )
+    else:
+        print(f"{Colors.FAIL}License file not found at: {license_path}{Colors.ENDC}")
 
-def _show_text_document (title :str ,relative_path :str ):
-    clear_screen ()
-    print (f"{Colors.HEADER}=== {title} ==={Colors.ENDC}\n")
-    print (f"{Colors.CYAN}Path:{Colors.ENDC} {relative_path}\n")
-    full_path =os .path .join (PROJECT_ROOT ,relative_path )
+    pause()
 
-    if os .path .exists (full_path )==False :
-        print (f"{Colors.FAIL}Document not found: {relative_path}{Colors.ENDC}")
-        pause ()
+
+def _show_text_document(title: str, relative_path: str):
+    clear_screen()
+    print(f"{Colors.HEADER}=== {title} ==={Colors.ENDC}\n")
+    print(f"{Colors.CYAN}Path:{Colors.ENDC} {relative_path}\n")
+    full_path = os.path.join(PROJECT_ROOT, relative_path)
+
+    if not os.path.exists(full_path):
+        print(f"{Colors.FAIL}Document not found: {relative_path}{Colors.ENDC}")
+        pause()
         return
 
-    try :
-        with open (full_path ,'r',encoding ='utf-8')as handle :
-            lines =handle .readlines ()
-    except Exception as e :
-        print (f"{Colors.FAIL}Could not open document: {e}{Colors.ENDC}")
-        pause ()
+    try:
+        with open(full_path, "r", encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except Exception as e:
+        print(f"{Colors.FAIL}Could not open document: {e}{Colors.ENDC}")
+        pause()
         return
 
-    if len (lines )==0 :
-        print (f"{Colors.WARNING}(Document is empty){Colors.ENDC}")
-        pause ()
+    if len(lines) == 0:
+        print(f"{Colors.WARNING}(Document is empty){Colors.ENDC}")
+        pause()
         return
 
-    for index ,line in enumerate (lines ):
-        print (line ,end ='')
-        if (index +1 )%20 ==0 and (index +1 )<len (lines ):
-            input (f"\n{Colors.CYAN}-- More ({index+1}/{len(lines)}) - Press Enter to continue --{Colors.ENDC}")
+    for index, line in enumerate(lines):
+        print(line, end="")
+        if (index + 1) % 20 == 0 and (index + 1) < len(lines):
+            input(
+                f"\n{Colors.CYAN}-- More ({index + 1}/{len(lines)}) - Press Enter to continue --{Colors.ENDC}"
+            )
 
-    pause ()
+    pause()
 
-def _load_shell_guides ():
-    try :
-        from SCP03 .interface .guides import ShellGuides
+
+def _load_shell_guides():
+    try:
+        from SCP03.interface.guides import ShellGuides
+
         return ShellGuides
-    except Exception as e :
-        clear_screen ()
-        print (f"{Colors.FAIL}Could not load the SCP03 guide renderer: {e}{Colors.ENDC}")
-        pause ()
+    except Exception as e:
+        clear_screen()
+        print(f"{Colors.FAIL}Could not load the SCP03 guide renderer: {e}{Colors.ENDC}")
+        pause()
         return None
 
-def _show_shell_guide_wizard ():
-    guides =_load_shell_guides ()
-    if guides is None :
-        return
-    guides .print_guide ("WIZARD")
 
-def _show_shell_guide_topic (topic :str ):
-    guides =_load_shell_guides ()
-    if guides is None :
+def _show_shell_guide_wizard():
+    guides = _load_shell_guides()
+    if guides is None:
+        return
+    guides.print_guide("WIZARD")
+
+
+def _show_shell_guide_topic(topic: str):
+    guides = _load_shell_guides()
+    if guides is None:
         return
 
-    topic_name =str (topic or "").strip ().upper ()
-    topic_map ={
-    "OTA":guides ._print_ota_guide ,
-    "SAIP":guides ._print_saip_guide ,
-    "SUCI":guides ._print_suci_guide ,
+    topic_name = str(topic or "").strip().upper()
+    topic_map = {
+        "OTA": guides._print_ota_guide,
+        "SAIP": guides._print_saip_guide,
+        "SUCI": guides._print_suci_guide,
     }
-    printer =topic_map .get (topic_name )
-    if printer is None :
-        clear_screen ()
-        print (f"{Colors.FAIL}Unknown guide topic: {topic_name}{Colors.ENDC}")
-        pause ()
+    printer = topic_map.get(topic_name)
+    if printer is None:
+        clear_screen()
+        print(f"{Colors.FAIL}Unknown guide topic: {topic_name}{Colors.ENDC}")
+        pause()
         return
 
-    clear_screen ()
-    printer ()
-    pause ()
+    clear_screen()
+    printer()
+    pause()
 
-def show_guides ():
-    while True :
-        clear_screen ()
-        print (f"{Colors.HEADER}")
-        print ("  ____       _     _             ____       _     _      ")
-        print (" / ___|_   _(_) __| | ___  ___  / ___|_   _(_) __| | ___ ")
-        print ("| |  _| | | | |/ _` |/ _ \\/ __| |  _| | | | |/ _` |/ _ \\")
-        print ("| |_| | |_| | | (_| |  __/\\__ \\ |_| | |_| | | (_| |  __/")
-        print (" \\____|\\__,_|_|\\__,_|\\___||___/\\____|\\__,_|_|\\__,_|\\___|")
-        print (f"{Colors.ENDC}")
-        print (f"{Colors.HEADER}=== Suite Guides & Documentation ==={Colors.ENDC}\n")
-        print ("Select a module-specific guide or reference document:")
-        print (f"  {Colors.GREEN}[1]{Colors.ENDC} Admin Shell guide topics")
-        print (f"  {Colors.CYAN}[2]{Colors.ENDC} OTA Simulator guide")
-        print (f"  {Colors.HEADER}[3]{Colors.ENDC} eSIM Management Relay guide")
-        print (f"  {Colors.HEADER}[5]{Colors.ENDC} Local SMDPP guide")
-        print (f"  {Colors.HEADER}[5C]{Colors.ENDC} Local SMDPP certificate override guide")
-        print (f"  {Colors.HEADER}[6]{Colors.ENDC} Local eIM overview")
-        print (f"  {Colors.HEADER}[6D]{Colors.ENDC} Local eIM detailed guide")
-        print (f"  {Colors.HEADER}[6T]{Colors.ENDC} Local eIM package template guide")
-        print (f"  {Colors.BLUE}[7]{Colors.ENDC} SAIP Tool guide")
-        print (f"  {Colors.BLUE}[8]{Colors.ENDC} SUCI Tool guide")
-        print ("")
-        print (f"{Colors.BOLD}Suite references:{Colors.ENDC}")
-        print (f"  {Colors.WHITE}[R]{Colors.ENDC} Root README")
-        print (f"  {Colors.WHITE}[H]{Colors.ENDC} Architecture")
-        print (f"  {Colors.WHITE}[N]{Colors.ENDC} NOTICE")
-        print (f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
 
-        choice =input ("\nSelect guide: ").strip ().upper ()
+def show_guides():
+    while True:
+        clear_screen()
+        print(f"{Colors.HEADER}")
+        print("  ____       _     _             ____       _     _      ")
+        print(" / ___|_   _(_) __| | ___  ___  / ___|_   _(_) __| | ___ ")
+        print("| |  _| | | | |/ _` |/ _ \\/ __| |  _| | | | |/ _` |/ _ \\")
+        print("| |_| | |_| | | (_| |  __/\\__ \\ |_| | |_| | | (_| |  __/")
+        print(" \\____|\\__,_|_|\\__,_|\\___||___/\\____|\\__,_|_|\\__,_|\\___|")
+        print(f"{Colors.ENDC}")
+        print(f"{Colors.HEADER}=== Suite Guides & Documentation ==={Colors.ENDC}\n")
+        print("Select a module-specific guide or reference document:")
+        print(f"  {Colors.GREEN}[1]{Colors.ENDC} Admin Shell guide topics")
+        print(f"  {Colors.CYAN}[2]{Colors.ENDC} OTA Simulator guide")
+        print(f"  {Colors.HEADER}[3]{Colors.ENDC} eSIM Management Relay guide")
+        print(f"  {Colors.HEADER}[5]{Colors.ENDC} Local SMDPP guide")
+        print(
+            f"  {Colors.HEADER}[5C]{Colors.ENDC} Local SMDPP certificate override guide"
+        )
+        print(f"  {Colors.HEADER}[6]{Colors.ENDC} Local eIM overview")
+        print(f"  {Colors.HEADER}[6D]{Colors.ENDC} Local eIM detailed guide")
+        print(f"  {Colors.HEADER}[6T]{Colors.ENDC} Local eIM package template guide")
+        print(f"  {Colors.BLUE}[7]{Colors.ENDC} SAIP Tool guide")
+        print(f"  {Colors.BLUE}[8]{Colors.ENDC} SUCI Tool guide")
+        print("")
+        print(f"{Colors.BOLD}Suite references:{Colors.ENDC}")
+        print(f"  {Colors.WHITE}[R]{Colors.ENDC} Root README")
+        print(f"  {Colors.WHITE}[H]{Colors.ENDC} Architecture")
+        print(f"  {Colors.WHITE}[N]{Colors.ENDC} NOTICE")
+        print(f"  {Colors.WHITE}[Q]{Colors.ENDC} Return to main menu")
 
-        if choice =='Q':
+        choice = input("\nSelect guide: ").strip().upper()
+
+        if choice == "Q":
             return
-        if choice =='1':
-            _show_shell_guide_wizard ()
+        if choice == "1":
+            _show_shell_guide_wizard()
             continue
-        if choice =='2':
-            _show_shell_guide_topic ("OTA")
+        if choice == "2":
+            _show_shell_guide_topic("OTA")
             continue
-        if choice =='3':
-            _show_text_document ("eSIM Management Relay Guide","SCP11/live/README.md")
+        if choice == "3":
+            _show_text_document("eSIM Management Relay Guide", "SCP11/live/README.md")
             continue
-        if choice =='5':
-            _show_text_document ("SCP11 Local SMDPP Guide","SCP11/local_access/README.md")
+        if choice == "5":
+            _show_text_document(
+                "SCP11 Local SMDPP Guide", "SCP11/local_access/README.md"
+            )
             continue
-        if choice =='5C':
-            _show_text_document ("SCP11 Local SMDPP Certificate Override Guide","SCP11/local_access/certs/README.md")
+        if choice == "5C":
+            _show_text_document(
+                "SCP11 Local SMDPP Certificate Override Guide",
+                "SCP11/local_access/certs/README.md",
+            )
             continue
-        if choice =='6':
-            _show_text_document ("SCP11 Local eIM Overview","SCP11/eim_local/README.md")
+        if choice == "6":
+            _show_text_document("SCP11 Local eIM Overview", "SCP11/eim_local/README.md")
             continue
-        if choice =='6D':
-            _show_text_document ("SCP11 Local eIM Detailed Guide","SCP11/eim_local/GUIDE.md")
+        if choice == "6D":
+            _show_text_document(
+                "SCP11 Local eIM Detailed Guide", "SCP11/eim_local/GUIDE.md"
+            )
             continue
-        if choice =='6T':
-            _show_text_document ("SCP11 Local eIM Package Template Guide","SCP11/eim_local/eim_packages/templates/README.md")
+        if choice == "6T":
+            _show_text_document(
+                "SCP11 Local eIM Package Template Guide",
+                "SCP11/eim_local/eim_packages/templates/README.md",
+            )
             continue
-        if choice =='7':
-            _show_shell_guide_topic ("SAIP")
+        if choice == "7":
+            _show_shell_guide_topic("SAIP")
             continue
-        if choice =='8':
-            _show_shell_guide_topic ("SUCI")
+        if choice == "8":
+            _show_shell_guide_topic("SUCI")
             continue
-        if choice =='R':
-            _show_text_document ("YggdraSIM README","README.md")
+        if choice == "R":
+            _show_text_document("YggdraSIM README", "README.md")
             continue
-        if choice =='H':
-            _show_text_document ("YggdraSIM Architecture","guides/ARCHITECTURE.md")
+        if choice == "H":
+            _show_text_document("YggdraSIM Architecture", "guides/ARCHITECTURE.md")
             continue
-        if choice =='N':
-            _show_text_document ("YggdraSIM NOTICE","NOTICE")
+        if choice == "N":
+            _show_text_document("YggdraSIM NOTICE", "NOTICE")
             continue
 
-        print (f"{Colors.FAIL}[!] Invalid guide selection.{Colors.ENDC}")
-        input (f"\n{Colors.CYAN}[Press Enter to continue]{Colors.ENDC}")
+        print(f"{Colors.FAIL}[!] Invalid guide selection.{Colors.ENDC}")
+        input(f"\n{Colors.CYAN}[Press Enter to continue]{Colors.ENDC}")
 
-def show_about ():
-    clear_screen ()
-    print (f"{Colors.HEADER}")
-    print (r" __   __               _               ____ ___ __  __ ")
-    print (r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
-    print (r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
-    print (r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
-    print (r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
-    print (r"      |___/  |___/                                     ")
-    print (r"                _    ____   ___  _   _ _____           ")
-    print (r"               / \  | __ ) / _ \| | | |_   _|          ")
-    print (r"              / _ \ |  _ \| | | | | | | | |            ")
-    print (r"             / ___ \| |_) | |_| | |_| | | |            ")
-    print (r"            /_/   \_\____/ \___/ \___/  |_|            ")
-    print (f"{Colors.ENDC}")
-    print (f"""
+
+def show_about():
+    clear_screen()
+    print(f"{Colors.HEADER}")
+    print(r" __   __               _               ____ ___ __  __ ")
+    print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
+    print(r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
+    print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
+    print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
+    print(r"      |___/  |___/                                     ")
+    print(r"                _    ____   ___  _   _ _____           ")
+    print(r"               / \  | __ ) / _ \| | | |_   _|          ")
+    print(r"              / _ \ |  _ \| | | | | | | | |            ")
+    print(r"             / ___ \| |_) | |_| | |_| | | |            ")
+    print(r"            /_/   \_\____/ \___/ \___/  |_|            ")
+    print(f"{Colors.ENDC}")
+    print(f"""
     {Colors.BOLD}YggdraSIM Suite v2.0{Colors.ENDC}
     Copyright (C) 2026 1oT OÜ. All rights reserved.
     Creator, architect, developer, and maintainer: Hampus Hellsberg.
@@ -2982,8 +3277,8 @@ def show_about ():
     * {Colors.CYAN}SCP11 Client (eSIM Management Relay):{Colors.ENDC}
       A single relay implementation is exposed through the eSIM management
       entrypoint. It exposes grouped `LPAd` and `IPAd` commands, compact
-      discovery, profile state control, `POLL` / `EIM-POLL`, ES9 URL/TLS/CA
-      controls, and expert / compatibility commands behind `HELP EXPERT`.
+      discovery, profile state control, ES9 URL/TLS/CA controls, and
+      expert / compatibility commands behind `HELP EXPERT`.
 
     * {Colors.CYAN}SCP11 Local SMDPP:{Colors.ENDC}
       Direct SCP11 bring-up against ISD-R with `DISCOVER`, `LOAD-PROFILE`,
@@ -3022,175 +3317,207 @@ def show_about ():
     It acts as the central conduit between local hardware, remote 
     file systems, and asymmetric provisioning realms.
     """)
-    pause ()
+    pause()
 
 
+def main_menu():
+    setup_paths()
+    setup_history()
+    while True:
+        clear_screen()
 
-def main_menu ():
-    setup_paths ()
-    setup_history ()
-    while True :
-        clear_screen ()
-
-        print (f"{Colors.HEADER}")
-        print (r" __   __               _               ____ ___ __  __ ")
-        print (r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
-        print (r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
-        print (r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
-        print (r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
-        print (r"      |___/  |___/                                     ")
-        print (r"        __  __       _        __  __                  ")
-        print (r"       |  \/  | __ _(_)_ __  |  \/  | ___ _ __  _   _ ")
-        print (r"       | |\/| |/ _` | | '_ \ | |\/| |/ _ \ '_ \| | | |")
-        print (r"       | |  | | (_| | | | | || |  | |  __/ | | | |_| |")
-        print (r"       |_|  |_|\__,_|_|_| |_||_|  |_|\___|_| |_|\__,_|")
-        print ("")
-        print (f"{Colors.HEADER}=== Unified Secure Element Research & Auditing Suite ==={Colors.ENDC}")
-        print (f"{Colors.CYAN}-------------------- Active Surfaces ---------------------{Colors.ENDC}")
-        print (
+        print(f"{Colors.HEADER}")
+        print(r" __   __               _               ____ ___ __  __ ")
+        print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
+        print(r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
+        print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
+        print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
+        print(r"      |___/  |___/                                     ")
+        print(r"        __  __       _        __  __                  ")
+        print(r"       |  \/  | __ _(_)_ __  |  \/  | ___ _ __  _   _ ")
+        print(r"       | |\/| |/ _` | | '_ \ | |\/| |/ _ \ '_ \| | | |")
+        print(r"       | |  | | (_| | | | | || |  | |  __/ | | | |_| |")
+        print(r"       |_|  |_|\__,_|_|_| |_||_|  |_|\___|_| |_|\__,_|")
+        print("")
+        print(
+            f"{Colors.HEADER}=== Unified Secure Element Research & Auditing Suite ==={Colors.ENDC}"
+        )
+        print(
+            f"{Colors.CYAN}-------------------- Active Surfaces ---------------------{Colors.ENDC}"
+        )
+        print(
             f"{Colors.WHITE} [ {Colors.GREEN}Admin Shell{Colors.WHITE} | "
             f"{Colors.CYAN}OTA Simulator{Colors.WHITE} | "
             f"{Colors.HEADER}eSIM Management{Colors.WHITE} |{Colors.ENDC}"
         )
-        print (
+        print(
             f"{Colors.WHITE}   {Colors.HEADER}Local SMDPP{Colors.WHITE} | "
             f"{Colors.HEADER}Local eIM{Colors.WHITE} | "
             f"{Colors.BLUE}SAIP Tool{Colors.WHITE} | "
             f"{Colors.BLUE}SUCI Tool{Colors.WHITE} ]{Colors.ENDC}"
         )
-        print (f"{Colors.BROWN}---------------------- Authorship ------------------------{Colors.ENDC}")
-        print (
+        print(
+            f"{Colors.BROWN}---------------------- Authorship ------------------------{Colors.ENDC}"
+        )
+        print(
             f"{Colors.WARNING} Authored and maintained by "
             f"{Colors.BOLD}{Colors.WHITE}1oT eSIM Engineering team{Colors.ENDC}"
         )
-        print (f"{Colors.HEADER}----------------------- Runtime --------------------------{Colors.ENDC}")
-        print ("\n".join (_build_active_backend_banner_lines ()))
-        print (f"{Colors.ENDC}")
+        print(
+            f"{Colors.HEADER}----------------------- Runtime --------------------------{Colors.ENDC}"
+        )
+        print("\n".join(_build_active_backend_banner_lines()))
+        print(f"{Colors.ENDC}")
 
-        menu_lines =[
-        f"{Colors.HEADER}==============================={Colors.ENDC}",
-        f"{Colors.GREEN}--- Administration ---{Colors.ENDC}",
-        f"{Colors.GREEN} [1] Admin Shell - Local Management{Colors.ENDC}",
-        f"{Colors.CYAN} [2] OTA Simulator - Remote Management{Colors.ENDC}",
-        "",
-        f"{Colors.HEADER}--- eSIM / eIM Management ---{Colors.ENDC}",
-        f"{Colors.HEADER} [3A] eSIM Management Relay{Colors.ENDC}",
-        f"{Colors.HEADER} [3C] Local SMDPP{Colors.ENDC}",
-        f"{Colors.HEADER} [3D] Local eIM{Colors.ENDC}",
-        "",
-        f"{Colors.BLUE}--- Profile & Key Tools ---{Colors.ENDC}",
-        f"{Colors.BLUE} [7] SAIP Tool{Colors.ENDC}",
-        f"{Colors.BLUE} [8] SUCI Key Tool{Colors.ENDC}",
-        "",
-        f"{Colors.WARNING}--- Automation ---{Colors.ENDC}",
-        f"{Colors.WARNING} [9A] Admin Shell - Script Execution{Colors.ENDC}",
-        f"{Colors.WARNING} [9B] Admin Shell - Report & DUMP-FS{Colors.ENDC}",
-        f"{Colors.WARNING} [9C] OTA Simulator - Script Execution{Colors.ENDC}",
-        "",
-        f"{Colors.CYAN}--- Runtime ---{Colors.ENDC}",
-        f"{Colors.CYAN} [C] Card Backend / Simulator Settings{Colors.ENDC}",
-        f"{Colors.CYAN} [CB] Card Bridge / Remote APDU Streaming{Colors.ENDC}",
-        f"{Colors.CYAN} [E] Environment Flags (YGGDRASIM_*){Colors.ENDC}",
+        menu_lines = [
+            f"{Colors.HEADER}==============================={Colors.ENDC}",
+            f"{Colors.GREEN}--- Administration ---{Colors.ENDC}",
+            f"{Colors.GREEN} [1] Admin Shell - Local Management{Colors.ENDC}",
+            f"{Colors.CYAN} [2] OTA Simulator - Remote Management{Colors.ENDC}",
+            "",
+            f"{Colors.HEADER}--- eSIM / eIM Management ---{Colors.ENDC}",
+            f"{Colors.HEADER} [3A] eSIM Management Relay{Colors.ENDC}",
+            f"{Colors.HEADER} [3C] Local SMDPP{Colors.ENDC}",
+            f"{Colors.HEADER} [3D] Local eIM{Colors.ENDC}",
+            "",
+            f"{Colors.BLUE}--- Profile & Key Tools ---{Colors.ENDC}",
+            f"{Colors.BLUE} [7] SAIP Tool{Colors.ENDC}",
+            f"{Colors.BLUE} [8] SUCI Key Tool{Colors.ENDC}",
+            "",
+            f"{Colors.WARNING}--- Automation ---{Colors.ENDC}",
+            f"{Colors.WARNING} [9A] Admin Shell - Script Execution{Colors.ENDC}",
+            f"{Colors.WARNING} [9B] Admin Shell - Report & DUMP-FS{Colors.ENDC}",
+            f"{Colors.WARNING} [9C] OTA Simulator - Script Execution{Colors.ENDC}",
+            "",
+            f"{Colors.CYAN}--- Runtime ---{Colors.ENDC}",
+            f"{Colors.CYAN} [C] Card Backend / Simulator Settings{Colors.ENDC}",
+            f"{Colors.CYAN} [CB] Card Bridge / APDU Streaming{Colors.ENDC}",
+            f"{Colors.CYAN} [E] Environment Flags (YGGDRASIM_*){Colors.ENDC}",
         ]
-        if yggdrasim_flavor .is_hil_bridge_included ()and yggdrasim_flavor .is_hil_bridge_supported_platform ():
-            menu_lines .append (f"{Colors.CYAN} [B] Local SIMtrace2 HIL Bridge Session{Colors.ENDC}")
-        elif yggdrasim_flavor .is_hil_bridge_included ():
-            menu_lines .append (f"{Colors.BROWN} [B] Card Bridge Session (local SIMtrace2 HIL is Linux-only on {sys.platform}){Colors.ENDC}")
-        else :
-            menu_lines .append (f"{Colors.BROWN} [B] Card Bridge Session (local SIMtrace2 HIL not bundled){Colors.ENDC}")
-        menu_lines .extend ([
-        "",
-        f"{Colors.WHITE}--- Reference ---{Colors.ENDC}",
-        f"{Colors.WHITE} [G] Guides & Documentation{Colors.ENDC}",
-        f"{Colors.WHITE} [A] About{Colors.ENDC}",
-        f"{Colors.WHITE} [L] License (GPLv3){Colors.ENDC}",
-        f"{Colors.WHITE} [Q] Quit{Colors.ENDC}",
-        f"{Colors.HEADER}==============================={Colors.ENDC}",
-        ])
-        print ("\n".join (menu_lines ))
+        if (
+            yggdrasim_flavor.is_hil_bridge_included()
+            and yggdrasim_flavor.is_hil_bridge_supported_platform()
+        ):
+            menu_lines.append(
+                f"{Colors.CYAN} [B] Local SIMtrace2 HIL Bridge Session{Colors.ENDC}"
+            )
+        elif yggdrasim_flavor.is_hil_bridge_included():
+            menu_lines.append(
+                f"{Colors.BROWN} [B] Card Bridge Session (local SIMtrace2 HIL is Linux-only on {sys.platform}){Colors.ENDC}"
+            )
+        else:
+            menu_lines.append(
+                f"{Colors.BROWN} [B] Card Bridge Session (local SIMtrace2 HIL not bundled){Colors.ENDC}"
+            )
+        plugin_lines = plugin_launcher_menu().lines()
+        if len(plugin_lines) > 0:
+            menu_lines.append("")
+            menu_lines.append(f"{Colors.CYAN}--- Plugins ---{Colors.ENDC}")
+            menu_lines.extend(f"{Colors.CYAN}{line}{Colors.ENDC}" for line in plugin_lines)
+        menu_lines.extend(
+            [
+                "",
+                f"{Colors.WHITE}--- Reference ---{Colors.ENDC}",
+                f"{Colors.WHITE} [G] Guides & Documentation{Colors.ENDC}",
+                f"{Colors.WHITE} [A] About{Colors.ENDC}",
+                f"{Colors.WHITE} [L] License (GPLv3){Colors.ENDC}",
+                f"{Colors.WHITE} [Q] Quit{Colors.ENDC}",
+                f"{Colors.HEADER}==============================={Colors.ENDC}",
+            ]
+        )
+        print("\n".join(menu_lines))
 
-        choice =input ("\nSelect module: ").strip ().upper ()
-        _dispatch_main_menu_choice (choice )
+        choice = input("\nSelect module: ").strip().upper()
+        _dispatch_main_menu_choice(choice)
 
-def _dispatch_main_menu_choice (choice :str )->None :
-    normalized_choice =str (choice or "").strip ().upper ()
-    legacy_choice_map ={
-    '3':'3A',
-    '5':'3C',
-    '6':'3D',
-    '9':'9A',
-    '10':'9B',
-    '11':'9C',
+
+def _dispatch_main_menu_choice(choice: str) -> None:
+    normalized_choice = str(choice or "").strip().upper()
+    legacy_choice_map = {
+        "3": "3A",
+        "5": "3C",
+        "6": "3D",
+        "9": "9A",
+        "10": "9B",
+        "11": "9C",
     }
-    if normalized_choice in legacy_choice_map :
-        normalized_choice =legacy_choice_map [normalized_choice ]
-    if normalized_choice =='1':
-        run_scp03 ()
+    if normalized_choice in legacy_choice_map:
+        normalized_choice = legacy_choice_map[normalized_choice]
+    if normalized_choice == "1":
+        run_scp03()
         return
-    if normalized_choice =='2':
-        run_scp80 ()
+    if normalized_choice == "2":
+        run_scp80()
         return
-    if normalized_choice =='3A':
-        run_scp11_live ()
+    if normalized_choice == "3A":
+        run_scp11_live()
         return
-    if normalized_choice =='3C':
-        run_scp11_local ()
+    if normalized_choice == "3C":
+        run_scp11_local()
         return
-    if normalized_choice =='3D':
-        run_scp11_eim_local ()
+    if normalized_choice == "3D":
+        run_scp11_eim_local()
         return
-    if normalized_choice =='7':
-        run_profile_package ()
+    if normalized_choice == "7":
+        run_profile_package()
         return
-    if normalized_choice =='8':
-        run_suci_tool ()
+    if normalized_choice == "8":
+        run_suci_tool()
         return
-    if normalized_choice =='9A':
-        run_scp03_script ()
+    if normalized_choice == "9A":
+        run_scp03_script()
         return
-    if normalized_choice =='9B':
-        run_scp03_report ()
+    if normalized_choice == "9B":
+        run_scp03_report()
         return
-    if normalized_choice =='9C':
-        run_scp80_script ()
+    if normalized_choice == "9C":
+        run_scp80_script()
         return
-    if normalized_choice =='C':
-        configure_card_backend ()
+    if normalized_choice == "C":
+        configure_card_backend()
         return
-    if normalized_choice =='CB':
-        manage_card_bridge ()
+    if normalized_choice == "CB":
+        manage_card_bridge()
         return
-    if normalized_choice =='E':
-        manage_env_flags ()
+    if normalized_choice == "E":
+        manage_env_flags()
         return
-    if normalized_choice =='B':
-        manage_hil_bridge ()
+    if normalized_choice == "B":
+        manage_hil_bridge()
         return
-    if normalized_choice =='G':
-        show_guides ()
+    if normalized_choice == "G":
+        show_guides()
         return
-    if normalized_choice =='A':
-        show_about ()
+    if normalized_choice == "A":
+        show_about()
         return
-    if normalized_choice =='L':
-        show_license ()
+    if normalized_choice == "L":
+        show_license()
         return
-    if normalized_choice in ('Q','QA'):
-        sys .exit (0 )
+    if normalized_choice in ("Q", "QA"):
+        sys.exit(0)
+    plugin_launcher_menu().dispatch(normalized_choice)
 
-def run_scp03_cmd (cmd_line :str ,yaml_out :str =None ):
+
+def run_scp03_cmd(cmd_line: str, yaml_out: str = None):
     """Run SCP03 commands non-interactively (for --cmd entrypoint)."""
-    try :
-        import SCP03 .main as scp03_entry 
-        scp03_entry .entry_cmd (cmd_line ,yaml_out =yaml_out )
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP03 Error: {e}{Colors.ENDC}")
-        raise 
+    try:
+        import SCP03.main as scp03_entry
+
+        scp03_entry.entry_cmd(cmd_line, yaml_out=yaml_out)
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP03 Error: {e}{Colors.ENDC}")
+        raise
 
 
-def run_asn1_decode(hex_text: str | None = None, *, input_file: str | None = None, output_format: str = "asn1") -> int:
+def run_asn1_decode(
+    hex_text: str | None = None,
+    *,
+    input_file: str | None = None,
+    output_format: str = "asn1",
+) -> int:
     """Run the ASN.1/TLV/APDU decoder from the unified launcher."""
 
     from Tools.Asn1TlvDecode.main import run_cli as asn1_run_cli
@@ -3206,12 +3533,12 @@ def run_asn1_decode(hex_text: str | None = None, *, input_file: str | None = Non
     return int(asn1_run_cli(decode_argv) or 0)
 
 
-def _build_cli_parser ():
+def _build_cli_parser():
     import argparse
     from yggdrasim_common.__about__ import __version__
 
-    flavor_label =yggdrasim_flavor .describe_flavor ()
-    epilog =(
+    flavor_label = yggdrasim_flavor.describe_flavor()
+    epilog = (
         "Examples:\n"
         "  python main/main.py\n"
         "  python main/main.py --version\n"
@@ -3229,112 +3556,116 @@ def _build_cli_parser ():
         "\n"
         f"Active build flavor: {flavor_label}\n"
     )
-    parser =argparse .ArgumentParser (
-        description ="YggdraSIM Suite",
-        epilog =epilog ,
-        formatter_class =argparse .RawDescriptionHelpFormatter ,
+    parser = argparse.ArgumentParser(
+        description="YggdraSIM Suite",
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser .add_argument (
+    parser.add_argument(
         "--version",
-        action ="version",
-        version =f"YggdraSIM {__version__} ({flavor_label})",
+        action="version",
+        version=f"YggdraSIM {__version__} ({flavor_label})",
     )
-    parser .add_argument (
+    parser.add_argument(
         "--doctor",
-        action ="store_true",
-        help ="Run a preflight environment check (Python, dependencies, pySim tree, reader, SQLite) and exit.",
+        action="store_true",
+        help="Run a preflight environment check (Python, dependencies, pySim tree, reader, SQLite) and exit.",
     )
-    parser .add_argument ("--scp03",action ="store_true",help ="Use SCP03 Admin Shell")
-    parser .add_argument ("--cmd",type =str ,help ="Semicolon-separated commands (non-interactive, use with --scp03)")
-    parser .add_argument ("--out",type =str ,help ="Output YAML file for --cmd")
-    parser .add_argument (
-    "--asn1",
-    nargs ="?",
-    const ="",
-    metavar ="HEX",
-    default =None ,
-    help ="Decode BER/DER ASN.1, BER-TLV, or command APDU hex and exit. Omit HEX to read stdin.",
+    parser.add_argument("--scp03", action="store_true", help="Use SCP03 Admin Shell")
+    parser.add_argument(
+        "--cmd",
+        type=str,
+        help="Semicolon-separated commands (non-interactive, use with --scp03)",
     )
-    parser .add_argument (
-    "--asn1-file",
-    dest ="asn1_file",
-    type =str ,
-    default =None ,
-    help ="Read ASN.1/TLV/APDU hex from a file and exit.",
+    parser.add_argument("--out", type=str, help="Output YAML file for --cmd")
+    parser.add_argument(
+        "--asn1",
+        nargs="?",
+        const="",
+        metavar="HEX",
+        default=None,
+        help="Decode BER/DER ASN.1, BER-TLV, or command APDU hex and exit. Omit HEX to read stdin.",
     )
-    parser .add_argument (
-    "--asn1-format",
-    dest ="asn1_format",
-    choices =("asn1","json","both"),
-    default ="asn1",
-    help ="ASN.1 decoder output format for --asn1/--asn1-file. Default: asn1.",
+    parser.add_argument(
+        "--asn1-file",
+        dest="asn1_file",
+        type=str,
+        default=None,
+        help="Read ASN.1/TLV/APDU hex from a file and exit.",
     )
-    parser .add_argument (
-    "--open-pcap",
-    dest ="open_pcap",
-    type =str ,
-    default =None ,
-    help ="Open a saved .pcap/.pcapng in the HIL decode TUI (offline review, no bridge).",
+    parser.add_argument(
+        "--asn1-format",
+        dest="asn1_format",
+        choices=("asn1", "json", "both"),
+        default="asn1",
+        help="ASN.1 decoder output format for --asn1/--asn1-file. Default: asn1.",
     )
-    parser .add_argument (
-    "--keybag",
-    dest ="keybag",
-    type =str ,
-    default =None ,
-    help ="Optional keybag JSON with SCP03/SCP11c session keys (for --open-pcap offline unwrap).",
+    parser.add_argument(
+        "--open-pcap",
+        dest="open_pcap",
+        type=str,
+        default=None,
+        help="Open a saved .pcap/.pcapng in the HIL decode TUI (offline review, no bridge).",
     )
-    parser .add_argument (
-    "--card-backend",
-    choices =["reader","sim"],
-    default =None,
-    help ="Select whether card-facing modules use the physical reader or the simulated SIM backend. When omitted, the last saved selection is reused.",
+    parser.add_argument(
+        "--keybag",
+        dest="keybag",
+        type=str,
+        default=None,
+        help="Optional keybag JSON with SCP03/SCP11c session keys (for --open-pcap offline unwrap).",
     )
-    parser .add_argument (
-    "--sim-isdr-config",
-    type =str ,
-    help ="Optional JSON config file that seeds the simulated ISD-R/eUICC personality.",
+    parser.add_argument(
+        "--card-backend",
+        choices=["reader", "sim"],
+        default=None,
+        help="Select whether card-facing modules use the physical reader or the simulated SIM backend. When omitted, the last saved selection is reused.",
     )
-    parser .add_argument (
-    "--sim-quirks",
-    type =str ,
-    help ="Optional Python quirks override file for the simulated SIM backend.",
+    parser.add_argument(
+        "--sim-isdr-config",
+        type=str,
+        help="Optional JSON config file that seeds the simulated ISD-R/eUICC personality.",
     )
-    parser .add_argument (
-    "--sim-eim-identity",
-    type =str ,
-    help ="Optional JSON file that defines the simulated card's default BF55 eIM identity.",
+    parser.add_argument(
+        "--sim-quirks",
+        type=str,
+        help="Optional Python quirks override file for the simulated SIM backend.",
     )
-    parser .add_argument (
-    "--sim-euicc-store",
-    type =str ,
-    help ="Optional directory root for persistent EID-scoped simulated eUICC state.",
+    parser.add_argument(
+        "--sim-eim-identity",
+        type=str,
+        help="Optional JSON file that defines the simulated card's default BF55 eIM identity.",
     )
-    parser .add_argument (
-    "--sim-profile-store",
-    type =str ,
-    help ="Optional directory for persisted simulated-profile artifacts.",
+    parser.add_argument(
+        "--sim-euicc-store",
+        type=str,
+        help="Optional directory root for persistent EID-scoped simulated eUICC state.",
     )
-    parser .add_argument (
-    "--sim-import-profile",
-    type =str ,
-    help ="Import a simulated profile from DER/BIN, hex-text DER (.txt/.hex), tagged SAIP JSON, or simulator profile-image JSON before launch.",
+    parser.add_argument(
+        "--sim-profile-store",
+        type=str,
+        help="Optional directory for persisted simulated-profile artifacts.",
     )
-    parser .add_argument (
-    "--sim-import-enable",
-    action ="store_true",
-    help ="Enable the imported simulator profile immediately.",
+    parser.add_argument(
+        "--sim-import-profile",
+        type=str,
+        help="Import a simulated profile from DER/BIN, hex-text DER (.txt/.hex), tagged SAIP JSON, or simulator profile-image JSON before launch.",
     )
-    add_debug_argument (
-    parser ,
-    help_text ="Enable global debug across modules launched from the wrapper. Without it, per-module debug stays opt-in.",
+    parser.add_argument(
+        "--sim-import-enable",
+        action="store_true",
+        help="Enable the imported simulator profile immediately.",
     )
-    _add_gui_arguments (parser )
-    _add_card_bridge_arguments (parser )
-    _add_remote_card_arguments (parser )
+    add_debug_argument(
+        parser,
+        help_text="Enable global debug across modules launched from the wrapper. Without it, per-module debug stays opt-in.",
+    )
+    _add_gui_arguments(parser)
+    _add_card_bridge_arguments(parser)
+    _add_remote_card_arguments(parser)
     return parser
 
 
-def _add_card_bridge_arguments (parser ):
+def _add_card_bridge_arguments(parser):
     """Attach the local Card Bridge CLI surface.
 
     ``--remote-card-url`` / ``--remote-card-token-file`` already make the
@@ -3342,90 +3673,90 @@ def _add_card_bridge_arguments (parser ):
     it can publish a locally attached PC/SC reader as the Card Bridge endpoint
     without going through the GUI.
     """
-    group =parser .add_argument_group ("Card Bridge / remote APDU streaming")
-    group .add_argument (
-    "--card-bridge",
-    action ="store_true",
-    help ="Start the local PC/SC Card Bridge daemon and exit when it stops.",
+    group = parser.add_argument_group("Card Bridge / remote APDU streaming")
+    group.add_argument(
+        "--card-bridge",
+        action="store_true",
+        help="Start the local PC/SC Card Bridge daemon and exit when it stops.",
     )
-    group .add_argument (
-    "--card-bridge-host",
-    dest ="card_bridge_host",
-    type =str ,
-    default =None ,
-    help ="Card Bridge bind host (default: 127.0.0.1).",
+    group.add_argument(
+        "--card-bridge-host",
+        dest="card_bridge_host",
+        type=str,
+        default=None,
+        help="Card Bridge bind host (default: 127.0.0.1).",
     )
-    group .add_argument (
-    "--card-bridge-port",
-    dest ="card_bridge_port",
-    type =int ,
-    default =None ,
-    help ="Card Bridge TCP port (default: 8642).",
+    group.add_argument(
+        "--card-bridge-port",
+        dest="card_bridge_port",
+        type=int,
+        default=None,
+        help="Card Bridge TCP port (default: 8642).",
     )
-    group .add_argument (
-    "--card-bridge-reader-index",
-    dest ="card_bridge_reader_index",
-    type =int ,
-    default =None ,
-    help ="PC/SC reader index to publish (default: 0).",
+    group.add_argument(
+        "--card-bridge-reader-index",
+        dest="card_bridge_reader_index",
+        type=int,
+        default=None,
+        help="PC/SC reader index to publish (default: 0).",
     )
-    group .add_argument (
-    "--card-bridge-reader-name",
-    dest ="card_bridge_reader_name",
-    type =str ,
-    default =None ,
-    help ="PC/SC reader name substring; overrides --card-bridge-reader-index.",
+    group.add_argument(
+        "--card-bridge-reader-name",
+        dest="card_bridge_reader_name",
+        type=str,
+        default=None,
+        help="PC/SC reader name substring; overrides --card-bridge-reader-index.",
     )
-    group .add_argument (
-    "--card-bridge-token-file",
-    dest ="card_bridge_token_file",
-    type =str ,
-    default =None ,
-    help ="Bearer-token file for the Card Bridge. Created with mode 0600 when missing.",
+    group.add_argument(
+        "--card-bridge-token-file",
+        dest="card_bridge_token_file",
+        type=str,
+        default=None,
+        help="Bearer-token file for the Card Bridge. Created with mode 0600 when missing.",
     )
-    group .add_argument (
-    "--card-bridge-no-token",
-    dest ="card_bridge_no_token",
-    action ="store_true",
-    help ="Run without a bearer token; loopback bind only.",
+    group.add_argument(
+        "--card-bridge-no-token",
+        dest="card_bridge_no_token",
+        action="store_true",
+        help="Run without a bearer token; loopback bind only.",
     )
-    group .add_argument (
-    "--card-bridge-audit",
-    dest ="card_bridge_audit",
-    action ="store_true",
-    help ="Emit header-only audit records for APDU exchanges.",
+    group.add_argument(
+        "--card-bridge-audit",
+        dest="card_bridge_audit",
+        action="store_true",
+        help="Emit header-only audit records for APDU exchanges.",
     )
-    group .add_argument (
-    "--card-bridge-audit-full-apdu",
-    dest ="card_bridge_audit_full_apdu",
-    action ="store_true",
-    help ="Log full APDU/response hex. Test-card forensic use only.",
+    group.add_argument(
+        "--card-bridge-audit-full-apdu",
+        dest="card_bridge_audit_full_apdu",
+        action="store_true",
+        help="Log full APDU/response hex. Test-card forensic use only.",
     )
-    group .add_argument (
-    "--card-bridge-audit-logger-name",
-    dest ="card_bridge_audit_logger_name",
-    type =str ,
-    default =None ,
-    help ="Python logger name used for Card Bridge audit records.",
+    group.add_argument(
+        "--card-bridge-audit-logger-name",
+        dest="card_bridge_audit_logger_name",
+        type=str,
+        default=None,
+        help="Python logger name used for Card Bridge audit records.",
     )
-    group .add_argument (
-    "--card-bridge-apdu-timeout-ms",
-    dest ="card_bridge_apdu_timeout_ms",
-    type =int ,
-    default =None ,
-    help ="Maximum PC/SC APDU wait in milliseconds.",
+    group.add_argument(
+        "--card-bridge-apdu-timeout-ms",
+        dest="card_bridge_apdu_timeout_ms",
+        type=int,
+        default=None,
+        help="Maximum PC/SC APDU wait in milliseconds.",
     )
-    group .add_argument (
-    "--card-bridge-pcsc-share-mode",
-    dest ="card_bridge_pcsc_share_mode",
-    choices =("shared","exclusive"),
-    default =None ,
-    help ="PC/SC sharing mode for the published reader (default: shared).",
+    group.add_argument(
+        "--card-bridge-pcsc-share-mode",
+        dest="card_bridge_pcsc_share_mode",
+        choices=("shared", "exclusive"),
+        default=None,
+        help="PC/SC sharing mode for the published reader (default: shared).",
     )
-    return parser 
+    return parser
 
 
-def _add_gui_arguments (parser ):
+def _add_gui_arguments(parser):
     """Attach the universal GUI argparse surface.
 
     Both `--gui` and `--web-server` are off by default. Neither flag
@@ -3433,68 +3764,78 @@ def _add_gui_arguments (parser ):
     dispatch path runs, so the baseline `pip install yggdrasim`
     install remains lean.
     """
-    group =parser .add_argument_group ("GUI (experimental)")
-    group .add_argument (
-    "--gui",
-    action ="store_true",
-    help ="Launch the desktop GUI (FastAPI on loopback + pywebview native window).",
+    group = parser.add_argument_group("GUI (experimental)")
+    group.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the desktop GUI (FastAPI on loopback + pywebview native window).",
     )
-    group .add_argument (
-    "--web-server",
-    dest ="web_server",
-    action ="store_true",
-    help ="Launch the remote-lab GUI API (FastAPI, no pywebview; requires an explicit bearer token).",
+    group.add_argument(
+        "--web-server",
+        dest="web_server",
+        action="store_true",
+        help="Launch the remote-lab GUI API (FastAPI, no pywebview; requires an explicit bearer token).",
     )
-    group .add_argument (
-    "--host",
-    type =str ,
-    default =None ,
-    help ="Override the GUI API bind host (default: 127.0.0.1 for --gui, 0.0.0.0 for --web-server).",
+    group.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="Override the GUI API bind host (default: 127.0.0.1 for --gui, 0.0.0.0 for --web-server).",
     )
-    group .add_argument (
-    "--port",
-    type =int ,
-    default =None ,
-    help ="Override the GUI API bind port (default: 27853 desktop / 27854 server).",
+    group.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Override the GUI API bind port (default: 27853 desktop / 27854 server).",
     )
-    group .add_argument (
-    "--token-file",
-    dest ="token_file",
-    type =str ,
-    default =None ,
-    help ="Path to a file containing the bearer token (required for --web-server).",
+    group.add_argument(
+        "--token-file",
+        dest="token_file",
+        type=str,
+        default=None,
+        help="Path to a file containing the bearer token (required for --web-server).",
     )
-    group .add_argument (
-    "--tls-cert",
-    dest ="tls_cert",
-    type =str ,
-    default =None ,
-    help ="TLS certificate path (PEM) for --web-server.",
+    group.add_argument(
+        "--tls-cert",
+        dest="tls_cert",
+        type=str,
+        default=None,
+        help="TLS certificate path (PEM) for --web-server.",
     )
-    group .add_argument (
-    "--tls-key",
-    dest ="tls_key",
-    type =str ,
-    default =None ,
-    help ="TLS private key path (PEM) for --web-server.",
+    group.add_argument(
+        "--tls-key",
+        dest="tls_key",
+        type=str,
+        default=None,
+        help="TLS private key path (PEM) for --web-server.",
     )
-    group .add_argument (
-    "--tls-self-signed",
-    dest ="tls_self_signed",
-    action ="store_true",
-    help ="Generate / reuse a self-signed TLS pair under state/gui_tls/ for --web-server.",
+    group.add_argument(
+        "--tls-self-signed",
+        dest="tls_self_signed",
+        action="store_true",
+        help="Generate / reuse a self-signed TLS pair under state/gui_tls/ for --web-server.",
     )
-    group .add_argument (
-    "--allow-origin",
-    dest ="allow_origin",
-    action ="append",
-    default =[],
-    help ="Additional CORS origin for --web-server (repeatable; wildcards refused).",
+    group.add_argument(
+        "--allow-origin",
+        dest="allow_origin",
+        action="append",
+        default=[],
+        help="Additional CORS origin for --web-server (repeatable; wildcards refused).",
     )
-    return parser 
+    group.add_argument(
+        "open_paths",
+        nargs="*",
+        metavar="FILE",
+        help=(
+            "Profile package or template to open in the SAIP workbench once the GUI "
+            "is up (with --gui / --web-server; the desktop launcher's Open With entry "
+            "passes the chosen file this way)."
+        ),
+    )
+    return parser
 
 
-def _route_gui_modes (args ):
+def _route_gui_modes(args):
     """Dispatch --gui / --web-server to the GUI server layer.
 
     Returns ``None`` when neither flag is set so the caller continues
@@ -3502,169 +3843,194 @@ def _route_gui_modes (args ):
     dependency stack is missing, this returns a non-zero exit code
     with a pointer at the correct `pip install yggdrasim[...]` extra.
     """
-    gui_enabled =bool (getattr (args ,"gui",False ))
-    web_server_enabled =bool (getattr (args ,"web_server",False ))
-    if gui_enabled and web_server_enabled :
-        print (f"{Colors.FAIL}[-] --gui and --web-server are mutually exclusive.{Colors.ENDC}")
-        return 2 
-    if not (gui_enabled or web_server_enabled ):
-        return None 
-    try :
-        from yggdrasim_common .gui_server .app import run_desktop ,run_web_server 
-    except ImportError as import_error :
-        extra ="gui"if gui_enabled else "gui-server"
-        print (
-        f"{Colors.FAIL}[-] {('--gui'if gui_enabled else '--web-server')} needs the optional dependency stack. "
-        f"Install it with: pip install 'yggdrasim[{extra}]' "
-        f"(underlying import error: {type(import_error).__name__}: {import_error}){Colors.ENDC}"
+    gui_enabled = bool(getattr(args, "gui", False))
+    web_server_enabled = bool(getattr(args, "web_server", False))
+    if gui_enabled and web_server_enabled:
+        print(
+            f"{Colors.FAIL}[-] --gui and --web-server are mutually exclusive.{Colors.ENDC}"
         )
-        return 3 
-    if gui_enabled :
-        return int (run_desktop (args )or 0 )
-    return int (run_web_server (args )or 0 )
-
-
-def _route_card_bridge_mode (args ):
-    """Dispatch --card-bridge to the standalone Card Bridge daemon."""
-    if bool (getattr (args ,"card_bridge",False ))is False :
-        return None
-    if bool (getattr (args ,"gui",False ))or bool (getattr (args ,"web_server",False )):
-        print (f"{Colors.FAIL}[-] --card-bridge cannot be combined with --gui or --web-server.{Colors.ENDC}")
         return 2
-    try :
-        from Tools.CardBridge.server import main as card_bridge_main
-    except ImportError as import_error :
-        print (
-        f"{Colors.FAIL}[-] --card-bridge needs the Card Bridge runtime. "
-        f"Install pyscard/PCSC support and ensure Tools.CardBridge is bundled "
-        f"(underlying import error: {type(import_error).__name__}: {import_error}){Colors.ENDC}"
+    if not (gui_enabled or web_server_enabled):
+        if len(list(getattr(args, "open_paths", None) or [])) > 0:
+            print(
+                f"{Colors.FAIL}[-] FILE arguments open in the GUI: add --gui, "
+                f"or start yggdrasim-desktop FILE.{Colors.ENDC}"
+            )
+            return 2
+        return None
+    try:
+        from yggdrasim_common.gui_server.app import run_desktop, run_web_server
+    except ImportError as import_error:
+        extra = "gui" if gui_enabled else "gui-server"
+        print(
+            f"{Colors.FAIL}[-] {('--gui' if gui_enabled else '--web-server')} needs the optional dependency stack. "
+            f"Install it with: pip install 'yggdrasim[{extra}]' "
+            f"(underlying import error: {type(import_error).__name__}: {import_error}){Colors.ENDC}"
         )
         return 3
-    bridge_argv =[]
-    host_value =getattr (args ,"card_bridge_host",None )
-    if host_value is not None :
-        bridge_argv .extend (["--host",str (host_value )])
-    port_value =getattr (args ,"card_bridge_port",None )
-    if port_value is not None :
-        bridge_argv .extend (["--port",str (port_value )])
-    reader_name_value =str (getattr (args ,"card_bridge_reader_name",None )or "").strip ()
-    if len (reader_name_value )>0 :
-        bridge_argv .extend (["--reader-name",reader_name_value ])
-    else :
-        reader_index_value =getattr (args ,"card_bridge_reader_index",None )
-        if reader_index_value is not None :
-            bridge_argv .extend (["--reader-index",str (reader_index_value )])
-    token_file_value =str (getattr (args ,"card_bridge_token_file",None )or "").strip ()
-    if len (token_file_value )>0 :
-        bridge_argv .extend (["--token-file",token_file_value ])
-    if bool (getattr (args ,"card_bridge_no_token",False )):
-        bridge_argv .append ("--no-token")
-    if bool (getattr (args ,"card_bridge_audit",False )):
-        bridge_argv .append ("--audit")
-    if bool (getattr (args ,"card_bridge_audit_full_apdu",False )):
-        bridge_argv .append ("--audit-full-apdu")
-    audit_logger_name =str (getattr (args ,"card_bridge_audit_logger_name",None )or "").strip ()
-    if len (audit_logger_name )>0 :
-        bridge_argv .extend (["--audit-logger-name",audit_logger_name ])
-    timeout_value =getattr (args ,"card_bridge_apdu_timeout_ms",None )
-    if timeout_value is not None :
-        bridge_argv .extend (["--apdu-timeout-ms",str (timeout_value )])
-    share_mode_value =str (getattr (args ,"card_bridge_pcsc_share_mode",None )or "").strip ()
-    if len (share_mode_value )>0 :
-        bridge_argv .extend (["--pcsc-share-mode",share_mode_value ])
-    return int (card_bridge_main (bridge_argv )or 0 )
+    if gui_enabled:
+        return int(run_desktop(args) or 0)
+    return int(run_web_server(args) or 0)
 
 
-def _apply_remote_card_arguments_with_log (args )->None :
+def _route_card_bridge_mode(args):
+    """Dispatch --card-bridge to the standalone Card Bridge daemon."""
+    if bool(getattr(args, "card_bridge", False)) is False:
+        return None
+    if bool(getattr(args, "gui", False)) or bool(getattr(args, "web_server", False)):
+        print(
+            f"{Colors.FAIL}[-] --card-bridge cannot be combined with --gui or --web-server.{Colors.ENDC}"
+        )
+        return 2
+    try:
+        from Tools.CardBridge.server import main as card_bridge_main
+    except ImportError as import_error:
+        print(
+            f"{Colors.FAIL}[-] --card-bridge needs the Card Bridge runtime. "
+            f"Install pyscard/PCSC support and ensure Tools.CardBridge is bundled "
+            f"(underlying import error: {type(import_error).__name__}: {import_error}){Colors.ENDC}"
+        )
+        return 3
+    bridge_argv = []
+    host_value = getattr(args, "card_bridge_host", None)
+    if host_value is not None:
+        bridge_argv.extend(["--host", str(host_value)])
+    port_value = getattr(args, "card_bridge_port", None)
+    if port_value is not None:
+        bridge_argv.extend(["--port", str(port_value)])
+    reader_name_value = str(
+        getattr(args, "card_bridge_reader_name", None) or ""
+    ).strip()
+    if len(reader_name_value) > 0:
+        bridge_argv.extend(["--reader-name", reader_name_value])
+    else:
+        reader_index_value = getattr(args, "card_bridge_reader_index", None)
+        if reader_index_value is not None:
+            bridge_argv.extend(["--reader-index", str(reader_index_value)])
+    token_file_value = str(getattr(args, "card_bridge_token_file", None) or "").strip()
+    if len(token_file_value) > 0:
+        bridge_argv.extend(["--token-file", token_file_value])
+    if bool(getattr(args, "card_bridge_no_token", False)):
+        bridge_argv.append("--no-token")
+    if bool(getattr(args, "card_bridge_audit", False)):
+        bridge_argv.append("--audit")
+    if bool(getattr(args, "card_bridge_audit_full_apdu", False)):
+        bridge_argv.append("--audit-full-apdu")
+    audit_logger_name = str(
+        getattr(args, "card_bridge_audit_logger_name", None) or ""
+    ).strip()
+    if len(audit_logger_name) > 0:
+        bridge_argv.extend(["--audit-logger-name", audit_logger_name])
+    timeout_value = getattr(args, "card_bridge_apdu_timeout_ms", None)
+    if timeout_value is not None:
+        bridge_argv.extend(["--apdu-timeout-ms", str(timeout_value)])
+    share_mode_value = str(
+        getattr(args, "card_bridge_pcsc_share_mode", None) or ""
+    ).strip()
+    if len(share_mode_value) > 0:
+        bridge_argv.extend(["--pcsc-share-mode", share_mode_value])
+    return int(card_bridge_main(bridge_argv) or 0)
+
+
+def _apply_remote_card_arguments_with_log(args) -> None:
     """Apply --remote-card-url / --remote-card-token-file and surface state.
 
-    A bridge banner only prints when something is actually configured —
+    A bridge banner only prints when something is actually configured --
     we don't want every YggdraSIM invocation to grow a noisy "remote
     card bridge: not configured" line.
     """
-    state =_apply_remote_card_arguments (args )
-    if len (state .get ("url")or "")>0 :
-        print (f"{Colors.CYAN}[i] {_describe_remote_card_state(state)}{Colors.ENDC}")
+    state = _apply_remote_card_arguments(args)
+    if len(state.get("url") or "") > 0:
+        print(f"{Colors.CYAN}[i] {_describe_remote_card_state(state)}{Colors.ENDC}")
 
 
-def run_cli (argv =None ):
-    internal_exit =dispatch_internal_entry (argv )
-    if internal_exit is not None :
-        return int (internal_exit )
-    parser =_build_cli_parser ()
-    args =parser .parse_args (argv )
-    if getattr (args ,"asn1",None )is not None or getattr (args ,"asn1_file",None )is not None :
-        return run_asn1_decode (
-        getattr (args ,"asn1",None ),
-        input_file =getattr (args ,"asn1_file",None ),
-        output_format =getattr (args ,"asn1_format","asn1"),
+def run_cli(argv=None):
+    internal_exit = dispatch_internal_entry(argv)
+    if internal_exit is not None:
+        return int(internal_exit)
+    parser = _build_cli_parser()
+    args = parser.parse_args(argv)
+    if (
+        getattr(args, "asn1", None) is not None
+        or getattr(args, "asn1_file", None) is not None
+    ):
+        return run_asn1_decode(
+            getattr(args, "asn1", None),
+            input_file=getattr(args, "asn1_file", None),
+            output_format=getattr(args, "asn1_format", "asn1"),
         )
-    card_bridge_exit =_route_card_bridge_mode (args )
-    if card_bridge_exit is not None :
-        return int (card_bridge_exit )
-    ensure_plugins_loaded ()
-    _emit_plugin_load_banner ()
+    card_bridge_exit = _route_card_bridge_mode(args)
+    if card_bridge_exit is not None:
+        return int(card_bridge_exit)
+    ensure_plugins_loaded()
+    _emit_plugin_load_banner()
     # Mirror --remote-card-url / --remote-card-token-file into the env
     # before any card backend is touched, so the existing
     # YGGDRASIM_CARD_RELAY_* resolution chain in card_backend picks the
     # values up transparently downstream.
-    _apply_remote_card_arguments_with_log (args )
-    if bool (getattr (args ,"doctor",False )):
+    _apply_remote_card_arguments_with_log(args)
+    if bool(getattr(args, "doctor", False)):
         from yggdrasim_common.doctor import run_doctor
         from yggdrasim_common.runtime_paths import runtime_root
-        return run_doctor (Path (runtime_root ()))
-    gui_exit =_route_gui_modes (args )
-    if gui_exit is not None :
-        return int (gui_exit )
+
+        return run_doctor(Path(runtime_root()))
+    gui_exit = _route_gui_modes(args)
+    if gui_exit is not None:
+        return int(gui_exit)
     # When --debug is passed, promote to a process-global default and
     # persist it.  When omitted, leave any previously persisted value
     # in place so debug state survives across sessions.
-    if bool (getattr (args ,"debug",False )):
-        set_global_debug (True )
-    install_noisy_warning_filters ()
-    card_backend_value =getattr (args ,"card_backend",None )
-    if card_backend_value is None :
-        set_card_backend (get_card_backend (),persist =False )
-    else :
-        set_card_backend (card_backend_value ,persist =False )
-    sim_isdr_config_value =getattr (args ,"sim_isdr_config",None )
-    if sim_isdr_config_value is not None :
-        set_sim_isdr_config_path (sim_isdr_config_value ,persist =False )
-    sim_euicc_store_value =getattr (args ,"sim_euicc_store",None )
-    if sim_euicc_store_value is not None :
-        set_sim_euicc_store_root (sim_euicc_store_value ,persist =False )
-    sim_quirks_value =getattr (args ,"sim_quirks",None )
-    if sim_quirks_value is not None :
-        set_sim_quirks_path (sim_quirks_value ,persist =False )
-    sim_eim_identity_value =getattr (args ,"sim_eim_identity",None )
-    if sim_eim_identity_value is not None :
-        set_sim_eim_identity_path (sim_eim_identity_value ,persist =False )
-    sim_profile_store_value =getattr (args ,"sim_profile_store",None )
-    if sim_profile_store_value is not None :
-        set_sim_profile_store_path (sim_profile_store_value ,persist =False )
-    sim_import_profile_value =str (getattr (args ,"sim_import_profile","")or "").strip ()
-    if len (sim_import_profile_value )>0 :
-        if _import_simulator_profile (
-        sim_import_profile_value ,
-        bool (getattr (args ,"sim_import_enable",False )),
-        persist_backend =False ,
-        )!=0 :
+    if bool(getattr(args, "debug", False)):
+        set_global_debug(True)
+    install_noisy_warning_filters()
+    card_backend_value = getattr(args, "card_backend", None)
+    if card_backend_value is None:
+        set_card_backend(get_card_backend(), persist=False)
+    else:
+        set_card_backend(card_backend_value, persist=False)
+    sim_isdr_config_value = getattr(args, "sim_isdr_config", None)
+    if sim_isdr_config_value is not None:
+        set_sim_isdr_config_path(sim_isdr_config_value, persist=False)
+    sim_euicc_store_value = getattr(args, "sim_euicc_store", None)
+    if sim_euicc_store_value is not None:
+        set_sim_euicc_store_root(sim_euicc_store_value, persist=False)
+    sim_quirks_value = getattr(args, "sim_quirks", None)
+    if sim_quirks_value is not None:
+        set_sim_quirks_path(sim_quirks_value, persist=False)
+    sim_eim_identity_value = getattr(args, "sim_eim_identity", None)
+    if sim_eim_identity_value is not None:
+        set_sim_eim_identity_path(sim_eim_identity_value, persist=False)
+    sim_profile_store_value = getattr(args, "sim_profile_store", None)
+    if sim_profile_store_value is not None:
+        set_sim_profile_store_path(sim_profile_store_value, persist=False)
+    sim_import_profile_value = str(
+        getattr(args, "sim_import_profile", "") or ""
+    ).strip()
+    if len(sim_import_profile_value) > 0:
+        if (
+            _import_simulator_profile(
+                sim_import_profile_value,
+                bool(getattr(args, "sim_import_enable", False)),
+                persist_backend=False,
+            )
+            != 0
+        ):
             return 1
-    open_pcap_value =str (getattr (args ,"open_pcap",None )or "").strip ()
-    if len (open_pcap_value )>0 :
-        keybag_value =str (getattr (args ,"keybag",None )or "").strip ()
-        return _open_hil_bridge_pcap_offline (open_pcap_value ,keybag_path =keybag_value )
-    if args .scp03 and args .cmd :
-        run_scp03_cmd (args .cmd ,yaml_out =args .out )
+    open_pcap_value = str(getattr(args, "open_pcap", None) or "").strip()
+    if len(open_pcap_value) > 0:
+        keybag_value = str(getattr(args, "keybag", None) or "").strip()
+        return _open_hil_bridge_pcap_offline(open_pcap_value, keybag_path=keybag_value)
+    if args.scp03 and args.cmd:
+        run_scp03_cmd(args.cmd, yaml_out=args.out)
         return 0
-    try :
-        main_menu ()
-    except QuitAllRequested :
+    try:
+        main_menu()
+    except QuitAllRequested:
         return 0
-    except KeyboardInterrupt :
+    except KeyboardInterrupt:
         return 0
     return 0
 
 
-if __name__ =="__main__":
-    sys .exit (run_cli ())
+if __name__ == "__main__":
+    sys.exit(run_cli())

@@ -199,12 +199,15 @@ class NotificationConfigurationUtf8Tests(unittest.TestCase):
         self.profile = self.state.profiles[0]
 
     def _store_metadata(self, address: bytes) -> bytes:
+        # NotificationConfigurationInformation in an AUTOMATIC TAGS module:
+        # each entry is 30 { 80 NotificationEvent, 81 UTF8String }, the
+        # shape _parse_notification_configuration_info reads.
         notification_config = tlv(
             "B6",
             tlv(
                 "30",
-                tlv("81", b"\x07\x80")
-                + tlv("0C", address),
+                tlv("80", b"\x07\x80")
+                + tlv("81", address),
             ),
         )
         return tlv(

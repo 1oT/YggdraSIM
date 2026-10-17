@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Release-boundary regression tests for bundles, wheels, and metadata."""
 
 from __future__ import annotations
@@ -454,11 +455,11 @@ class ReleaseMetadataTests(unittest.TestCase):
         # from project_version() would restate validate_tag's own comparison
         # and pass even with the function gutted. Bump them with the release.
         self.assertEqual(
-            release_validation.validate_tag(REPO_ROOT, "v2.1.0"),
-            "2.1.0",
+            release_validation.validate_tag(REPO_ROOT, "v2.2.0"),
+            "2.2.0",
         )
         with self.assertRaises(release_validation.ReleaseValidationError):
-            release_validation.validate_tag(REPO_ROOT, "v2.1.1")
+            release_validation.validate_tag(REPO_ROOT, "v2.2.1")
 
     def test_archive_listing_scan_matches_real_directory_components(self) -> None:
         listing = (

@@ -21,7 +21,7 @@ TP_UDL_OFFSET = 15
 
 class _StubConfig:
     def get(self, key: str) -> str:
-        return {"pid": "41", "dcs": "F6"}[key]
+        return {"pid": "7F", "dcs": "F6"}[key]
 
 
 def _builder() -> OtaPacketBuilder:

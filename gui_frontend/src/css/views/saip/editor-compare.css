@@ -62,7 +62,7 @@
   border: 1px solid var(--border);
   color: var(--fg);
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: 11px;
 }
@@ -118,7 +118,7 @@
   font-size: 11px;
 }
 
-/* Decoded fileDescriptor editor — replaces a raw hex input on the
+/* Decoded fileDescriptor editor -- replaces a raw hex input on the
    FCP tab with structure / file-type dropdowns + record-size /
    record-count fields. The hex carrier stays hidden so the existing
    Apply button keeps writing through to ``saip.update_file_field``. */
@@ -192,7 +192,15 @@
   padding-top: 2px;
 }
 
-/* ASN.1 + JSON tabs — view-only listings of the CHOICE list. */
+/* A stored descriptor or size a card refuses (a fifth descriptor byte,
+   a size that is not a whole number of records). */
+.saip-fd-warning {
+  font-size: 11px;
+  color: var(--warn);
+  padding-top: 2px;
+}
+
+/* ASN.1 + JSON tabs -- view-only listings of the CHOICE list. */
 .saip-asn1-table {
   width: 100%;
   border-collapse: collapse;
@@ -252,7 +260,7 @@
   border-radius: 4px;
 }
 
-/* ARR record summary line — distinct from the rule list. */
+/* ARR record summary line -- distinct from the rule list. */
 .saip-arr-record-summary {
   margin: 0 0 6px;
   font-size: 11px;
@@ -282,7 +290,7 @@
   flex: 1 1 auto;
 }
 
-/* File-kind chip ("ADF" / "Linear-fixed EF" / …) sits above the
+/* File-kind chip ("ADF" / "Linear-fixed EF" / ...) sits above the
  * editable rows and tells the operator which applicability column
  * the M/O/C/F glyphs are evaluated in. */
 .saip-fcp-kind-row {
@@ -297,7 +305,7 @@
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -312,7 +320,7 @@
   font-style: italic;
 }
 
-/* Per-row applicability glyph — single-letter chip (M / O / C / F)
+/* Per-row applicability glyph -- single-letter chip (M / O / C / F)
  * pinned next to the field label. Operators flagged the previous
  * uniform layout for hiding which fields are actually expected by
  * TCA SAIP createFCP for the current file kind. */
@@ -394,7 +402,7 @@
   text-decoration-color: color-mix(in oklab, var(--fail) 55%, transparent);
 }
 
-/* Per-record navigator — dropdown + prev/next + keyboard (PageUp /
+/* Per-record navigator -- dropdown + prev/next + keyboard (PageUp /
  * PageDown / Home / End). Keeps 22-record EF.ARRs / phonebooks to
  * one visible record instead of flooding the Data tab. */
 
@@ -406,6 +414,10 @@
   min-width: 0;
   box-sizing: border-box;
   outline: none;
+}
+
+.saip-record-nav:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring-soft);
 }
 
 .saip-record-nav--data {
@@ -468,7 +480,7 @@
 }
 
 /* EF.ARR per-record card list (consumes the backend's arr_records
- * decode — the SAIP TUI uses the same decoder). One collapsible
+ * decode -- the SAIP TUI uses the same decoder). One collapsible
  * row per access-rule record; populated rows expand by default,
  * FF-padded slots collapse. */
 
@@ -487,7 +499,7 @@
 
 .saip-arr-record {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-alt);
   overflow: hidden;
 }
@@ -568,6 +580,38 @@
   gap: 4px;
 }
 
+/* The reading that the files citing this record do not use: same rules,
+   named against the other access-mode table. */
+.saip-arr-rule-list--alt {
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  opacity: 0.85;
+}
+
+.saip-arr-rule-scope {
+  margin: 8px 0 4px;
+}
+
+.saip-arr-rule-list + .saip-arr-record-cited {
+  margin-top: 8px;
+}
+
+/* Rules the FCP's securityAttributesReferenced points at, nested under that
+   row so the reference and what it resolves to read as one unit. */
+.saip-fcp-access-rules {
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+
+.saip-fcp-access-rules .saip-arr-rule-list {
+  margin: 4px 0;
+}
+
+.saip-fcp-access-head {
+  font-style: normal;
+}
+
 .saip-arr-rule {
   display: flex;
   align-items: baseline;
@@ -598,7 +642,7 @@
   flex: 0 0 auto;
   font-size: 10px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent-soft);
   color: var(--accent);
   border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
@@ -617,7 +661,7 @@
 }
 
 .saip-arr-cond--bool {
-  color: #b48ead;
+  color: var(--accent);
 }
 
 .saip-arr-cond--cmd {
@@ -751,7 +795,7 @@
 
 .saip-record-copy.is-copied {
   background: var(--accent);
-  color: #2e3440;
+  color: var(--accent-fg);
 }
 
 .saip-record-actions {
@@ -799,7 +843,7 @@
   margin-top: 6px;
 }
 
-/* Structured file wizards (EF.IMSI / EF.AD / EF.UST / …). */
+/* Structured file wizards (EF.IMSI / EF.AD / EF.UST / ...). */
 
 .saip-wizard-card {
   border-color: var(--accent-soft);
@@ -904,28 +948,19 @@
   color: var(--danger);
 }
 
+/* Service tables list one service per row (flag-rows.css). */
 .saip-wizard-ust-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 4px 12px;
-  max-height: 320px;
+  max-height: min(480px, 60vh);
   overflow-y: auto;
-  padding: 6px;
+  padding: 2px 0;
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 4px;
 }
 
 .saip-wizard-ust-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
   color: var(--fg);
-}
-
-.saip-wizard-ust-cell input[type="checkbox"] {
-  flex: 0 0 auto;
 }
 
 .saip-wizard-text--wide {
@@ -965,30 +1000,25 @@
   border-radius: 4px;
 }
 
+/* Bit grids list one bit per row (flag-rows.css). */
 .saip-wizard-bitgrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 4px 10px;
-  padding: 4px 6px;
+  padding: 2px 0;
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 4px;
 }
 
 .saip-wizard-bit-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
   color: var(--fg);
 }
 
-.saip-wizard-bit-cell input[type="checkbox"] {
-  flex: 0 0 auto;
-}
-
-.saip-wizard-acc-grid {
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+/* Address editors: type of number, numbering plan and digits on one line. */
+.saip-wizard-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .saip-wizard-preview--error {
@@ -1007,8 +1037,67 @@
   overflow: hidden;
 }
 
+/* Placeholder binding rows sit between the size line and the hex editor
+   of a file that carries template placeholders. */
+.saip-file-placeholder-bindings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+.saip-form-hex-chip--declared {
+  opacity: 0.85;
+}
+
+/* The hex pane carries a placeholder's value (or its literal) in place of
+   the sentinel; the tint and the flag line say so. */
+.saip-rawbytes-input.is-placeholder-bearing {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+}
+
+.saip-rawbytes-placeholder-flag {
+  color: var(--accent);
+}
+
+/* The decoded form of a placeholder's value sits under the hex pane and
+   reads like it; the head line names the literal and the value form. */
+.saip-placeholder-value-editor {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.saip-placeholder-value-head {
+  color: var(--accent);
+  margin: 0 0 4px;
+}
+
+.saip-placeholder-value-input {
+  min-height: 32px;
+}
+
+/* Compact placeholder editor: byte rows in the mono face, raw model folded. */
+.saip-placeholder-bytes-input {
+  font-family: var(--mono);
+}
+
+.saip-placeholder-model-json {
+  margin-top: 8px;
+}
+
+.saip-placeholder-model-json summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
 .saip-rawbytes-card {
   margin-top: 12px;
+}
+
+.saip-record-hex-card .saip-record-hex-toolbar {
+  margin: 6px 0;
 }
 
 .saip-rawbytes-input {
@@ -1085,23 +1174,12 @@
   letter-spacing: 0.5px;
 }
 
-.saip-arr-wizard-am {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 2px 10px;
-}
-
 .saip-arr-wizard-sc {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.btn-small {
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 4px;
-}
 
 .saip-edit-hint {
   margin: 8px 0 0;
@@ -1208,7 +1286,7 @@
 
 .saip-decoded-entry-group {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-alt);
   overflow: hidden;
 }
@@ -1216,7 +1294,7 @@
 .saip-decoded-entry-group-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   padding: 7px 9px;
   border-bottom: 1px solid var(--border);
@@ -1243,7 +1321,9 @@
 .saip-decoded-entry-group-title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   min-width: 0;
   color: var(--fg);
   font-size: 12px;
@@ -1251,10 +1331,12 @@
 }
 
 .saip-decoded-entry-group-meta {
+  margin-left: auto;
   color: var(--fg-muted);
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 400;
+  white-space: nowrap;
 }
 
 .saip-decoded-entry-group-body {
@@ -1262,6 +1344,165 @@
   flex-direction: column;
   gap: 8px;
   padding: 8px;
+}
+
+/* Security Domain keyList: the overview table and its expand / collapse
+   controls above the per-key groups, one divider per key version, and
+   the value preview a folded key-field row carries. */
+.saip-sd-keylist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  container-type: inline-size;
+}
+
+.saip-sd-keylist-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.saip-sd-keylist-title {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.saip-sd-keylist-meta {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.saip-sd-keylist-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.saip-sd-keytable-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.saip-sd-keytable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.saip-sd-keytable thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.saip-sd-keytable td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.saip-sd-keytable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.saip-sd-keytable-row {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.saip-sd-keytable-row:hover {
+  background: var(--surface);
+}
+
+.saip-sd-keytable-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--surface);
+}
+
+.saip-sd-keytable-idx {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+}
+
+.saip-sd-keytable-mono {
+  font-family: var(--font-mono);
+}
+
+.saip-sd-keytable-sub {
+  margin-left: 5px;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+/* The key column is the one that may wrap: in a narrow pane the hex
+   folds at the column's minimum instead of pushing the table sideways. */
+.saip-sd-keytable td.saip-sd-keytable-hex {
+  font-family: var(--font-mono);
+  white-space: normal;
+  word-break: break-all;
+  min-width: 16ch;
+}
+
+@container (max-width: 720px) {
+  .saip-sd-keytable-sub {
+    display: none;
+  }
+
+  .saip-sd-keytable thead th,
+  .saip-sd-keytable td {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .saip-sd-keytable td.saip-sd-keytable-hex {
+    min-width: 14ch;
+  }
+}
+
+.saip-sd-keytable-default {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.saip-sd-keyset-divider {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 2px 0;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--fg);
+}
+
+.saip-sd-keyset-divider-meta {
+  font-size: 10px;
+  font-weight: 400;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+}
+
+.saip-decoded-row-preview {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
 }
 
 .saip-pe-decoded-direct {
@@ -1351,7 +1592,7 @@
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
 }
 
@@ -1365,7 +1606,7 @@
   width: 100%;
   padding: 3px 7px 3px 3px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-muted);
   cursor: pointer;
@@ -1389,7 +1630,7 @@
   width: 22px;
   height: 22px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-alt);
   color: var(--fg-muted);
   font-size: 10px;
@@ -1416,26 +1657,14 @@
   margin: auto;
 }
 
-.saip-profile-services-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 5px 8px;
-}
-
 .saip-profile-service-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
   font-size: 11px;
   color: var(--fg);
 }
 
 .saip-profile-service-option span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .saip-profile-header-textarea {
@@ -1587,7 +1816,7 @@
 
 .saip-decoded-row {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
   background: var(--surface-alt);
   transition: border-color 120ms ease, box-shadow 120ms ease;
@@ -1618,14 +1847,14 @@
 }
 
 .saip-decoded-chip-mod {
-  color: var(--ygg-amber, #ebcb8b);
-  border-color: var(--ygg-amber, #ebcb8b);
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 45%, transparent);
 }
 
 .saip-decoded-revert-btn {
   font-size: 10px;
   padding: 3px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   min-height: 28px;
 }
 
@@ -1662,7 +1891,7 @@
   letter-spacing: 0.03em;
   text-transform: uppercase;
   padding: 2px 6px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg-muted);
@@ -1894,21 +2123,16 @@
   color: var(--fg-muted);
 }
 
+/* One service per row (flag-rows.css). */
 .saip-decoded-services-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 4px 12px;
-  max-height: 220px;
+  max-height: min(480px, 60vh);
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 8px 10px;
+  padding: 2px 0;
 }
 
 .saip-decoded-services-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
   font-family: var(--font-mono);
 }

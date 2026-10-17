@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for structural and header lint rules.
 
-Covers: YRL-DOC-001, YRL-SEQ-001..004, YRL-ICC-001/010,
+Covers: YRL-DOC-001, YRL-SEQ-001..004, YRL-SEQ-011, YRL-ICC-001/010,
         YRL-IMS-001..007, YRL-SVC-001, YRL-HDR-001,
         YRL-UST-001, YRL-UST-002.
 """
@@ -38,7 +37,8 @@ _GOOD_ICCID_EF_HEX = _swap_nibbles(_GOOD_ICCID_HEX)
 # TS 31.102 §4.2.2: length byte 0x08, then parity byte = (first_digit<<4)|parity_nibble
 # where parity_nibble = 0x1 for odd digit count, 0x9 for even.
 # 15 digits (odd), first digit 0 -> parity byte 0x01; remaining 14 digits nibble-swapped.
-_GOOD_IMSI_HEX = "080110100000000010"
+# 15 digits (odd): length 08, parity nibble 9 (TS 24.008 §10.5.1.4).
+_GOOD_IMSI_HEX = "080910100000000010"
 
 
 def _minimal_doc(*section_keys_and_types: tuple[str, str]) -> dict:
@@ -122,7 +122,7 @@ def _codes(doc: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# YRL-DOC-001 — empty section list
+# YRL-DOC-001 -- empty section list
 # ---------------------------------------------------------------------------
 
 class DocEmptyTests(unittest.TestCase):
@@ -138,7 +138,7 @@ class DocEmptyTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-SEQ-001..004 — PE sequence structure
+# YRL-SEQ-001..004 -- PE sequence structure
 # ---------------------------------------------------------------------------
 
 class PeSequenceTests(unittest.TestCase):
@@ -175,9 +175,32 @@ class PeSequenceTests(unittest.TestCase):
         for rule in ("YRL-SEQ-001", "YRL-SEQ-002", "YRL-SEQ-003", "YRL-SEQ-004"):
             self.assertNotIn(rule, codes)
 
+    def test_seq003_accepts_iot_as_second_pe(self) -> None:
+        # TCA SAIP v3.4.1 §7.5: an IoT Minimal Profile has no PE-MF; PE-IoT
+        # follows the header directly.
+        doc = _minimal_doc(("header", "header"), ("iot", "iot"), ("end", "end"))
+        codes = _codes(doc)
+        self.assertNotIn("YRL-SEQ-003", codes)
+        self.assertNotIn("YRL-SEQ-011", codes)
+
+    def test_seq011_iot_together_with_mf_fires(self) -> None:
+        doc = _minimal_doc(
+            ("header", "header"), ("mf", "mf"), ("iot", "iot"), ("end", "end")
+        )
+        self.assertIn("YRL-SEQ-011", _codes(doc))
+
+    def test_seq011_iot_together_with_usim_fires(self) -> None:
+        doc = _minimal_doc(
+            ("header", "header"), ("iot", "iot"), ("usim", "usim"), ("end", "end")
+        )
+        self.assertIn("YRL-SEQ-011", _codes(doc))
+
+    def test_seq011_silent_for_a_full_profile(self) -> None:
+        self.assertNotIn("YRL-SEQ-011", _codes(_standard_doc()))
+
 
 # ---------------------------------------------------------------------------
-# YRL-ICC-001 — ICCID missing from header
+# YRL-ICC-001 -- ICCID missing from header
 # ---------------------------------------------------------------------------
 
 class IccidMissingTests(unittest.TestCase):
@@ -204,7 +227,7 @@ class IccidMissingTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-ICC-010 — ICCID mismatch between header and EF.ICCID
+# YRL-ICC-010 -- ICCID mismatch between header and EF.ICCID
 # ---------------------------------------------------------------------------
 
 class IccidConsistencyTests(unittest.TestCase):
@@ -245,7 +268,7 @@ class IccidConsistencyTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-IMS-001..007 — EF.IMSI encoding checks
+# YRL-IMS-001..007 -- EF.IMSI encoding checks
 # ---------------------------------------------------------------------------
 
 class ImsiEncodingTests(unittest.TestCase):
@@ -257,9 +280,12 @@ class ImsiEncodingTests(unittest.TestCase):
         self.assertIn("YRL-IMS-001", codes)
 
     def test_ims002_bad_length_byte(self) -> None:
-        # 9 bytes, length byte is 0x07 (should be 0x08)
+        # 9 bytes, length byte is 0x07 while 8 significant bytes follow.
         codes = _codes(_doc_with_usim("07911000000000F000"))
         self.assertIn("YRL-IMS-002", codes)
+        # A 13-digit IMSI takes 7 significant bytes: 07 is right, 08 is not.
+        self.assertNotIn("YRL-IMS-002", _codes(_doc_with_usim("0709101010101010FF")))
+        self.assertIn("YRL-IMS-002", _codes(_doc_with_usim("0809101010101010FF")))
 
     def test_ims003_bad_parity_nibble(self) -> None:
         # parity nibble is 0x5 (neither 0x1 nor 0x9)
@@ -272,15 +298,16 @@ class ImsiEncodingTests(unittest.TestCase):
         self.assertIn("YRL-IMS-004", codes)
 
     def test_ims005_parity_mismatch(self) -> None:
-        # 14-digit IMSI (even count), but parity nibble = 0x1 (only valid for odd).
-        # TS 31.102 §4.2.2: even count -> parity nibble 0x9.
-        codes = _codes(_doc_with_usim("0801101000000000f0"))
+        # 14-digit IMSI (even count) with parity nibble 0x9 (odd).
+        # TS 24.008 §10.5.1.4: even count -> parity nibble 0x1.
+        codes = _codes(_doc_with_usim("0809101000000000f0"))
         self.assertIn("YRL-IMS-005", codes)
+        self.assertNotIn("YRL-IMS-005", _codes(_doc_with_usim("0801101000000000f0")))
 
     def test_ims006_too_few_digits(self) -> None:
-        # 5 digits (< 6 minimum), parity nibble 0x1 (correct for odd 5):
-        # 0x08 len, 0x01 parity, then 2 digit-pair bytes, then 5 filler bytes.
-        codes = _codes(_doc_with_usim("08011010ffffffffff"))
+        # 5 digits (< 6 minimum), parity nibble 0x9 (correct for odd 5):
+        # 0x03 significant bytes, 0x09 parity, then 2 digit-pair bytes, filler.
+        codes = _codes(_doc_with_usim("03091010ffffffffff"))
         self.assertIn("YRL-IMS-006", codes)
 
     def test_good_imsi_passes(self) -> None:
@@ -291,7 +318,7 @@ class ImsiEncodingTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-SVC-001 — mandatory services absent from header
+# YRL-SVC-001 -- mandatory services absent from header
 # ---------------------------------------------------------------------------
 
 class MandatoryServicesTests(unittest.TestCase):
@@ -318,7 +345,7 @@ class MandatoryServicesTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-HDR-001 — profile header missing mandatory field
+# YRL-HDR-001 -- profile header missing mandatory field
 # ---------------------------------------------------------------------------
 
 class HeaderFieldTests(unittest.TestCase):
@@ -346,7 +373,7 @@ class HeaderFieldTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-UST-001 / YRL-UST-002 — UST service-to-file coherence
+# YRL-UST-001 / YRL-UST-002 -- UST service-to-file coherence
 # ---------------------------------------------------------------------------
 
 
@@ -545,7 +572,7 @@ class UstCoherenceTests(unittest.TestCase):
                 self.assertIn(marker, matching[0].message)
 
     def test_ust001_not_triggered_when_service_disabled(self) -> None:
-        # UST all zero — no services set, no UST-001 should fire
+        # UST all zero -- no services set, no UST-001 should fire
         doc = _doc_with_usim(ust_hex=self._UST_ALL_ZERO)
         codes = _codes(doc)
         self.assertNotIn("YRL-UST-001", codes)

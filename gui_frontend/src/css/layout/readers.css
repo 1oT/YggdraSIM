@@ -134,7 +134,7 @@
   flex: 0 0 auto;
   width: 9px;
   height: 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fg-dim);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15) inset;
 }

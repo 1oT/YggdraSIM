@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Per-notification ES9+ routing — SGP.22 §5.6.4 compliance tests.
+"""Per-notification ES9+ routing -- SGP.22 §5.6.4 compliance tests.
 
 NotificationMetadata.notificationAddress (BF2F tag 0C, UTF8String)
 identifies the SM-DP+ that minted each PendingNotification. The LPA
@@ -39,8 +38,8 @@ class HandleNotificationRequestSmdpAddressFieldTests(unittest.TestCase):
         )
         self.assertEqual(request.smdp_address, "dpp1.example.com")
 
-    def test_base_models_carry_smdp_address(self) -> None:
-        from SCP11.models import HandleNotificationRequest
+    def test_relay_models_carry_smdp_address(self) -> None:
+        from SCP11.relay.models import HandleNotificationRequest
 
         request = HandleNotificationRequest(
             pending_notification="dGVzdA==",
@@ -62,10 +61,10 @@ class HandleNotificationRequestSmdpAddressFieldTests(unittest.TestCase):
         # single argument MUST keep working -- empty string preserves
         # the legacy "use configured base URL" behaviour.
         from SCP11.live.models import HandleNotificationRequest as Live
-        from SCP11.models import HandleNotificationRequest as Base
+        from SCP11.relay.models import HandleNotificationRequest as Relay
         from SCP11.test.models import HandleNotificationRequest as Test
 
-        for cls in (Live, Base, Test):
+        for cls in (Live, Relay, Test):
             with self.subTest(cls=cls.__module__):
                 request = cls(pending_notification="dGVzdA==")
                 self.assertEqual(request.smdp_address, "")
@@ -114,9 +113,9 @@ class Es9ClientHandleNotificationRoutingTests(unittest.TestCase):
         self.assertEqual(captured["path"], "/gsma/rsp2/es9plus/handleNotification")
         self.assertEqual(captured["body"], {"pendingNotification": "dGVzdA=="})
 
-    def test_base_client_routes_to_notification_address(self) -> None:
-        client, captured = self._build_recording_client("SCP11.es9_client")
-        from SCP11.models import HandleNotificationRequest
+    def test_relay_client_routes_to_notification_address(self) -> None:
+        client, captured = self._build_recording_client("SCP11.relay.es9_client")
+        from SCP11.relay.models import HandleNotificationRequest
 
         request = HandleNotificationRequest(
             pending_notification="dGVzdA==",
@@ -177,8 +176,8 @@ class OrchestratorForwardPendingNotificationRoutingTests(unittest.TestCase):
     """The orchestrator must extract the FQDN and pass it through."""
 
     def _build_orchestrator(self, orch_module_name: str, models_module_name: str):
-        # The three orchestrator variants share the routing surface but
-        # are implemented as independent modules; verify each one wires
+        # The live orchestrator and its two compatibility namespaces
+        # share one implementation; verify each import path wires
         # ``notificationAddress`` through to the provider unchanged.
         orch_module = importlib.import_module(orch_module_name)
         models_module = importlib.import_module(models_module_name)
@@ -220,10 +219,10 @@ class OrchestratorForwardPendingNotificationRoutingTests(unittest.TestCase):
         self.assertEqual(outcome["captured"][0].smdp_address, "dpp1.example.com")
         self.assertEqual(outcome["captured"][0].pending_notification, "dGVzdA==")
 
-    def test_base_orchestrator_passes_notification_address_through(self) -> None:
+    def test_relay_orchestrator_passes_notification_address_through(self) -> None:
         outcome = self._exercise_forwarding_with_address(
-            "SCP11.orchestrator",
-            "SCP11.models",
+            "SCP11.relay.orchestrator",
+            "SCP11.relay.models",
             "dpp1.example.com",
         )
         self.assertEqual(outcome["captured"][0].smdp_address, "dpp1.example.com")

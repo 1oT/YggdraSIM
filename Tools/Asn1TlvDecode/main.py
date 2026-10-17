@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ASN.1/TLV decoder: renders pasted BER/DER hex as JSON and value notation."""
 from __future__ import annotations
 
@@ -162,6 +161,13 @@ class ApduCommandInfo:
 
 
 _APDU_COMMANDS: dict[tuple[int | None, int], ApduCommandInfo] = {
+    (None, 0x04): ApduCommandInfo("DEACTIVATE_FILE", "ISO 7816-4 / ETSI TS 102 221"),
+    (None, 0x32): ApduCommandInfo("INCREASE", "ETSI TS 102 221"),
+    (None, 0x44): ApduCommandInfo("ACTIVATE_FILE", "ISO 7816-4 / ETSI TS 102 221"),
+    (None, 0x73): ApduCommandInfo("MANAGE_SECURE_CHANNEL", "ETSI TS 102 221"),
+    (None, 0x75): ApduCommandInfo("TRANSACT_DATA", "ETSI TS 102 221"),
+    (None, 0x89): ApduCommandInfo("AUTHENTICATE", "ETSI TS 102 221 / 3GPP TS 31.102"),
+    (None, 0xA2): ApduCommandInfo("SEARCH_RECORD", "ISO 7816-4 / ETSI TS 102 221"),
     (None, 0xA4): ApduCommandInfo("SELECT", "ISO 7816-4 / ETSI TS 102 221"),
     (None, 0xB0): ApduCommandInfo("READ_BINARY", "ISO 7816-4 / ETSI TS 102 221"),
     (None, 0xD6): ApduCommandInfo("UPDATE_BINARY", "ISO 7816-4 / ETSI TS 102 221"),
@@ -178,12 +184,18 @@ _APDU_COMMANDS: dict[tuple[int | None, int], ApduCommandInfo] = {
     (None, 0xCA): ApduCommandInfo("GET_DATA", "ISO 7816-4 / GlobalPlatform"),
     (None, 0xCB): ApduCommandInfo("GET_DATA_ODD", "ISO 7816-4"),
     (None, 0xDA): ApduCommandInfo("PUT_DATA", "ISO 7816-4 / GlobalPlatform"),
+    (None, 0xDB): ApduCommandInfo("SET_DATA", "ETSI TS 102 221"),
     (0x00, 0x70): ApduCommandInfo("MANAGE_CHANNEL", "ISO 7816-4 / GlobalPlatform"),
     (0x01, 0x70): ApduCommandInfo("MANAGE_CHANNEL", "ISO 7816-4 / GlobalPlatform"),
     (0x00, 0xE0): ApduCommandInfo("CREATE_FILE", "ETSI TS 102 222"),
     (0x00, 0xE4): ApduCommandInfo("DELETE_FILE", "ETSI TS 102 222"),
     (0x80, 0x10): ApduCommandInfo("TERMINAL_PROFILE", "ETSI TS 102 223"),
     (0x80, 0x12): ApduCommandInfo("FETCH", "ETSI TS 102 223"),
+    # '78' and '7A' are deliberately absent: TS 102 221 table 10.5 note 2
+    # records that GlobalPlatform uses the same two INS values for END and
+    # BEGIN R-MAC SESSION, so either name would be wrong half the time.
+    (0x80, 0x76): ApduCommandInfo("SUSPEND_UICC", "ETSI TS 102 221"),
+    (0x80, 0x7C): ApduCommandInfo("MANAGE_LSI", "ETSI TS 102 221"),
     (0x80, 0x14): ApduCommandInfo("TERMINAL_RESPONSE", "ETSI TS 102 223"),
     (0x80, 0x50): ApduCommandInfo("INITIALIZE_UPDATE", "GlobalPlatform Card Spec / SCP02 / SCP03"),
     (0x80, 0x82): ApduCommandInfo("EXTERNAL_AUTHENTICATE", "GlobalPlatform Card Spec / SCP02 / SCP03"),
@@ -252,6 +264,19 @@ def run_cli(argv: list[str] | None = None, *, stdout: TextIO | None = None, stde
         return 2
     try:
         raw_input = _read_input(args)
+        if args.context:
+            from .context import decode_context_text
+
+            context_result = decode_context_text(raw_input, hint=str(args.domain))
+            if _interactive_stdout(out_stream):
+                out_stream.write("\n")
+            if str(args.format) == "json":
+                out_stream.write(json.dumps(context_result, indent=2, sort_keys=False) + "\n")
+            else:
+                out_stream.write(str(context_result["notation"]) + "\n")
+                if str(args.format) == "both":
+                    out_stream.write("\n" + json.dumps(context_result, indent=2, sort_keys=False) + "\n")
+            return 0
         data = normalise_hex(raw_input)
         tag_registry = TagRegistry.load()
         result = decode_bytes(
@@ -1064,6 +1089,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default="der",
         help="asn1tools codec for schema decode, default: der.",
     )
+    parser.add_argument(
+        "--context",
+        action="store_true",
+        help=(
+            "Context-aware decode: classify each APDU by CLA/INS and decode the "
+            "payload against that specification; accepts a whole exchange trace."
+        ),
+    )
+    parser.add_argument(
+        "--domain",
+        default="auto",
+        choices=("auto", "apdu", "response", "es10", "gp", "uicc", "cat", "tlv", "sw"),
+        help="With --context: force the decode domain instead of detecting it.",
+    )
     return parser
 
 
@@ -1160,7 +1199,7 @@ def _parse_tag_table(path: Path, *, root: Path) -> list[TagInfo]:
                 if name not in {"NAME", "DATA NAME", "DATA OBJECT", "LENGTH"}:
                     entries.append(TagInfo(tag=tag, name=name, source=source))
                     continue
-        match = re.search(r"['‘`]([0-9A-Fa-f]{2,6})['’`]\s+(?:to\s+['‘`][0-9A-Fa-f]{2,6}['’`]\s+)?(.+)", line)
+        match = re.search(r"[''`]([0-9A-Fa-f]{2,6})[''`]\s+(?:to\s+[''`][0-9A-Fa-f]{2,6}[''`]\s+)?(.+)", line)
         if match is None:
             continue
         tag = _clean_tag(match.group(1))
@@ -1625,18 +1664,56 @@ def _render_item_notation(item: dict[str, Any], *, indent: int, assignment: bool
             operator = "::=" if assignment else "="
             return [f"{prefix}{label} {operator} {{}}"]
         first_line = f"{prefix}{label} ::= {{" if assignment else f"{prefix}{label} {{"
-        lines = [first_line]
-        for index, child in enumerate(children):
-            child_lines = _render_item_notation(child, indent=indent + 2, assignment=False)
-            if index < len(children) - 1:
-                child_lines[-1] = child_lines[-1] + ","
-            lines.extend(child_lines)
-        lines.append(f"{prefix}}}")
-        return lines
-    value = item.get("decoded")
-    rendered_value = _render_value(value, indent) if "decoded" in item else f"'{item.get('raw', '')}'H"
+        return [first_line, *_render_child_lines(children, indent + 2), f"{prefix}}}"]
+    encapsulated = _encapsulated_items(item)
+    if encapsulated is not None:
+        keyword = "::= encapsulates" if assignment else "encapsulates"
+        return [f"{prefix}{label} {keyword} {{", *_render_child_lines(encapsulated, indent + 2), f"{prefix}}}"]
     operator = "::=" if assignment else "="
-    return [f"{prefix}{label} {operator} {rendered_value}"]
+    if "decoded" not in item:
+        return [f"{prefix}{label} {operator} {_raw_value(str(item.get('raw', '')))}"]
+    value = item["decoded"]
+    if isinstance(value, dict) and "embeddedAsn1" in value:
+        # A TLV reading that _encapsulated_items turned down; the other fields carry the value.
+        value = {key: entry for key, entry in value.items() if key != "embeddedAsn1"}
+    return [f"{prefix}{label} {operator} {_render_value(value, indent)}"]
+
+
+def _render_child_lines(children: list[dict[str, Any]], indent: int) -> list[str]:
+    lines: list[str] = []
+    for index, child in enumerate(children):
+        child_lines = _render_item_notation(child, indent=indent, assignment=False)
+        if index < len(children) - 1:
+            child_lines[-1] = child_lines[-1] + ","
+        lines.extend(child_lines)
+    return lines
+
+
+def _encapsulated_items(item: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """The DER an OCTET STRING or BIT STRING carries, when it is shown as nested items."""
+    decoded = item.get("decoded")
+    if not isinstance(decoded, dict):
+        return None
+    embedded = decoded.get("embeddedAsn1")
+    if not isinstance(embedded, list) or len(embedded) == 0 or "text" in decoded:
+        return None
+    # A BIT STRING usually holds a key or a signature. Only a constructed first element (an RSA
+    # key, an ECDSA signature) is read as DER, so an EC point that happens to parse as a TLV keeps
+    # its payload hex.
+    if "payloadHex" in decoded and not embedded[0].get("constructed"):
+        return None
+    return embedded
+
+
+def _raw_value(raw_hex: str) -> str:
+    """'...'H for an undecoded primitive, with its text when every byte is printable ASCII."""
+    try:
+        value = bytes.fromhex(raw_hex)
+    except ValueError:
+        return f"'{raw_hex}'H"
+    if len(value) >= 4 and all(0x20 <= byte <= 0x7E for byte in value):
+        return f"'{raw_hex}'H ({json.dumps(value.decode('ascii'))})"
+    return f"'{raw_hex}'H"
 
 
 def _render_value(value: Any, indent: int) -> str:

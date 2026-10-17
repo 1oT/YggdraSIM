@@ -13,7 +13,7 @@
   width: 8px;
   height: 8px;
   transform: translateY(-50%);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
   box-shadow: 0 0 8px var(--accent-glow);
   animation: ygg-busy-pulse 1.2s ease-in-out infinite;

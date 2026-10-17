@@ -31,13 +31,23 @@ class FileExpectation:
     expected_type: str
     expected_structure: str
     size: Optional[int] = None
+    # Lower bound for files whose size the specification gives as a minimum
+    # ("2n bytes", "X bytes, X >= 1", "4+X bytes"); ``size`` stays for exact ones.
+    min_size: Optional[int] = None
     record_length: Optional[int] = None
+    # Lower bound for records whose size the specification gives as a
+    # minimum ("X bytes (X >= 57)"); ``record_length`` stays for exact ones.
+    min_record_length: Optional[int] = None
     record_count: Optional[int] = None
     sfi: Optional[str] = None
     required: bool = True
     require_security: bool = True
     require_lcs: bool = True
     service_any: Tuple[int, ...] = ()
+    # Services whose availability makes the specification forbid the file.
+    # When one of them is available the file is checked for absence instead
+    # of for structure.
+    absent_if_service: Tuple[int, ...] = ()
     content_pattern: Optional[str] = None
     pattern_scope: str = "file"
     content_mismatch_severity: str = "WARN"
@@ -86,15 +96,19 @@ def _expectation_from_mapping(raw: Any, where: str) -> FileExpectation:
             raise PolicyPackError(f"{where}.{name} is required")
 
     values = dict(raw)
-    if "service_any" in values:
-        services = values["service_any"]
+    for service_field in ("service_any", "absent_if_service"):
+        if service_field not in values:
+            continue
+        services = values[service_field]
         if not isinstance(services, (list, tuple)):
-            raise PolicyPackError(f"{where}.service_any must be a list of integers")
+            raise PolicyPackError(
+                f"{where}.{service_field} must be a list of integers"
+            )
         try:
-            values["service_any"] = tuple(int(item) for item in services)
+            values[service_field] = tuple(int(item) for item in services)
         except (TypeError, ValueError) as exc:
             raise PolicyPackError(
-                f"{where}.service_any must be a list of integers"
+                f"{where}.{service_field} must be a list of integers"
             ) from exc
     for name in ("required", "require_security", "require_lcs"):
         if name in values:
@@ -173,18 +187,39 @@ def export_default_policy_pack() -> Dict[str, Any]:
 
 
 class ProfileValidator:
+    # Presence, structure, size and SFI come from ETSI TS 102 221 v18.4 §13
+    # and Annex H (MF level), 3GPP TS 31.102 v19.5 §4.2 / §4.4 (USIM) and
+    # 3GPP TS 31.103 v19 §4.2 (ISIM). Record counts, exact sizes of
+    # variable-length files and content patterns are the reset-profile policy
+    # of this validator, not specification requirements.
     MF_EXPECTATIONS: Tuple[FileExpectation, ...] = (
         FileExpectation("MF", "DF", "Tree", required=True, require_security=False),
-        FileExpectation("EF_PL", "EF", "Transparent", size=2, sfi="05"),
+        # TS 102 221 v18.4 Table 13.4: mandatory, 2n bytes, SFI '05' (Annex H.1).
+        FileExpectation("EF_PL", "EF", "Transparent", min_size=2, sfi="05"),
+        # TS 102 221 v18.4 Table 13.3: mandatory, 10 bytes, SFI optional.
         FileExpectation("EF_ICCID", "EF", "Transparent", size=10),
+        # TS 102 221 v18.4 Table 13.1: mandatory, SFI '1E' (Annex H.1).
         FileExpectation("EF_DIR", "EF", "Linear Fixed", sfi="1E"),
-        FileExpectation("EF_ARR", "EF", "Linear Fixed"),
+        # TS 102 221 v18.4 Table 13.5: EF_ARR at MF level is optional.
+        FileExpectation("EF_ARR", "EF", "Linear Fixed", required=False),
+        # TS 102 221 v18.4 Table 13.8: mandatory, 5 bytes, SFI '08' (Annex H.1).
         FileExpectation("EF_UMPC", "EF", "Transparent", size=5, sfi="08"),
     )
 
     USIM_EXPECTATIONS: Tuple[FileExpectation, ...] = (
         FileExpectation("ADF_USIM", "DF", "Tree", required=True, require_security=False),
-        FileExpectation("ADF_USIM/EF_IMSI", "EF", "Transparent", size=9, sfi="07", require_security=False),
+        # TS 31.102 v19.5 §4.2.2: if service n°130 is "available", this file
+        # shall not be available. Service 130 marks a SUPI that is not an
+        # IMSI, so the file is checked for absence on such a USIM.
+        FileExpectation(
+            "ADF_USIM/EF_IMSI",
+            "EF",
+            "Transparent",
+            size=9,
+            sfi="07",
+            require_security=False,
+            absent_if_service=(130,),
+        ),
         FileExpectation("ADF_USIM/EF_ARR", "EF", "Linear Fixed", sfi="17", require_security=False),
         FileExpectation(
             "ADF_USIM/EF_KEYS",
@@ -202,23 +237,25 @@ class ProfileValidator:
             sfi="09",
             content_pattern=_hex_join("07", _repeat_byte("FF", 32)),
         ),
+        # TS 31.102 v19.5 §4.2.6: mandatory, 1 byte, SFI '12'; not tied to a
+        # UST service.
         FileExpectation(
             "ADF_USIM/EF_HPPLMN",
             "EF",
             "Transparent",
             size=1,
             sfi="12",
-            service_any=(12,),
             content_pattern="0A",
         ),
-        FileExpectation("ADF_USIM/EF_UST", "EF", "Transparent", size=17, sfi="04"),
+        # TS 31.102 v19.5 §4.2.8: mandatory, X bytes (X >= 1), SFI '04'.
+        FileExpectation("ADF_USIM/EF_UST", "EF", "Transparent", min_size=1, sfi="04"),
+        # TS 31.102 v19.5 §4.2.24: present if service n°2 and/or n°89; no SFI.
         FileExpectation(
             "ADF_USIM/EF_FDN",
             "EF",
             "Linear Fixed",
             record_length=26,
             record_count=20,
-            sfi="08",
             service_any=(2, 89),
             content_pattern=_hex_join(_repeat_byte("FF", 26)),
             pattern_scope="record",
@@ -229,7 +266,6 @@ class ProfileValidator:
             "Linear Fixed",
             record_length=176,
             record_count=10,
-            sfi="00",
             service_any=(10,),
             content_pattern=_hex_join("00", _repeat_byte("FF", 175)),
             pattern_scope="record",
@@ -248,12 +284,14 @@ class ProfileValidator:
             "ADF_USIM/EF_SMSS",
             "EF",
             "Transparent",
-            size=2,
+            min_size=2,
             service_any=(10,),
             content_pattern="FFFF",
         ),
-        FileExpectation("ADF_USIM/EF_SPN", "EF", "Transparent", size=17, sfi="10", service_any=(19,)),
-        FileExpectation("ADF_USIM/EF_EST", "EF", "Transparent", size=1, sfi="05", service_any=(2, 6, 34, 35)),
+        # TS 31.102 v19.5 §4.2.12: optional (service n°19), 17 bytes, no SFI.
+        FileExpectation("ADF_USIM/EF_SPN", "EF", "Transparent", size=17, service_any=(19,)),
+        # TS 31.102 v19.5 §4.2.47: present if service n°2, 6, 34 or 35; X >= 1.
+        FileExpectation("ADF_USIM/EF_EST", "EF", "Transparent", min_size=1, sfi="05", service_any=(2, 6, 34, 35)),
         FileExpectation(
             "ADF_USIM/EF_START_HFN",
             "EF",
@@ -283,7 +321,7 @@ class ProfileValidator:
             "ADF_USIM/EF_FPLMN",
             "EF",
             "Transparent",
-            size=12,
+            min_size=12,
             sfi="0D",
             content_pattern=_repeat_byte("FF", 12),
         ),
@@ -295,13 +333,16 @@ class ProfileValidator:
             sfi="0B",
             content_pattern="FFFFFFFFFFFFFF0000FF01",
         ),
-        FileExpectation("ADF_USIM/EF_AD", "EF", "Transparent", size=4, sfi="03"),
+        # TS 31.102 v19.5 §4.2.18: mandatory, 4+X bytes, SFI '03'.
+        FileExpectation("ADF_USIM/EF_AD", "EF", "Transparent", min_size=4, sfi="03"),
         FileExpectation("ADF_USIM/EF_ECC", "EF", "Linear Fixed", record_length=4, record_count=1, sfi="01"),
+        # TS 31.102 v19.5 §4.2.57: mandatory, "File size: X bytes, (X >= 46)".
+        # The 128-byte content pattern stays this validator's reset policy.
         FileExpectation(
             "ADF_USIM/EF_NETPAR",
             "EF",
             "Transparent",
-            size=128,
+            min_size=46,
             content_pattern=_repeat_byte("FF", 128),
         ),
         FileExpectation(
@@ -378,13 +419,37 @@ class ProfileValidator:
             required=False,
             content_pattern="FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000001",
         ),
+        # TS 31.102 v19.5 §4.4.11.4 / §4.4.11.5: present when service
+        # n°122 is available, "Record size: X bytes (X >= 57)". The
+        # record count follows service n°136: one record when it is not
+        # available, two when it is, so only the two-record rule is pinned
+        # here and it is gated on that service. The 62-byte record pattern
+        # stays this validator's reset policy.
         FileExpectation(
             "ADF_USIM/5GS/EF_5GS3GPPNSC",
             "EF",
             "Linear Fixed",
-            record_length=62,
+            min_record_length=57,
+            sfi="03",
+            required=False,
+            content_pattern=_repeat_byte("FF", 62),
+            pattern_scope="record",
+        ),
+        FileExpectation(
+            "ADF_USIM/5GS/EF_5GS3GPPNSC",
+            "EF",
+            "Linear Fixed",
             record_count=2,
             sfi="03",
+            required=False,
+            service_any=(136,),
+        ),
+        FileExpectation(
+            "ADF_USIM/5GS/EF_5GSN3GPPNSC",
+            "EF",
+            "Linear Fixed",
+            min_record_length=57,
+            sfi="04",
             required=False,
             content_pattern=_repeat_byte("FF", 62),
             pattern_scope="record",
@@ -393,12 +458,10 @@ class ProfileValidator:
             "ADF_USIM/5GS/EF_5GSN3GPPNSC",
             "EF",
             "Linear Fixed",
-            record_length=62,
             record_count=2,
             sfi="04",
             required=False,
-            content_pattern=_repeat_byte("FF", 62),
-            pattern_scope="record",
+            service_any=(136,),
         ),
         FileExpectation(
             "ADF_USIM/5GS/EF_5GAUTHKEYS",
@@ -416,12 +479,17 @@ class ProfileValidator:
         FileExpectation("ADF_ISIM/EF_IMPI", "EF", "Transparent", sfi="02"),
         FileExpectation("ADF_ISIM/EF_IMPU", "EF", "Linear Fixed", record_count=1, sfi="04"),
         FileExpectation("ADF_ISIM/EF_DOMAIN", "EF", "Transparent", sfi="05"),
-        FileExpectation("ADF_ISIM/EF_IST", "EF", "Transparent", size=14, sfi="07"),
+        # TS 31.103 v19 §4.2.7: optional (mandatory only when optional services
+        # are provided), X bytes (X >= 1), SFI '07'.
+        FileExpectation(
+            "ADF_ISIM/EF_IST", "EF", "Transparent", min_size=1, sfi="07", required=False
+        ),
+        # TS 31.103 v19 §4.2.5: mandatory, 3+X bytes, SFI '03'.
         FileExpectation(
             "ADF_ISIM/EF_AD",
             "EF",
             "Transparent",
-            size=3,
+            min_size=3,
             sfi="03",
             content_pattern="000000",
         ),
@@ -583,10 +651,51 @@ class ProfileValidator:
         print(f"\n{Config.Colors.BOLD}{title}{Config.Colors.ENDC}")
 
         for expectation in expectations:
+            if self._is_expectation_forbidden(expectation, service_bits):
+                self._validate_absence(expectation)
+                continue
+
             if self._is_expectation_applicable(expectation, service_bits) is False:
                 continue
 
             self._validate_expectation(expectation)
+
+    def _is_expectation_forbidden(
+        self,
+        expectation: FileExpectation,
+        service_bits: Optional[Sequence[int]],
+    ) -> bool:
+        """Report whether a declared service forbids the file (``absent_if_service``)."""
+        if len(expectation.absent_if_service) == 0:
+            return False
+
+        if service_bits is None:
+            return False
+
+        for service_number in expectation.absent_if_service:
+            if self._service_is_available(service_bits, service_number):
+                return True
+
+        return False
+
+    def _validate_absence(self, expectation: FileExpectation) -> None:
+        """Check a file the service table forbids."""
+        services = ", ".join(f"n°{number}" for number in expectation.absent_if_service)
+        selected = self.fs.select(expectation.path, silent=True)
+        if selected is False:
+            self._add_finding(
+                "PASS",
+                expectation.path,
+                f"Not available, as service {services} requires.",
+            )
+            return
+
+        self._add_finding(
+            "FAIL",
+            expectation.path,
+            f"File selects although service {services} is available; "
+            "the clause requires it not to be available.",
+        )
 
     def _is_expectation_applicable(
         self,
@@ -613,6 +722,16 @@ class ProfileValidator:
             return
 
         meta = dict(self.fs.current_fcp)
+        if "type" not in meta and "structure" not in meta:
+            # The controller records ``template: Unknown`` when SELECT answered
+            # without an FCP; the previous file's descriptor is never inherited.
+            self._add_finding(
+                "FAIL",
+                expectation.path,
+                "SELECT returned no FCP template; file type and structure cannot be verified.",
+            )
+            return
+
         fail_errors: List[str] = []
         warn_errors: List[str] = []
 
@@ -631,11 +750,29 @@ class ProfileValidator:
             if actual_size != expectation.size:
                 warn_errors.append(f"size={actual_size}, expected={expectation.size}")
 
+        if expectation.min_size is not None:
+            actual_size = meta.get("size")
+            if not isinstance(actual_size, int) or actual_size < expectation.min_size:
+                warn_errors.append(
+                    f"size={actual_size}, expected at least {expectation.min_size}"
+                )
+
         if expectation.record_length is not None:
             actual_record_length = meta.get("rec_len")
             if actual_record_length != expectation.record_length:
                 warn_errors.append(
                     f"record_length={actual_record_length}, expected={expectation.record_length}"
+                )
+
+        if expectation.min_record_length is not None:
+            actual_record_length = meta.get("rec_len")
+            if (
+                not isinstance(actual_record_length, int)
+                or actual_record_length < expectation.min_record_length
+            ):
+                warn_errors.append(
+                    f"record_length={actual_record_length}, "
+                    f"expected at least {expectation.min_record_length}"
                 )
 
         if expectation.record_count is not None:

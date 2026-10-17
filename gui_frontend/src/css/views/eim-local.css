@@ -5,7 +5,7 @@
 
 
 /* ----------------------------------------------------------------------
-   FS-Admin guided wizards (CREATE FILE / lifecycle / resize / …)
+   FS-Admin guided wizards (CREATE FILE / lifecycle / resize / ...)
    ---------------------------------------------------------------------- */
 
 .cc-fs-mode-bar {
@@ -25,7 +25,7 @@
 .cc-fs-mode-bar .btn {
   padding: 5px 14px;
   font-size: 12.5px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   border: 1px solid transparent;
   color: var(--fg-muted);
@@ -71,7 +71,7 @@
   padding: 12px 14px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   margin-top: 6px;
 }
 
@@ -116,7 +116,7 @@
   font-size: 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 

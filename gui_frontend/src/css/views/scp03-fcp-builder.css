@@ -5,7 +5,7 @@
 
 
 /* ----------------------------------------------------------------------
-   SGP.32 bulk telemetry — structured report
+   SGP.32 bulk telemetry -- structured report
    One titled sub-card per ES10 retrieval (scan, RAT, notifications,
    eIM config, certs). Replaces the old raw-stdout `<pre>` dump.
    ---------------------------------------------------------------------- */
@@ -90,7 +90,7 @@
   line-height: 1.5;
 }
 
-/* Inline trace block — rendered directly in the card body (no
+/* Inline trace block -- rendered directly in the card body (no
    <details> wrapper). Used by scp03RenderTrace() across every SCP03
    action that previously hid a "Show trace" disclosure. Operators
    wanted the captured stdout visible at a glance, matching CLI
@@ -101,7 +101,7 @@
   padding: 10px 12px;
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
@@ -113,7 +113,7 @@
 }
 
 /* When the inline trace sits inside an SGP.32 section card it's
-   already inside a bordered panel — tighten spacing so it doesn't
+   already inside a bordered panel -- tighten spacing so it doesn't
    look nested-in-nested. */
 .cc-sgp32-section > .cc-log-inline {
   margin: 4px 0 0;
@@ -191,7 +191,7 @@
   text-align: left;
 }
 
-/* "No card in reader" notice — styled as an informational banner
+/* "No card in reader" notice -- styled as an informational banner
    (amber/warn, not red/error) because it's a routine operator
    condition, not a crash. Keeps the scan error channel free for
    real regressions. */

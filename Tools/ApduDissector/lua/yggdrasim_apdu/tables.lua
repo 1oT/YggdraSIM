@@ -19,19 +19,29 @@
 --   SIMCARD/gp.py
 --   Tools/YggdraMCP/server.py
 --   yggdrasim_common/stk_tables.py
+--   yggdrasim_common/tls_tables.py
+--   docs/tel-docs/converted/SGP.22-v3.1/SGP.22-v3.1.md
+--   docs/tel-docs/converted/SGP.32-v1.2/SGP.32-v1.2.md
 
 local M = {}
 
-M.SOURCE_DIGEST = "e82ce74aebdbf1e7471f15d29026197870c87cdecb7301ca5665720edcd4c499"
+M.SOURCE_DIGEST = "20e74e3f5f5467e2a4327795d2cb3184bf7e7728bac0714319133d3f8d787345"
 
 M.INS_NAMES = {
+    [0x04] = "DEACTIVATE_FILE",
     [0x20] = "VERIFY",
     [0x24] = "CHANGE_REFERENCE_DATA",
     [0x26] = "DISABLE_VERIFICATION_REQUIREMENT",
     [0x28] = "ENABLE_VERIFICATION_REQUIREMENT",
     [0x2C] = "RESET_RETRY_COUNTER",
+    [0x32] = "INCREASE",
+    [0x44] = "ACTIVATE_FILE",
+    [0x73] = "MANAGE_SECURE_CHANNEL",
+    [0x75] = "TRANSACT_DATA",
     [0x84] = "GET_CHALLENGE",
     [0x88] = "INTERNAL_AUTHENTICATE",
+    [0x89] = "AUTHENTICATE",
+    [0xA2] = "SEARCH_RECORD",
     [0xA4] = "SELECT",
     [0xB0] = "READ_BINARY",
     [0xB2] = "READ_RECORD",
@@ -40,6 +50,7 @@ M.INS_NAMES = {
     [0xCB] = "GET_DATA_ODD",
     [0xD6] = "UPDATE_BINARY",
     [0xDA] = "PUT_DATA",
+    [0xDB] = "SET_DATA",
     [0xDC] = "UPDATE_RECORD",
 }
 
@@ -52,6 +63,8 @@ M.CLA_INS_NAMES = {
     [0x8012] = "FETCH",
     [0x8014] = "TERMINAL_RESPONSE",
     [0x8050] = "INITIALIZE_UPDATE",
+    [0x8076] = "SUSPEND_UICC",
+    [0x807C] = "MANAGE_LSI",
     [0x8082] = "EXTERNAL_AUTHENTICATE",
     [0x80AA] = "TERMINAL_CAPABILITY",
     [0x80C2] = "ENVELOPE",
@@ -73,13 +86,20 @@ M.CLA_INS_NAMES = {
 }
 
 M.INS_SOURCE = {
+    [0x04] = "ISO 7816-4 / ETSI TS 102 221",
     [0x20] = "ISO 7816-4 / ETSI TS 102 221",
     [0x24] = "ISO 7816-4 / ETSI TS 102 221",
     [0x26] = "ISO 7816-4 / ETSI TS 102 221",
     [0x28] = "ISO 7816-4 / ETSI TS 102 221",
     [0x2C] = "ISO 7816-4 / ETSI TS 102 221",
+    [0x32] = "ETSI TS 102 221",
+    [0x44] = "ISO 7816-4 / ETSI TS 102 221",
+    [0x73] = "ETSI TS 102 221",
+    [0x75] = "ETSI TS 102 221",
     [0x84] = "ISO 7816-4 / GlobalPlatform",
     [0x88] = "ISO 7816-4 / 3GPP TS 31.102",
+    [0x89] = "ETSI TS 102 221 / 3GPP TS 31.102",
+    [0xA2] = "ISO 7816-4 / ETSI TS 102 221",
     [0xA4] = "ISO 7816-4 / ETSI TS 102 221",
     [0xB0] = "ISO 7816-4 / ETSI TS 102 221",
     [0xB2] = "ISO 7816-4 / ETSI TS 102 221",
@@ -88,6 +108,7 @@ M.INS_SOURCE = {
     [0xCB] = "ISO 7816-4",
     [0xD6] = "ISO 7816-4 / ETSI TS 102 221",
     [0xDA] = "ISO 7816-4 / GlobalPlatform",
+    [0xDB] = "ETSI TS 102 221",
     [0xDC] = "ISO 7816-4 / ETSI TS 102 221",
 }
 
@@ -100,6 +121,8 @@ M.CLA_INS_SOURCE = {
     [0x8012] = "ETSI TS 102 223",
     [0x8014] = "ETSI TS 102 223",
     [0x8050] = "GlobalPlatform Card Spec / SCP02 / SCP03",
+    [0x8076] = "ETSI TS 102 221",
+    [0x807C] = "ETSI TS 102 221",
     [0x8082] = "GlobalPlatform Card Spec / SCP02 / SCP03",
     [0x80AA] = "ETSI TS 102 221 / ETSI TS 102 223",
     [0x80C2] = "ETSI TS 102 223",
@@ -237,6 +260,9 @@ M.RISK_CLASS_NAMES = {
 
 M.APDU_RISK = {
     [0x04] = 3,
+    [0x10] = 2,
+    [0x12] = 2,
+    [0x14] = 2,
     [0x20] = 3,
     [0x24] = 3,
     [0x26] = 3,
@@ -253,6 +279,7 @@ M.APDU_RISK = {
     [0xB2] = 1,
     [0xB3] = 1,
     [0xC0] = 1,
+    [0xC2] = 2,
     [0xCA] = 1,
     [0xD6] = 2,
     [0xD8] = 3,
@@ -269,6 +296,9 @@ M.APDU_RISK = {
 
 M.APDU_RISK_NAME = {
     [0x04] = "DEACTIVATE FILE",
+    [0x10] = "TERMINAL PROFILE",
+    [0x12] = "FETCH",
+    [0x14] = "TERMINAL RESPONSE",
     [0x20] = "VERIFY (consumes a PIN retry)",
     [0x24] = "CHANGE REFERENCE DATA",
     [0x26] = "DISABLE VERIFICATION REQUIREMENT",
@@ -285,6 +315,7 @@ M.APDU_RISK_NAME = {
     [0xB2] = "READ RECORD",
     [0xB3] = "READ RECORD (odd instruction)",
     [0xC0] = "GET RESPONSE",
+    [0xC2] = "ENVELOPE",
     [0xCA] = "GET DATA",
     [0xD6] = "UPDATE BINARY",
     [0xD8] = "PUT KEY",
@@ -361,7 +392,7 @@ M.BER_TAGS = {
     ["66"] = "SECURITY_DOMAIN_MANAGEMENT_DATA (GlobalPlatform / SGP.02)",
     ["67"] = "CARD_CAPABILITY_INFORMATION (GlobalPlatform / SGP.02)",
     ["7F21"] = "CERTIFICATE (GlobalPlatform / SGP.02 ECASD)",
-    ["80"] = "context-0 primitive; meaning depends on the enclosing structure",
+    ["80"] = "context-0 primitive",
     ["90"] = "profileNickname (SGP.22 ProfileInfo)",
     ["91"] = "serviceProviderName (SGP.22 ProfileInfo)",
     ["92"] = "profileName (SGP.22 ProfileInfo)",
@@ -375,10 +406,10 @@ M.BER_TAGS = {
     ["9F70"] = "profileState (SGP.22 ProfileInfo)",
     ["9F7B"] = "E_CALL_INDICATION (SGP.32)",
     ["9F7F"] = "CPLC (GlobalPlatform / ETSI TS 102 226)",
-    ["A0"] = "context-0 constructed; meaning depends on the enclosing structure",
-    ["A1"] = "context-1 constructed; meaning depends on the enclosing structure",
-    ["A9"] = "context-9 constructed; meaning depends on the enclosing structure",
-    ["AA"] = "context-10 constructed; meaning depends on the enclosing structure",
+    ["A0"] = "context-0 constructed",
+    ["A1"] = "context-1 constructed",
+    ["A9"] = "context-9 constructed",
+    ["AA"] = "context-10 constructed",
     ["AC"] = "CERTIFICATION_DATA_OBJECT (GSMA)",
     ["BF20"] = "EUICCInfo1 / GetEuiccInfo1Request (SGP.22 section 5.7.8 GetEUICCInfo)",
     ["BF21"] = "PREPARE_DOWNLOAD_RESPONSE (SGP.22)",
@@ -576,6 +607,81 @@ M.REFRESH_QUALIFIERS = {
     [0x0A] = "Application Update",
 }
 
+M.TLS_CONTENT_TYPES = {
+    [0x14] = "change_cipher_spec",
+    [0x15] = "alert",
+    [0x16] = "handshake",
+    [0x17] = "application_data",
+    [0x18] = "heartbeat",
+}
+
+M.TLS_ALERT_LEVELS = {
+    [0x01] = "warning",
+    [0x02] = "fatal",
+}
+
+M.TLS_ALERT_DESCRIPTIONS = {
+    [0x00] = "close_notify",
+    [0x0A] = "unexpected_message",
+    [0x14] = "bad_record_mac",
+    [0x15] = "decryption_failed",
+    [0x16] = "record_overflow",
+    [0x1E] = "decompression_failure",
+    [0x28] = "handshake_failure",
+    [0x29] = "no_certificate",
+    [0x2A] = "bad_certificate",
+    [0x2B] = "unsupported_certificate",
+    [0x2C] = "certificate_revoked",
+    [0x2D] = "certificate_expired",
+    [0x2E] = "certificate_unknown",
+    [0x2F] = "illegal_parameter",
+    [0x30] = "unknown_ca",
+    [0x31] = "access_denied",
+    [0x32] = "decode_error",
+    [0x33] = "decrypt_error",
+    [0x34] = "too_many_cids_requested",
+    [0x3C] = "export_restriction",
+    [0x46] = "protocol_version",
+    [0x47] = "insufficient_security",
+    [0x50] = "internal_error",
+    [0x56] = "inappropriate_fallback",
+    [0x5A] = "user_canceled",
+    [0x64] = "no_renegotiation",
+    [0x6D] = "missing_extension",
+    [0x6E] = "unsupported_extension",
+    [0x6F] = "certificate_unobtainable",
+    [0x70] = "unrecognized_name",
+    [0x71] = "bad_certificate_status_response",
+    [0x72] = "bad_certificate_hash_value",
+    [0x73] = "unknown_psk_identity",
+    [0x74] = "certificate_required",
+    [0x75] = "general_error",
+    [0x78] = "no_application_protocol",
+    [0x79] = "ech_required",
+}
+
+M.TLS_HANDSHAKE_TYPES = {
+    [0x00] = "hello_request",
+    [0x01] = "client_hello",
+    [0x02] = "server_hello",
+    [0x03] = "hello_verify_request",
+    [0x04] = "new_session_ticket",
+    [0x05] = "end_of_early_data",
+    [0x08] = "encrypted_extensions",
+    [0x0B] = "certificate",
+    [0x0C] = "server_key_exchange",
+    [0x0D] = "certificate_request",
+    [0x0E] = "server_hello_done",
+    [0x0F] = "certificate_verify",
+    [0x10] = "client_key_exchange",
+    [0x14] = "finished",
+    [0x15] = "certificate_url",
+    [0x16] = "certificate_status",
+    [0x18] = "key_update",
+    [0x19] = "compressed_certificate",
+    [0xFE] = "message_hash",
+}
+
 M.FILE_PATHS = {
     ["2F00"] = "MF / EF.DIR",
     ["2F05"] = "MF / EF.PL",
@@ -647,6 +753,1558 @@ M.GP_LIFECYCLE = {
     [0x0F] = "PERSONALIZED / SD PERSONALIZED",
     [0x7F] = "SD LOCKED",
     [0x83] = "LOCKED APPLICATION",
+}
+
+M.RSP_ROOTS = {
+    ["BF20"] = "EUICCInfo1",
+    ["BF21"] = "PrepareDownloadResponse",
+    ["BF22"] = "EUICCInfo2",
+    ["BF23"] = "InitialiseSecureChannelRequest",
+    ["BF24"] = "ConfigureISDPRequest",
+    ["BF25"] = "StoreMetadataRequest",
+    ["BF26"] = "ReplaceSessionKeysRequest",
+    ["BF27"] = "ProfileInstallationResultData",
+    ["BF28"] = "ListNotificationResponse",
+    ["BF29"] = "SetNicknameResponse",
+    ["BF2A"] = "UpdateMetadataRequest",
+    ["BF2B"] = "RetrieveNotificationsListResponse",
+    ["BF2D"] = "ProfileInfoListResponse",
+    ["BF2E"] = "GetEuiccChallengeResponse",
+    ["BF2F"] = "NotificationMetadata",
+    ["BF30"] = "NotificationSentResponse",
+    ["BF31"] = "EnableProfileResponse",
+    ["BF32"] = "DisableProfileResponse",
+    ["BF33"] = "DeleteProfileResponse",
+    ["BF34"] = "EuiccMemoryResetResponse",
+    ["BF36"] = "BoundProfilePackage",
+    ["BF37"] = "ProfileInstallationResult",
+    ["BF38"] = "AuthenticateServerResponse",
+    ["BF39"] = "InitiateAuthenticationResponseEsipa",
+    ["BF3A"] = "GetBoundProfilePackageResponseEsipa",
+    ["BF3B"] = "AuthenticateClientResponseEsipa",
+    ["BF3C"] = "EuiccConfiguredDataResponse",
+    ["BF3D"] = "HandleNotificationEsipa",
+    ["BF3E"] = "GetEuiccDataResponse",
+    ["BF3F"] = "SetDefaultDpAddressResponse",
+    ["BF40"] = "AuthenticateClientResponseEs11",
+    ["BF41"] = "CancelSessionResponseEsipa",
+    ["BF42"] = "IpaeActivationResponse",
+    ["BF43"] = "GetRatResponse",
+    ["BF44"] = "LoadRpmPackageRequest",
+    ["BF45"] = "VerifySmdsResponseResponse",
+    ["BF46"] = "CheckEventResponse",
+    ["BF4A"] = "AlertData",
+    ["BF4B"] = "VerifyDeviceChangeResponse",
+    ["BF4C"] = "ConfirmDeviceChangeResponse",
+    ["BF4D"] = "PrepareDeviceChangeResponse",
+    ["BF4E"] = "TransferEimPackageResponse",
+    ["BF4F"] = "GetEimPackageResponse",
+    ["BF50"] = "ProvideEimPackageResultResponse",
+    ["BF51"] = "EuiccPackageResult",
+    ["BF52"] = "IpaEuiccDataResponse",
+    ["BF54"] = "ProfileDownloadTriggerResult",
+    ["BF55"] = "GetEimConfigurationDataResponse",
+    ["BF56"] = "GetCertsResponse",
+    ["BF57"] = "AddInitialEimResponse",
+    ["BF58"] = "ProfileRollbackResponse",
+    ["BF59"] = "ConfigureImmediateProfileEnablingResponse",
+    ["BF5A"] = "ImmediateEnableResponse",
+    ["BF5B"] = "EnableEmergencyProfileResponse",
+    ["BF5C"] = "DisableEmergencyProfileResponse",
+    ["BF5D"] = "ExecuteFallbackMechanismResponse",
+    ["BF5E"] = "ReturnFromFallbackResponse",
+    ["BF5F"] = "GetConnectivityParametersResponse",
+    ["BF60"] = "VerifySmdpResponseResponse",
+    ["BF61"] = "CheckProgressResponse",
+    ["BF62"] = "VerifyProfileRecoveryResponse",
+    ["BF63"] = "DeleteNotificationForDc",
+}
+
+M.RSP_MEMBERS = {
+    ["AddEimResult"] = {
+        ["02"] = "addEimResultCode",
+        ["84"] = "associationToken",
+    },
+    ["AddInitialEimRequest"] = {
+        ["A0"] = "eimConfigurationDataList",
+    },
+    ["AddInitialEimResponse"] = {
+        ["81"] = "addInitialEimError",
+        ["A0"] = "addInitialEimOk",
+    },
+    ["AlertData"] = {
+        ["A0"] = "metadataUpdateEnabledProfile",
+        ["A1"] = "pendingOperationAlert",
+    },
+    ["AuthenticateClientOk"] = {
+        ["30"] = "smdpCertificate",
+        ["5F37"] = "smdpSignature2",
+        ["80"] = "transactionId",
+        ["BF25"] = "profileMetadata",
+    },
+    ["AuthenticateClientOkDPEsipa"] = {
+        ["04"] = "hashCc",
+        ["30"] = "smdpCertificate",
+        ["5F37"] = "smdpSignature2",
+        ["80"] = "transactionId",
+        ["BF25"] = "profileMetaData",
+    },
+    ["AuthenticateClientOkDSEsipa"] = {
+        ["80"] = "transactionId",
+        ["BF54"] = "profileDownloadTrigger",
+    },
+    ["AuthenticateClientOkDelayedDeviceChange"] = {
+        ["5F37"] = "smdpSignature6",
+        ["80"] = "transactionId",
+    },
+    ["AuthenticateClientOkDeviceChange"] = {
+        ["5F37"] = "smdpSignature4",
+        ["80"] = "transactionId",
+        ["A1"] = "serviceProviderMessageForDc",
+    },
+    ["AuthenticateClientOkEs11V2"] = {
+        ["80"] = "transactionId",
+        ["A1"] = "eventEntries",
+    },
+    ["AuthenticateClientOkEs11V3"] = {
+        ["5F37"] = "smdsSignature2",
+        ["80"] = "transactionId",
+    },
+    ["AuthenticateClientOkRpm"] = {
+        ["5F37"] = "smdpSignature3",
+        ["80"] = "transactionId",
+    },
+    ["AuthenticateClientRequest"] = {
+        ["80"] = "transactionId",
+        ["BF38"] = "authenticateServerResponse",
+        ["BF63"] = "deleteNotificationForDc",
+    },
+    ["AuthenticateClientRequestEsipa"] = {
+        ["80"] = "transactionId",
+        ["BF38"] = "authenticateServerResponse",
+    },
+    ["AuthenticateClientResponseEs11"] = {
+        ["81"] = "authenticateClientError",
+        ["A0"] = "authenticateClientOk",
+        ["A2"] = "authenticateClientOkV3",
+    },
+    ["AuthenticateClientResponseEs9"] = {
+        ["81"] = "authenticateClientError",
+        ["A0"] = "authenticateClientOk",
+        ["A2"] = "authenticateClientOkRpm",
+        ["A3"] = "authenticateClientOkDeviceChange",
+        ["A4"] = "authenticateClientOkDelayedDeviceChange",
+    },
+    ["AuthenticateClientResponseEsipa"] = {
+        ["82"] = "authenticateClientErrorEsipa",
+        ["A0"] = "authenticateClientOkDPEsipa",
+        ["A1"] = "authenticateClientOkDSEsipa",
+    },
+    ["AuthenticateResponseError"] = {
+        ["02"] = "authenticateErrorCode",
+        ["80"] = "transactionId",
+    },
+    ["AuthenticateServerRequest"] = {
+        ["04"] = "euiccCiPKIdToBeUsed",
+        ["30"] = "serverCertificate",
+        ["5F37"] = "serverSignature1",
+        ["A1"] = "otherCertsInChain",
+        ["A2"] = "crlList",
+    },
+    ["AuthenticateServerResponse"] = {
+        ["A0"] = "authenticateResponseOk",
+        ["A1"] = "authenticateResponseError",
+    },
+    ["BoundProfilePackage"] = {
+        ["A0"] = "firstSequenceOf87",
+        ["A1"] = "sequenceOf88",
+        ["A2"] = "secondSequenceOf87",
+        ["A3"] = "sequenceOf86",
+        ["BF23"] = "initialiseSecureChannelRequest",
+    },
+    ["CancelSessionRequest"] = {
+        ["80"] = "transactionId",
+        ["81"] = "reason",
+    },
+    ["CancelSessionRequestEs9"] = {
+        ["80"] = "transactionId",
+        ["A1"] = "cancelSessionResponse",
+    },
+    ["CancelSessionRequestEsipa"] = {
+        ["80"] = "transactionId",
+        ["A1"] = "cancelSessionResponse",
+    },
+    ["CancelSessionResponse"] = {
+        ["81"] = "cancelSessionResponseError",
+        ["A0"] = "cancelSessionResponseOk",
+    },
+    ["CancelSessionResponseEs9"] = {
+        ["81"] = "cancelSessionError",
+        ["A0"] = "cancelSessionOk",
+    },
+    ["CancelSessionResponseEsipa"] = {
+        ["81"] = "cancelSessionError",
+        ["A0"] = "cancelSessionOk",
+    },
+    ["CancelSessionResponseOk"] = {
+        ["5F37"] = "euiccCancelSessionSignature",
+    },
+    ["CertificationDataObject"] = {
+        ["80"] = "platformLabel",
+        ["81"] = "discoveryBaseURL",
+    },
+    ["CheckEventOk"] = {
+        ["80"] = "isPendingEvent",
+    },
+    ["CheckEventRequest"] = {
+        ["80"] = "ecId",
+        ["81"] = "smdsAddress",
+    },
+    ["CheckEventResponse"] = {
+        ["81"] = "checkEventError",
+        ["A0"] = "checkEventOk",
+    },
+    ["CheckProgressOk"] = {
+        ["80"] = "retryDelay",
+    },
+    ["CheckProgressRequest"] = {
+        ["80"] = "dcSessionId",
+    },
+    ["CheckProgressResponse"] = {
+        ["81"] = "checkProgressError",
+        ["A0"] = "checkProgressOk",
+    },
+    ["CompactAuthenticateResponseOk"] = {
+        ["5F37"] = "euiccSignature1",
+        ["A1"] = "euiccCertificate",
+        ["A2"] = "eumCertificate",
+    },
+    ["CompactCancelSessionResponseOk"] = {
+        ["5F37"] = "euiccCancelSessionSignature",
+    },
+    ["CompactEuiccCancelSessionSigned"] = {
+        ["80"] = "reason",
+    },
+    ["CompactEuiccSigned1"] = {
+        ["84"] = "extCardResource",
+        ["A2"] = "ctxParams1",
+    },
+    ["CompactEuiccSigned2"] = {
+        ["04"] = "hashCc",
+        ["5F49"] = "euiccOtpk",
+    },
+    ["CompactOtherSignedNotification"] = {
+        ["5A"] = "eidValue",
+        ["5F37"] = "euiccNotificationSignature",
+        ["BF2F"] = "tbsOtherNotification",
+    },
+    ["CompactPrepareDownloadResponseOk"] = {
+        ["5F37"] = "euiccSignature2",
+    },
+    ["CompactProfileInstallationResult"] = {
+        ["A0"] = "compactProfileInstallationResultData",
+    },
+    ["CompactProfileInstallationResultData"] = {
+        ["01"] = "iccidPresent",
+        ["02"] = "seqNumber",
+        ["80"] = "transactionId",
+        ["A2"] = "compactFinalResult",
+    },
+    ["CompactSuccessResult"] = {
+        ["04"] = "simaResponse",
+        ["4F"] = "compactAid",
+    },
+    ["ConfigureISDPRequest"] = {
+        ["B8"] = "dpProprietaryData",
+    },
+    ["ConfigureImmediateProfileEnablingRequest"] = {
+        ["80"] = "immediateEnableFlag",
+        ["81"] = "defaultSmdpOid",
+        ["82"] = "defaultSmdpAddress",
+    },
+    ["ConfigureImmediateProfileEnablingResponse"] = {
+        ["80"] = "configImmediateEnableResult",
+    },
+    ["ConfirmDeviceChangeOk"] = {
+        ["5F37"] = "smdpSignature5",
+        ["80"] = "transactionId",
+    },
+    ["ConfirmDeviceChangeRequest"] = {
+        ["80"] = "transactionId",
+        ["BF4D"] = "prepareDeviceChangeResponse",
+    },
+    ["ConfirmDeviceChangeResponse"] = {
+        ["81"] = "confirmDeviceChangeError",
+        ["A0"] = "confirmDeviceChangeOk",
+    },
+    ["ConnectivityParameters"] = {
+        ["81"] = "httpParams",
+    },
+    ["ContactPcmpResponse"] = {
+        ["81"] = "contactPcmpResponseError",
+        ["A0"] = "contactPcmpResponseOk",
+    },
+    ["ControlRefTemplate"] = {
+        ["80"] = "keyType",
+        ["81"] = "keyLen",
+        ["84"] = "hostId",
+    },
+    ["CtxParams1"] = {
+        ["A0"] = "ctxParamsForCommonAuthentication",
+        ["A1"] = "ctxParamsForDeviceChange",
+        ["A2"] = "ctxParamsForProfileRecovery",
+        ["A3"] = "ctxParamsForPushServiceRegistration",
+    },
+    ["CtxParamsForCommonAuthentication"] = {
+        ["5A"] = "iccid",
+        ["80"] = "matchingId",
+        ["82"] = "operationType",
+        ["A1"] = "deviceInfo",
+        ["A3"] = "matchingIdSource",
+        ["A4"] = "vendorSpecificExtension",
+    },
+    ["CtxParamsForProfileRecovery"] = {
+        ["5A"] = "iccid",
+        ["A1"] = "deviceInfo",
+        ["A2"] = "vendorSpecificExtension",
+    },
+    ["CtxParamsForPushServiceRegistration"] = {
+        ["80"] = "selectedPushService",
+        ["81"] = "pushToken",
+    },
+    ["DeleteNotificationForDc"] = {
+        ["81"] = "euiccNotificationSignature",
+        ["A0"] = "notificationMetadata",
+    },
+    ["DeleteProfileRequest"] = {
+        ["4F"] = "isdpAid",
+        ["5A"] = "iccid",
+    },
+    ["DeleteProfileResponse"] = {
+        ["80"] = "deleteResult",
+    },
+    ["DeviceAdditionalFeatureSupport"] = {
+        ["80"] = "naiSupport",
+    },
+    ["DeviceCapabilities"] = {
+        ["80"] = "gsmSupportedRelease",
+        ["81"] = "utranSupportedRelease",
+        ["82"] = "cdma2000onexSupportedRelease",
+        ["83"] = "cdma2000hrpdSupportedRelease",
+        ["84"] = "cdma2000ehrpdSupportedRelease",
+        ["85"] = "eutranEpcSupportedRelease",
+        ["86"] = "contactlessSupportedRelease",
+        ["87"] = "rspCrlSupportedVersion",
+        ["88"] = "nrEpcSupportedRelease",
+        ["89"] = "nr5gcSupportedRelease",
+        ["8A"] = "eutran5gcSupportedRelease",
+        ["8B"] = "lpaSvn",
+        ["8C"] = "catSupportedClasses",
+        ["8D"] = "euiccFormFactorType",
+        ["AE"] = "deviceAdditionalFeatureSupport",
+    },
+    ["DeviceChangeConfiguration"] = {
+        ["A0"] = "requestToDp",
+        ["A1"] = "usingStoredAc",
+    },
+    ["DeviceChangeData"] = {
+        ["5A"] = "iccid",
+        ["80"] = "activationCodeForDc",
+        ["81"] = "deleteOldProfile",
+        ["82"] = "deleteNotificationForDcSupport",
+        ["83"] = "notificationAddress",
+        ["84"] = "profileRecoverySupport",
+        ["85"] = "profileRecoveryValidityPeriod",
+    },
+    ["DeviceChangeResponse"] = {
+        ["A0"] = "deviceChangeData",
+        ["A1"] = "encryptedDeviceChangeData",
+    },
+    ["DeviceInfo"] = {
+        ["80"] = "tac",
+        ["82"] = "imei",
+        ["84"] = "deviceTestMode",
+        ["85"] = "lpaRspCapability",
+        ["A1"] = "deviceCapabilities",
+        ["A3"] = "preferredLanguages",
+    },
+    ["DisableEmergencyProfileRequest"] = {
+        ["80"] = "refreshFlag",
+    },
+    ["DisableEmergencyProfileResponse"] = {
+        ["80"] = "disableEmergencyProfileResult",
+    },
+    ["DisableProfileRequest"] = {
+        ["81"] = "refreshFlag",
+        ["A0"] = "profileIdentifier",
+    },
+    ["DisableProfileResponse"] = {
+        ["80"] = "disableResult",
+    },
+    ["DpProprietaryData"] = {
+        ["80"] = "dpOid",
+    },
+    ["E4ERequest"] = {
+        ["82"] = "listProfiles",
+        ["87"] = "changeConfirmationPin",
+        ["88"] = "setRpmAllow",
+        ["8B"] = "cancelSession",
+        ["A0"] = "startDownload",
+        ["A1"] = "confirmDownload",
+        ["A3"] = "enableProfile",
+        ["A4"] = "disableProfile",
+        ["A5"] = "deleteProfile",
+        ["A6"] = "euiccMemReset",
+        ["A9"] = "pollRpmPackage",
+        ["AA"] = "confirmRpmPackage",
+    },
+    ["E4EResponse"] = {
+        ["80"] = "resultCode",
+        ["A1"] = "resultData",
+    },
+    ["EUICCInfo1"] = {
+        ["82"] = "lowestSvn",
+        ["88"] = "euiccRspCapability",
+        ["93"] = "highestSvn",
+        ["A9"] = "euiccCiPKIdListForVerification",
+        ["AA"] = "euiccCiPKIdListForSigning",
+        ["B1"] = "euiccCiPKIdListForSigningV3",
+    },
+    ["EUICCInfo2"] = {
+        ["04"] = "ppVersion",
+        ["0C"] = "sasAcreditationNumber",
+        ["81"] = "baseProfilePackageVersion",
+        ["82"] = "lowestSvn",
+        ["83"] = "euiccFirmwareVersion",
+        ["84"] = "extCardResource",
+        ["85"] = "uiccCapability",
+        ["86"] = "ts102241Version",
+        ["87"] = "globalplatformVersion",
+        ["88"] = "euiccRspCapability",
+        ["8B"] = "euiccCategory",
+        ["8D"] = "treProperties",
+        ["8E"] = "treProductReference",
+        ["90"] = "lpaMode",
+        ["92"] = "additionalEuiccInfo",
+        ["93"] = "highestSvn",
+        ["99"] = "forbiddenProfilePolicyRules",
+        ["A9"] = "euiccCiPKIdListForVerification",
+        ["AA"] = "euiccCiPKIdListForSigning",
+        ["AC"] = "certificationDataObject",
+        ["AF"] = "additionalProfilePackageVersions",
+        ["B1"] = "euiccCiPKIdListForSigningV3",
+        ["B4"] = "iotSpecificInfo",
+    },
+    ["EUICCSigned2"] = {
+        ["04"] = "hashCc",
+        ["30"] = "additionalInformation",
+        ["5F49"] = "euiccOtpk",
+        ["80"] = "transactionId",
+    },
+    ["EUICCSigned3"] = {
+        ["04"] = "hashCc",
+        ["30"] = "additionalInformation",
+        ["5F49"] = "eacEuiccOtpk",
+        ["80"] = "transactionId",
+    },
+    ["Eco"] = {
+        ["A8"] = "addEim",
+        ["A9"] = "deleteEim",
+        ["AA"] = "updateEim",
+        ["AB"] = "listEim",
+    },
+    ["EimConfigurationData"] = {
+        ["80"] = "eimId",
+        ["81"] = "eimFqdn",
+        ["82"] = "eimIdType",
+        ["83"] = "counterValue",
+        ["84"] = "associationToken",
+        ["87"] = "eimSupportedProtocol",
+        ["88"] = "euiccCiPKId",
+        ["89"] = "indirectProfileDownload",
+        ["A5"] = "eimPublicKeyData",
+        ["A6"] = "trustedPublicKeyDataTls",
+    },
+    ["EimIdInfo"] = {
+        ["80"] = "eimId",
+        ["82"] = "eimIdType",
+    },
+    ["EimPackageResult"] = {
+        ["30"] = "ePRAndNotifications",
+        ["A0"] = "eimPackageResultResponseError",
+        ["BF51"] = "euiccPackageResult",
+        ["BF52"] = "ipaEuiccDataResponse",
+        ["BF54"] = "profileDownloadTriggerResult",
+    },
+    ["EimPackageResultResponseError"] = {
+        ["02"] = "eimPackageResultErrorCode",
+        ["80"] = "eimTransactionId",
+    },
+    ["EnableEmergencyProfileRequest"] = {
+        ["80"] = "refreshFlag",
+    },
+    ["EnableEmergencyProfileResponse"] = {
+        ["80"] = "enableEmergencyProfileResult",
+    },
+    ["EnableProfileRequest"] = {
+        ["81"] = "refreshFlag",
+        ["82"] = "targetEsimPort",
+        ["A0"] = "profileIdentifier",
+    },
+    ["EnableProfileResponse"] = {
+        ["80"] = "enableResult",
+        ["81"] = "targetEsimPort",
+    },
+    ["EncryptedDeviceChangeData"] = {
+        ["5F49"] = "eacSmdpOtpk",
+        ["86"] = "controlRefTemplate",
+        ["A1"] = "sequenceOf87",
+    },
+    ["EnterpriseConfiguration"] = {
+        ["80"] = "enterpriseOid",
+        ["81"] = "enterpriseName",
+        ["A2"] = "enterpriseRules",
+    },
+    ["ErrorResult"] = {
+        ["80"] = "bppCommandId",
+        ["81"] = "errorReason",
+        ["82"] = "ppiResponse",
+    },
+    ["EsipaMessageFromEimToIpa"] = {
+        ["BF39"] = "initiateAuthenticationResponseEsipa",
+        ["BF3A"] = "getBoundProfilePackageResponseEsipa",
+        ["BF3B"] = "authenticateClientResponseEsipa",
+        ["BF41"] = "cancelSessionResponseEsipa",
+        ["BF4E"] = "transferEimPackageRequest",
+        ["BF4F"] = "getEimPackageResponse",
+        ["BF50"] = "provideEimPackageResultResponse",
+    },
+    ["EsipaMessageFromIpaToEim"] = {
+        ["BF39"] = "initiateAuthenticationRequestEsipa",
+        ["BF3A"] = "getBoundProfilePackageRequestEsipa",
+        ["BF3B"] = "authenticateClientRequestEsipa",
+        ["BF3D"] = "handleNotificationEsipa",
+        ["BF41"] = "cancelSessionRequestEsipa",
+        ["BF4E"] = "transferEimPackageResponse",
+        ["BF4F"] = "getEimPackageRequest",
+        ["BF50"] = "provideEimPackageResult",
+    },
+    ["EuiccCancelSessionSigned"] = {
+        ["80"] = "transactionId",
+        ["81"] = "smdpOid",
+        ["82"] = "reason",
+    },
+    ["EuiccConfiguredDataResponse"] = {
+        ["80"] = "defaultDpAddress",
+        ["81"] = "rootDsAddress",
+        ["83"] = "allowedCiPKId",
+        ["A2"] = "additionalRootDsAddresses",
+        ["A4"] = "ciList",
+    },
+    ["EuiccMemoryResetRequest"] = {
+        ["82"] = "resetOptions",
+    },
+    ["EuiccMemoryResetResponse"] = {
+        ["80"] = "resetResult",
+    },
+    ["EuiccPackage"] = {
+        ["A0"] = "psmoList",
+        ["A1"] = "ecoList",
+    },
+    ["EuiccPackageErrorDataSigned"] = {
+        ["02"] = "euiccPackageErrorCode",
+        ["80"] = "eimId",
+        ["81"] = "counterValue",
+        ["82"] = "eimTransactionId",
+    },
+    ["EuiccPackageErrorSigned"] = {
+        ["5F37"] = "euiccSignEPE",
+    },
+    ["EuiccPackageErrorUnsigned"] = {
+        ["80"] = "eimId",
+        ["82"] = "eimTransactionId",
+        ["84"] = "associationToken",
+    },
+    ["EuiccPackageRequest"] = {
+        ["5F37"] = "eimSignature",
+    },
+    ["EuiccPackageResult"] = {
+        ["A0"] = "euiccPackageResultSigned",
+        ["A1"] = "euiccPackageErrorSigned",
+        ["A2"] = "euiccPackageErrorUnsigned",
+    },
+    ["EuiccPackageResultDataSigned"] = {
+        ["30"] = "euiccResult",
+        ["80"] = "eimId",
+        ["81"] = "counterValue",
+        ["82"] = "eimTransactionId",
+        ["83"] = "seqNumber",
+    },
+    ["EuiccPackageResultSigned"] = {
+        ["5F37"] = "euiccSignEPR",
+    },
+    ["EuiccPackageSigned"] = {
+        ["5A"] = "eidValue",
+        ["80"] = "eimId",
+        ["81"] = "counterValue",
+        ["82"] = "eimTransactionId",
+    },
+    ["EuiccResultData"] = {
+        ["02"] = "processingTerminated",
+        ["83"] = "enableResult",
+        ["84"] = "disableResult",
+        ["85"] = "deleteResult",
+        ["87"] = "configureImmediateEnableResult",
+        ["89"] = "deleteEimResult",
+        ["8A"] = "updateEimResult",
+        ["8C"] = "rollbackResult",
+        ["8D"] = "setFallbackAttributeResult",
+        ["8E"] = "unsetFallbackAttributeResult",
+        ["A6"] = "getRATResult",
+        ["A8"] = "addEimResult",
+        ["AB"] = "listEimResult",
+        ["BF2D"] = "listProfileInfoResult",
+        ["BF65"] = "setDefaultDpAddressResult",
+    },
+    ["EuiccSigned1"] = {
+        ["80"] = "transactionId",
+        ["83"] = "serverAddress",
+        ["84"] = "serverChallenge",
+        ["BF22"] = "euiccInfo2",
+    },
+    ["EventRecord"] = {
+        ["80"] = "eventId",
+        ["81"] = "rspServerAddress",
+    },
+    ["ExecuteFallbackMechanismRequest"] = {
+        ["80"] = "refreshFlag",
+    },
+    ["ExecuteFallbackMechanismResponse"] = {
+        ["80"] = "executeFallbackMechanismResult",
+    },
+    ["GetBoundProfilePackageOk"] = {
+        ["80"] = "transactionId",
+        ["BF36"] = "boundProfilePackage",
+    },
+    ["GetBoundProfilePackageOkEsipa"] = {
+        ["80"] = "transactionId",
+        ["BF36"] = "boundProfilePackage",
+    },
+    ["GetBoundProfilePackageRequest"] = {
+        ["80"] = "transactionId",
+        ["BF21"] = "prepareDownloadResponse",
+    },
+    ["GetBoundProfilePackageRequestEsipa"] = {
+        ["80"] = "transactionId",
+        ["BF21"] = "prepareDownloadResponse",
+    },
+    ["GetBoundProfilePackageResponse"] = {
+        ["81"] = "getBoundProfilePackageError",
+        ["A0"] = "getBoundProfilePackageOk",
+    },
+    ["GetBoundProfilePackageResponseEsipa"] = {
+        ["81"] = "getBoundProfilePackageErrorEsipa",
+        ["A0"] = "getBoundProfilePackageOkEsipa",
+    },
+    ["GetCertsRequest"] = {
+        ["80"] = "euiccCiPKId",
+    },
+    ["GetCertsResponse"] = {
+        ["81"] = "getCertsError",
+        ["A0"] = "certs",
+    },
+    ["GetConnectivityParametersResponse"] = {
+        ["81"] = "connectivityParametersError",
+        ["A0"] = "connectivityParameters",
+    },
+    ["GetEimConfigurationDataRequest"] = {
+        ["A0"] = "searchCriteria",
+    },
+    ["GetEimConfigurationDataResponse"] = {
+        ["A0"] = "eimConfigurationDataList",
+    },
+    ["GetEimPackageRequest"] = {
+        ["5A"] = "eidValue",
+        ["80"] = "notifyStateChange",
+        ["81"] = "stateChangeCause",
+        ["82"] = "rPLMN",
+    },
+    ["GetEimPackageResponse"] = {
+        ["02"] = "eimPackageError",
+        ["BF51"] = "euiccPackageRequest",
+        ["BF52"] = "ipaEuiccDataRequest",
+        ["BF54"] = "profileDownloadTriggerRequest",
+    },
+    ["GetEuiccChallengeResponse"] = {
+        ["80"] = "euiccChallenge",
+    },
+    ["GetEuiccDataRequest"] = {
+        ["5C"] = "tagList",
+    },
+    ["GetEuiccDataResponse"] = {
+        ["5A"] = "eidValue",
+    },
+    ["GetRatResponse"] = {
+        ["A0"] = "rat",
+    },
+    ["HandleNotification"] = {
+        ["A0"] = "pendingNotification",
+    },
+    ["HandleNotificationEsipa"] = {
+        ["A0"] = "pendingNotification",
+        ["BF50"] = "provideEimPackageResult",
+    },
+    ["ISDRProprietaryApplicationTemplate"] = {
+        ["03"] = "euiccConfiguration",
+        ["82"] = "lowestSvn",
+    },
+    ["ISDRProprietaryApplicationTemplateIoT"] = {
+        ["80"] = "euiccConfiguration",
+    },
+    ["ImmediateEnableRequest"] = {
+        ["80"] = "refreshFlag",
+    },
+    ["ImmediateEnableResponse"] = {
+        ["80"] = "immediateEnableResult",
+    },
+    ["InitialiseSecureChannelRequest"] = {
+        ["5F37"] = "smdpSign",
+        ["5F49"] = "smdpOtpk",
+        ["80"] = "transactionId",
+        ["82"] = "remoteOpId",
+        ["86"] = "controlRefTemplate",
+    },
+    ["InitiateAuthenticationOkEs9"] = {
+        ["04"] = "euiccCiPKIdToBeUsed",
+        ["30"] = "serverCertificate",
+        ["5F37"] = "serverSignature1",
+        ["A1"] = "otherCertsInChain",
+        ["A2"] = "crlList",
+    },
+    ["InitiateAuthenticationOkEsipa"] = {
+        ["04"] = "euiccCiPKIdentifierToBeUsed",
+        ["0C"] = "matchingId",
+        ["30"] = "serverCertificate",
+        ["5F37"] = "serverSignature1",
+        ["80"] = "transactionId",
+        ["A2"] = "ctxParams1",
+    },
+    ["InitiateAuthenticationRequest"] = {
+        ["81"] = "euiccChallenge",
+        ["83"] = "smdpAddress",
+        ["85"] = "lpaRspCapability",
+        ["BF20"] = "euiccInfo1",
+    },
+    ["InitiateAuthenticationRequestEsipa"] = {
+        ["81"] = "euiccChallenge",
+        ["82"] = "eimTransactionId",
+        ["83"] = "smdpAddress",
+        ["BF20"] = "euiccInfo1",
+    },
+    ["InitiateAuthenticationResponse"] = {
+        ["81"] = "initiateAuthenticationError",
+        ["A0"] = "initiateAuthenticationOk",
+    },
+    ["InitiateAuthenticationResponseEsipa"] = {
+        ["81"] = "initiateAuthenticationErrorEsipa",
+        ["A0"] = "initiateAuthenticationOkEsipa",
+    },
+    ["IoTSpecificInfo"] = {
+        ["81"] = "ecallSupported",
+        ["82"] = "fallbackSupported",
+        ["A0"] = "iotVersion",
+    },
+    ["IpaCapabilities"] = {
+        ["80"] = "ipaFeatures",
+        ["81"] = "ipaSupportedProtocols",
+    },
+    ["IpaEuiccData"] = {
+        ["81"] = "defaultSmdpAddress",
+        ["83"] = "rootSmdsAddress",
+        ["84"] = "associationToken",
+        ["87"] = "eimTransactionId",
+        ["A0"] = "notificationsList",
+        ["A2"] = "euiccPackageResultList",
+        ["A5"] = "eumCertificate",
+        ["A6"] = "euiccCertificate",
+        ["A8"] = "ipaCapabilities",
+        ["A9"] = "deviceInfo",
+        ["BF20"] = "euiccInfo1",
+        ["BF22"] = "euiccInfo2",
+    },
+    ["IpaEuiccDataRequest"] = {
+        ["04"] = "euiccCiPKIdentifierToBeUsed",
+        ["5C"] = "tagList",
+        ["83"] = "eimTransactionId",
+        ["A1"] = "searchCriteriaNotification",
+        ["A2"] = "searchCriteriaEuiccPackageResult",
+    },
+    ["IpaEuiccDataResponse"] = {
+        ["A0"] = "ipaEuiccData",
+        ["A1"] = "ipaEuiccDataResponseError",
+    },
+    ["IpaEuiccDataResponseError"] = {
+        ["02"] = "ipaEuiccDataErrorCode",
+        ["80"] = "eimTransactionId",
+    },
+    ["IpaeActivationRequest"] = {
+        ["80"] = "ipaeOption",
+    },
+    ["IpaeActivationResponse"] = {
+        ["80"] = "ipaeActivationResult",
+    },
+    ["ListEimResult"] = {
+        ["81"] = "listEimError",
+        ["A0"] = "eimIdList",
+    },
+    ["ListNotificationRequest"] = {
+        ["81"] = "profileManagementOperation",
+    },
+    ["ListNotificationResponse"] = {
+        ["81"] = "listNotificationsResultError",
+        ["A0"] = "notificationMetadataList",
+    },
+    ["ListProfileInfo"] = {
+        ["5C"] = "tagList",
+        ["A0"] = "searchCriteria",
+    },
+    ["LoadRpmPackageRequest"] = {
+        ["02"] = "targetEsimPort",
+        ["5F37"] = "smdpSignature3",
+    },
+    ["LoadRpmPackageResult"] = {
+        ["A0"] = "loadRpmPackageResultSigned",
+        ["A1"] = "loadRpmPackageResultNotSigned",
+    },
+    ["LoadRpmPackageResultDataSigned"] = {
+        ["06"] = "smdpOid",
+        ["80"] = "transactionId",
+        ["A2"] = "finalResult",
+        ["BF2F"] = "notificationMetadata",
+    },
+    ["LoadRpmPackageResultNotSigned"] = {
+        ["02"] = "loadRpmPackageErrorCodeNotSigned",
+        ["80"] = "transactionId",
+    },
+    ["LoadRpmPackageResultSigned"] = {
+        ["81"] = "euiccSignRPR",
+        ["A0"] = "loadRpmPackageResultDataSigned",
+    },
+    ["LocalisedTextMessage"] = {
+        ["80"] = "languageTag",
+        ["81"] = "message",
+    },
+    ["LpaeActivationRequest"] = {
+        ["80"] = "lpaeOption",
+    },
+    ["LpaeActivationResponse"] = {
+        ["80"] = "lpaeActivationResult",
+    },
+    ["LprConfiguration"] = {
+        ["80"] = "pcmpAddress",
+        ["81"] = "dpiEnable",
+        ["82"] = "triggerLprOnEnableProfile",
+    },
+    ["MatchingIdSource"] = {
+        ["80"] = "none",
+        ["81"] = "activationCode",
+        ["82"] = "smdsOid",
+    },
+    ["MetadataUpdateEnabledProfile"] = {
+        ["5A"] = "iccid",
+        ["5C"] = "tagList",
+    },
+    ["NotificationConfigurationInformation"] = {
+        ["80"] = "profileManagementOperation",
+        ["81"] = "notificationAddress",
+    },
+    ["NotificationMetadata"] = {
+        ["0C"] = "notificationAddress",
+        ["5A"] = "iccid",
+        ["80"] = "seqNumber",
+        ["81"] = "profileManagementOperation",
+    },
+    ["NotificationSentRequest"] = {
+        ["80"] = "seqNumber",
+    },
+    ["NotificationSentResponse"] = {
+        ["80"] = "deleteNotificationStatus",
+    },
+    ["OperatorId"] = {
+        ["80"] = "mccMnc",
+        ["81"] = "gid1",
+        ["82"] = "gid2",
+    },
+    ["PendingNotification"] = {
+        ["A1"] = "loadRpmPackageResultSigned",
+        ["BF37"] = "profileInstallationResult",
+    },
+    ["PrepareDeviceChangeRequest"] = {
+        ["04"] = "hashCc",
+        ["5F37"] = "smdpSignature4",
+    },
+    ["PrepareDeviceChangeResponse"] = {
+        ["A0"] = "prepareDeviceChangeResponseOk",
+        ["A1"] = "prepareDeviceChangeResponseError",
+    },
+    ["PrepareDeviceChangeResponseError"] = {
+        ["02"] = "downloadErrorCode",
+        ["80"] = "transactionId",
+    },
+    ["PrepareDeviceChangeResponseOk"] = {
+        ["5F37"] = "euiccSignature3",
+    },
+    ["PrepareDownloadRequest"] = {
+        ["04"] = "hashCc",
+        ["30"] = "smdpCertificate",
+        ["5F37"] = "smdpSignature2",
+    },
+    ["PrepareDownloadResponse"] = {
+        ["A0"] = "downloadResponseOk",
+        ["A1"] = "downloadResponseError",
+    },
+    ["PrepareDownloadResponseError"] = {
+        ["02"] = "downloadErrorCode",
+        ["80"] = "transactionId",
+    },
+    ["PrepareDownloadResponseOk"] = {
+        ["5F37"] = "euiccSignature2",
+    },
+    ["ProfileDownloadData"] = {
+        ["80"] = "activationCode",
+        ["81"] = "contactDefaultSmdp",
+        ["A2"] = "contactSmds",
+    },
+    ["ProfileDownloadTriggerRequest"] = {
+        ["82"] = "eimTransactionId",
+        ["A0"] = "profileDownloadData",
+    },
+    ["ProfileDownloadTriggerResult"] = {
+        ["82"] = "eimTransactionId",
+    },
+    ["ProfileInfo"] = {
+        ["4F"] = "isdpAid",
+        ["5A"] = "iccid",
+        ["90"] = "profileNickname",
+        ["91"] = "serviceProviderName",
+        ["92"] = "profileName",
+        ["93"] = "iconType",
+        ["94"] = "icon",
+        ["95"] = "profileClass",
+        ["99"] = "profilePolicyRules",
+        ["9B"] = "hriServerAddress",
+        ["9F1F"] = "serviceDescription",
+        ["9F24"] = "enabledOnEsimPort",
+        ["9F25"] = "profileSize",
+        ["9F70"] = "profileState",
+        ["B6"] = "notificationConfigurationInfo",
+        ["B8"] = "dpProprietaryData",
+        ["BA"] = "rpmConfiguration",
+        ["BC"] = "lprConfiguration",
+        ["BD"] = "enterpriseConfiguration",
+        ["BF20"] = "deviceChangeConfiguration",
+        ["BF22"] = "serviceSpecificDataStoredInEuicc",
+    },
+    ["ProfileInfoListRequest"] = {
+        ["5C"] = "tagList",
+        ["A0"] = "searchCriteria",
+    },
+    ["ProfileInfoListResponse"] = {
+        ["81"] = "profileInfoListError",
+        ["A0"] = "profileInfoListOk",
+    },
+    ["ProfileInstallationResult"] = {
+        ["5F37"] = "euiccSignPIR",
+        ["BF27"] = "profileInstallationResultData",
+    },
+    ["ProfileInstallationResultData"] = {
+        ["06"] = "smdpOid",
+        ["80"] = "transactionId",
+        ["A2"] = "finalResult",
+        ["BF2F"] = "notificationMetadata",
+    },
+    ["ProfilePolicyAuthorisationRule"] = {
+        ["80"] = "pprIds",
+        ["82"] = "pprFlags",
+        ["A1"] = "allowedOperators",
+    },
+    ["ProfileRollbackRequest"] = {
+        ["80"] = "refreshFlag",
+    },
+    ["ProfileRollbackResponse"] = {
+        ["02"] = "cmdResult",
+        ["BF51"] = "eUICCPackageResult",
+    },
+    ["ProvideEimPackageResult"] = {
+        ["5A"] = "eidValue",
+    },
+    ["ProvideEimPackageResultResponse"] = {
+        ["02"] = "provideEimPackageResultError",
+        ["30"] = "emptyResponse",
+        ["BF53"] = "eimAcknowledgements",
+    },
+    ["Psmo"] = {
+        ["A3"] = "enable",
+        ["A4"] = "disable",
+        ["A5"] = "delete",
+        ["A6"] = "getRAT",
+        ["A7"] = "configureImmediateEnable",
+        ["A8"] = "setFallbackAttribute",
+        ["A9"] = "unsetFallbackAttribute",
+        ["BF2D"] = "listProfileInfo",
+        ["BF65"] = "setDefaultDpAddress",
+    },
+    ["RemoteProfileProvisioningRequest"] = {
+        ["BF39"] = "initiateAuthenticationRequest",
+        ["BF3A"] = "getBoundProfilePackageRequest",
+        ["BF3B"] = "authenticateClientRequest",
+        ["BF3D"] = "handleNotification",
+        ["BF41"] = "cancelSessionRequestEs9",
+        ["BF46"] = "checkEventRequest",
+        ["BF4C"] = "confirmDeviceChangeRequest",
+        ["BF61"] = "checkProgressRequest",
+    },
+    ["RemoteProfileProvisioningResponse"] = {
+        ["BF39"] = "initiateAuthenticationResponse",
+        ["BF3A"] = "getBoundProfilePackageResponse",
+        ["BF3B"] = "authenticateClientResponseEs9",
+        ["BF40"] = "authenticateClientResponseEs11",
+        ["BF41"] = "cancelSessionResponseEs9",
+        ["BF46"] = "checkEventResponse",
+        ["BF4C"] = "confirmDeviceChangeResponse",
+        ["BF61"] = "checkProgressResponse",
+    },
+    ["ReplaceSessionKeysRequest"] = {
+        ["80"] = "initialMacChainingValue",
+        ["81"] = "ppkEnc",
+        ["82"] = "ppkCmac",
+    },
+    ["RetrieveNotificationsListRequest"] = {
+        ["A0"] = "searchCriteria",
+    },
+    ["RetrieveNotificationsListResponse"] = {
+        ["81"] = "notificationsListResultError",
+        ["A0"] = "notificationList",
+    },
+    ["ReturnFromFallbackRequest"] = {
+        ["80"] = "refreshFlag",
+    },
+    ["ReturnFromFallbackResponse"] = {
+        ["80"] = "returnFromFallbackResult",
+    },
+    ["RpmCommand"] = {
+        ["80"] = "continueOnFailure",
+    },
+    ["RpmCommandResult"] = {
+        ["5A"] = "iccid",
+    },
+    ["RpmConfiguration"] = {
+        ["81"] = "pollingAddress",
+        ["82"] = "allowedCiPKId",
+        ["83"] = "profileOwnerOid",
+        ["A0"] = "managingDpList",
+    },
+    ["SEQUENCE OF CertificateList"] = {
+        ["30"] = "CertificateList",
+    },
+    ["SEQUENCE OF NotificationMetadata"] = {
+        ["BF2F"] = "NotificationMetadata",
+    },
+    ["SEQUENCE OF ProfileInfo"] = {
+        ["E3"] = "ProfileInfo",
+    },
+    ["SEQUENCE OF SubjectKeyIdentifier"] = {
+        ["04"] = "SubjectKeyIdentifier",
+    },
+    ["SEQUENCE OF VersionType"] = {
+        ["04"] = "VersionType",
+    },
+    ["SecureUserIntent"] = {
+        ["80"] = "secureUserIntentCaptured",
+        ["81"] = "additionalData",
+    },
+    ["ServerSigned1"] = {
+        ["80"] = "transactionId",
+        ["81"] = "euiccChallenge",
+        ["83"] = "serverAddress",
+        ["84"] = "serverChallenge",
+        ["86"] = "serverRspCapability",
+        ["A5"] = "sessionContext",
+    },
+    ["ServerWithPendingOperation"] = {
+        ["80"] = "pollingAddress",
+        ["81"] = "rootSmds",
+        ["82"] = "defaultSmdp",
+        ["83"] = "explicitAddress",
+    },
+    ["SessionContext"] = {
+        ["80"] = "serverSvn",
+        ["81"] = "crlStaplingV3Used",
+        ["82"] = "euiccCiPKIdToBeUsedV3",
+        ["A3"] = "supportedPushServices",
+    },
+    ["SetDefaultDpAddressRequest"] = {
+        ["80"] = "defaultDpAddress",
+        ["81"] = "allowedCiPKId",
+    },
+    ["SetDefaultDpAddressResponse"] = {
+        ["80"] = "setDefaultDpAddressResult",
+    },
+    ["SetNicknameRequest"] = {
+        ["5A"] = "iccid",
+        ["90"] = "profileNickname",
+    },
+    ["SetNicknameResponse"] = {
+        ["80"] = "setNicknameResult",
+    },
+    ["SmdpSigned2"] = {
+        ["01"] = "ccRequiredFlag",
+        ["05"] = "rpmPending",
+        ["5F49"] = "bppEuiccOtpk",
+        ["80"] = "transactionId",
+    },
+    ["SmdpSigned3"] = {
+        ["80"] = "transactionId",
+        ["82"] = "rpmPending",
+        ["A1"] = "rpmPackage",
+    },
+    ["SmdpSigned4"] = {
+        ["01"] = "ccRequiredFlag",
+        ["80"] = "transactionId",
+        ["81"] = "activationCodeForProfileRecovery",
+    },
+    ["SmdpSigned5"] = {
+        ["80"] = "transactionId",
+        ["A1"] = "deviceChangeResponse",
+    },
+    ["SmdpSigned6"] = {
+        ["80"] = "transactionId",
+    },
+    ["SmdsSigned2"] = {
+        ["80"] = "transactionId",
+    },
+    ["StoreMetadataRequest"] = {
+        ["5A"] = "iccid",
+        ["91"] = "serviceProviderName",
+        ["92"] = "profileName",
+        ["93"] = "iconType",
+        ["94"] = "icon",
+        ["95"] = "profileClass",
+        ["99"] = "profilePolicyRules",
+        ["9B"] = "hriServerAddress",
+        ["9F1F"] = "serviceDescription",
+        ["9F21"] = "estimatedProfileSize",
+        ["B6"] = "notificationConfigurationInfo",
+        ["BA"] = "rpmConfiguration",
+        ["BC"] = "lprConfiguration",
+        ["BD"] = "enterpriseConfiguration",
+        ["BE"] = "serviceProviderMessage",
+        ["BF20"] = "deviceChangeConfiguration",
+        ["BF22"] = "serviceSpecificDataStoredInEuicc",
+        ["BF23"] = "serviceSpecificDataNotStoredInEuicc",
+    },
+    ["SuccessResult"] = {
+        ["04"] = "ppiResponse",
+        ["4F"] = "aid",
+    },
+    ["TransferEimPackageRequest"] = {
+        ["BF51"] = "euiccPackageRequest",
+        ["BF52"] = "ipaEuiccDataRequest",
+        ["BF53"] = "eimAcknowledgements",
+        ["BF54"] = "profileDownloadTriggerRequest",
+    },
+    ["TransferEimPackageResponse"] = {
+        ["02"] = "eimPackageError",
+        ["05"] = "eimPackageReceived",
+        ["30"] = "ePRAndNotifications",
+        ["BF51"] = "euiccPackageResult",
+        ["BF52"] = "ipaEuiccDataResponse",
+    },
+    ["UpdateMetadataRequest"] = {
+        ["91"] = "serviceProviderName",
+        ["92"] = "profileName",
+        ["93"] = "iconType",
+        ["94"] = "icon",
+        ["99"] = "profilePolicyRules",
+        ["9B"] = "hriServerAddress",
+        ["B6"] = "notificationConfigurationInfo",
+        ["BA"] = "rpmConfiguration",
+        ["BC"] = "lprConfiguration",
+        ["BD"] = "enterpriseConfiguration",
+        ["BF20"] = "deviceChangeConfiguration",
+        ["BF22"] = "serviceSpecificDataStoredInEuicc",
+    },
+    ["VerifyDeviceChangeRequest"] = {
+        ["5F37"] = "smdpSignature5",
+    },
+    ["VerifyDeviceChangeResponse"] = {
+        ["81"] = "verifyDeviceChangeError",
+        ["A0"] = "verifyDeviceChangeOk",
+    },
+    ["VerifyProfileRecoveryRequest"] = {
+        ["5F37"] = "smdpSignature4",
+    },
+    ["VerifyProfileRecoveryResponse"] = {
+        ["80"] = "verifyProfileRecoveryOk",
+        ["81"] = "verifyProfileRecoveryError",
+    },
+    ["VerifySmdpResponseRequest"] = {
+        ["5F37"] = "smdpSignature6",
+    },
+    ["VerifySmdpResponseResponse"] = {
+        ["80"] = "verifySmdpResponseOk",
+        ["81"] = "verifySmdpResponseError",
+    },
+    ["VerifySmdsResponseRequest"] = {
+        ["5F37"] = "smdsSignature2",
+    },
+    ["VerifySmdsResponseResponse"] = {
+        ["80"] = "verifySmdsResponseOk",
+        ["81"] = "verifySmdsResponseError",
+    },
+}
+
+M.RSP_MEMBER_TYPES = {
+    ["AlertData"] = {
+        ["A0"] = "MetadataUpdateEnabledProfile",
+        ["A1"] = "ServerWithPendingOperation",
+    },
+    ["AuthenticateClientOk"] = {
+        ["BF25"] = "StoreMetadataRequest",
+    },
+    ["AuthenticateClientOkDPEsipa"] = {
+        ["BF25"] = "StoreMetadataRequest",
+    },
+    ["AuthenticateClientOkDSEsipa"] = {
+        ["BF54"] = "ProfileDownloadTriggerRequest",
+    },
+    ["AuthenticateClientOkDeviceChange"] = {
+        ["A1"] = "LocalisedTextMessage",
+    },
+    ["AuthenticateClientRequest"] = {
+        ["BF38"] = "AuthenticateServerResponse",
+        ["BF63"] = "DeleteNotificationForDc",
+    },
+    ["AuthenticateClientRequestEsipa"] = {
+        ["BF38"] = "AuthenticateServerResponse",
+    },
+    ["AuthenticateClientResponseEs11"] = {
+        ["A0"] = "AuthenticateClientOkEs11V2",
+        ["A2"] = "AuthenticateClientOkEs11V3",
+    },
+    ["AuthenticateClientResponseEs9"] = {
+        ["A0"] = "AuthenticateClientOk",
+        ["A2"] = "AuthenticateClientOkRpm",
+        ["A3"] = "AuthenticateClientOkDeviceChange",
+        ["A4"] = "AuthenticateClientOkDelayedDeviceChange",
+    },
+    ["AuthenticateClientResponseEsipa"] = {
+        ["A0"] = "AuthenticateClientOkDPEsipa",
+        ["A1"] = "AuthenticateClientOkDSEsipa",
+    },
+    ["AuthenticateServerRequest"] = {
+        ["A2"] = "SEQUENCE OF CertificateList",
+    },
+    ["AuthenticateServerResponse"] = {
+        ["A0"] = "AuthenticateResponseOk",
+        ["A1"] = "AuthenticateResponseError",
+    },
+    ["BoundProfilePackage"] = {
+        ["BF23"] = "InitialiseSecureChannelRequest",
+    },
+    ["CancelSessionRequestEs9"] = {
+        ["A1"] = "CancelSessionResponse",
+    },
+    ["CancelSessionRequestEsipa"] = {
+        ["A1"] = "CancelSessionResponse",
+    },
+    ["CancelSessionResponse"] = {
+        ["A0"] = "CancelSessionResponseOk",
+    },
+    ["CancelSessionResponseEs9"] = {
+        ["A0"] = "CancelSessionOk",
+    },
+    ["CancelSessionResponseEsipa"] = {
+        ["A0"] = "CancelSessionOk",
+    },
+    ["CheckEventResponse"] = {
+        ["A0"] = "CheckEventOk",
+    },
+    ["CheckProgressResponse"] = {
+        ["A0"] = "CheckProgressOk",
+    },
+    ["CompactEuiccSigned1"] = {
+        ["A2"] = "CtxParams1",
+    },
+    ["CompactOtherSignedNotification"] = {
+        ["BF2F"] = "NotificationMetadata",
+    },
+    ["CompactProfileInstallationResult"] = {
+        ["A0"] = "CompactProfileInstallationResultData",
+    },
+    ["ConfigureISDPRequest"] = {
+        ["B8"] = "DpProprietaryData",
+    },
+    ["ConfirmDeviceChangeRequest"] = {
+        ["BF4D"] = "PrepareDeviceChangeResponse",
+    },
+    ["ConfirmDeviceChangeResponse"] = {
+        ["A0"] = "ConfirmDeviceChangeOk",
+    },
+    ["CtxParams1"] = {
+        ["A0"] = "CtxParamsForCommonAuthentication",
+        ["A1"] = "CtxParamsForDeviceChange",
+        ["A2"] = "CtxParamsForProfileRecovery",
+        ["A3"] = "CtxParamsForPushServiceRegistration",
+    },
+    ["CtxParamsForCommonAuthentication"] = {
+        ["A1"] = "DeviceInfo",
+        ["A3"] = "MatchingIdSource",
+    },
+    ["CtxParamsForProfileRecovery"] = {
+        ["A1"] = "DeviceInfo",
+    },
+    ["DeleteNotificationForDc"] = {
+        ["A0"] = "NotificationMetadata",
+    },
+    ["DeviceCapabilities"] = {
+        ["AE"] = "DeviceAdditionalFeatureSupport",
+    },
+    ["DeviceChangeResponse"] = {
+        ["A0"] = "DeviceChangeData",
+        ["A1"] = "EncryptedDeviceChangeData",
+    },
+    ["DeviceInfo"] = {
+        ["A1"] = "DeviceCapabilities",
+    },
+    ["EUICCInfo1"] = {
+        ["A9"] = "SEQUENCE OF SubjectKeyIdentifier",
+        ["AA"] = "SEQUENCE OF SubjectKeyIdentifier",
+        ["B1"] = "SEQUENCE OF SubjectKeyIdentifier",
+    },
+    ["EUICCInfo2"] = {
+        ["A9"] = "SEQUENCE OF SubjectKeyIdentifier",
+        ["AA"] = "SEQUENCE OF SubjectKeyIdentifier",
+        ["AC"] = "CertificationDataObject",
+        ["AF"] = "SEQUENCE OF VersionType",
+        ["B1"] = "SEQUENCE OF SubjectKeyIdentifier",
+        ["B4"] = "IoTSpecificInfo",
+    },
+    ["Eco"] = {
+        ["A8"] = "EimConfigurationData",
+        ["AA"] = "EimConfigurationData",
+    },
+    ["EimPackageResult"] = {
+        ["A0"] = "EimPackageResultResponseError",
+        ["BF51"] = "EuiccPackageResult",
+        ["BF52"] = "IpaEuiccDataResponse",
+        ["BF54"] = "ProfileDownloadTriggerResult",
+    },
+    ["EsipaMessageFromEimToIpa"] = {
+        ["BF39"] = "InitiateAuthenticationResponseEsipa",
+        ["BF3A"] = "GetBoundProfilePackageResponseEsipa",
+        ["BF3B"] = "AuthenticateClientResponseEsipa",
+        ["BF41"] = "CancelSessionResponseEsipa",
+        ["BF4E"] = "TransferEimPackageRequest",
+        ["BF4F"] = "GetEimPackageResponse",
+        ["BF50"] = "ProvideEimPackageResultResponse",
+    },
+    ["EsipaMessageFromIpaToEim"] = {
+        ["BF39"] = "InitiateAuthenticationRequestEsipa",
+        ["BF3A"] = "GetBoundProfilePackageRequestEsipa",
+        ["BF3B"] = "AuthenticateClientRequestEsipa",
+        ["BF3D"] = "HandleNotificationEsipa",
+        ["BF41"] = "CancelSessionRequestEsipa",
+        ["BF4E"] = "TransferEimPackageResponse",
+        ["BF4F"] = "GetEimPackageRequest",
+        ["BF50"] = "ProvideEimPackageResult",
+    },
+    ["EuiccPackageResult"] = {
+        ["A0"] = "EuiccPackageResultSigned",
+        ["A1"] = "EuiccPackageErrorSigned",
+        ["A2"] = "EuiccPackageErrorUnsigned",
+    },
+    ["EuiccResultData"] = {
+        ["A8"] = "AddEimResult",
+        ["AB"] = "ListEimResult",
+        ["BF2D"] = "ProfileInfoListResponse",
+        ["BF65"] = "SetDefaultDpAddressResponse",
+    },
+    ["EuiccSigned1"] = {
+        ["BF22"] = "EUICCInfo2",
+    },
+    ["GetBoundProfilePackageOk"] = {
+        ["BF36"] = "BoundProfilePackage",
+    },
+    ["GetBoundProfilePackageOkEsipa"] = {
+        ["BF36"] = "BoundProfilePackage",
+    },
+    ["GetBoundProfilePackageRequest"] = {
+        ["BF21"] = "PrepareDownloadResponse",
+    },
+    ["GetBoundProfilePackageRequestEsipa"] = {
+        ["BF21"] = "PrepareDownloadResponse",
+    },
+    ["GetBoundProfilePackageResponse"] = {
+        ["A0"] = "GetBoundProfilePackageOk",
+    },
+    ["GetBoundProfilePackageResponseEsipa"] = {
+        ["A0"] = "GetBoundProfilePackageOkEsipa",
+    },
+    ["GetConnectivityParametersResponse"] = {
+        ["A0"] = "ConnectivityParameters",
+    },
+    ["GetEimPackageResponse"] = {
+        ["BF51"] = "EuiccPackageRequest",
+        ["BF52"] = "IpaEuiccDataRequest",
+        ["BF54"] = "ProfileDownloadTriggerRequest",
+    },
+    ["HandleNotification"] = {
+        ["A0"] = "PendingNotification",
+    },
+    ["HandleNotificationEsipa"] = {
+        ["A0"] = "PendingNotification",
+        ["BF50"] = "ProvideEimPackageResult",
+    },
+    ["InitiateAuthenticationOkEs9"] = {
+        ["A2"] = "SEQUENCE OF CertificateList",
+    },
+    ["InitiateAuthenticationOkEsipa"] = {
+        ["A2"] = "CtxParams1",
+    },
+    ["InitiateAuthenticationRequest"] = {
+        ["BF20"] = "EUICCInfo1",
+    },
+    ["InitiateAuthenticationRequestEsipa"] = {
+        ["BF20"] = "EUICCInfo1",
+    },
+    ["InitiateAuthenticationResponse"] = {
+        ["A0"] = "InitiateAuthenticationOkEs9",
+    },
+    ["InitiateAuthenticationResponseEsipa"] = {
+        ["A0"] = "InitiateAuthenticationOkEsipa",
+    },
+    ["IoTSpecificInfo"] = {
+        ["A0"] = "SEQUENCE OF VersionType",
+    },
+    ["IpaEuiccData"] = {
+        ["A8"] = "IpaCapabilities",
+        ["A9"] = "DeviceInfo",
+        ["BF20"] = "EUICCInfo1",
+        ["BF22"] = "EUICCInfo2",
+    },
+    ["IpaEuiccDataResponse"] = {
+        ["A0"] = "IpaEuiccData",
+        ["A1"] = "IpaEuiccDataResponseError",
+    },
+    ["ListNotificationResponse"] = {
+        ["A0"] = "SEQUENCE OF NotificationMetadata",
+    },
+    ["LoadRpmPackageResult"] = {
+        ["A0"] = "LoadRpmPackageResultSigned",
+        ["A1"] = "LoadRpmPackageResultNotSigned",
+    },
+    ["LoadRpmPackageResultDataSigned"] = {
+        ["BF2F"] = "NotificationMetadata",
+    },
+    ["LoadRpmPackageResultSigned"] = {
+        ["A0"] = "LoadRpmPackageResultDataSigned",
+    },
+    ["PendingNotification"] = {
+        ["A1"] = "LoadRpmPackageResultSigned",
+        ["BF37"] = "ProfileInstallationResult",
+    },
+    ["PrepareDeviceChangeResponse"] = {
+        ["A0"] = "PrepareDeviceChangeResponseOk",
+        ["A1"] = "PrepareDeviceChangeResponseError",
+    },
+    ["PrepareDownloadResponse"] = {
+        ["A0"] = "PrepareDownloadResponseOk",
+        ["A1"] = "PrepareDownloadResponseError",
+    },
+    ["ProfileDownloadTriggerRequest"] = {
+        ["A0"] = "ProfileDownloadData",
+    },
+    ["ProfileInfo"] = {
+        ["B8"] = "DpProprietaryData",
+        ["BA"] = "RpmConfiguration",
+        ["BC"] = "LprConfiguration",
+        ["BD"] = "EnterpriseConfiguration",
+        ["BF20"] = "DeviceChangeConfiguration",
+    },
+    ["ProfileInfoListResponse"] = {
+        ["A0"] = "SEQUENCE OF ProfileInfo",
+    },
+    ["ProfileInstallationResult"] = {
+        ["BF27"] = "ProfileInstallationResultData",
+    },
+    ["ProfileInstallationResultData"] = {
+        ["BF2F"] = "NotificationMetadata",
+    },
+    ["ProfileRollbackResponse"] = {
+        ["BF51"] = "EuiccPackageResult",
+    },
+    ["Psmo"] = {
+        ["BF2D"] = "ProfileInfoListRequest",
+        ["BF65"] = "SetDefaultDpAddressRequest",
+    },
+    ["RemoteProfileProvisioningRequest"] = {
+        ["BF39"] = "InitiateAuthenticationRequest",
+        ["BF3A"] = "GetBoundProfilePackageRequest",
+        ["BF3B"] = "AuthenticateClientRequest",
+        ["BF3D"] = "HandleNotification",
+        ["BF41"] = "CancelSessionRequestEs9",
+        ["BF46"] = "CheckEventRequest",
+        ["BF4C"] = "ConfirmDeviceChangeRequest",
+        ["BF61"] = "CheckProgressRequest",
+    },
+    ["RemoteProfileProvisioningResponse"] = {
+        ["BF39"] = "InitiateAuthenticationResponse",
+        ["BF3A"] = "GetBoundProfilePackageResponse",
+        ["BF3B"] = "AuthenticateClientResponseEs9",
+        ["BF40"] = "AuthenticateClientResponseEs11",
+        ["BF41"] = "CancelSessionResponseEs9",
+        ["BF46"] = "CheckEventResponse",
+        ["BF4C"] = "ConfirmDeviceChangeResponse",
+        ["BF61"] = "CheckProgressResponse",
+    },
+    ["SEQUENCE OF NotificationMetadata"] = {
+        ["BF2F"] = "NotificationMetadata",
+    },
+    ["SEQUENCE OF ProfileInfo"] = {
+        ["E3"] = "ProfileInfo",
+    },
+    ["ServerSigned1"] = {
+        ["A5"] = "SessionContext",
+    },
+    ["SmdpSigned5"] = {
+        ["A1"] = "DeviceChangeResponse",
+    },
+    ["StoreMetadataRequest"] = {
+        ["BA"] = "RpmConfiguration",
+        ["BC"] = "LprConfiguration",
+        ["BD"] = "EnterpriseConfiguration",
+        ["BE"] = "LocalisedTextMessage",
+        ["BF20"] = "DeviceChangeConfiguration",
+    },
+    ["TransferEimPackageRequest"] = {
+        ["BF51"] = "EuiccPackageRequest",
+        ["BF52"] = "IpaEuiccDataRequest",
+        ["BF54"] = "ProfileDownloadTriggerRequest",
+    },
+    ["TransferEimPackageResponse"] = {
+        ["BF51"] = "EuiccPackageResult",
+        ["BF52"] = "IpaEuiccDataResponse",
+    },
+    ["UpdateMetadataRequest"] = {
+        ["BA"] = "RpmConfiguration",
+        ["BC"] = "LprConfiguration",
+        ["BD"] = "EnterpriseConfiguration",
+        ["BF20"] = "DeviceChangeConfiguration",
+    },
+    ["VerifyDeviceChangeResponse"] = {
+        ["A0"] = "DeviceChangeData",
+    },
 }
 
 return M
