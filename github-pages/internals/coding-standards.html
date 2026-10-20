@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="internals/coding-standards.html" data-ygg-open-sections="internals">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -50,9 +50,13 @@ predictable.</p>
             <a href="#comments" class="toc-link">Comments</a>
             <a href="#documentation-tone" class="toc-link">Documentation tone</a>
             <a href="#wizard-granularity" class="toc-link">Wizard granularity</a>
+            <a href="#shell-command-lines" class="toc-link">Shell command lines</a>
             <a href="#apdu-and-crypto-handling" class="toc-link">APDU and crypto handling</a>
+            <a href="#reuse-before-building" class="toc-link">Reuse before building</a>
             <a href="#python-conventions" class="toc-link">Python conventions</a>
             <a href="#security-and-boundary" class="toc-link">Security and boundary</a>
+            <a href="#decode-boundaries" class="toc-link">Decode boundaries</a>
+            <a href="#gui-frontend" class="toc-link">GUI frontend</a>
             <a href="#git-and-commits" class="toc-link">Git and commits</a>
             <a href="#pull-requests" class="toc-link">Pull requests</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
@@ -89,6 +93,20 @@ predictable.</p>
 <p>Interactive wizards must be tag-granular. Each nested <abbr title="Tag-Length-Value">TLV</abbr>, ASN.1 field, or
 distinct conceptual step gets its own wizard stage. This keeps the operator
 path navigable and the wizard maintainable as the spec evolves.</p>
+<h2 id="shell-command-lines">Shell command lines</h2>
+<ul>
+<li>Every interactive shell hands each command line, typed or from <code>--cmd</code>
+  / <code>--stdin</code>, to <code>yggdrasim_common.command_log.run_with_command_log</code>
+  before it parses the line, so <code>--log &lt;file&gt;</code> works on every command.
+  Pass a <code>debug</code> context that switches the shell's own debug output on
+  (raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> logging, a debug mode) and back; the helper turns the global
+  debug flag on itself.</li>
+<li>A path that reaches the same handlers without a terminal, such as a GUI
+  action, refuses <code>--log</code> (<code>command_log.log_flag_present</code>): a file path in
+  a web request would be written on the server host.</li>
+<li>Swap <code>sys.stdout</code> / <code>sys.stderr</code> around one command, never across a
+  prompt, so every swap stays nested and readline keeps the terminal.</li>
+</ul>
 <h2 id="apdu-and-crypto-handling"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> and crypto handling</h2>
 <ul>
 <li>ISO/IEC 7816-4 terminology is preferred: CLA, INS, P1, P2, Lc, Data, Le,
@@ -97,6 +115,23 @@ path navigable and the wizard maintainable as the spec evolves.</p>
   <code>INSTALL FOR LOAD</code>, <code>INSTALL FOR INSTALL</code>, <code>PUT KEY</code>.</li>
 <li><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> payload shaping must respect the shared <code>SCP11/shared/</code> helpers
   instead of re-implementing the wheel per subsystem.</li>
+</ul>
+<h2 id="reuse-before-building">Reuse before building</h2>
+<ul>
+<li>Before writing a new decoder or encoder, an <abbr title="Elementary File">EF</abbr> or ASN.1 definition, a
+  protocol stack, or a card, reader or network tool, check the osmocom
+  projects for one that exists: pySim first, then libosmocore and the
+  other projects on gitea.osmocom.org (simtrace2, osmo-remsim, osmo-epdg,
+  the osmo-ttcn3-hacks test suites).</li>
+<li>Prefer importing it, then porting it, then using it as the reference
+  behaviour. Check its licence against GPL-3.0-or-later before copying
+  code.</li>
+<li>When nothing fits, the change says what was checked and why it does
+  not fit.</li>
+<li>A defect or gap found in a reused project is fixed twice: a patch with
+  its evidence under <code>upstream_patches/&lt;name&gt;/</code> (see the
+  <code>upstream_patches/osmocom-*</code> folders), and a compensation in this tree
+  that verifies its own effect.</li>
 </ul>
 <h2 id="python-conventions">Python conventions</h2>
 <ul>
@@ -110,7 +145,9 @@ path navigable and the wizard maintainable as the spec evolves.</p>
   covers operator-visible runtime failures, <code>ValueError</code> covers malformed
   user or card data, <code>TypeError</code> covers contract violations, and dedicated
   <code>OSError</code> subclasses cover transport issues. Avoid <code>raise Exception(...)</code>
-  entirely so broad failures remain visible in review.</li>
+  entirely -- the pre-release security sweep removed every
+  remaining occurrence from the production tree, so new occurrences show
+  up clearly in code review.</li>
 <li><code>except Exception:</code> catches are acceptable only in display / <abbr title="Tag-Length-Value">TLV</abbr>-fallback
   paths where any failure collapses to "render the raw hex instead". New
   production code should catch the specific exception it cares about.</li>
@@ -127,6 +164,50 @@ path navigable and the wizard maintainable as the spec evolves.</p>
   for every card-facing subsystem.</li>
 <li>Never commit keys, certificates, or credentials. Runtime material lives
   under the runtime root, not in the tree.</li>
+</ul>
+<h2 id="decode-boundaries">Decode boundaries</h2>
+<p>Every subsystem decodes bytes it did not produce: a card response, an ES9+
+payload, a workbook, a profile package. Those bytes can be truncated,
+over-long, or hostile.</p>
+<ul>
+<li><strong>Contain upstream exception types at the module boundary.</strong> Code that
+  delegates to pySim, <code>asn1tools</code>, or <code>cryptography</code> can raise
+  <code>OutOfByteDataError</code>, <code>MissingDataError</code>, or a bare <code>IndexError</code>. A
+  caller catching <code>ValueError</code> never sees those, so a malformed remote
+  payload unwinds the whole flow instead of failing the one step.</li>
+<li><strong>If the surrounding code already degrades gracefully for one malformed
+  field, a sibling field must take the same route.</strong> Two fields of the
+  same response behaving differently is a defect, not a policy choice.</li>
+<li><strong>Guard the call, not one field.</strong> Validating a single field leaves its
+  siblings in the same call unguarded.</li>
+<li><strong>A rejection should raise a type the module owns</strong> -- <code>ValueError</code>, or
+  a domain error such as <code>Scp03ResponseProtectionError</code>. Those read as
+  rejections; an <code>IndexError</code> reads as a crash.</li>
+<li><strong>A private helper may assume its caller's precondition.</strong> Keep the
+  bounds check next to the caller that enforces it, and do not treat a
+  scanner calling the helper directly as a finding.</li>
+</ul>
+<p>When you change a decoder, call it with <code>b""</code>, a single byte, a truncated
+<abbr title="Tag-Length-Value">TLV</abbr> header, a length that over-claims its body (<code>b"\x62\xc8"</code>), a
+long-form length with no body, and an odd-nibble BCD run. Anything other
+than a clean rejection is a defect.</p>
+<h2 id="gui-frontend">GUI frontend</h2>
+<ul>
+<li><code>gui_frontend/src/</code> is the source; <code>yggdrasim_common/gui_server/static/</code>
+  is build output. Rebuild with <code>./scripts/build_gui_frontend.sh</code> after
+  every source change; <code>tests/test_gui_source_manifests.py</code> requires the
+  served bundle to be byte-identical to a fresh build.</li>
+<li>One design system, 20 themes. Colour reaches a rule through a theme
+  token or not at all; the per-file literal budget in
+  <code>tests/test_gui_design_system_consistency.py</code> only shrinks. New floating
+  surfaces (<code>position: fixed</code>) are app chrome or transient overlays;
+  action output renders inline.</li>
+<li>The page CSP forbids inline scripts, inline styles, inline handlers and
+  <code>eval</code>. Build DOM with <code>createElement</code> / <code>textContent</code>.</li>
+<li>Every operator-visible label is anchored in a specification or marked
+  YggdraSIM-coined in <code>guides/NAMING_CONVENTIONS.md</code>.</li>
+<li>The full contract, the CSS layer map and the theme registration steps
+  are in <code>gui_frontend/README.md</code>.</li>
 </ul>
 <h2 id="git-and-commits">Git and commits</h2>
 <ul>
@@ -158,9 +239,13 @@ path navigable and the wizard maintainable as the spec evolves.</p>
             <a href="#comments" class="toc-link">Comments</a>
             <a href="#documentation-tone" class="toc-link">Documentation tone</a>
             <a href="#wizard-granularity" class="toc-link">Wizard granularity</a>
+            <a href="#shell-command-lines" class="toc-link">Shell command lines</a>
             <a href="#apdu-and-crypto-handling" class="toc-link">APDU and crypto handling</a>
+            <a href="#reuse-before-building" class="toc-link">Reuse before building</a>
             <a href="#python-conventions" class="toc-link">Python conventions</a>
             <a href="#security-and-boundary" class="toc-link">Security and boundary</a>
+            <a href="#decode-boundaries" class="toc-link">Decode boundaries</a>
+            <a href="#gui-frontend" class="toc-link">GUI frontend</a>
             <a href="#git-and-commits" class="toc-link">Git and commits</a>
             <a href="#pull-requests" class="toc-link">Pull requests</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
@@ -178,13 +263,13 @@ path navigable and the wizard maintainable as the spec evolves.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

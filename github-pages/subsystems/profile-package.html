@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/profile-package.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -53,6 +53,7 @@ card directly; its output is what the card-facing shells consume.</p>
             <a href="#inspection-and-linting" class="toc-link toc-link-sub">Inspection and linting</a>
             <a href="#transform-and-transcode" class="toc-link toc-link-sub">Transform and transcode</a>
             <a href="#transcode-tui" class="toc-link toc-link-sub">Transcode TUI</a>
+            <a href="#variable-defs-token-sidecars" class="toc-link toc-link-sub">Variable defs / token sidecars</a>
             <a href="#diff-and-simulator-pipeline" class="toc-link toc-link-sub">Diff and simulator-pipeline</a>
             <a href="#structured-pe-editors" class="toc-link toc-link-sub">Structured PE editors</a>
             <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
@@ -162,6 +163,10 @@ python -m Tools.ProfilePackage --cmd &quot;USE &lt;path&gt;; INFO; EXIT&quot;
 <td>full lint with strict mode, metadata, and gate preset support</td>
 </tr>
 <tr>
+<td><code>TRIM</code></td>
+<td>report, or with <code>APPLY</code> drop, the <code>fillFileContent</code> bytes the fill pattern or template default already provides (TCA <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> 8.3.3)</td>
+</tr>
+<tr>
 <td><code>DUMP</code></td>
 <td>structured dump in decoded or raw form</td>
 </tr>
@@ -193,6 +198,14 @@ python -m Tools.ProfilePackage --cmd &quot;USE &lt;path&gt;; INFO; EXIT&quot;
 <td>remove a <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr> from a profile</td>
 </tr>
 <tr>
+<td><code>RFM [&lt;pe_index&gt; MF \| &lt;pe_index&gt; ADF &lt;USIM\|ISIM\|CSIM\|aid&gt;] [ACCESS=&lt;hex&gt;] [ADMIN=&lt;hex&gt;] [OUTPUT=&lt;file.der&gt; \| IN-PLACE]</code></td>
+<td>list the <abbr title="Profile Element (SAIP)">PE</abbr>-<abbr title="Remote File Management">RFM</abbr> elements with their default directory, or drop (<code>MF</code>) / install (<code>ADF</code>) the <code>adfRFMAccess</code> binding of one (TCA <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> 8.8; <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 226 7.2 / 7.3); without <code>OUTPUT=</code> or <code>IN-PLACE</code> the change is only shown</td>
+</tr>
+<tr>
+<td><code>VARIABLES [SET \| CLEAR \| USE \| FILL \| GENERATE \| EXPORT \| EXPORT-LIST \| LISTS \| NORMALISE \| DEFINE ...]</code></td>
+<td>the one verb over the active template, inline typed placeholders or <code>{NAME}</code> tokens: the placeholders with the value each takes and its source; SET / CLEAR edit the typed values, USE binds a test-value list, FILL stores the lists' values, GENERATE (EXPORT is the same) writes the test profile with every placeholder replaced by its value (<abbr title="Distinguished Encoding Rules">DER</abbr>, or ASCII hex for a <code>.hex</code> target), EXPORT-LIST writes the values as a list, LISTS manages the lists, NORMALISE respells the placeholders in the typed form, DEFINE adds a placeholder to a test-value list with its value or declared alone</td>
+</tr>
+<tr>
 <td><code>RAW &lt;subcommand&gt;</code></td>
 <td>pass-through to the external backend tool</td>
 </tr>
@@ -213,6 +226,39 @@ python -m Tools.ProfilePackage --cmd &quot;USE &lt;path&gt;; INFO; EXIT&quot;
 </tr>
 </tbody>
 </table></div>
+<h3 id="variable-defs-token-sidecars">Variable defs / token sidecars</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Verb</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>EXPORT-TOKENS &lt;template.json&gt; [&lt;sidecar.json&gt;]</code></td>
+<td>extract <code>__ygg_token_defs__</code> from a template into a standalone JSON sidecar</td>
+</tr>
+<tr>
+<td><code>APPLY-TOKENS &lt;template.json&gt; &lt;sidecar.json&gt; [&lt;out.json&gt;] [OVERWRITE]</code></td>
+<td>merge a sidecar back into a template</td>
+</tr>
+<tr>
+<td><code>EXPORT-TOKENS-CSV &lt;template_or_sidecar.json&gt; [&lt;out.csv&gt;]</code></td>
+<td>emit a <code>name,hex</code> personalisation CSV</td>
+</tr>
+<tr>
+<td><code>IMPORT-TOKENS-CSV &lt;input.csv&gt; [&lt;out.tokens.json&gt;]</code></td>
+<td>convert a personalisation-data CSV into one or more YggdraSIM sidecars (multi-block CSVs produce <code>&lt;stem&gt;_&lt;n&gt;.tokens.json</code> per block)</td>
+</tr>
+</tbody>
+</table></div>
+<p>The CSV format follows the TCA <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> personalisation-data convention
+used across the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> ecosystem: one variable per line, <code>name,hex</code>,
+with optional <code>#</code>-prefix comment lines used to separate independent
+personalisation-data sets when multiple profile packages share one CSV
+file. The interop is symmetric -- exporting and re-importing produces
+an identical sidecar payload modulo casing.</p>
 <h3 id="diff-and-simulator-pipeline">Diff and simulator-pipeline</h3>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -281,25 +327,29 @@ in the slot caption.</p>
 </table></div>
 <p>Editor coverage today:</p>
 <ul>
-<li><abbr title="Profile Element (SAIP)">PE</abbr>-PINCodes / <abbr title="Profile Element (SAIP)">PE</abbr>-PUKCodes — per-row key-reference, retry counters, hex
+<li><abbr title="Profile Element (SAIP)">PE</abbr>-PINCodes / <abbr title="Profile Element (SAIP)">PE</abbr>-PUKCodes -- per-row key-reference, retry counters, hex
   <abbr title="Personal Identification Number">PIN</abbr> / <abbr title="Personal Unblocking Key">PUK</abbr> value, attributes, unblocking-<abbr title="Personal Identification Number">PIN</abbr> reference, with add / remove</li>
-<li><abbr title="Profile Element (SAIP)">PE</abbr>-AKAParameter / <abbr title="Profile Element (SAIP)">PE</abbr>-AKAParameter2 — algorithm picker (Milenage,
+<li><abbr title="Profile Element (SAIP)">PE</abbr>-AKAParameter / <abbr title="Profile Element (SAIP)">PE</abbr>-AKAParameter2 -- algorithm picker (Milenage,
   <abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr>, XOR, etc.), key, OPc, rotation / xoring constants, SQN options,
   delta, age limit, and a dynamic SQN-init list</li>
 <li><abbr title="Profile Element (SAIP)">PE</abbr>-<abbr title="Universal Subscriber Identity Module">USIM</abbr> / <abbr title="Profile Element (SAIP)">PE</abbr>-OPT-<abbr title="Universal Subscriber Identity Module">USIM</abbr> / <abbr title="Profile Element (SAIP)">PE</abbr>-<abbr title="IP Multimedia Services Identity Module">ISIM</abbr> / <abbr title="Profile Element (SAIP)">PE</abbr>-OPT-<abbr title="IP Multimedia Services Identity Module">ISIM</abbr> / <abbr title="Profile Element (SAIP)">PE</abbr>-CSIM / <abbr title="Profile Element (SAIP)">PE</abbr>-OPT-CSIM /
-  <abbr title="Profile Element (SAIP)">PE</abbr>-Telecom — header, template-ID dropdown of known OIDs, and <abbr title="Elementary File">EF</abbr> presence
+  <abbr title="Profile Element (SAIP)">PE</abbr>-Telecom -- header, template-ID dropdown of known OIDs, and <abbr title="Elementary File">EF</abbr> presence
   toggles so operators can drop EFs from the <abbr title="Profile Element (SAIP)">PE</abbr></li>
-<li><abbr title="Profile Element (SAIP)">PE</abbr>-SecurityDomain — instance parameters (load-package / class /
+<li><abbr title="Profile Element (SAIP)">PE</abbr>-SecurityDomain -- instance parameters (load-package / class /
   instance <abbr title="Application Identifier">AID</abbr>, privileges, life-cycle state), dynamic key list (key data,
   key type, MAC length, key access, key identifier, usage qualifier,
   version number), and a personalisation-blob list</li>
-<li>everything else — <code>GenericPeEditor</code> falls back to the shared
+<li>everything else -- <code>GenericPeEditor</code> falls back to the shared
   <code>PeHeaderForm</code> so <code>mandated</code> and <code>identification</code> always round-trip</li>
 </ul>
 <p>All edits are committed back through <code>saip_decoded_edit</code>, so the JSON and
 <abbr title="Distinguished Encoding Rules">DER</abbr> previews refresh on every change.</p>
-<p>The file-system and applications views are read-only navigation aids:
-selecting a file or application jumps the JSON outline to the matching <abbr title="Profile Element (SAIP)">PE</abbr>.</p>
+<p>The file-system view exposes <abbr title="File Control Parameters">FCP</abbr>, decoded, data, and JSON panels for each
+materialised <abbr title="Elementary File">EF</abbr>. Record-fixed files derive row windows from the <abbr title="File Control Parameters">FCP</abbr> record
+layout and reconstructed <abbr title="Elementary File">EF</abbr> image, so <abbr title="Elementary File">EF</abbr>.ARR and similar EFs still show every
+record slot when a backend response does not include per-record decode rows.
+The applications view is a read-only navigation aid: selecting an application
+jumps the JSON outline to the matching <abbr title="Profile Element (SAIP)">PE</abbr>.</p>
 <h2 id="runtime-dependencies">Runtime dependencies</h2>
 <ul>
 <li>Python runtime only</li>
@@ -375,6 +425,7 @@ type.</p>
             <a href="#inspection-and-linting" class="toc-link toc-link-sub">Inspection and linting</a>
             <a href="#transform-and-transcode" class="toc-link toc-link-sub">Transform and transcode</a>
             <a href="#transcode-tui" class="toc-link toc-link-sub">Transcode TUI</a>
+            <a href="#variable-defs-token-sidecars" class="toc-link toc-link-sub">Variable defs / token sidecars</a>
             <a href="#diff-and-simulator-pipeline" class="toc-link toc-link-sub">Diff and simulator-pipeline</a>
             <a href="#structured-pe-editors" class="toc-link toc-link-sub">Structured PE editors</a>
             <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
@@ -400,13 +451,13 @@ type.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Remote Lab — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/remote-lab.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Remote Lab</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Remote Lab</h1>
+        <p class="page-lead mb-8"><code>yggdrasim_common/remote_lab/</code> turns a set of card rigs into a shared
+resource. An agent publishes what exists, hands out exclusive sessions, and
+fronts each rig with a session relay; operators discover rigs and reserve them
+from the CLI or the GUI without ever holding a rig's own Card Bridge token.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#module-map" class="toc-link">Module map</a>
+            <a href="#two-kinds-of-rig" class="toc-link">Two kinds of rig</a>
+            <a href="#sessions-and-leases" class="toc-link">Sessions and leases</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#control-api" class="toc-link">Control API</a>
+            <a href="#gui-surface" class="toc-link">GUI surface</a>
+            <a href="#configuration" class="toc-link">Configuration</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>The data plane does not change. <a href="card-bridge.html">Card Bridge</a> still carries
+the APDUs; the agent adds identity, inventory, status and locking in front of
+it.</p>
+<div class="code-block"><pre><code>operator  --control--&gt;  lab agent      (who exists, may I have it)
+operator  --stream---&gt;  session relay  --&gt;  Card Bridge  --&gt;  reader
+</code></pre></div>
+<h2 id="when-to-use-it">When to use it</h2>
+<ul>
+<li>several people share a set of rigs and need to know who holds what</li>
+<li>a rig should be reachable without distributing the bridge token that grants
+  unrestricted access to its card</li>
+<li>a modem rig has no card of its own and an operator wants to feed it one</li>
+<li>a session must expire on its own when the holder's workstation disappears</li>
+</ul>
+<p>For a single operator with a single reader, plain <a href="../how-to/remote-apdu-streaming.html">Card Bridge over
+SSH</a> is less machinery.</p>
+<h2 id="module-map">Module map</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Module</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent.py</code></td>
+<td>The published process: control API plus one session relay per rig.</td>
+</tr>
+<tr>
+<td><code>config.py</code></td>
+<td>YAML parsing and validation for agent, rigs, tokens and defaults.</td>
+</tr>
+<tr>
+<td><code>sessions.py</code></td>
+<td>In-memory lock and session manager: reservation, heartbeat, expiry.</td>
+</tr>
+<tr>
+<td><code>security.py</code></td>
+<td>Bearer-token hashing and comparison for control and session APIs.</td>
+</tr>
+<tr>
+<td><code>registry.py</code></td>
+<td>The operator-side invite and device registry the GUI reads.</td>
+</tr>
+<tr>
+<td><code>consumer.py</code></td>
+<td>The <abbr title="Hardware-In-The-Loop">HIL</abbr> supervisor bound to one reserved modem rig.</td>
+</tr>
+<tr>
+<td><code>client.py</code></td>
+<td>HTTP client helpers used by the CLI and the GUI routes.</td>
+</tr>
+<tr>
+<td><code>cli.py</code></td>
+<td>The <code>yggdrasim-lab</code> verbs.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="two-kinds-of-rig">Two kinds of rig</h2>
+<p>A rig declares its <code>kind</code> in the agent config; absent, it is a card rig.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Kind</th>
+<th>Holds</th>
+<th>A session means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>card</code></td>
+<td>A reader with a card in it, published through Card Bridge.</td>
+<td>The rig streams its card to you.</td>
+</tr>
+<tr>
+<td><code>modem</code></td>
+<td>A modem and a SIMtrace2, no card of its own.</td>
+<td>You offer a card from your own Card Bridge and the rig consumes it.</td>
+</tr>
+</tbody>
+</table></div>
+<p>A modem rig spawns <code>yggdrasim-hil-supervisor</code> on reservation. The executable
+and every flag that is not derived from the offer come from rig config, never
+from the request.</p>
+<h2 id="sessions-and-leases">Sessions and leases</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Default</th>
+<th>Value</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reservation_timeout_seconds</code></td>
+<td>30</td>
+<td>How long a reservation attempt waits for the rig to come free.</td>
+</tr>
+<tr>
+<td><code>heartbeat_timeout_seconds</code></td>
+<td>60</td>
+<td>A session with no heartbeat inside this window is reclaimed.</td>
+</tr>
+<tr>
+<td><code>max_session_seconds</code></td>
+<td>14400</td>
+<td>Hard ceiling on one session, four hours.</td>
+</tr>
+</tbody>
+</table></div>
+<p>A session carries its own token, separate from the access token used to
+reserve it. Releasing is explicit; <code>force-release</code> exists for a rig whose
+holder has gone away and requires a token with the <code>admin</code> role.</p>
+<h2 id="entry-points">Entry points</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Form</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agent</td>
+<td><code>yggdrasim-lab-agent</code></td>
+</tr>
+<tr>
+<td>Operator CLI</td>
+<td><code>yggdrasim-lab rigs \| status \| reserve \| release \| heartbeat</code></td>
+</tr>
+<tr>
+<td>GUI</td>
+<td>the <strong>Remote Lab</strong> view of the <a href="gui-command-center.html">Universal GUI</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>The CLI and the GUI cover the same capability, so a rig is usable from either
+surface. <code>yggdrasim-lab</code> takes <code>--agent</code> (control base URL) and a token, by
+value or from a file.</p>
+<h2 id="control-api">Control API</h2>
+<p>The agent answers on its control port, <code>8700</code> by default, bound to loopback
+unless the config says otherwise.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /healthz</code></td>
+<td>Liveness.</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/info</code></td>
+<td>Agent identity and defaults.</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/rigs</code></td>
+<td>The published inventory.</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/rigs/{rig}/status</code></td>
+<td>One rig: presence, card state, current holder.</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/rigs/{rig}/sessions</code></td>
+<td>Reserve the rig; answers with the session and its relay URL.</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/sessions/{session}/heartbeat</code></td>
+<td>Keep a session alive.</td>
+</tr>
+<tr>
+<td><code>DELETE /api/v1/sessions/{session}</code></td>
+<td>Release.</td>
+</tr>
+<tr>
+<td><code>POST /api/v1/rigs/{rig}/force-release</code></td>
+<td>Admin override for an abandoned session.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Each rig also carries a session relay that speaks the Card Bridge paths
+(<code>/ping</code>, <code>/status</code>, <code>/apdu</code>). Its bind host and external port come from the
+rig's <code>stream_proxy</code> block; port <code>0</code> takes an ephemeral one. A rig can be told
+to answer each caller with an address that caller can reach, so one agent
+serves both a VPN peer and an SSH-forwarded operator.</p>
+<p>The <a href="../how-to/run-a-remote-lab-agent.html">Run a Remote Lab Agent</a> how-to
+carries the request and response bodies.</p>
+<h2 id="gui-surface">GUI surface</h2>
+<p><code>yggdrasim_common/gui_server/routes/remote_lab.py</code> mounts <code>/api/remote-lab</code>.
+The view lists devices, opens a link to one, and keeps the session alive while
+the link is open:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /devices</code>, <code>POST /devices/{id}/update</code>, <code>DELETE /devices/{id}</code></td>
+<td>The local device registry.</td>
+</tr>
+<tr>
+<td><code>POST /import</code>, <code>GET /devices/{id}/export</code></td>
+<td>Invite exchange.</td>
+</tr>
+<tr>
+<td><code>POST /hosts</code></td>
+<td>Record a host, including one that has no SSH target yet.</td>
+</tr>
+<tr>
+<td><code>GET /status</code>, <code>GET /devices/{id}/status</code>, <code>GET /sessions</code></td>
+<td>What is reachable and who holds it.</td>
+</tr>
+<tr>
+<td><code>POST /devices/{id}/connect</code></td>
+<td>Reserve and open the link.</td>
+</tr>
+<tr>
+<td><code>POST /devices/{id}/offer-card</code></td>
+<td>Hand a modem rig a card from this host's Card Bridge.</td>
+</tr>
+<tr>
+<td><code>POST /devices/{id}/release</code>, <code>POST /devices/{id}/force-release</code></td>
+<td>Give the rig back.</td>
+</tr>
+</tbody>
+</table></div>
+<p>An invite is the JSON an agent owner hands an operator: it names the agent and
+the rig and carries an access token. A single invite, an array, or a bundle
+imports the same way. The SSH half of a host entry is never part of an invite.</p>
+<h2 id="configuration">Configuration</h2>
+<p>The agent reads a YAML file. The security block stores only SHA-256 hashes of
+access tokens, never the token itself; mint a pair with
+<code>yggdrasim_common.card_bridge_auth.generate_token</code> and
+<code>yggdrasim_common.remote_lab.security.hash_token</code>. Each token carries an <code>id</code>
+and a role of <code>user</code> or <code>admin</code>.</p>
+<p><code>guides/systemd/yggdrasim-lab-agent.service.example</code> is a <code>systemd --user</code>
+unit for an agent host.</p>
+<h2 id="pitfalls">Pitfalls</h2>
+<ul>
+<li>A remote rig's reader name does not resolve on the operator's machine.
+  Judge a rig by its agent-reported status -- free, busy, reserved -- not by a
+  local <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> probe, which cannot see it.</li>
+<li>The agent binds loopback by default. Treat a non-loopback bind exactly like
+  exposing Card Bridge itself: a private network path or an SSH forward.</li>
+<li>An operator who stops sending heartbeats loses the rig after the heartbeat
+  timeout. That is the point; it is what stops an abandoned session from
+  holding a rig for four hours.</li>
+<li>The agent adds no confidentiality of its own. Tokens and APDUs ride the
+  transport you give it.</li>
+</ul>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../how-to/run-a-remote-lab-agent.html">Run a Remote Lab Agent</a> -- the task guide</li>
+<li><a href="card-bridge.html">Card Bridge</a> -- the data plane underneath</li>
+<li><a href="hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a> -- what a modem rig runs once it has a card</li>
+<li><a href="gui-command-center.html">Universal GUI Command Center</a></li>
+<li><a href="../how-to/remote-apdu-streaming.html">Card Bridge over SSH</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#module-map" class="toc-link">Module map</a>
+            <a href="#two-kinds-of-rig" class="toc-link">Two kinds of rig</a>
+            <a href="#sessions-and-leases" class="toc-link">Sessions and leases</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#control-api" class="toc-link">Control API</a>
+            <a href="#gui-surface" class="toc-link">GUI surface</a>
+            <a href="#configuration" class="toc-link">Configuration</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

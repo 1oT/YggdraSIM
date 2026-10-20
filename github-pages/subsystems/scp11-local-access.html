@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp11-local-access.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -175,7 +175,7 @@ EOF
 </tr>
 <tr>
 <td><code>LOAD-PROFILE</code></td>
-<td>full local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> + PrepareDownload + LoadBPP flow</td>
+<td>full local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> + PrepareDownload + LoadBPP flow, then EnableProfile on the installed profile</td>
 </tr>
 </tbody>
 </table></div>
@@ -279,9 +279,9 @@ EOF
 <h2 id="session-key-export">Session key export</h2>
 <p><code>EXPORT-KEYBAG</code> snapshots the last-built pySim BSP session into a
 keybag JSON compatible with the <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge offline-replay decoder.
-The BSP is (re)built by any verb that needs a secure channel —
+The BSP is (re)built by any verb that needs a secure channel --
 <code>LOAD-PROFILE</code>, <code>ENABLE-PROFILE</code>, <code>DISABLE-PROFILE</code>, <code>DELETE-PROFILE</code>,
-<code>STORE-METADATA</code>, <code>UPDATE-METADATA</code>, etc. — so run the desired verb
+<code>STORE-METADATA</code>, <code>UPDATE-METADATA</code>, etc. -- so run the desired verb
 first, then export.</p>
 <h3 id="interactive-shell">Interactive shell</h3>
 <div class="code-block"><pre><code>[Local SMDPP] &gt; LOAD-PROFILE
@@ -289,10 +289,10 @@ first, then export.</p>
 </code></pre></div>
 <p>Arguments (both optional):</p>
 <ul>
-<li><code>OutputPath.keys.json</code> — destination file. Defaults to a
+<li><code>OutputPath.keys.json</code> -- destination file. Defaults to a
   timestamped path under <code>Workspace/SCP11/local_access/keybags/</code> when
   omitted.</li>
-<li><code>Label</code> — free-form identifier written to the entry for operator
+<li><code>Label</code> -- free-form identifier written to the entry for operator
   cross-referencing.</li>
 </ul>
 <p>The handler refuses cleanly if:</p>
@@ -312,16 +312,16 @@ keybag. If no batch is provided, the export runs standalone.</p>
 <p>The shell's <code>LocalSessionState</code> keeps the BSP material after every
 build via <code>_snapshot_session_bsp</code>:</p>
 <ul>
-<li><code>last_bsp_s_enc_hex</code> — BSP session S-ENC</li>
-<li><code>last_bsp_s_mac_hex</code> — BSP session S-MAC</li>
-<li><code>last_bsp_mac_chain_hex</code> — MAC chaining value</li>
-<li><code>last_bsp_block_nr</code> — per-session block counter</li>
-<li><code>last_bsp_aid_hex</code> — <abbr title="Application Identifier">AID</abbr> under which the BSP was built</li>
-<li><code>last_bsp_protocol</code> — <code>"SCP11c"</code></li>
+<li><code>last_bsp_s_enc_hex</code> -- BSP session S-ENC</li>
+<li><code>last_bsp_s_mac_hex</code> -- BSP session S-MAC</li>
+<li><code>last_bsp_mac_chain_hex</code> -- MAC chaining value</li>
+<li><code>last_bsp_block_nr</code> -- per-session block counter</li>
+<li><code>last_bsp_aid_hex</code> -- <abbr title="Application Identifier">AID</abbr> under which the BSP was built</li>
+<li><code>last_bsp_protocol</code> -- <code>"SCP11c"</code></li>
 </ul>
 <p><code>EXPORT-KEYBAG</code> reads directly from this snapshot, so it is safe to
 run even after the BSP has been torn down by the verb that built it.</p>
-<p>See <a href="hil-bridge.html#keybag-json-schema"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge — Keybag JSON schema</a>
+<p>See <a href="hil-bridge.html#keybag-json-schema"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge -- Keybag JSON schema</a>
 for the complete file structure and
 <a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a> for
 how the keybag feeds into the decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> <abbr title="Text User Interface">TUI</abbr>.</p>
@@ -333,6 +333,9 @@ how the keybag feeds into the decoded-<abbr title="Application Protocol Data Uni
   by the card if a field is out of the card's acceptable range.</li>
 <li><code>LOAD-PROFILE</code> requires both <code>PROFILE</code> and (often) <code>METADATA</code> to be set
   for the current session. <code>STATUS</code> confirms the choices.</li>
+<li><code>LOAD-PROFILE</code> enables the profile it installed (<code>AUTO_ENABLE_AFTER_LOAD</code>
+  in <code>LocalAccessConfig</code>). A refused enable is reported after the load
+  banner and does not fail the load.</li>
 <li>Certificate matching uses the card's allowed <abbr title="Certificate Issuer Public Key Identifier">CI PKID</abbr> set. Drop-in custom
   certificates must live in a directory the loader scans; see
   <a href="../reference/runtime-root.html">Runtime Root</a>.</li>
@@ -343,7 +346,7 @@ how the keybag feeds into the decoded-<abbr title="Application Protocol Data Uni
 <li><a href="scp11-live.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Live Relay</a></li>
 <li><a href="../how-to/download-a-profile-local.html">Download a Profile (Local Access)</a></li>
 <li><a href="../how-to/enable-disable-delete-profile.html">Enable, Disable, Delete a Profile</a></li>
-<li><a href="hil-bridge.html#offline-pcap-replay"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge — offline pcap replay</a></li>
+<li><a href="hil-bridge.html#offline-pcap-replay"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge -- offline pcap replay</a></li>
 <li><a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a></li>
 </ul>
         </div>
@@ -384,13 +387,13 @@ how the keybag feeds into the decoded-<abbr title="Application Protocol Data Uni
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

@@ -1,4 +1,0 @@
-# Shortcut for GET STATUS (Packages registry, P1=0x20).
-SCP03-SD
-PKGS
-EXIT

@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/runtime-root.html" data-ygg-open-sections="reference">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -57,14 +57,16 @@ the active runtime root.</p>
         <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
 <h2 id="resolution-order">Resolution order</h2>
 <pre class="mermaid"><code>flowchart LR
-    Start["launch"] --> Env{"YGGDRASIM_RUNTIME_ROOT set?"}
-    Env -- yes --> UseEnv["use that directory"]
-    Env -- no --> Frozen{"frozen build?"}
-    Frozen -- no --> Repo["use repository root"]
-    Frozen -- yes --> Next["YggdraSIM-data next to executable"]
-    Next --> Writable{"writable?"}
-    Writable -- yes --> UseNext["use YggdraSIM-data"]
-    Writable -- no --> Home["fallback to ~/YggdraSIM-data"]</code></pre>
+    Start["launch"] --&gt; Env{"YGGDRASIM_RUNTIME_ROOT set?"}
+    Env -- yes --&gt; UseEnv["use that directory"]
+    Env -- no --&gt; Frozen{"frozen build?"}
+    Frozen -- no --&gt; Editable{"editable/source checkout?"}
+    Editable -- yes --&gt; Repo["use repository root"]
+    Editable -- no --&gt; UserData["use platform per-user data directory"]
+    Frozen -- yes --&gt; Next["YggdraSIM-data next to executable"]
+    Next --&gt; Writable{"writable?"}
+    Writable -- yes --&gt; UseNext["use YggdraSIM-data"]
+    Writable -- no --&gt; Home["fallback to ~/YggdraSIM-data"]</code></pre>
 <p class="fig-caption">Figure: Runtime-root resolution order — env override, repo, or data directory</p>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -81,6 +83,10 @@ the active runtime root.</p>
 <tr>
 <td>source run (editable install, in-repo)</td>
 <td>the repository root is the runtime root</td>
+</tr>
+<tr>
+<td>non-editable wheel</td>
+<td>platform per-user data directory; never <code>site-packages</code></td>
 </tr>
 <tr>
 <td>frozen build, writable next-to-executable directory</td>
@@ -193,13 +199,13 @@ yggdrasim-scp11-live --cmd &quot;STATUS; EXIT&quot;
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

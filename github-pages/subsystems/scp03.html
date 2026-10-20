@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp03.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -55,6 +55,7 @@ navigation, <abbr title="Embedded UICC">eUICC</abbr> retrieval, <abbr title="Per
             <a href="#euicc-retrieval" class="toc-link toc-link-sub">eUICC retrieval</a>
             <a href="#pin-and-authentication" class="toc-link toc-link-sub">PIN and authentication</a>
             <a href="#reporting" class="toc-link toc-link-sub">Reporting</a>
+            <a href="#raw-apdu-entry" class="toc-link toc-link-sub">Raw APDU entry</a>
             <a href="#hil-diagnostics" class="toc-link toc-link-sub">HIL / diagnostics</a>
             <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
             <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
@@ -85,8 +86,8 @@ navigation, <abbr title="Embedded UICC">eUICC</abbr> retrieval, <abbr title="Per
 <li>generating a full filesystem export or YAML-oriented report</li>
 <li>comparing a live card against a stored "gold" profile snapshot</li>
 </ul>
-<p>Do not use it as a relay provisioning shell. Relay work lives in <code>SCP11/live</code>
-and <code>SCP11/test</code>. Direct local <abbr title="Issuer Security Domain - Root">ISD-R</abbr> provisioning lives in
+<p>Do not use it as a relay provisioning shell. Relay work lives in <code>SCP11/live</code>.
+Direct local <abbr title="Issuer Security Domain - Root">ISD-R</abbr> provisioning lives in
 <code>SCP11/local_access</code>.</p>
 <h2 id="entry-points">Entry points</h2>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Module</label><label for="__tabbed_1_2">Console script</label><label for="__tabbed_1_3">From the launcher</label></div>
@@ -244,6 +245,40 @@ yggdrasim-scp03 --cmd &quot;AUTH-SD; APPS; EXIT&quot;
 </tr>
 </tbody>
 </table></div>
+<h3 id="raw-apdu-entry">Raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> entry</h3>
+<p>A line that matches no command is transmitted as an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>. A data field longer
+than a one-byte <code>Lc</code> can announce is carried as a STORE DATA block sequence
+instead of being rejected: P1 marks every block but the last as "more blocks"
+and P2 counts the blocks (GlobalPlatform Card Specification v2.3.1 Table
+11-89). The same applies to a line read from a <code>RUN</code> / <code>SCRIPT</code> file.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Input on the line</th>
+<th>Sent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>a command <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> that already fits</td>
+<td>unchanged</td>
+</tr>
+<tr>
+<td>a command <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> with an extended <code>Lc</code> over 255 bytes</td>
+<td>one STORE DATA block per 255 bytes</td>
+</tr>
+<tr>
+<td>a four-byte header followed by over 255 raw bytes</td>
+<td>the same, reusing the header's CLA, P1 and starting block number</td>
+</tr>
+<tr>
+<td>a bare BER-<abbr title="Tag-Length-Value">TLV</abbr> command payload with no header</td>
+<td>wrapped as STORE DATA on the logical channel the session last used</td>
+</tr>
+</tbody>
+</table></div>
+<p>Only STORE DATA and LOAD define a block sequence, so any other instruction
+carrying an extended length is passed to the card untouched.</p>
 <h3 id="hil-diagnostics"><abbr title="Hardware-In-The-Loop">HIL</abbr> / diagnostics</h3>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -256,6 +291,14 @@ yggdrasim-scp03 --cmd &quot;AUTH-SD; APPS; EXIT&quot;
 <tr>
 <td><code>EXPORT-KEYBAG [Path.keys.json] [Label]</code></td>
 <td>dump the active <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> session keys (S-ENC, S-MAC, S-RMAC, SSC, chaining value) and the active target <abbr title="Application Identifier">AID</abbr> into a keybag JSON for offline <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap decryption</td>
+</tr>
+<tr>
+<td><code>TRACE START [File]</code> / <code>TRACE STOP</code> / <code>TRACE STATUS</code></td>
+<td>copy every command from START to STOP, run with debug output, into a log file; the prompt reads <code>TRACE</code> meanwhile</td>
+</tr>
+<tr>
+<td><code>&lt;command&gt; --log &lt;File&gt;</code></td>
+<td>the same for one command line (see <a href="../reference/cli-cheatsheet.html#capture-commands-to-a-file">Capture commands to a file</a>)</td>
 </tr>
 </tbody>
 </table></div>
@@ -328,9 +371,9 @@ decoder.</p>
 </code></pre></div>
 <p>Arguments (both optional):</p>
 <ul>
-<li><code>OutputPath.keys.json</code> — destination file. Defaults to a
+<li><code>OutputPath.keys.json</code> -- destination file. Defaults to a
   timestamped path under the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> workspace when omitted.</li>
-<li><code>Label</code> — free-form identifier written to the entry for operator
+<li><code>Label</code> -- free-form identifier written to the entry for operator
   cross-referencing (ticket id, serial, pcap name, etc.).</li>
 </ul>
 <p>The handler refuses cleanly if:</p>
@@ -346,7 +389,7 @@ decoder.</p>
 <li><code>ssc_hex</code> / <code>chaining_value_hex</code>: <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> state at time of export</li>
 <li><code>label</code>: the operator-provided label</li>
 </ul>
-<p>See <a href="hil-bridge.html#keybag-json-schema"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge — Keybag JSON schema</a>
+<p>See <a href="hil-bridge.html#keybag-json-schema"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge -- Keybag JSON schema</a>
 for the complete file structure and
 <a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a> for
 how the keybag feeds into the decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> <abbr title="Text User Interface">TUI</abbr>.</p>
@@ -366,7 +409,7 @@ how the keybag feeds into the decoded-<abbr title="Application Protocol Data Uni
 <li><code>GUIDE</code> opens the topic menu</li>
 <li><code>GUIDE GP</code>, <code>GUIDE ETSI</code>, <code>GUIDE GSMA</code>, <code>GUIDE INSTALL</code>, <code>GUIDE SECURITY</code>,
   <code>GUIDE OTA</code>, <code>GUIDE CONFIG</code>, <code>GUIDE SAIP</code>, <code>GUIDE SUCI</code>, <code>GUIDE CLI</code> for
-  topic deep dives</li>
+  per-topic references</li>
 <li><code>HELP</code> prints the grouped command reference</li>
 </ul>
 <p>The same content is mirrored under <a href="../shell-guides/index.html">Shell Guides</a>
@@ -378,7 +421,7 @@ for reading outside the terminal.</p>
 <li><a href="../concepts/3gpp-naa.html">3GPP <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr></a></li>
 <li><a href="../reference/command-suite.html">CLI Matrix</a></li>
 <li><a href="../reference/troubleshooting.html">Troubleshooting</a></li>
-<li><a href="hil-bridge.html#offline-pcap-replay"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge — offline pcap replay</a></li>
+<li><a href="hil-bridge.html#offline-pcap-replay"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge -- offline pcap replay</a></li>
 <li><a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a></li>
 </ul>
         </div>
@@ -395,6 +438,7 @@ for reading outside the terminal.</p>
             <a href="#euicc-retrieval" class="toc-link toc-link-sub">eUICC retrieval</a>
             <a href="#pin-and-authentication" class="toc-link toc-link-sub">PIN and authentication</a>
             <a href="#reporting" class="toc-link toc-link-sub">Reporting</a>
+            <a href="#raw-apdu-entry" class="toc-link toc-link-sub">Raw APDU entry</a>
             <a href="#hil-diagnostics" class="toc-link toc-link-sub">HIL / diagnostics</a>
             <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
             <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
@@ -421,13 +465,13 @@ for reading outside the terminal.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

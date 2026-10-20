@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="internals/plugin-contract.html" data-ygg-open-sections="internals">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -50,6 +50,15 @@ absent.</p>
             <a href="#registration-contract" class="toc-link">Registration contract</a>
             <a href="#capability-manager" class="toc-link">Capability manager</a>
             <a href="#reserved-capability-names" class="toc-link">Reserved capability names</a>
+            <a href="#mcp_extensions" class="toc-link toc-link-sub">mcp_extensions</a>
+            <a href="#plugin-consoles" class="toc-link">Plugin consoles</a>
+            <a href="#manifest" class="toc-link toc-link-sub">Manifest</a>
+            <a href="#methods" class="toc-link toc-link-sub">Methods</a>
+            <a href="#layout" class="toc-link toc-link-sub">Layout</a>
+            <a href="#top-bar-pills" class="toc-link toc-link-sub">Top bar pills</a>
+            <a href="#comparison-panel" class="toc-link toc-link-sub">Comparison panel</a>
+            <a href="#run-forms" class="toc-link toc-link-sub">Run forms</a>
+            <a href="#apdu-trace-renderer" class="toc-link">APDU trace renderer</a>
             <a href="#absent-plugin-behavior" class="toc-link">Absent-plugin behavior</a>
             <a href="#runtime-root-note" class="toc-link">Runtime root note</a>
             <a href="#publication-policy" class="toc-link">Publication policy</a>
@@ -66,10 +75,12 @@ absent.</p>
 <li>package-style plugins <code>plugins/&lt;name&gt;/</code> with an <code>__init__.py</code> (skipped if
   that file is missing)</li>
 </ul>
-<p>Loaded plugins get unique synthetic module names on the form
-<code>yggdrasim_plugin_&lt;name&gt;</code>. Load errors are captured per plugin and surfaced
-back to the runtime, not raised globally. A broken plugin must not break the
-rest of the process.</p>
+<p>Directory plugins load canonically as <code>plugins.&lt;name&gt;</code> so package-relative
+imports work in source and drop-in runtime installs. The legacy
+<code>yggdrasim_plugin_&lt;name&gt;</code> name remains an alias to the same module object.
+Single-file plugins retain the legacy synthetic name. Load errors are captured
+per plugin and surfaced back to the runtime, not raised globally. A broken
+plugin must not break the rest of the process.</p>
 <h2 id="registration-contract">Registration contract</h2>
 <p>Each plugin module must expose a callable:</p>
 <div class="code-block"><pre><code>def register_plugins(manager):
@@ -105,25 +116,448 @@ lowercased and stripped. Empty names are rejected.</p>
 </tr>
 </tbody>
 </table></div>
-<p>Consumers generally call <code>get_capability("polling")</code> and branch on whether
+<p>Consumers call <code>get_capability("&lt;capability-name&gt;")</code> and branch on whether
 it returns a provider.</p>
+<p>A provider whose <code>extend_target</code> raises is recorded under
+<code>&lt;capability-name&gt;:extend</code> in <code>load_errors()</code>, and the providers after it
+still extend the target. An <code>ActionSpec</code> or <code>ActionField</code> built with a
+non-<code>str</code> text field is refused with a <code>TypeError</code> naming the spec at
+construction (the usual cause is a trailing comma inside a parenthesised run
+of string literals, which makes the field a tuple), so a malformed action
+becomes that plugin's load error while <code>GET /api/actions</code> keeps serving
+every other action.</p>
 <h2 id="reserved-capability-names">Reserved capability names</h2>
+<p>Reserved names are private extension contracts. Public distributions should
+document only the generic loader behavior and keep undistributed capability
+names out of shipped docs.</p>
+<h3 id="mcp_extensions"><code>mcp_extensions</code></h3>
+<p>The one capability whose name is published, because the consumer that reads
+it ships too. It lets a private plugin add tools, resources, and prompts to
+the MCP server without any operator specifics entering this tree.</p>
+<p>A provider exposes <code>register(mcp)</code> and may expose the usual <code>health()</code>:</p>
+<div class="code-block"><pre><code>class OperatorMcpExtensions:
+    def health(self) -&gt; dict:
+        return {&quot;actions_available&quot;: True, &quot;dependency_issues&quot;: []}
+
+    def register(self, mcp) -&gt; None:
+        @mcp.prompt()
+        def house_profile_review(file_path: str = &quot;&quot;) -&gt; str:
+            return f&quot;Review {file_path} against the house profile rules ...&quot;
+
+        @mcp.tool()
+        def operator_plmn_lookup(mccmnc: str) -&gt; str:
+            ...
+
+
+def register_plugins(manager) -&gt; None:
+    manager.register_capability(&quot;mcp_extensions&quot;, OperatorMcpExtensions())
+</code></pre></div>
+<p><code>Tools/YggdraMCP/server.py::load_plugin_extensions</code> calls it at startup and
+reports rather than raises at every step: a provider that is absent,
+declares itself unavailable, raises from <code>health()</code>, lacks <code>register</code>, or
+raises from <code>register</code> is logged and skipped, and the server still serves
+its built-in surface.</p>
+<p>A plugin tool that drives a card must call <code>card_access_allowed()</code> from the
+server module and refuse when it returns <code>False</code>. The loader cannot enforce
+that on a plugin's behalf, and a plugin that ignores it silently widens the
+gate the built-in card tools sit behind.</p>
+<h2 id="plugin-consoles">Plugin consoles</h2>
+<p>A plugin can give the GUI a console without shipping browser code. The core
+owns one generic view and one route family (<code>/api/plugin-consoles</code>); the
+plugin hands over a manifest that declares what the view may render and an
+object that answers the calls. The console is listed in the left rail's
+<em>Plugin consoles</em> group when the GUI starts with plugin loading allowed;
+the group is not shown while no console is registered. A console is the GUI half of a capability; the same
+command language still needs its CLI verb.</p>
+<p>The provider's <code>extend_target</code> receives a <code>PluginConsoleRegistry</code> and calls
+<code>add_console(console)</code>:</p>
+<div class="code-block"><pre><code>class CounterConsole:
+    def manifest(self) -&gt; dict:
+        return {
+            &quot;id&quot;: &quot;counter&quot;,
+            &quot;title&quot;: &quot;Counter&quot;,
+            &quot;start&quot;: {&quot;fields&quot;: [{&quot;name&quot;: &quot;step&quot;, &quot;label&quot;: &quot;Step&quot;, &quot;type&quot;: &quot;number&quot;, &quot;min&quot;: 1, &quot;default&quot;: 1}]},
+            &quot;actions&quot;: [
+                {&quot;id&quot;: &quot;add&quot;, &quot;label&quot;: &quot;Add&quot;, &quot;template&quot;: &quot;ADD {amount}&quot;,
+                 &quot;fields&quot;: [{&quot;name&quot;: &quot;amount&quot;, &quot;label&quot;: &quot;Amount&quot;, &quot;type&quot;: &quot;number&quot;}]},
+            ],
+            &quot;command_line&quot;: {&quot;placeholder&quot;: &quot;HELP&quot;},
+            &quot;streams&quot;: [
+                {&quot;id&quot;: &quot;log&quot;, &quot;title&quot;: &quot;Log&quot;,
+                 &quot;columns&quot;: [{&quot;key&quot;: &quot;at&quot;, &quot;label&quot;: &quot;Time&quot;, &quot;format&quot;: &quot;time&quot;},
+                             {&quot;key&quot;: &quot;text&quot;, &quot;label&quot;: &quot;Message&quot;}]},
+            ],
+        }
+
+    def status(self) -&gt; dict: ...
+    def start(self, values: dict) -&gt; dict: ...
+    def stop(self) -&gt; dict: ...
+    def command(self, line: str) -&gt; dict: ...
+    def stream(self, stream_id: str, after: int) -&gt; dict: ...
+    def help(self) -&gt; dict: ...
+
+
+class CounterCapability:
+    def __init__(self) -&gt; None:
+        self._console = CounterConsole()
+
+    def extend_target(self, target) -&gt; None:
+        if type(target).__name__ == &quot;PluginConsoleRegistry&quot;:
+            target.add_console(self._console)
+</code></pre></div>
+<p>The registry is filled once per process, on the first request after the
+plugin gate has latched. <code>add_console</code> validates the manifest
+(<code>yggdrasim_common/gui_server/plugin_console_manifest.py</code>) and checks the
+methods it depends on; a console that does not fit is listed as refused with
+the reason, which the GUI log shows, and never reaches the view. The registry
+lists at most 16 consoles and keeps at most 32 refusals.</p>
+<h3 id="manifest">Manifest</h3>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
-<th>Capability</th>
-<th>Consumers</th>
+<th>Key</th>
+<th>Shape</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>polling</code></td>
-<td><code>SCP11/live</code> <code>POLL</code>, <code>SCP11/test</code> <code>POLL</code>, <code>SCP11/eim_local</code> <code>IPAE-LIVE</code> / <code>IPAE-TEST</code></td>
+<td><code>id</code></td>
+<td><code>[a-z][a-z0-9_-]{0,31}</code>; the URL segment and the nav leaf</td>
+</tr>
+<tr>
+<td><code>title</code>, <code>summary</code></td>
+<td>one line each, at most 60 and 240 characters</td>
+</tr>
+<tr>
+<td><code>start</code></td>
+<td>optional <code>{label, fields}</code>; the operator starts and stops such a console, and its actions and command line are enabled only while it runs; a text field may carry <code>fill: {label}</code>, a button beside it that asks the console for the field's value</td>
+</tr>
+<tr>
+<td><code>actions</code></td>
+<td>up to 48 <code>{id, label, template, fields, group, hint, place}</code>; <code>group</code> sorts the buttons under headings; <code>place</code> is <code>actions</code> (the default: a card on the Actions tab) or <code>compare</code> (a button in the comparison panel's toolbar, which needs <code>compare</code> declared)</td>
+</tr>
+<tr>
+<td><code>command_line</code></td>
+<td>optional <code>{placeholder, hint}</code>; its presence enables the free command line</td>
+</tr>
+<tr>
+<td><code>streams</code></td>
+<td>up to 4 <code>{id, title, columns}</code>; a column is <code>{key, label, format, width}</code> with format <code>text</code>, <code>time</code> (epoch seconds), <code>hex</code> or <code>mono</code> (text in the mono font with its spacing kept: a captured terminal) and width <code>narrow</code>, <code>medium</code> or <code>fill</code> (the default; a time column is always narrow and takes no width)</td>
+</tr>
+<tr>
+<td><code>compare</code></td>
+<td>optional comparison panel <code>{title, hint, sides}</code>: 2 to 4 sides <code>{id, label}</code>, filled by the status answer (see <em>Comparison panel</em> below)</td>
+</tr>
+<tr>
+<td><code>state</code></td>
+<td>optional <code>{title}</code>: the state the status reports gets a tab of its own under that title (default <code>State</code>); without it the state is listed under the start form</td>
+</tr>
+<tr>
+<td><code>pills</code></td>
+<td>up to 3 <code>{id, label}</code> top bar pills, a label of at most 20 characters; <code>pills()</code> answers them (see <em>Top bar pills</em> below)</td>
+</tr>
+<tr>
+<td><code>runs</code></td>
+<td>optional run form: variants of selectable items, their fields and the stored credentials they need (see <em>Run forms</em> below)</td>
 </tr>
 </tbody>
 </table></div>
-<p>New capabilities should be added to this list only after the consumer side
-is ready to use them cleanly.</p>
+<p>A field is <code>{name, label, type, default, required, placeholder, hint}</code> with
+type <code>text</code> (plus <code>pattern</code>, <code>max_length</code>), <code>number</code> (<code>min</code>, <code>max</code>,
+<code>step</code>), <code>boolean</code>, <code>choice</code> (<code>options</code>, each <code>{value, label}</code>) or <code>reader</code>
+(a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> or remote reader name the view offers from the live reader list;
+empty leaves the pick to the plugin). Any other key, at any level, refuses
+the whole manifest.</p>
+<p>An action's <code>template</code> names each of its fields once, as <code>{name}</code>; the
+fields are always required and are <code>text</code>, <code>number</code> or <code>choice</code>. The server
+renders the line and refuses a value that is not one word or that starts
+with <code>-</code>, so a field never adds words or options to the line. The console
+receives the rendered line through <code>command(line)</code> exactly as a typed one,
+and the transcript shows it, so a button teaches the command it stands for.</p>
+<h3 id="methods">Methods</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Method</th>
+<th>Needed when</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest()</code></td>
+<td>always</td>
+<td>the manifest above</td>
+</tr>
+<tr>
+<td><code>status()</code></td>
+<td>always</td>
+<td><code>{running, busy, last_error, state}</code>, plus <code>compare</code> when the manifest declares one; <code>busy</code> is a phase label shown while it lasts, <code>state</code> a plain object the view lists as key / value rows</td>
+</tr>
+<tr>
+<td><code>start(values)</code>, <code>stop()</code></td>
+<td><code>start</code> is declared</td>
+<td>the status after the change; <code>values</code> holds every start field, checked</td>
+</tr>
+<tr>
+<td><code>fill(field, values)</code></td>
+<td>a start field declares <code>fill</code></td>
+<td><code>{value, note}</code>: the field's value, cut to its length, worked out from the other start values (checked, none required yet; the field's own half-typed value is left out)</td>
+</tr>
+<tr>
+<td><code>command(line)</code></td>
+<td>actions or a command line are declared</td>
+<td><code>{output}</code></td>
+</tr>
+<tr>
+<td><code>stream(stream_id, after)</code></td>
+<td>streams are declared</td>
+<td><code>{entries, next}</code>: the entries after cursor <code>after</code> and the cursor to ask from next</td>
+</tr>
+<tr>
+<td><code>pills()</code></td>
+<td>pills are declared</td>
+<td><code>{&lt;pill id&gt;: {value, state}}</code>: a pill left out or with an empty value is not shown; <code>state</code> is <code>ok</code>, <code>warn</code>, <code>error</code>, <code>busy</code> or <code>idle</code></td>
+</tr>
+<tr>
+<td><code>help()</code></td>
+<td>optional</td>
+<td><code>{groups: [{group, commands: [{name, usage, summary, aliases}]}], text}</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>A <code>ValueError</code> from a call answers 422, a <code>RuntimeError</code> 409 and anything
+else 500. The polls never fail: <code>status</code> reports a provider error as
+<code>last_error</code>, a stream as its <code>error</code>. Every answer is copied into bounded
+plain JSON (<code>plugin_console_output.py</code>) before it is sent, and the view
+renders it as text only.</p>
+<p>The routes are <code>GET /api/plugin-consoles</code> (the consoles and the refusals),
+<code>GET /api/plugin-consoles/pills</code> (every console's pills that carry a value),
+<code>GET .../{id}/status</code>, <code>POST .../{id}/start</code>, <code>POST .../{id}/stop</code>,
+<code>POST .../{id}/fill</code> (<code>{field, values}</code>),
+<code>POST .../{id}/command</code> (<code>{line}</code> or <code>{action, values}</code>),
+<code>GET .../{id}/stream?cursor=&lt;stream&gt;:&lt;n&gt;</code> (the status and every stream in
+one answer) and <code>GET .../{id}/help</code>. They sit behind the GUI's bearer token
+like every <code>/api/*</code> route.</p>
+<h3 id="layout">Layout</h3>
+<p>The view is two panes, each with a tab per part the manifest declares:
+controls (Session, the state tab, Actions, or Command line when the console
+declares no actions, the run form and the credentials) and output (the
+comparison, one tab per stream, the runs). A pane with one part shows no
+tab strip, and a pane with none leaves the other the whole width. The panes
+fill the window and scroll on their own, so no part sits below another
+pane's content; below 960 px they stack and the page scrolls. The tab
+picked per console and pane is kept in the viewer's browser storage. An
+action's answer shows under its own card (its first four lines) as well as
+in the transcript.</p>
+<p>A stream table has fixed column widths from the manifest, so a new row never
+re-measures the ones before it: a fill column takes what the narrow and
+medium ones leave, and below each column's minimum the table scrolls
+sideways. Time, hex and narrow text stay on one line and are cut at the
+column edge, with the whole value as a tooltip; a click opens that row, and
+the table's Wrap shows every value in full. A table keeps its newest 1000
+rows and follows new rows while it is scrolled to the bottom, also across a
+tab switch.</p>
+<h3 id="top-bar-pills">Top bar pills</h3>
+<p>A console that reports something worth seeing from any view (a session's
+network, an open channel) declares <code>pills</code> and answers <code>pills()</code>:</p>
+<div class="code-block"><pre><code>{&quot;network&quot;: {&quot;value&quot;: &quot;001/01 E-UTRAN normal&quot;, &quot;state&quot;: &quot;ok&quot;},
+ &quot;channel&quot;: {&quot;value&quot;: &quot;1 open&quot;, &quot;state&quot;: &quot;ok&quot;}}
+</code></pre></div>
+<p>The top bar polls <code>GET /api/plugin-consoles/pills</code> every 5 seconds while the
+page is visible and shows each pill with a value beside the bridge pills: the
+label, the value (one line, cut at 48 characters) and a dot in the tone of
+<code>state</code> (<code>ok</code> green, <code>warn</code> and <code>busy</code> in the warn and accent colours,
+<code>error</code> red). A click opens the console. Nothing is shown for a console that
+answers no value, so a stopped session takes no room. On a narrow window the
+values fold away first (below 1760 px, the title keeps the whole text), then
+a console's further pills (below 1400 px). A console whose <code>pills()</code> raises
+drops out of that answer; the others stay.</p>
+<h3 id="comparison-panel">Comparison panel</h3>
+<p>A console that shows two or more views of the same thing side by side (a
+card read from the reader beside a platform's record of it) declares
+<code>compare</code> with its sides and returns the panel with every <code>status()</code>
+answer:</p>
+<div class="code-block"><pre><code>{&quot;compare&quot;: {&quot;note&quot;: &quot;...&quot;, &quot;sections&quot;: [{&quot;title&quot;: &quot;Profiles&quot;, &quot;rows&quot;: [
+    {&quot;label&quot;: &quot;8988201234567890123&quot;, &quot;cells&quot;: {&quot;card&quot;: &quot;enabled&quot;, &quot;platform&quot;: &quot;disabled&quot;}, &quot;verdict&quot;: &quot;differs&quot;},
+]}]}}
+</code></pre></div>
+<p>The plugin decides each row's verdict: <code>same</code>, <code>differs</code>, <code>missing</code>
+(present on one side only) or <code>info</code> (a row that is not compared); anything
+else reads <code>info</code>. <code>plugin_console_output.compare_payload</code> keeps one text
+cell per declared side (a cell for any other side is dropped, a missing one
+reads empty), at most 24 sections of 256 rows and 2048 characters per cell,
+on every path that answers a status (status, start, stop and the stream
+poll); a console that declares no comparison never passes one on. The view
+renders one table per section in the output pane's comparison tab, with the
+item, one column per side and the verdict (differs in the warn colour, one
+side only in the fail colour), and redraws only when the answer changed.
+Each section folds on its heading, which also counts its rows and what
+differs; a redraw keeps the sections as they are, and the folded ones are
+remembered per console in the browser. An action with <code>place: compare</code>
+renders as a button in the toolbar above the tables, its fields beside it,
+and answers in the box under the toolbar (the first lines, prefixed with the
+action's label); the transcript on the Actions tab keeps the whole answer.</p>
+<h3 id="run-forms">Run forms</h3>
+<p>A console that starts runs (a test suite, a batch job) declares <code>runs</code>
+instead of, or beside, a session. The view renders a variant select, the
+fields every run uses, one card per item (ticking it opens the item's own
+fields inline) and the field groups the ticked items use, placed before or
+after the items; the output pane's runs tab follows the current run and
+lists the earlier ones, and the credentials have a tab of their own.
+<code>plugin_console_runform.py</code> validates the section:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Key</th>
+<th>Shape</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>labels</code></td>
+<td>optional titles <code>form</code>, <code>variant</code>, <code>items</code>, <code>credentials</code>, <code>start</code>, <code>cancel</code>, <code>current</code>, <code>history</code>, <code>empty_history</code>; each defaults to generic wording</td>
+</tr>
+<tr>
+<td><code>fields</code></td>
+<td>up to 8 fields every run uses, rendered first (an operator signature, a title)</td>
+</tr>
+<tr>
+<td><code>groups</code></td>
+<td>up to 16 <code>{id, label, place}</code>; <code>place</code> is <code>before_items</code> (beside the credentials) or <code>after_items</code></td>
+</tr>
+<tr>
+<td><code>credentials</code></td>
+<td>up to 8 <code>{id, label, hint, named, fields, labels}</code>: secrets the plugin stores once (an API key and its base URL, or a client certificate's settings and key passphrase), up to 8 text fields, at least one <code>secret</code>; <code>named</code> keeps several entries (below); <code>labels</code> may rename the <code>store</code>, <code>forget</code> and <code>replace</code> buttons (at most 24 characters each: a sign-in whose secret is used once and never kept reads Sign in / Sign out)</td>
+</tr>
+<tr>
+<td><code>variants</code></td>
+<td>1 to 8 <code>{id, label, summary, available, unavailable_reason, credentials, fields, items}</code>; <code>credentials</code> names the ones the variant's items may need, each shown in the form as a status line with a button to the credentials tab</td>
+</tr>
+<tr>
+<td><code>accepts_while_running</code></td>
+<td>optional flag: a start while a run is in progress is accepted, and the console adds it to that run (its answer names the run in progress, which the view keeps following); without it the view refuses a start until the run is done</td>
+</tr>
+</tbody>
+</table></div>
+<p>A run field is a form field plus <code>group</code> (a declared group id), <code>secret</code>
+(a text field typed into a password box, with no default),
+<code>visible_when: {field, equals}</code>, which hides the field until an earlier field
+holds that value (<code>equals</code> has the controlling field's type), and, for a
+choice, <code>options_from</code>: the name of a list the console's status answer
+carries under <code>choices</code>, which fills the field's options instead of the
+manifest, so the operator picks a profile or an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> by name and the plugin
+receives the value behind it. Such a field declares no options and no
+default, cannot control another field, shows a blank first option until the
+operator picks, and a start is checked against the list current at that
+moment; <code>plugin_console_output.choices_payload</code> keeps at most 64
+<code>{value, label}</code> per declared source (values of at most 64 characters,
+labels of 60, an empty or repeated value dropped) and drops any source no
+field declares. An item is
+<code>{id, label, summary, badge, available, unavailable_reason, fields,
+credentials, auto_when}</code>: <code>fields</code> names the variant fields it uses and
+<code>credentials</code> the stored secrets it needs. A field no item names is always in
+use. A field several items name must carry a group, and a controlling field
+must be in use whenever the field it controls is. <code>auto_when: {field,
+equals}</code> selects the item from an always-used field instead of a tick.</p>
+<p>The server repeats the view's selection (<code>plugin_console_selection.py</code>,
+mirrored by <code>pcRunPlan</code> in the view and held to one table by the tests): a
+field is visible when it is in use and its controller is visible and holds
+the wanted value. Only visible fields are checked and passed on, so a hidden
+or unused value never reaches the plugin; a visible required field that is
+blank refuses the start, and so does a needed credential that is not usable.</p>
+<p>A <code>named</code> credential keeps several entries on the plugin's side, each under
+a name the operator gives it: one word of 1 to 40 letters, digits, <code>.</code>, <code>_</code>
+or <code>-</code>, starting with a letter or a digit (<code>ENTRY_NAME</code> in
+<code>plugin_console_runform.py</code>), unique within the credential. Its panel in the
+credentials tab lists the entries (Replace, Forget) and Add opens a Name
+field beside the credential's own fields; the form's status line for it
+carries "Use for this run", which picks the entry a run uses. The view
+preselects the only usable entry, and Run stores a typed entry first and
+uses it. The pick is not a form field and stays out of the
+selection: the request carries it as <code>credential_entries</code>, and a start is
+refused while a needed named credential has no pick naming a usable entry.
+A refusal never repeats a name back, in case a secret was typed into it.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Method</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>status()</code></td>
+<td>also <code>active_run</code>: the id of the run in progress, which the view attaches to, or empty; and <code>choices</code>: <code>{&lt;source&gt;: [{value, label}]}</code> for the fields declared with <code>options_from</code></td>
+</tr>
+<tr>
+<td><code>run_start(request)</code></td>
+<td>the new run's history row; <code>request</code> is <code>{variant, items, auto_items, values, credentials}</code>, plus <code>credential_entries</code> (<code>{credential id: entry name}</code>) when a needed credential is named</td>
+</tr>
+<tr>
+<td><code>runs(limit)</code></td>
+<td>history rows, newest first: <code>{id, status, title, summary, time}</code></td>
+</tr>
+<tr>
+<td><code>run(run_id)</code></td>
+<td><code>{id, status, title, meta, error, results}</code>; a result is <code>{label, status, note, checks: [{ok, text}], details: [{summary, text}]}</code></td>
+</tr>
+<tr>
+<td><code>run_events(run_id, after)</code></td>
+<td><code>{entries: [{time, level, text}], next, finished}</code>; <code>level</code> is <code>info</code>, <code>ok</code>, <code>warn</code> or <code>error</code></td>
+</tr>
+<tr>
+<td><code>run_cancel(run_id)</code></td>
+<td><code>{cancel_requested}</code></td>
+</tr>
+<tr>
+<td><code>credentials()</code></td>
+<td><code>{&lt;id&gt;: {stored, usable, summary, values}}</code>; <code>values</code> may carry the non-secret fields; a named credential answers <code>{summary, entries: [{name, usable, summary, values}]}</code></td>
+</tr>
+<tr>
+<td><code>credential_store(id, values)</code>, <code>credential_forget(id)</code></td>
+<td>that credential's entry; for a named credential they take the entry name as one more argument (<code>credential_store(id, values, name)</code>, <code>credential_forget(id, name)</code>) and answer the whole credential</td>
+</tr>
+</tbody>
+</table></div>
+<p>The credential trio is needed only when the form declares credentials. Run
+states are <code>queued</code>, <code>running</code>, <code>passed</code>, <code>failed</code>, <code>error</code> and
+<code>cancelled</code>, result states <code>pending</code>, <code>running</code>, <code>passed</code>, <code>failed</code>, <code>error</code>
+and <code>skipped</code>; anything else reads <code>unknown</code>. The answers are cut to these
+shapes in <code>plugin_console_runs_output.py</code>: a credential answer keeps
+<code>stored</code>, <code>usable</code>, the summary and the declared non-secret values (a named
+one at most 32 entries, each well-formed name once in any case, with the
+same keys), so a stored secret cannot reach the page even when a provider
+returns it. A <code>KeyError</code> from a run call answers 404.</p>
+<p>The routes are <code>POST .../{id}/runs</code> (<code>{variant, items, values}</code>),
+<code>GET .../{id}/runs?limit=</code>, <code>GET .../{id}/runs/{run_id}</code>,
+<code>GET .../{id}/runs/{run_id}/events?after=</code>,
+<code>POST .../{id}/runs/{run_id}/cancel</code>, <code>GET .../{id}/credentials</code> and
+<code>POST</code> / <code>DELETE .../{id}/credentials/{credential_id}</code> (<code>{values}</code>; a named
+credential's entry is <code>{name, values}</code> and <code>?name=</code>, and a plain credential
+refuses a name). A run start may carry <code>credential_entries</code>.</p>
+<h2 id="apdu-trace-renderer"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> trace renderer</h2>
+<p><code>SCP11.transport.set_apdu_trace_renderer(renderer)</code> hands every raw-mode
+exchange of the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> transport (a command run with <code>--debug</code>, or the global
+debug flag) to <code>renderer(label, command, response, sw1, sw2)</code> in place of the
+built-in <code>[label] &gt; HEX</code> and <code>[label] &lt; SW: ... Data: ...</code> lines, and returns
+the renderer it replaced. There is one slot for the whole process, so a
+provider installs its renderer from <code>extend_target</code> and every <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> shell's
+channel prints through it; concise-mode lines do not change. A renderer that
+raises leaves that exchange to the built-in lines, and while a renderer is
+installed <code>send_chunked</code> drops its per-block line, because the label the
+renderer receives already names the block. With no renderer installed the
+transport prints as it always has.</p>
+<p><code>SCP11.transport.set_apdu_trace_note_renderer(renderer)</code> is the second slot,
+for the lines a flow prints between those exchanges while the global debug
+flag is on: the connect phase's heading (<code>Phase: Connect</code>) and the lines on
+the logical channel <abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr> settled on (<code>ES10b logical channel active: CH1.</code>).
+A flow prints such a line with <code>print_apdu_trace_note(text, heading=...)</code>;
+<code>renderer(text)</code> receives the text in place of the built-in <code>[*] text</code> line,
+and the setter returns the renderer it replaced. A heading's blank line
+belongs to the built-in form only. With the debug flag off nothing reaches
+the renderer, and a renderer that raises leaves the line to the built-in
+form.</p>
 <h2 id="absent-plugin-behavior">Absent-plugin behavior</h2>
 <p>The contract says:</p>
 <ul>
@@ -159,6 +593,15 @@ root only.</p>
             <a href="#registration-contract" class="toc-link">Registration contract</a>
             <a href="#capability-manager" class="toc-link">Capability manager</a>
             <a href="#reserved-capability-names" class="toc-link">Reserved capability names</a>
+            <a href="#mcp_extensions" class="toc-link toc-link-sub">mcp_extensions</a>
+            <a href="#plugin-consoles" class="toc-link">Plugin consoles</a>
+            <a href="#manifest" class="toc-link toc-link-sub">Manifest</a>
+            <a href="#methods" class="toc-link toc-link-sub">Methods</a>
+            <a href="#layout" class="toc-link toc-link-sub">Layout</a>
+            <a href="#top-bar-pills" class="toc-link toc-link-sub">Top bar pills</a>
+            <a href="#comparison-panel" class="toc-link toc-link-sub">Comparison panel</a>
+            <a href="#run-forms" class="toc-link toc-link-sub">Run forms</a>
+            <a href="#apdu-trace-renderer" class="toc-link">APDU trace renderer</a>
             <a href="#absent-plugin-behavior" class="toc-link">Absent-plugin behavior</a>
             <a href="#runtime-root-note" class="toc-link">Runtime root note</a>
             <a href="#publication-policy" class="toc-link">Publication policy</a>
@@ -177,13 +620,13 @@ root only.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

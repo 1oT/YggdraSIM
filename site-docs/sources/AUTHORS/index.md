@@ -1,3 +1,0 @@
-# AUTHORS
-
---8<-- "AUTHORS"

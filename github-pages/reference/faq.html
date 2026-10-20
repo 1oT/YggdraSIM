@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/faq.html" data-ygg-open-sections="reference">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -45,7 +45,7 @@
           <nav>
             <a href="#which-shell-should-i-use-for-what" class="toc-link">Which shell should I use for what?</a>
             <a href="#is-scp03-a-relay-shell" class="toc-link">Is SCP03 a relay shell?</a>
-            <a href="#what-is-the-difference-between-scp11live-and-scp11test" class="toc-link">What is the difference between SCP11/live and SCP11/test?</a>
+            <a href="#what-happened-to-scp11test" class="toc-link">What happened to SCP11/test?</a>
             <a href="#what-does-workspacelocaleimeim_identityjson-do-and-why-is-it-separate-from-workspacesimcardeim_identityjson" class="toc-link">What does Workspace/LocalEIM/eim_identity.json do and why is it separate from Workspace/SIMCARD/eim_identity.json?</a>
             <a href="#where-is-my-runtime-state-stored" class="toc-link">Where is my runtime state stored?</a>
             <a href="#how-do-i-reset-a-subsystems-state" class="toc-link">How do I reset a subsystem&#x27;s state?</a>
@@ -62,15 +62,15 @@
 <h2 id="which-shell-should-i-use-for-what">Which shell should I use for what?</h2>
 <p>Use the <a href="../operator-surfaces.html">Operator Surfaces</a> table as the first
 filter, then the <a href="../subsystems/index.html">Subsystems</a> overview for a picture
-view with links into the deep dives.</p>
+view with links into the per-subsystem pages.</p>
 <h2 id="is-scp03-a-relay-shell">Is <code>SCP03</code> a relay shell?</h2>
 <p>No. <code>SCP03/</code> is the card-administration and retrieval shell. Relay work
-lives in <code>SCP11/live</code> and <code>SCP11/test</code>. Direct local <abbr title="Issuer Security Domain - Root">ISD-R</abbr> work lives in
+lives in <code>SCP11/live</code>. Direct local <abbr title="Issuer Security Domain - Root">ISD-R</abbr> work lives in
 <code>SCP11/local_access</code>. <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-side <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 work lives in <code>SCP11/eim_local</code>.</p>
-<h2 id="what-is-the-difference-between-scp11live-and-scp11test">What is the difference between <code>SCP11/live</code> and <code>SCP11/test</code>?</h2>
-<p>Same operator model. The intended drift is certificate trust, endpoint
-defaults, and lab-only request/result shaping. See
-<a href="../subsystems/scp11-test.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Test Relay</a>.</p>
+<h2 id="what-happened-to-scp11test">What happened to <code>SCP11/test</code>?</h2>
+<p><code>SCP11/test</code> is now an import compatibility namespace. Operator relay work
+uses <code>SCP11/live</code>, which contains the lab request-shaping controls and explicit
+CA-bundle configuration.</p>
 <h2 id="what-does-workspacelocaleimeim_identityjson-do-and-why-is-it-separate-from-workspacesimcardeim_identityjson">What does <code>Workspace/LocalEIM/eim_identity.json</code> do and why is it separate from <code>Workspace/SIMCARD/eim_identity.json</code>?</h2>
 <p>The Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity describes the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>/SM-DP+ endpoint side of the
 <code>SCP11/eim_local</code> shell. The simulator-side file describes what a simulated
@@ -123,7 +123,7 @@ cheatsheet, see the <a href="command-suite.html">CLI Matrix</a>.</p>
         <nav>
             <a href="#which-shell-should-i-use-for-what" class="toc-link">Which shell should I use for what?</a>
             <a href="#is-scp03-a-relay-shell" class="toc-link">Is SCP03 a relay shell?</a>
-            <a href="#what-is-the-difference-between-scp11live-and-scp11test" class="toc-link">What is the difference between SCP11/live and SCP11/test?</a>
+            <a href="#what-happened-to-scp11test" class="toc-link">What happened to SCP11/test?</a>
             <a href="#what-does-workspacelocaleimeim_identityjson-do-and-why-is-it-separate-from-workspacesimcardeim_identityjson" class="toc-link">What does Workspace/LocalEIM/eim_identity.json do and why is it separate from Workspace/SIMCARD/eim_identity.json?</a>
             <a href="#where-is-my-runtime-state-stored" class="toc-link">Where is my runtime state stored?</a>
             <a href="#how-do-i-reset-a-subsystems-state" class="toc-link">How do I reset a subsystem&#x27;s state?</a>
@@ -148,13 +148,13 @@ cheatsheet, see the <a href="command-suite.html">CLI Matrix</a>.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

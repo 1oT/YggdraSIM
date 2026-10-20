@@ -3,22 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SCP11 Live Relay — YggdraSIM</title>
+  <title>SCP11 eSIM Management Relay — YggdraSIM</title>
   <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp11-live.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -35,12 +35,13 @@
             <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
             <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
             <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
-            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">SCP11 Live Relay</span></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">SCP11 eSIM Management Relay</span></li>
           </ol>
         </nav>
-        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">SCP11 Live Relay</h1>
-        <p class="page-lead mb-8"><code>SCP11/live/</code> is the production-like relay shell. It assumes live-default
-certificate trust, live-default endpoints, and a relay-first operator model.
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">SCP11 eSIM Management Relay</h1>
+        <p class="page-lead mb-8"><code>SCP11/live/</code> is the consolidated eSIM management relay shell. It uses
+platform TLS trust by default, accepts explicit CA bundle overrides, and keeps
+a relay-first operator model.
 Use it when the workflow runs through an SM-DP+ or an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and should behave
 the way a shipping <abbr title="Local Profile Assistant">LPA</abbr>/IPA would.</p>
         <details class="toc-mobile xl:hidden mb-8">
@@ -52,7 +53,7 @@ the way a shipping <abbr title="Local Profile Assistant">LPA</abbr>/IPA would.</
             <a href="#session-and-diagnostics" class="toc-link toc-link-sub">Session and diagnostics</a>
             <a href="#lpad" class="toc-link toc-link-sub">LPAd</a>
             <a href="#ipad" class="toc-link toc-link-sub">IPAd</a>
-            <a href="#ipae-plugin-backed" class="toc-link toc-link-sub">IPAe (plugin-backed)</a>
+            <a href="#optional-extension-commands" class="toc-link toc-link-sub">Optional extension commands</a>
             <a href="#profile-state" class="toc-link toc-link-sub">Profile state</a>
             <a href="#endpoints-and-trust" class="toc-link toc-link-sub">Endpoints and trust</a>
             <a href="#compatibility-probes" class="toc-link toc-link-sub">Compatibility probes</a>
@@ -62,7 +63,6 @@ the way a shipping <abbr title="Local Profile Assistant">LPA</abbr>/IPA would.</
             <a href="#common-recipes" class="toc-link">Common recipes</a>
             <a href="#fast-preflight" class="toc-link toc-link-sub">Fast preflight</a>
             <a href="#download-with-an-activation-code" class="toc-link toc-link-sub">Download with an activation code</a>
-            <a href="#poll-with-the-plugin-backed-path" class="toc-link toc-link-sub">Poll with the plugin-backed path</a>
             <a href="#pitfalls" class="toc-link">Pitfalls</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
           </nav>
@@ -71,13 +71,13 @@ the way a shipping <abbr title="Local Profile Assistant">LPA</abbr>/IPA would.</
 <div class="admonition info">
 <p class="admonition-title">Underlying concept</p>
 <p>Read <a href="../concepts/rsp-architecture.html"><abbr title="Remote SIM Provisioning">RSP</abbr> Architecture</a> first. The
-<abbr title="Local Profile Assistant, device-side">LPAd</abbr> / <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> / <abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> split there is what the command surface reflects.</p>
+<abbr title="Local Profile Assistant, device-side">LPAd</abbr> / <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> split there is what the command surface reflects.</p>
 </div>
 <h2 id="when-to-use-it">When to use it</h2>
 <ul>
 <li><code>DOWNLOAD-PROFILE</code> driven by an activation code</li>
 <li><code>DISCOVER</code> and <code>DOWNLOAD</code> for <abbr title="IoT Profile Assistant, device-side">IPAd</abbr>-style pulls</li>
-<li>optional plugin-backed relay-side <code>POLL</code> for <abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> polling campaigns</li>
+<li>optional local extensions for deployment-specific relay commands</li>
 <li>setting SM-DP+, ES9+, or ES9+ CA parameters for the session</li>
 <li>running notification synchronization around transactional flows</li>
 </ul>
@@ -94,7 +94,7 @@ python -m SCP11.live --cmd &quot;DISCOVER; STATUS; EXIT&quot;
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<p><code>python main/main.py</code> and pick the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Live entry.</p>
+<p><code>python main/main.py</code> and pick the eSIM Management Relay entry.</p>
 </div>
 </div>
 </div>
@@ -110,7 +110,7 @@ python -m SCP11.live --cmd &quot;DISCOVER; STATUS; EXIT&quot;
 <tbody>
 <tr>
 <td><code>STATUS</code></td>
-<td>print live session snapshot</td>
+<td>print relay session snapshot</td>
 </tr>
 <tr>
 <td><code>LIST</code></td>
@@ -160,7 +160,7 @@ python -m SCP11.live --cmd &quot;DISCOVER; STATUS; EXIT&quot;
 </tr>
 </tbody>
 </table></div>
-<h3 id="ipae-plugin-backed"><abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> (plugin-backed)</h3>
+<h3 id="optional-extension-commands">Optional extension commands</h3>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -170,12 +170,8 @@ python -m SCP11.live --cmd &quot;DISCOVER; STATUS; EXIT&quot;
 </thead>
 <tbody>
 <tr>
-<td><code>POLL [attempts] [window] [-t 20s] [-s 5] [--debug]</code></td>
-<td>plugin-backed relay poll</td>
-</tr>
-<tr>
-<td><code>EIM-POLL</code></td>
-<td>retained alias for <code>POLL</code></td>
+<td></td>
+<td></td>
 </tr>
 </tbody>
 </table></div>
@@ -263,7 +259,7 @@ python -m SCP11.live --cmd &quot;DISCOVER; STATUS; EXIT&quot;
 <tbody>
 <tr>
 <td><code>--dump-keybag &lt;path&gt;</code></td>
-<td><strong>no-op stub</strong>. SCP11c BSP keys are derived inside the <abbr title="Embedded UICC">eUICC</abbr> during <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> processing and never reach the host, so they cannot be exported from the live relay. The flag prints a clear message pointing at <code>SCP11.local_access</code> (for host-derived BSPs) or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> (for <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> session keys), then exits with code <code>2</code>.</td>
+<td><strong>no-op stub</strong>. SCP11c BSP keys are derived inside the <abbr title="Embedded UICC">eUICC</abbr> during <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> processing and never reach the host, so they cannot be exported from the relay. The flag prints a clear message pointing at <code>SCP11.local_access</code> (for host-derived BSPs) or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> (for <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> session keys), then exits with code <code>2</code>.</td>
 </tr>
 </tbody>
 </table></div>
@@ -275,7 +271,7 @@ python -m SCP11.live --cmd &quot;DISCOVER; STATUS; EXIT&quot;
 <li>a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader with an <abbr title="Embedded UICC">eUICC</abbr>, or a relay transport endpoint for the card</li>
 <li>certificate material under <code>SCP11/</code> and under the writable runtime root</li>
 <li>network reachability to the chosen SM-DP+ or <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr></li>
-<li>optional <code>polling</code> plugin for <code>POLL</code></li>
+<li>optional local extension packages under the runtime root</li>
 </ul>
 <h2 id="state-the-shell-writes">State the shell writes</h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
@@ -292,7 +288,7 @@ python -m SCP11.live --cmd &quot;DISCOVER; STATUS; EXIT&quot;
 </tr>
 <tr>
 <td>runtime root <code>plugins/</code></td>
-<td>optional <code>polling</code> plugin code and artifacts</td>
+<td>optional local extension code and artifacts</td>
 </tr>
 </tbody>
 </table></div>
@@ -301,13 +297,8 @@ python -m SCP11.live --cmd &quot;DISCOVER; STATUS; EXIT&quot;
 <div class="code-block"><pre><code>python -m SCP11.live --cmd &quot;DISCOVER; STATUS; LIST; EXIT&quot;
 </code></pre></div>
 <h3 id="download-with-an-activation-code">Download with an activation code</h3>
-<div class="code-block"><pre><code>[eSIM Live] &gt; DOWNLOAD-PROFILE LPA:1$example.smdp.example.com$ABCDEF123456
+<div class="code-block"><pre><code>[eSIM Management] &gt; DOWNLOAD-PROFILE LPA:1$example.smdp.example.com$ABCDEF123456
 </code></pre></div>
-<h3 id="poll-with-the-plugin-backed-path">Poll with the plugin-backed path</h3>
-<div class="code-block"><pre><code>[eSIM Live] &gt; POLL 5 60s -t 20s -s 5
-</code></pre></div>
-<p>Without the plugin, the <code>POLL</code> verb is either hidden or emits a clean runtime
-error explaining that the capability is optional.</p>
 <h2 id="pitfalls">Pitfalls</h2>
 <ul>
 <li>An expired or untrusted ES9+ certificate fails at <code>InitiateAuthentication</code>
@@ -324,10 +315,9 @@ error explaining that the capability is optional.</p>
 <h2 id="related-pages">Related pages</h2>
 <ul>
 <li><a href="../concepts/rsp-architecture.html"><abbr title="Remote SIM Provisioning">RSP</abbr> Architecture</a></li>
-<li><a href="scp11-test.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Test Relay</a></li>
 <li><a href="scp11-local-access.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access</a></li>
 <li><a href="../how-to/download-a-profile-live.html">Download a Profile (Live Relay)</a></li>
-<li><a href="hil-bridge.html#offline-pcap-replay"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge — offline pcap replay</a></li>
+<li><a href="hil-bridge.html#offline-pcap-replay"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge -- offline pcap replay</a></li>
 </ul>
         </div>
       </div><!-- /ygg-toc-body -->
@@ -340,7 +330,7 @@ error explaining that the capability is optional.</p>
             <a href="#session-and-diagnostics" class="toc-link toc-link-sub">Session and diagnostics</a>
             <a href="#lpad" class="toc-link toc-link-sub">LPAd</a>
             <a href="#ipad" class="toc-link toc-link-sub">IPAd</a>
-            <a href="#ipae-plugin-backed" class="toc-link toc-link-sub">IPAe (plugin-backed)</a>
+            <a href="#optional-extension-commands" class="toc-link toc-link-sub">Optional extension commands</a>
             <a href="#profile-state" class="toc-link toc-link-sub">Profile state</a>
             <a href="#endpoints-and-trust" class="toc-link toc-link-sub">Endpoints and trust</a>
             <a href="#compatibility-probes" class="toc-link toc-link-sub">Compatibility probes</a>
@@ -350,7 +340,6 @@ error explaining that the capability is optional.</p>
             <a href="#common-recipes" class="toc-link">Common recipes</a>
             <a href="#fast-preflight" class="toc-link toc-link-sub">Fast preflight</a>
             <a href="#download-with-an-activation-code" class="toc-link toc-link-sub">Download with an activation code</a>
-            <a href="#poll-with-the-plugin-backed-path" class="toc-link toc-link-sub">Poll with the plugin-backed path</a>
             <a href="#pitfalls" class="toc-link">Pitfalls</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
         </nav>
@@ -367,13 +356,13 @@ error explaining that the capability is optional.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

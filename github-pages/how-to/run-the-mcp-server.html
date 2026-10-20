@@ -1,0 +1,896 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Run the MCP server — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/run-the-mcp-server.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Run the MCP server</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Run the MCP server</h1>
+        <p class="page-lead mb-8">Give an AI assistant the YggdraSIM tool surface, so it can do the work an
+operator does rather than hand hex back and forth: decode an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> or an
+ASN.1 structure, resolve a status word or spec section, lint a <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> package
+or an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package, diff two session recordings, drive a card, and run batch
+commands in the operator shells.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#access-model" class="toc-link">Access model</a>
+            <a href="#card-safety" class="toc-link">Card safety</a>
+            <a href="#card-access-is-off-by-default" class="toc-link toc-link-sub">Card access is off by default</a>
+            <a href="#changing-a-card-needs-write-access-as-well" class="toc-link toc-link-sub">Changing a card needs write access as well</a>
+            <a href="#a-confirmation-prompt-before-anything-irreversible" class="toc-link toc-link-sub">A confirmation prompt before anything irreversible</a>
+            <a href="#credentials-are-never-requested" class="toc-link toc-link-sub">Credentials are never requested</a>
+            <a href="#tool-annotations" class="toc-link toc-link-sub">Tool annotations</a>
+            <a href="#session-state" class="toc-link toc-link-sub">Session state</a>
+            <a href="#install" class="toc-link">Install</a>
+            <a href="#standalone-without-the-rest-of-yggdrasim" class="toc-link toc-link-sub">Standalone, without the rest of YggdraSIM</a>
+            <a href="#register-it-with-a-client" class="toc-link">Register it with a client</a>
+            <a href="#tools" class="toc-link">Tools</a>
+            <a href="#lookup" class="toc-link toc-link-sub">Lookup</a>
+            <a href="#decode" class="toc-link toc-link-sub">Decode</a>
+            <a href="#files" class="toc-link toc-link-sub">Files</a>
+            <a href="#card" class="toc-link toc-link-sub">Card</a>
+            <a href="#choosing-the-transport" class="toc-link toc-link-sub">Choosing the transport</a>
+            <a href="#sessions" class="toc-link toc-link-sub">Sessions</a>
+            <a href="#running-shell-commands" class="toc-link toc-link-sub">Running shell commands</a>
+            <a href="#the-gates" class="toc-link toc-link-sub">The gates</a>
+            <a href="#enabling-it" class="toc-link toc-link-sub">Enabling it</a>
+            <a href="#two-things-to-know" class="toc-link toc-link-sub">Two things to know</a>
+            <a href="#service-state-is-read-only" class="toc-link toc-link-sub">Service state is read-only</a>
+            <a href="#what-is-not-exposed" class="toc-link toc-link-sub">What is not exposed</a>
+            <a href="#resources" class="toc-link">Resources</a>
+            <a href="#prompts" class="toc-link">Prompts</a>
+            <a href="#private-extensions" class="toc-link">Private extensions</a>
+            <a href="#capabilities-are-gated-on-the-plugin-being-there" class="toc-link toc-link-sub">Capabilities are gated on the plugin being there</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#security-rules" class="toc-link">Security rules</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>31 tools, 4 reference resources, and 3 canned workflows. Eight operator
+shells are reachable through <code>shell_run</code>, covering 378 classified verbs --
+every entry point in the project that has a batch mode.</p>
+<p>The server speaks the Model Context Protocol over stdio and works with any
+MCP client (Claude Code, Claude Desktop, and other MCP-capable tools).</p>
+<p>What it deliberately does not do is decide it is allowed to act. Every
+capability that changes something sits behind an opt-in an operator sets on
+the server entry, described under <a href="#access-model">Access model</a>.</p>
+<h2 id="access-model">Access model</h2>
+<p>The intent is that an agent can do what an operator can do, given the same
+information -- build a <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> profile, install an applet, test an <abbr title="Over-The-Air">OTA</abbr>
+envelope. What it cannot do is decide on its own that it is allowed to.</p>
+<p>The server starts <strong>read-only</strong>, and three independent switches widen it.
+None implies another, and each is set on the server entry rather than per
+call, so the choice is persistent and visible.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Off (default)</th>
+<th>On</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_MCP_ACCESS</code></td>
+<td>reads only</td>
+<td><code>write</code> also permits anything that changes state</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_MCP_ALLOW_CARD</code></td>
+<td>nothing reaches hardware</td>
+<td>tools and verbs may reach a physical card</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_MCP_ALLOW_SCRIPT_FILES</code></td>
+<td><code>RUN</code> / <code>SCRIPT</code> refused</td>
+<td>an unverified command file may be executed</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>YGGDRASIM_MCP_ACCESS</code> is a mode, not a flag: it reads <code>write</code> (also
+<code>readwrite</code>, <code>read-write</code>, <code>rw</code>) and treats everything else, including
+<code>1</code> and <code>yes</code>, as read-only. A truthy-looking value is not a request for
+write access.</p>
+<p>The two axes are orthogonal on purpose. Write access without card access
+builds profiles and <abbr title="Over-The-Air">OTA</abbr> envelopes on disk and never touches hardware. Card
+access without write access reads a card and cannot change it.</p>
+<h2 id="card-safety">Card safety</h2>
+<p>Several tools reach a real card: <code>pcsc_transmit</code> locally,
+<code>card_bridge_transmit</code> through a relay, and the <code>card_session_*</code> tools
+through a connection they hold open. An MCP client is usually an agent
+acting without step-by-step review, and a wrong <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> is not always
+recoverable. <abbr title="Personal Identification Number">PIN</abbr> and <abbr title="Personal Unblocking Key">PUK</abbr> retry counters only decrement, an ADM key can
+block permanently, and a terminated card does not come back.</p>
+<h3 id="card-access-is-off-by-default">Card access is off by default</h3>
+<p>Nothing reaches a card unless <code>YGGDRASIM_MCP_ALLOW_CARD</code> is set. With it
+unset the card tools refuse with an explanation, and the rest of the 26
+work normally.</p>
+<p>Note what enabling it actually says: <code>card_bridge_transmit</code> reaches
+whatever relay URL it is given, so the flag covers the local reader <strong>and</strong>
+every rig this host can reach.</p>
+<h3 id="changing-a-card-needs-write-access-as-well">Changing a card needs write access as well</h3>
+<p>With card access on, APDUs are classified by instruction byte, and the two
+classes that change the card need <code>YGGDRASIM_MCP_ACCESS=write</code>:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Class</th>
+<th>Examples</th>
+<th>Needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>read</td>
+<td>SELECT, READ BINARY, READ RECORD, GET STATUS</td>
+<td><code>ALLOW_CARD</code></td>
+</tr>
+<tr>
+<td>write</td>
+<td>UPDATE BINARY, UPDATE RECORD, INSTALL, STORE DATA</td>
+<td><code>ALLOW_CARD</code> <strong>and</strong> <code>ACCESS=write</code></td>
+</tr>
+<tr>
+<td>destructive</td>
+<td>VERIFY, CHANGE <abbr title="Personal Identification Number">PIN</abbr>, RESET RETRY COUNTER, PUT KEY, DELETE, SET STATUS, DEACTIVATE FILE, STORE DATA carrying an <abbr title="Embedded UICC">eUICC</abbr> memory reset</td>
+<td><code>ALLOW_CARD</code> <strong>and</strong> <code>ACCESS=write</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>An instruction the table does not recognise is classified as <strong>write</strong>, not
+read: not having seen an instruction is not evidence that it is safe.</p>
+<p>Call <code>apdu_risk</code> to classify a command without sending it; it works with
+every gate shut, and reports the current access mode alongside the class.</p>
+<h3 id="a-confirmation-prompt-before-anything-irreversible">A confirmation prompt before anything irreversible</h3>
+<p>When a destructive <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> is permitted, the server asks the client to confirm
+with a human first, naming the operation and the target. The distinction
+between write and destructive survives here even though both need the same
+opt-in: reflashing a file and terminating a card are not the same act.</p>
+<p>This is defence in depth, never the only guard. Elicitation is an optional
+MCP capability, and a client that is itself an agent may answer the prompt
+without asking anyone. A client that does not support it at all is not an
+error; the server falls back to the environment gates. Those gates are what
+actually hold.</p>
+<h3 id="credentials-are-never-requested">Credentials are never requested</h3>
+<p>The server never asks for a <abbr title="Personal Identification Number">PIN</abbr>, <abbr title="Personal Unblocking Key">PUK</abbr>, ADM key, or any other secret. The MCP
+SDK scopes in-band elicitation to non-sensitive data for good reason, and
+there is a sharper problem here: an agent client may answer a prompt
+itself, so a fabricated <abbr title="Personal Identification Number">PIN</abbr> would be submitted to the card and consume a
+real retry counter.</p>
+<p>Secrets go in <strong>by path</strong>, configured out of band by a human:</p>
+<div class="code-block"><pre><code>{&quot;apdu_url&quot;: &quot;http://127.0.0.1:8642/apdu&quot;,
+ &quot;token_file&quot;: &quot;~/.config/yggdrasim/card_bridge/8642.token&quot;}
+</code></pre></div>
+<p>The server reads the file itself and enforces <code>0600</code> on it. The agent
+handles a filename, never a value, so nothing secret enters a tool
+argument or a transcript. Authenticated flows such as <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> follow the same
+rule: stage the keys as files first, then reference them by path.</p>
+<p>A handful of shell verbs take key material as a positional argument --
+<code>DERIVE-OPC</code> is the clearest -- and those are gated at the write tier
+rather than refused outright. Refusing would be theatre: if the caller
+supplied the key, it is already in the transcript. Prefer the by-path form
+where the shell offers one, and treat any batch that carries a secret
+inline as a batch whose transcript is now sensitive.</p>
+<h3 id="tool-annotations">Tool annotations</h3>
+<p>Every tool carries MCP annotations (<code>readOnlyHint</code>, <code>destructiveHint</code>,
+<code>idempotentHint</code>, <code>openWorldHint</code>), so a client can tell the difference
+between <code>status_word_lookup</code> and <code>pcsc_transmit</code> without reading this page
+and can prompt accordingly. 23 of the 31 tools are marked read-only; the
+seven that are not are <code>pcsc_transmit</code>, <code>card_bridge_transmit</code>,
+<code>shell_run</code>, <code>card_backend_select</code>, and the three <code>card_session_*</code> tools.</p>
+<h3 id="session-state">Session state</h3>
+<p><code>pcsc_transmit</code> connects, transmits one <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, and disconnects. No session
+survives between calls, so it suits stateless probes and <strong>cannot</strong> carry a
+secure-channel flow: the second <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> of an <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> exchange would arrive on a
+card that has forgotten the first.</p>
+<p>There are two ways to keep state. <code>card_session_open</code> holds a connection
+locally and hands back a session id to transmit through. Or run a Card
+Bridge and use <code>card_bridge_transmit</code>: the bridge holds the reader and
+relays through it, which is also what reaches a remote rig. See
+<a href="remote-apdu-streaming.html">Card Bridge over SSH</a>.</p>
+<p>Whatever the layers say: use a throwaway test card, not one carrying live
+credentials.</p>
+<h2 id="install">Install</h2>
+<div class="code-block"><pre><code>python -m pip install -e &#39;.[mcp]&#39;
+</code></pre></div>
+<p>The <code>mcp</code> extra is opt-in: neither the base install nor <code>[full]</code> pulls it
+in, so a normal runtime never carries the server.</p>
+<h3 id="standalone-without-the-rest-of-yggdrasim">Standalone, without the rest of YggdraSIM</h3>
+<p>Most of the tools decode bytes and resolve identifiers, which needs no
+card stack. <code>scripts/release/build_mcp_standalone.py</code> generates a separate
+<code>yggdrasim-mcp</code> distribution carrying just those:</p>
+<div class="code-block"><pre><code>python scripts/release/build_mcp_standalone.py --wheel-out dist/
+pip install dist/yggdrasim_mcp-*.whl          # decode, lookup, diff tools
+pip install &#39;yggdrasim_mcp-*.whl[card]&#39;       # adds the PC/SC tools
+</code></pre></div>
+<p>It declares only <code>mcp</code>, <code>pyyaml</code>, and <code>asn1crypto</code>, with <code>pyscard</code>
+optional because it needs a compiler and the PCSC headers. No Git
+dependencies, so a plain <code>pip</code> resolves it.</p>
+<p>Fifteen of the twenty-six tools work from that install alone, nineteen
+with <code>[card]</code>. That includes driving a card: the transport chain is
+vendored, so <code>card_session_open</code>, <code>card_session_transmit</code>, and
+<code>card_bridge_transmit</code> all work without the rest of YggdraSIM. <code>[card]</code>
+adds the three that need a local <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> driver; the relay path needs no
+driver at all, so a standalone install with no pyscard can still drive a
+card through a Card Bridge or a Remote Lab rig.</p>
+<p>Seven tools need the full install and report that they are unavailable,
+naming what is missing rather than raising: <code>saip_lint</code> and <code>saip_diff</code>
+need the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> stack; <code>bpp_segment</code>, <code>metadata_lint</code>, and <code>eim_package_lint</code>
+need the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> code; <code>runtime_status</code> and <code>shell_run</code> need the full
+runtime. The simulated backend is also full-install only -- <code>SIMCARD</code> is a
+whole subsystem, so selecting <code>sim</code> on a standalone reports that plainly
+and points at the reader backend.</p>
+<p>The distribution publishes a single <code>yggdrasim_mcp</code> package rather than
+re-providing <code>Tools</code> or <code>SCP03</code>, so it can be installed alongside the full
+<code>yggdrasim</code> without a file collision. The tree is generated on demand from
+these sources and is never committed, so it cannot drift from the code it
+is cut from.</p>
+<p>Every degraded tool is still registered, so an agent discovers it and gets
+a reason instead of a missing capability it cannot ask about.</p>
+<h2 id="register-it-with-a-client">Register it with a client</h2>
+<p>For Claude Code:</p>
+<div class="code-block"><pre><code>claude mcp add yggdrasim -- yggdrasim-mcp
+</code></pre></div>
+<p>For a client that reads a JSON config, the equivalent entry is:</p>
+<div class="code-block"><pre><code>{
+  &quot;mcpServers&quot;: {
+    &quot;yggdrasim&quot;: {
+      &quot;command&quot;: &quot;yggdrasim-mcp&quot;
+    }
+  }
+}
+</code></pre></div>
+<p>To enable card access for a supervised session, add the environment
+variable to that entry:</p>
+<div class="code-block"><pre><code>{
+  &quot;mcpServers&quot;: {
+    &quot;yggdrasim&quot;: {
+      &quot;command&quot;: &quot;yggdrasim-mcp&quot;,
+      &quot;env&quot;: { &quot;YGGDRASIM_MCP_ALLOW_CARD&quot;: &quot;1&quot; }
+    }
+  }
+}
+</code></pre></div>
+<p>From a source checkout without installing, <code>python -m Tools.YggdraMCP.server</code>
+is equivalent.</p>
+<h2 id="tools">Tools</h2>
+<h3 id="lookup">Lookup</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tool</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>status_word_lookup</code></td>
+<td>resolve SW1/SW2, including the <code>61xx</code>, <code>6Cxx</code>, and <code>63Cx</code> families</td>
+</tr>
+<tr>
+<td><code>ber_tlv_lookup</code></td>
+<td>name a single BER-<abbr title="Tag-Length-Value">TLV</abbr> tag with its spec citation</td>
+</tr>
+<tr>
+<td><code>spec_section_lookup</code></td>
+<td>find a clause in the local spec library (<code>docs/tel-docs/converted</code>) and return its title, page file and a versioned citation; without the library, a short verified index</td>
+</tr>
+<tr>
+<td><code>aide_registry_lookup</code></td>
+<td>resolve an application identifier</td>
+</tr>
+<tr>
+<td><code>validate_identifier</code></td>
+<td>check an <abbr title="Integrated Circuit Card Identifier">ICCID</abbr>, IMSI, <abbr title="eUICC Identifier">EID</abbr> or MCC/MNC against the test ranges this project uses</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="decode">Decode</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tool</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apdu_parse</code></td>
+<td>split a command <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> into CLA/INS/P1/P2/Lc/data/Le</td>
+</tr>
+<tr>
+<td><code>asn1_decode</code></td>
+<td>recursively decode BER/<abbr title="Distinguished Encoding Rules">DER</abbr> <abbr title="Tag-Length-Value">TLV</abbr> or a full <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> into a named tree</td>
+</tr>
+<tr>
+<td><code>sgp32_decode</code></td>
+<td>decode an <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32/<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 response body: <code>euicc_info1</code>, <code>notifications</code>, <code>rat_rules</code>, <code>eim_configuration</code>, <code>get_certs</code></td>
+</tr>
+<tr>
+<td><code>bpp_segment</code></td>
+<td>show how a Bound Profile Package splits into <abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr> segments per Annex M</td>
+</tr>
+<tr>
+<td><code>apdu_risk</code></td>
+<td>classify an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> as read, write, or irreversible without sending it</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>apdu_parse</code> and <code>ber_tlv_lookup</code> answer narrow questions (header fields,
+one tag). <code>asn1_decode</code> parses a whole structure, resolving every nested
+tag against the <abbr title="GSM Association">GSMA</abbr>/3GPP index with its spec source, so a complete
+<code>EuiccInfo2</code> comes back as structure rather than hex. It tries BER/<abbr title="Distinguished Encoding Rules">DER</abbr>
+first and falls back to <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> interpretation, so a bare command <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>
+decodes too.</p>
+<h3 id="files">Files</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tool</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>saip_lint</code></td>
+<td>lint a <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> package and return the <code>YRL-*</code> findings</td>
+</tr>
+<tr>
+<td><code>saip_diff</code></td>
+<td>structurally diff two <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> packages: added, removed, changed, moved</td>
+</tr>
+<tr>
+<td><code>metadata_lint</code></td>
+<td>lint an <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 profile metadata document</td>
+</tr>
+<tr>
+<td><code>eim_package_lint</code></td>
+<td>validate an <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package against the ES2+ schema</td>
+</tr>
+<tr>
+<td><code>plugin_status</code></td>
+<td>report which optional plugin-backed capabilities are available</td>
+</tr>
+<tr>
+<td><code>runtime_status</code></td>
+<td>report the runtime root, build flavor, and live service state</td>
+</tr>
+<tr>
+<td><code>shell_run</code></td>
+<td>run a batch of operator-shell commands; <strong>some of these reach a real card</strong></td>
+</tr>
+<tr>
+<td><code>session_diff</code></td>
+<td>diff the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> traces of two session recordings</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>saip_lint</code> accepts the same inputs as <code>Package &gt; Open</code>: binary <abbr title="Distinguished Encoding Rules">DER</abbr>, ASCII
+hex text, ASN.1 value notation, or transcode JSON. Excel workbooks are
+refused, because they are not <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> packages; see the note on spreadsheet
+extensions in <a href="../build-and-packaging.html">Build and Packaging</a>.</p>
+<p><code>session_diff</code> takes two recordings written by the shell recorder; see
+<a href="diff-two-session-recordings.html">Diff Two Session Recordings</a>.</p>
+<p><code>saip_diff</code> bounds its response at 200 entries and reports how many were
+dropped; a whole-package diff can run to thousands of nodes.</p>
+<p>Upstream pySim logs the construction of every file in a profile at DEBUG,
+which is over a hundred kilobytes of stderr per package load. Those
+loggers are raised to WARNING; set <code>YGGDRASIM_MCP_UPSTREAM_LOG_LEVEL=DEBUG</code>
+when actually debugging a decode.</p>
+<h3 id="card">Card</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tool</th>
+<th>Card access</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pcsc_list_readers</code></td>
+<td>no</td>
+<td>enumerate local <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> readers</td>
+</tr>
+<tr>
+<td><code>pcsc_transmit</code></td>
+<td><strong>yes</strong></td>
+<td>transmit a raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> to a local physical card (stateless)</td>
+</tr>
+<tr>
+<td><code>card_bridge_transmit</code></td>
+<td><strong>yes</strong></td>
+<td>transmit through a Card Bridge or Remote Lab relay (keeps session state)</td>
+</tr>
+<tr>
+<td><code>card_backend_status</code></td>
+<td>no</td>
+<td>report which transport the stack talks through, and what is open</td>
+</tr>
+<tr>
+<td><code>card_backend_select</code></td>
+<td>for <code>reader</code></td>
+<td>point the stack at a local reader or the simulator</td>
+</tr>
+<tr>
+<td><code>card_session_open</code></td>
+<td>for <code>reader</code></td>
+<td>open a session that survives across calls, and read its <abbr title="Answer To Reset">ATR</abbr></td>
+</tr>
+<tr>
+<td><code>card_session_transmit</code></td>
+<td>for <code>reader</code></td>
+<td>send one <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> through an open session</td>
+</tr>
+<tr>
+<td><code>card_session_close</code></td>
+<td>no</td>
+<td>close one session, or all of them</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="choosing-the-transport">Choosing the transport</h3>
+<p>Three paths reach a card: a local <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader, a relay, or the built-in
+simulator. <code>card_backend_status</code> reports which one is configured, where
+that setting came from, and every session this server holds. It reads with
+every gate shut, and reports whether a relay token exists rather than its
+value.</p>
+<p><code>card_backend_select</code> switches between <code>reader</code> and <code>sim</code>. Both need write
+access, because the choice outlives the call; selecting <code>reader</code>
+additionally needs card access, since it points the whole stack at
+hardware. <code>persist</code> is off by default -- with it on, the choice is written
+to the runtime settings file and every other YggdraSIM process picks it up.</p>
+<p>Selecting <code>sim</code> is how an agent does card work with no reader present: the
+simulator answers real APDUs, so a SELECT/READ chain or a profile
+inspection runs end to end. The card gate does not apply to it, because
+there is no hardware to protect. Write access still does, because the
+simulator carries state.</p>
+<h3 id="sessions">Sessions</h3>
+<p><code>pcsc_transmit</code> connects and disconnects around each <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, so a
+secure-channel flow cannot work through it: the second <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> of an <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>
+exchange arrives on a card that has forgotten the first.</p>
+<p><code>card_session_open</code> holds one connection open and returns a session id and
+the <abbr title="Answer To Reset">ATR</abbr>. Every <code>card_session_transmit</code> on that id runs on the same channel,
+so the selected file, the logical channel, and the secure channel all
+survive between calls. Each <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> is still classified individually, so a
+read-only server can drive a whole inspection sequence and refuse the one
+command that would change something.</p>
+<p>Sessions expire after 10 minutes idle and at most 4 are held at once. The
+handle pins a reader and keeps the card powered, so an unbounded registry
+would leak both.</p>
+<p><code>card_bridge_transmit</code> reaches whatever rig its URL points at, so it sits
+behind the same opt-in as <code>pcsc_transmit</code>. Enabling card access is
+therefore not only a statement about the reader on this machine; it is a
+statement about every relay this host can reach. For a Remote Lab rig the
+token file holds the session token, not the bridge's own token.</p>
+<h3 id="running-shell-commands">Running shell commands</h3>
+<div class="admonition danger">
+<p class="admonition-title">These shells reach a real card</p>
+<p>With every opt-in set, verbs reachable through <code>shell_run</code> can install
+applets, write keys, send an <abbr title="Over-The-Air">OTA</abbr> envelope, export a key bag, and
+disable or delete a profile. <strong>None of that can be undone.</strong> Use a
+throwaway test card, never one carrying live credentials.</p>
+<p>Nothing reaches a card, and nothing changes state, unless <em>you</em> set the
+environment variables below. They are off by default and stay off until
+an operator turns them on deliberately.</p>
+</div>
+<p><code>shell_run</code> executes a non-interactive batch in an operator shell, so an
+agent can drive a workflow rather than only inspect single files:</p>
+<div class="code-block"><pre><code>shell=&quot;profile_package&quot;     USE /abs/profile.der; INFO; TREE; LINT; EXIT
+shell=&quot;scp80&quot;               SET /abs/keys.json; BUILD; EXIT
+shell=&quot;scp11_eim&quot;           EIM-PACKAGE /abs/pkg.json; EIM-PACKAGE-LINT; EXIT
+shell=&quot;suci_tool&quot;           STATUS; GENERATE secp256r1; DUMP; EXIT
+shell=&quot;scp03&quot;               SELECT 3F00; READ; INFO; EXIT
+shell=&quot;scp11_live&quot;          GET-EID; GET-EUICC-INFO2; LIST; EXIT
+shell=&quot;scp11_relay&quot;         GET-EID; GET-EUICC-INFO2; LIST; EXIT
+shell=&quot;scp11_local_access&quot;  LIST; PROFILE; METADATA; EXIT
+</code></pre></div>
+<p>All eight operator shells are exposed, covering 378 classified verbs:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Shell</th>
+<th>Opens a reader at startup</th>
+<th>Verbs</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>profile_package</code></td>
+<td>no</td>
+<td>61</td>
+<td><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> package inspection and authoring</td>
+</tr>
+<tr>
+<td><code>scp80</code></td>
+<td>no</td>
+<td>15</td>
+<td><abbr title="Over-The-Air">OTA</abbr>: build an envelope offline, or <code>SEND</code> it to a card</td>
+</tr>
+<tr>
+<td><code>scp11_eim</code></td>
+<td>no</td>
+<td>74</td>
+<td><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>: author, lint, and issue <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> packages</td>
+</tr>
+<tr>
+<td><code>suci_tool</code></td>
+<td>no</td>
+<td>11</td>
+<td><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key generation and public-key export</td>
+</tr>
+<tr>
+<td><code>scp03</code></td>
+<td><strong>yes</strong></td>
+<td>81</td>
+<td>card admin: filesystem, registry, GlobalPlatform</td>
+</tr>
+<tr>
+<td><code>scp11_live</code></td>
+<td><strong>yes</strong></td>
+<td>50</td>
+<td><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22/<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 profile download and <abbr title="Embedded UICC">eUICC</abbr> management</td>
+</tr>
+<tr>
+<td><code>scp11_relay</code></td>
+<td><strong>yes</strong></td>
+<td>50</td>
+<td>the live shell under its legacy <code>SCP11.relay</code> entry point</td>
+</tr>
+<tr>
+<td><code>scp11_local_access</code></td>
+<td><strong>yes</strong></td>
+<td>36</td>
+<td>local <abbr title="Embedded UICC">eUICC</abbr> profile management over ES10</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>scp11_relay</code> is the compatibility namespace of <code>scp11_live</code>: every module
+under <code>SCP11/relay/</code> aliases its <code>SCP11/live/</code> counterpart, so the two
+shells register the same verbs and share one classification.</p>
+<p><code>scp80</code> and <code>scp11_eim</code> are the two that split the axes apart. Building an
+<abbr title="Over-The-Air">OTA</abbr> envelope or authoring and linting an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package is offline work that
+needs write access and no card. The verbs that put those artefacts on a
+card -- <code>SEND</code>, <code>SENDRAW</code>, <code>OTA</code> in <code>scp80</code>, and the issue / ISDR / profile
+verbs in <code>scp11_eim</code> -- each carry their own card check even though the
+shell itself opened no reader.</p>
+<p>Each shell's verb set is read from that shell's own command table, and a
+test compares the two in both directions on every run. A verb the shell
+registers but the gate does not classify is refused as unknown, so the
+failure mode is a capability going missing rather than an unguarded one.</p>
+<h3 id="the-gates">The gates</h3>
+<p><strong>A shell that opens a reader at startup needs
+<code>YGGDRASIM_MCP_ALLOW_CARD</code></strong>, checked before the process starts. <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>
+connects to a reader during startup, so even <code>HELP</code> would touch hardware;
+refusing early means it never gets that far. Individual verbs that reach a
+card from an otherwise offline shell are gated the same way.</p>
+<p><strong>Verbs are allow-listed, not deny-listed.</strong> <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> alone carries 81
+classified verbs. Read verbs run at any access level; anything that changes
+state needs <code>YGGDRASIM_MCP_ACCESS=write</code>. An unrecognised verb is refused
+rather than assumed harmless, and a refusal anywhere blocks the whole batch
+before the process starts.</p>
+<p><strong>Classification follows the leading verb</strong>, so a verb that dispatches its
+own subcommands is classified by the most dangerous thing it can reach:
+<code>TOKENS</code> sits at the write tier because <code>TOKENS SET</code> writes, even though a
+bare <code>TOKENS</code> only lists. Use the dedicated read verb where one exists --
+<code>LIST-TOKENS</code> rather than <code>TOKENS</code> -- to stay inside read-only access.</p>
+<p><strong><code>--log &lt;file&gt;</code> makes a read a write.</strong> Every shell appends a command's
+output to the file a <code>--log</code> modifier names, on the host the server runs
+on, so the gate takes the modifier off before it reads the verb and files
+a read verb that carries one under the write tier.</p>
+<p><strong>Verbs whose payload is never classified need their own opt-in.</strong> <code>RUN</code>
+and <code>SCRIPT</code> take a file of commands; <code>RAW</code> passes its arguments straight
+through to the underlying tool. In each case the gate cannot see what will
+actually run, so every other rule stops applying. Set
+<code>YGGDRASIM_MCP_ALLOW_SCRIPT_FILES</code> when you specifically want an agent to
+run something you have not had classified -- write access alone does not
+grant it.</p>
+<p><strong>Interactive verbs are refused at every level.</strong> A batch has no terminal,
+so a verb that opens a menu or prompts for input would hang until the
+timeout rather than fail. This covers more than the obvious <abbr title="Text User Interface">TUI</abbr> entry
+points: <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>'s <code>PUT-KEY</code>, <code>SET-STATUS</code>, and <code>MANAGE-PIN</code> are wizards, and
+<code>scp80</code>'s <code>ADMIN</code> hands the reader to the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell's own REPL.</p>
+<h3 id="enabling-it">Enabling it</h3>
+<p>Opt in on the MCP server entry, so the choice is persistent and visible
+rather than made per call:</p>
+<div class="code-block"><pre><code>{
+  &quot;mcpServers&quot;: {
+    &quot;yggdrasim&quot;: {
+      &quot;command&quot;: &quot;yggdrasim-mcp&quot;,
+      &quot;env&quot;: {
+        &quot;YGGDRASIM_MCP_ACCESS&quot;: &quot;write&quot;,
+        &quot;YGGDRASIM_MCP_ALLOW_CARD&quot;: &quot;1&quot;
+      }
+    }
+  }
+}
+</code></pre></div>
+<p>Drop <code>YGGDRASIM_MCP_ALLOW_CARD</code> for a server that authors profiles and <abbr title="Over-The-Air">OTA</abbr>
+payloads but cannot touch hardware -- that combination covers most of the
+build-side work with none of the irreversible risk. Add
+<code>YGGDRASIM_MCP_ALLOW_SCRIPT_FILES</code> only when you intend an agent to run
+unverified command files.</p>
+<h3 id="two-things-to-know">Two things to know</h3>
+<p><strong>Pass absolute paths.</strong> A shell resolves a relative path against its own
+profile and transcode directories, not the working directory, so a
+relative argument can silently act on a different package. The tool flags
+any relative path argument and reports when the shell logged a missing
+path.</p>
+<p><strong>State does not survive between calls</strong>, since each batch is a fresh
+process. Put a whole flow in one batch.</p>
+<p><strong>Ambiguity resolves upward.</strong> Where a verb's own help text left its risk
+open -- a package-issuing verb whose JSON the gate never reads, a flow
+whose steps the remote side chooses -- it sits at the destructive tier
+rather than the write tier. Guessing downward for a card shell is how an
+agent wipes one.</p>
+<h3 id="service-state-is-read-only">Service state is read-only</h3>
+<p><code>runtime_status</code> reports the runtime root, build flavor, and whether the
+<abbr title="Hardware-In-The-Loop">HIL</abbr> bridge and Remote Lab have live state. It does not start or stop
+anything. Stopping a rig mid-session is a different class of risk from a
+bad <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, and the value does not justify handing that to an agent.</p>
+<p>Rig entries come back through the registry's redacted view: it reports
+whether a token file exists, never its path or contents.</p>
+<h3 id="what-is-not-exposed">What is not exposed</h3>
+<p>The card, profile, and <abbr title="Embedded UICC">eUICC</abbr> surfaces are covered end to end. Of the
+project's other entry points, these are reachable only from a terminal:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Entry point</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>yggdrasim-gui</code>, <code>yggdrasim-web-server</code></td>
+<td>long-running services with their own UI</td>
+</tr>
+<tr>
+<td><code>yggdrasim-hil-bridge</code>, <code>yggdrasim-hil-supervisor</code></td>
+<td>rig services; lifecycle is an operator decision</td>
+</tr>
+<tr>
+<td><code>yggdrasim-lab-agent</code>, <code>yggdrasim-card-bridge</code></td>
+<td>daemons; the MCP is a client of these, not their manager</td>
+</tr>
+<tr>
+<td><code>yggdrasim-profile-autoload</code></td>
+<td>watches for card insertion, so it never returns</td>
+</tr>
+<tr>
+<td><code>yggdrasim-apdu-fuzzer</code>, <code>yggdrasim-eum-diag</code></td>
+<td>no batch mode, and the fuzzer's own allow-list gate is the right place for that decision</td>
+</tr>
+</tbody>
+</table></div>
+<p>Every entry point with a batch mode is exposed. The services are
+deliberate: starting and stopping a rig is a different class of risk from
+a bad <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, and a watcher that never returns cannot answer a tool call.
+The last row has no <code>--cmd</code>, so there is nothing to classify.</p>
+<h2 id="resources">Resources</h2>
+<p>Reference tables an agent can read whole instead of spending a tool call
+per lookup:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>URI</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>yggdrasim://reference/status-words</code></td>
+<td>every status word the server can name</td>
+</tr>
+<tr>
+<td><code>yggdrasim://reference/ber-tlv-tags</code></td>
+<td>BER-<abbr title="Tag-Length-Value">TLV</abbr> tags with spec citations</td>
+</tr>
+<tr>
+<td><code>yggdrasim://reference/spec-sections</code></td>
+<td>the verified clause index <code>spec_section_lookup</code> falls back to without the spec library</td>
+</tr>
+<tr>
+<td><code>yggdrasim://reference/test-identifier-ranges</code></td>
+<td>the test ranges to use instead of real allocations, each with its source</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="prompts">Prompts</h2>
+<p>Canned workflows that chain the tools in a sensible order:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Prompt</th>
+<th>Use when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>triage_failed_profile_download</code></td>
+<td>an <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22/<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 download failed and you want the cause, not a guess</td>
+</tr>
+<tr>
+<td><code>explain_apdu_exchange</code></td>
+<td>you have one command/response pair and want it read back in full</td>
+</tr>
+<tr>
+<td><code>review_profile_package</code></td>
+<td>you want a <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> package triaged into things actually worth fixing</td>
+</tr>
+</tbody>
+</table></div>
+<p>These are deliberately generic. Anything encoding operator specifics --
+real PLMNs, house profile rules, rig inventory -- belongs in a private
+plugin rather than the published server, the same split the vendor-quirk
+configuration uses.</p>
+<h2 id="private-extensions">Private extensions</h2>
+<p>A plugin under the runtime root can add its own tools, resources, and
+prompts by registering the <code>mcp_extensions</code> capability:</p>
+<div class="code-block"><pre><code>class OperatorMcpExtensions:
+    def register(self, mcp) -&gt; None:
+        @mcp.prompt()
+        def house_profile_review(file_path: str = &quot;&quot;) -&gt; str:
+            return f&quot;Review {file_path} against the house rules ...&quot;
+
+
+def register_plugins(manager) -&gt; None:
+    manager.register_capability(&quot;mcp_extensions&quot;, OperatorMcpExtensions())
+</code></pre></div>
+<p>Plugin loading is opt-in, because a plugin is executable Python from the
+runtime root:</p>
+<div class="code-block"><pre><code>YGGDRASIM_ALLOW_PLUGINS=1 yggdrasim-mcp
+</code></pre></div>
+<p><code>YGGDRASIM_DISALLOW_PLUGINS=1</code> hard-locks the loader and wins over the
+opt-in.</p>
+<p>The server starts either way. A plugin that is absent, unhealthy, or raises
+is logged and skipped rather than taking the server down with it. A plugin
+tool that drives a card must call <code>card_access_allowed()</code> itself; see
+<a href="../internals/plugin-contract.html">Plugin Contract</a>.</p>
+<h3 id="capabilities-are-gated-on-the-plugin-being-there">Capabilities are gated on the plugin being there</h3>
+<p>An agent should not have to discover a missing capability by failing. Call
+<code>plugin_status</code> to see what is available:</p>
+<div class="code-block"><pre><code>{&quot;extensions_active&quot;: true,
+ &quot;plugin_tools&quot;: [&quot;workbook_to_saip&quot;, &quot;operator_plmn_lookup&quot;],
+ &quot;plugin_loading_enabled&quot;: true}
+</code></pre></div>
+<p>Built-in tools that depend on a plugin answer differently in each case
+rather than emitting one fixed refusal. <code>saip_lint</code> on a workbook is the
+worked example, because Excel-to-<abbr title="SIMalliance Interoperable Profile">SAIP</abbr> generation is not part of the
+published core:</p>
+<ul>
+<li><strong>no plugin</strong> -- reports <code>plugin_available: false</code> and how to install one</li>
+<li><strong>plugin loaded</strong> -- reports <code>plugin_available: true</code> and names the tool
+  to call</li>
+</ul>
+<p>A provider can set a <code>workbook_tool</code> attribute naming its converter, and
+that tool is listed first. Without it the core lists every tool the plugin
+added, since it cannot know which one handles a workbook.</p>
+<h2 id="validation">Validation</h2>
+<p>Confirm the server starts and the client sees it:</p>
+<div class="code-block"><pre><code>yggdrasim-mcp &lt;/dev/null
+</code></pre></div>
+<p>It exits immediately on a closed stdin, which is enough to prove the entry
+point and the <code>mcp</code> extra resolve. If the extra is missing you get a
+one-line install hint instead of a traceback.</p>
+<p>Confirm the gates are where you expect. Ask the assistant to call
+<code>apdu_risk</code> on <code>80E400000A</code> (a DELETE); it should report <code>destructive</code> and
+<code>would_be_sent: false</code> without touching anything.</p>
+<p>With the opt-in unset, ask it to transmit an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>: it should come back with
+<code>Card access is disabled</code>, naming the environment variable. With
+<code>YGGDRASIM_MCP_ALLOW_CARD=1</code> but not the destructive flag, a SELECT should
+go through while a VERIFY is refused as irreversible.</p>
+<h2 id="security-rules">Security rules</h2>
+<ul>
+<li>Keep <code>YGGDRASIM_MCP_ALLOW_CARD</code> unset for unattended sessions. It gates
+  both the local reader and every relay this host can reach.</li>
+<li>The file tools read any path you give them. Point them at captures and
+  fixtures, not at a home directory.</li>
+<li>Tool output flows back to a model provider. Treat an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> trace the same
+  way you would treat it in a bug report: it can carry PINs and operator
+  secrets.</li>
+<li>The server binds nothing. It speaks stdio to its parent process only,
+  so there is no listening port to firewall.</li>
+</ul>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../build-and-packaging.html">Build and Packaging</a></li>
+<li><a href="inspect-and-transcode-saip.html">Inspect and Transcode <abbr title="SIMalliance Interoperable Profile">SAIP</abbr></a></li>
+<li><a href="diagnostics-toolbox.html">Diagnostics Toolbox</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#access-model" class="toc-link">Access model</a>
+            <a href="#card-safety" class="toc-link">Card safety</a>
+            <a href="#card-access-is-off-by-default" class="toc-link toc-link-sub">Card access is off by default</a>
+            <a href="#changing-a-card-needs-write-access-as-well" class="toc-link toc-link-sub">Changing a card needs write access as well</a>
+            <a href="#a-confirmation-prompt-before-anything-irreversible" class="toc-link toc-link-sub">A confirmation prompt before anything irreversible</a>
+            <a href="#credentials-are-never-requested" class="toc-link toc-link-sub">Credentials are never requested</a>
+            <a href="#tool-annotations" class="toc-link toc-link-sub">Tool annotations</a>
+            <a href="#session-state" class="toc-link toc-link-sub">Session state</a>
+            <a href="#install" class="toc-link">Install</a>
+            <a href="#standalone-without-the-rest-of-yggdrasim" class="toc-link toc-link-sub">Standalone, without the rest of YggdraSIM</a>
+            <a href="#register-it-with-a-client" class="toc-link">Register it with a client</a>
+            <a href="#tools" class="toc-link">Tools</a>
+            <a href="#lookup" class="toc-link toc-link-sub">Lookup</a>
+            <a href="#decode" class="toc-link toc-link-sub">Decode</a>
+            <a href="#files" class="toc-link toc-link-sub">Files</a>
+            <a href="#card" class="toc-link toc-link-sub">Card</a>
+            <a href="#choosing-the-transport" class="toc-link toc-link-sub">Choosing the transport</a>
+            <a href="#sessions" class="toc-link toc-link-sub">Sessions</a>
+            <a href="#running-shell-commands" class="toc-link toc-link-sub">Running shell commands</a>
+            <a href="#the-gates" class="toc-link toc-link-sub">The gates</a>
+            <a href="#enabling-it" class="toc-link toc-link-sub">Enabling it</a>
+            <a href="#two-things-to-know" class="toc-link toc-link-sub">Two things to know</a>
+            <a href="#service-state-is-read-only" class="toc-link toc-link-sub">Service state is read-only</a>
+            <a href="#what-is-not-exposed" class="toc-link toc-link-sub">What is not exposed</a>
+            <a href="#resources" class="toc-link">Resources</a>
+            <a href="#prompts" class="toc-link">Prompts</a>
+            <a href="#private-extensions" class="toc-link">Private extensions</a>
+            <a href="#capabilities-are-gated-on-the-plugin-being-there" class="toc-link toc-link-sub">Capabilities are gated on the plugin being there</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#security-rules" class="toc-link">Security rules</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

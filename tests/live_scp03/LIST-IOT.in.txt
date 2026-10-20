@@ -1,4 +1,0 @@
-# IoT-specific profile listing variant.
-SCP03-SD
-LIST-IOT
-EXIT

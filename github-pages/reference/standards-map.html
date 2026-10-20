@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/standards-map.html" data-ygg-open-sections="reference">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -40,14 +40,7 @@
         </nav>
         <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Standards map</h1>
         <p class="page-lead mb-8">This page maps the published specifications YggdraSIM implements to the
-concepts pages and the subsystem pages that act on them. The <code>docs/</code>
-filenames below point at the operator's optional local developer tree
-(gitignored, see the README "Repository layout" entry): they are not
-shipped with the wheel or the clean bundle. Download the source
-documents from the issuing body and drop them into <code>docs/</code> at the repo
-root to populate the offline reference. The one exception is the
-RSPRO ASN.1 schema which is redistributed as <code>Tools/HilBridge/RSPRO.asn</code>
-package data so that the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge works from a plain <code>pip install</code>.</p>
+concepts pages and the subsystem pages that act on them.</p>
         <details class="toc-mobile xl:hidden mb-8">
           <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
           <nav>
@@ -61,35 +54,59 @@ package data so that the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge wo
           </nav>
         </details>
         <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>The folders below name the operator's optional local specification library.
+<code>docs/</code> is gitignored and ships with nothing, so it starts empty:
+<code>python scripts/fetch_tel_docs.py</code> downloads every freely published source in
+its manifest (<code>--list</code> prints the manifest, <code>--manual</code> the documents that need
+a click-through or a purchase, with the file name each must be saved under),
+and <code>python scripts/convert_tel_docs.py</code> packs each one into
+<code>docs/tel-docs/converted/&lt;folder&gt;/</code>: the full text, a <code>pages/</code> copy to grep, a
+<code>tables/</code> directory, and verbatim <code>asn1/</code> extracts. <code>_index.md</code> is the
+catalogue. Versions coexist on purpose -- encode against the version the peer
+declares, not the newest text -- so a folder name carries its version and this
+table names the newest packed one.</p>
+<p>The exception is the RSPRO ASN.1 schema, redistributed as
+<code>Tools/HilBridge/RSPRO.asn</code> package data so the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge works from a plain
+<code>pip install</code>.</p>
 <h2 id="etsi"><abbr title="European Telecommunications Standards Institute">ETSI</abbr></h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
 <th>Spec</th>
-<th>Optional local file</th>
+<th>Local library folder</th>
 <th>Implemented at</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 221</td>
-<td><code>docs/ts_102221v160200p.md</code></td>
+<td><code>ts_102221v18.4</code>, <code>ts_102221v160200p</code></td>
 <td><a href="../concepts/etsi-uicc.html"><abbr title="European Telecommunications Standards Institute">ETSI</abbr> <abbr title="Universal Integrated Circuit Card">UICC</abbr></a>, <a href="../subsystems/scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a></td>
 </tr>
 <tr>
 <td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 222</td>
-<td><code>docs/ts_102222v130000p.md</code></td>
+<td><code>ts_102222v130000p</code></td>
 <td><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Remote File Management">RFM</abbr> payloads, <a href="../subsystems/scp80.html"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> Shell</a></td>
 </tr>
 <tr>
 <td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 225</td>
-<td><code>docs/ts_102225v180000p.md</code></td>
+<td><code>ts_102225v180000p</code></td>
 <td><a href="../concepts/ota-scp80.html"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr></a>, <a href="../subsystems/scp80.html"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> Shell</a></td>
 </tr>
 <tr>
 <td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 226</td>
-<td><code>docs/ts_102226v120000p.md</code></td>
+<td><code>ts_102226v120000p</code></td>
 <td><a href="../subsystems/scp80.html"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> Shell</a></td>
+</tr>
+<tr>
+<td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 (Card Application Toolkit, BIP)</td>
+<td><code>ts_102223v18.3</code></td>
+<td><a href="../subsystems/apdu-dissector.html"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Dissector</a> -- clauses 8.7 device identities, 8.12 general result and its cause byte, 8.52 bearer, 8.56 channel status, 8.59 transport level</td>
+</tr>
+<tr>
+<td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 101 220 (COMPREHENSION-<abbr title="Tag-Length-Value">TLV</abbr> tag allocation)</td>
+<td><code>ts_101220v19</code></td>
+<td><a href="../subsystems/apdu-dissector.html"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Dissector</a> -- clause 7.1 tag and length forms, clause 7.2 tag values</td>
 </tr>
 </tbody>
 </table></div>
@@ -98,40 +115,50 @@ package data so that the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge wo
 <thead>
 <tr>
 <th>Spec</th>
-<th>Optional local file</th>
+<th>Local library folder</th>
 <th>Implemented at</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>3GPP TS 31.102 (<abbr title="Universal Subscriber Identity Module">USIM</abbr> application + <code>GET IDENTITY</code>)</td>
-<td><code>docs/ts_131102v180400p.md</code></td>
+<td><code>ts_131102v180400p</code></td>
 <td><a href="../concepts/3gpp-naa.html">3GPP <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr></a>, <a href="../subsystems/scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a>, <a href="../subsystems/suci-tool.html"><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> Tool</a>, <a href="../subsystems/simcard-simulator.html">SIMCARD Simulator</a></td>
 </tr>
 <tr>
 <td>3GPP TS 33.501 (5G AKA + <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> Profile A / B)</td>
-<td><code>docs/ts_133501.md</code> (drop in)</td>
+<td><code>ts_133501v19.7</code></td>
 <td><a href="../subsystems/simcard-simulator.html">SIMCARD Simulator</a>, <a href="../subsystems/suci-tool.html"><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> Tool</a></td>
 </tr>
 <tr>
 <td>3GPP TS 33.402 (EAP-AKA')</td>
-<td><code>docs/ts_133402.md</code> (drop in)</td>
+<td><code>ts_133402v19</code></td>
 <td><a href="../subsystems/simcard-simulator.html">SIMCARD Simulator</a></td>
 </tr>
 <tr>
 <td>3GPP TS 33.535 (AKMA)</td>
-<td><code>docs/ts_133535.md</code> (drop in)</td>
-<td><a href="../subsystems/simcard-simulator.html">SIMCARD Simulator</a></td>
+<td><code>ts_133535v19</code></td>
+<td><a href="../subsystems/simcard-simulator.html">SIMCARD Simulator</a>, YggdraCore AAnF stub</td>
 </tr>
 <tr>
 <td>3GPP TS 35.205 / 35.206 (Milenage)</td>
-<td><code>docs/ts_135205.md</code> / <code>docs/ts_135206.md</code> (drop in)</td>
+<td><code>ts_135205v19</code> / <code>ts_135206v19</code></td>
 <td><a href="../subsystems/simcard-simulator.html">SIMCARD Simulator</a></td>
 </tr>
 <tr>
 <td>3GPP TS 35.231 (<abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr>)</td>
-<td><code>docs/ts_135231.md</code> (drop in)</td>
+<td><code>ts_135231v19</code></td>
 <td><a href="../subsystems/simcard-simulator.html">SIMCARD Simulator</a></td>
+</tr>
+<tr>
+<td>3GPP TS 24.011 (point-to-point short message support)</td>
+<td><code>ts_124011v19</code></td>
+<td><a href="../subsystems/scp80.html"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> Shell</a> -- clause 8.2.5.2 RP-Destination Address, the coding the <abbr title="Elementary File">EF</abbr>.SMSP service-centre address reuses</td>
+</tr>
+<tr>
+<td>3GPP TS 31.111 (<abbr title="Universal Subscriber Identity Module">USIM</abbr> Application Toolkit)</td>
+<td><code>ts_131111v170600p</code></td>
+<td><a href="../subsystems/apdu-dissector.html"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Dissector</a> -- clause 9.1 BER-<abbr title="Tag-Length-Value">TLV</abbr> envelope tags in the ME-to-<abbr title="Universal Integrated Circuit Card">UICC</abbr> direction</td>
 </tr>
 </tbody>
 </table></div>
@@ -140,19 +167,19 @@ package data so that the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge wo
 <thead>
 <tr>
 <th>Spec</th>
-<th>Optional local file</th>
+<th>Local library folder</th>
 <th>Implemented at</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><abbr title="GlobalPlatform">GP</abbr> Card Specification v2.3.1</td>
-<td><code>docs/GPC_CardSpecification_v2.3.1.49_PublicRvw.md</code></td>
+<td><code>GPC_CardSpecification_v2.3.1.49_PublicRvw</code></td>
 <td><a href="../concepts/globalplatform.html">GlobalPlatform</a>, <a href="../subsystems/scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a></td>
 </tr>
 <tr>
 <td><abbr title="GlobalPlatform">GP</abbr> <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> amendment v1.1.2</td>
-<td><code>docs/GPC_2.3_D_SCP03_v1.1.2_PublicRelease.md</code></td>
+<td><code>GPC_2.3_D_SCP03_v1.1.2_PublicRelease</code></td>
 <td><a href="../subsystems/scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a></td>
 </tr>
 </tbody>
@@ -162,29 +189,29 @@ package data so that the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge wo
 <thead>
 <tr>
 <th>Spec</th>
-<th>Optional local file</th>
+<th>Local library folder</th>
 <th>Implemented at</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.02 (Classic M2M <abbr title="Remote SIM Provisioning">RSP</abbr>)</td>
-<td><code>docs/SGP.02-v4.2.md</code></td>
+<td><code>SGP.02-v4.2</code></td>
 <td>reference context</td>
 </tr>
 <tr>
 <td><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 (Consumer <abbr title="Remote SIM Provisioning">RSP</abbr>)</td>
-<td><code>docs/SGP.22-v3.1.md</code></td>
+<td><code>SGP.22-v3.1</code></td>
 <td><a href="../concepts/rsp-architecture.html"><abbr title="Remote SIM Provisioning">RSP</abbr> Architecture</a>, <a href="../subsystems/scp11-live.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Live</a>, <a href="../subsystems/scp11-local-access.html">Local Access</a></td>
 </tr>
 <tr>
 <td><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 (IoT <abbr title="Remote SIM Provisioning">RSP</abbr>)</td>
-<td><code>docs/SGP.32-v1.2.md</code></td>
+<td><code>SGP.32-v1.2</code>, <code>SGP.32-v1.3</code></td>
 <td><a href="../concepts/rsp-architecture.html"><abbr title="Remote SIM Provisioning">RSP</abbr> Architecture</a>, <a href="../subsystems/scp11-eim-local.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> Local</a></td>
 </tr>
 <tr>
 <td>RSPRO ASN.1</td>
-<td><code>docs/RSPRO.asn</code> (+ shipped <code>Tools/HilBridge/RSPRO.asn</code>)</td>
+<td>not packed; shipped as <code>Tools/HilBridge/RSPRO.asn</code></td>
 <td><a href="../subsystems/hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a></td>
 </tr>
 </tbody>
@@ -194,19 +221,19 @@ package data so that the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge wo
 <thead>
 <tr>
 <th>Spec</th>
-<th>Optional local file</th>
+<th>Local library folder</th>
 <th>Implemented at</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Profile Interoperability v3.4.1</td>
-<td><code>docs/Profile_interoperability_V3.4.1.md</code></td>
+<td>Profile Interoperability Test Spec v3.4</td>
+<td><code>Profile_interoperability_test_specification_V3.4</code></td>
 <td><a href="../concepts/saip-profiles.html"><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Profiles</a>, <a href="../subsystems/profile-package.html">Profile Package</a></td>
 </tr>
 <tr>
 <td>Profile Interoperability Technical Spec v3.4.1</td>
-<td><code>docs/Profile_interoperability_technical_specification_V3.4.1.md</code></td>
+<td><code>Profile_interoperability_technical_specification_V3.4.1</code></td>
 <td><a href="../subsystems/profile-package.html">Profile Package</a></td>
 </tr>
 </tbody>
@@ -222,11 +249,15 @@ package data so that the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge wo
 <tbody>
 <tr>
 <td>ISO/IEC 7816-3 (electrical, transport)</td>
-<td>every card-facing subsystem</td>
+<td>every card-facing subsystem; <a href="../subsystems/apdu-dissector.html"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Dissector</a> decodes the <abbr title="Answer To Reset">ATR</abbr> per clause 8.2</td>
 </tr>
 <tr>
 <td>ISO/IEC 7816-4 (<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, logical)</td>
-<td><a href="../concepts/secure-element-primer.html">Secure Element Primer</a>, every card-facing subsystem</td>
+<td><a href="../concepts/secure-element-primer.html">Secure Element Primer</a>, every card-facing subsystem; <a href="../subsystems/apdu-dissector.html"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Dissector</a> -- clause 5.1.3 status categories, clause 5.4.1 class byte, Table 3 secure messaging, Table 12 file descriptor, Table 13 life-cycle status</td>
+</tr>
+<tr>
+<td>ISO/IEC 8825-1 (BER-<abbr title="Tag-Length-Value">TLV</abbr>)</td>
+<td><a href="../subsystems/apdu-dissector.html"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Dissector</a>; indefinite lengths are reported and refused, since <abbr title="Distinguished Encoding Rules">DER</abbr> prohibits them</td>
 </tr>
 </tbody>
 </table></div>
@@ -262,13 +293,13 @@ package data so that the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge wo
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

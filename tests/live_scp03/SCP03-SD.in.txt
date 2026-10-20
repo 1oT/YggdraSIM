@@ -1,3 +1,0 @@
-# Authenticate to the Security Domain using SCP03 (canonical name).
-SCP03-SD
-EXIT

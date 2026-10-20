@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="about/notice.html" data-ygg-open-sections="about">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -60,12 +60,20 @@ runtime from their upstream sources:
   payloads are enabled) and <code>osmo-remsim-client-st2</code> / SIMtrace2 firmware
   (when the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge is in use). These tools are provided by their
   respective upstream projects and are not redistributed here.</p>
-<p>Vendored schema notice:
-The only third-party material redistributed inside this tree is the RSPRO
-ASN.1 schema at <code>docs/RSPRO.asn</code> (mirrored into <code>Tools/HilBridge/RSPRO.asn</code>
-for wheel packaging). It is included because it is required at runtime by
-the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge decoder and is too small to justify a separate installation
-step.</p>
+<p>Vendored material notice:
+Three third-party items are redistributed inside this tree, each because the
+runtime needs it locally and a separate installation step is not workable:
+- the RSPRO ASN.1 schema at <code>docs/RSPRO.asn</code> (mirrored into
+  <code>Tools/HilBridge/RSPRO.asn</code> for wheel packaging), required at runtime by
+  the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge decoder and too small to justify its own install step
+- <code>xterm.js</code> and <code>xterm-addon-fit</code> (MIT) under
+  <code>gui_frontend/src/vendor/xterm/</code>, which back the GUI terminal panel
+- <code>mermaid</code> (MIT) under <code>gui_frontend/src/vendor/mermaid/</code>, which renders
+  the diagrams in the GUI guide viewer</p>
+<p>The two browser libraries are vendored rather than loaded from a CDN because
+the GUI ships a <code>script-src 'self'</code> Content-Security-Policy and has to run
+fully offline. Each vendor directory carries a <code>NOTICE.md</code> with the upstream
+project, the pinned version, the license, and the update procedure.</p>
 <p>Acknowledgements:
 With a big-hearted thank you to the Osmocom community, the <code>pySim</code>
 maintainers and contributors, and Martin Paljak for <code>GlobalPlatformPro</code>.
@@ -95,13 +103,13 @@ your option, any later version. See <code>LICENSE</code> for the full text.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

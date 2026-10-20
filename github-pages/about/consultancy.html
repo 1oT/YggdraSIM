@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="about/consultancy.html" data-ygg-open-sections="about">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -51,21 +51,21 @@ team directly for tailored work.</p>
         <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
 <h2 id="what-1ot-can-help-with">What 1oT can help with</h2>
 <ul>
-<li><strong><abbr title="Embedded UICC">eUICC</abbr> / eSIM integration</strong> — <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 and <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 bring-up, device-side
-  <abbr title="Local Profile Assistant, device-side">LPAd</abbr> and <abbr title="IoT Profile Assistant, device-side">IPAd</abbr>, <abbr title="Embedded UICC">eUICC</abbr>-side <abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr>, <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> remote management, and ES9+ interop</li>
-<li><strong><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> profile work</strong> — profile audits, linting, transcoding,
+<li><strong><abbr title="Embedded UICC">eUICC</abbr> / eSIM integration</strong> -- <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 and <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 bring-up, device-side
+  <abbr title="Local Profile Assistant, device-side">LPAd</abbr> and <abbr title="IoT Profile Assistant, device-side">IPAd</abbr>, <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> remote management, and ES9+ interop</li>
+<li><strong><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> profile work</strong> -- profile audits, linting, transcoding,
   operator-specific binders, <code>3GPP-USIM</code> and <code>GSM-ACCESS</code> templates</li>
-<li><strong><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> relay debugging</strong> — live ES9+ flows, PK/SK negotiation,
+<li><strong><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> relay debugging</strong> -- live ES9+ flows, PK/SK negotiation,
   MetaData signing, and eSIM bound-profile download troubleshooting</li>
-<li><strong><abbr title="Hardware-In-The-Loop">HIL</abbr> rigs</strong> — SIMtrace2 cardem, passive sniffing, <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> capture,
+<li><strong><abbr title="Hardware-In-The-Loop">HIL</abbr> rigs</strong> -- SIMtrace2 cardem, passive sniffing, <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> capture,
   pcap replay, and protocol-conformance harnesses around
   <code>ETSI TS 102 221</code> and GlobalPlatform</li>
-<li><strong><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr></strong> — campaign design, PoR handling, crypto review, and
+<li><strong><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr></strong> -- campaign design, PoR handling, crypto review, and
   production-grade key management</li>
-<li><strong>Private forks</strong> — a named feature branch where commercial work
+<li><strong>Private forks</strong> -- a named feature branch where commercial work
   is performed, with back-porting to YggdraSIM main where it does not
   conflict with customer confidentiality</li>
-<li><strong>Training</strong> — focused sessions on the secure-element stack for
+<li><strong>Training</strong> -- focused sessions on the secure-element stack for
   your engineering team (<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, GlobalPlatform, <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22/32, <abbr title="SIMalliance Interoperable Profile">SAIP</abbr>)</li>
 </ul>
 <h2 id="engagement-shapes">Engagement shapes</h2>
@@ -116,13 +116,13 @@ team directly for tailored work.</p>
 </ol>
 <h2 id="contact">Contact</h2>
 <ul>
-<li><strong>Commercial conversations</strong> — reach out via the contact form on
+<li><strong>Commercial conversations</strong> -- reach out via the contact form on
   <a href="https://www.1ot.com/">1ot.com</a> or through the inbound channel your
   1oT account manager has provided.</li>
-<li><strong>Public bugs and feature requests</strong> — open a GitHub issue at
-  .</li>
-<li><strong>Security disclosures</strong> — follow the process in
-  
+<li><strong>Public bugs and feature requests</strong> -- open a GitHub issue at
+  <a href="https://github.com/1oT/YggdraSIM/issues"><code>1oT/YggdraSIM</code></a>.</li>
+<li><strong>Security disclosures</strong> -- follow the process in
+  <a href="https://github.com/1oT/YggdraSIM/blob/main/.github/SECURITY.md"><code>.github/SECURITY.md</code></a>
   rather than opening a public issue.</li>
 </ul>
 <p>Consultancy engagements are covered by a separate commercial
@@ -162,13 +162,13 @@ repository.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

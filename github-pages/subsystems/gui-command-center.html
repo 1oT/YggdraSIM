@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Universal GUI Command Center — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/gui-command-center.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Universal GUI Command Center</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Universal GUI Command Center</h1>
+        <p class="page-lead mb-8">The Universal GUI Command Center is the browser/desktop surface for the
+same registry-backed actions exposed by the CLI modules. It is useful when
+an operator needs a persistent workbench: reader selection, <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> filesystem
+state, <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> package inspection, eSIM relay actions, remote-card diagnostics,
+and live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> visibility in one window.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#launch-modes" class="toc-link">Launch modes</a>
+            <a href="#views" class="toc-link">Views</a>
+            <a href="#inside-the-workbenches" class="toc-link">Inside the workbenches</a>
+            <a href="#saip-workbench" class="toc-link toc-link-sub">SAIP workbench</a>
+            <a href="#scp03-workbench" class="toc-link toc-link-sub">SCP03 workbench</a>
+            <a href="#offline-tools" class="toc-link toc-link-sub">Offline Tools</a>
+            <a href="#live-apdu-stream" class="toc-link">Live APDU stream</a>
+            <a href="#remote-card-bridge-controls" class="toc-link">Remote-card bridge controls</a>
+            <a href="#security-posture" class="toc-link">Security posture</a>
+            <a href="#common-launch-recipes" class="toc-link">Common launch recipes</a>
+            <a href="#local-desktop-with-a-physical-reader" class="toc-link toc-link-sub">Local desktop with a physical reader</a>
+            <a href="#remote-browser-connected-to-a-lab-host" class="toc-link toc-link-sub">Remote browser connected to a lab host</a>
+            <a href="#remote-card-plus-remote-hil-rig" class="toc-link toc-link-sub">Remote card plus remote HIL rig</a>
+            <a href="#troubleshooting" class="toc-link">Troubleshooting</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>The GUI is optional. A source install needs either the desktop extra or the
+headless server extra:</p>
+<div class="code-block"><pre><code>python -m pip install -e &#39;.[gui]&#39;        # desktop pywebview window
+python -m pip install -e &#39;.[gui-server]&#39; # browser / remote lab server
+</code></pre></div>
+<p>Release builds publish paired CLI and desktop-GUI executables for the clean
+flavor on Windows, macOS, Linux, and Raspberry Pi arm64, and for the full
+flavor on supported Linux targets. Source installs remain the most flexible
+path for GUI lab development.</p>
+<h2 id="launch-modes">Launch modes</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Desktop</label><label for="__tabbed_1_2">Headless / remote lab</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python main/main.py --gui
+</code></pre></div>
+<p>Desktop mode binds a local FastAPI server, opens a pywebview window,
+generates an in-process bearer token, and tears down GUI-owned helpers
+on shutdown.</p>
+<p>The window's page zoom is adjustable: Ctrl+plus, Ctrl+minus and
+Ctrl+0 (or Ctrl+wheel) step it through the browser ladder (0.5 to
+3), and the chosen factor is remembered across launches as the
+<code>YGGDRASIM_GUI_ZOOM</code> env flag, which the Configuration view edits
+as well. <code>1</code> (default) is the native size the layout is drawn for;
+<code>auto</code> fits the layout to the window instead. A browser tab on
+<code>--web-server</code> uses the browser's own zoom.</p>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>install -m 600 /dev/null ~/.config/yggdrasim/gui.token
+python - &lt;&lt;&#39;PY&#39; &gt; ~/.config/yggdrasim/gui.token
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+
+python main/main.py --web-server \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --token-file ~/.config/yggdrasim/gui.token
+</code></pre></div>
+<p><code>--web-server</code> requires an explicit bearer token. Keep the bind on
+<code>127.0.0.1</code> and reach it through SSH unless you have a separate TLS
+and access-control plan:</p>
+<div class="code-block"><pre><code>ssh -fN -L 8765:127.0.0.1:8765 user@lab-host
+</code></pre></div>
+</div>
+</div>
+</div>
+<h2 id="views">Views</h2>
+<p>The left rail switches between views; the reader strip and the live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> dock
+stay with you across all of them.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>View</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Overview</td>
+<td>Module picker, plus the active card backend and where that selection came from.</td>
+</tr>
+<tr>
+<td>Command Center</td>
+<td>The registry-backed action forms, grouped by subsystem into tabs.</td>
+</tr>
+<tr>
+<td>Remote Lab</td>
+<td>Rig inventory, invites, sessions, and card offers against a <a href="remote-lab.html">Remote Lab</a> agent.</td>
+</tr>
+<tr>
+<td>Plugin console</td>
+<td>One view for every console a loaded plugin registers: its start form, action buttons, command line and live tables, or a run form with its current run and history, each console a leaf under <em>Plugin consoles</em>, a group shown only while a console is registered. See <a href="../internals/plugin-contract.html#plugin-consoles">Plugin Contract</a>.</td>
+</tr>
+<tr>
+<td>Registry browser</td>
+<td>Introspection over <code>yggdrasim_common.registry</code>: subsystems, CLI modules, symbol lookups.</td>
+</tr>
+<tr>
+<td>Environment</td>
+<td>Configuration (every <code>YGGDRASIM_*</code> flag, see <a href="../reference/env-flags.html">Environment Flags</a>) and the loaded-plugin list.</td>
+</tr>
+<tr>
+<td>Terminal</td>
+<td>A PTY running <code>python -m &lt;module&gt;</code>, restricted to the registry's CLI module allow-list.</td>
+</tr>
+<tr>
+<td>Host shell</td>
+<td>Opt-in PTY on the operator's login shell. Hidden unless <code>YGGDRASIM_GUI_HOST_SHELL=1</code>.</td>
+</tr>
+<tr>
+<td>Card Bridge</td>
+<td>Local bridge control plus the Remote Bridge onboarding for a stored host. See <a href="card-bridge.html">Card Bridge</a>.</td>
+</tr>
+<tr>
+<td>About</td>
+<td>What this build is, and an in-app reader for the guides the release ships (<code>/api/guides</code>).</td>
+</tr>
+</tbody>
+</table></div>
+<p>Within those views:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Area</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Reader strip</td>
+<td>Lists local <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> readers and remote-card bridge rows from <code>/api/live/readers</code>.</td>
+</tr>
+<tr>
+<td><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> workbench</td>
+<td>Card session tabs, filesystem navigation, <abbr title="File Control Parameters">FCP</abbr>/ARR display, records, binary reads, and custom APDUs.</td>
+</tr>
+<tr>
+<td><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> workbench</td>
+<td>Profile-package inspection and editing: <abbr title="Profile Element (SAIP)">PE</abbr> tree, hex pane, template placeholders, <abbr title="Profile Element (SAIP)">PE</abbr> export and import.</td>
+</tr>
+<tr>
+<td>Command Center actions</td>
+<td>Registry-backed forms for <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>, <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>, <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr>, <abbr title="SIMalliance Interoperable Profile">SAIP</abbr>, simulator, diagnostics, and <abbr title="Hardware-In-The-Loop">HIL</abbr> actions.</td>
+</tr>
+<tr>
+<td>Live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> dock</td>
+<td>WebSocket-fed <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> stream from the process-wide recorder, capped for long sessions.</td>
+</tr>
+<tr>
+<td>Card bridge panel</td>
+<td>Remote-card bridge configuration, live probe, token posture, latency history, and remote <abbr title="Hardware-In-The-Loop">HIL</abbr> rig control.</td>
+</tr>
+<tr>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> module</td>
+<td>Local/remote <abbr title="Hardware-In-The-Loop">HIL</abbr> health, decoded pcap snapshots, modem shell helper, GSMTAP capture review.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="inside-the-workbenches">Inside the workbenches</h2>
+<h3 id="saip-workbench"><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> workbench</h3>
+<p>Profile-package work happens on a <abbr title="Profile Element (SAIP)">PE</abbr> tree beside a hex pane. Beyond opening,
+editing and saving a package, two actions move a single profile element
+between packages:</p>
+<ul>
+<li><strong>Export <abbr title="Profile Element (SAIP)">PE</abbr></strong> (<code>saip.export_pe</code>) writes one <abbr title="Profile Element (SAIP)">PE</abbr> as a <abbr title="Profile Element (SAIP)">PE</abbr> document
+  (<code>.pe.json</code>, schema <code>ygg.pe_document.v1</code>): the <abbr title="Profile Element (SAIP)">PE</abbr> type and the tagged
+  decoded tree a saved package uses, and nothing about the package it came
+  from. A <abbr title="Profile Element (SAIP)">PE</abbr>-Application therefore travels with its load block, the applet
+  bytes and every instance. The dialog names the file after the <abbr title="Profile Element (SAIP)">PE</abbr>, and the
+  destination's extension picks <abbr title="Distinguished Encoding Rules">DER</abbr> or hex instead. In a template session you
+  choose whether the placeholder literals travel or the stored values are
+  substituted.</li>
+<li><strong>Import <abbr title="Profile Element (SAIP)">PE</abbr></strong> (<code>saip.import_pe</code>) puts one back into any package. It also
+  reads a tagged single-section document, the plain decoded JSON of one <abbr title="Profile Element (SAIP)">PE</abbr>,
+  and <abbr title="Distinguished Encoding Rules">DER</abbr> or hex text. The tree has to encode before it reaches the sequence,
+  the <abbr title="Distinguished Encoding Rules">DER</abbr> an earlier release's document recorded is reported when it no
+  longer matches its tree, and the copy takes the next free identification so
+  the other PEs keep theirs.</li>
+<li><strong>Save <abbr title="Profile Element (SAIP)">PE</abbr></strong> (<code>saip.save_pe</code>) keeps the selected <abbr title="Profile Element (SAIP)">PE</abbr> in the operator's <abbr title="Profile Element (SAIP)">PE</abbr>
+  library under a name, as the same <abbr title="Profile Element (SAIP)">PE</abbr> document, so a standardised element
+  (a <abbr title="Profile Element (SAIP)">PE</abbr>-SD with its key set and privileges, say) is one click away in any
+  package; <strong><abbr title="Profile Element (SAIP)">PE</abbr> library</strong> (<code>saip.list_pe_library</code>, <code>saip.load_pe</code>,
+  <code>saip.delete_saved_pe</code>) lists the entries and loads one at a chosen
+  index or deletes it. The library is <code>~/.yggdrasim/saip_pe_library/</code>
+  (<code>YGGDRASIM_SAIP_PE_LIBRARY</code>), outside every checkout. A saved template
+  <abbr title="Profile Element (SAIP)">PE</abbr> keeps its placeholder literals and registers them in the package it is
+  loaded into, answered from the test-value lists where they can be.</li>
+</ul>
+<p><strong>Add above</strong> / <strong>Add below</strong> open the <em>Insert profile element</em> dialog:
+every <code>ProfileElement</code> type the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> module in use can carry
+(<code>saip.list_pe_types</code>, schema order, with a filter box), the presets of a
+type that has several, and the saved PEs of the <abbr title="Profile Element (SAIP)">PE</abbr> library, inserted at
+the index the dialog shows. The Decoded view keeps its scroll offset, open
+folds and chosen tab per package and element, so switching between open
+packages and back lands where the operator left off, and a link path
+clicked in a <abbr title="Profile Element (SAIP)">PE</abbr>-GFM entry opens the referenced file in the FS tree with the
+top tab following. The <abbr title="File Control Parameters">FCP</abbr> editor of a GFM entry carries every <code>Fcp</code>
+member, <code>dfName</code> for an ADF included; for a link, <abbr title="Elementary File">EF</abbr> size and the
+proprietary info rows are the conditional parameters that turn the link
+into an independent file.</p>
+<p><strong>Save as</strong> names the format and the destination in one dialog: <abbr title="Distinguished Encoding Rules">DER</abbr>, HEX
+(<code>.hex</code> / <code>.txt</code>), ASN.1 value notation (<code>.asn</code>), tagged JSON (<code>.json</code>) and,
+for a template session, varder; a destination extension still names the
+format itself. The <abbr title="Profile Element (SAIP)">PE</abbr>-SD card decodes each <code>sdPersoData</code> record into its
+<abbr title="Data Grouping Identifier">DGI</abbr> blocks under the raw hex and takes a new record (<strong>Add <abbr title="Data Grouping Identifier">DGI</abbr> record</strong>),
+which the server accepts only as whole <abbr title="Data Grouping Identifier">DGI</abbr>, length, value blocks.</p>
+<p>The Profile Header editor carries <strong>Sync from <abbr title="Elementary File">EF</abbr>.<abbr title="Integrated Circuit Card Identifier">ICCID</abbr></strong> and <strong>Sync from
+<abbr title="Elementary File">EF</abbr>.SMSP</strong>: each copies a file's value into the header field that mirrors it --
+<code>iccid</code>, and the SMSC address of the SMS-PP bearer -- and applies it.</p>
+<h3 id="scp03-workbench"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> workbench</h3>
+<p>The Install tab's <strong>Install script</strong> button (<code>scp03.build_install_script</code>)
+builds the <abbr title="Converted Applet (Java Card)">CAP</abbr> install sequence without a card and offers a save-as picker
+with an overwrite switch. It is the same builder as the shell's Wizard 8
+(Full <abbr title="Converted Applet (Java Card)">CAP</abbr> Install Sequence) and writes a byte-identical file: the source <abbr title="Converted Applet (Java Card)">CAP</abbr>
+and the format as <code>#</code> comments, one <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> per line. An <abbr title="Over-The-Air">OTA</abbr>-formatted file runs
+in the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell with <code>script &lt;file&gt;</code>, an ISO-formatted one in the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>
+shell with <code>RUN &lt;file&gt;</code>.</p>
+<h3 id="offline-tools">Offline Tools</h3>
+<p>Offline Tools opens on a context-aware decoder (<code>tool.decoder.context</code>). One
+paste box takes an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, a response, a bare <abbr title="Tag-Length-Value">TLV</abbr> or a whole exchange trace;
+each command is classified by its CLA/INS pair and the payload decoded
+against the specification that governs it -- TS 102 221 SELECT parameters and
+<abbr title="File Control Parameters">FCP</abbr> templates, TS 102 223 / TS 101 220 proactive commands, envelopes and
+terminal responses, GPC v2.3.1 GET STATUS entries, INSTALL, DELETE, STORE
+DATA and GET DATA, <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> INITIALIZE UPDATE, ES10 requests and responses named
+from their BF tag, and TS 31.102 AUTHENTICATE. A trace carries state: the
+selected file names READ BINARY content, and a <code>61 xx</code> word chains GET
+RESPONSE onto its command.</p>
+<p>The same engine backs <code>python -m Tools.Asn1TlvDecode --context</code> and the
+<code>context_decode</code> MCP tool, so a decode reads the same from the GUI, a
+terminal and an agent.</p>
+<h2 id="live-apdu-stream">Live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> stream</h2>
+<p>Every card connection created through the shared card backend is wrapped by
+the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> recorder. The recorder stores a bounded ring buffer and streams
+new exchanges to the GUI over <code>/api/events/apdu</code>.</p>
+<p>What appears in the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> dock:</p>
+<ul>
+<li>command <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> hex</li>
+<li>response data hex</li>
+<li>status word or <code>ERR</code></li>
+<li>elapsed time</li>
+<li>source label such as <code>pcsc</code>, <code>relay</code>, or simulator-backed actions</li>
+</ul>
+<p>The stream is diagnostic. It does not replace keybag capture for decrypting
+secure-channel traffic. For <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>/SCP11c plaintext replay, export a keybag
+from the shell that derived the session keys and use the <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap replay
+workflow.</p>
+<h2 id="remote-card-bridge-controls">Remote-card bridge controls</h2>
+<p>The Card bridge view wraps the same <code>Tools.CardBridge</code> and <abbr title="Hardware-In-The-Loop">HIL</abbr> remote-card
+workflow documented in <a href="../how-to/remote-apdu-streaming.html">Card Bridge over SSH</a>.
+It is designed for the common lab topology:</p>
+<div class="code-block"><pre><code>PC reader -&gt; local CardBridge -&gt; SSH tunnel -&gt; Raspberry Pi HIL rig -&gt; SIMtrace2 -&gt; modem
+</code></pre></div>
+<p>The GUI can:</p>
+<ul>
+<li>start or stop the local PC-side Card Bridge</li>
+<li>open or close SSH forwards to a rig</li>
+<li>sync the bearer token to the rig with mode <code>0600</code></li>
+<li>install or restart the rig-side <code>systemd --user</code> <abbr title="Hardware-In-The-Loop">HIL</abbr> supervisor service</li>
+<li>verify the remote bridge, <abbr title="Hardware-In-The-Loop">HIL</abbr> service, SIMtrace2 path, and RemSIM binary</li>
+<li>pull remote <abbr title="Hardware-In-The-Loop">HIL</abbr> captures back into the local GUI for decoded review</li>
+</ul>
+<p>SSH key login must already work from the account that launched the GUI. The
+actions use <code>BatchMode=yes</code> and will not pause for an interactive password.</p>
+<h2 id="security-posture">Security posture</h2>
+<ul>
+<li><code>--web-server</code> refuses to start without a bearer token.</li>
+<li>Wildcard CORS origins are refused.</li>
+<li>Loopback bind plus SSH tunnel is the default remote-access model.</li>
+<li><code>--tls-cert</code>/<code>--tls-key</code> or <code>--tls-self-signed</code> are available for lab
+  environments that cannot rely on SSH tunnelling alone.</li>
+<li>The host shell is disabled by default and must be explicitly enabled with
+  <code>YGGDRASIM_GUI_HOST_SHELL=1</code>.</li>
+<li>Remote-card bearer tokens are never echoed in GUI responses; only short
+  fingerprints are shown.</li>
+<li>The file picker lists only the directories it offers (home, working
+  dir, workspace, Documents, Downloads, Desktop) when running
+  <code>--web-server</code>, because that mode is reachable off-host and the token
+  holder need not own the machine. <code>--gui</code> is unrestricted: it is bound
+  to loopback on the operator's own machine. Override either default
+  with <code>YGGDRASIM_GUI_FS_ROOTS</code> (an <code>os.pathsep</code>-separated list). The
+  endpoint returns names, sizes, and timestamps only -- there is no
+  route that reads file contents by path.</li>
+</ul>
+<h2 id="common-launch-recipes">Common launch recipes</h2>
+<h3 id="local-desktop-with-a-physical-reader">Local desktop with a physical reader</h3>
+<div class="code-block"><pre><code>python -m pip install -e &#39;.[gui]&#39;
+python main/main.py --gui
+</code></pre></div>
+<h3 id="remote-browser-connected-to-a-lab-host">Remote browser connected to a lab host</h3>
+<div class="code-block"><pre><code># lab host
+python -m pip install -e &#39;.[gui-server,hil]&#39;
+python main/main.py --web-server \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --token-file ~/.config/yggdrasim/gui.token
+
+# workstation
+ssh -fN -L 8765:127.0.0.1:8765 lab-host
+</code></pre></div>
+<h3 id="remote-card-plus-remote-hil-rig">Remote card plus remote <abbr title="Hardware-In-The-Loop">HIL</abbr> rig</h3>
+<ol>
+<li>Start the GUI on the workstation with <code>[gui]</code>.</li>
+<li>Open the Card bridge view.</li>
+<li>Fill in the local reader selector, SSH target, rig repo path, rig
+   Python, RemSIM binary, SIMtrace2 VID:PID, and <abbr title="Hardware-In-The-Loop">HIL</abbr> port.</li>
+<li>Run <strong>Start full rig</strong>.</li>
+<li>Watch the live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> dock and <abbr title="Hardware-In-The-Loop">HIL</abbr> decoded views.</li>
+</ol>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--web-server</code> exits with a token error</td>
+<td>no token supplied</td>
+<td>pass <code>--token-file</code>, <code>YGGDRASIM_GUI_TOKEN_FILE</code>, or <code>YGGDRASIM_GUI_TOKEN</code></td>
+</tr>
+<tr>
+<td>browser opens but actions return 401</td>
+<td>stale token in URL/local storage</td>
+<td>reload from the printed URL or clear the browser tab state</td>
+</tr>
+<tr>
+<td>no APDUs appear</td>
+<td>action did not use the shared card backend, or no card traffic happened yet</td>
+<td>run a reader-backed action and check <code>/api/live/readers</code></td>
+</tr>
+<tr>
+<td>Host shell is hidden</td>
+<td>host shell intentionally disabled</td>
+<td>set <code>YGGDRASIM_GUI_HOST_SHELL=1</code> and restart</td>
+</tr>
+<tr>
+<td>the desktop window's interface is too small or too large</td>
+<td>page zoom remembered from an earlier session, or <code>YGGDRASIM_GUI_ZOOM</code> set in the environment</td>
+<td>press Ctrl+0 in the window for the native size, or set the flag in Configuration</td>
+</tr>
+<tr>
+<td>file picker says a path is "outside the directories this server may browse"</td>
+<td><code>--web-server</code> limits listing to the picker's roots</td>
+<td>add the directory to <code>YGGDRASIM_GUI_FS_ROOTS</code> and restart</td>
+</tr>
+<tr>
+<td>remote rig action hangs at SSH</td>
+<td>key login not configured</td>
+<td>verify <code>ssh -o BatchMode=yes &lt;target&gt; true</code> outside the GUI</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="card-bridge.html">Card Bridge</a></li>
+<li><a href="remote-lab.html">Remote Lab</a></li>
+<li><a href="../how-to/remote-apdu-streaming.html">Card Bridge over SSH</a></li>
+<li><a href="../how-to/install-remsim-apdu-streaming.html">Install RemSIM / <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</a></li>
+<li><a href="hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a></li>
+<li><a href="../how-to/run-hil-capture.html">Run a <abbr title="Hardware-In-The-Loop">HIL</abbr> Capture</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#launch-modes" class="toc-link">Launch modes</a>
+            <a href="#views" class="toc-link">Views</a>
+            <a href="#inside-the-workbenches" class="toc-link">Inside the workbenches</a>
+            <a href="#saip-workbench" class="toc-link toc-link-sub">SAIP workbench</a>
+            <a href="#scp03-workbench" class="toc-link toc-link-sub">SCP03 workbench</a>
+            <a href="#offline-tools" class="toc-link toc-link-sub">Offline Tools</a>
+            <a href="#live-apdu-stream" class="toc-link">Live APDU stream</a>
+            <a href="#remote-card-bridge-controls" class="toc-link">Remote-card bridge controls</a>
+            <a href="#security-posture" class="toc-link">Security posture</a>
+            <a href="#common-launch-recipes" class="toc-link">Common launch recipes</a>
+            <a href="#local-desktop-with-a-physical-reader" class="toc-link toc-link-sub">Local desktop with a physical reader</a>
+            <a href="#remote-browser-connected-to-a-lab-host" class="toc-link toc-link-sub">Remote browser connected to a lab host</a>
+            <a href="#remote-card-plus-remote-hil-rig" class="toc-link toc-link-sub">Remote card plus remote HIL rig</a>
+            <a href="#troubleshooting" class="toc-link">Troubleshooting</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

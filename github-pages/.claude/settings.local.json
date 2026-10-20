@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(node --check ygg.js)",
-      "Bash(node --check ygg-layout.js)",
-      "Skill(ui)"
-    ]
-  }
-}

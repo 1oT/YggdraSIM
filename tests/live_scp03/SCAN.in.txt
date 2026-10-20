@@ -1,4 +1,0 @@
-# Traverse and discover the UICC file tree (read-only).
-SCP03-SD
-SCAN
-EXIT

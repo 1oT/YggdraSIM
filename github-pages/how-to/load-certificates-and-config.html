@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Load certificates &amp; config — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/load-certificates-and-config.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Load certificates &amp; config</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Load certificates &amp; config</h1>
+        <p class="page-lead mb-8">Bring operator-owned material -- certificates, private keys,
+secure-channel keysets, simulator personality files, identity records,
+encryption envelopes, and protected diagnostic inputs -- into YggdraSIM
+without touching any in-tree starter material.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#decision-tree" class="toc-link">Decision tree</a>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#recipe-1-bring-your-own-rsp-certs-local-access" class="toc-link">Recipe 1: Bring-your-own RSP certs (local-access)</a>
+            <a href="#recipe-2-bring-your-own-rsp-certs-eim-local" class="toc-link">Recipe 2: Bring-your-own RSP certs (eim-local)</a>
+            <a href="#recipe-3-load-an-operator-eim-signing-certificate" class="toc-link">Recipe 3: Load an operator eIM signing certificate</a>
+            <a href="#recipe-4-replace-the-simulator-personality" class="toc-link">Recipe 4: Replace the simulator personality</a>
+            <a href="#recipe-5-replace-the-simulator-default-eim-identity" class="toc-link">Recipe 5: Replace the simulator default eIM identity</a>
+            <a href="#recipe-6-load-scp03-and-scp80-keysets" class="toc-link">Recipe 6: Load SCP03 and SCP80 keysets</a>
+            <a href="#recipe-7-load-suci-keys" class="toc-link">Recipe 7: Load SUCI keys</a>
+            <a href="#recipe-8-seed-a-yggdracore-subscription" class="toc-link">Recipe 8: Seed a YggdraCore subscription</a>
+            <a href="#recipe-9-attach-eum-session-keys-to-a-pcap" class="toc-link">Recipe 9: Attach EUM session keys to a pcap</a>
+            <a href="#recipe-10-turn-on-inventory-encryption" class="toc-link">Recipe 10: Turn on inventory encryption</a>
+            <a href="#recipe-11-relocate-the-runtime-root" class="toc-link">Recipe 11: Relocate the runtime root</a>
+            <a href="#bring-your-own-keys-checklist" class="toc-link">Bring-your-own keys checklist</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#related-documentation" class="toc-link">Related documentation</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>This page is the <strong>task-driven mirror</strong> of the canonical operator
+guide
+<a href="https://github.com/1oT/YggdraSIM/blob/v2.2.0/guides/CONFIGURATION_AND_CERTIFICATES.md"><code>guides/CONFIGURATION_AND_CERTIFICATES.md</code></a>
+at the repository root. The schemas, sidecar shapes, fallback rules,
+and selection orders are normative there; this page picks the most
+common flows and walks through them as numbered recipes.</p>
+<div class="admonition warning">
+<p class="admonition-title">Bundled <code>Workspace/</code> material is starter material</p>
+<p>Everything that ships under <code>Workspace/</code>, <code>SCP11/SGP.26_test_Certs/</code>,
+and the <code>state/inventory_crypto.json</code> defaults is starter material.
+It is there so the toolkit can boot, run the unit tests, and execute
+a first-light download against the in-tree fake <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and Local
+SM-DP+. Replace, override, or relocate it before any non-test use.</p>
+</div>
+<h2 id="decision-tree">Decision tree</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>You have ...</th>
+<th>Jump to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>operator DPauth / DPpb cert + key for <code>LOAD-PROFILE</code> against <code>ISD-R</code></td>
+<td><a href="#recipe-1-bring-your-own-rsp-certs-local-access">Recipe 1</a></td>
+</tr>
+<tr>
+<td>operator DPauth / DPpb cert + key for the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> local profile-loading path</td>
+<td><a href="#recipe-2-bring-your-own-rsp-certs-eim-local">Recipe 2</a></td>
+</tr>
+<tr>
+<td>operator-issued <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> signing certificate</td>
+<td><a href="#recipe-3-load-an-operator-eim-signing-certificate">Recipe 3</a></td>
+</tr>
+<tr>
+<td>your own simulated card identity (<abbr title="eUICC Identifier">EID</abbr>, <abbr title="Answer To Reset">ATR</abbr>, AIDs, default DP, <abbr title="Certificate Issuer Public Key Identifier">CI PKID</abbr>)</td>
+<td><a href="#recipe-4-replace-the-simulator-personality">Recipe 4</a></td>
+</tr>
+<tr>
+<td>your own simulated default <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity used on first boot</td>
+<td><a href="#recipe-5-replace-the-simulator-default-eim-identity">Recipe 5</a></td>
+</tr>
+<tr>
+<td>your own <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> keysets</td>
+<td><a href="#recipe-6-load-scp03-and-scp80-keysets">Recipe 6</a></td>
+</tr>
+<tr>
+<td><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> Profile A / B home-network keys</td>
+<td><a href="#recipe-7-load-suci-keys">Recipe 7</a></td>
+</tr>
+<tr>
+<td>K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber</td>
+<td><a href="#recipe-8-seed-a-yggdracore-subscription">Recipe 8</a></td>
+</tr>
+<tr>
+<td>ShS-ENC / ShS-MAC / DEK from an EUM database for a failing PCAP</td>
+<td><a href="#recipe-9-attach-eum-session-keys-to-a-pcap">Recipe 9</a></td>
+</tr>
+<tr>
+<td>a need to encrypt every persisted secret at rest</td>
+<td><a href="#recipe-10-turn-on-inventory-encryption">Recipe 10</a></td>
+</tr>
+<tr>
+<td>a need to relocate or freeze the writable runtime root</td>
+<td><a href="#recipe-11-relocate-the-runtime-root">Recipe 11</a></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>A working YggdraSIM install (<code>yggdrasim --doctor</code> exits cleanly).</li>
+<li>A directory outside the repository to hold operator-owned material
+  (the recipes refer to it as <code>~/yggdra-secrets</code>, but the layout is
+  yours to choose).</li>
+<li>For recipes that touch the inventory: <code>gpg</code> with at least one
+  recipient available.</li>
+</ul>
+<h2 id="recipe-1-bring-your-own-rsp-certs-local-access">Recipe 1: Bring-your-own <abbr title="Remote SIM Provisioning">RSP</abbr> certs (local-access)</h2>
+<p>Replace the bundled <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.26 test fixtures used by <code>LOAD-PROFILE</code> against
+<code>ISD-R</code> with operator-owned DPauth / DPpb material.</p>
+<ol>
+<li>
+<p>Drop the operator material into the local-access cert zone.</p>
+<div class="code-block"><pre><code>cp ~/yggdra-secrets/op-alpha-auth.cert.der  SCP11/local_access/certs/
+cp ~/yggdra-secrets/op-alpha-auth.key.pem   SCP11/local_access/certs/
+cp ~/yggdra-secrets/op-alpha-pb.cert.der    SCP11/local_access/certs/
+cp ~/yggdra-secrets/op-alpha-pb.key.pem     SCP11/local_access/certs/
+</code></pre></div>
+</li>
+<li>
+<p>Author a sidecar metadata file beside each certificate. The selector
+   reads either <code>&lt;certificate&gt;.meta.json</code> or
+   <code>&lt;stem&gt;.meta.json</code>.</p>
+<div class="code-block"><pre><code>{
+  &quot;role&quot;: &quot;auth&quot;,
+  &quot;private_key_path&quot;: &quot;op-alpha-auth.key.pem&quot;,
+  &quot;root_ci_pkid&quot;: &quot;F54172BDF98A95D65CBEB88A38A1C11D800A85C3&quot;,
+  &quot;server_address&quot;: &quot;local.smdpp.operator.example&quot;
+}
+</code></pre></div>
+</li>
+<li>
+<p>Verify the inventory with the local-access shell's <code>CERTS</code> verb
+   (alias <code>SMDP-CERTS</code>).</p>
+<div class="code-block"><pre><code>yggdrasim-scp11-local-access --cmd &quot;STATUS; CERTS; EXIT&quot;
+</code></pre></div>
+<p>Expected: the new records appear with <code>source=local_override</code>,
+they win over the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.26 bundle, and the active card's
+<code>allowed_ci_pkids</code> accept the chosen <code>root_ci_pkid</code>. Add <code>--json</code>
+or <code>--yaml</code> to <code>CERTS</code> for a machine-readable inventory dump.</p>
+</li>
+<li>
+<p>Run a download against a card.</p>
+<div class="code-block"><pre><code>yggdrasim-scp11-local-access --cmd &quot;LOAD-PROFILE; EXIT&quot;
+</code></pre></div>
+</li>
+</ol>
+<p><strong>Reference.</strong> Selector code: <code>SCP11/local_access/cert_store.py</code> -- the
+full sidecar schema (every field) lives in the canonical operator
+guide.</p>
+<h2 id="recipe-2-bring-your-own-rsp-certs-eim-local">Recipe 2: Bring-your-own <abbr title="Remote SIM Provisioning">RSP</abbr> certs (eim-local)</h2>
+<p>Identical drop-in pattern as Recipe 1, but the destination is
+<code>SCP11/eim_local/certs/</code>. The eim-local shell mirrors the selected
+DPauth <code>server_address</code> into the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> activation code when the package
+does not pin a different <code>smdp_address</code>.</p>
+<p>The eim-local shell does not expose a dedicated DPauth/DPpb inventory
+verb (the selector is exercised silently when the flow runs). Verify
+functionally:</p>
+<div class="code-block"><pre><code>yggdrasim-scp11-eim-local --cmd &quot;STATUS; LOAD-PROFILE; EXIT&quot;
+</code></pre></div>
+<h2 id="recipe-3-load-an-operator-eim-signing-certificate">Recipe 3: Load an operator <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> signing certificate</h2>
+<p>Replace the bundled fake-<abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> signing certificates with operator-issued
+material for <code>ADD-INITIAL-EIM</code> / <code>ADD-EIM</code>.</p>
+<ol>
+<li>
+<p>Drop the certificate (and matching key, if held in-band) into
+   <code>SCP11/eim_local/certs/eim/</code>. The mirror at
+   <code>Workspace/LocalEIM/certs/eim/</code> is consulted by the same selector.</p>
+</li>
+<li>
+<p>Author a sidecar metadata file. The <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> cert store classifies files
+   as <code>signing</code>, <code>tls</code>, or <code>ci</code>; spell out the role explicitly so the
+   selector does not have to guess.</p>
+<div class="code-block"><pre><code>{
+  &quot;role&quot;: &quot;signing&quot;,
+  &quot;private_key_path&quot;: &quot;op-alpha-eim.key.pem&quot;,
+  &quot;root_ci_pkids&quot;: [&quot;F54172BDF98A95D65CBEB88A38A1C11D800A85C3&quot;],
+  &quot;subject_cn&quot;: &quot;operator-alpha.eim.example&quot;,
+  &quot;curve&quot;: &quot;NIST&quot;
+}
+</code></pre></div>
+</li>
+<li>
+<p>Verify with the eim-local shell's <code>EIM-CERTS</code> verb.</p>
+<div class="code-block"><pre><code>yggdrasim-scp11-eim-local --cmd &quot;STATUS; EIM-CERTS; EXIT&quot;
+</code></pre></div>
+<p>Expected: <code>source=local_eim_dir</code>, <code>role=signing</code>, the chosen
+<code>root_ci_pkids</code> intersect the active <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity's preferred <abbr title="Certificate Issuer">CI</abbr>
+list. Add <code>--json</code> or <code>--yaml</code> for machine-readable output, or
+pass a package path / cert path positional to preview how the
+selector would resolve a specific call site.</p>
+</li>
+</ol>
+<p><strong>Reference.</strong> Selector code: <code>SCP11/eim_local/eim_cert_store.py</code>.</p>
+<h2 id="recipe-4-replace-the-simulator-personality">Recipe 4: Replace the simulator personality</h2>
+<p>Set the <abbr title="eUICC Identifier">EID</abbr>, <abbr title="Answer To Reset">ATR</abbr>, AIDs, default SM-DP+ address, <abbr title="Embedded UICC">eUICC</abbr>-side allowed <abbr title="Certificate Issuer">CI</abbr>
+list, and on-card <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> keysets used by the <strong>simulated</strong> card.</p>
+<ol>
+<li>
+<p>Author the file outside the repository.</p>
+<div class="code-block"><pre><code>{
+  &quot;eid&quot;: &quot;89...your 32 hex digits...&quot;,
+  &quot;atr_hex&quot;: &quot;3B9F96801FC78031A073BE21136743200718000001A5&quot;,
+  &quot;default_dp_address&quot;: &quot;rsp.operator.example&quot;,
+  &quot;root_ci_pkid_hex&quot;: &quot;F54172BDF98A95D65CBEB88A38A1C11D800A85C3&quot;,
+  &quot;isdr&quot;:   { &quot;aid&quot;: &quot;A0000005591010FFFFFFFF8900000100&quot;, &quot;label&quot;: &quot;ISDR&quot;  },
+  &quot;ecasd&quot;:  { &quot;aid&quot;: &quot;A0000005591010FFFFFFFF8900000200&quot;, &quot;label&quot;: &quot;ECASD&quot; },
+  &quot;mno_sd&quot;: { &quot;aid&quot;: &quot;A000000151000000&quot;,                 &quot;label&quot;: &quot;MNO-SD&quot; },
+  &quot;scp03_keys&quot;:     { &quot;kenc_hex&quot;: &quot;...&quot;, &quot;kmac_hex&quot;: &quot;...&quot;, &quot;dek_hex&quot;: &quot;...&quot;, &quot;kvn&quot;: 48 },
+  &quot;scp80_security&quot;: { &quot;spi&quot;: &quot;1621&quot;, &quot;kic&quot;: &quot;15&quot;, &quot;kid&quot;: &quot;15&quot;, &quot;tar&quot;: &quot;B00000&quot;,
+                      &quot;key_enc_hex&quot;: &quot;...&quot;, &quot;key_mac_hex&quot;: &quot;...&quot; },
+  &quot;configured_data&quot;: {
+    &quot;root_smds_address&quot;: &quot;root-smds.example.com&quot;,
+    &quot;additional_root_smds_addresses&quot;: [&quot;smds2.example&quot;, &quot;smds3.example&quot;],
+    &quot;allowed_ci_pkids_hex&quot;:            [&quot;F54172BDF98A95D65CBEB88A38A1C11D800A85C3&quot;],
+    &quot;ci_list_hex&quot;:                     [&quot;F54172BDF98A95D65CBEB88A38A1C11D800A85C3&quot;]
+  }
+}
+</code></pre></div>
+</li>
+<li>
+<p>Point the simulator at it.</p>
+<div class="code-block"><pre><code>export YGGDRASIM_SIM_ISDR_CONFIG=~/yggdra-secrets/operator-isdr.json
+</code></pre></div>
+</li>
+<li>
+<p>Boot the simulator and confirm the load. The unified launcher's
+   read-only preflight covers the simulator boot path; an <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>
+   status probe against the simulator confirms the file is being
+   consumed:</p>
+<div class="code-block"><pre><code>yggdrasim --doctor
+YGGDRASIM_CARD_BACKEND=sim yggdrasim-scp03 --cmd &quot;STATUS; EXIT&quot;
+</code></pre></div>
+</li>
+</ol>
+<p>The original <code>Workspace/SIMCARD/isdr_config.json</code> is untouched. Drop
+the env var to fall back to the bundled starter material.</p>
+<h2 id="recipe-5-replace-the-simulator-default-eim-identity">Recipe 5: Replace the simulator default <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity</h2>
+<p>Used on first boot, when the card's <code>BF55</code> <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity has not yet
+been programmed. Authoring follows the same pattern as Recipe 4, with
+the override env var <code>YGGDRASIM_SIM_EIM_IDENTITY</code> and the schema below:</p>
+<div class="code-block"><pre><code>{
+  &quot;display_name&quot;: &quot;Example lab&quot;,
+  &quot;eim_id&quot;: &quot;2.25....&quot;,
+  &quot;eim_id_type&quot;: &quot;oid&quot;,
+  &quot;eim_fqdn&quot;: &quot;eim.operator.example&quot;,
+  &quot;eim_endpoint&quot;: &quot;https://eim.operator.example/gsma/rsp2/asn1&quot;,
+  &quot;euicc_ci_pk_id&quot;: &quot;F54172BDF98A95D65CBEB88A38A1C11D800A85C3&quot;,
+  &quot;eim_public_key_cert_path&quot;: &quot;/path/to/eim_signing.pem&quot;,
+  &quot;trusted_tls_cert_path&quot;: &quot;/path/to/eim_tls.pem&quot;
+}
+</code></pre></div>
+<p><code>euicc_ci_pk_id</code> must match a <abbr title="Certificate Issuer">CI</abbr> SKI in the simulator's
+<code>configured_data.allowed_ci_pkids_hex</code>.</p>
+<h2 id="recipe-6-load-scp03-and-scp80-keysets">Recipe 6: Load <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> and <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> keysets</h2>
+<p>Two stages: file-based defaults, then the per-card SQLite inventory
+(authoritative).</p>
+<ol>
+<li>
+<p><strong>File-based default (boot).</strong> Edit
+   <code>Workspace/SCP03/keys.ini</code>. The four secret fields are 16-byte hex.</p>
+<div class="code-block"><pre><code>[KEYS]
+enc = ...your 32 hex chars...
+mac = ...your 32 hex chars...
+dek = ...your 32 hex chars...
+kvn = 30
+aid = A000000151000000
+adm = 3132333435363738
+</code></pre></div>
+<p><code>kvn</code> must match the on-card keyset version (the simulated card's
+<code>isdr_config.json.scp03_keys.kvn</code>); a mismatch surfaces as
+<code>INITIALIZE UPDATE</code> returning <code>6982</code> / <code>6A88</code>.</p>
+</li>
+<li>
+<p><strong>Per-card inventory (runtime).</strong> Connect the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> admin shell
+   to a card; the shell auto-binds to the active <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> and seeds a
+   per-card record on first use. To rotate the active card's keyset
+   in place, use the <code>CONFIG</code> wizard:</p>
+<div class="code-block"><pre><code>SCP03&gt; CONFIG
+... wizard prompts for ENC / MAC / DEK / KVN / AID / ADM ...
+SCP03&gt; SHOW
+SCP03&gt; EXIT
+</code></pre></div>
+<p><code>CONFIG</code> writes through to both the module-level state and the
+per-<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> inventory namespace (<code>iccid/&lt;ICCID&gt;/scp03</code>); on the
+next connect to the same card, that record is loaded ahead of
+<code>keys.ini</code>. Delete the <code>[KEYS]</code> section in <code>keys.ini</code> once the
+per-card record is the source of truth.</p>
+</li>
+<li>
+<p><strong><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> parameters.</strong> The <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell follows the same
+   pattern with lowercase verbs:</p>
+<div class="code-block"><pre><code>yggdrasim-scp80 --cmd &quot;iccid &lt;ICCID&gt;; set kic &lt;16-byte-hex&gt;; set kid &lt;16-byte-hex&gt;; set kic_indicator &lt;hex&gt;; set kid_indicator &lt;hex&gt;; show; quit&quot;
+</code></pre></div>
+<p>Slot names follow <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 225 §5.1.1: <code>kic</code> / <code>kid</code> are the
+16-byte ciphering and integrity keys; <code>kic_indicator</code> /
+<code>kid_indicator</code> are the 1-byte indicator bytes that select algorithm
+plus key index in the Command Packet header. Legacy <code>key_enc</code> /
+<code>key_mac</code> and 2-byte <code>kic</code> / <code>kid</code> values are auto-migrated on
+load. <code>set</code> updates the active <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> config; <code>show</code> prints the
+resolved values. The per-<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> record is persisted to
+<code>iccid/&lt;ICCID&gt;/scp80</code> and is preferred over the legacy
+<code>Workspace/SCP80/ota_config.ini</code> on the next bind.</p>
+</li>
+<li>
+<p><strong>Encrypt the inventory at rest.</strong> Continue with <a href="#recipe-10-turn-on-inventory-encryption">Recipe
+   10</a>.</p>
+</li>
+</ol>
+<h2 id="recipe-7-load-suci-keys">Recipe 7: Load <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> keys</h2>
+<p>The <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> helper holds <strong>one</strong> active key file at a time. The path is
+resolved relative to the runtime workspace.</p>
+<div class="code-block"><pre><code>yggdrasim-suci-tool --cmd &quot;USE keys/operator-alpha.key; STATUS; DUMP; EXIT&quot;
+</code></pre></div>
+<p><code>secp256r1</code> (Profile A) and <code>curve25519</code> (Profile B) are supported.
+The <code>TOOL</code> verb prints the active <code>suci-keytool</code> binary path; override
+it with <code>TOOL &lt;path&gt;</code> when the binary lives outside the standard
+search.</p>
+<div class="admonition note">
+<p class="admonition-title">Custodial reminder</p>
+<p><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key files are 32 bytes of long-term home-network material.
+Keep them at 0600, never share across operators, and rotate per the
+home-network's policy. They never belong inside the inventory
+encryption envelope -- they are operator key material, not stored
+application state.</p>
+</div>
+<h2 id="recipe-8-seed-a-yggdracore-subscription">Recipe 8: Seed a YggdraCore subscription</h2>
+<p>The in-process AUSF / AAnF stub holds subscribers in memory only.
+There is no on-disk format.</p>
+<div class="code-block"><pre><code>from Tools.YggdraCore.subscription_store import get_default_subscription_store
+
+store = get_default_subscription_store()
+store.upsert(
+    supi=&quot;imsi-001010000000001&quot;,
+    k=bytes.fromhex(&quot;0123456789ABCDEFFEDCBA9876543210&quot;),
+    opc=bytes.fromhex(&quot;CD63CB71954A155A5DC83A7BFD11A41C&quot;),
+    amf=b&quot;\x80\x00&quot;,
+    sqn=b&quot;\x00\x00\x00\x00\x00\x01&quot;,
+    mcc=&quot;001&quot;,
+    mnc=&quot;01&quot;,
+    routing_indicator=&quot;0&quot;,
+    akma_enabled=True,
+)
+</code></pre></div>
+<p><code>K</code> and <code>OPc</code> are exactly 16 bytes; <code>AMF</code> is 2; <code>SQN</code> is 6; <code>MCC</code> is
+3 digits; <code>MNC</code> is 2 or 3 digits; <code>RID</code> is 1..4 digits. The store
+auto-bumps <code>SQN</code> on every successful authentication (TS 33.102 Annex
+C) and refuses overflow.</p>
+<p>For BYO Open5GS (<code>YGGDRASIM_5GCORE_MODE=byo</code>), the same record shape
+provisions a real subscriber DB through <code>pymongo</code>; pass the Mongo URI
+and database name to <code>Open5gsBridge</code> directly.</p>
+<h2 id="recipe-9-attach-eum-session-keys-to-a-pcap">Recipe 9: Attach EUM session keys to a pcap</h2>
+<p>Use this to drive the bundled Lua dissector against a stuck profile
+download.</p>
+<ol>
+<li>
+<p>Write the repository.</p>
+<div class="code-block"><pre><code>yggdrasim-eum-diag store-keys \
+    --iccid 8988000000000000001 \
+    --shs-enc AABBCCDDEEFF00112233445566778899 \
+    --shs-mac 00112233445566778899AABBCCDDEEFF \
+    --dek    0F0E0D0C0B0A09080706050403020100 \
+    --keys-out ~/secrets/eum-keys.json
+</code></pre></div>
+<p>The writer chmods the file to <code>0600</code> on POSIX; any
+group/other-readable mode is reported on load.</p>
+</li>
+<li>
+<p>Run the dissector against the failing pcap, reusing the stored
+   repository.</p>
+<div class="code-block"><pre><code>export YGGDRASIM_EUM_SESSION_KEYS=~/secrets/eum-keys.json
+yggdrasim-eum-diag inject-keys \
+    --bundle-file ~/secrets/eum-keys.json \
+    --pcap ~/captures/failing-example.pcapng
+</code></pre></div>
+<p><code>inject-keys</code> accepts either the per-bundle CLI flags
+(<code>--iccid / --shs-enc / --shs-mac / --dek</code>) or <code>--bundle-file</code>
+pointing at an existing repository JSON. The bundled Lua
+dissector reads the same file from
+<code>YGGDRASIM_EUM_SESSION_KEYS</code>, so exporting the env var lets
+additional <code>tshark</code> / Wireshark sessions decode the same pcap
+without re-running <code>inject-keys</code>.</p>
+</li>
+<li>
+<p>For an offline <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> decode without the pcap, use:</p>
+<div class="code-block"><pre><code>yggdrasim-eum-diag decode-bpp \
+    --bpp ~/captures/bf36.der \
+    --keys ~/secrets/eum-keys.json
+</code></pre></div>
+</li>
+</ol>
+<p>The repository is keyed by <abbr title="Integrated Circuit Card Identifier">ICCID</abbr>, so a single file may carry every
+session under investigation.</p>
+<h2 id="recipe-10-turn-on-inventory-encryption">Recipe 10: Turn on inventory encryption</h2>
+<p>The full step-by-step recipe lives at
+<a href="enable-inventory-encryption.html"><code>enable-inventory-encryption.md</code></a>. The
+short form:</p>
+<ol>
+<li>Identify a recipient: <code>gpg --list-keys --with-colons | rg '^uid'</code></li>
+<li>
+<p>Edit <code>state/inventory_crypto.json</code>:</p>
+<div class="code-block"><pre><code>{
+  &quot;enabled&quot;: true,
+  &quot;provider&quot;: &quot;gpg&quot;,
+  &quot;gpg&quot;: { &quot;binary&quot;: &quot;gpg&quot;, &quot;recipients&quot;: [&quot;YOUR_FPR_HERE&quot;] }
+}
+</code></pre></div>
+</li>
+<li>
+<p>Trigger any inventory write (running the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell against a
+   card and exiting cleanly is enough -- it will write the per-card
+   <code>scp03</code> namespace), then confirm the on-disk bytes start with
+   <code>-----BEGIN PGP MESSAGE-----</code>.</p>
+</li>
+<li>Verify with <code>yggdrasim --doctor</code> (the <code>gpg</code> probe must report
+   <code>ok</code>); the resulting on-disk bytes are the actual proof the
+   envelope took.</li>
+</ol>
+<p><code>plaintext_fallback_writes</code> is the strict-mode escape hatch -- leave it
+<code>false</code> so the writer refuses to drop plaintext on disk while the GPG
+provider is ready.</p>
+<h2 id="recipe-11-relocate-the-runtime-root">Recipe 11: Relocate the runtime root</h2>
+<div class="code-block"><pre><code>export YGGDRASIM_RUNTIME_ROOT=/var/lib/operator-alpha/yggdra
+mkdir -p &quot;$YGGDRASIM_RUNTIME_ROOT&quot;
+yggdrasim --doctor
+</code></pre></div>
+<p>The doctor's <code>workspace</code> probe confirms the resolved root and that
+<code>plugins/</code>, <code>state/</code>, and <code>Workspace/</code> exist underneath it.</p>
+<p>The override is persisted to <code>~/.yggdrasim/env_overrides.json</code> so the
+choice survives across runs without creating a chicken-and-egg with
+the resolver. Source checkouts default to the repository root; frozen
+builds default to a sibling <code>YggdraSIM-data</code> directory next to the
+executable, falling back to <code>~/YggdraSIM-data</code>.</p>
+<h2 id="bring-your-own-keys-checklist">Bring-your-own keys checklist</h2>
+<p>A concise pre-flight list before pushing any operator material into a
+non-test environment:</p>
+<ol>
+<li><strong>DPauth / DPpb pairs.</strong> Drop into
+   <code>SCP11/&lt;flavor&gt;/certs/</code> with sidecar <code>.meta.json</code>. Verify with
+   the local-access shell's <code>CERTS</code> verb (or, for eim-local, by
+   running <code>LOAD-PROFILE</code> and checking the result).</li>
+<li><strong><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> signing certificates.</strong> Drop into
+   <code>SCP11/eim_local/certs/eim/</code>. Verify with the eim-local shell's
+   <code>EIM-CERTS</code> verb.</li>
+<li><strong>Simulator personality.</strong> Author externally; point
+   <code>YGGDRASIM_SIM_ISDR_CONFIG</code> / <code>YGGDRASIM_SIM_EIM_IDENTITY</code> at the
+   files.</li>
+<li><strong><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> keysets.</strong> Migrate <code>keys.ini</code> into the per-card SQLite
+   inventory; turn on inventory crypto; delete the <code>[KEYS]</code> section.</li>
+<li><strong><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> keysets.</strong> Per-<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> inventory record; drop legacy
+   <code>ota_config.ini</code>.</li>
+<li><strong><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> keys.</strong> Author per home-network. Never reuse across
+   operators.</li>
+<li><strong>YggdraCore subscribers.</strong> Provision through <code>upsert(...)</code> or the
+   BYO Open5GS bridge. Stub state is intentionally non-persistent.</li>
+<li><strong>EUM session keys.</strong> Author with <code>yggdrasim-eum-diag store-keys</code>,
+   chmod 0600, point <code>YGGDRASIM_EUM_SESSION_KEYS</code> at the file.</li>
+<li><strong><abbr title="Hardware-In-The-Loop">HIL</abbr> keybags.</strong> Drop next to the pcap; auto-discovery picks them
+   up. Delete after use.</li>
+<li><strong>Inventory crypto.</strong> Turn on before any non-test card is bound.</li>
+<li><strong>Plugins.</strong> Leave disabled unless a local plugin is required. Opt
+    in with <code>YGGDRASIM_ALLOW_PLUGINS=1</code>; hard-lock attestation builds
+    with <code>YGGDRASIM_DISALLOW_PLUGINS=1</code>.</li>
+<li><strong>Workspace seed material.</strong> Treat every committed sample as a
+    test fixture. Replace, override, or relocate before non-test use.</li>
+</ol>
+<h2 id="validation">Validation</h2>
+<p>For each recipe above, the canonical "did it stick?" probes are:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Surface</th>
+<th>Probe</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> <abbr title="Remote SIM Provisioning">RSP</abbr> certs</td>
+<td><code>yggdrasim-scp11-local-access --cmd "STATUS; CERTS; EXIT"</code></td>
+</tr>
+<tr>
+<td><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> signing certs</td>
+<td><code>yggdrasim-scp11-eim-local --cmd "STATUS; EIM-CERTS; EXIT"</code></td>
+</tr>
+<tr>
+<td>Simulator personality</td>
+<td><code>YGGDRASIM_CARD_BACKEND=sim yggdrasim-scp03 --cmd "STATUS; EXIT"</code></td>
+</tr>
+<tr>
+<td><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> keysets</td>
+<td><code>yggdrasim-scp03 --cmd "SHOW; EXIT"</code></td>
+</tr>
+<tr>
+<td><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> keysets</td>
+<td><code>yggdrasim-scp80 --cmd "iccid &lt;ICCID&gt;; show; quit"</code></td>
+</tr>
+<tr>
+<td><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> keys</td>
+<td><code>yggdrasim-suci-tool --cmd "STATUS; EXIT"</code></td>
+</tr>
+<tr>
+<td>Inventory crypto</td>
+<td><code>yggdrasim --doctor</code> (look for the <code>gpg</code> probe row)</td>
+</tr>
+<tr>
+<td>Runtime root</td>
+<td><code>yggdrasim --doctor</code> (look for the <code>workspace</code> probe row)</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="related-documentation">Related documentation</h2>
+<ul>
+<li><a href="https://github.com/1oT/YggdraSIM/blob/v2.2.0/guides/CONFIGURATION_AND_CERTIFICATES.md">Configuration and Certificates (canonical operator guide)</a></li>
+<li><a href="enable-inventory-encryption.html">Enable Inventory Encryption</a></li>
+<li><a href="download-a-profile-local.html">Download a Profile (Local Access)</a></li>
+<li><a href="diagnostics-toolbox.html">Diagnostics Toolbox</a></li>
+<li><a href="../reference/runtime-root.html">Runtime Root reference</a></li>
+<li><a href="../reference/state-schema.html">State schema reference</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#decision-tree" class="toc-link">Decision tree</a>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#recipe-1-bring-your-own-rsp-certs-local-access" class="toc-link">Recipe 1: Bring-your-own RSP certs (local-access)</a>
+            <a href="#recipe-2-bring-your-own-rsp-certs-eim-local" class="toc-link">Recipe 2: Bring-your-own RSP certs (eim-local)</a>
+            <a href="#recipe-3-load-an-operator-eim-signing-certificate" class="toc-link">Recipe 3: Load an operator eIM signing certificate</a>
+            <a href="#recipe-4-replace-the-simulator-personality" class="toc-link">Recipe 4: Replace the simulator personality</a>
+            <a href="#recipe-5-replace-the-simulator-default-eim-identity" class="toc-link">Recipe 5: Replace the simulator default eIM identity</a>
+            <a href="#recipe-6-load-scp03-and-scp80-keysets" class="toc-link">Recipe 6: Load SCP03 and SCP80 keysets</a>
+            <a href="#recipe-7-load-suci-keys" class="toc-link">Recipe 7: Load SUCI keys</a>
+            <a href="#recipe-8-seed-a-yggdracore-subscription" class="toc-link">Recipe 8: Seed a YggdraCore subscription</a>
+            <a href="#recipe-9-attach-eum-session-keys-to-a-pcap" class="toc-link">Recipe 9: Attach EUM session keys to a pcap</a>
+            <a href="#recipe-10-turn-on-inventory-encryption" class="toc-link">Recipe 10: Turn on inventory encryption</a>
+            <a href="#recipe-11-relocate-the-runtime-root" class="toc-link">Recipe 11: Relocate the runtime root</a>
+            <a href="#bring-your-own-keys-checklist" class="toc-link">Bring-your-own keys checklist</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#related-documentation" class="toc-link">Related documentation</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

@@ -1,3 +1,0 @@
-# Print the SCP03 command reference.
-HELP
-EXIT

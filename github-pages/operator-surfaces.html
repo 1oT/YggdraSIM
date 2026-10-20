@@ -10,8 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="tailwind.css?v=2">
-  <link rel="stylesheet" href="ygg.css?v=2">
+  <link rel="stylesheet" href="tailwind.css?v=3">
+  <link rel="stylesheet" href="ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="" data-ygg-partial-path="partials/sidebar.html" data-ygg-active-link="operator-surfaces.html">
@@ -20,7 +20,7 @@
 
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="ygg-layout.js?v=2"></script>
+  <script src="ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -64,7 +64,7 @@
 <tr>
 <td><code>main/main.py</code></td>
 <td>you want a unified launcher and guide entry point</td>
-<td>module dispatch, docs, about, license, automation entry points</td>
+<td>module dispatch, Card Bridge menu, docs, about, license, automation entry points</td>
 <td><code>python main/main.py</code></td>
 </tr>
 <tr>
@@ -81,15 +81,15 @@
 </tr>
 <tr>
 <td><code>SCP11/live/</code></td>
-<td>the workflow is relay-first and should match live defaults</td>
-<td><code>DOWNLOAD-PROFILE</code>, <code>DISCOVER</code>, <code>DOWNLOAD</code>, optional plugin-backed <code>POLL</code></td>
+<td>the workflow is relay-first</td>
+<td><code>DOWNLOAD-PROFILE</code>, <code>DISCOVER</code>, <code>DOWNLOAD</code>, optional local extensions, explicit ES9 CA controls</td>
 <td><code>python -m SCP11.live</code></td>
 </tr>
 <tr>
 <td><code>SCP11/test/</code></td>
-<td>the workflow is relay-first but needs lab-only shaping or test defaults</td>
-<td>live-shaped relay surface with test certificates and request-variant controls</td>
-<td><code>python -m SCP11.test</code></td>
+<td>older imports still reference the test namespace</td>
+<td>compatibility shims over the eSIM management relay implementation</td>
+<td>import only</td>
 </tr>
 <tr>
 <td><code>SCP11/local_access/</code></td>
@@ -100,7 +100,7 @@
 <tr>
 <td><code>SCP11/eim_local/</code></td>
 <td>the task is on the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> side rather than the relay side</td>
-<td><code>ADD-EIM</code>, package queues, localized polling, handover, response logs</td>
+<td><code>ADD-EIM</code>, package queues, hotfolders, handover, response logs</td>
 <td><code>python -m SCP11.eim_local</code></td>
 </tr>
 <tr>
@@ -122,6 +122,18 @@
 <td><code>python -m Tools.HilBridge.supervisor</code></td>
 </tr>
 <tr>
+<td><code>Tools/CardBridge/</code></td>
+<td>a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader is attached to another host</td>
+<td>loopback HTTP <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> bridge, bearer-token auth, SSH tunnel topology, remote-card input for CLI, GUI, and <abbr title="Hardware-In-The-Loop">HIL</abbr> consumers</td>
+<td><code>python main/main.py --card-bridge</code> or <code>python -m Tools.CardBridge</code></td>
+</tr>
+<tr>
+<td><code>yggdrasim_common/remote_lab/</code></td>
+<td>a set of rigs is shared by several operators</td>
+<td>rig inventory, exclusive sessions with heartbeat expiry, card offers to modem rigs, invite exchange</td>
+<td><code>yggdrasim-lab-agent</code> (publish), <code>yggdrasim-lab</code> (use)</td>
+</tr>
+<tr>
 <td><code>Tools/ApduFuzz/</code></td>
 <td>the task is opt-in, allow-listed <abbr title="Embedded UICC">eUICC</abbr> <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> mutation fuzzing</td>
 <td>mutation-based <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> fuzzer with hard-gated allow list</td>
@@ -134,10 +146,22 @@
 <td><code>python -m Tools.EumDiag</code></td>
 </tr>
 <tr>
+<td><code>Tools/YggdraCore/</code></td>
+<td>a 5G core stub is needed for AKA / AKMA round-trips (loopback or BYO-Open5GS)</td>
+<td>AUSF / AAnF stubs, FastAPI loopback, Open5GS provisioning bridge</td>
+<td><code>YGGDRASIM_5GCORE_MODE=stub</code> (library / HTTP stub)</td>
+</tr>
+<tr>
 <td><code>SIMCARD/</code></td>
 <td>the task needs an in-process simulated <abbr title="Universal Integrated Circuit Card">UICC</abbr> / <abbr title="Embedded UICC">eUICC</abbr> instead of a physical reader</td>
 <td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> / <abbr title="GlobalPlatform">GP</abbr> / <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> / Toolkit / 5G AKA / AKMA / <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> / <code>GET IDENTITY</code></td>
 <td><code>--card-backend sim</code> on any launcher</td>
+</tr>
+<tr>
+<td><code>yggdrasim_common/gui_server/</code></td>
+<td>a desktop or web-served GUI Command Center is wanted</td>
+<td>typed action registry, reader strip, live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> dock, Card Bridge panel, FastAPI / pywebview surfaces</td>
+<td><code>python main/main.py --gui</code> or <code>--web-server</code></td>
 </tr>
 </tbody>
 </table></div>
@@ -166,9 +190,13 @@ python -m SCP80 --cmd &quot;show; history; exit&quot;
 <li>Use <code>SCP11/eim_local</code> when the operator model is <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-side package or handover work.</li>
 <li>Use <code>Tools/ProfilePackage</code> before card work when the package needs inspection, linting, or transcode.</li>
 <li>Use <code>Tools/HilBridge</code> when a physical card must stay in a reader while also serving a modem.</li>
+<li>Use <code>Tools.CardBridge</code> or <code>python main/main.py --card-bridge</code> when the reader is remote and APDUs should cross an SSH tunnel.</li>
+<li>Use the GUI Command Center when you need reader state, action forms, live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> rows, and remote-rig controls in one workbench.</li>
 <li>Use <code>Tools/ApduFuzz</code> only on lab-only eUICCs after explicitly enabling the allow-list gate.</li>
 <li>Use <code>Tools/EumDiag</code> when an EUM / SM-DP+ capture must be replayed or decoded with operator-side keys.</li>
+<li>Use <code>Tools/YggdraCore</code> (or <code>YGGDRASIM_5GCORE_MODE=stub</code>) when 5G AKA / AKMA round-trips need a loopback core.</li>
 <li>Use <code>--card-backend sim</code> to swap in the in-process simulator without touching shell command surfaces.</li>
+<li>Use <code>--gui</code> or <code>--web-server</code> to bring up the Universal GUI Command Center on top of any backend.</li>
 </ul>
 <h2 id="related-source-guides">Related source guides</h2>
 <ul>
@@ -200,13 +228,13 @@ python -m SCP80 --cmd &quot;show; history; exit&quot;
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="ygg.js?v=2"></script>
+<script src="ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

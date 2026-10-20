@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/enable-inventory-encryption.html" data-ygg-open-sections="how-to">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -60,7 +60,7 @@ inventory so stored per-card payloads are encrypted at rest.</p>
 <li>write access to <code>state/inventory_crypto.json</code></li>
 </ul>
 <h2 id="default-behavior">Default behavior</h2>
-<p>Out of the box, <code>state/inventory_crypto.json</code> has <code>enabled: false</code>. Payloads
+<p>By default, <code>state/inventory_crypto.json</code> has <code>enabled: false</code>. Payloads
 are stored in clear in the SQLite database. This is deliberate to keep
 onboarding simple. Sensitive labs should enable encryption as soon as the
 first real card state is written.</p>
@@ -87,7 +87,7 @@ first real card state is written.</p>
 <p>Save it. The <code>gpg.binary</code> and <code>gpg.timeout_seconds</code> keys are
 optional; they default to <code>"gpg"</code> on <code>PATH</code> and <code>120</code> seconds
 respectively. Raise the timeout if your deployment uses a smart
-card–backed key that needs a physical touch or a slow
+card-backed key that needs a physical touch or a slow
 <code>pinentry</code>.</p>
 </li>
 <li>
@@ -154,13 +154,13 @@ Each rewrite re-envelopes the row.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

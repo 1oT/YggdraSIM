@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/saip-profiles.html" data-ygg-open-sections="concepts">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -46,6 +46,7 @@ and the technical specification in
             <a href="#json-and-der-forms" class="toc-link">JSON and DER forms</a>
             <a href="#linting" class="toc-link">Linting</a>
             <a href="#sidecars" class="toc-link">Sidecars</a>
+            <a href="#single-profile-elements" class="toc-link">Single profile elements</a>
             <a href="#standards-map" class="toc-link">Standards map</a>
             <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
           </nav>
@@ -55,12 +56,12 @@ and the technical specification in
 edits, lints, and transcodes <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> content.</p>
 <h2 id="layers">Layers</h2>
 <pre class="mermaid"><code>flowchart LR
-    Template["SAIP template<br/>text / JSON"] --> UPP["Unprotected Profile Package"]
-    UPP --> PE["Profile Elements<br/>PE list"]
-    UPP --> ASN1["ASN.1 DER encoding"]
-    UPP --> Bind["BPP binding<br/>#40;on SM-DP+#41;"]
-    Bind --> BPP["Bound Profile Package"]
-    BPP --> Card["eUICC"]</code></pre>
+    Template["SAIP template&lt;br/&gt;text / JSON"] --&gt; UPP["Unprotected Profile Package"]
+    UPP --&gt; PE["Profile Elements&lt;br/&gt;PE list"]
+    UPP --&gt; ASN1["ASN.1 DER encoding"]
+    UPP --&gt; Bind["BPP binding&lt;br/&gt;(on SM-DP+)"]
+    Bind --&gt; BPP["Bound Profile Package"]
+    BPP --&gt; Card["eUICC"]</code></pre>
 <p class="fig-caption">Figure: SAIP profile layers — template through UPP and BPP onto the eUICC</p>
 <ul>
 <li>A <strong>template</strong> is a human-authored profile description.</li>
@@ -131,6 +132,51 @@ under review:</p>
 </table></div>
 <p>These sidecars are used by the download flows to validate what will actually
 land on the card.</p>
+<h2 id="single-profile-elements">Single profile elements</h2>
+<p>The GUI workbench exports and imports one <abbr title="Profile Element (SAIP)">PE</abbr> at a time (ribbon <em>Element</em>
+group and the <abbr title="Profile Element (SAIP)">PE</abbr> card's context menu; <code>saip.export_pe</code> / <code>saip.import_pe</code>
+in the action registry). The complete form is the <em><abbr title="Profile Element (SAIP)">PE</abbr> document</em>, a
+<code>.pe.json</code> file with the schema <code>ygg.pe_document.v1</code>:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Key</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>__ygg_pe_document__</code></td>
+<td><code>schema</code> and <code>pe_type</code>; a template <abbr title="Profile Element (SAIP)">PE</abbr> adds <code>template</code> and its <code>placeholders</code></td>
+</tr>
+<tr>
+<td><code>sections</code></td>
+<td>the <abbr title="Profile Element (SAIP)">PE</abbr>'s decoded tree in the tagged form a saved package uses, without the display labels, so every setting and the workbench's <abbr title="Profile Element (SAIP)">PE</abbr> name survive</td>
+</tr>
+</tbody>
+</table></div>
+<p>The document names nothing outside the <abbr title="Profile Element (SAIP)">PE</abbr>: no source package, no summary,
+no <abbr title="Distinguished Encoding Rules">DER</abbr> copy. Import rebuilds the <abbr title="Profile Element (SAIP)">PE</abbr> from the tree, which re-encodes to the
+same bytes. For <abbr title="Profile Element (SAIP)">PE</abbr>-Application (TCA <abbr title="Embedded UICC">eUICC</abbr> Profile Package v3.4.1 section
+8.7) the tree carries the load block with its <code>loadBlockObject</code> bytes and
+every <code>ApplicationInstance</code>; the export's response lists the load package
+<abbr title="Application Identifier">AID</abbr>, the load block size, a <abbr title="Converted Applet (Java Card)">CAP</abbr> / <abbr title="Intermediate Java Card">IJC</abbr> header inspection and the instance
+AIDs. <abbr title="Distinguished Encoding Rules">DER</abbr> and HEX exports carry the <abbr title="Profile Element (SAIP)">PE</abbr> bytes only.</p>
+<p>Import accepts the <abbr title="Profile Element (SAIP)">PE</abbr> document, a tagged single-section JSON document, the
+plain decoded JSON the JSON tab shows, binary <abbr title="Distinguished Encoding Rules">DER</abbr> and ASCII hex. The tree
+is the editable truth: a document an earlier release wrote also records
+<code>der_hex</code>, and when that no longer matches the tree's re-encoding the
+import reports it and uses the tree. The imported <abbr title="Profile Element (SAIP)">PE</abbr> takes
+the next free <code>identification</code> (section 8.1.3 requires uniqueness), so the
+other PEs keep theirs. A template <abbr title="Profile Element (SAIP)">PE</abbr> that still carries placeholder
+literals is refused; export it with the stored values substituted first.</p>
+<p>The <em><abbr title="Profile Element (SAIP)">PE</abbr> library</em> (<code>saip.save_pe</code>, <code>saip.list_pe_library</code>, <code>saip.load_pe</code>,
+<code>saip.delete_saved_pe</code>; <code>Tools/ProfilePackage/saip_pe_library.py</code>) stores
+the same <abbr title="Profile Element (SAIP)">PE</abbr> document under a name in <code>~/.yggdrasim/saip_pe_library/</code>
+(<code>YGGDRASIM_SAIP_PE_LIBRARY</code>), so a standardised element loads into any
+package without a file dialog. Unlike the file import, loading a saved
+template <abbr title="Profile Element (SAIP)">PE</abbr> keeps its placeholder literals: they are registered in the
+receiving package the way a literal typed into an editor is.</p>
 <h2 id="standards-map">Standards map</h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -174,6 +220,7 @@ land on the card.</p>
             <a href="#json-and-der-forms" class="toc-link">JSON and DER forms</a>
             <a href="#linting" class="toc-link">Linting</a>
             <a href="#sidecars" class="toc-link">Sidecars</a>
+            <a href="#single-profile-elements" class="toc-link">Single profile elements</a>
             <a href="#standards-map" class="toc-link">Standards map</a>
             <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
         </nav>
@@ -190,13 +237,13 @@ land on the card.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

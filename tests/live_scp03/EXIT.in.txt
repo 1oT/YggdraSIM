@@ -1,2 +1,0 @@
-# Single-command session: just leave the shell.
-EXIT

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Card Bridge over SSH — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/remote-apdu-streaming.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Card Bridge over SSH</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Card Bridge over SSH</h1>
+        <p class="page-lead mb-8">Expose a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader over a loopback HTTP bridge, carry the traffic through
+SSH, and make YggdraSIM use that card as if it were local. The same bridge
+can also feed a <abbr title="Hardware-In-The-Loop">HIL</abbr> rig, so a card on a workstation can serve a modem on a
+Raspberry Pi or lab host.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#topologies" class="toc-link">Topologies</a>
+            <a href="#tool-uses-a-remote-reader" class="toc-link toc-link-sub">Tool uses a remote reader</a>
+            <a href="#remote-card-feeds-a-hil-rig" class="toc-link toc-link-sub">Remote card feeds a HIL rig</a>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#start-the-card-bridge" class="toc-link">Start the Card Bridge</a>
+            <a href="#open-the-ssh-tunnel" class="toc-link">Open the SSH tunnel</a>
+            <a href="#configure-yggdrasim-consumers" class="toc-link">Configure YggdraSIM consumers</a>
+            <a href="#feed-a-hil-rig-with-the-remote-card" class="toc-link">Feed a HIL rig with the remote card</a>
+            <a href="#use-the-gui-instead" class="toc-link">Use the GUI instead</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#security-rules" class="toc-link">Security rules</a>
+            <a href="#troubleshooting" class="toc-link">Troubleshooting</a>
+            <a href="#sharing-rigs-across-a-team" class="toc-link">Sharing rigs across a team</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="topologies">Topologies</h2>
+<h3 id="tool-uses-a-remote-reader">Tool uses a remote reader</h3>
+<div class="code-block"><pre><code>YggdraSIM tool host  --ssh -L--&gt;  reader host
+local URL :8642                 Card Bridge :8642 -&gt; PC/SC reader
+</code></pre></div>
+<p>Use this when the operator shell or GUI runs on one machine and the card is
+plugged into another.</p>
+<h3 id="remote-card-feeds-a-hil-rig">Remote card feeds a <abbr title="Hardware-In-The-Loop">HIL</abbr> rig</h3>
+<div class="code-block"><pre><code>workstation reader -&gt; Card Bridge -&gt; SSH forward -&gt; rig HIL bridge -&gt; RemSIM client -&gt; SIMtrace2 -&gt; modem
+</code></pre></div>
+<p>Use this when the modem/SIMtrace2 rig is remote but the card must stay with
+the operator.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<p>Reader side:</p>
+<ul>
+<li>Python 3.10+</li>
+<li>YggdraSIM source install or a build that includes <code>Tools.CardBridge</code></li>
+<li><code>pcscd</code> and <code>pyscard</code></li>
+<li><abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader visible to <code>pcsc_scan</code></li>
+</ul>
+<p>Tool or rig side:</p>
+<ul>
+<li>YggdraSIM installed</li>
+<li>SSH access to the reader side</li>
+<li>for <abbr title="Hardware-In-The-Loop">HIL</abbr>: Linux, SIMtrace2, <code>osmo-remsim-client-st2</code>, and the full/<abbr title="Hardware-In-The-Loop">HIL</abbr>
+  source dependencies</li>
+</ul>
+<p>Card Bridge itself is cross-platform: the reader-side bridge and the
+remote-card consumer flags are supported on Windows, macOS, Linux, and
+Raspberry Pi as long as <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> and SSH are available. Only the direct
+SIMtrace2/RemSIM <abbr title="Hardware-In-The-Loop">HIL</abbr> rig process is Linux-only.</p>
+<p>For a complete dependency install path, use
+<a href="install-remsim-apdu-streaming.html">Install RemSIM / <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</a>. The
+main upstream references are:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Dependency</th>
+<th>Reference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SSH forwarding</td>
+<td><a href="https://www.openssh.org/manual.html">OpenSSH manual pages</a></td>
+</tr>
+<tr>
+<td><abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> middleware and tools</td>
+<td><a href="https://pcsclite.apdu.fr/">PCSC-Lite project</a>, <a href="https://pcsc-tools.apdu.fr/">pcsc-tools</a></td>
+</tr>
+<tr>
+<td>RemSIM client</td>
+<td><a href="https://osmocom.org/projects/osmo-remsim/wiki">Osmocom RemSIM</a>, <a href="https://osmocom.org/projects/cellular-infrastructure/wiki/Binary_Packages">Osmocom binary packages</a></td>
+</tr>
+<tr>
+<td>SIMtrace2 rig</td>
+<td><a href="https://osmocom.org/projects/sim-card/wiki/SIMtrace2">SIMtrace2 wiki</a>, <a href="https://ftp.osmocom.org/binaries/simtrace2/firmware/">SIMtrace2 firmware binaries</a></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="start-the-card-bridge">Start the Card Bridge</h2>
+<p>On the reader host, start the bridge from the unified launcher:</p>
+<div class="code-block"><pre><code>python main/main.py --card-bridge \
+  --card-bridge-port 8642 \
+  --card-bridge-reader-name &quot;ACR&quot;
+</code></pre></div>
+<p>Installed environments can use the dedicated console script or module form:</p>
+<div class="code-block"><pre><code>yggdrasim-card-bridge \
+  --port 8642 \
+  --reader-name &quot;ACR&quot;
+
+# equivalent from a source checkout
+python -m Tools.CardBridge \
+  --port 8642 \
+  --reader-name &quot;ACR&quot;
+</code></pre></div>
+<p>The bridge binds to <code>127.0.0.1</code>, writes a bearer token under
+<code>${XDG_CONFIG_HOME:-~/.config}/yggdrasim/card_bridge/&lt;port&gt;.token</code>, and
+prints the <code>/apdu</code> and <code>/status</code> URLs in its startup banner. <code>/card/reset</code>
+and <code>/ping</code> are served on the same base URL. The token file is created with
+mode <code>0600</code>.</p>
+<p>Use <code>--reader-index 0</code> instead of <code>--reader-name</code> when reader ordering is
+stable. In the interactive launcher, the same controls are available under
+<code>python main/main.py</code> -&gt; <code>[CB] Card Bridge / Card Bridge over SSH</code>.</p>
+<h2 id="open-the-ssh-tunnel">Open the SSH tunnel</h2>
+<p>From the YggdraSIM host to the reader host:</p>
+<div class="code-block"><pre><code>ssh -fN -L 8642:127.0.0.1:8642 user@reader-host
+</code></pre></div>
+<p>For a <abbr title="Hardware-In-The-Loop">HIL</abbr> rig that must consume a workstation card, either run that command
+on the rig, or run the reverse form from the workstation:</p>
+<div class="code-block"><pre><code>ssh -fN -R 8642:127.0.0.1:8642 user@rig-host
+</code></pre></div>
+<h2 id="configure-yggdrasim-consumers">Configure YggdraSIM consumers</h2>
+<p>Copy or otherwise stage the token file on the consumer side:</p>
+<div class="code-block"><pre><code>mkdir -p ~/.config/yggdrasim/card_bridge
+scp user@reader-host:~/.config/yggdrasim/card_bridge/8642.token \
+  ~/.config/yggdrasim/card_bridge/8642.token
+chmod 600 ~/.config/yggdrasim/card_bridge/8642.token
+</code></pre></div>
+<p>Then point a shell at the forwarded bridge:</p>
+<div class="code-block"><pre><code>python main/main.py \
+  --remote-card-url http://127.0.0.1:8642/apdu \
+  --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token
+
+python -m SCP03 \
+  --remote-card-url http://127.0.0.1:8642/apdu \
+  --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token
+</code></pre></div>
+<p>The first command opens the normal CLI menu with the remote card already
+selected for card-consuming tools launched from that process. Other
+card-consuming surfaces that use the shared backend accept the same flags.
+Environment equivalents are:</p>
+<div class="code-block"><pre><code>export YGGDRASIM_CARD_RELAY_URL=http://127.0.0.1:8642/apdu
+export YGGDRASIM_CARD_RELAY_TOKEN_FILE=~/.config/yggdrasim/card_bridge/8642.token
+</code></pre></div>
+<h2 id="feed-a-hil-rig-with-the-remote-card">Feed a <abbr title="Hardware-In-The-Loop">HIL</abbr> rig with the remote card</h2>
+<p>On the rig, after the SSH tunnel is up:</p>
+<div class="code-block"><pre><code>yggdrasim-hil-supervisor \
+  --remote-card-url http://127.0.0.1:8642/apdu \
+  --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token \
+  --apdu-timeout-ms 30000 \
+  --host 127.0.0.1 \
+  --port 9997 \
+  --advertise-host 127.0.0.1 \
+  --usb-vidpid 1d50:60e3
+</code></pre></div>
+<p>The <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge now reads and writes the remote card through the tunnel while
+still exposing its normal rig-side relay state and GSMTAP mirror. Local
+YggdraSIM tools on the rig continue to talk to the <abbr title="Hardware-In-The-Loop">HIL</abbr> relay, not directly
+to the Card Bridge.</p>
+<h2 id="use-the-gui-instead">Use the GUI instead</h2>
+<p>The <a href="../subsystems/gui-command-center.html">Universal GUI Command Center</a> wraps
+this flow in the Card bridge panel. The <strong>Start full rig</strong> action can start
+the local bridge, open SSH forwards, sync the token, install or restart the
+remote <abbr title="Hardware-In-The-Loop">HIL</abbr> service, and verify the final state.</p>
+<p>Use the GUI when you need repeated lab sessions against the same rig. Use the
+CLI flow above when you need a minimal, auditable setup sequence.</p>
+<h2 id="validation">Validation</h2>
+<p>Cheap liveness check:</p>
+<div class="code-block"><pre><code>curl -s http://127.0.0.1:8642/ping
+</code></pre></div>
+<p>Authenticated status:</p>
+<div class="code-block"><pre><code>curl -s \
+  -H &quot;Authorization: Bearer $(cat ~/.config/yggdrasim/card_bridge/8642.token)&quot; \
+  http://127.0.0.1:8642/status | jq .
+</code></pre></div>
+<p>YggdraSIM preflight:</p>
+<div class="code-block"><pre><code>python main/main.py --doctor \
+  --remote-card-url http://127.0.0.1:8642/apdu \
+  --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token
+</code></pre></div>
+<p>CLI menu probe:</p>
+<div class="code-block"><pre><code>python main/main.py
+# then choose [CB] -&gt; [3] Probe configured remote APDU bridge
+</code></pre></div>
+<p>For <abbr title="Hardware-In-The-Loop">HIL</abbr>, also check:</p>
+<div class="code-block"><pre><code>cat state/hil_bridge_supervisor.json
+cat state/hil_bridge_card_relay.json
+</code></pre></div>
+<p>Look for a running supervisor, an <code>ok</code> card relay, and a non-empty <abbr title="Answer To Reset">ATR</abbr>.</p>
+<h2 id="security-rules">Security rules</h2>
+<ul>
+<li>Keep Card Bridge bound to loopback.</li>
+<li>Use SSH for transport encryption and peer authentication.</li>
+<li>Keep bearer tokens in <code>0600</code> files, not shell history.</li>
+<li>Enable full <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> audit only on test cards; APDUs can contain PINs and
+  operator secrets.</li>
+<li>Do not expose <code>/apdu</code> directly on a lab subnet. If a non-loopback bind is
+  unavoidable, use a token, TLS termination, and host firewall rules.</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/ping</code> works, <code>/status</code> returns 401</td>
+<td>wrong or missing bearer token</td>
+<td>copy the token again and verify mode <code>0600</code></td>
+</tr>
+<tr>
+<td>YggdraSIM still opens the local reader</td>
+<td>remote-card URL not applied</td>
+<td>pass <code>--remote-card-url</code> on the exact command being run, or export the env vars</td>
+</tr>
+<tr>
+<td><code>reader busy</code> on the reader host</td>
+<td>another process holds the <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader exclusively</td>
+<td>close the local shell or GUI that owns it; Card Bridge already defaults to <code>--pcsc-share-mode shared</code>, so passing it again changes nothing</td>
+</tr>
+<tr>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> starts but no modem APDUs appear</td>
+<td>RemSIM/SIMtrace2 side not attached</td>
+<td>validate <code>osmo-remsim-client-st2</code>, SIMtrace2 firmware, and USB permissions</td>
+</tr>
+<tr>
+<td>APDUs time out over WAN</td>
+<td>SSH path too slow for default timeout</td>
+<td>raise <code>--apdu-timeout-ms</code> on Card Bridge and <abbr title="Hardware-In-The-Loop">HIL</abbr></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="sharing-rigs-across-a-team">Sharing rigs across a team</h2>
+<p>One Card Bridge plus one SSH forward serves one operator. When several people
+share a set of rigs, put a Remote Lab agent in front: it keeps this same
+<code>/apdu</code> data plane and adds rig inventory, per-person tokens, and exclusive
+session locking so two operators cannot drive one card at once. See
+<a href="run-a-remote-lab-agent.html">Run a Remote Lab Agent</a>.</p>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="run-a-remote-lab-agent.html">Run a Remote Lab Agent</a></li>
+<li><a href="../subsystems/gui-command-center.html">Universal GUI Command Center</a></li>
+<li><a href="install-remsim-apdu-streaming.html">Install RemSIM / <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</a></li>
+<li><a href="../subsystems/hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a></li>
+<li><a href="run-hil-capture.html">Run a <abbr title="Hardware-In-The-Loop">HIL</abbr> Capture</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#topologies" class="toc-link">Topologies</a>
+            <a href="#tool-uses-a-remote-reader" class="toc-link toc-link-sub">Tool uses a remote reader</a>
+            <a href="#remote-card-feeds-a-hil-rig" class="toc-link toc-link-sub">Remote card feeds a HIL rig</a>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#start-the-card-bridge" class="toc-link">Start the Card Bridge</a>
+            <a href="#open-the-ssh-tunnel" class="toc-link">Open the SSH tunnel</a>
+            <a href="#configure-yggdrasim-consumers" class="toc-link">Configure YggdraSIM consumers</a>
+            <a href="#feed-a-hil-rig-with-the-remote-card" class="toc-link">Feed a HIL rig with the remote card</a>
+            <a href="#use-the-gui-instead" class="toc-link">Use the GUI instead</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#security-rules" class="toc-link">Security rules</a>
+            <a href="#troubleshooting" class="toc-link">Troubleshooting</a>
+            <a href="#sharing-rigs-across-a-team" class="toc-link">Sharing rigs across a team</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

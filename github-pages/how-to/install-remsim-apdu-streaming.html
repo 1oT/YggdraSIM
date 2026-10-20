@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Install RemSIM streaming — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/install-remsim-apdu-streaming.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Install RemSIM streaming</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Install RemSIM streaming</h1>
+        <p class="page-lead mb-8">Prepare a Linux lab host or Raspberry Pi for the full <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> streaming stack:
+YggdraSIM <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge, Osmocom RemSIM client for SIMtrace2, GSMTAP capture,
+and optional Card Bridge remote-card input.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#supported-hosts" class="toc-link">Supported hosts</a>
+            <a href="#system-packages" class="toc-link">System packages</a>
+            <a href="#external-dependency-references" class="toc-link">External dependency references</a>
+            <a href="#install-yggdrasim-fullhil-support" class="toc-link">Install YggdraSIM full/HIL support</a>
+            <a href="#install-or-locate-osmo-remsim-client-st2" class="toc-link">Install or locate osmo-remsim-client-st2</a>
+            <a href="#prepare-simtrace2" class="toc-link">Prepare SIMtrace2</a>
+            <a href="#verify-pcsc" class="toc-link">Verify PC/SC</a>
+            <a href="#run-doctor" class="toc-link">Run doctor</a>
+            <a href="#first-local-hil-start" class="toc-link">First local HIL start</a>
+            <a href="#first-remote-card-hil-start" class="toc-link">First remote-card HIL start</a>
+            <a href="#optional-systemd-user-service" class="toc-link">Optional systemd --user service</a>
+            <a href="#validation-checklist" class="toc-link">Validation checklist</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>Use this page before <a href="run-hil-capture.html">Run a <abbr title="Hardware-In-The-Loop">HIL</abbr> Capture</a> or
+<a href="remote-apdu-streaming.html">Card Bridge over SSH</a>.</p>
+<h2 id="supported-hosts">Supported hosts</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Host</th>
+<th>Recommended install</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux x86_64 lab host</td>
+<td><code>scripts/install/install-linux.sh --flavor full</code></td>
+</tr>
+<tr>
+<td>Raspberry Pi OS 64-bit</td>
+<td><code>scripts/install/install-raspberrypi.sh --flavor full</code></td>
+</tr>
+<tr>
+<td>Source checkout</td>
+<td><code>python -m pip install -e '.[full]'</code> or <code>'.[hil]'</code></td>
+</tr>
+<tr>
+<td>Windows / macOS</td>
+<td>clean tools plus Card Bridge / remote <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> streaming; direct SIMtrace2/RemSIM <abbr title="Hardware-In-The-Loop">HIL</abbr> is Linux-only</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="system-packages">System packages</h2>
+<p>Debian / Ubuntu / Raspberry Pi OS:</p>
+<div class="code-block"><pre><code>sudo apt-get update
+sudo apt-get install --no-install-recommends \
+  pcscd pcsc-tools libpcsclite1 libpcsclite-dev \
+  usbutils dfu-util git build-essential pkg-config \
+  autoconf automake libtool \
+  wireshark tshark termshark \
+  python3 python3-venv python3-pip
+</code></pre></div>
+<p>Add the user to groups needed by your distro:</p>
+<div class="code-block"><pre><code>sudo usermod -a -G plugdev,wireshark &quot;$USER&quot;
+</code></pre></div>
+<p>Log out and back in after group changes.</p>
+<h2 id="external-dependency-references">External dependency references</h2>
+<p>Use distro packages where possible. These upstream links are the reference
+points when a package is missing, stale, or needs to be built from source.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Dependency</th>
+<th>Used for</th>
+<th>Upstream install/source reference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Osmocom RemSIM / <code>osmo-remsim-client-st2</code></td>
+<td>SIMtrace2 RemSIM client attached to the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge</td>
+<td><a href="https://osmocom.org/projects/osmo-remsim/wiki">Osmocom RemSIM</a>, <a href="https://osmocom.org/projects/cellular-infrastructure/wiki/Binary_Packages">Osmocom binary packages</a>, <a href="https://gitea.osmocom.org/sim-card/osmo-remsim">osmo-remsim source</a></td>
+</tr>
+<tr>
+<td>SIMtrace2 firmware and tools</td>
+<td>card-emulation firmware, board utilities, USB bring-up</td>
+<td><a href="https://osmocom.org/projects/sim-card/wiki/SIMtrace2">SIMtrace2 wiki</a>, <a href="https://ftp.osmocom.org/binaries/simtrace2/firmware/">firmware binaries</a>, <a href="https://gitea.osmocom.org/sim-card/simtrace2">simtrace2 source</a></td>
+</tr>
+<tr>
+<td><abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> Lite / <code>pcscd</code></td>
+<td>reader middleware on Linux and BSD-like hosts</td>
+<td><a href="https://pcsclite.apdu.fr/">PCSC-Lite project</a>, <a href="https://pcsc-tools.apdu.fr/">pcsc-tools</a></td>
+</tr>
+<tr>
+<td><code>dfu-util</code></td>
+<td>flashing SIMtrace2 card-emulation firmware</td>
+<td><a href="https://dfu-util.sourceforge.net/">dfu-util homepage</a></td>
+</tr>
+<tr>
+<td>Wireshark / <code>tshark</code> / <code>dumpcap</code></td>
+<td>GSMTAP capture, live decode, offline pcap review</td>
+<td><a href="https://www.wireshark.org/download.html">Wireshark downloads</a>, <a href="https://www.wireshark.org/docs/">Wireshark documentation</a></td>
+</tr>
+<tr>
+<td>Termshark</td>
+<td>optional terminal UI around <code>tshark</code> on headless rigs</td>
+<td><a href="https://termshark.io/">Termshark</a></td>
+</tr>
+<tr>
+<td>OpenSSH</td>
+<td><code>ssh -L</code> / <code>ssh -R</code> <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> bridge forwarding</td>
+<td><a href="https://www.openssh.org/manual.html">OpenSSH manual pages</a></td>
+</tr>
+<tr>
+<td>Raspberry Pi OS</td>
+<td>supported arm64 lab rig baseline</td>
+<td><a href="https://www.raspberrypi.com/software/">Raspberry Pi software</a></td>
+</tr>
+<tr>
+<td>pySim</td>
+<td>optional <abbr title="SIMalliance Interoperable Profile">SAIP</abbr>/<abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> helper dependency pulled by YggdraSIM extras</td>
+<td><a href="https://github.com/osmocom/pysim">pySim GitHub mirror</a>, <a href="https://gitea.osmocom.org/sim-card/pysim">pySim Osmocom source</a></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="install-yggdrasim-fullhil-support">Install YggdraSIM full/<abbr title="Hardware-In-The-Loop">HIL</abbr> support</h2>
+<p>Release script:</p>
+<div class="code-block"><pre><code>scripts/install/install-linux.sh --flavor full
+</code></pre></div>
+<p>Source checkout:</p>
+<div class="code-block"><pre><code>python -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e &#39;.[full]&#39;
+</code></pre></div>
+<p>For a lighter source install that only adds the <abbr title="Hardware-In-The-Loop">HIL</abbr> runtime:</p>
+<div class="code-block"><pre><code>python -m pip install -e &#39;.[hil]&#39;
+</code></pre></div>
+<h2 id="install-or-locate-osmo-remsim-client-st2">Install or locate <code>osmo-remsim-client-st2</code></h2>
+<p>First check whether your distro already provides it:</p>
+<div class="code-block"><pre><code>command -v osmo-remsim-client-st2
+osmo-remsim-client-st2 --help
+</code></pre></div>
+<p>If it is not packaged for your host, build/install it using your normal
+Osmocom toolchain process and make sure the resulting executable is on
+<code>PATH</code>, or note the absolute path for the supervisor's <code>--remsim-binary</code>
+/ GUI <strong>RPi REMSIM binary</strong> field.</p>
+<p>Validate the path:</p>
+<div class="code-block"><pre><code>/usr/local/bin/osmo-remsim-client-st2 --help
+</code></pre></div>
+<h2 id="prepare-simtrace2">Prepare SIMtrace2</h2>
+<ol>
+<li>Flash or update the SIMtrace2 card-emulation firmware. Use
+   <code>guides/SIMTRACE2_CARDEM_GUIDE.md</code> for the firmware procedure.</li>
+<li>
+<p>Confirm USB enumeration:</p>
+<div class="code-block"><pre><code>lsusb | rg -i &#39;simtrace|1d50:60e3&#39;
+</code></pre></div>
+</li>
+<li>
+<p>Confirm optional tool visibility:</p>
+<div class="code-block"><pre><code>command -v simtrace2-list || true
+command -v simtrace2-tool || true
+</code></pre></div>
+</li>
+</ol>
+<h2 id="verify-pcsc">Verify <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr></h2>
+<div class="code-block"><pre><code>systemctl status pcscd --no-pager
+pcsc_scan -n
+python main/main.py --card-bridge --card-bridge-no-token --card-bridge-reader-index 0
+</code></pre></div>
+<p>Stop the bridge with <code>Ctrl-C</code> after the startup banner confirms the reader
+opened. On <abbr title="Hardware-In-The-Loop">HIL</abbr>-capable Linux hosts you can also list readers through the <abbr title="Hardware-In-The-Loop">HIL</abbr>
+bridge:</p>
+<div class="code-block"><pre><code>python -m Tools.HilBridge.main --list-readers
+</code></pre></div>
+<p>If the reader is remote, start the Card Bridge on the reader host and validate
+the SSH tunnel before starting <abbr title="Hardware-In-The-Loop">HIL</abbr>:</p>
+<div class="code-block"><pre><code>python main/main.py --card-bridge \
+  --card-bridge-port 8642 \
+  --card-bridge-reader-index 0
+
+curl -s http://127.0.0.1:8642/ping
+</code></pre></div>
+<h2 id="run-doctor">Run doctor</h2>
+<div class="code-block"><pre><code>python main/main.py --doctor
+</code></pre></div>
+<p>Expected <abbr title="Hardware-In-The-Loop">HIL</abbr>-related rows:</p>
+<ul>
+<li><code>hil-bridge-runtime</code></li>
+<li><code>osmo-remsim-client-st2</code></li>
+<li><code>tshark</code></li>
+<li><code>dfu-util</code></li>
+<li><code>lsusb</code></li>
+<li><abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader status</li>
+</ul>
+<p>Warnings for optional tools are acceptable for offline-only work. A live
+SIMtrace2 rig needs the RemSIM client and USB visibility.</p>
+<h2 id="first-local-hil-start">First local <abbr title="Hardware-In-The-Loop">HIL</abbr> start</h2>
+<div class="code-block"><pre><code>yggdrasim-hil-supervisor \
+  --reader-index 0 \
+  --host 127.0.0.1 \
+  --port 9997 \
+  --advertise-host 127.0.0.1 \
+  --usb-vidpid 1d50:60e3
+</code></pre></div>
+<p>If the RemSIM binary is not on <code>PATH</code>, pass it explicitly:</p>
+<div class="code-block"><pre><code>yggdrasim-hil-supervisor \
+  --reader-index 0 \
+  --remsim-binary /usr/local/bin/osmo-remsim-client-st2 \
+  --usb-vidpid 1d50:60e3
+</code></pre></div>
+<h2 id="first-remote-card-hil-start">First remote-card <abbr title="Hardware-In-The-Loop">HIL</abbr> start</h2>
+<p>After Card Bridge and SSH forwarding are ready:</p>
+<div class="code-block"><pre><code>yggdrasim-hil-supervisor \
+  --remote-card-url http://127.0.0.1:8642/apdu \
+  --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token \
+  --apdu-timeout-ms 30000 \
+  --usb-vidpid 1d50:60e3
+</code></pre></div>
+<p>This keeps the modem/SIMtrace2 rig local to the Linux host while APDUs are
+served by the workstation card through SSH.</p>
+<p>From the unified CLI you can manage the reader-side piece without opening
+the GUI:</p>
+<div class="code-block"><pre><code>python main/main.py
+# choose [CB] Card Bridge / Card Bridge over SSH
+</code></pre></div>
+<p>The <code>[CB]</code> menu can start or stop the local Card Bridge, print SSH tunnel
+commands, apply <code>--remote-card-url</code> / token-file settings to the current CLI
+session, and probe <code>/ping</code> plus authenticated <code>/status</code>.</p>
+<h2 id="optional-systemd-user-service">Optional <code>systemd --user</code> service</h2>
+<p>Copy the example:</p>
+<div class="code-block"><pre><code>mkdir -p ~/.config/systemd/user
+cp guides/systemd/yggdrasim-hil-supervisor.service.example \
+  ~/.config/systemd/user/yggdrasim-hil-supervisor.service
+</code></pre></div>
+<p>Edit:</p>
+<ul>
+<li><code>WorkingDirectory</code></li>
+<li>Python or executable path</li>
+<li>reader selector or remote-card flags</li>
+<li><code>--remsim-binary</code> if needed</li>
+<li><code>--usb-vidpid</code></li>
+</ul>
+<p>Leave the ordering alone. A unit that is <code>WantedBy=default.target</code> must not
+also be <code>After=default.target</code>: that closes an ordering cycle, and systemd
+breaks a cycle by deleting one of the start jobs, so a unit silently never
+starts at boot. Order against a concrete unit when one service needs another
+first, as <code>yggdrasim-lab-agent.service.example</code> does with the Card Bridge.</p>
+<p>Then:</p>
+<div class="code-block"><pre><code>systemctl --user daemon-reload
+systemctl --user start yggdrasim-hil-supervisor.service
+systemctl --user status yggdrasim-hil-supervisor.service
+</code></pre></div>
+<p>For unattended Raspberry Pi rigs:</p>
+<div class="code-block"><pre><code>loginctl enable-linger &quot;$USER&quot;
+</code></pre></div>
+<h2 id="validation-checklist">Validation checklist</h2>
+<ul>
+<li><code>pcsc_scan -n</code> sees the card or Card Bridge <code>/status</code> returns an <abbr title="Answer To Reset">ATR</abbr></li>
+<li><code>lsusb</code> sees the SIMtrace2</li>
+<li><code>osmo-remsim-client-st2 --help</code> works</li>
+<li><code>python main/main.py --doctor</code> reports <abbr title="Hardware-In-The-Loop">HIL</abbr> readiness</li>
+<li><code>python main/main.py</code> -&gt; <code>[CB]</code> -&gt; <code>[3]</code> probes the configured bridge</li>
+<li><code>state/hil_bridge_supervisor.json</code> shows <code>status: running</code></li>
+<li><code>state/hil_bridge_card_relay.json</code> shows <code>status: ok</code></li>
+<li>Wireshark or <code>tshark</code> sees GSMTAP on UDP <code>4729</code></li>
+<li>the GUI live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> dock receives rows during card traffic</li>
+</ul>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="remote-apdu-streaming.html">Card Bridge over SSH</a></li>
+<li><a href="run-hil-capture.html">Run a <abbr title="Hardware-In-The-Loop">HIL</abbr> Capture</a></li>
+<li><a href="../subsystems/gui-command-center.html">Universal GUI Command Center</a></li>
+<li><a href="../subsystems/hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a></li>
+<li><code>guides/INSTALL_FULL.md</code></li>
+<li><code>guides/INSTALL_RASPBERRYPI.md</code></li>
+<li><code>guides/SIMTRACE2_CARDEM_GUIDE.md</code></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#supported-hosts" class="toc-link">Supported hosts</a>
+            <a href="#system-packages" class="toc-link">System packages</a>
+            <a href="#external-dependency-references" class="toc-link">External dependency references</a>
+            <a href="#install-yggdrasim-fullhil-support" class="toc-link">Install YggdraSIM full/HIL support</a>
+            <a href="#install-or-locate-osmo-remsim-client-st2" class="toc-link">Install or locate osmo-remsim-client-st2</a>
+            <a href="#prepare-simtrace2" class="toc-link">Prepare SIMtrace2</a>
+            <a href="#verify-pcsc" class="toc-link">Verify PC/SC</a>
+            <a href="#run-doctor" class="toc-link">Run doctor</a>
+            <a href="#first-local-hil-start" class="toc-link">First local HIL start</a>
+            <a href="#first-remote-card-hil-start" class="toc-link">First remote-card HIL start</a>
+            <a href="#optional-systemd-user-service" class="toc-link">Optional systemd --user service</a>
+            <a href="#validation-checklist" class="toc-link">Validation checklist</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

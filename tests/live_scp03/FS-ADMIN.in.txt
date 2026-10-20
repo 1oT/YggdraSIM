@@ -1,5 +1,0 @@
-# FS-ADMIN is an administrative wizard (Activate/Delete/Create/Resize).
-# Sends EOF immediately after invocation.
-SCP03-SD
-FS-ADMIN
-EXIT

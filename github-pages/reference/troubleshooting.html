@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/troubleshooting.html" data-ygg-open-sections="reference">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -46,9 +46,11 @@ non-trivial, the row links to the page that explains it in full.</p>
           <nav>
             <a href="#general" class="toc-link">General</a>
             <a href="#pcsc-and-reader" class="toc-link">PC/SC and reader</a>
+            <a href="#universal-gui-command-center" class="toc-link">Universal GUI Command Center</a>
+            <a href="#card-bridge-and-remote-apdu-streaming" class="toc-link">Card Bridge and remote APDU streaming</a>
             <a href="#scp03" class="toc-link">SCP03</a>
             <a href="#scp80" class="toc-link">SCP80</a>
-            <a href="#scp11-relay-live-and-test" class="toc-link">SCP11 relay (live and test)</a>
+            <a href="#scp11-esim-management-relay" class="toc-link">SCP11 eSIM management relay</a>
             <a href="#tls-trust-posture-knobs" class="toc-link toc-link-sub">TLS trust-posture knobs</a>
             <a href="#plugin-loader-knobs" class="toc-link toc-link-sub">Plugin loader knobs</a>
             <a href="#scp11-local-access" class="toc-link">SCP11 local access</a>
@@ -124,6 +126,75 @@ non-trivial, the row links to the page that explains it in full.</p>
 </tr>
 </tbody>
 </table></div>
+<h2 id="universal-gui-command-center">Universal GUI Command Center</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--gui</code> is unavailable</td>
+<td>GUI extras not installed in the active environment</td>
+<td>install <code>python -m pip install -e '.[gui]'</code>, or use <code>.[full,gui]</code> on a Linux lab host</td>
+</tr>
+<tr>
+<td>browser reaches the server but actions return unauthorized</td>
+<td>missing or wrong GUI bearer token</td>
+<td>read the token path printed by <code>--web-server</code>, keep the server bound to loopback, and reconnect through the SSH tunnel</td>
+</tr>
+<tr>
+<td>Host shell panel is disabled</td>
+<td>host shell is intentionally opt-in</td>
+<td>set <code>YGGDRASIM_GUI_HOST_SHELL=1</code> only on a trusted workstation</td>
+</tr>
+<tr>
+<td>live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> dock is empty</td>
+<td>no local <abbr title="Hardware-In-The-Loop">HIL</abbr> relay or Card Bridge relay is active</td>
+<td>start a local <abbr title="Hardware-In-The-Loop">HIL</abbr> session on Linux or the Card Bridge flow from the GUI. See <a href="../subsystems/gui-command-center.html">Universal GUI Command Center</a>.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="card-bridge-and-remote-apdu-streaming">Card Bridge and remote <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> streaming</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/ping</code> works but <code>/apdu</code> returns <code>401</code></td>
+<td>bearer token missing on the consumer side</td>
+<td>copy the token file with mode <code>0600</code> and pass <code>--remote-card-token-file</code>; see <a href="../how-to/remote-apdu-streaming.html">Card Bridge over SSH</a></td>
+</tr>
+<tr>
+<td><code>429 Too many authentication failures</code></td>
+<td>repeated bad tokens from the same peer</td>
+<td>wait for the lockout window, then retry with the correct token</td>
+</tr>
+<tr>
+<td><code>Connection refused</code> from the <abbr title="Hardware-In-The-Loop">HIL</abbr> rig</td>
+<td>SSH forward is missing or bound on the wrong host</td>
+<td>confirm <code>ssh -L</code> or <code>ssh -R</code> is still running and that the rig can reach <code>http://127.0.0.1:8642/ping</code></td>
+</tr>
+<tr>
+<td>APDUs hang during long <abbr title="Embedded UICC">eUICC</abbr> work</td>
+<td>tunnel latency or timeout too low</td>
+<td>raise <code>--apdu-timeout-ms</code> on the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge or supervisor</td>
+</tr>
+<tr>
+<td>remote <abbr title="Hardware-In-The-Loop">HIL</abbr> service starts but RemSIM exits immediately</td>
+<td><code>osmo-remsim-client-st2</code> missing or wrong path</td>
+<td>install the RemSIM client or configure the absolute binary path. See <a href="../how-to/install-remsim-apdu-streaming.html">Install RemSIM / <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</a>.</td>
+</tr>
+</tbody>
+</table></div>
 <h2 id="scp03"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr></h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -183,7 +254,7 @@ non-trivial, the row links to the page that explains it in full.</p>
 </tr>
 </tbody>
 </table></div>
-<h2 id="scp11-relay-live-and-test"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> relay (live and test)</h2>
+<h2 id="scp11-esim-management-relay"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> eSIM management relay</h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -205,23 +276,18 @@ non-trivial, the row links to the page that explains it in full.</p>
 </tr>
 <tr>
 <td><code>self-signed certificate in certificate chain</code> on a freshly-seen <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>/SM-DP+ FQDN</td>
-<td>no local trust anchor yet for this host</td>
-<td>the client runs a TOFU chain read, verifies it against a local bundle, and persists the result. If you previously set <code>YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION=1</code>, unset it so auto-learn can bootstrap; subsequent runs will be fully pinned against the persisted bundle.</td>
+<td>no local trust anchor for this host, and the first-contact chain read is refused by default</td>
+<td>point the client at the anchor with <code>SET-ES9-CA --persist &lt;pem&gt;</code> (or <code>ES9_CA_BUNDLE_PATH</code>). Without a reviewed anchor to hand, set <code>YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION=1</code> for one run: the client reads the chain, verifies it, and persists it under <code>SCP11/&lt;tree&gt;/dynamic_ca</code>, after which the flag is no longer needed. Both routes are refused while <code>YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION=1</code>.</td>
 </tr>
 <tr>
 <td><abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> install fails mid-stream</td>
 <td>insufficient memory or bad <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> segment</td>
 <td>retry, free space, or relint the source package</td>
 </tr>
-<tr>
-<td><code>POLL</code> verb absent or emits capability error</td>
-<td><code>polling</code> plugin not loaded</td>
-<td>plugins load by default; confirm the startup stderr banner lists <code>polling_plugin.py</code> and that <code>YGGDRASIM_DISALLOW_PLUGINS</code> / <code>YGGDRASIM_ALLOW_PLUGINS=0</code> are not set</td>
-</tr>
 </tbody>
 </table></div>
 <h3 id="tls-trust-posture-knobs">TLS trust-posture knobs</h3>
-<p>Three env flags govern <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> TLS posture. All three are unset by default.</p>
+<p>Four env flags govern <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> TLS posture. All four are unset by default. Two gates are independent: one covers request-carrying traffic, the other covers the read-only chain probe.</p>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -245,16 +311,22 @@ non-trivial, the row links to the page that explains it in full.</p>
 <td>Fleet or <abbr title="Certificate Issuer">CI</abbr> where nobody should ever downgrade a request.</td>
 </tr>
 <tr>
+<td><code>YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION</code></td>
+<td>Opt-in to the read-only chain probe that auto-learns a trust anchor on first contact. Sends no request body; persists the verified chain under <code>SCP11/&lt;tree&gt;/dynamic_ca</code>.</td>
+<td>unset → refused</td>
+<td>First contact with a lab SM-DP+ / <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> whose root you cannot pre-seed. Only on a network you trust -- an active attacker controls first contact.</td>
+</tr>
+<tr>
 <td><code>YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION</code></td>
-<td>Hard-lock: refuse the read-only TOFU chain read that auto-learns new trust anchors. Use only when no new anchor may be learned at runtime.</td>
-<td>unset → auto-learn allowed</td>
-<td>Air-gapped or attestation-only deployments; pre-seed anchors under <code>SCP11/&lt;tree&gt;/certs</code> instead.</td>
+<td>Hard-lock: refuse the chain probe even if <code>ALLOW_TLS_INTROSPECTION=1</code> is also set.</td>
+<td>unset → opt-in still possible</td>
+<td>Air-gapped or attestation-only deployments; point <code>ES9_CA_BUNDLE_PATH</code> at a reviewed anchor instead.</td>
 </tr>
 </tbody>
 </table></div>
-<p>Auto-learn is intentionally the default. Popping in a new <abbr title="Embedded UICC">eUICC</abbr> or registering against a new <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> FQDN works without any env dance: the client TOFUs the chain once, persists it as a local bundle, and every subsequent call verifies against that bundle with full pinning.</p>
+<p>Auto-learn is opt-in, not the default. A freshly-seen SM-DP+ or <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> FQDN whose root is not already trusted fails with <code>CERTIFICATE_VERIFY_FAILED</code> until either <code>ES9_CA_BUNDLE_PATH</code> names a reviewed anchor or <code>ALLOW_TLS_INTROSPECTION=1</code> permits one bootstrap read. After a successful bootstrap the persisted bundle pins every subsequent call, and the flag can be unset again.</p>
 <h3 id="plugin-loader-knobs">Plugin loader knobs</h3>
-<p>Plugins under the active runtime root's <code>plugins/</code> directory load by default. The first-party <code>polling_plugin.py</code> backs the <code>POLL</code> / <code>IPAE-LIVE</code> / <code>IPAE-TEST</code> command families.</p>
+<p>Plugins under the active runtime root's <code>plugins/</code> directory are refused by default because they are executable local Python. Set <code>YGGDRASIM_ALLOW_PLUGINS=1</code> only for plugin packages you intend to run.</p>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -266,20 +338,20 @@ non-trivial, the row links to the page that explains it in full.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>YGGDRASIM_DISALLOW_PLUGINS</code></td>
-<td>Hard-lock: refuse every plugin, including the first-party polling plugin.</td>
-<td>unset → plugins load</td>
-<td>Attestation / <abbr title="Certificate Issuer">CI</abbr> / air-gapped deployments where no out-of-tree code may execute.</td>
+<td><code>YGGDRASIM_ALLOW_PLUGINS</code></td>
+<td>Opt-in knob. <code>1</code>/<code>true</code>/<code>yes</code>/<code>on</code> imports plugins; unset, false, or unrecognised values refuse them.</td>
+<td>unset → plugins refused</td>
+<td>Source checkouts or lab runtimes that intentionally load local plugins.</td>
 </tr>
 <tr>
-<td><code>YGGDRASIM_ALLOW_PLUGINS</code></td>
-<td>Tri-state opt-in / opt-out knob. <code>0</code>/<code>false</code>/<code>no</code>/<code>off</code> → opt-out (same as <code>DISALLOW=1</code>). <code>1</code>/<code>true</code>/<code>yes</code>/<code>on</code> → opt-in (redundant after the default flip, still honoured).</td>
-<td>unset → plugins load</td>
-<td>Backward-compat for deployments that want to keep the old opt-in-only posture.</td>
+<td><code>YGGDRASIM_DISALLOW_PLUGINS</code></td>
+<td>Hard-lock: refuse every plugin even when <code>ALLOW_PLUGINS=1</code> is also set.</td>
+<td>unset → still requires <code>ALLOW_PLUGINS=1</code></td>
+<td>Attestation / <abbr title="Certificate Issuer">CI</abbr> / air-gapped deployments where no out-of-tree code may execute.</td>
 </tr>
 </tbody>
 </table></div>
-<p>On first successful load the manager prints a one-line stderr banner naming each loaded <code>.py</code> file, e.g. <code>[plugins] loaded 1: polling_plugin.py (hard-lock with YGGDRASIM_DISALLOW_PLUGINS=1).</code>. If you don't see that line and <code>POLL</code> / <code>IPAE-*</code> are missing, the loader was hard-locked by one of the env flags above.</p>
+<p>On first successful load the manager prints a one-line stderr banner naming each loaded plugin entry, e.g. <code>[plugins] loaded 1: my_plugin/ (YGGDRASIM_ALLOW_PLUGINS=1; set YGGDRASIM_DISALLOW_PLUGINS=1 to hard-lock plugin loading).</code>. If you do not see that line and plugin-owned commands are missing, the loader was refused by the default-deny posture or by one of the env flags above.</p>
 <h2 id="scp11-local-access"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> local access</h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -323,14 +395,9 @@ non-trivial, the row links to the page that explains it in full.</p>
 <td>check <code>Workspace/SIMCARD/isdr_config.json</code> simulator-side, or use <code>ADD-EIM</code></td>
 </tr>
 <tr>
-<td><code>IPAE-LIVE</code> / <code>IPAE-TEST</code> absent from <code>HELP</code></td>
-<td><code>polling</code> plugin not loaded</td>
-<td>plugins load by default; check the stderr banner at shell startup. If you set <code>YGGDRASIM_DISALLOW_PLUGINS=1</code> (or <code>YGGDRASIM_ALLOW_PLUGINS=0</code>), unset it. Confirm <code>plugins/polling_plugin.py</code> sits under the active runtime root.</td>
-</tr>
-<tr>
-<td><code>POLL</code> absent from <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> relay shells</td>
-<td><code>polling</code> plugin not loaded</td>
-<td>same as above. Plugin backs <code>POLL</code> / <code>IPAE-LIVE</code> / <code>IPAE-TEST</code> in one module.</td>
+<td>optional relay verbs absent from <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> shells</td>
+<td>local command extension not loaded</td>
+<td>same opt-in and hard-lock checks as above.</td>
 </tr>
 <tr>
 <td>Hotfolder empty after drop</td>
@@ -368,6 +435,11 @@ non-trivial, the row links to the page that explains it in full.</p>
 <td><code>reader busy</code> in a YggdraSIM shell</td>
 <td>direct <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> handle used while bridge owns the reader</td>
 <td>route through the relay</td>
+</tr>
+<tr>
+<td><code>Card source: remote</code> never appears</td>
+<td>bridge is still using local <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> mode</td>
+<td>pass <code>--remote-card-url</code> and <code>--remote-card-token-file</code> to the bridge or supervisor</td>
 </tr>
 </tbody>
 </table></div>
@@ -431,6 +503,8 @@ non-trivial, the row links to the page that explains it in full.</p>
 <li><a href="glossary.html">Glossary</a></li>
 <li><a href="runtime-root.html">Runtime Root</a></li>
 <li><a href="state-schema.html">State Schema</a></li>
+<li><a href="../how-to/remote-apdu-streaming.html">Card Bridge over SSH</a></li>
+<li><a href="../how-to/install-remsim-apdu-streaming.html">Install RemSIM / <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</a></li>
 </ul>
         </div>
       </div><!-- /ygg-toc-body -->
@@ -439,9 +513,11 @@ non-trivial, the row links to the page that explains it in full.</p>
         <nav>
             <a href="#general" class="toc-link">General</a>
             <a href="#pcsc-and-reader" class="toc-link">PC/SC and reader</a>
+            <a href="#universal-gui-command-center" class="toc-link">Universal GUI Command Center</a>
+            <a href="#card-bridge-and-remote-apdu-streaming" class="toc-link">Card Bridge and remote APDU streaming</a>
             <a href="#scp03" class="toc-link">SCP03</a>
             <a href="#scp80" class="toc-link">SCP80</a>
-            <a href="#scp11-relay-live-and-test" class="toc-link">SCP11 relay (live and test)</a>
+            <a href="#scp11-esim-management-relay" class="toc-link">SCP11 eSIM management relay</a>
             <a href="#tls-trust-posture-knobs" class="toc-link toc-link-sub">TLS trust-posture knobs</a>
             <a href="#plugin-loader-knobs" class="toc-link toc-link-sub">Plugin loader knobs</a>
             <a href="#scp11-local-access" class="toc-link">SCP11 local access</a>
@@ -464,13 +540,13 @@ non-trivial, the row links to the page that explains it in full.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

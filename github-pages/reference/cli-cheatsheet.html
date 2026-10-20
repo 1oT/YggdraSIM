@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/cli-cheatsheet.html" data-ygg-open-sections="reference">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -52,6 +52,8 @@ scripted local operation. Use this alongside the full
             <a href="#batch-conventions" class="toc-link">Batch conventions</a>
             <a href="#semicolon-mode" class="toc-link">Semicolon mode</a>
             <a href="#stdin-mode" class="toc-link">Stdin mode</a>
+            <a href="#capture-commands-to-a-file" class="toc-link">Capture commands to a file</a>
+            <a href="#scp03-trace" class="toc-link toc-link-sub">SCP03 TRACE</a>
             <a href="#profile-lifecycle-fast-paths" class="toc-link">Profile lifecycle fast paths</a>
             <a href="#module-examples" class="toc-link">Module examples</a>
             <a href="#scp03" class="toc-link toc-link-sub">SCP03</a>
@@ -73,7 +75,7 @@ scripted local operation. Use this alongside the full
         </details>
         <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
 <h2 id="assumptions">Assumptions</h2>
-<p>Every <code>python -m …</code> example assumes one of the following:</p>
+<p>Every <code>python -m ...</code> example assumes one of the following:</p>
 <ul>
 <li>you are running the command from the repository root, or</li>
 <li>you already ran <code>python -m pip install -e /path/to/YggdraSIM</code> in the same
@@ -84,7 +86,6 @@ scripted local operation. Use this alongside the full
 <li><code>yggdrasim-scp03</code></li>
 <li><code>yggdrasim-scp80</code></li>
 <li><code>yggdrasim-scp11-live</code></li>
-<li><code>yggdrasim-scp11-test</code></li>
 <li><code>yggdrasim-scp11-relay</code></li>
 <li><code>yggdrasim-scp11-local-access</code></li>
 <li><code>yggdrasim-scp11-eim-local</code></li>
@@ -98,10 +99,10 @@ scripted local operation. Use this alongside the full
 </ul>
 <h2 id="flow-at-a-glance">Flow at a glance</h2>
 <pre class="mermaid"><code>flowchart LR
-    CI["CI job / script"] -->|"--cmd 'A; B; EXIT'"| Shell["python -m MODULE"]
-    CI -->|"--stdin <<EOF"| Shell
-    Shell -->|stdout + artifacts| Reports["reports/*.yaml\nreports/*.log"]
-    Shell -. optional .-> Out["--out report.yaml\n#40;SCP03 only#41;"]</code></pre>
+    CI["CI job / script"] --&gt;|"--cmd 'A; B; EXIT'"| Shell["python -m MODULE"]
+    CI --&gt;|"--stdin &lt;&lt;EOF"| Shell
+    Shell --&gt;|stdout + artifacts| Reports["reports/*.yaml\nreports/*.log"]
+    Shell -. optional .-&gt; Out["--out report.yaml\n(SCP03 only)"]</code></pre>
 <p class="fig-caption">Figure: CLI flow at a glance — CI job to module shell to reports and artifacts</p>
 <h2 id="scope">Scope</h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
@@ -134,21 +135,14 @@ scripted local operation. Use this alongside the full
 <td>Yes</td>
 <td>Yes</td>
 <td>Yes</td>
-<td>Relay shell using the default relay certificate set.</td>
+<td>Compatibility alias of the <code>SCP11.live</code> shell.</td>
 </tr>
 <tr>
 <td><code>python -m SCP11.live</code></td>
 <td>Yes</td>
 <td>Yes</td>
 <td>Yes</td>
-<td>Relay shell using live certificate defaults.</td>
-</tr>
-<tr>
-<td><code>python -m SCP11.test</code></td>
-<td>Yes</td>
-<td>Yes</td>
-<td>Yes</td>
-<td>Relay shell using test certificate defaults.</td>
+<td>eSIM management relay shell.</td>
 </tr>
 <tr>
 <td><code>python -m SCP11.local_access</code></td>
@@ -265,6 +259,67 @@ DUMP
 EXIT
 EOF
 </code></pre></div>
+<h2 id="capture-commands-to-a-file">Capture commands to a file</h2>
+<p>Every shell command line takes <code>--log &lt;file&gt;</code>. The command runs as it
+would with <code>--debug</code> -- the raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> trace and the debug narration
+included -- and everything it prints is appended to <code>&lt;file&gt;</code> as well as
+shown on the terminal. The terminal therefore shows the debug output
+too; the file carries the same text without colour codes.</p>
+<div class="code-block"><pre><code>[eSIM Management] &gt; DOWNLOAD --log logs/download.log
+[Local eIM] &gt; IPAD-DISCOVER --log &quot;logs/ipad discover.log&quot;
+[APDU] &gt; SELECT 3F00 --log=logs/select.log
+</code></pre></div>
+<ul>
+<li>The flag can sit anywhere on the line and comes off before the command
+  reads its arguments; <code>--log=&lt;file&gt;</code> and a quoted path both work.</li>
+<li>A relative path is taken from the working directory, and <code>~</code> and
+  environment variables are expanded. A directory (an existing one, or a
+  path ending in <code>/</code>) gets a file named after the command and the local
+  time, such as <code>logs/download-20261014-102233.log</code>.</li>
+<li>The file is opened for append, and a new one is readable by its owner
+  only: the debug trace carries key material in full. Each run opens with a
+  <code>===</code> header naming the shell and the command, and closes with a trailer
+  that says how it ended (<code>ended</code>, <code>interrupted (Ctrl+C)</code>, ...) and how
+  long it took. A traceback goes to the file only.</li>
+<li>The body is laid out to fold by indentation, so an editor that folds
+  that way collapses a run, a block or a row. A line printed at the left
+  margin opens a block and starts with the local time it was printed, to
+  the millisecond; an indented line -- the decoded rows under an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, the
+  full hex under a row, the fields under a TLS handshake -- continues the
+  block above it without a time of its own, in the columns the terminal
+  showed it in. The whole run sits one level under its <code>===</code> header.</li>
+</ul>
+<ul>
+<li>Batch mode takes the flag too:</li>
+</ul>
+<div class="code-block"><pre><code>python -m SCP11.live --cmd &quot;SCAN --log reports/scan.log; EXIT&quot;
+</code></pre></div>
+<ul>
+<li>The GUI refuses the flag: its action panels already hold the output, and
+  a path typed into a web form would be written on the server host.</li>
+</ul>
+<h3 id="scp03-trace"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> <code>TRACE</code></h3>
+<p>The <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell can keep one log open across commands:</p>
+<div class="code-block"><pre><code>[APDU] &gt; TRACE START logs/session.log
+[TRACE APDU] &gt; SELECT 3F00
+[TRACE APDU] &gt; 00B0000010
+[TRACE APDU] &gt; TRACE STOP
+</code></pre></div>
+<p>From <code>TRACE START</code> to <code>TRACE STOP</code> (or <code>TRACE END</code>) every command runs
+with debug output and is copied into the file, its output one level
+under a <code>&gt; command</code> line; a <code>RUN</code> script notes each of its lines one
+level deeper again. <code>TRACE
+STATUS</code>, or <code>TRACE</code> alone, reports the file and its line count. <code>TRACE
+START</code> without a file writes <code>reports/command_logs/scp03-trace-&lt;time&gt;.log</code>
+under the runtime root. <code>EXIT</code>, <code>QA</code> and the end of a <code>--cmd</code> batch close
+an open trace. <code>--log</code> on one command still works during a trace; that
+command then goes to both files. Debug output stays on until <code>TRACE STOP</code>:
+a <code>DEBUG</code> typed during a trace flips the switch for that one command only.</p>
+<p>A command log is a transcript: <code>--json</code> / <code>--yaml</code> output lands in it like
+any other text, its first line stamped and the rest indented under it, so
+the file does not parse as JSON or YAML. For a structured report use the shells'
+own outputs (<code>--out</code> in <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>, <code>RECORD START</code> / <code>RECORD STOP</code> in the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>
+Local SMDPP and Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> shells).</p>
 <h2 id="profile-lifecycle-fast-paths">Profile lifecycle fast paths</h2>
 <p>Relay snapshot:</p>
 <div class="code-block"><pre><code>python -m SCP11.live --cmd &quot;DISCOVER; STATUS; LIST; EXIT&quot;
@@ -282,10 +337,9 @@ EOF
 </code></pre></div>
 <p>Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> queue run:</p>
 <div class="code-block"><pre><code>python -m SCP11.eim_local --cmd \
-  &quot;HOTFOLDER-LIST --json; POLL-CAMPAIGN --until-empty --max-cycles 20 --json; EXIT&quot;
+  &quot;HOTFOLDER-LIST --json; HOTFOLDER-FETCH --json; RESP-LOG 5 --json; EXIT&quot;
 </code></pre></div>
-<p><abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> watchdog (plugin-injected):</p>
-<div class="code-block"><pre><code>python -m SCP11.live --cmd &quot;DISCOVER; POLL 3 -t 20s -s 5; EXIT&quot;
+<div class="code-block"><pre><code>python -m SCP11.live --cmd &quot;DISCOVER; STATUS; LIST; EXIT&quot;
 </code></pre></div>
 <h2 id="module-examples">Module examples</h2>
 <h3 id="scp03"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr></h3>
@@ -307,7 +361,7 @@ EOF
 <div class="code-block"><pre><code>python -m SCP80 --cmd &quot;show; build; quit&quot;
 </code></pre></div>
 <div class="code-block"><pre><code>python -m SCP80 --stdin &lt;&lt;&#39;EOF&#39;
-iccid 8988201234567890123
+iccid 8988001234567890123
 build
 quit
 EOF
@@ -319,8 +373,8 @@ EOF
 <p>Live certificate defaults:</p>
 <div class="code-block"><pre><code>python -m SCP11.live --cmd &quot;DISCOVER; STATUS; EXIT&quot;
 </code></pre></div>
-<p>Test certificate defaults:</p>
-<div class="code-block"><pre><code>python -m SCP11.test --stdin &lt;&lt;&#39;EOF&#39;
+<p>Stdin batch:</p>
+<div class="code-block"><pre><code>python -m SCP11.live --stdin &lt;&lt;&#39;EOF&#39;
 DISCOVER
 LIST
 STATUS
@@ -345,7 +399,8 @@ EOF
 </code></pre></div>
 <div class="code-block"><pre><code>python -m SCP11.eim_local --stdin &lt;&lt;&#39;EOF&#39;
 HOTFOLDER-LIST --json
-POLL-CAMPAIGN --until-empty --max-cycles 20 --json
+HOTFOLDER-FETCH --json
+RESP-LOG 5 --json
 EXIT
 EOF
 </code></pre></div>
@@ -378,8 +433,8 @@ EOF
 </code></pre></div>
 <h3 id="hil-bridge-daemons"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge daemons</h3>
 <p>Both <code>yggdrasim-hil-bridge</code> and <code>yggdrasim-hil-supervisor</code> are
-<code>argparse</code>-only daemons — no <code>--cmd</code> / <code>--stdin</code>. Drive them through
-systemd or the launcher's <code>[B]</code> <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge Session menu instead:</p>
+<code>argparse</code>-only daemons -- no <code>--cmd</code> / <code>--stdin</code>. Drive them through
+systemd or the launcher's <code>[B]</code> Local SIMtrace2 <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge Session menu instead:</p>
 <div class="code-block"><pre><code>yggdrasim-hil-bridge \
     --host 127.0.0.1 --port 9997 \
     --reader-name &quot;SIMtrace 2&quot; \
@@ -398,7 +453,7 @@ stack up:</p>
 <div class="code-block"><pre><code>python main/main.py --open-pcap captures/session-example.pcapng
 python main/main.py \
     --open-pcap captures/session-example.pcapng \
-    --keybag    captures/session-example.keys.json
+    --keybag    captures/session-2026-04-20.keys.json
 </code></pre></div>
 <p>Sidecar keybag files named <code>&lt;pcap&gt;.keys.json</code> or <code>&lt;stem&gt;.keys.json</code>
 next to the capture are auto-discovered when <code>--keybag</code> is omitted.</p>
@@ -420,8 +475,8 @@ LOAD-PROFILE
 EXIT
 EOF
 </code></pre></div>
-<p><code>python -m SCP11.live --dump-keybag …</code> is an intentional <strong>no-op
-stub</strong> — live-mode SCP11c BSP keys are derived inside the <abbr title="Embedded UICC">eUICC</abbr> and
+<p><code>python -m SCP11.live --dump-keybag ...</code> is an intentional <strong>no-op
+stub</strong> -- live-mode SCP11c BSP keys are derived inside the <abbr title="Embedded UICC">eUICC</abbr> and
 never reach the host. Use <code>SCP11.local_access</code> or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> for real
 exports.</p>
 <h2 id="interactive-recording">Interactive recording</h2>
@@ -444,7 +499,7 @@ RECORD STOP
 <ul>
 <li>Redirect stdout when the command output is the artifact:</li>
 </ul>
-<div class="code-block"><pre><code>python -m SCP11.test --cmd &quot;DISCOVER; EXIT&quot; &gt; reports/scp11_test_discover.txt
+<div class="code-block"><pre><code>python -m SCP11.live --cmd &quot;DISCOVER; EXIT&quot; &gt; reports/scp11_discover.txt
 </code></pre></div>
 <ul>
 <li>Capture stdout and keep it visible with <code>tee</code>:</li>
@@ -500,6 +555,8 @@ python -m Tools.SuciTool --cmd &quot;USE keys/demo_suci.key; DUMP; EXIT&quot;
             <a href="#batch-conventions" class="toc-link">Batch conventions</a>
             <a href="#semicolon-mode" class="toc-link">Semicolon mode</a>
             <a href="#stdin-mode" class="toc-link">Stdin mode</a>
+            <a href="#capture-commands-to-a-file" class="toc-link">Capture commands to a file</a>
+            <a href="#scp03-trace" class="toc-link toc-link-sub">SCP03 TRACE</a>
             <a href="#profile-lifecycle-fast-paths" class="toc-link">Profile lifecycle fast paths</a>
             <a href="#module-examples" class="toc-link">Module examples</a>
             <a href="#scp03" class="toc-link toc-link-sub">SCP03</a>
@@ -531,13 +588,13 @@ python -m Tools.SuciTool --cmd &quot;USE keys/demo_suci.key; DUMP; EXIT&quot;
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

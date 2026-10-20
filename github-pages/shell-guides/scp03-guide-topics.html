@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="shell-guides/scp03-guide-topics.html" data-ygg-open-sections="shell-guides">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -64,6 +64,7 @@ straight to one topic.</p>
             <a href="#install" class="toc-link">INSTALL</a>
             <a href="#install-wizard-scope" class="toc-link toc-link-sub">Install wizard scope</a>
             <a href="#wizard-options" class="toc-link toc-link-sub">Wizard options</a>
+            <a href="#one-shot-cap-install" class="toc-link toc-link-sub">One-shot CAP install</a>
             <a href="#apdu-structure-and-privileges" class="toc-link toc-link-sub">APDU structure and privileges</a>
             <a href="#install-parameters" class="toc-link toc-link-sub">Install parameters</a>
             <a href="#security" class="toc-link">SECURITY</a>
@@ -278,6 +279,26 @@ lifecycle:</p>
 <li>install and make selectable</li>
 <li>full <abbr title="Converted Applet (Java Card)">CAP</abbr> install sequence</li>
 </ol>
+<h3 id="one-shot-cap-install">One-shot <abbr title="Converted Applet (Java Card)">CAP</abbr> install</h3>
+<p><code>INSTALL &lt;cap/ijc&gt; &lt;INSTALL-for-install APDU&gt;</code> parses the <abbr title="Converted Applet (Java Card)">CAP</abbr>/<abbr title="Intermediate Java Card">IJC</abbr>, sends
+<code>INSTALL [for load]</code> and <code>LOAD</code>, then sends the supplied <code>INSTALL [for install]</code>
+or <code>INSTALL [for install and make selectable]</code> <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> unchanged. The command
+checks that the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Load File <abbr title="Application Identifier">AID</abbr> matches the <abbr title="Converted Applet (Java Card)">CAP</abbr> package <abbr title="Application Identifier">AID</abbr> before loading.</p>
+<p><code>INSTALL-CAP &lt;cap/ijc&gt; --privs 00 --params C900 --applet &lt;AID&gt; --module &lt;AID&gt;</code>
+builds the complete <abbr title="Converted Applet (Java Card)">CAP</abbr> load and instantiate sequence from command arguments.
+The command also accepts positional compatibility:
+<code>INSTALL-CAP &lt;cap/ijc&gt; [Priv] [Params] [AppletAID] [ModuleAID]</code>.</p>
+<p>Direct scriptable INSTALL verbs are available for the remaining <abbr title="GlobalPlatform">GP</abbr> variants:</p>
+<ul>
+<li><code>LOAD &lt;cap/ijc&gt;</code></li>
+<li><code>INSTALL-LOAD &lt;LoadFileAID&gt; [SecurityDomainAID] [LoadFileHash] [Params] [Token]</code></li>
+<li><code>INSTALL-APP &lt;PkgAID&gt; &lt;AppAID&gt; [ModAID] [Priv] [Params]</code></li>
+<li><code>INSTALL-INSTANCE &lt;PkgAID&gt; &lt;AppAID&gt; [ModAID] [Priv] [Params]</code></li>
+<li><code>MAKE-SELECTABLE &lt;AID&gt; [Priv] [Params] [Token]</code></li>
+<li><code>EXTRADITE &lt;App_AID&gt; &lt;SD_AID&gt; [Token]</code></li>
+<li><code>REGISTRY-UPDATE &lt;AID&gt; [Priv] [Params]</code></li>
+<li><code>PERSONALIZE &lt;AID&gt;</code></li>
+</ul>
 <h3 id="apdu-structure-and-privileges"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> structure and privileges</h3>
 <p>Representative structure:</p>
 <div class="code-block"><pre><code>80 E6 &lt;P1&gt; 00 &lt;Lc&gt; &lt;LoadFileAID_LV&gt; &lt;ModuleAID_LV&gt; &lt;AppletAID_LV&gt; &lt;Priv_LV&gt; &lt;Params_LV&gt; &lt;Token_LV&gt;
@@ -301,7 +322,8 @@ lifecycle:</p>
 <li>legacy <abbr title="Subscriber Identity Module">SIM</abbr> file-access parameters such as <code>CA</code></li>
 </ul>
 <p>It also notes that <code>CA</code> and <code>EA</code> must not be mixed in the same install
-parameter set.</p>
+parameter set. The install-parameter builder accepts <code>C900</code> or any other
+complete <code>C9</code> <abbr title="Tag-Length-Value">TLV</abbr> unchanged, and wraps non-<abbr title="Tag-Length-Value">TLV</abbr> C9 values as <code>C9</code>.</p>
 <h2 id="security">SECURITY</h2>
 <h3 id="scp03-cryptographic-model"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> cryptographic model</h3>
 <p>The security guide ties the shell behavior to:</p>
@@ -458,6 +480,8 @@ invoked.</p>
 </ul>
 <p>Representative examples:</p>
 <div class="code-block"><pre><code>python3 -m SCP03 --cmd &quot;SCP03-SD; LIST&quot; --out report.yaml
+python3 -m SCP03 --cmd &quot;SCP03-SD; INSTALL-CAP app.cap --privs 00 --params C900; APPS; PKGS&quot;
+printf &#39;SCP03-SD\nINSTALL-CAP app.cap --privs 00 --params C900\nAPPS\nQ\n&#39; | python3 -m SCP03
 printf &#39;HELP\nQ\n&#39; | python3 -m SCP03
 python3 -m Tools.ProfilePackage --cmd &quot;USE reference_test_profile.txt; INFO&quot; &gt; saip_stdout.txt
 </code></pre></div>
@@ -490,6 +514,7 @@ python3 -m Tools.ProfilePackage --cmd &quot;USE reference_test_profile.txt; INFO
             <a href="#install" class="toc-link">INSTALL</a>
             <a href="#install-wizard-scope" class="toc-link toc-link-sub">Install wizard scope</a>
             <a href="#wizard-options" class="toc-link toc-link-sub">Wizard options</a>
+            <a href="#one-shot-cap-install" class="toc-link toc-link-sub">One-shot CAP install</a>
             <a href="#apdu-structure-and-privileges" class="toc-link toc-link-sub">APDU structure and privileges</a>
             <a href="#install-parameters" class="toc-link toc-link-sub">Install parameters</a>
             <a href="#security" class="toc-link">SECURITY</a>
@@ -533,13 +558,13 @@ python3 -m Tools.ProfilePackage --cmd &quot;USE reference_test_profile.txt; INFO
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

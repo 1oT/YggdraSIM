@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/globalplatform.html" data-ygg-open-sections="concepts">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -54,17 +54,17 @@ and Security Domain primitives.</p>
         <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
 <h2 id="security-domain-hierarchy">Security Domain hierarchy</h2>
 <pre class="mermaid"><code>flowchart TB
-    ISDR["ISD-R<br/>Issuer Security Domain - Root"]
-    ISDP1["ISD-P #40;profile 1#41;"]
-    ISDP2["ISD-P #40;profile 2#41;"]
+    ISDR["ISD-R&lt;br/&gt;Issuer Security Domain - Root"]
+    ISDP1["ISD-P (profile 1)"]
+    ISDP2["ISD-P (profile 2)"]
     MNOSD["MNO-SD"]
-    SSD["SSD #40;Supplementary#41;"]
+    SSD["SSD (Supplementary)"]
 
-    ISDR --> ISDP1
-    ISDR --> ISDP2
-    ISDP1 --> MNOSD
-    ISDP2 --> MNOSD
-    MNOSD --> SSD</code></pre>
+    ISDR --&gt; ISDP1
+    ISDR --&gt; ISDP2
+    ISDP1 --&gt; MNOSD
+    ISDP2 --&gt; MNOSD
+    MNOSD --&gt; SSD</code></pre>
 <p class="fig-caption">Figure: GlobalPlatform Security Domain hierarchy — ISD-R down to SSD</p>
 <p>Each Security Domain (SD) is an on-card authority. It owns a key set, a
 lifecycle state, and an access policy. The <code>ISD-R</code> on an <abbr title="Embedded UICC">eUICC</abbr> is the top
@@ -108,13 +108,13 @@ encrypted. YggdraSIM uses three of them.</p>
 <pre class="mermaid"><code>sequenceDiagram
     participant H as Host / SCP03 shell
     participant C as Card / ISD or SD
-    H->>C: SELECT <SD AID>
-    H->>C: INITIALIZE UPDATE (host challenge)
-    C-->>H: card challenge, card cryptogram, sequence counter
-    H->>H: derive S-ENC, S-MAC, S-RMAC
-    H->>C: EXTERNAL AUTHENTICATE (host cryptogram, C-MAC)
-    C-->>H: 9000 secured channel established
-    H->>C: APDU + C-MAC (+ ENC) ...</code></pre>
+    H-&gt;&gt;C: SELECT &lt;SD AID&gt;
+    H-&gt;&gt;C: INITIALIZE UPDATE (host challenge)
+    C--&gt;&gt;H: card challenge, card cryptogram, sequence counter
+    H-&gt;&gt;H: derive S-ENC, S-MAC, S-RMAC
+    H-&gt;&gt;C: EXTERNAL AUTHENTICATE (host cryptogram, C-MAC)
+    C--&gt;&gt;H: 9000 secured channel established
+    H-&gt;&gt;C: APDU + C-MAC (+ ENC) ...</code></pre>
 <p class="fig-caption">Figure: SCP03 secure-channel establishment and protected APDU exchange</p>
 <p>After <code>EXTERNAL AUTHENTICATE</code> returns <code>9000</code>, every subsequent command inside
 the session is protected by C-MAC, and optionally C-DECRYPTION and R-MAC, for
@@ -184,13 +184,13 @@ application on the card. The admin surface exposes it as:</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

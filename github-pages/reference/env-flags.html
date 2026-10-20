@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Environment flags — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/env-flags.html" data-ygg-open-sections="reference">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="../index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Reference</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Environment flags</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Environment flags</h1>
+        <p class="page-lead mb-8"><code>yggdrasim_common/env_flags.py</code> is the single source of truth for the
+<code>YGGDRASIM_*</code> runtime flags: each one declares its name, category, summary,
+accepted values, default, when a change takes effect, and where an override
+is stored. Three surfaces read that one registry, and so does the table at
+the bottom of this page:</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#which-value-wins" class="toc-link">Which value wins</a>
+            <a href="#where-an-override-is-stored" class="toc-link">Where an override is stored</a>
+            <a href="#reading-the-table" class="toc-link">Reading the table</a>
+            <a href="#the-flags" class="toc-link">The flags</a>
+            <a href="#build-runtime" class="toc-link toc-link-sub">Build / runtime</a>
+            <a href="#card-backend" class="toc-link toc-link-sub">Card backend</a>
+            <a href="#simulator-behaviour" class="toc-link toc-link-sub">Simulator behaviour</a>
+            <a href="#plugins" class="toc-link toc-link-sub">Plugins</a>
+            <a href="#demo-keys-gate" class="toc-link toc-link-sub">Demo keys gate</a>
+            <a href="#scp11-tls" class="toc-link toc-link-sub">SCP11 TLS</a>
+            <a href="#scp11-local-saip-decode" class="toc-link toc-link-sub">SCP11 local SAIP decode</a>
+            <a href="#debug" class="toc-link toc-link-sub">Debug</a>
+            <a href="#hil-bridge" class="toc-link toc-link-sub">HIL bridge</a>
+            <a href="#external-tool-locators" class="toc-link toc-link-sub">External tool locators</a>
+            <a href="#session-recording" class="toc-link toc-link-sub">Session recording</a>
+            <a href="#appearance" class="toc-link toc-link-sub">Appearance</a>
+            <a href="#universal-gui" class="toc-link toc-link-sub">Universal GUI</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<ul>
+<li>the launcher menu, <code>[E] Environment Flags (YGGDRASIM_*)</code></li>
+<li>the Universal GUI, <strong>Environment -&gt; Configuration</strong> (<code>/api/env_flags/list</code>,
+  <code>/api/env_flags/{name}/set</code>, <code>/{name}/clear</code>, <code>/reset</code>)</li>
+<li><code>yggdrasim_common.env_flags</code> itself, for anything that needs the contract
+  in code</li>
+</ul>
+<h2 id="which-value-wins">Which value wins</h2>
+<ol>
+<li>The process environment. <code>VAR=... yggdrasim ...</code>, a shell <code>export</code>, or a
+   CLI flag that sets the variable takes priority over everything else.</li>
+<li>A persisted override, applied at process entry for flags the environment
+   leaves unset.</li>
+<li>The flag's own default, which is what the Default column describes.</li>
+</ol>
+<p><code>apply_persisted_env_overrides()</code> never overwrites a variable that is already
+set, so a command-line choice is not silently replaced by a stored one.</p>
+<div class="admonition warning">
+<p class="admonition-title">Persisted overrides do not reach every command</p>
+<p>Only the launcher (<code>yggdrasim</code>, <code>yggdrasim-gui</code>, <code>yggdrasim-desktop</code>,
+<code>yggdrasim-web-server</code>) and the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> live shell call
+<code>apply_persisted_env_overrides()</code> at startup. A standalone console script
+such as <code>yggdrasim-scp03</code> or <code>yggdrasim-card-bridge</code> reads the process
+environment only. Export the variable in the shell -- or start from the
+launcher -- when a stored value has to apply to one of those.</p>
+</div>
+<h2 id="where-an-override-is-stored">Where an override is stored</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Persistence</th>
+<th>File</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>runtime root</td>
+<td><code>state/env_overrides.json</code> under the runtime root</td>
+<td>Most flags.</td>
+</tr>
+<tr>
+<td>home</td>
+<td><code>~/.yggdrasim/env_overrides.json</code></td>
+<td>Flags that cannot live inside the runtime root, because selecting the root from inside it would be circular. Currently <code>YGGDRASIM_RUNTIME_ROOT</code>.</td>
+</tr>
+<tr>
+<td>session only</td>
+<td>--</td>
+<td>Never written. Export it in a shell profile to pin it across launches.</td>
+</tr>
+</tbody>
+</table></div>
+<p>A corrupt overrides file is quarantined rather than deleted, and only
+registered flag names are read back.</p>
+<h2 id="reading-the-table">Reading the table</h2>
+<ul>
+<li><strong>Accepts</strong> -- the exact values the editors write. A toggle writes the on
+  value and unsets for off, so a shell comparison against <code>1</code> stays valid.</li>
+<li><strong>Applies</strong> -- <em>immediately</em> means the running process picks the change up;
+  <em>next launch</em> means the value is read once at startup.</li>
+<li><strong>Persistence</strong> -- the file an override lands in, per the table above.</li>
+<li><strong>(sensitive)</strong> -- the flag weakens a security posture (insecure TLS, demo
+  keys, the quirks gate, disabling plugins), so the editors ask for
+  confirmation before writing it.</li>
+</ul>
+<h2 id="the-flags">The flags</h2>
+
+
+<p>64 flags in 13 categories, generated from <code>yggdrasim_common/env_flags.py</code>.</p>
+<h3 id="build-runtime">Build / runtime</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_FLAVOR</code></td>
+<td><code>clean</code>, <code>full</code>, <code>source</code></td>
+<td>auto-detect (frozen build → clean; source checkout → source)</td>
+<td>next launch</td>
+<td>session only</td>
+<td>Force build flavor (clean / full / source)</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_RUNTIME_ROOT</code></td>
+<td>path</td>
+<td>source checkout: repo root. Frozen build: YggdraSIM-data next to the exe, else ~/YggdraSIM-data.</td>
+<td>next launch</td>
+<td>home</td>
+<td>Force the writable runtime root</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="card-backend">Card backend</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_CARD_BACKEND</code></td>
+<td><code>reader</code>, <code>sim</code></td>
+<td>reader unless the saved selection picks sim</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Force reader vs simulated <abbr title="Subscriber Identity Module">SIM</abbr></td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_CARD_RELAY_URL</code></td>
+<td>text</td>
+<td>unset (no relay) -- local <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> or simulator</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Remote <abbr title="Hardware-In-The-Loop">HIL</abbr> card-relay URL</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SIM_QUIRKS</code></td>
+<td>path</td>
+<td>Workspace/SIMCARD/sim_quirks.py (reseeded from template on first run)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Override the simulated-<abbr title="Subscriber Identity Module">SIM</abbr> quirks file</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SIM_ISDR_CONFIG</code></td>
+<td>path</td>
+<td>Workspace/SIMCARD/isdr_config.json</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Override the simulated-<abbr title="Issuer Security Domain - Root">ISD-R</abbr> personality JSON</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SIM_EIM_IDENTITY</code></td>
+<td>path</td>
+<td>Workspace/SIMCARD/eim_identity.json</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Override the simulated default BF55 <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SIM_EUICC_STORE</code></td>
+<td>path</td>
+<td>Workspace/SIMCARD/euicc_store</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Override the simulated <abbr title="Embedded UICC">eUICC</abbr> store root</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SIM_PROFILE_STORE</code></td>
+<td>path</td>
+<td>derived per-<abbr title="eUICC Identifier">EID</abbr> under the <abbr title="Embedded UICC">eUICC</abbr> store root</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Override the simulated profile artifact directory</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="simulator-behaviour">Simulator behaviour</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_ALLOW_QUIRKS</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → quirks files are refused</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>(sensitive) Allow loading Python quirks files</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_DISABLE_QUIRKS</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → quirks are loaded per YGGDRASIM_ALLOW_QUIRKS</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Kill switch for simulator quirks</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SIM_DEBUG_FAULTS</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → quiet</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Log simulator fault-injection decisions verbosely</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_ENABLE_TUAK</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → MILENAGE only</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Enable <abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr> auth algorithm in the simulator</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="plugins">Plugins</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_ALLOW_PLUGINS</code></td>
+<td><code>1</code>, <code>0</code></td>
+<td>unset → plugins refused</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Opt in to runtime plugin loading</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_DISALLOW_PLUGINS</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → still requires YGGDRASIM_ALLOW_PLUGINS=1</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>(sensitive) Hard-lock: refuse every plugin</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="demo-keys-gate">Demo keys gate</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_ALLOW_DEMO_KEYS</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → banner is printed when demo keys are detected</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>(sensitive) Silence the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> demo-keys warning</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_REQUIRE_NON_DEMO_KEYS</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → demo keys only emit a warning</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Fail fast when demo keys are loaded</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="scp11-tls"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> TLS</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_SCP11_ALLOW_INSECURE_TLS</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → unpinned request traffic is refused</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>(sensitive) Allow unpinned <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> ES9 request traffic</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SCP11_REQUIRE_PINNED_TLS</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → opt-in still possible</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Hard-lock: refuse unpinned <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> request traffic</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SCP11_ALLOW_TLS_INTROSPECTION</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → first-contact chain reads are refused</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>(sensitive) Allow read-only TOFU chain reads on first contact</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → ALLOW_TLS_INTROSPECTION=1 still required</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Hard-lock: refuse TOFU chain reads</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="scp11-local-saip-decode"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> local <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> decode</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_SCP11_SAIP_DECODE_TIMEOUT_SECONDS</code></td>
+<td>number</td>
+<td>unset → built-in default (see <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>/local_access/session.py)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Extend the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> decode timeout for LocalSMDPP</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SCP11_ALLOW_FULL_SAIP_DECODE</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → compact decode only</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Allow expensive full <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> decode on LocalSMDPP profiles</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="debug">Debug</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_GLOBAL_DEBUG</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → per-module debug stays opt-in</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Enable verbose debug across modules</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="hil-bridge"><abbr title="Hardware-In-The-Loop">HIL</abbr> bridge</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_HIL_CAPTURE_INTERFACE</code></td>
+<td>text</td>
+<td>lo0 on macOS, lo elsewhere</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Network interface Wireshark / tshark listen on</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_WIRESHARK_BIN</code></td>
+<td>path</td>
+<td>shutil.which('wireshark')</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Explicit Wireshark binary path</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_TERMSHARK_BIN</code></td>
+<td>path</td>
+<td>shutil.which('termshark')</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Explicit termshark binary path</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_TERMSHARK_WARMUP_SECONDS</code></td>
+<td>number</td>
+<td>2.0</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Warm-up delay before starting the bridge after termshark</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_TUI_TERM</code></td>
+<td>text</td>
+<td>auto-detect (prefers screen-256color / tmux-256color / xterm-256color)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Override the TERM value used by the <abbr title="Hardware-In-The-Loop">HIL</abbr> live-decode <abbr title="Text User Interface">TUI</abbr></td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_RELAY_SESSION_RESET</code></td>
+<td><code>1</code> / unset</td>
+<td>enabled</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Power-cycle the card at relay-session boundaries</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_SIMTRACE_RESET</code></td>
+<td>text</td>
+<td>usb-reset</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>How the supervisor clears the SIMtrace2 board before a session</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_UHUBCTL_LOCATION</code></td>
+<td>text</td>
+<td>unset (port-power reset disabled)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Hub location for the port-power SIMtrace2 reset</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_UHUBCTL_PORT</code></td>
+<td>text</td>
+<td>unset (all ports on the hub)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Hub port for the port-power SIMtrace2 reset</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_UHUBCTL_BINARY</code></td>
+<td>path</td>
+<td>uhubctl (resolved from PATH)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Path to the uhubctl binary</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_RSPRO_ASN</code></td>
+<td>path</td>
+<td>built-in module shipped with Tools/HilBridge</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Override the RSPRO ASN.1 module path</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="external-tool-locators">External tool locators</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_SAIP_TOOL</code></td>
+<td>text</td>
+<td>shutil.which('saip-tool')</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Explicit saip-tool binary or command</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS</code></td>
+<td>number</td>
+<td>built-in default (see Tools/ProfilePackage/saip_tool.py)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Default timeout for saip-tool subprocess calls</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SAIP_TOOL_CACHE_MAX_BYTES</code></td>
+<td>integer</td>
+<td>built-in default (see Tools/ProfilePackage/saip_tool.py)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Cap for the on-disk <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> tool decode cache</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SAIP_UNIVERSAL_TOKENS</code></td>
+<td>path</td>
+<td>~/.yggdrasim/saip_universal_tokens.csv</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Universal placeholder test-value list for <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> templates</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SAIP_TOKEN_LISTS</code></td>
+<td>path</td>
+<td>~/.yggdrasim/saip_token_lists/</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Library of profile-specific placeholder test-value lists</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SAIP_PE_LIBRARY</code></td>
+<td>path</td>
+<td>~/.yggdrasim/saip_pe_library/</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Library of saved profile elements for the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> workbench</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SAIP_UNIVERSAL_DEFAULTS</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → templates are seeded from the list</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Seed opened templates from the universal test-value list</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SUCI_TOOL</code></td>
+<td>text</td>
+<td>shutil.which('suci-keytool')</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Explicit suci-keytool binary or command</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SUCI_TIMEOUT</code></td>
+<td>number</td>
+<td>built-in default (see Tools/SuciTool/tool.py)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Default timeout for suci-keytool subprocess calls</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_EUM_SESSION_KEYS</code></td>
+<td>path</td>
+<td>unset → no session key material available</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Path to the EUM session keys JSON repository</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="session-recording">Session recording</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_SESSION_APDU_TRACE_CAP</code></td>
+<td>integer</td>
+<td>50000</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Soft cap on <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> events per session recording</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="appearance">Appearance</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_CLI_THEME</code></td>
+<td><code>nord</code>, <code>catppuccin-frappe</code>, <code>catppuccin-latte</code>, <code>catppuccin-macchiato</code>, <code>catppuccin-mocha</code>, <code>dracula</code>, <code>github-dark</code>, <code>github-light</code>, <code>graphite-light</code>, <code>gruv-dark</code>, <code>ink-light</code>, <code>islands-light</code>, <code>matrix</code>, <code>mono</code>, <code>nord-light</code>, <code>ocean-dark</code>, <code>oneot-dark</code>, <code>oneot-light</code>, <code>solarized-dark</code>, <code>solarized-light</code>, <code>tokyo-night</code></td>
+<td>nord (the canonical YggdraSIM palette)</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Terminal colour palette for the CLI and the shells</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="universal-gui">Universal GUI</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Accepts</th>
+<th>Default</th>
+<th>Applies</th>
+<th>Persistence</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_GUI_HOST</code></td>
+<td>text</td>
+<td>127.0.0.1</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Desktop GUI bind host</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_PORT</code></td>
+<td>integer</td>
+<td>27853</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Desktop GUI bind port</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_SERVER_HOST</code></td>
+<td>text</td>
+<td>0.0.0.0 (SSH-tunnel-friendly: prefer 127.0.0.1)</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>(sensitive) Remote lab GUI bind host</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_SERVER_PORT</code></td>
+<td>integer</td>
+<td>27854</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Remote lab GUI bind port</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_TOKEN</code></td>
+<td>text</td>
+<td>unset → auto-generated for --gui, rejected for --web-server</td>
+<td>next launch</td>
+<td>session only</td>
+<td>(sensitive) Bearer token for the GUI API (inline)</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_TOKEN_FILE</code></td>
+<td>path</td>
+<td>unset</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>(sensitive) Path to a bearer-token file for the GUI API</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_FS_ROOTS</code></td>
+<td>path</td>
+<td>unset -&gt; whole filesystem for --gui, shortcut roots for --web-server</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Directories the in-app file picker may list</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_TLS_CERT</code></td>
+<td>path</td>
+<td>unset (plain HTTP unless --tls-self-signed is passed)</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>TLS certificate path for --web-server</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_TLS_KEY</code></td>
+<td>path</td>
+<td>unset</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>(sensitive) TLS private key path for --web-server</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_ALLOW_ORIGIN</code></td>
+<td>text</td>
+<td>unset → deny-all (same-origin SPA only)</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Additional CORS origin(s) for --web-server</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_IDLE_SECONDS</code></td>
+<td>integer</td>
+<td>1800</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>WebSocket idle cutoff for GUI shell sessions</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_PATH_ALLOWLIST</code></td>
+<td>text</td>
+<td>unset → runtime root + <abbr title="Embedded UICC">eUICC</abbr> store + CWD</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Extra path roots the GUI is permitted to read</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_WEBVIEW_DEBUG</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → dev tools closed</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Open the pywebview dev tools on --gui launch</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_ZOOM</code></td>
+<td><code>auto</code>, <code>0.5</code>, <code>0.67</code>, <code>0.75</code>, <code>0.8</code>, <code>0.9</code>, <code>1</code>, <code>1.1</code>, <code>1.25</code>, <code>1.5</code>, <code>1.75</code>, <code>2</code>, <code>2.5</code>, <code>3</code></td>
+<td>1 (native size)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Page zoom of the --gui desktop window</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_GPU</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → GPU off (software drawing, one raster thread)</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>Let the --gui desktop window draw with the GPU</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_HOST_SHELL</code></td>
+<td><code>1</code> / unset</td>
+<td>unset → Host shell tab is hidden, route refuses connections</td>
+<td>next launch</td>
+<td>runtime root</td>
+<td>(sensitive) Expose the GUI Host-Shell tab (free-form OS shell PTY)</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_GUI_CARD_SESSION_IDLE_SECONDS</code></td>
+<td>integer</td>
+<td>900 (15 minutes)</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Idle ceiling for a GUI card session holding a reader</td>
+</tr>
+</tbody>
+</table></div>
+
+
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="runtime-root.html">Runtime Root</a> -- what the runtime root holds</li>
+<li><a href="state-schema.html">State Schema</a> -- the files under <code>state/</code></li>
+<li><a href="troubleshooting.html">Troubleshooting</a></li>
+<li><a href="../how-to/load-certificates-and-config.html">Load Certificates and Configuration</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#which-value-wins" class="toc-link">Which value wins</a>
+            <a href="#where-an-override-is-stored" class="toc-link">Where an override is stored</a>
+            <a href="#reading-the-table" class="toc-link">Reading the table</a>
+            <a href="#the-flags" class="toc-link">The flags</a>
+            <a href="#build-runtime" class="toc-link toc-link-sub">Build / runtime</a>
+            <a href="#card-backend" class="toc-link toc-link-sub">Card backend</a>
+            <a href="#simulator-behaviour" class="toc-link toc-link-sub">Simulator behaviour</a>
+            <a href="#plugins" class="toc-link toc-link-sub">Plugins</a>
+            <a href="#demo-keys-gate" class="toc-link toc-link-sub">Demo keys gate</a>
+            <a href="#scp11-tls" class="toc-link toc-link-sub">SCP11 TLS</a>
+            <a href="#scp11-local-saip-decode" class="toc-link toc-link-sub">SCP11 local SAIP decode</a>
+            <a href="#debug" class="toc-link toc-link-sub">Debug</a>
+            <a href="#hil-bridge" class="toc-link toc-link-sub">HIL bridge</a>
+            <a href="#external-tool-locators" class="toc-link toc-link-sub">External tool locators</a>
+            <a href="#session-recording" class="toc-link toc-link-sub">Session recording</a>
+            <a href="#appearance" class="toc-link toc-link-sub">Appearance</a>
+            <a href="#universal-gui" class="toc-link toc-link-sub">Universal GUI</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

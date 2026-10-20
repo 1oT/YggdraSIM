@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp80.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -83,7 +83,7 @@ if <abbr title="Security Parameter Indicator (OTA)">SPI</abbr>, TAR, and PoR are
 <div class="tabbed-content">
 <div class="tabbed-block">
 <div class="code-block"><pre><code>python -m SCP80
-python -m SCP80 --cmd &quot;show; iccid 8946xxx; build A0D6...; send; EXIT&quot;
+python -m SCP80 --cmd &quot;show; iccid 8988xxx; build A0D6...; send; EXIT&quot;
 </code></pre></div>
 </div>
 <div class="tabbed-block">
@@ -126,7 +126,7 @@ python -m SCP80 --cmd &quot;show; iccid 8946xxx; build A0D6...; send; EXIT&quot;
 </tr>
 <tr>
 <td><code>sendraw &lt;hex&gt;</code></td>
-<td>transmit a raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> without <abbr title="Over-The-Air">OTA</abbr> wrapping</td>
+<td>transmit a raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> without <abbr title="Over-The-Air">OTA</abbr> wrapping; a data field over 255 bytes is sent as a STORE DATA block sequence</td>
 </tr>
 <tr>
 <td><code>ota &lt;hex&gt;</code></td>
@@ -188,18 +188,18 @@ python -m SCP80 --cmd &quot;show; iccid 8946xxx; build A0D6...; send; EXIT&quot;
 </table></div>
 <h2 id="common-recipes">Common recipes</h2>
 <h3 id="send-a-plain-update-binary-via-ota">Send a plain <code>UPDATE BINARY</code> via <abbr title="Over-The-Air">OTA</abbr></h3>
-<div class="code-block"><pre><code>[SCP80] &gt; iccid 8946000000000000000F
-[SCP80] &gt; set KIc 15
-[SCP80] &gt; set KID 15
+<div class="code-block"><pre><code>[SCP80] &gt; iccid 8988000000000000000F
+[SCP80] &gt; set kic_indicator 15
+[SCP80] &gt; set kid_indicator 15
 [SCP80] &gt; set TAR 000000
 [SCP80] &gt; build 00D6000003A0A0A0
 [SCP80] &gt; send
 </code></pre></div>
 <h3 id="one-shot-ota-wrap-and-send">One-shot <abbr title="Over-The-Air">OTA</abbr> wrap and send</h3>
-<div class="code-block"><pre><code>python -m SCP80 --cmd &quot;iccid 8946000000000000000F; ota 00D6000003A0A0A0; exit&quot;
+<div class="code-block"><pre><code>python -m SCP80 --cmd &quot;iccid 8988000000000000000F; ota 00D6000003A0A0A0; exit&quot;
 </code></pre></div>
 <h3 id="reuse-iccid-bound-state-across-sessions">Reuse <abbr title="Integrated Circuit Card Identifier">ICCID</abbr>-bound state across sessions</h3>
-<div class="code-block"><pre><code>[SCP80] &gt; iccid 8946000000000000000F
+<div class="code-block"><pre><code>[SCP80] &gt; iccid 8988000000000000000F
 [SCP80] &gt; show
 [SCP80] &gt; build 00A40000023F00
 [SCP80] &gt; send
@@ -264,13 +264,13 @@ authored <code>guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md</code> for lifecycle-f
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/replay-hil-pcap-offline.html" data-ygg-open-sections="how-to">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -66,7 +66,7 @@ streaming a live FIFO.</p>
 <h2 id="prerequisites">Prerequisites</h2>
 <ul>
 <li>a saved <code>.pcap</code> or <code>.pcapng</code> captured by the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge, Wireshark,
-  <code>tshark</code>, or <code>dumpcap</code> — on-wire frames must be either plain APDUs or
+  <code>tshark</code>, or <code>dumpcap</code> -- on-wire frames must be either plain APDUs or
   GSMTAP over UDP <code>4729</code></li>
 <li><code>tshark</code> on <code>PATH</code></li>
 <li>Python environment with YggdraSIM installed (source checkout or
@@ -84,7 +84,7 @@ streaming a live FIFO.</p>
 <p>Locate the capture file. Example:</p>
 <div class="code-block"><pre><code>ls -lh Workspace/hil/captures/
 # session-example.pcapng
-# session-example.pcap.keys.json
+# session-2026-04-20.pcap.keys.json
 </code></pre></div>
 <p>If the keybag lives next to the capture as
 <code>&lt;capture&gt;.pcap.keys.json</code> or <code>&lt;capture&gt;.keys.json</code>, it is
@@ -102,14 +102,14 @@ auto-discovered.</p>
 <div class="tabbed-block">
 <div class="code-block"><pre><code>python main/main.py \
     --open-pcap Workspace/hil/captures/session-example.pcapng \
-    --keybag    Workspace/hil/captures/session-example.keys.json
+    --keybag    Workspace/hil/captures/session-2026-04-20.keys.json
 </code></pre></div>
 </div>
 <div class="tabbed-block">
 <div class="code-block"><pre><code>python main/main.py
-[B]   HIL Bridge Session
+[B]   Local SIMtrace2 HIL Bridge Session
  [3]  Open saved .pcap (offline review, no bridge)
-     pcap path  : Workspace/hil/captures/session-example.pcapng
+      pcap path  : Workspace/hil/captures/session-example.pcapng
       keybag path: (blank → auto-discover)
 </code></pre></div>
 </div>
@@ -118,7 +118,7 @@ auto-discovered.</p>
 </li>
 <li>
 <p>Navigate the capture.</p>
-<p>The <abbr title="Text User Interface">TUI</abbr> behaves the same as in live capture mode — summary list on
+<p>The <abbr title="Text User Interface">TUI</abbr> behaves the same as in live capture mode -- summary list on
 the left, detail pane, hex pane, and stateful context rows.
 Secure-messaging APDUs that match a keybag entry gain an extra
 "plaintext" context line. Entries that do not match (wrong <abbr title="Application Identifier">AID</abbr>, no
@@ -136,18 +136,18 @@ channel. Pick the path that matches how the capture was made:</p>
 <h3 id="scp03-sessions"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> sessions</h3>
 <p>Inside the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> admin shell, after <code>AUTH-SD</code>:</p>
 <div class="code-block"><pre><code>[APDU] &gt; AUTH-SD
-[A0...00] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-example.keys.json case-1234
+[A0...00] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
 </code></pre></div>
 <p>The handler refuses cleanly if the session is not authenticated.</p>
 <h3 id="scp11-local-access-sessions"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access sessions</h3>
 <p>Inside <code>SCP11.local_access</code>, after any verb that builds a BSP (for
 example <code>LOAD-PROFILE</code>, <code>ENABLE-PROFILE</code>, or <code>STORE-METADATA</code>):</p>
 <div class="code-block"><pre><code>[Local SMDPP] &gt; LOAD-PROFILE
-[Local SMDPP] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-example.keys.json case-1234
+[Local SMDPP] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
 </code></pre></div>
 <p>Non-interactively:</p>
 <div class="code-block"><pre><code>python -m SCP11.local_access --dump-keybag \
-    Workspace/hil/captures/session-example.keys.json
+    Workspace/hil/captures/session-2026-04-20.keys.json
 </code></pre></div>
 <h3 id="scp11-live-sessions"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Live sessions</h3>
 <p><code>python -m SCP11.live --dump-keybag</code> is a <strong>stub</strong>. In live mode the
@@ -209,7 +209,7 @@ capture; unmatched entries are skipped silently.</p>
 </tr>
 <tr>
 <td><code>SCP11.live --dump-keybag</code> prints "no-op"</td>
-<td>Expected — live mode BSP keys are not host-side. Use Local Access or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>.</td>
+<td>Expected -- live mode BSP keys are not host-side. Use Local Access or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>.</td>
 </tr>
 </tbody>
 </table></div>
@@ -250,13 +250,13 @@ capture; unmatched entries are skipped silently.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/diagnostics-toolbox.html" data-ygg-open-sections="how-to">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -40,7 +40,7 @@
         </nav>
         <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Diagnostics toolbox</h1>
         <p class="page-lead mb-8">Four capabilities land next to the core subsystems for the v1
-release. Each is additive — nothing existing changes unless the
+release. Each is additive -- nothing existing changes unless the
 new command is explicitly invoked.</p>
         <details class="toc-mobile xl:hidden mb-8">
           <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
@@ -97,16 +97,16 @@ and raw <abbr title="Distinguished Encoding Rules">DER</abbr>. Top-level <abbr t
 single <code>moved</code> entry.</p>
 <p>Inside <code>DIFF-TUI</code>:</p>
 <ul>
-<li><code>n</code> / <code>N</code> — next / previous diff</li>
-<li><code>v</code> — toggle value rendering</li>
-<li><code>q</code> — quit</li>
+<li><code>n</code> / <code>N</code> -- next / previous diff</li>
+<li><code>v</code> -- toggle value rendering</li>
+<li><code>q</code> -- quit</li>
 </ul>
 <p>See <a href="../subsystems/profile-package.html">Profile Package subsystem</a>.</p>
 <hr />
 <h2 id="2-simulator-to-tui-auto-open">2. Simulator-to-<abbr title="Text User Interface">TUI</abbr> auto-open</h2>
 <p>When SIMCARD writes a new <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> to its profile store (typically
 after a successful <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> download), a polling watcher picks it up
-and launches a command per arrival — by default the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> <abbr title="Text User Interface">TUI</abbr>.</p>
+and launches a command per arrival -- by default the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> <abbr title="Text User Interface">TUI</abbr>.</p>
 <div class="code-block"><pre><code>yggdrasim-profile-autoload --store-root /path/to/profile_store
 yggdrasim-profile-autoload --store-root ... --max-arrivals 5
 yggdrasim-profile-autoload \
@@ -115,12 +115,12 @@ yggdrasim-profile-autoload \
 <p>Template variables (single-brace Python <code>str.format</code> style; unknown
 tokens substitute the empty string rather than raising):</p>
 <ul>
-<li><code>{iccid}</code> — the newly seen <abbr title="Integrated Circuit Card Identifier">ICCID</abbr></li>
-<li><code>{profile}</code> — preferred profile path</li>
-<li><code>{profile_path}</code> — alias of <code>{profile}</code></li>
-<li><code>{profile_dir}</code> — the per-profile directory</li>
-<li><code>{manifest}</code> — the manifest JSON path (empty if absent)</li>
-<li><code>{python}</code> — <code>sys.executable</code></li>
+<li><code>{iccid}</code> -- the newly seen <abbr title="Integrated Circuit Card Identifier">ICCID</abbr></li>
+<li><code>{profile}</code> -- preferred profile path</li>
+<li><code>{profile_path}</code> -- alias of <code>{profile}</code></li>
+<li><code>{profile_dir}</code> -- the per-profile directory</li>
+<li><code>{manifest}</code> -- the manifest JSON path (empty if absent)</li>
+<li><code>{python}</code> -- <code>sys.executable</code></li>
 </ul>
 <p>With no <code>--launcher</code> flag the watcher runs
 <code>python -m Tools.ProfilePackage --cmd "USE &lt;profile&gt;; INFO; TREE; EXIT"</code>,
@@ -140,7 +140,7 @@ allow-listed. The tooling refuses to start without both
 <div class="code-block"><pre><code>yggdrasim-apdu-fuzzer \
     --corpus /path/to/session.json \
     --transport pcsc \
-    --allow-iccid 89000012345678901234 \
+    --allow-iccid 89880012345678901234 \
     --seed 0xCAFEBABE \
     --max-apdus 500 \
     --i-mean-it
@@ -156,7 +156,7 @@ Supply ShS-ENC, ShS-MAC, and optionally DEK for a given <abbr title="Integrated 
 the tooling writes a local JSON key repository (atomic, <code>0o600</code>)
 and launches <code>tshark</code> with the shipped Lua dissector.</p>
 <div class="code-block"><pre><code>yggdrasim-eum-diag inject-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc &lt;32 hex chars&gt; \
     --shs-mac &lt;32 hex chars&gt; \
     --dek     &lt;32 hex chars&gt; \
@@ -165,7 +165,7 @@ and launches <code>tshark</code> with the shipped Lua dissector.</p>
 <p>Write keys only (for when a separate <code>wireshark</code> instance is
 handling the capture):</p>
 <div class="code-block"><pre><code>yggdrasim-eum-diag store-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc ... --shs-mac ... \
     --keys-out /tmp/session-keys.json
 </code></pre></div>
@@ -196,13 +196,13 @@ handling the capture):</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

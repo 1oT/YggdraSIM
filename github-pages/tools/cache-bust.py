@@ -17,7 +17,7 @@ import os
 import re
 import sys
 
-VERSION = "2"  # bump this after editing ygg.css / ygg.js / tailwind.css / etc.
+VERSION = "3"  # bump this after editing ygg.css / ygg.js / tailwind.css / etc.
 
 APPLY = "--apply" in sys.argv
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -10,8 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="tailwind.css?v=2">
-  <link rel="stylesheet" href="ygg.css?v=2">
+  <link rel="stylesheet" href="tailwind.css?v=3">
+  <link rel="stylesheet" href="ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="" data-ygg-partial-path="partials/sidebar.html" data-ygg-active-link="build-and-packaging.html">
@@ -20,7 +20,7 @@
 
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="ygg-layout.js?v=2"></script>
+  <script src="ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -75,7 +75,7 @@
 <tr>
 <td><code>clean</code></td>
 <td>no</td>
-<td>Windows x86_64 / macOS x86_64 + arm64 / Linux x86_64 / Raspberry Pi arm64</td>
+<td>Windows x86_64 / macOS arm64 / Linux x86_64 / Raspberry Pi arm64</td>
 <td>desktop / <abbr title="Certificate Issuer">CI</abbr> / field</td>
 </tr>
 <tr>
@@ -93,7 +93,9 @@
 </tbody>
 </table></div>
 <h3 id="optional-extras-orthogonal-to-the-flavor-split">Optional extras (orthogonal to the flavor split)</h3>
-<p>These extras are independently selectable on a source install.</p>
+<p>These extras are independently selectable on a source install. The
+PyInstaller build produces a CLI executable and a desktop-GUI companion for
+each published flavor when the build environment includes <code>[gui]</code>.</p>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -105,13 +107,33 @@
 <tbody>
 <tr>
 <td><code>[saip]</code></td>
-<td>(empty back-compat alias; pySim is already in base deps)</td>
-<td>onboarding scripts that reference the old name</td>
+<td><code>openpyxl</code>, <code>defusedxml</code></td>
+<td>hosting a spreadsheet import/export plugin; the generator itself is supplied separately</td>
+</tr>
+<tr>
+<td><code>[mcp]</code></td>
+<td><code>mcp</code></td>
+<td>serving the tool surface to an AI agent (<code>yggdrasim-mcp</code>)</td>
 </tr>
 <tr>
 <td><code>[hil]</code></td>
-<td><code>pyudev</code> (Linux only)</td>
-<td>enabling the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge supervisor on a source install</td>
+<td><code>pyudev</code>, <code>pyserial</code>, etc.</td>
+<td>enabling the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge on a source install</td>
+</tr>
+<tr>
+<td><code>[gui]</code></td>
+<td><code>pywebview</code></td>
+<td>desktop Universal GUI (<code>--gui</code>)</td>
+</tr>
+<tr>
+<td><code>[gui-server]</code></td>
+<td><code>fastapi</code>, <code>uvicorn</code></td>
+<td>web-served Universal GUI (<code>--web-server</code>)</td>
+</tr>
+<tr>
+<td><code>[open5gs]</code></td>
+<td><code>pymongo</code></td>
+<td>BYO-Open5GS provisioning bridge</td>
 </tr>
 <tr>
 <td><code>[build]</code></td>
@@ -120,7 +142,7 @@
 </tr>
 <tr>
 <td><code>[test]</code></td>
-<td><code>pytest</code></td>
+<td><code>pytest</code>, helpers</td>
 <td>running the test suite</td>
 </tr>
 <tr>
@@ -130,8 +152,8 @@
 </tr>
 <tr>
 <td><code>[full]</code></td>
-<td><code>[hil]</code> + <code>[build]</code> + <code>[test]</code></td>
-<td>one-shot install of the <abbr title="Hardware-In-The-Loop">HIL</abbr>-capable source flavor</td>
+<td><code>pyudev</code> plus the headless GUI-server runtime</td>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr>-capable Linux runtime (add <code>[gui]</code> for a source desktop window)</td>
 </tr>
 </tbody>
 </table></div>
@@ -142,6 +164,13 @@ as <code>--version</code>, <code>--doctor</code>, and the main menu can report t
 SKU even when the variable is not exported afterwards.</p>
 <p>External host dependencies still matter for real card workflows,
 especially <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> libraries, reader drivers, and optional <code>gpg</code>.</p>
+<p>For GUI-driven source labs, install with combined extras:</p>
+<div class="code-block"><pre><code>python -m pip install -e &#39;.[full,gui]&#39;
+</code></pre></div>
+<p>That profile gives the local workstation the GUI and Card Bridge pieces while
+keeping the Linux-only <abbr title="Hardware-In-The-Loop">HIL</abbr>/RemSIM dependencies available for local rigs. A
+headless Raspberry Pi rig normally uses <code>.[full]</code> plus the RemSIM/SIMtrace2
+system packages documented in <a href="how-to/install-remsim-apdu-streaming.html">Install RemSIM / <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</a>.</p>
 <h2 id="docker">Docker</h2>
 <p>The image is flavor-aware through a build argument:</p>
 <div class="code-block"><pre><code># Clean (Windows / macOS / Linux hosts)
@@ -227,6 +256,8 @@ the writable runtime root:</p>
 <li>smart-card flows are tested on each target OS that will be supported</li>
 <li>on <code>full</code> builds, the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge can acquire the reader, launch
   <code>osmo-remsim-client-st2</code>, and mirror GSMTAP to Wireshark</li>
+<li>on GUI/source lab installs, the live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> dock connects and Card Bridge
+  <code>/status</code> probes succeed through the intended SSH tunnel</li>
 </ul>
 <h2 id="deep-reference">Deep reference</h2>
 <p>Use these authored guides for the complete reference:</p>
@@ -237,6 +268,8 @@ the writable runtime root:</p>
 <li><code>guides/INSTALL_FROM_SOURCE.md</code> - source install matrix</li>
 <li><code>guides/INSTALL_RASPBERRYPI.md</code> - Raspberry Pi notes</li>
 <li><code>guides/SIMTRACE2_CARDEM_GUIDE.md</code> - SIMtrace2 firmware / toolchain</li>
+<li><a href="subsystems/gui-command-center.html">Universal GUI Command Center</a></li>
+<li><a href="how-to/remote-apdu-streaming.html">Card Bridge over SSH</a></li>
 </ul>
         </div>
       </div><!-- /ygg-toc-body -->
@@ -265,13 +298,13 @@ the writable runtime root:</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="ygg.js?v=2"></script>
+<script src="ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Card Bridge — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/card-bridge.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Card Bridge</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Card Bridge</h1>
+        <p class="page-lead mb-8"><code>Tools/CardBridge/</code> publishes one <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader over HTTP so a card that sits
+in a reader on one machine can be driven from another. The bridge process
+owns the reader, the relay service in <code>Tools/HilBridge/apdu_relay.py</code> owns
+the wire format, and every consumer -- the shells, the Universal GUI, the <abbr title="Hardware-In-The-Loop">HIL</abbr>
+supervisor -- speaks the same <code>/apdu</code> endpoint.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#http-surface" class="toc-link">HTTP surface</a>
+            <a href="#authentication" class="toc-link">Authentication</a>
+            <a href="#consumers" class="toc-link">Consumers</a>
+            <a href="#gui-surfaces" class="toc-link">GUI surfaces</a>
+            <a href="#run-it-as-a-service" class="toc-link">Run it as a service</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<div class="admonition info">
+<p class="admonition-title">Authored guide</p>
+<p><a href="https://github.com/1oT/YggdraSIM/blob/v2.2.0/guides/CARD_BRIDGE_GUIDE.md"><code>guides/CARD_BRIDGE_GUIDE.md</code></a>
+carries the step-by-step workflow: topology, SSH tunnel, doctor
+preflight, audit records, and the troubleshooting table. This page is the
+subsystem map.</p>
+</div>
+<h2 id="when-to-use-it">When to use it</h2>
+<ul>
+<li>the reader is attached to a workstation while the work happens on a lab
+  host, or the reverse</li>
+<li>a Windows or macOS operator needs a card that lives on the Linux <abbr title="Hardware-In-The-Loop">HIL</abbr> host</li>
+<li>a <abbr title="Hardware-In-The-Loop">HIL</abbr> rig carries a modem but no reader, and must be fed a card over the
+  network</li>
+<li>several people share a set of rigs -- then put <a href="remote-lab.html">Remote Lab</a>
+  in front of the bridge, which adds identity, inventory and exclusive
+  sessions on top of this same data plane</li>
+</ul>
+<h2 id="entry-points">Entry points</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Form</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Installed command</td>
+<td><code>yggdrasim-card-bridge</code></td>
+</tr>
+<tr>
+<td>Module</td>
+<td><code>python -m Tools.CardBridge</code></td>
+</tr>
+<tr>
+<td>Launcher</td>
+<td><code>python main/main.py --card-bridge</code>, or <code>[CB]</code> in the menu</td>
+</tr>
+<tr>
+<td>GUI</td>
+<td>the <strong>Card Bridge</strong> view of the <a href="gui-command-center.html">Universal GUI</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>Flags on the bridge process:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--host</code></td>
+<td>Bind interface, <code>127.0.0.1</code> by default. Any other address requires a token and is meant only for a TLS-terminating reverse proxy.</td>
+</tr>
+<tr>
+<td><code>--port</code></td>
+<td>TCP port, <code>8642</code> by default.</td>
+</tr>
+<tr>
+<td><code>--reader-index</code></td>
+<td>Index of the <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader to publish (<code>0</code> by default).</td>
+</tr>
+<tr>
+<td><code>--reader-name</code></td>
+<td>Substring match on the reader name; overrides <code>--reader-index</code>.</td>
+</tr>
+<tr>
+<td><code>--token-file</code></td>
+<td>Path to a <code>0600</code> file holding the bearer token. A missing file is created with a fresh token. Omitted, the bridge writes <code>${XDG_CONFIG_HOME:-~/.config}/yggdrasim/card_bridge/&lt;port&gt;.token</code>.</td>
+</tr>
+<tr>
+<td><code>--no-token</code></td>
+<td>Run unauthenticated. Loopback bind only -- the bridge refuses to start otherwise.</td>
+</tr>
+<tr>
+<td><code>--audit</code></td>
+<td>One structured audit record per exchange: header bytes and status word, never the data payload.</td>
+</tr>
+<tr>
+<td><code>--audit-full-apdu</code></td>
+<td>Also logs full <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> and response hex. <abbr title="Personal Identification Number">PIN</abbr> material rides through here; forensic work on test cards only. Implies <code>--audit</code>.</td>
+</tr>
+<tr>
+<td><code>--audit-logger-name</code></td>
+<td>Python logger that receives the audit records.</td>
+</tr>
+<tr>
+<td><code>--apdu-timeout-ms</code></td>
+<td>Maximum <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> wait per <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>.</td>
+</tr>
+<tr>
+<td><code>--pcsc-share-mode</code></td>
+<td><code>shared</code> by default, so a GUI reader probe does not block startup; <code>exclusive</code> when no other local process may touch the reader.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="http-surface">HTTP surface</h2>
+<p>The paths come from <code>Tools/HilBridge/apdu_relay.py</code> and are identical whether
+the bridge is reached directly, through an SSH forward, or through a Remote
+Lab session relay.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/apdu</code></td>
+<td>The data plane: one request carries one <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, the response carries the data and the status word.</td>
+</tr>
+<tr>
+<td><code>/ping</code></td>
+<td>Liveness. Answers <code>pong</code>.</td>
+</tr>
+<tr>
+<td><code>/status</code></td>
+<td>Reader name, card presence, <abbr title="Answer To Reset">ATR</abbr>, and the lease holder when one exists.</td>
+</tr>
+<tr>
+<td><code>/card/reset</code></td>
+<td>Power-cycles the card in the published reader.</td>
+</tr>
+<tr>
+<td><code>/lease</code></td>
+<td>Take, renew or drop the exclusive hold a consumer has on the card.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="authentication">Authentication</h2>
+<p>The bridge is bearer-token gated. <code>yggdrasim_common/card_bridge_auth.py</code>
+generates a 32-byte URL-safe token; the token file stays <code>0600</code> and the
+process never logs more than a six-character fingerprint. A peer that fails
+authentication three times inside 30 s is locked out for 60 s.</p>
+<p>Binding a non-loopback address without a token is refused outright. There is
+no override flag: either keep the SSH-tunnel topology or supply a token and
+terminate TLS in front of the bridge.</p>
+<h2 id="consumers">Consumers</h2>
+<p>A YggdraSIM shell, the GUI or the <abbr title="Hardware-In-The-Loop">HIL</abbr> supervisor becomes a Card Bridge
+consumer through the shared arguments in
+<code>yggdrasim_common/remote_card_args.py</code>:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Argument</th>
+<th>Environment variable</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--remote-card-url</code></td>
+<td><code>YGGDRASIM_CARD_RELAY_URL</code></td>
+</tr>
+<tr>
+<td><code>--remote-card-token-file</code></td>
+<td><code>YGGDRASIM_CARD_RELAY_TOKEN_FILE</code></td>
+</tr>
+<tr>
+<td>(token value)</td>
+<td><code>YGGDRASIM_CARD_RELAY_TOKEN</code></td>
+</tr>
+<tr>
+<td><code>--remote-card-lease-file</code></td>
+<td>--</td>
+</tr>
+<tr>
+<td><code>--remote-card-restart-backoff</code></td>
+<td>--</td>
+</tr>
+</tbody>
+</table></div>
+<p>Prefer the token file over the raw value: a token passed on the command line
+is visible in <code>ps</code> output.</p>
+<h2 id="gui-surfaces">GUI surfaces</h2>
+<p>The <strong>Card Bridge</strong> view drives both a local bridge and a remote one. Its
+actions are registered in <code>yggdrasim_common/gui_server/actions/card_bridge.py</code>:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Action</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Status, Probe bridge</td>
+<td>Read the local bridge state; probe a URL and token pair.</td>
+</tr>
+<tr>
+<td>Generate token, Configuration</td>
+<td>Mint a token file; edit the stored bridge settings.</td>
+</tr>
+<tr>
+<td>Start local bridge, Stop local bridge</td>
+<td>Run the bridge on this host against a chosen reader.</td>
+</tr>
+<tr>
+<td>Remote rig status</td>
+<td>Report the saved remote host, its service, tunnel and lease holder.</td>
+</tr>
+<tr>
+<td>Start remote <abbr title="Hardware-In-The-Loop">HIL</abbr> rig, Stop remote <abbr title="Hardware-In-The-Loop">HIL</abbr> rig</td>
+<td>Bring a saved remote rig up or down, tunnel included.</td>
+</tr>
+<tr>
+<td>Start RPi tunnel, Stop RPi tunnel</td>
+<td>Manage only the SSH forward to the saved host.</td>
+</tr>
+<tr>
+<td>Sync token to RPi</td>
+<td>Copy the bridge token to the remote host.</td>
+</tr>
+<tr>
+<td>Install RPi <abbr title="Hardware-In-The-Loop">HIL</abbr> service, Control RPi <abbr title="Hardware-In-The-Loop">HIL</abbr> service</td>
+<td>Install and drive the <code>systemd --user</code> unit on the remote host.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The remote-rig actions are what the GUI calls <strong>Remote Bridge</strong>: one stored
+host, onboarded once, then started and stopped from the same panel. A host
+with no SSH target is recorded as a gap to fill rather than rejected, so the
+inventory can be written before the access is in place.</p>
+<h2 id="run-it-as-a-service">Run it as a service</h2>
+<p><code>guides/systemd/yggdrasim-card-bridge.service.example</code> is a <code>systemd --user</code>
+unit for a reader host that should publish its card on boot. Install it on
+the reader machine, not on the consumer.</p>
+<h2 id="pitfalls">Pitfalls</h2>
+<ul>
+<li>Re-enumerating the reader (a USB reseat, a <code>pcscd</code> restart) invalidates the
+  handle the bridge holds, and nothing notices. <code>/status</code> answers from the
+  reader label and <abbr title="Answer To Reset">ATR</abbr> captured when the process connected, and defaults its
+  <code>status</code> to <code>ok</code>, so it still reads healthy; <code>/card/reset</code> drives the same
+  dead channel. Restart the bridge process.</li>
+<li><code>--audit-full-apdu</code> captures PINs and key material in cleartext.</li>
+<li>An SSH forward dies with its session. Set <code>ServerAliveInterval</code> and
+  <code>ServerAliveCountMax</code> in <code>~/.ssh/config</code> for a long-running rig link.</li>
+<li>The bridge publishes one reader. Two cards on one host means two bridge
+  processes on two ports.</li>
+</ul>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../how-to/remote-apdu-streaming.html">Card Bridge over SSH</a> -- the task guide</li>
+<li><a href="remote-lab.html">Remote Lab</a> -- identity, inventory and sessions over this bridge</li>
+<li><a href="hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a> -- the remote-card consumer on a rig</li>
+<li><a href="../how-to/install-remsim-apdu-streaming.html">Install RemSIM / <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</a></li>
+<li><a href="gui-command-center.html">Universal GUI Command Center</a></li>
+<li><a href="https://github.com/1oT/YggdraSIM/blob/v2.2.0/guides/CARD_BRIDGE_GUIDE.md"><code>guides/CARD_BRIDGE_GUIDE.md</code></a> -- the authored operator guide</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#http-surface" class="toc-link">HTTP surface</a>
+            <a href="#authentication" class="toc-link">Authentication</a>
+            <a href="#consumers" class="toc-link">Consumers</a>
+            <a href="#gui-surfaces" class="toc-link">GUI surfaces</a>
+            <a href="#run-it-as-a-service" class="toc-link">Run it as a service</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

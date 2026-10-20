@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/rsp-architecture.html" data-ygg-open-sections="concepts">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -59,23 +59,23 @@ for context only.</p>
 <h2 id="actors">Actors</h2>
 <pre class="mermaid"><code>flowchart LR
     subgraph Device
-        LPAd["LPAd<br/>local profile assistant #40;device#41;"]
-        IPAd["IPAd<br/>IoT profile assistant #40;device#41;"]
+        LPAd["LPAd&lt;br/&gt;local profile assistant (device)"]
+        IPAd["IPAd&lt;br/&gt;IoT profile assistant (device)"]
     end
     subgraph Card
         ISDR["ISD-R"]
-        ISDP["ISD-P #40;one per profile#41;"]
+        ISDP["ISD-P (one per profile)"]
     end
     subgraph Network
-        SMDP["SM-DP#43;"]
-        eIM["eIM #40;SGP.32#41;"]
+        SMDP["SM-DP+"]
+        eIM["eIM (SGP.32)"]
     end
 
-    LPAd -->|"ES10a/b/c"| ISDR
-    IPAd -->|"ES10b/c"| ISDR
-    LPAd -->|"ES9+"| SMDP
-    IPAd -->|"ES9+"| eIM
-    eIM -->|"ES9+#39;"| SMDP</code></pre>
+    LPAd -- ES10a/b/c --&gt; ISDR
+    IPAd -- ES10b/c --&gt; ISDR
+    LPAd -- ES9+ --&gt; SMDP
+    IPAd -- ES9+ --&gt; eIM
+    eIM -- ES9+' --&gt; SMDP</code></pre>
 <p class="fig-caption">Figure: RSP actors and ES interfaces across device, card, and network</p>
 <ul>
 <li><strong><abbr title="Local Profile Assistant, device-side">LPAd</abbr></strong> is the consumer-device-side agent in <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22. It speaks to the
@@ -121,7 +121,7 @@ for context only.</p>
 <tr>
 <td>ES9+'</td>
 <td><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and SM-DP+</td>
-<td><abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr>-variant handover flows</td>
+<td>handover flows</td>
 </tr>
 </tbody>
 </table></div>
@@ -131,20 +131,20 @@ for context only.</p>
     participant LPAd
     participant ISDR
     participant SMDP
-    User->>LPAd: activation code LPA:1$...
-    LPAd->>SMDP: InitiateAuthentication (eUICC challenge)
-    SMDP-->>LPAd: serverSigned1 + SM-DP+ chain
-    LPAd->>ISDR: AuthenticateServer (serverSigned1)
-    ISDR-->>LPAd: eUICCSigned1
-    LPAd->>SMDP: AuthenticateClient (eUICCSigned1)
-    SMDP-->>LPAd: smdpSigned2 + metadata
-    LPAd->>ISDR: PrepareDownload (smdpSigned2)
-    ISDR-->>LPAd: euiccSigned2
-    LPAd->>SMDP: GetBoundProfilePackage
-    SMDP-->>LPAd: BPP
-    LPAd->>ISDR: LoadBoundProfilePackage (BPP segments)
-    ISDR-->>LPAd: per-segment acks
-    LPAd->>SMDP: HandleNotification (InstallResult)</code></pre>
+    User-&gt;&gt;LPAd: activation code LPA:1$...
+    LPAd-&gt;&gt;SMDP: InitiateAuthentication (eUICC challenge)
+    SMDP--&gt;&gt;LPAd: serverSigned1 + SM-DP+ chain
+    LPAd-&gt;&gt;ISDR: AuthenticateServer (serverSigned1)
+    ISDR--&gt;&gt;LPAd: eUICCSigned1
+    LPAd-&gt;&gt;SMDP: AuthenticateClient (eUICCSigned1)
+    SMDP--&gt;&gt;LPAd: smdpSigned2 + metadata
+    LPAd-&gt;&gt;ISDR: PrepareDownload (smdpSigned2)
+    ISDR--&gt;&gt;LPAd: euiccSigned2
+    LPAd-&gt;&gt;SMDP: GetBoundProfilePackage
+    SMDP--&gt;&gt;LPAd: BPP
+    LPAd-&gt;&gt;ISDR: LoadBoundProfilePackage (BPP segments)
+    ISDR--&gt;&gt;LPAd: per-segment acks
+    LPAd-&gt;&gt;SMDP: HandleNotification (InstallResult)</code></pre>
 <p class="fig-caption">Figure: Consumer RSP profile download — mutual authentication to BPP install</p>
 <p>The <code>BPP</code> is the ASN.1 structure that carries the profile wrapped in a set of
 session keys. The <abbr title="Issuer Security Domain - Root">ISD-R</abbr> unwraps it segment by segment. On completion the
@@ -157,14 +157,15 @@ of instructions. The <abbr title="IoT Profile Assistant, device-side">IPAd</abbr
 <li><code>ADD-INITIAL-EIM</code> primes an <abbr title="Issuer Security Domain - Root">ISD-R</abbr> with the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity fields in BF55.</li>
 <li><code>ADD-EIM</code> authorizes additional eIMs or rotates entries.</li>
 <li><code>LOAD-EIM-PACKAGE</code> is the card-side consumption step.</li>
-<li>Polling loops let the <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> ask the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> for work, execute, and acknowledge.</li>
+<li>Package exchange lets the <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> receive work, execute it, and acknowledge
+  the result.</li>
 </ul>
 <pre class="mermaid"><code>flowchart LR
-    eIMAuth["eIM authoring"] --> Package["eIM package"]
-    Package --> IPAd["IPAd executor"]
-    IPAd --> ISDR["ISD-R"]
-    IPAd --> Notify["Notifications / Ack"]
-    Notify --> eIMAuth</code></pre>
+    eIMAuth["eIM authoring"] --&gt; Package["eIM package"]
+    Package --&gt; IPAd["IPAd executor"]
+    IPAd --&gt; ISDR["ISD-R"]
+    IPAd --&gt; Notify["Notifications / Ack"]
+    Notify --&gt; eIMAuth</code></pre>
 <p class="fig-caption">Figure: IoT RSP (SGP.32) flow — eIM package authoring to IPAd execution</p>
 <h2 id="profile-lifecycle-states-on-the-euicc">Profile lifecycle states on the <abbr title="Embedded UICC">eUICC</abbr></h2>
 <p>Each installed profile on the <code>ISD-R</code> carries a state.</p>
@@ -203,6 +204,19 @@ notifications are emitted, and how the <abbr title="Local Profile Assistant">LPA
 <code>RemoveNotificationFromList</code>. YggdraSIM's relay shells automate this around
 transactional flows and surface it under <code>NOTIF-*</code> verbs when a manual retry
 is needed.</p>
+<p>An <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 <abbr title="Embedded UICC">eUICC</abbr> also keeps each signed <abbr title="Embedded UICC">eUICC</abbr> Package Result until the IPA
+deletes it (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.3 §2.11.2.1). The <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> answers
+<code>ESipa.ProvideEimPackageResult</code> with the sequence numbers of the results and
+notifications it processed (<code>EimAcknowledgements</code>, tag <code>BF53</code>), and the eSIM
+Management shell removes each acknowledged one with
+<code>RemoveNotificationFromList</code> (§3.3.1 steps 13 and 15). A result the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> did
+not acknowledge stays on the card, where <code>RetrieveNotificationsList</code> with
+<code>euiccPackageResults</code> (§5.9.11) can still read it.</p>
+<p>The result of an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-triggered profile download, the
+ProfileDownloadTriggerResult, goes to the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> with <code>ESipa.HandleNotification</code>
+instead (§3.2.3.1 step 13). That function has no response, so the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>
+acknowledges nothing; the ProfileInstallationResult inside it leaves the card
+once the SM-DP+ has taken it through <code>ES9+.HandleNotification</code> (§3.7).</p>
 <h2 id="eim-identity-and-bf55"><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity and BF55</h2>
 <p>The BF55 row in <code>EUICCInfo2</code> advertises the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity set an <abbr title="Embedded UICC">eUICC</abbr>
 recognizes. It defines:</p>
@@ -218,12 +232,12 @@ the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> endpoint side 
 <a href="../subsystems/scp11-eim-local.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> Local</a>.</p>
 <h2 id="where-to-look-in-yggdrasim">Where to look in YggdraSIM</h2>
 <ul>
-<li><a href="../subsystems/scp11-live.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Live Relay</a> and
-  <a href="../subsystems/scp11-test.html">Test Relay</a> for consumer-style ES9+ flows</li>
+<li><a href="../subsystems/scp11-live.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> eSIM Management Relay</a> for
+  consumer-style ES9+ flows</li>
 <li><a href="../subsystems/scp11-local-access.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access</a> for direct
   <abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr> / <abbr title="ES10c interface for profile state control">ES10c</abbr> without relay</li>
 <li><a href="../subsystems/scp11-eim-local.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> Local</a> for <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32
-  orchestration with localized <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and <abbr title="IoT Profile Assistant, device-side">IPAd</abbr>/<abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> flows</li>
+  orchestration with localized <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> flows</li>
 <li><a href="../reference/standards-map.html">Standards Map</a> for the specific <abbr title="GSM Association">GSMA</abbr>
   sections mapped to implementation</li>
 </ul>
@@ -254,13 +268,13 @@ the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> endpoint side 
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

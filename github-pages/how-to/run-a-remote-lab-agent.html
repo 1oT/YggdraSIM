@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Run a remote lab agent — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/run-a-remote-lab-agent.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Run a remote lab agent</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Run a remote lab agent</h1>
+        <p class="page-lead mb-8">Publish one or more card rigs to a team, so an operator can discover what
+exists, take exclusive hold of a rig for the length of a session, and stream
+APDUs to it -- without every user needing the rig's own Card Bridge token.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#mint-access-tokens" class="toc-link">Mint access tokens</a>
+            <a href="#two-kinds-of-rig" class="toc-link">Two kinds of rig</a>
+            <a href="#write-the-config" class="toc-link">Write the config</a>
+            <a href="#start-the-agent" class="toc-link">Start the agent</a>
+            <a href="#run-it-as-a-service" class="toc-link">Run it as a service</a>
+            <a href="#reach-the-agent" class="toc-link">Reach the agent</a>
+            <a href="#pin-a-name-or-echo-the-caller" class="toc-link toc-link-sub">Pin a name, or echo the caller</a>
+            <a href="#a-shared-rig-on-a-vpn" class="toc-link toc-link-sub">A shared rig on a VPN</a>
+            <a href="#a-single-operator-rig-over-ssh" class="toc-link toc-link-sub">A single-operator rig over SSH</a>
+            <a href="#take-a-session" class="toc-link">Take a session</a>
+            <a href="#stream-apdus-through-the-session" class="toc-link">Stream APDUs through the session</a>
+            <a href="#store-a-host-once" class="toc-link">Store a host once</a>
+            <a href="#a-host-you-have-not-set-up-yet" class="toc-link toc-link-sub">A host you have not set up yet</a>
+            <a href="#offer-a-card-to-a-modem-rig" class="toc-link">Offer a card to a modem rig</a>
+            <a href="#control-api-reference" class="toc-link">Control API reference</a>
+            <a href="#use-the-gui-instead" class="toc-link">Use the GUI instead</a>
+            <a href="#security-rules" class="toc-link">Security rules</a>
+            <a href="#troubleshooting" class="toc-link">Troubleshooting</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>The agent does not replace <a href="remote-apdu-streaming.html">Card Bridge over SSH</a>.
+It sits in front of it: the data plane is still the Card Bridge HTTP <code>/apdu</code>
+relay, and the agent adds identity, rig inventory, status, and exclusive
+session locking on top.</p>
+<div class="code-block"><pre><code>operator  --control--&gt;  Lab agent :8700        (who exists, may I have it)
+operator  --stream---&gt;  rig proxy :8801  --&gt;  Card Bridge :8642  --&gt;  reader
+</code></pre></div>
+<p>Use this when several people share a set of rigs. For a single operator and a
+single reader, plain Card Bridge over SSH is less machinery.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>YggdraSIM installed on the agent host (<code>yggdrasim-lab-agent</code> ships with the
+  base install; the YAML parser is a base dependency)</li>
+<li>one reachable Card Bridge <code>/apdu</code> endpoint per rig, already working per
+  <a href="remote-apdu-streaming.html">Card Bridge over SSH</a></li>
+<li>a private network path, or SSH forwards, between operators and the agent</li>
+</ul>
+<p>The agent binds loopback by default. Treat a non-loopback bind the same way
+you would treat exposing Card Bridge itself: see <a href="#security-rules">Security rules</a>.</p>
+<h2 id="mint-access-tokens">Mint access tokens</h2>
+<p>The config stores only SHA-256 hashes, never the token itself. Generate a
+pair with the shipped helpers:</p>
+<div class="code-block"><pre><code>python -c &quot;
+from yggdrasim_common.card_bridge_auth import generate_token
+from yggdrasim_common.remote_lab.security import hash_token
+token = generate_token()
+print(&#39;token      :&#39;, token)
+print(&#39;token_hash :&#39;, hash_token(token))
+&quot;
+</code></pre></div>
+<p>Give the <code>token</code> to the operator and put the <code>token_hash</code> in the config. A
+<code>role: admin</code> token additionally permits <code>force-release</code>.</p>
+<h2 id="two-kinds-of-rig">Two kinds of rig</h2>
+<p>A rig declares what it offers, and that decides which way APDUs travel.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Kind</th>
+<th>Holds the card</th>
+<th>Holds a modem</th>
+<th>The operator</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>card</code></td>
+<td>the rig</td>
+<td>no</td>
+<td>streams APDUs to the rig</td>
+</tr>
+<tr>
+<td><code>modem</code></td>
+<td>the operator</td>
+<td>yes, plus a SIMtrace2</td>
+<td>offers a card for the rig to drive</td>
+</tr>
+</tbody>
+</table></div>
+<p>A <strong>card rig</strong> is the original shape and stays the default: leave <code>kind</code>
+out and nothing changes. A <strong>modem rig</strong> reverses the direction. It has
+no card of its own, so a reservation must carry a card offer naming a
+Card Bridge the rig can reach, and the rig runs a <abbr title="Hardware-In-The-Loop">HIL</abbr> supervisor against
+it for the length of the session.</p>
+<p>A host that carries both a reader and a modem publishes two rigs sharing
+one lock name, so taking either takes the bench.</p>
+<h2 id="write-the-config">Write the config</h2>
+<div class="code-block"><pre><code>agent:
+  id: lab-01
+  name: Bench lab
+  bind_host: 127.0.0.1
+  control_port: 8700
+
+defaults:
+  reservation_timeout_seconds: 30
+  heartbeat_timeout_seconds: 60
+  max_session_seconds: 14400
+
+security:
+  access_tokens:
+    - id: alice
+      token_hash: &quot;sha256:0000000000000000000000000000000000000000000000000000000000000000&quot;
+      role: user
+    - id: lab-admin
+      token_hash: &quot;sha256:1111111111111111111111111111111111111111111111111111111111111111&quot;
+      role: admin
+
+rigs:
+  - id: bench-a
+    name: Bench A
+    location: TestLocality
+    tags: [pcsc, esim]
+    capabilities: [scp03, scp11]
+    enabled: true
+    stream_proxy:
+      bind_host: 127.0.0.1
+      external_port: 8801
+    upstream:
+      url: http://127.0.0.1:8642/apdu
+      token_file: ~/.config/yggdrasim/card_bridge/8642.token
+</code></pre></div>
+<p>Field notes, all enforced by the loader:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Key</th>
+<th>Required</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent.id</code></td>
+<td>yes</td>
+<td>rejected when empty</td>
+</tr>
+<tr>
+<td><code>agent.bind_host</code></td>
+<td>no</td>
+<td>defaults to <code>127.0.0.1</code></td>
+</tr>
+<tr>
+<td><code>agent.control_port</code></td>
+<td>no</td>
+<td>defaults to <code>8700</code></td>
+</tr>
+<tr>
+<td><code>agent.public_host</code></td>
+<td>no</td>
+<td>the host callers are told to use. Not enforced anywhere: left unset, the agent answers each caller with the address that caller used, which is the right setting for a rig reachable by more than one route</td>
+</tr>
+<tr>
+<td><code>defaults.*</code></td>
+<td>no</td>
+<td><code>30</code> / <code>60</code> / <code>14400</code> seconds; floored at 1</td>
+</tr>
+<tr>
+<td><code>security.access_tokens</code></td>
+<td>yes</td>
+<td>at least one entry; <code>token_hash</code> must start with <code>sha256:</code>; <code>role</code> is <code>user</code> or <code>admin</code></td>
+</tr>
+<tr>
+<td><code>rigs[].id</code></td>
+<td>yes</td>
+<td>must be unique, compared case-insensitively</td>
+</tr>
+<tr>
+<td><code>rigs[].stream_proxy.external_port</code></td>
+<td>yes</td>
+<td>rejected when it collides with another rig or with <code>agent.control_port</code> on an overlapping bind</td>
+</tr>
+<tr>
+<td><code>rigs[].stream_proxy.bind_host</code></td>
+<td>no</td>
+<td>defaults to <code>127.0.0.1</code></td>
+</tr>
+<tr>
+<td><code>rigs[].stream_proxy.public_host</code></td>
+<td>no</td>
+<td>overrides <code>agent.public_host</code> for this rig's stream URL; falls back to the <code>Host</code> header, then <code>bind_host</code>, with <code>0.0.0.0</code> rewritten to <code>127.0.0.1</code></td>
+</tr>
+<tr>
+<td><code>rigs[].upstream</code></td>
+<td>yes</td>
+<td>either <code>url</code>, or <code>host</code> + <code>port</code> (+ optional <code>scheme</code>); <code>/apdu</code> is appended when missing</td>
+</tr>
+<tr>
+<td><code>rigs[].locks</code></td>
+<td>no</td>
+<td>defaults to <code>rig:&lt;id&gt;</code>; give two rigs a shared lock name when they cannot run at once</td>
+</tr>
+<tr>
+<td><code>rigs[].enabled</code></td>
+<td>no</td>
+<td>defaults to <code>true</code></td>
+</tr>
+<tr>
+<td><code>rigs[].kind</code></td>
+<td>no</td>
+<td><code>card</code> or <code>modem</code>; defaults to <code>card</code>, so a config written before modem rigs existed is unchanged</td>
+</tr>
+<tr>
+<td><code>rigs[].modem.label</code></td>
+<td>no</td>
+<td>what an operator sees in the inventory; defaults to the rig name</td>
+</tr>
+<tr>
+<td><code>rigs[].modem.simtrace_vidpid</code></td>
+<td>no</td>
+<td>defaults to <code>1d50:60e3</code></td>
+</tr>
+<tr>
+<td><code>rigs[].consumer.enabled</code></td>
+<td>no</td>
+<td>defaults to <code>false</code>; must be <code>true</code> before a reservation may start a supervisor on this host</td>
+</tr>
+<tr>
+<td><code>rigs[].consumer.supervisor</code></td>
+<td>no</td>
+<td>defaults to <code>yggdrasim-hil-supervisor</code>; the only executable a reservation can start</td>
+</tr>
+<tr>
+<td><code>rigs[].consumer.simtrace_reset</code></td>
+<td>no</td>
+<td><code>off</code>, <code>usb-reset</code>, <code>port-power</code> or <code>auto</code>; defaults to <code>usb-reset</code></td>
+</tr>
+<tr>
+<td><code>rigs[].consumer.bridge_host</code> / <code>.bridge_port</code></td>
+<td>no</td>
+<td>where the rig-side <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge listens; <code>127.0.0.1</code> and <code>9997</code></td>
+</tr>
+<tr>
+<td><code>rigs[].consumer.apdu_timeout_ms</code></td>
+<td>no</td>
+<td>defaults to <code>30000</code>, which suits a card reached across a tunnel</td>
+</tr>
+</tbody>
+</table></div>
+<p>On a modem rig <code>stream_proxy</code> and <code>upstream</code> are both omitted: the rig
+serves no card, so it binds no listener and has no upstream to name.
+Declaring an <code>upstream</code> on a modem rig, or a <code>modem</code> or <code>consumer</code> block
+on a card rig, is rejected rather than ignored.</p>
+<div class="code-block"><pre><code>rigs:
+  - id: quectel-a
+    name: Quectel bench
+    kind: modem
+    location: TestLocality
+    modem:
+      label: Quectel EC25-E
+      simtrace_vidpid: 1d50:60e3
+    consumer:
+      enabled: true
+      simtrace_reset: usb-reset
+    locks: [bench:pi-1]
+</code></pre></div>
+<p><code>upstream.url</code> must be <code>http(s)</code> with no credentials, query, or fragment.
+Use <code>upstream.token_file</code> rather than inline <code>token</code> so the Card Bridge
+bearer stays in a <code>0600</code> file.</p>
+<h2 id="start-the-agent">Start the agent</h2>
+<div class="code-block"><pre><code>yggdrasim-lab-agent --config ~/.config/yggdrasim/remote-lab.yaml
+</code></pre></div>
+<p><code>--log-level DEBUG</code> raises verbosity. A malformed config fails at startup
+with the offending key path, so a typo never produces a half-open agent.</p>
+<h2 id="run-it-as-a-service">Run it as a service</h2>
+<p>An unattended rig host runs the agent and its Card Bridge as <code>systemd --user</code>
+units. Two examples ship beside the <abbr title="Hardware-In-The-Loop">HIL</abbr> one:</p>
+<div class="code-block"><pre><code>mkdir -p ~/.config/systemd/user
+cp guides/systemd/yggdrasim-card-bridge.service.example \
+  ~/.config/systemd/user/yggdrasim-card-bridge.service
+cp guides/systemd/yggdrasim-lab-agent.service.example \
+  ~/.config/systemd/user/yggdrasim-lab-agent.service
+
+systemctl --user daemon-reload
+systemctl --user enable --now yggdrasim-card-bridge.service yggdrasim-lab-agent.service
+loginctl enable-linger &quot;$USER&quot;
+</code></pre></div>
+<p><code>enable-linger</code> is what makes the units start at boot without a login.</p>
+<p><strong>Never order a unit after <code>default.target</code> when that target already wants
+it.</strong> The agent is ordered after the Card Bridge, and both are
+<code>WantedBy=default.target</code>; adding <code>After=default.target</code> to either one closes
+a cycle, and systemd resolves a cycle by deleting one of the start jobs. The
+result is a unit that silently never starts at boot while <code>systemctl status</code>
+afterwards reports nothing worse than <code>inactive (dead)</code>.</p>
+<p><code>systemctl --user enable --now</code> does not catch this, because starting a unit
+by hand never runs the boot transaction. Rehearse the boot path instead:</p>
+<div class="code-block"><pre><code>systemctl --user stop yggdrasim-lab-agent.service yggdrasim-card-bridge.service
+systemctl --user start default.target
+systemctl --user is-active yggdrasim-card-bridge.service yggdrasim-lab-agent.service
+journalctl --user -b | grep -i &quot;ordering cycle&quot;
+</code></pre></div>
+<p>Both units should report <code>active</code> and the grep should find nothing.</p>
+<h2 id="reach-the-agent">Reach the agent</h2>
+<p>Pick one of two shapes. They differ in who the rig is meant to serve, not in
+how callers authenticate -- an access token is required either way.</p>
+<h3 id="pin-a-name-or-echo-the-caller">Pin a name, or echo the caller</h3>
+<p>A rig's advertised stream URL comes from <code>stream_proxy.public_host</code>, then
+<code>agent.public_host</code>, then the request's <code>Host</code> header, then the bind
+address. Only the last is rewritten, <code>0.0.0.0</code> becoming <code>127.0.0.1</code>.</p>
+<p>Pinning a name is right for a rig that answers to exactly one. Leaving
+both unset is right for a rig reachable more than one way, because the
+agent then hands each caller back the address that caller reached it on:</p>
+<div class="code-block"><pre><code>called as esim-rig.example.test  -&gt;  http://esim-rig.example.test:8801/apdu
+called as 10.73.184.89           -&gt;  http://10.73.184.89:8801/apdu
+</code></pre></div>
+<p>That matters when a host is reachable over a VPN and over a LAN, or when
+it later becomes a VPN peer in its own right. A pinned name that resolves
+to an address the caller cannot route is the worst of both: the control
+port answers, every stream URL points somewhere unreachable, sessions
+open and APDUs go nowhere.</p>
+<p><code>scripts/remote_lab_open_agent_to_vpn.py --public-host auto</code> leaves the
+field unset for you; passing a name pins it as before.</p>
+<h3 id="a-shared-rig-on-a-vpn">A shared rig on a VPN</h3>
+<p>When a rig is meant to serve everyone who holds a token and the device config,
+put it on the VPN the team already runs (NetBird, Tailscale, WireGuard, a
+routed office LAN) and bind the agent to a real interface:</p>
+<div class="code-block"><pre><code>agent:
+  bind_host: 0.0.0.0
+  public_host: rig-host.internal.example    # resolvable BY CALLERS
+
+rigs:
+  - id: bench-a
+    stream_proxy:
+      bind_host: 0.0.0.0
+      public_host: rig-host.internal.example
+</code></pre></div>
+<p><code>public_host</code> is not optional here. The agent advertises a stream URL for each
+rig, and it derives the host from <code>stream_proxy.public_host</code>, then
+<code>agent.public_host</code>, then the request's <code>Host</code> header, then <code>bind_host</code> --
+rewriting <code>0.0.0.0</code> to <code>127.0.0.1</code> on the way. Leave it unset and control calls
+succeed while every caller is handed a loopback stream URL it cannot reach, so
+sessions open and APDUs go nowhere.</p>
+<p>Point the device registry at the same name rather than at <code>127.0.0.1</code>, and
+prefer the DNS name over an address so a DHCP lease change does not strand it.</p>
+<p>The rig's card-bridge upstream stays on loopback: only the agent talks to it,
+and it runs on the same host.</p>
+<p><code>scripts/remote_lab_open_agent_to_vpn.py</code> makes both edits on the rig host. It
+backs the config up, validates it with the agent's own loader before touching
+the service, and restores the backup if that fails:</p>
+<div class="code-block"><pre><code>python3 scripts/remote_lab_open_agent_to_vpn.py --dry-run
+python3 scripts/remote_lab_open_agent_to_vpn.py --public-host rig-host.internal.example
+</code></pre></div>
+<p>From an operator machine, <code>scripts/remote_lab_verify_over_vpn.sh</code> checks the
+whole path and separates a network problem from a bind problem -- the two
+failures the GUI renders identically. It is read-only and never prints the
+token:</p>
+<div class="code-block"><pre><code>scripts/remote_lab_verify_over_vpn.sh rig-host.internal.example path/to/device.token
+</code></pre></div>
+<h3 id="a-single-operator-rig-over-ssh">A single-operator rig over SSH</h3>
+<p>When the rig serves one person, keep it loopback-bound and forward the control
+port and every rig's stream port. Let SSH notice a dead peer rather than hang
+on one:</p>
+<div class="code-block"><pre><code>ssh -fN -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+  -L 8700:127.0.0.1:8700 -L 8801:127.0.0.1:8801 user@rig-host
+</code></pre></div>
+<p>The forward dies with the remote host, so a rig-host reboot leaves nothing
+listening locally and the agent reads as unreachable while it is in fact
+healthy. Re-open the tunnel before diagnosing anything further. This is the
+shape that strands a rig the moment the tunnel drops, which is why a shared rig
+belongs on a VPN instead.</p>
+<h2 id="take-a-session">Take a session</h2>
+<p>Every control call except <code>/healthz</code> needs an access-token bearer.</p>
+<div class="code-block"><pre><code>AGENT=http://127.0.0.1:8700
+TOKEN=&lt;the token you minted&gt;
+
+curl -s &quot;$AGENT/healthz&quot;
+
+curl -s -H &quot;Authorization: Bearer $TOKEN&quot; &quot;$AGENT/api/v1/rigs&quot; | jq .
+
+curl -s -X POST -H &quot;Authorization: Bearer $TOKEN&quot; \
+  -H &#39;Content-Type: application/json&#39; \
+  -d &#39;{&quot;user&quot;:&quot;alice&quot;,&quot;client_id&quot;:&quot;bench-laptop&quot;,&quot;requested_ttl_seconds&quot;:3600}&#39; \
+  &quot;$AGENT/api/v1/rigs/bench-a/sessions&quot; | jq .
+</code></pre></div>
+<p>A successful reservation returns <code>201</code> with the session identity and the
+stream endpoints:</p>
+<div class="code-block"><pre><code>{
+  &quot;session_id&quot;: &quot;...&quot;,
+  &quot;session_token&quot;: &quot;...&quot;,
+  &quot;rig_id&quot;: &quot;bench-a&quot;,
+  &quot;expires_at&quot;: &quot;2026-07-25T12:00:00Z&quot;,
+  &quot;heartbeat_interval_seconds&quot;: 10,
+  &quot;stream&quot;: {
+    &quot;transport&quot;: &quot;http-card-bridge&quot;,
+    &quot;url&quot;: &quot;http://127.0.0.1:8801/apdu&quot;,
+    &quot;status_url&quot;: &quot;http://127.0.0.1:8801/status&quot;,
+    &quot;card_reset_url&quot;: &quot;http://127.0.0.1:8801/card/reset&quot;
+  }
+}
+</code></pre></div>
+<p>A rig already held by someone else returns <code>423 Locked</code> with the holder in
+the body. That is the whole point of the agent: two operators cannot drive
+one card at the same time.</p>
+<p>Keep the session alive at <code>heartbeat_interval_seconds</code>:</p>
+<div class="code-block"><pre><code>curl -s -X POST -H &quot;Authorization: Bearer $TOKEN&quot; \
+  -H &#39;Content-Type: application/json&#39; \
+  -d &quot;{\&quot;session_token\&quot;:\&quot;$SESSION_TOKEN\&quot;}&quot; \
+  &quot;$AGENT/api/v1/sessions/$SESSION_ID/heartbeat&quot;
+</code></pre></div>
+<p>Release it when done:</p>
+<div class="code-block"><pre><code>curl -s -X DELETE -H &quot;Authorization: Bearer $TOKEN&quot; \
+  -H &#39;Content-Type: application/json&#39; \
+  -d &quot;{\&quot;session_token\&quot;:\&quot;$SESSION_TOKEN\&quot;}&quot; \
+  &quot;$AGENT/api/v1/sessions/$SESSION_ID&quot;
+</code></pre></div>
+<p>Release requires the <code>session_token</code> in the body, so holding an access token
+is not enough to drop somebody else's session. That is what <code>force-release</code>
+is for.</p>
+<p>A session that stops heartbeating expires on its own after
+<code>heartbeat_timeout_seconds</code>, and no session outlives <code>max_session_seconds</code>.
+An <code>admin</code> token can evict a stuck holder:</p>
+<div class="code-block"><pre><code>curl -s -X POST -H &quot;Authorization: Bearer $ADMIN_TOKEN&quot; \
+  -H &#39;Content-Type: application/json&#39; -d &#39;{}&#39; \
+  &quot;$AGENT/api/v1/rigs/bench-a/force-release&quot;
+</code></pre></div>
+<h2 id="stream-apdus-through-the-session">Stream APDUs through the session</h2>
+<p>The per-rig proxy speaks the Card Bridge protocol, so existing consumers
+work unchanged -- the bearer is the <code>session_token</code>, not the rig's own Card
+Bridge token:</p>
+<div class="code-block"><pre><code>printf &#39;%s&#39; &quot;$SESSION_TOKEN&quot; &gt; ~/.config/yggdrasim/card_bridge/8801.token
+chmod 600 ~/.config/yggdrasim/card_bridge/8801.token
+
+python main/main.py \
+  --remote-card-url http://127.0.0.1:8801/apdu \
+  --remote-card-token-file ~/.config/yggdrasim/card_bridge/8801.token
+</code></pre></div>
+<p>The proxy exposes <code>/ping</code> (unauthenticated), <code>/status</code>, <code>/apdu</code>, and
+<code>/card/reset</code>. Requests without a live session are rejected with <code>401</code>, so a
+released or expired session cannot keep driving the card.</p>
+<h2 id="store-a-host-once">Store a host once</h2>
+<p>A registered device is a host card, and it records everything about the
+box rather than about a run. Two doors can be recorded on one card:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Field</th>
+<th>Door</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent_host</code>, <code>agent_control_port</code>, token file</td>
+<td>agent</td>
+<td>bearer token, shared, reservable</td>
+</tr>
+<tr>
+<td><code>ssh_target</code>, <code>ssh_identity_file</code></td>
+<td>SSH</td>
+<td>this operator's login, for setup and single-operator use</td>
+</tr>
+<tr>
+<td><code>remote_workdir</code>, <code>remote_python</code>, <code>hil_service_name</code></td>
+<td>SSH</td>
+<td>where the checkout and its service live on the host</td>
+</tr>
+<tr>
+<td><code>card_reachability</code>, <code>card_url</code></td>
+<td>either</td>
+<td><code>tunnel</code> opens a reverse forward; <code>direct</code> points the host at a card published on a routable address</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="a-host-you-have-not-set-up-yet">A host you have not set up yet</h3>
+<p>An invite carries an agent and a token, so there is no invite for a host
+that has neither. That is the ordinary state of a rig before somebody
+installs an agent on it, and it is exactly the host you want to record
+while preparing one.</p>
+<p>Remote Bridge stores that host directly: fill the SSH fields, name it,
+and add it. The card then carries only the SSH half, reports itself as
+<code>ssh-only</code> rather than offline, and offers no Connect, because there is
+no agent to reserve a rig from. Importing an invite for the same host
+later fills in the agent half without changing its identity.</p>
+<p>A host needs at least one door. Neither half is rejected, and so is half
+an agent: a host without a port would build a control URL nobody can
+call.</p>
+<p>The SSH half never travels in an invite. An invite hands a colleague an
+agent and a token; it must not hand them your login or the path to your
+private key.</p>
+<p>Naming a host card is what collapses the Remote Bridge action from a
+screenful of fields to one choice: every field it used to ask for is a
+property of the box. Typed values still win, so the card fills blanks
+rather than overriding an answer.</p>
+<p>Both surfaces then report one view of the host. Starting a Remote Bridge
+setup asks the host's agent whether its bench is already held and stops
+before touching anything when it is, so two operators cannot configure
+conflicting supervisors on one box. That check closes the setup window;
+the lasting exclusion while a rig runs is the card lease.</p>
+<h2 id="offer-a-card-to-a-modem-rig">Offer a card to a modem rig</h2>
+<p>The rig has to reach the Card Bridge you name, so open a reverse tunnel
+before reserving unless the bridge is already published on an address the
+rig can route to:</p>
+<div class="code-block"><pre><code>ssh -fN -R 8642:127.0.0.1:8642 esim@rig.example.test
+yggdrasim-lab --agent http://rig.example.test:8700 --token-file ~/.config/yggdrasim/remote_lab/alice.token \
+    reserve quectel-a --user alice --offer-card-url http://127.0.0.1:8642/apdu
+</code></pre></div>
+<p>The token for your own bridge is read from the file
+<code>yggdrasim-card-bridge</code> wrote for that port, so it does not have to be
+passed. Use <code>--offer-card-token-file</code> when the bridge runs somewhere
+else.</p>
+<p>Reachability is checked before the reservation is granted. A tunnel that
+is not open fails here with a message saying so, rather than as silence
+once the modem powers up. If the card is already leased, the reservation
+is refused with <code>card_leased</code> and nothing starts.</p>
+<p>The grant carries no <code>stream</code> block, because the card is already on your
+machine and there is nothing for the agent to stream back. It carries a
+<code>consumer</code> block instead, and the rig releases the card and stops the
+supervisor when the session ends, expires or loses its heartbeat.</p>
+<h2 id="control-api-reference">Control API reference</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Auth</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/healthz</code></td>
+<td>none</td>
+<td>liveness</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/info</code></td>
+<td>access token</td>
+<td>agent identity and version</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/rigs</code></td>
+<td>access token</td>
+<td>inventory with per-rig status</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/rigs/{id}/status</code></td>
+<td>access token</td>
+<td>one rig</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/rigs/{id}/sessions</code></td>
+<td>access token</td>
+<td>reserve; <code>423</code> when held</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/sessions/{id}/heartbeat</code></td>
+<td>access token + <code>session_token</code></td>
+<td>extend</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/v1/sessions/{id}</code></td>
+<td>access token + <code>session_token</code></td>
+<td>release</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/rigs/{id}/force-release</code></td>
+<td>admin token</td>
+<td>evict the holder</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="use-the-gui-instead">Use the GUI instead</h2>
+<p>The <a href="../subsystems/gui-command-center.html">Universal GUI Command Center</a>
+consumes the same agents under <code>/api/remote-lab</code>: import an agent, list its
+devices, read status, connect, release, and force-release. The client-side
+inventory persists to <code>Workspace/RemoteLab/registry.json</code>; per-device tokens
+live in their own private files, and export redacts them. A device's name,
+location, tags and agent address are editable from its card.</p>
+<p>Connect behaves like plugging in a local reader. It reserves the rig, starts
+the heartbeat, reads the card's <abbr title="Answer To Reset">ATR</abbr> from the relay's status endpoint and
+publishes the reader as <code>Remote Lab: &lt;device name&gt;</code>; it does not scan the
+card and it does not move the operator off the Remote Lab page. That
+reservation is held by one <em>link</em> session that belongs to no module. The
+file system, eSIM management, the local SM-DP+ and <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> each open their own
+card channel through the published name when they need one, and closing any
+of them leaves the rig reserved. Disconnect (or the agent expiring the
+session) closes the link, which closes those channels first and releases the
+rig last, so nothing outlives the reservation it was opened under.</p>
+<p>The shells reach the same rig once the GUI has connected it. <code>yggdrasim-scp03</code>,
+<code>yggdrasim-scp11</code> and <code>yggdrasim-scp11-live</code> take <code>--reader "Remote Lab: &lt;device
+name&gt;"</code> (an exact <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader name works there too); the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell takes
+<code>set reader_name Remote Lab: &lt;device name&gt;</code>, and <code>set reader_idx N</code> switches
+back to a local reader. The MCP card tools accept the same name in
+<code>reader_name</code>. A name that resolves to nothing is a startup error, never a
+fallback to the first local reader.</p>
+<h2 id="security-rules">Security rules</h2>
+<ul>
+<li>Choose the bind to match who the rig serves. A single-operator rig stays on
+  loopback behind SSH. A rig shared by everyone holding a token belongs on a
+  trusted network -- a VPN or a routed internal LAN -- and binds to a real
+  interface. What must never happen is a non-loopback bind on an untrusted
+  network: the agent authenticates callers, but it is not a TLS terminator, so
+  the transport has to be private on its own.</li>
+<li>Restrict reachability at the network layer when the VPN can do it. A NetBird
+  or Tailscale ACL that exposes the control and stream ports only to a lab
+  group beats the all-or-nothing reach an SSH login grants.</li>
+<li>Store only <code>token_hash</code> in the config file. The config is not a secret
+  store, and a hash is useless to an attacker who reads it.</li>
+<li>Issue one access token per person, not one per team, so revoking a leaver
+  is an edit and a restart rather than a rotation for everyone.</li>
+<li>Reserve <code>role: admin</code> for the people who should be able to yank a rig out
+  from under a colleague mid-session.</li>
+<li>Session tokens are as sensitive as Card Bridge tokens: <code>0600</code> files, never
+  shell history.</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>agent exits at startup naming a key path</td>
+<td>config schema error</td>
+<td>fix the reported key; the loader reports the exact index, e.g. <code>rigs[1].upstream</code></td>
+</tr>
+<tr>
+<td><code>duplicate stream proxy bind/port</code></td>
+<td>two rigs share a port, or one collides with <code>agent.control_port</code></td>
+<td>give each rig its own <code>external_port</code></td>
+</tr>
+<tr>
+<td>every control call returns <code>401</code></td>
+<td>token not in <code>security.access_tokens</code>, or hash mismatch</td>
+<td>re-mint the pair and paste the new <code>token_hash</code></td>
+</tr>
+<tr>
+<td><code>POST /sessions</code> returns <code>423</code></td>
+<td>rig held by a live session</td>
+<td>wait for expiry, or force-release with an admin token</td>
+</tr>
+<tr>
+<td><code>/apdu</code> returns <code>401</code> mid-run</td>
+<td>session expired because heartbeats stopped</td>
+<td>heartbeat at <code>heartbeat_interval_seconds</code></td>
+</tr>
+<tr>
+<td>rig status reports the upstream down</td>
+<td>Card Bridge not running or token wrong</td>
+<td>validate the rig directly per <a href="remote-apdu-streaming.html">Card Bridge over SSH</a></td>
+</tr>
+<tr>
+<td><code>force-release</code> returns <code>403</code></td>
+<td>bearer is a <code>user</code> token</td>
+<td>use a <code>role: admin</code> token</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="remote-apdu-streaming.html">Card Bridge over SSH</a></li>
+<li><a href="install-remsim-apdu-streaming.html">Install RemSIM / <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</a></li>
+<li><a href="../subsystems/gui-command-center.html">Universal GUI Command Center</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#mint-access-tokens" class="toc-link">Mint access tokens</a>
+            <a href="#two-kinds-of-rig" class="toc-link">Two kinds of rig</a>
+            <a href="#write-the-config" class="toc-link">Write the config</a>
+            <a href="#start-the-agent" class="toc-link">Start the agent</a>
+            <a href="#run-it-as-a-service" class="toc-link">Run it as a service</a>
+            <a href="#reach-the-agent" class="toc-link">Reach the agent</a>
+            <a href="#pin-a-name-or-echo-the-caller" class="toc-link toc-link-sub">Pin a name, or echo the caller</a>
+            <a href="#a-shared-rig-on-a-vpn" class="toc-link toc-link-sub">A shared rig on a VPN</a>
+            <a href="#a-single-operator-rig-over-ssh" class="toc-link toc-link-sub">A single-operator rig over SSH</a>
+            <a href="#take-a-session" class="toc-link">Take a session</a>
+            <a href="#stream-apdus-through-the-session" class="toc-link">Stream APDUs through the session</a>
+            <a href="#store-a-host-once" class="toc-link">Store a host once</a>
+            <a href="#a-host-you-have-not-set-up-yet" class="toc-link toc-link-sub">A host you have not set up yet</a>
+            <a href="#offer-a-card-to-a-modem-rig" class="toc-link">Offer a card to a modem rig</a>
+            <a href="#control-api-reference" class="toc-link">Control API reference</a>
+            <a href="#use-the-gui-instead" class="toc-link">Use the GUI instead</a>
+            <a href="#security-rules" class="toc-link">Security rules</a>
+            <a href="#troubleshooting" class="toc-link">Troubleshooting</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

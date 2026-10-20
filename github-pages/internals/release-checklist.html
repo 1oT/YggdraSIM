@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="internals/release-checklist.html" data-ygg-open-sections="internals">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -51,8 +51,10 @@ release.</p>
             <a href="#docker" class="toc-link">Docker</a>
             <a href="#pyinstaller-bundle" class="toc-link">PyInstaller bundle</a>
             <a href="#documentation-site" class="toc-link">Documentation site</a>
+            <a href="#manual-unsigned-test-draft" class="toc-link">Manual unsigned test draft</a>
+            <a href="#windows-only-test-artifact" class="toc-link toc-link-sub">Windows-only test artifact</a>
             <a href="#tagging-and-publishing" class="toc-link">Tagging and publishing</a>
-            <a href="#tagging-contract" class="toc-link toc-link-sub">Tagging contract</a>
+            <a href="#annotated-tag-message-contract" class="toc-link toc-link-sub">Annotated-tag-message contract</a>
             <a href="#post-release" class="toc-link">Post-release</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
           </nav>
@@ -62,6 +64,8 @@ release.</p>
 <ul class="task-list">
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> working tree is clean; <code>git status</code> shows what you expect</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>pyproject.toml</code> <code>version</code> is bumped</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>CHANGELOG.md</code> has a <code>## [X.Y.Z] -- YYYY-MM-DD</code> section and nothing
+      under <code>## [Unreleased]</code>; the tag gate refuses either omission</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>README.md</code> is aligned with the behavior of the new release</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>guides/CAPABILITIES.md</code> reflects any new or retired surface</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>guides/ARCHITECTURE.md</code> reflects any new cross-module dependency</li>
@@ -72,8 +76,9 @@ release.</p>
       package-data in <code>pyproject.toml</code>)</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> operator-facing docs that reference <code>docs/</code> describe it as an
       optional local developer tree (not as shipped content)</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> no local-only audit/report files are required to validate this release;
-      all release gates are represented by tracked tests, docs, and <abbr title="Certificate Issuer">CI</abbr> checks</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> The local-only pre-release audit notes show no
+      open action items that a release should ship with; anything
+      explicitly deferred is listed in the "Deferred" blocks</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>pyflakes SCP03/ SCP11/ SCP80/ SIMCARD/ Tools/ main/ plugins/
       yggdrasim_common/</code> is clean modulo the two documented <code># noqa:
       F401</code> probes and the <code>SCP11/shared</code> / <code>SCP11/relay</code> star-import
@@ -88,7 +93,6 @@ release.</p>
 yggdrasim-scp80 --cmd &quot;exit&quot;
 yggdrasim-scp11 --cmd &quot;EXIT&quot;
 yggdrasim-scp11-live --cmd &quot;HELP; EXIT&quot;
-yggdrasim-scp11-test --cmd &quot;HELP; EXIT&quot;
 yggdrasim-scp11-local-access --cmd &quot;HELP; EXIT&quot;
 yggdrasim-scp11-eim-local --cmd &quot;HELP; EXIT&quot;
 yggdrasim-profile-package --cmd &quot;STATUS; EXIT&quot;
@@ -111,7 +115,7 @@ Do not mass-run. Redirect noisy runs to a log file and inspect with <code>rg</co
 <ul class="task-list">
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> each test file that exercises a changed area passes</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> plugin runtime behavior is exercised through
-      <code>tests/test_polling_plugin_*.py</code> where applicable</li>
+      <code>tests/test_plugin_*.py</code> where applicable</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <abbr title="Hardware-In-The-Loop">HIL</abbr>-related tests pass in their emulated form</li>
 </ul>
 <h2 id="docker">Docker</h2>
@@ -137,13 +141,113 @@ Do not mass-run. Redirect noisy runs to a log file and inspect with <code>rg</co
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> nav entries that reference new pages exist and resolve</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> nav entries for removed pages are removed</li>
 </ul>
-<h2 id="tagging-and-publishing">Tagging and publishing</h2>
-<p>The <abbr title="Certificate Issuer">CI</abbr> workflows are currently validation-only for the v1.0.1 cycle. They run
-build/test checks but do not publish release assets and do not push Docker
-images.</p>
-<p>Release publication is therefore a manual maintainer step.</p>
-<h3 id="tagging-contract">Tagging contract</h3>
+<h2 id="manual-unsigned-test-draft">Manual unsigned test draft</h2>
+<p>Use the <strong>Main Test Draft Release</strong> workflow only when a cross-platform test
+bundle is needed before a production release. It is a manual
+<code>workflow_dispatch</code> flow restricted to <code>main</code>; pull requests and ordinary
+pushes never publish test assets.</p>
 <ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> dispatch the workflow from <code>main</code> and confirm its recorded commit SHA is
+      the exact revision you intend to test</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm the workflow creates a new draft tagged
+      <code>ci-main-&lt;run-id&gt;-&lt;attempt&gt;</code> and records both the exact SHA and Actions
+      run in its notes</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm the draft is not the latest release and remains a draft; install
+      scripts must not consume <code>ci-main-*</code> tags or the test-only asset names</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> treat every asset as an <strong>UNSIGNED TEST BUILD</strong>: Windows may display a
+      Microsoft Defender SmartScreen warning, while the unsigned and
+      unnotarized macOS build may be blocked by Gatekeeper</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm every primary asset has a <code>.sha256</code> sidecar</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> for a successful run, confirm the final asset set also contains a
+      CycloneDX SBOM and a global <code>SHA256SUMS</code>, and that the draft is marked
+      <strong>COMPLETE</strong></li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> if any build or verification leg fails, confirm the draft is marked
+      <strong>INCOMPLETE</strong>; do not mistake partial assets for a complete test set</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> verify downloaded assets against their sidecars or <code>SHA256SUMS</code> before
+      testing them</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> remove a stale <code>ci-main-*</code> draft yourself once diagnosis is done. The
+      build workflow carries no delete path by design; <code>CI Draft Cleanup</code>
+      (<code>.github/workflows/ci-draft-cleanup.yml</code>) reaps <code>ci-main-*</code> and
+      <code>ci-windows-main-*</code> drafts older than seven days on a daily schedule,
+      so anything worth keeping must be published or copied before then</li>
+</ul>
+<p>This draft flow does not replace or weaken the production flow below. It never
+publishes a signed release, and it is not evidence that Windows signing,
+macOS signing/notarization, provenance, or production publication gates pass.</p>
+<h3 id="windows-only-test-artifact">Windows-only test artifact</h3>
+<p>Use <strong>Windows Test Artifact</strong> when a single Windows x86_64 clean bundle is
+enough. It is a manual, <code>main</code>-only flow and does not start the other platform
+jobs.</p>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm the run attempts one Actions artifact with one-day retention;
+      quota failure is visible but does not prevent the draft fallback</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm the unique <code>ci-windows-main-&lt;run-id&gt;-&lt;attempt&gt;</code> draft remains a
+      draft prerelease targeted at the dispatched SHA</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm the draft has exactly one Windows ZIP and its <code>.sha256</code> sidecar</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm a <strong>COMPLETE</strong> draft was redownloaded, checksum-verified,
+      extracted, and smoke-tested; never use an <strong>INCOMPLETE</strong> draft</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> treat both executables as unsigned test builds that may trigger
+      Microsoft Defender SmartScreen</li>
+</ul>
+<h2 id="tagging-and-publishing">Tagging and publishing</h2>
+<p>The publish flow is wired end-to-end in <code>.github/workflows/build.yml</code>. Pushing
+an annotated <code>v*</code> tag triggers <code>docs-strict</code> + <code>pytest-suite</code>, the release
+build matrix (Linux x86_64 / arm64 clean+full, macOS arm64 clean,
+Windows x86_64 clean, Debian package) and the <code>publish-release</code> job. The
+<code>publish-release</code> job:</p>
+<ul>
+<li>downloads every matrix artefact;</li>
+<li>renames each binary to the canonical name the install scripts consume
+  (<code>yggdrasim-{os}-{arch}-{flavor}[.exe]</code>, see
+  <code>scripts/install/_common.sh::yg_asset_name</code> and
+  <code>scripts/install/install-windows.ps1::Install-YgFromRelease</code>);</li>
+<li>generates a <code>SHA256SUMS</code> manifest;</li>
+<li>guards the matrix against silent drift with an explicit "required asset"
+  list before calling <code>gh release create</code>;</li>
+<li>reads the annotated tag message from the tag object the policy job
+  verified, judges it with <code>scripts/release/release_notes.py check</code>, calls
+  <code>gh release create &lt;tag&gt; --notes-file &lt;notes&gt; --verify-tag ...</code>, and reads
+  the page body back to compare it with the checked notes.</li>
+</ul>
+<p>The annotated <code>v*</code> path remains the only production publication path. It uses
+canonical installer-facing asset names and fails closed if any required
+build, checksum, provenance, or publication gate does not pass. Windows
+Authenticode signing and macOS signing plus notarization run when the
+repository holds the <code>WINDOWS_CODESIGN_*</code> and <code>MACOS_CODESIGN_*</code> /
+<code>MACOS_NOTARY_*</code> secrets. A repository without them publishes unsigned
+binaries and the release notes gain a <em>Code signing</em> section that says so;
+a partial set of secrets fails the build, because it is a misconfiguration
+rather than a decision.
+Before any platform build or signing step, <abbr title="Certificate Issuer">CI</abbr> also requires the tag to match
+<code>v&lt;project.version&gt;</code>, verifies that it is annotated, confirms that its
+exact commit is reachable from <code>origin/main</code> or from an <code>origin/release/*</code>
+branch, and judges the tag message and <code>CHANGELOG.md</code> with the release-note
+gate below.</p>
+<h3 id="annotated-tag-message-contract">Annotated-tag-message contract</h3>
+<p>The release page's body is the <strong>annotated</strong> tag message. Both
+<code>release-ref-policy</code> (before any platform builds) and <code>publish-release</code>
+(before <code>gh release create</code>) run <code>scripts/release/release_notes.py check</code>
+on it and fail closed when:</p>
+<ul>
+<li>the message is empty, or is the tagged commit's message (a tag annotated
+  with <code>git log -1 --format=%B</code> output reads as a commit on the page);</li>
+<li>the first line is not <code>YggdraSIM vX.Y.Z</code> for the tag being published;</li>
+<li>no line is a Markdown list item (<code>- ...</code>), so the note names no change;</li>
+<li>a line is a trailer (<code>...-by:</code> or <code>...-Session:</code>);</li>
+<li><code>CHANGELOG.md</code> in the tagged tree has no <code>## [X.Y.Z] -- YYYY-MM-DD</code>
+  section, that section is empty, or <code>## [Unreleased]</code> still carries
+  entries. The tagged tree ships whatever the changelog files under
+  Unreleased, so at a production tag that section is empty.</li>
+</ul>
+<p><code>publish-release</code> reads the message from the tag object the policy job
+verified (<code>git/tags/&lt;sha&gt;</code> on the API), never from the checkout:
+<code>actions/checkout</code> re-points <code>refs/tags/&lt;tag&gt;</code> at the commit, which is how
+<code>gh release create --notes-from-tag</code> published the v2.1.0 commit message
+as its release notes. After creation the page body is read back and
+compared with the checked notes. Tagging steps:</p>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> move every <code>## [Unreleased]</code> entry into the <code>## [X.Y.Z] -- YYYY-MM-DD</code>
+      section of <code>CHANGELOG.md</code> in the commit the tag will point at</li>
 <li class="task-list-item">
 <p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> tag the release in git <strong>with an annotation that reads as a
       release note</strong> (covers headline behavioural changes, defaults,
@@ -151,27 +255,39 @@ images.</p>
 <div class="code-block"><pre><code>git tag -a vX.Y.Z -m &quot;$(cat &lt;&lt;&#39;EOF&#39;
 YggdraSIM vX.Y.Z
 
-First / next … release. Notable changes:
+First / next ... release. Notable changes:
 
-- …
-- …
+- ...
+- ...
 EOF
 )&quot;
-git push origin vX.Y.Z
 </code></pre></div>
 </li>
 <li class="task-list-item">
-<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> watch the workflow at <code>https://github.com/&lt;repo&gt;/actions</code> and
-      confirm the validation jobs complete for the release tag/branch.</p>
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> run the gate on the local tag before the push; it reads the
+      annotated tag, the tagged commit and the tagged tree's
+      <code>CHANGELOG.md</code> from the checkout, and refuses a lightweight tag:</p>
+<div class="code-block"><pre><code>python3 scripts/release/release_notes.py check --tag vX.Y.Z
+</code></pre></div>
 </li>
 <li class="task-list-item">
-<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm the GitHub Release page lists the eight asset names plus
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> push the tag: <code>git push origin vX.Y.Z</code></p>
+</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm the tagged commit is already reachable from <code>origin/main</code> or
+      from a <code>release/&lt;major&gt;.&lt;minor&gt;.x</code> branch; the release policy gate
+      rejects production tags made from arbitrary commits or unmerged
+      branches before any platform build starts</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> watch the workflow at <code>https://github.com/&lt;repo&gt;/actions</code>. The
+      <code>publish-release</code> job only runs on <code>refs/tags/v*</code>; failures in
+      <code>docs-strict</code>, <code>pytest-suite</code>, or any build leg short-circuit the
+      release publish.</li>
+<li class="task-list-item">
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm the GitHub Release page lists the seven asset names plus
       <code>SHA256SUMS</code>:</p>
 <div class="code-block"><pre><code>yggdrasim-linux-x86_64-clean
 yggdrasim-linux-x86_64-full
 yggdrasim-linux-arm64-clean
 yggdrasim-linux-arm64-full
-yggdrasim-macos-x86_64-clean
 yggdrasim-macos-arm64-clean
 yggdrasim-windows-x86_64-clean.exe
 yggdrasim-clean_X.Y.Z_amd64.deb
@@ -184,6 +300,10 @@ SHA256SUMS
 <div class="code-block"><pre><code>YGGDRASIM_REPO=1oT/YggdraSIM \
   scripts/install/install-linux.sh --version vX.Y.Z
 </code></pre></div>
+</li>
+<li class="task-list-item">
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> publish the Docker image (<code>.github/workflows/docker.yml</code>) if that
+      is part of the release.</p>
 </li>
 </ul>
 <h2 id="post-release">Post-release</h2>
@@ -209,8 +329,10 @@ SHA256SUMS
             <a href="#docker" class="toc-link">Docker</a>
             <a href="#pyinstaller-bundle" class="toc-link">PyInstaller bundle</a>
             <a href="#documentation-site" class="toc-link">Documentation site</a>
+            <a href="#manual-unsigned-test-draft" class="toc-link">Manual unsigned test draft</a>
+            <a href="#windows-only-test-artifact" class="toc-link toc-link-sub">Windows-only test artifact</a>
             <a href="#tagging-and-publishing" class="toc-link">Tagging and publishing</a>
-            <a href="#tagging-contract" class="toc-link toc-link-sub">Tagging contract</a>
+            <a href="#annotated-tag-message-contract" class="toc-link toc-link-sub">Annotated-tag-message contract</a>
             <a href="#post-release" class="toc-link">Post-release</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
         </nav>
@@ -227,13 +349,13 @@ SHA256SUMS
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/simcard-simulator.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -63,12 +63,10 @@ shells can target it in place of a <abbr title="Personal Computer/Smart Card (Wo
             <a href="#event-download-routing" class="toc-link toc-link-sub">Event Download routing</a>
             <a href="#timer-management-proactive-type-0x27" class="toc-link toc-link-sub">TIMER MANAGEMENT (proactive type 0x27)</a>
             <a href="#terminal-profile-bring-up-strategy" class="toc-link toc-link-sub">TERMINAL PROFILE bring-up strategy</a>
-            <a href="#ipa-poll-bip-trigger-on-timer-expiration" class="toc-link toc-link-sub">IPA-poll BIP trigger on TIMER EXPIRATION</a>
-            <a href="#esipa-request-body-bf4f-geteimpackagerequest" class="toc-link toc-link-sub">ESipa request body — BF4F GetEimPackageRequest</a>
+            <a href="#esipa-request-body-bf4f-geteimpackagerequest" class="toc-link toc-link-sub">ESipa request body -- BF4F GetEimPackageRequest</a>
             <a href="#esipa-response-dispatch-on-receive-data" class="toc-link toc-link-sub">ESipa response dispatch on RECEIVE DATA</a>
-            <a href="#loadcrl-bf35-sgp22-5713" class="toc-link toc-link-sub">LoadCRL — BF35 (SGP.22 §5.7.13)</a>
-            <a href="#esipa-result-follow-up-bf50-provideeimpackageresult" class="toc-link toc-link-sub">ESipa result follow-up — BF50 ProvideEimPackageResult</a>
-            <a href="#ipa-poll-loopback-validation-mode-a-mode-b" class="toc-link toc-link-sub">IPA-poll loopback validation (Mode A + Mode B)</a>
+            <a href="#loadcrl-bf35-sgp22-5713" class="toc-link toc-link-sub">LoadCRL -- BF35 (SGP.22 §5.7.13)</a>
+            <a href="#esipa-result-follow-up-bf50-provideeimpackageresult" class="toc-link toc-link-sub">ESipa result follow-up -- BF50 ProvideEimPackageResult</a>
             <a href="#more-time-polling-off-declare-service" class="toc-link toc-link-sub">MORE TIME / POLLING OFF / DECLARE SERVICE</a>
             <a href="#service-discovery-0x45-0x46-0x47" class="toc-link toc-link-sub">Service discovery (0x45 / 0x46 / 0x47)</a>
             <a href="#multi-card-terminal-0x30-0x31-0x32-0x33" class="toc-link toc-link-sub">Multi-card terminal (0x30 / 0x31 / 0x32 / 0x33)</a>
@@ -99,7 +97,7 @@ shells can target it in place of a <abbr title="Personal Computer/Smart Card (Wo
             <a href="#terminal-capability-tlv-decode-round-13" class="toc-link toc-link-sub">Terminal Capability TLV decode (round 13)</a>
             <a href="#additional-isim-efs-round-13" class="toc-link toc-link-sub">Additional ISIM EFs (round 13)</a>
             <a href="#more-time-poll-interval-tr-latches-round-13" class="toc-link toc-link-sub">MORE TIME / POLL INTERVAL TR latches (round 13)</a>
-            <a href="#ims-aka-via-authenticate-p20x82-round-12" class="toc-link toc-link-sub">IMS AKA via AUTHENTICATE P2=0x82 (round 12)</a>
+            <a href="#ims-aka-via-authenticate-p20x81-under-the-isim-round-12" class="toc-link toc-link-sub">IMS AKA via AUTHENTICATE P2=0x81 under the ISIM (round 12)</a>
             <a href="#isim-efs-round-12" class="toc-link toc-link-sub">ISIM EFs (round 12)</a>
             <a href="#call-lifecycle-event-downloads-round-12" class="toc-link toc-link-sub">Call-lifecycle event downloads (round 12)</a>
             <a href="#misc-event-downloads-round-12" class="toc-link toc-link-sub">Misc event downloads (round 12)</a>
@@ -148,7 +146,7 @@ through the wrapper menu.</p>
 <li>an <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 221-shaped filesystem covering <abbr title="Master File">MF</abbr>, DFs, ADFs, and EFs</li>
 <li>the full <abbr title="Personal Identification Number">PIN</abbr> lifecycle: VERIFY (<code>0x20</code>), CHANGE (<code>0x24</code>), DISABLE
   (<code>0x26</code>), ENABLE (<code>0x28</code>) and UNBLOCK (<code>0x2C</code>) with proper retry
-  bookkeeping per TS 102 221 §11.1.9–11.1.12</li>
+  bookkeeping per TS 102 221 §11.1.9-11.1.12</li>
 <li>ISO 7816-4 / TS 102 221 §11.1.7 <code>GET CHALLENGE</code> (<code>0x84</code>) returning
   <code>Le</code> random bytes (or 256 when <code>Le=0</code>) and persisting them in
   <code>state.last_challenge_bytes</code> for <abbr title="Over-The-Air">OTA</abbr> / <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> freshness</li>
@@ -298,27 +296,34 @@ through the wrapper menu.</p>
   (record EFs grow / shrink in record-count units); when the
   body omits a <code>83</code> <abbr title="File Identifier">FID</abbr> the simulator targets the current <abbr title="Elementary File">EF</abbr>,
   matching commercial-card behaviour.
-- 3GPP TS 31.102 §7.1.2.1.2 / §7.1.2.1.3 <code>AUTHENTICATE</code> GBA
-  variants. <code>P2=0x84</code> (GBA Bootstrap) reuses the regular UMTS
-  AKA Milenage path, including AUTS / sync-failure recovery, and
-  on success caches <code>Ks = CK||IK</code> plus a synthesised B-TID of
-  the form <code>&lt;rand-hex&gt;@bsf.simulator</code> into <code>state.gba_ks</code> /
-  <code>state.gba_b_tid</code>. <code>state.gba_key_lifetime</code> is set to the
-  TS 33.220 §4.4.6 default of 86400 seconds. <code>P2=0x85</code> (GBA
-  Security Context) parses the <code>L_NAF || NAF_Id || L_IMPI || IMPI</code>
-  body, runs the TS 33.220 §B.0 KDF (HMAC-SHA-256 keyed with <code>Ks</code>,
-  static <code>gba-me</code> salt, RAND from the most recent bootstrap), and
-  returns <code>DB 20 || Ks_(ext)NAF</code>. The result is also stashed in
-  <code>state.gba_naf_records[NAF_Id|IMPI]</code> for offline introspection.
-  Calling <code>P2=0x85</code> without a prior bootstrap returns <code>69 85</code>;
-  malformed input returns <code>67 00</code>.
+- <code>AUTHENTICATE</code> in the GBA context (<code>P2=0x84</code>) on the <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> and,
+  when EF_UST shows service n°68, the <abbr title="Universal Subscriber Identity Module">USIM</abbr>: TS 31.102 v19.5
+  §7.1.1.4 / §7.1.1.5 / §7.1.2.3 / §7.1.2.4, TS 31.103 v19
+  §7.1.1.2 / §7.1.1.3 / §7.1.2.3 / §7.1.2.4. The first data byte
+  picks the mode. Bootstrapping Mode (<code>DD</code>, then RAND and AUTN<em>)
+  undoes the MAC modification of TS 33.220 v19.1 §5.3.2 (MAC</em> is
+  MAC XOR the first 64 bits of SHA-256(IK); the card supports
+  SHA-256), checks MAC and SQN as UMTS AKA does (AUTS on a stale
+  SQN), keeps <code>Ks = CK || IK</code> and RAND in
+  <code>state.gba_key_material[&lt;ADF name&gt;]</code>, writes RAND to EF_GBABP and
+  answers <code>DB L RES</code> with the least significant bit of RES flipped.
+  NAF Derivation Mode (<code>DE</code>, then NAF_ID and IMPI on the <abbr title="Universal Subscriber Identity Module">USIM</abbr>, NAF_ID
+  alone on the <abbr title="IP Multimedia Services Identity Module">ISIM</abbr>, which reads IMPI from EF_IMPI) answers
+  <code>DB 20 Ks_ext_NAF</code>, keeps Ks_int_NAF with the B-TID the ME wrote to
+  EF_GBABP, and records the NAF_ID / B-TID pair in EF_GBANL: the
+  NAF_ID's own record, else a free one, else the one derived least
+  recently. Both keys follow TS 33.220 v19.1 Annex B (<code>gba-me</code>,
+  <code>gba-u</code>). No key material answers <code>69 85</code>, malformed data <code>67 00</code>,
+  a missing service or an unknown mode <code>98 64</code>, an EF_GBABP or
+  EF_GBANL too small for the data <code>98 66</code>. GBA runs over Milenage
+  only; a <abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr> profile gets <code>69 85</code>.
 - a card-side <abbr title="GlobalPlatform">GP</abbr> registry, <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> secure-messaging, and <abbr title="Issuer Security Domain - Root">ISD-R</abbr>
   interaction
 - a profile store that tracks installed profiles and their lifecycle
 - an <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 Toolkit / BIP runtime that routes envelopes by
   root tag (D1 SMS-PP, D2 Cell Broadcast, D3 Menu Selection, D4 Call
   Control, D5 MO-SMS Control, D6 Event Download, D7 Timer Expiration,
-  D8 USSD Download)
+  D9 USSD Download; D8 is reserved for intra-<abbr title="Universal Integrated Circuit Card">UICC</abbr> communication)
 - a Milenage / <abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr> 3GPP TS 35.205 / 35.231 AKA core
 - a 5G authentication stack:
     - 3GPP TS 33.501 5G AKA (<code>AUTHENTICATE</code>, <code>RES*</code>)
@@ -550,7 +555,7 @@ AUTOMATIC TAGS. The constructed forms <code>A9</code> / <code>AA</code> are rese
 </tbody>
 </table></div>
 <p>Each of the BF58/BF5B/BF5C/BF5D/BF5E/BF59/BF5A/BF65 responses follows
-the <code>[N] SEQUENCE { result [0] INTEGER }</code> shape from §5.9.15 – §5.9.25,
+the <code>[N] SEQUENCE { result [0] INTEGER }</code> shape from §5.9.15 - §5.9.25,
 encoded as <code>BFxx LL 80 01 NN</code>. <code>BF5F</code> is the only CHOICE in this group:
 the success branch wraps <code>httpParams</code> under context <code>81</code>, the error
 branch reuses <code>80 01 NN</code> for the <code>connectivityParametersError</code> enum.</p>
@@ -570,17 +575,17 @@ branch reuses <code>80 01 NN</code> for the <code>connectivityParametersError</c
 <p><code>SIMCARD/state.py::SimCardState</code> carries the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 fields persisted
 through the <abbr title="Embedded UICC">eUICC</abbr> manifest (<code>SIMCARD/euicc_store.py</code>):</p>
 <ul>
-<li><code>euicc_package_results: list[SimEuiccPackageResultEntry]</code> — signed
+<li><code>euicc_package_results: list[SimEuiccPackageResultEntry]</code> -- signed
   result blobs awaiting IPA acknowledgement.</li>
-<li><code>association_token_counter: int</code> — monotonic counter used by
+<li><code>association_token_counter: int</code> -- monotonic counter used by
   <code>addEim</code> to allocate fresh association tokens.</li>
 <li><code>immediate_enable_flag</code>, <code>immediate_enable_smdp_oid</code>,
-  <code>immediate_enable_smdp_address</code> — populated by
+  <code>immediate_enable_smdp_address</code> -- populated by
   <code>configureImmediateEnable</code> and read back by
   <code>GetEimConfigurationData</code>.</li>
-<li><code>previous_enabled_aid</code> — captured during a <code>enable.rollbackFlag</code>
+<li><code>previous_enabled_aid</code> -- captured during a <code>enable.rollbackFlag</code>
   swap or a <code>BF5D</code> fallback swap so <code>BF58</code> / <code>BF5E</code> can revert.</li>
-<li><code>emergency_profile_active</code>, <code>emergency_pre_aid</code> — sticky
+<li><code>emergency_profile_active</code>, <code>emergency_pre_aid</code> -- sticky
   bookkeeping for <code>BF5B</code> / <code>BF5C</code>. Spec-mandated: the Emergency
   Profile remains enabled across resets, so this state lives in the
   <abbr title="Embedded UICC">eUICC</abbr> manifest rather than the volatile session.</li>
@@ -588,13 +593,13 @@ through the <abbr title="Embedded UICC">eUICC</abbr> manifest (<code>SIMCARD/eui
 <p><code>SimProfileEntry</code> adds the following flags persisted by
 <code>SIMCARD/profile_store.py</code>:</p>
 <ul>
-<li><code>fallback_attribute: bool</code> — set by PSMO <code>setFallbackAttribute</code>.</li>
-<li><code>rollback_armed: bool</code> — set by <code>enable.rollbackFlag</code> and cleared on
+<li><code>fallback_attribute: bool</code> -- set by PSMO <code>setFallbackAttribute</code>.</li>
+<li><code>rollback_armed: bool</code> -- set by <code>enable.rollbackFlag</code> and cleared on
   successful <code>ProfileRollback</code> / <code>ExecuteFallbackMechanism</code>.</li>
-<li><code>ecall_indication: bool</code> — marks the Profile that BF5B / BF5C
+<li><code>ecall_indication: bool</code> -- marks the Profile that BF5B / BF5C
   operate on. Sourced from <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> profile metadata at install time, or
   set explicitly by tooling/tests.</li>
-<li><code>connectivity_params_http: bytes</code> — TCA Profile Interoperability
+<li><code>connectivity_params_http: bytes</code> -- TCA Profile Interoperability
   HTTP/CoAP parameters returned by <code>BF5F</code>.</li>
 </ul>
 <p>Each <code>SimEimEntry</code> keeps its own <code>counter_value</code> and
@@ -706,9 +711,9 @@ relevant section of TS 102 223 / TS 31.111:</p>
 <td><code>90 00</code>, no body.</td>
 </tr>
 <tr>
-<td><code>D8</code></td>
+<td><code>D9</code></td>
 <td>USSD Download</td>
-<td><code>80 01 00</code> per TS 31.111 §7.3.3.</td>
+<td><code>80 01 00</code> per TS 31.111 §7.3.3 (tag <code>D9</code> per §9.1; <code>D8</code> reserved).</td>
 </tr>
 <tr>
 <td>other</td>
@@ -818,27 +823,27 @@ bookkeeping for the events the simulator can react to:</p>
 <tbody>
 <tr>
 <td><code>0x03</code></td>
-<td>TS 102 223 §7.4.3 Location Status</td>
+<td>TS 102 223 §7.5.4 Location status</td>
 <td><code>location_information</code></td>
 </tr>
 <tr>
-<td><code>0x07</code></td>
-<td>TS 102 223 §7.4.7 Idle Screen Available</td>
+<td><code>0x05</code></td>
+<td>TS 102 223 §7.5.6 Idle screen available</td>
 <td><code>idle_screen_available</code></td>
 </tr>
 <tr>
-<td><code>0x09</code></td>
-<td>TS 102 223 §7.4.9 Browser Termination</td>
+<td><code>0x08</code></td>
+<td>TS 102 223 §7.5.9 Browser termination</td>
 <td><code>last_browser_termination_cause</code></td>
 </tr>
 <tr>
-<td><code>0x0B</code></td>
-<td>TS 102 223 §7.4.11 Channel Status</td>
+<td><code>0x0A</code></td>
+<td>TS 102 223 §7.5.11 Channel status</td>
 <td><code>open_channel_active</code></td>
 </tr>
 <tr>
-<td><code>0x0F</code></td>
-<td>3GPP TS 31.111 §7.5.13 Network Rejection</td>
+<td><code>0x12</code></td>
+<td>3GPP TS 31.111 §7.5.2 Network Rejection</td>
 <td><code>last_network_rejection_cause</code></td>
 </tr>
 </tbody>
@@ -910,20 +915,12 @@ through the <code>toolkit</code> block in
 </thead>
 <tbody>
 <tr>
-<td><code>poll_strategy</code></td>
-<td><code>"timer"</code> (default) / <code>"poll_interval"</code> / <code>"both"</code> / <code>"off"</code>. <code>"timer"</code> uses TS 102 223 §6.6.21 TIMER MANAGEMENT START — the trigger <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 IPA-poll relies on. <code>"poll_interval"</code> falls back to the §6.6.5 POLL INTERVAL heartbeat. <code>"both"</code> emits both; <code>"off"</code> emits no proactive bring-up.</td>
-</tr>
-<tr>
 <td><code>timer_management_seconds</code></td>
 <td>Initial timer setpoint, encoded as BCD HH/MM/SS in <abbr title="Tag-Length-Value">TLV</abbr> <code>A5</code>.</td>
 </tr>
 <tr>
 <td><code>timer_management_id</code></td>
 <td>Timer identifier carried in <abbr title="Tag-Length-Value">TLV</abbr> <code>A4</code>. Clamped to the <abbr title="European Telecommunications Standards Institute">ETSI</abbr> 1..8 range.</td>
-</tr>
-<tr>
-<td><code>timer_management_auto_rearm</code></td>
-<td>When <code>true</code> (default) every received <code>D7</code> TIMER EXPIRATION envelope re-queues a fresh TIMER MANAGEMENT START so the IPA-poll cadence keeps running without applet-side housekeeping.</td>
 </tr>
 <tr>
 <td><code>poll_interval_seconds</code></td>
@@ -933,44 +930,32 @@ through the <code>toolkit</code> block in
 <td><code>provide_imei</code></td>
 <td>When <code>true</code> (default) the bootstrap also queues a PROVIDE LOCAL INFORMATION (IMEI) proactive command after the polling trigger, mirroring real <abbr title="Embedded UICC">eUICC</abbr> bring-up.</td>
 </tr>
-<tr>
-<td><code>ipa_poll</code></td>
-<td>Nested object that controls the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 §3.5 IPA-poll BIP trigger emitted on every D7 TIMER EXPIRATION envelope (see below).</td>
-</tr>
 </tbody>
 </table></div>
 <p>Defaults (<code>SimToolkitState</code>) match the JSON template, so a fresh
-workspace boots straight into timer-driven IPA-poll without any
 manual configuration.</p>
-<h3 id="ipa-poll-bip-trigger-on-timer-expiration">IPA-poll BIP trigger on TIMER EXPIRATION</h3>
 <p><code>_apply_timer_expiration</code> drives the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 §3.5 polling
 cadence. Each <code>D7</code> envelope queues a two-leg BIP cycle followed
 by a TIMER MANAGEMENT START re-arm. The first leg is a DNS
-resolution against a public resolver (default <code>8.8.8.8</code>); the
+resolution against a public resolver (default <code>192.0.2.53</code>); the
 second is the ESipa exchange against the resolved <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> IP.</p>
 <h4 id="cold-cache-cycle-no-resolved-ip-yet">Cold-cache cycle (no resolved IP yet)</h4>
-<ol>
-<li><strong>OPEN CHANNEL</strong> UDP_REMOTE → <code>toolkit.ipa_poll_dns_server:53</code>
-   with qualifier <code>0x03</code> (immediate + automatic reconnection).
+<p>with qualifier <code>0x03</code> (immediate + automatic reconnection).
    The cellular APN travels under <abbr title="Tag-Length-Value">TLV</abbr> <code>47</code> (Network Access Name,
    §8.70 label-list encoding), the resolver IPv4 under <abbr title="Tag-Length-Value">TLV</abbr> <code>3E</code>
    (Other Address, §8.59 type byte <code>0x21</code>), and the alpha id
    (<abbr title="Tag-Length-Value">TLV</abbr> <code>05</code>) is present-but-empty so the modem can still label
-   the bearer in its UI without forcing user-visible text.</li>
-<li><strong>SEND DATA</strong> with the AAAA query for the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> FQDN (RFC 1035
+   the bearer in its UI without forcing user-visible text.
+2. <strong>SEND DATA</strong> with the AAAA query for the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> FQDN (RFC 1035
    wire format, transaction id seeded from
-   <code>toolkit.ipa_poll_dns_query_id</code>).</li>
-<li><strong>SEND DATA</strong> with the A query for the same FQDN.</li>
-<li><strong>RECEIVE DATA</strong> drains the resolver's first answer.</li>
-<li><strong>RECEIVE DATA</strong> drains the resolver's second answer. The
+3. <strong>SEND DATA</strong> with the A query for the same FQDN.
+4. <strong>RECEIVE DATA</strong> drains the resolver's first answer.
+5. <strong>RECEIVE DATA</strong> drains the resolver's second answer. The
    first usable A-record lands in
-   <code>toolkit.ipa_poll_resolved_ip</code>.</li>
-<li><strong>CLOSE CHANNEL</strong> tears the resolver bearer down. If the DNS
+6. <strong>CLOSE CHANNEL</strong> tears the resolver bearer down. If the DNS
    leg produced an IPv4 address, the toolkit chains directly
    into the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> leg below; otherwise the cycle returns to idle
-   and <code>toolkit.ipa_poll_last_resolution_error</code> records why.</li>
-<li><strong>TIMER MANAGEMENT START</strong> re-arms the cadence.</li>
-</ol>
+7. <strong>TIMER MANAGEMENT START</strong> re-arms the cadence.</p>
 <h4 id="warm-cache-cycle-resolved-ip-already-cached">Warm-cache cycle (resolved IP already cached)</h4>
 <ol>
 <li><strong>OPEN CHANNEL</strong> TCP_CLIENT_REMOTE → <code>&lt;resolved_ip&gt;:443</code>
@@ -985,12 +970,10 @@ second is the ESipa exchange against the resolved <abbr title="eSIM IoT Manager 
 <li><strong>TIMER MANAGEMENT START</strong> re-arms the cadence.</li>
 </ol>
 <p>The DNS and <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> legs share the same APN. APN priority is:
-1. <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> profile <abbr title="Elementary File">EF</abbr>.ACL (<code>6F57</code>) — set automatically by the
+1. <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> profile <abbr title="Elementary File">EF</abbr>.ACL (<code>6F57</code>) -- set automatically by the
    filesystem rebuild whenever a profile is enabled.
-2. <code>YGGDRASIM_SIM_IPA_POLL_APN</code> env override.
 3. <code>internet.apn</code> workspace fallback.</p>
-<p><code>toolkit.ipa_poll_apn_source</code> records which input won
-(<code>"bpp"</code> / <code>"env"</code> / <code>"default"</code>).</p>
+<p>(<code>"bpp"</code> / <code>"env"</code> / <code>"default"</code>).</p>
 <h4 id="open-channel-failure-recovery">OPEN CHANNEL failure recovery</h4>
 <p>When the modem fails the OPEN CHANNEL TR (e.g. result <code>0x20</code>
 "BIP error", info <code>0x04</code> "no service"), the toolkit drains the
@@ -998,21 +981,17 @@ SEND DATA / RECEIVE DATA / TIMER MANAGEMENT / CLOSE CHANNEL
 commands the IPA had already queued behind it so the modem does
 not have to FETCH guaranteed-failure commands (<code>0x3A03</code> "channel
 id not valid") before the next timer expires.
-<code>ipa_poll_session_active</code>, <code>ipa_poll_followup_emitted</code> and the
 phase machine all reset on the same code path.</p>
 <p>When the modem fails a SEND DATA or RECEIVE DATA TR mid-cycle
 (general result <code>0x3A</code> "Bearer Independent Protocol error" is
 the common case for misbehaving UDP/TCP stacks), the toolkit
 drains the still-pending SEND/RECEIVE/TIMER follow-ups but
 preserves the trailing CLOSE CHANNEL so the bearer is torn down
-cleanly, increments <code>toolkit.ipa_poll_consecutive_failures</code> and
 records a <code>phase|origin|result|info</code> summary into
-<code>toolkit.ipa_poll_last_cycle_error</code> for status renderers. The
 counter resets to zero on the next cycle that successfully
 dispatches at least one EuiccPackage into <abbr title="Issuer Security Domain - Root">ISD-R</abbr>.</p>
 <h4 id="timer-management-yield-between-send-and-receive-data">TIMER MANAGEMENT yield between SEND and RECEIVE DATA</h4>
 <p><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 §6.6.21 + reference IPA traces show that real
-<abbr title="Embedded UICC">eUICC</abbr> IPAs arm a watchdog timer (timer <code>02</code>, ~65 s) right after
 the SEND DATA burst and deactivate it once the matching
 RECEIVE DATA flight has been drained. The proactive yield gives
 the modem its FETCH/STATUS polling window so bytes from the
@@ -1025,15 +1004,11 @@ every RECEIVE DATA because no data has arrived yet.</p>
 <li>The DNS leg queues
   <code>OPEN/SEND/SEND/TIMER(start)/RECV/RECV/TIMER(stop)/CLOSE</code>.</li>
 <li>The plain-HTTP <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> leg queues
-  <code>OPEN/SEND/TIMER(start)/RECV/TIMER(stop)/CLOSE</code>.</li>
-<li>The TLS reactive loop arms the watchdog right before each
+  <code>OPEN/SEND/TIMER(start)/RECV/TIMER(stop)/CLOSE</code>.
   RECEIVE DATA dispatch and disarms it before the next SEND
   DATA flight (or CLOSE CHANNEL).</li>
 </ul>
-<p><code>toolkit.ipa_poll_wait_timer_id</code> (default <code>2</code>) and
-<code>toolkit.ipa_poll_wait_timer_seconds</code> (default <code>65</code>) override
-the timer parameters; <code>toolkit.ipa_poll_wait_timer_armed</code>
-tracks the runtime arm state for the TLS path.</p>
+<p>tracks the runtime arm state for the TLS path.</p>
 <p>All TIMER MANAGEMENT proactives use the comprehension-clear
 <abbr title="Tag-Length-Value">TLV</abbr> form (<code>24</code> Timer Identifier, <code>25</code> Timer Value) and
 RECEIVE DATA uses the comprehension-clear form (<code>37</code> Channel
@@ -1049,8 +1024,7 @@ the channel opened by the matching OPEN CHANNEL -- encoded as
 identifier (<code>0x82</code>) instead causes the modem to reject every
 follow-up with general-result <code>0x3A</code> / additional-info <code>0x03</code>
 ("Channel identifier not valid").</p>
-<p>Because the IPA-poll cycle queues the full
-OPEN/SEND/RECEIVE/CLOSE batch up-front, the destination byte on
+<p>OPEN/SEND/RECEIVE/CLOSE batch up-front, the destination byte on
 the follow-ups is initially encoded as <code>0x82</code>. Once the
 OPEN CHANNEL TR returns the assigned channel id in the
 channel-status <abbr title="Tag-Length-Value">TLV</abbr> (<code>38 02 [byte1] [byte2]</code>, channel id =
@@ -1061,14 +1035,12 @@ patch stops at the first non-BIP entry so unrelated traffic from
 extensions is left untouched. The field resets to <code>0</code> on
 CLOSE CHANNEL (success or failure) and on OPEN CHANNEL failure
 so the next cycle starts clean.</p>
-<p>The trigger is gated by <code>ipa_poll.enabled</code>. When no FQDN can be
-resolved (no override, no <code>state.eim_entries[*].eim_fqdn</code>, no
+<p>resolved (no override, no <code>state.eim_entries[*].eim_fqdn</code>, no
 workspace <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity) the BIP sequence is skipped and only the
 timer re-arm is queued so the cadence keeps running while a test
 fixture is being staged.</p>
 <h4 id="in-card-tls-12-handshake-stage-2">In-card TLS-1.2 handshake (Stage 2)</h4>
-<p>When <code>toolkit.ipa_poll_tls_enabled</code> is <code>True</code> (the production
-default) the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> leg above runs the TLS-1.2
+<p>default) the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> leg above runs the TLS-1.2
 <strong>ECDHE-ECDSA-AES128-GCM-SHA256</strong> handshake entirely inside the
 card. The modem stays a transparent byte pipe -- no MITM, no
 re-wrapping -- which mirrors what every reference IPA on real
@@ -1114,56 +1086,44 @@ TR handlers drive a SEND/RECEIVE DATA loop:</p>
 <p>Aborts:</p>
 <ul>
 <li>TLS handshake failure (<code>SSLError</code> from <code>do_handshake()</code>)
-  records the reason in <code>toolkit.ipa_poll_tls_last_error</code>,
   drains any queued follow-ups and queues a single CLOSE CHANNEL
-  so the bearer is shut cleanly.</li>
-<li>Idle-receive cap (<code>toolkit.ipa_poll_tls_max_idle_receives</code>,
+  so the bearer is shut cleanly.
   default 16) prevents an unresponsive <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> from looping the
   RECEIVE DATA polls forever; on overflow the cycle aborts with
   the same CLOSE CHANNEL teardown.</li>
 </ul>
 <p>The Stage-1 plain-HTTP fallback is preserved for tests and lab
-debugging: setting <code>toolkit.ipa_poll_tls_enabled = False</code>
 restores the linear OPEN/SEND/RECEIVE/CLOSE queue from before
 the TLS engine was wired in.</p>
-<h3 id="esipa-request-body-bf4f-geteimpackagerequest">ESipa request body — <code>BF4F</code> GetEimPackageRequest</h3>
-<p>The first SEND DATA in every IPA-poll cycle carries an
-<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.2 §6.5.2.1 <code>GetEimPackageRequest</code> (BF4F) wrapped in
+<h3 id="esipa-request-body-bf4f-geteimpackagerequest">ESipa request body -- <code>BF4F</code> GetEimPackageRequest</h3>
+<p><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.2 §6.5.2.1 <code>GetEimPackageRequest</code> (BF4F) wrapped in
 HTTP/1.1 framing:</p>
 <ul>
 <li><code>5A</code> 16-byte <abbr title="eUICC Identifier">EID</abbr> (mandatory).</li>
 <li><code>80</code> notifyStateChange flag, <code>81</code> stateChangeCause, <code>82</code> rPlmn
-  BCD — all optional, omitted by default.</li>
+  BCD -- all optional, omitted by default.</li>
 </ul>
 <p><code>Content-Type</code> is <code>application/x-gsma-rsp-asn1</code> and
 <code>X-Admin-Protocol</code> is <code>gsma/rsp/v2.2.0</code> so the modem's HTTP
 client routes it to <code>/gsma/rsp2/asn1</code>. The body can still be
-overridden by setting <code>state.toolkit.ipa_poll_request_payload</code>;
 that escape hatch is the way an integration test injects a
 <code>BF39</code> InitiateAuthenticationRequestEsipa or any other ESipa
 opener.</p>
 <h3 id="esipa-response-dispatch-on-receive-data">ESipa response dispatch on RECEIVE DATA</h3>
-<p>When an IPA-poll cycle is in flight, the bytes the modem returns
-through the <strong>RECEIVE DATA</strong> terminal response are the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s
+<p>through the <strong>RECEIVE DATA</strong> terminal response are the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s
 ESipa payload (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 §6.5). The toolkit:</p>
-<ol>
-<li>Tracks the cycle via <code>state.toolkit.ipa_poll_session_active</code>,
-   set when <code>_queue_ipa_poll_sequence()</code> enqueues the BIP burst
-   and cleared on the <strong>CLOSE CHANNEL</strong> TR (success <em>or</em> failure;
-   the bearer is gone either way).</li>
-<li>Strips any leading HTTP envelope (<code>HTTP/1.1 ...\r\n\r\n</code>) the
-   bearer left in the buffer.</li>
-<li>Walks the residue as a chain of <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 outer TLVs and forwards
+<p>and cleared on the <strong>CLOSE CHANNEL</strong> TR (success <em>or</em> failure;
+   the bearer is gone either way).
+2. Strips any leading HTTP envelope (<code>HTTP/1.1 ...\r\n\r\n</code>) the
+   bearer left in the buffer.
+3. Walks the residue as a chain of <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 outer TLVs and forwards
    each recognised <code>BFxx</code> package into <abbr title="Issuer Security Domain - Root">ISD-R</abbr> via the dispatcher
    wired by <code>SimulatedSimCardEngine</code>
    (<code>self.toolkit.set_eim_package_dispatcher(self.sgp.handle_store_data)</code>),
    which is exactly the path a real terminal would take when the
-   IPA fans the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> payload out as STORE DATA on <abbr title="Issuer Security Domain - Root">ISD-R</abbr>.</li>
-<li>Records the outer tag of every successfully dispatched package
-   in <code>state.toolkit.ipa_poll_dispatched_packages</code> and the raw
-   R-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> bytes the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr> layer returned in
-   <code>state.toolkit.ipa_poll_dispatched_responses</code>.</li>
-</ol>
+   IPA fans the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> payload out as STORE DATA on <abbr title="Issuer Security Domain - Root">ISD-R</abbr>.
+4. Records the outer tag of every successfully dispatched package
+   R-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> bytes the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr> layer returned in</p>
 <p>The dispatcher allow-list covers the full <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32/<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 tag range
 the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr> layer can handle (BF21/25/29/2A/2B/2D/2E/30/31/32/33/34/
 36/38/3C/3F/41/45/50..5F/64/65). New tags are added to the
@@ -1173,7 +1133,7 @@ tests can build a <code>ToolkitLogic</code> in isolation; the engine wiring
 is the only place that introduces the dependency. Failures from
 the dispatcher (raised exceptions, <code>6Axx</code> SW pairs) are isolated
 to their package and do not abort the rest of the chain.</p>
-<h3 id="loadcrl-bf35-sgp22-5713">LoadCRL — <code>BF35</code> (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 §5.7.13)</h3>
+<h3 id="loadcrl-bf35-sgp22-5713">LoadCRL -- <code>BF35</code> (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 §5.7.13)</h3>
 <p>The <abbr title="Embedded UICC">eUICC</abbr> accepts CRL <abbr title="Distinguished Encoding Rules">DER</abbr> blobs pushed by the <abbr title="Remote SIM Provisioning">RSP</abbr> server. Each
 non-empty <code>BF35</code> STORE DATA payload is appended to
 <code>state.loaded_crls</code>; the response is <code>BF35</code> with an inner
@@ -1183,7 +1143,7 @@ the persistence path lets a future enforcer walk the list
 without touching transport. The dispatcher allow-list includes
 <code>BF35</code> so an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-side push relayed over BIP forwards directly to
 the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr> layer.</p>
-<h3 id="esipa-result-follow-up-bf50-provideeimpackageresult">ESipa result follow-up — <code>BF50</code> ProvideEimPackageResult</h3>
+<h3 id="esipa-result-follow-up-bf50-provideeimpackageresult">ESipa result follow-up -- <code>BF50</code> ProvideEimPackageResult</h3>
 <p>After the dispatcher consumed at least one package and produced
 non-empty response bytes, the IPA injects a fresh <strong>SEND DATA</strong>
 (plus a follow-up RECEIVE DATA to drain the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s
@@ -1197,17 +1157,14 @@ CHANNEL. The injected SEND DATA carries an <abbr title="SIM Group Permanent (GSM
   of those tags are wrapped in <code>BF51</code> (<code>LoadEuiccPackage</code> result)
   per the default-CHOICE rule.</li>
 </ul>
-<p>The follow-up is gated by <code>state.toolkit.ipa_poll_followup_emitted</code>
-so the IPA cannot cascade itself if the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s acknowledgement
+<p>so the IPA cannot cascade itself if the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s acknowledgement
 happens to contain BF50 bytes -- real eIMs reply with an empty
 body or a tiny ack <abbr title="Tag-Length-Value">TLV</abbr> and the latch resets only on the next
 cycle (CLOSE CHANNEL TR).</p>
-<p><code>state.toolkit.ipa_poll_pending_result_payload</code> and
-<code>state.toolkit.ipa_poll_last_result_payload</code> cache the body for
-operator introspection; the latter survives the cycle teardown
+<p>operator introspection; the latter survives the cycle teardown
 so a test can confirm "the IPA shipped the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> the expected
 result for cycle N".</p>
-<h4 id="error-choice-bf50-with-0-eimpackageresulterrorcode">Error CHOICE — <code>BF50</code> with <code>[0]</code> EimPackageResultErrorCode</h4>
+<h4 id="error-choice-bf50-with-0-eimpackageresulterrorcode">Error CHOICE -- <code>BF50</code> with <code>[0]</code> EimPackageResultErrorCode</h4>
 <p>When <em>every</em> dispatched package failed (the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr> layer returned a
 non-9000 SW pair, or the dispatcher itself raised), the IPA
 emits the error branch of the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.2 §6.5.2.1 EimPackageResult
@@ -1216,11 +1173,9 @@ CHOICE instead of <code>BF51</code>/<code>BF52</code>/<code>BF54</code>:</p>
 </code></pre></div>
 <p>where <code>XX</code> is the EimPackageResultErrorCode the IPA inferred.
 The <code>_sw_to_eim_package_error_code()</code> static maps the card's
-SW pair to <code>1</code> (invalidPackageFormat — <code>6A80</code>/<code>6A82</code>/<code>6985</code>),
-<code>2</code> (unknownPackage — <code>6A88</code>), or <code>127</code> (undefinedError —
-everything else). <code>state.toolkit.ipa_poll_failed_packages</code> is a
-parallel <code>[(outer_tag, error_code), ...]</code> audit trail to the
-existing <code>ipa_poll_dispatched_packages</code> success list.</p>
+SW pair to <code>1</code> (invalidPackageFormat -- <code>6A80</code>/<code>6A82</code>/<code>6985</code>),
+<code>2</code> (unknownPackage -- <code>6A88</code>), or <code>127</code> (undefinedError --
+parallel <code>[(outer_tag, error_code), ...]</code> audit trail to the</p>
 <h4 id="pendingnotification-piggyback">PendingNotification piggyback</h4>
 <p>After the per-package result chain (or in place of it on a
 failure-only cycle, provided notifications exist), the IPA
@@ -1229,9 +1184,7 @@ appends a <code>BF2B</code>/<code>A0 ...</code> retrieve-all chunk drained from
 cleared from the <abbr title="Embedded UICC">eUICC</abbr>; the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> is expected to acknowledge them
 via a follow-up <code>RemoveNotificationFromList</code> (BF30) before they
 go away. This mirrors a real card: notifications stay pinned
-until explicitly cleared, so the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and <abbr title="Embedded UICC">eUICC</abbr> share the same
-view if the IPA-poll BIP cycle drops mid-flight.</p>
-<h3 id="ipa-poll-loopback-validation-mode-a-mode-b">IPA-poll loopback validation (Mode A + Mode B)</h3>
+until explicitly cleared, so the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and <abbr title="Embedded UICC">eUICC</abbr> share the same</p>
 <p>Two integration suites pin the IPA contract end-to-end:</p>
 <ul>
 <li>
@@ -1248,8 +1201,6 @@ view if the IPA-poll BIP cycle drops mid-flight.</p>
 </li>
 <li>
 <p><strong>Mode B (RECEIVE DATA dispatch / fake-modem)</strong> --
-  <code>tests/test_simcard_ipa_poll_dispatch.py</code> and
-  <code>tests/test_simcard_ipa_poll_engine_loopback.py</code>. A small
   in-test FETCH/TR loop impersonates the modem, returns a canned
   ESipa payload through RECEIVE DATA, and asserts that the
   payload is fan-out into <abbr title="Issuer Security Domain - Root">ISD-R</abbr>. The engine-level test runs
@@ -1425,7 +1376,7 @@ the captured cold-attach byte sequence through the <abbr title="Hardware-In-The-
 wrapper.</p>
 <h3 id="saip-835-explicit-fcplinkpath-aliases"><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> §8.3.5 explicit <code>Fcp.linkPath</code> aliases</h3>
 <p>The TCA Profile Interoperability v2.3.1 specification carries a
-first-class encoding for cross-<abbr title="Dedicated File">DF</abbr> aliases inside the Bound Profile
+explicit encoding for cross-<abbr title="Dedicated File">DF</abbr> aliases inside the Bound Profile
 Package. Every <code>Fcp</code> SEQUENCE may include a
 <code>linkPath [PRIVATE 7] OCTET STRING (SIZE (0..8))</code> field whose body
 is the concatenation of 2-byte File Identifiers walking from the <abbr title="Master File">MF</abbr>
@@ -1449,8 +1400,8 @@ down to the file the slot is meant to mirror. A typical operator
    <code>[PRIVATE 7]</code> OCTET STRING from every <abbr title="File Control Parameters">FCP</abbr>, splits it into 2-byte
    FIDs, and stores the upper-case hex tuple on
    <code>SimProfileFsNode.link_path</code>. Both the <abbr title="Elementary File">EF</abbr>-section consumer (<abbr title="Profile Element (SAIP)">PE</abbr>
-   <code>usim</code>, <code>opt-usim</code>, <code>isim</code>, <code>opt-isim</code>, <code>gsm-access</code>, <code>telecom</code>,
-   <code>mf</code>, <code>df-...</code>) and the <code>genericFileManagement</code> consumer go
+   <code>usim</code>, <code>opt-usim</code>, <code>isim</code>, <code>opt-isim</code>, <code>iot</code>, <code>opt-iot</code>, <code>gsm-access</code>,
+   <code>telecom</code>, <code>mf</code>, <code>df-...</code>) and the <code>genericFileManagement</code> consumer go
    through the same helper. Empty OCTET STRINGs are mapped to the
    empty tuple per §8.3.5 ("turn this template link file into an
    independent file"); odd-length payloads are dropped silently as
@@ -1486,17 +1437,17 @@ file.</p>
 <p>Regression coverage in <code>tests/test_simcard_saip_link_path.py</code> pins
 the OCTET-STRING decoder, the runtime resolver, the
 "<abbr title="Universal Subscriber Identity Module">USIM</abbr>-only <abbr title="Elementary File">EF</abbr> (no link, no peer) preserved verbatim" contract, and
-an end-to-end replay against the operator <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> fixture that asserts
+an optional end-to-end replay against a locally selected <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> that asserts
 every <abbr title="Universal Subscriber Identity Module">USIM</abbr>-side <abbr title="Elementary File">EF</abbr>.IMSI / <abbr title="Elementary File">EF</abbr>.AD / <abbr title="Elementary File">EF</abbr>.SPN / <abbr title="Elementary File">EF</abbr>.SMS / <abbr title="Elementary File">EF</abbr>.SMSP /
 <abbr title="Elementary File">EF</abbr>.MSISDN bound to a <abbr title="Dedicated File">DF</abbr>.GSM or <abbr title="Dedicated File">DF</abbr>.TELECOM target now exposes the
 canonical bytes through the ADF SELECT path -- including the
-production SFI READ BINARY (<code>00B0870009</code>) that originally returned
+captured-style SFI READ BINARY (<code>00B0870009</code>) that returned
 <code>9000</code> with an empty body.</p>
 <h3 id="ts-31102-annex-h-shared-efs-dfgsm-adfusim-mirror">TS 31.102 Annex H "shared EFs" (<abbr title="Dedicated File">DF</abbr>.GSM &lt;-&gt; ADF.<abbr title="Universal Subscriber Identity Module">USIM</abbr> mirror)</h3>
 <p>3GPP TS 31.102 Annex H Table H.1 lists the Elementary Files that
 must surface identical content irrespective of whether the modem
 is reading them under <abbr title="Dedicated File">DF</abbr>.GSM (legacy <abbr title="Subscriber Identity Module">SIM</abbr> context) or ADF.<abbr title="Universal Subscriber Identity Module">USIM</abbr>
-(modern <abbr title="Universal Integrated Circuit Card">UICC</abbr> context). Real-world operator BPPs lean on this
+(modern <abbr title="Universal Integrated Circuit Card">UICC</abbr> context). <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> issuers can lean on this
 contract heavily: a typical TCA Profile Interoperability §3.5.5
 profile only ships the canonical bytes of <abbr title="Elementary File">EF</abbr>.IMSI (<code>6F07</code>),
 <abbr title="Elementary File">EF</abbr>.AD (<code>6FAD</code>), <abbr title="Elementary File">EF</abbr>.LOCI (<code>6F7E</code>), <abbr title="Elementary File">EF</abbr>.FPLMN (<code>6F7B</code>), <abbr title="Elementary File">EF</abbr>.SPN
@@ -1525,13 +1476,13 @@ explicitly populated it, so an operator that ships distinct
 happen to coexist under both DFs (vendor-private EFs, repurposed
 slots) are left untouched because they are not in the shared-<abbr title="Elementary File">EF</abbr>
 table.</p>
-<p>This is the fix that unblocks the production <abbr title="Hardware-In-The-Loop">HIL</abbr> trace where
+<p>This is the fix for the captured-style <abbr title="Hardware-In-The-Loop">HIL</abbr> trace where
 <code>READ BINARY</code> against <abbr title="Elementary File">EF</abbr>.IMSI under ADF.<abbr title="Universal Subscriber Identity Module">USIM</abbr> (issued by the modem
 via SFI=0x07 selection mode) used to return <code>9000</code> with no body
 once the operator <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> overrode the lab default. Regression
 coverage lives in <code>tests/test_simcard_shared_ef_mirror.py</code>,
-including a slot that replays the SFI READ BINARY against the
-real <code>89103000000466311335</code> <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> fixture.</p>
+including an optional slot that replays SFI READ BINARY against a
+locally selected <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr>. The tracked suite contains no operator identity.</p>
 <h3 id="tca-profile-interoperability-35-9-template-default-fill-in">TCA Profile Interoperability §3.5 / §9 template default fill-in</h3>
 <p>After the Annex H mirror has run, <code>rebuild_runtime_filesystem</code>
 calls <code>_apply_saip_template_defaults_to_runtime</code> to layer in the
@@ -1593,7 +1544,7 @@ spec-correct bytes.</p>
 <code>tests/test_simcard_saip_template_defaults.py</code> pins the registry
 shape, the fill-in invariants (issuer wins, <code>content_rqd=True</code>
 never auto-populated, SFIs always synced), and an end-to-end
-replay of the <code>89103000000466311335</code> cold-attach SFI <code>READ BINARY</code>
+replay of a cold-attach SFI <code>READ BINARY</code>
 sequence (<code>00B0830004</code> -&gt; <abbr title="Elementary File">EF</abbr>.AD <code>00000002</code>, <code>00B0870009</code> -&gt;
 <abbr title="Elementary File">EF</abbr>.IMSI from <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr>, <code>00B0920001</code> -&gt; <abbr title="Elementary File">EF</abbr>.HPPLMN).</p>
 <h3 id="pysim-integration-phases-a-e">pySim integration (Phases A-E)</h3>
@@ -1644,7 +1595,7 @@ deployments.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Phase A</strong> lifts pySim's <code>ProfileTemplateRegistry</code> snapshots
+<p>The template-overlay layer lifts pySim's <code>ProfileTemplateRegistry</code> snapshots
 (<code>FilesAtMF</code>, <code>FilesUsimMandatory[V2]</code>, <code>FilesUsimOptional[V2|V3]</code>,
 <code>FilesIsimMandatory</code>, <code>FilesIsimOptional[v2]</code>, <code>FilesUsimDfGsmAccess</code>,
 <code>FilesUsimDf5GS[v2|v3|v4]</code>, <code>FilesUsimDfSaip</code>, <code>FilesTelecom</code>)
@@ -1653,15 +1604,15 @@ hand-curated parent-context anchors. <code>pysim_alias_specs_for</code>
 keys aliases by <code>(FID, canonical EF name)</code> so files that share a
 <abbr title="File Identifier">FID</abbr> across DFs (<code>ef-pbc</code> 4F09 in <abbr title="Dedicated File">DF</abbr>.PHONEBOOK vs <code>ef-supinai</code>
 4F09 in <abbr title="Dedicated File">DF</abbr>.5GS) cannot collide.</p>
-<p><strong>Phase B</strong> routes every <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> / GFM <code>fileDescriptor</code> blob through
+<p>The <abbr title="File Control Parameters">FCP</abbr>-decoder layer routes every <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> / GFM <code>fileDescriptor</code> blob through
 <code>pySim.esim.saip.File.from_fileDescriptor</code>, then projects the
 result onto <code>FcpAttributes</code> (typed dataclass with <code>fid_hex</code>,
 <code>structure</code>, <code>arr</code>, <code>lcsi</code>, <code>fill_pattern</code>, <code>link_path</code>, ...).
-SFI assignments still flow from the Phase A template overlay --
+SFI assignments still flow from the template-overlay layer --
 pySim stores the raw <code>shortEFID</code> byte rather than the unpacked
 SFI defined by TS 102 221 §13.2, so descriptor-derived SFIs are
 deliberately not used to populate <code>SimProfileFsNode.sfi</code>.</p>
-<p><strong>Phase C</strong> wraps <code>pinCodes</code>, <code>pukCodes</code>, <code>securityDomain</code>,
+<p>The <abbr title="Profile Element (SAIP)">PE</abbr>-wrapper layer wraps <code>pinCodes</code>, <code>pukCodes</code>, <code>securityDomain</code>,
 <code>rfm</code> and <code>akaParameter</code> PEs through <code>pysim_pe_wrapper</code>, which
 constructs the matching pySim subclass and runs <code>_post_decode</code>.
 <code>pysim_sd_keys</code> returns frozen <code>PySimSdKeySnapshot</code>s with the
@@ -1671,7 +1622,7 @@ the <code>KeyType</code> enum string mapped to the <abbr title="GlobalPlatform">
 <code>ProfileElementAKA._fixup_sqnInit_dec</code> so the asn1tools
 <code>'0x000000000000'</code> default for <code>sqnInit</code> materialises into the
 TS 33.102 §6.3.7 32-element list of 6-byte zeros.</p>
-<p><strong>Phase D</strong> rewrites <code>_consume_generic_file_management</code> on top
+<p>The GFM-walker layer rewrites <code>_consume_generic_file_management</code> on top
 of <code>ProfileElementGFM</code>. <code>pysim_gfm_walk</code> replicates pySim's
 stream processing (<code>filePath</code>, <code>createFCP</code>, <code>fillFileOffset</code>,
 <code>fillFileContent</code>, <code>linkPath</code> extension) and emits a tuple of
@@ -1682,7 +1633,7 @@ for <abbr title="Dedicated File">DF</abbr>/ADF promotes the parent chain so subs
 an explicit <code>filePath</code> resolve under it). The original local
 walker is retained as <code>_consume_generic_file_management_local</code>
 fallback for when pySim is absent or returns an empty walk.</p>
-<p><strong>Phase E</strong> replaces the inspector's hand-curated bit -&gt; name
+<p>The service-table layer replaces the inspector's hand-curated bit -&gt; name
 dictionaries (<code>Tools/ProfilePackage/saip_asn1_decode._UST_SERVICE_NAMES</code>,
 <code>_EST_SERVICE_NAMES</code>, <code>_ISIM_SERVICE_NAMES</code>) with the
 authoritative pySim maps (<code>pySim.ts_31_102.EF_UST_map</code>,
@@ -1766,7 +1717,7 @@ ciphering-key EFs the modem caches across inter-<abbr title="Rules Authorisation
 the sentinel and triggers a fresh authentication instead of
 encrypting traffic with stale state.</p>
 <h3 id="isim-sms-storage-efs-round-24"><abbr title="IP Multimedia Services Identity Module">ISIM</abbr> SMS-storage EFs (round 24)</h3>
-<p><code>EF.IST</code> byte 0 = <code>0xFF</code> also flips on <strong>service 6 (SMS
+<p><code>EF.IST</code> byte 0 = <code>0xF3</code> also flips on <strong>service 6 (SMS
 storage in <abbr title="IP Multimedia Services Identity Module">ISIM</abbr>)</strong>, <strong>service 7 (SMS status reports in <abbr title="IP Multimedia Services Identity Module">ISIM</abbr>)</strong>,
 and <strong>service 8 (SM-over-IP)</strong> per 3GPP TS 31.103 §4.2.7. As
 with round-23's GBA pair, services 6 and 7 require dedicated
@@ -1809,12 +1760,11 @@ EFs under <code>ADF.ISIM</code>; round-24 closes that coherence gap.</p>
 so a modem reading SMS storage from either app sees the same
 default record shape.</p>
 <h3 id="isim-gba-supporting-efs-round-23"><abbr title="IP Multimedia Services Identity Module">ISIM</abbr> GBA-supporting EFs (round 23)</h3>
-<p><code>EF.IST</code> (3GPP TS 31.103 §4.2.7) is seeded with byte 0 = <code>0xFF</code>,
-which advertises <strong>service 2 (GBA)</strong> as available + activated.
-A spec-conformant card with that bit set must also expose the
-two GBA storage EFs; previously the simulator was returning
-<code>6A 82</code> on both, which would stall every bootstrap a paired ME
-attempted.</p>
+<p><code>EF.IST</code> (3GPP TS 31.103 v19 §4.2.7) is seeded with byte 0 =
+<code>0xF3</code>, which advertises <strong>service 2 (GBA)</strong> as available. A card
+with that bit set must also expose the two GBA storage EFs
+(§4.2.9, §4.2.10); without them every bootstrap a paired ME
+attempted would stall on <code>6A 82</code>.</p>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -1829,24 +1779,25 @@ attempted.</p>
 <tr>
 <td><code>6FD5</code></td>
 <td><abbr title="Elementary File">EF</abbr>.GBABP</td>
-<td>transparent, 6 bytes</td>
-<td><code>80 00 81 00 82 00</code> (empty B-TID / Ks_NAF / Lifetime TLVs)</td>
-<td>TS 31.103 §4.2.10</td>
+<td>transparent, 128 bytes</td>
+<td>all <code>FF</code> (Annex C)</td>
+<td>TS 31.103 v19 §4.2.9</td>
 </tr>
 <tr>
 <td><code>6FD7</code></td>
 <td><abbr title="Elementary File">EF</abbr>.GBANL</td>
-<td>linear-fixed, 28 bytes per record</td>
-<td>one all-FF placeholder row</td>
-<td>TS 31.103 §4.2.11</td>
+<td>linear-fixed, two 128-byte records, UPDATE ADM</td>
+<td>all <code>FF</code> (Annex C)</td>
+<td>TS 31.103 v19 §4.2.10</td>
 </tr>
 </tbody>
 </table></div>
-<p>The empty-<abbr title="Tag-Length-Value">TLV</abbr> scaffold for <abbr title="Elementary File">EF</abbr>.GBABP gives a deterministic
-6-byte read before any successful Ks_NAF derivation, then
-allows a normal UPDATE BINARY once the bootstrap completes.
-<abbr title="Elementary File">EF</abbr>.GBANL is structured as a record <abbr title="Elementary File">EF</abbr> so the modem can append
-per-NAF rows via UPDATE RECORD without resizing.</p>
+<p><abbr title="Elementary File">EF</abbr>.GBABP holds three length-prefixed fields, RAND, B-TID and key
+lifetime. The <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> writes RAND when it bootstraps and leaves the
+other two empty; the ME writes the B-TID and lifetime the BSF sent.
+An <abbr title="Elementary File">EF</abbr>.GBANL record is a <code>80</code> NAF_ID <abbr title="Tag-Length-Value">TLV</abbr> and a <code>81</code> B-TID <abbr title="Tag-Length-Value">TLV</abbr>; the
+<abbr title="IP Multimedia Services Identity Module">ISIM</abbr> fills the records in NAF Derivation Mode, and the ME cannot
+write them (UPDATE ADM).</p>
 <h3 id="efehplmnpi-efcfis-seeds-round-22"><abbr title="Elementary File">EF</abbr>.EHPLMNPI + <abbr title="Elementary File">EF</abbr>.CFIS seeds (round 22)</h3>
 <p>Round-22 closes two more spec-mandated EFs that the simulator
 was returning <code>6A 82</code> for:</p>
@@ -2090,7 +2041,7 @@ intercept without parsing <code>envelope_history</code> by hand:</p>
 <td><code>mo_sms_envelopes_received</code></td>
 </tr>
 <tr>
-<td><code>D8</code> USSD Download</td>
+<td><code>D9</code> USSD Download</td>
 <td>TS 31.111 §7.3.3</td>
 <td><code>last_ussd_download_dcs</code>, <code>last_ussd_download_raw</code>, <code>last_ussd_download_text</code> (best-effort decoded via <code>_decode_text_string</code>)</td>
 <td><code>ussd_downloads_received</code></td>
@@ -2210,31 +2161,29 @@ envelope, and <code>_handle_event_download</code> ships the values into
 </thead>
 <tbody>
 <tr>
-<td><code>0x03</code> Location Status</td>
-<td>TS 102 223 §7.4.4</td>
+<td><code>0x03</code> Location status</td>
+<td>TS 102 223 §7.5.4</td>
 <td><code>last_location_status</code> (0=normal, 1=limited, 2=no service) + <code>location_status_changes</code> events-received counter.</td>
 </tr>
 <tr>
-<td><code>0x06</code> Card Reader Status</td>
-<td>TS 102 223 §7.4.7</td>
+<td><code>0x06</code> Card reader status</td>
+<td>TS 102 223 §7.5.7</td>
 <td><code>last_card_reader_status</code> (raw byte: bits 7..6 present/powered, bits 0..3 reader id) + <code>last_card_reader_id</code> (decoded id) + <code>card_reader_status_events</code>.</td>
 </tr>
 <tr>
-<td><code>0x09</code> Data Available (overlay)</td>
-<td>TS 102 223 §7.4.10</td>
-<td>When the envelope carries <abbr title="Tag-Length-Value">TLV</abbr> <code>37</code> Channel Length, <code>last_data_available_channel_length</code>, optional <code>last_data_available_channel_status</code> (<abbr title="Tag-Length-Value">TLV</abbr> <code>38</code>), and <code>data_available_events</code> are latched. The existing browser-termination-cause path on the same code is unaffected.</td>
+<td><code>0x09</code> Data available</td>
+<td>TS 102 223 §7.5.10</td>
+<td><code>last_data_available_channel_length</code> from <abbr title="Tag-Length-Value">TLV</abbr> <code>37</code> Channel Length, optional <code>last_data_available_channel_status</code> (<abbr title="Tag-Length-Value">TLV</abbr> <code>38</code>), and the <code>data_available_events</code> counter.</td>
 </tr>
 <tr>
-<td><code>0x10</code> Frames Information Change</td>
-<td>TS 102 223 §7.4.16</td>
+<td><code>0x10</code> Frames Information changed</td>
+<td>TS 102 223 §7.5.17</td>
 <td><code>last_frames_information</code> is overwritten with the new <abbr title="Tag-Length-Value">TLV</abbr> <code>49</code> blob and <code>frames_information_changes</code> increments on every event (including empty payloads, mirroring <code>display_parameters_changes</code>).</td>
 </tr>
 </tbody>
 </table></div>
-<p>The <code>0x09</code> overlay accepts envelopes that carry both
-<code>browser_termination_cause</code> and <code>channel_length</code>, so a vendor that
-overloads the same opcode for both purposes does not lose either
-side of the dispatch.</p>
+<p>Browser termination is event <code>0x08</code> (§7.5.9) and carries its cause
+in <abbr title="Tag-Length-Value">TLV</abbr> <code>34</code> / <code>B4</code>; it does not share a code with Data available.</p>
 <h3 id="user-input-proactive-tr-latches-round-16">User-input proactive TR latches (round 16)</h3>
 <p>Round-16 closes the user-facing <abbr title="SIM Application Toolkit">STK</abbr> proactive TR-side gaps. The
 parser now extracts the Text String <abbr title="Tag-Length-Value">TLV</abbr> (<code>0D</code> / <code>8D</code>) and the
@@ -2488,7 +2437,7 @@ spec-mandated EFs:</p>
 <td><code>6F07</code></td>
 <td><abbr title="Elementary File">EF</abbr>.IST</td>
 <td>transparent</td>
-<td>TS 31.103 §4.2.7 service table. Byte 0 advertises bits 1..8 = 0xFF (P-CSCF address, GBA, HTTP Digest, GBA local key establishment, P-CSCF discovery for IMS LBO, SM storage, SM status reports, SM-over-IP).</td>
+<td>TS 31.103 v19 §4.2.7 service table. Byte 0 = 0xF3: P-CSCF address, GBA, P-CSCF discovery for IMS LBO, SM storage, SM status reports, SM-over-IP. HTTP Digest (3) and GBA-based Local Key Establishment (4) stay clear because AUTHENTICATE implements neither.</td>
 </tr>
 <tr>
 <td><code>6F09</code></td>
@@ -2531,19 +2480,22 @@ the unit byte: <code>0x00</code> minutes, <code>0x01</code> seconds, <code>0x02<
 tenths-of-second. Failed TRs reset the duration cache so a
 subsequent test can distinguish "terminal accepted some
 cadence" from "terminal rejected the request".</p>
-<h3 id="ims-aka-via-authenticate-p20x82-round-12">IMS AKA via <code>AUTHENTICATE</code> P2=0x82 (round 12)</h3>
-<p>3GPP TS 31.103 §7.1 specifies that the <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> application performs
-its own AKA challenge/response under the same Milenage parameters
-as the <abbr title="Universal Subscriber Identity Module">USIM</abbr>. Round-12 wires <code>internal_authenticate(p2=0x82, ...)</code>
-in <code>SIMCARD/auth.py</code> so it delegates to <code>_run_usim_authentication</code>
-verbatim:</p>
+<h3 id="ims-aka-via-authenticate-p20x81-under-the-isim-round-12">IMS AKA via <code>AUTHENTICATE</code> P2=0x81 under the <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> (round 12)</h3>
+<p>The <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> runs its own AKA under the same Milenage parameters as
+the <abbr title="Universal Subscriber Identity Module">USIM</abbr>. IMS AKA is P2 <code>81</code> with ADF.<abbr title="IP Multimedia Services Identity Module">ISIM</abbr> selected (TS 31.103 v19
+§7.1.2 Table 1), the context code the <abbr title="Universal Subscriber Identity Module">USIM</abbr> uses for 3G/EPS/5G
+(TS 31.102 v19.5 Table 7.1.2-1):</p>
 <ul>
-<li>The card decodes RAND / AUTN, runs Milenage f1..f5, returns the
-  spec UMTS-AKA response (RES, CK, IK, optionally Kc).</li>
-<li>A paired modem can therefore issue
-  <code>AUTHENTICATE</code> with P2=0x82 against ADF.<abbr title="IP Multimedia Services Identity Module">ISIM</abbr> during SIP REGISTER
-  challenge handling without a custom carve-out.</li>
-<li>Unknown P2 values still return <code>6A 86</code>.</li>
+<li>The card decodes RAND / AUTN, runs Milenage f1..f5 and answers
+  <code>DB</code> RES, CK and IK (TS 31.103 v19 §7.1.2.1); the <abbr title="Universal Subscriber Identity Module">USIM</abbr>'s answer
+  adds Kc.</li>
+<li>P2 <code>82</code> is HTTP Digest on the <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> and VGCS/VBS on the <abbr title="Universal Subscriber Identity Module">USIM</abbr>;
+  neither is implemented, so both answer <code>98 64</code> (security
+  context not supported, TS 31.102 v19.5 §7.3.1). The <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> has no
+  GSM context (<code>80</code> is reserved there), and the odd-INS contexts
+  <code>85</code> / <code>86</code> are RFU with INS <code>88</code>; all three answer <code>6A 86</code>.</li>
+<li><code>SIMCARD/auth.py</code> picks the coding from the selected application;
+  with no <abbr title="Universal Subscriber Identity Module">USIM</abbr> or <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> selected the <abbr title="Universal Subscriber Identity Module">USIM</abbr> table applies.</li>
 </ul>
 <h3 id="isim-efs-round-12"><abbr title="IP Multimedia Services Identity Module">ISIM</abbr> EFs (round 12)</h3>
 <p>Round-12 augments the ADF.<abbr title="IP Multimedia Services Identity Module">ISIM</abbr> tree (<abbr title="File Identifier">FID</abbr> <code>7FF2</code>, <abbr title="Application Identifier">AID</abbr>
@@ -2629,11 +2581,11 @@ without scraping <code>event_history</code>.</p>
 <td><code>state.toolkit.user_activity_count</code> increments monotonically. The event carries no payload of interest.</td>
 </tr>
 <tr>
-<td><code>0x0D</code> Access Technology Change</td>
+<td><code>0x0B</code> Access Technology Change</td>
 <td><code>state.toolkit.last_access_technology</code> caches the new <abbr title="Rules Authorisation Table">RAT</abbr> byte (TS 102 223 §8.61: <code>0x00</code> GSM, <code>0x03</code> UTRAN, <code>0x08</code> E-UTRAN, <code>0x0A</code> NG-RAN). <code>access_technology_changes</code> increments only when the value actually changed. The COMPREHENSION-<abbr title="Tag-Length-Value">TLV</abbr> tag <code>3F</code> / <code>BF</code> is read by a dedicated single-byte / single-length scanner because the BER walker would otherwise mis-parse it as a multi-byte tag (TS 101 220 §7.1.1.1).</td>
 </tr>
 <tr>
-<td><code>0x0E</code> Display Parameters Change</td>
+<td><code>0x0C</code> Display parameters changed</td>
 <td><code>state.toolkit.last_display_parameters</code> caches the raw <abbr title="Tag-Length-Value">TLV</abbr> <code>46</code> / <code>C6</code> payload; <code>display_parameters_changes</code> increments on every event so polling can derive a delta.</td>
 </tr>
 </tbody>
@@ -2707,8 +2659,8 @@ proactives:</p>
   Frames Information blob (TR context).</li>
 </ul>
 <h3 id="event-download-additions">Event Download additions</h3>
-<p>Round-8 extends <code>_handle_event_download</code> with three event codes
-from TS 102 223 §7.4.10 / §7.4.12:</p>
+<p><code>_handle_event_download</code> dispatches on the event codes of
+TS 102 223 §8.25, extended by the values TS 31.111 §8.25 adds:</p>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -2718,31 +2670,23 @@ from TS 102 223 §7.4.10 / §7.4.12:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>0x0A</code> SS event</td>
-<td><code>state.toolkit.last_ss_event_data</code> (<abbr title="Tag-Length-Value">TLV</abbr> <code>89</code> payload)</td>
-</tr>
-<tr>
-<td><code>0x0B</code> USSD event</td>
-<td><code>state.toolkit.last_ussd_event_data</code> + <code>last_ussd_event_dcs</code> (<abbr title="Tag-Length-Value">TLV</abbr> <code>8A</code> byte 0 = DCS, bytes 1.. = text)</td>
-</tr>
-<tr>
-<td><code>0x0C</code> Local Connection</td>
+<td><code>0x0D</code> Local Connection (§7.5.14)</td>
 <td><code>state.toolkit.local_connection_active</code> -- True when <abbr title="Tag-Length-Value">TLV</abbr> <code>40</code> byte 0 high nibble = <code>0x80</code> (established), False on <code>0x00</code> (terminated)</td>
 </tr>
 <tr>
-<td><code>0x13</code> HCI Connectivity (round-9)</td>
+<td><code>0x13</code> HCI Connectivity (§7.5.18)</td>
 <td><code>state.toolkit.hci_connectivity_active</code> -- shares <abbr title="Tag-Length-Value">TLV</abbr> <code>40</code> decoding with Local Connection: high nibble <code>0x80</code> marks the HCI gate as connected, <code>0x00</code> as disconnected</td>
 </tr>
 <tr>
-<td><code>0x16</code> Contactless State Request (round-10)</td>
+<td><code>0x16</code> Contactless state request (§7.5.19)</td>
 <td><code>state.toolkit.contactless_active</code> -- <abbr title="Tag-Length-Value">TLV</abbr> <code>40</code> high nibble <code>0x80</code> activates the contactless front-end, <code>0x00</code> deactivates it</td>
 </tr>
 <tr>
-<td><code>0x18</code> IMS Registration (round-10)</td>
+<td><code>0x17</code> IMS Registration (TS 31.111 §7.5.21)</td>
 <td><code>state.toolkit.ims_registered</code> from <abbr title="Tag-Length-Value">TLV</abbr> <code>B9</code> byte 0 (<code>0x01</code> registered, <code>0x00</code> deregistered) and <code>state.toolkit.last_ims_event_data</code> from the optional registered URI (<abbr title="Tag-Length-Value">TLV</abbr> <code>BA</code>)</td>
 </tr>
 <tr>
-<td><code>0x19</code> IMS Incoming Data (round-10)</td>
+<td><code>0x18</code> Incoming IMS Data (TS 31.111 §7.5.20)</td>
 <td><code>state.toolkit.last_ims_event_data</code> -- IMS / SIP payload from <abbr title="Tag-Length-Value">TLV</abbr> <code>BA</code></td>
 </tr>
 </tbody>
@@ -2818,9 +2762,10 @@ modules:</p>
 </tr>
 </tbody>
 </table></div>
-<p>The complementary network-side AUSF / AAnF surfaces are out of scope
-for this release; this release ships the <abbr title="Subscriber Identity Module">SIM</abbr>-side primitives only.
-Operators who need a network-side counterpart wire it up themselves.</p>
+<p>The complementary core-side surface lives under <code>Tools/YggdraCore/</code>,
+which exposes an in-process AUSF / AAnF pair plus a FastAPI loopback
+launcher (<code>YGGDRASIM_5GCORE_MODE=stub</code>). See the operator-surfaces
+table on the <a href="../index.html">home page</a> for the entry points.</p>
 <h2 id="identity-files">Identity files</h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -2928,7 +2873,7 @@ EOF
 <li>3GPP TS 31.111 §7.3.1 Call Control by <abbr title="Universal Subscriber Identity Module">USIM</abbr> (envelope <code>D4</code>)</li>
 <li>3GPP TS 31.111 §7.3.2 MO Short Message Control (envelope <code>D5</code>)</li>
 <li>3GPP TS 102 223 §7.1.7 Timer Expiration (envelope <code>D7</code>)</li>
-<li>3GPP TS 31.111 §7.3.3 USSD Download (envelope <code>D8</code>)</li>
+<li>3GPP TS 31.111 §7.3.3 USSD Download (envelope <code>D9</code>; <code>D8</code> reserved for intra-<abbr title="Universal Integrated Circuit Card">UICC</abbr> communication)</li>
 <li>TCA Profile Interoperability §3.4.2 profileHeader.connectivityParameters</li>
 </ul>
         </div>
@@ -2952,12 +2897,10 @@ EOF
             <a href="#event-download-routing" class="toc-link toc-link-sub">Event Download routing</a>
             <a href="#timer-management-proactive-type-0x27" class="toc-link toc-link-sub">TIMER MANAGEMENT (proactive type 0x27)</a>
             <a href="#terminal-profile-bring-up-strategy" class="toc-link toc-link-sub">TERMINAL PROFILE bring-up strategy</a>
-            <a href="#ipa-poll-bip-trigger-on-timer-expiration" class="toc-link toc-link-sub">IPA-poll BIP trigger on TIMER EXPIRATION</a>
-            <a href="#esipa-request-body-bf4f-geteimpackagerequest" class="toc-link toc-link-sub">ESipa request body — BF4F GetEimPackageRequest</a>
+            <a href="#esipa-request-body-bf4f-geteimpackagerequest" class="toc-link toc-link-sub">ESipa request body -- BF4F GetEimPackageRequest</a>
             <a href="#esipa-response-dispatch-on-receive-data" class="toc-link toc-link-sub">ESipa response dispatch on RECEIVE DATA</a>
-            <a href="#loadcrl-bf35-sgp22-5713" class="toc-link toc-link-sub">LoadCRL — BF35 (SGP.22 §5.7.13)</a>
-            <a href="#esipa-result-follow-up-bf50-provideeimpackageresult" class="toc-link toc-link-sub">ESipa result follow-up — BF50 ProvideEimPackageResult</a>
-            <a href="#ipa-poll-loopback-validation-mode-a-mode-b" class="toc-link toc-link-sub">IPA-poll loopback validation (Mode A + Mode B)</a>
+            <a href="#loadcrl-bf35-sgp22-5713" class="toc-link toc-link-sub">LoadCRL -- BF35 (SGP.22 §5.7.13)</a>
+            <a href="#esipa-result-follow-up-bf50-provideeimpackageresult" class="toc-link toc-link-sub">ESipa result follow-up -- BF50 ProvideEimPackageResult</a>
             <a href="#more-time-polling-off-declare-service" class="toc-link toc-link-sub">MORE TIME / POLLING OFF / DECLARE SERVICE</a>
             <a href="#service-discovery-0x45-0x46-0x47" class="toc-link toc-link-sub">Service discovery (0x45 / 0x46 / 0x47)</a>
             <a href="#multi-card-terminal-0x30-0x31-0x32-0x33" class="toc-link toc-link-sub">Multi-card terminal (0x30 / 0x31 / 0x32 / 0x33)</a>
@@ -2988,7 +2931,7 @@ EOF
             <a href="#terminal-capability-tlv-decode-round-13" class="toc-link toc-link-sub">Terminal Capability TLV decode (round 13)</a>
             <a href="#additional-isim-efs-round-13" class="toc-link toc-link-sub">Additional ISIM EFs (round 13)</a>
             <a href="#more-time-poll-interval-tr-latches-round-13" class="toc-link toc-link-sub">MORE TIME / POLL INTERVAL TR latches (round 13)</a>
-            <a href="#ims-aka-via-authenticate-p20x82-round-12" class="toc-link toc-link-sub">IMS AKA via AUTHENTICATE P2=0x82 (round 12)</a>
+            <a href="#ims-aka-via-authenticate-p20x81-under-the-isim-round-12" class="toc-link toc-link-sub">IMS AKA via AUTHENTICATE P2=0x81 under the ISIM (round 12)</a>
             <a href="#isim-efs-round-12" class="toc-link toc-link-sub">ISIM EFs (round 12)</a>
             <a href="#call-lifecycle-event-downloads-round-12" class="toc-link toc-link-sub">Call-lifecycle event downloads (round 12)</a>
             <a href="#misc-event-downloads-round-12" class="toc-link toc-link-sub">Misc event downloads (round 12)</a>
@@ -3022,13 +2965,13 @@ EOF
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

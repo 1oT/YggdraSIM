@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp11-eim-local.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -40,9 +40,8 @@
         </nav>
         <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">SCP11 eIM Local</h1>
         <p class="page-lead mb-8"><code>SCP11/eim_local/</code> is the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-side shell for <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 IoT <abbr title="Remote SIM Provisioning">RSP</abbr> work. It layers
-<abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package authoring, hotfolder queues, poll campaigns, response logging, and
-handover helpers on top of the local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> stack, and exposes a standalone
-<abbr title="IoT Profile Assistant, device-side">IPAd</abbr> runner suitable for export.</p>
+<abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package authoring, hotfolder queues, response logging, and handover
+helpers on top of the local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> stack.</p>
         <details class="toc-mobile xl:hidden mb-8">
           <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
           <nav>
@@ -51,15 +50,15 @@ handover helpers on top of the local <abbr title="Secure Channel Protocol 11 (GP
             <a href="#command-surface-grouped" class="toc-link">Command surface, grouped</a>
             <a href="#diagnostics-and-paths" class="toc-link toc-link-sub">Diagnostics and paths</a>
             <a href="#eim-lifecycle-direct-card" class="toc-link toc-link-sub">eIM lifecycle (direct card)</a>
-            <a href="#ipad-and-ipae" class="toc-link toc-link-sub">IPAd and IPAe</a>
+            <a href="#ipad-discovery-and-handover" class="toc-link toc-link-sub">IPAd discovery and handover</a>
             <a href="#queues-and-campaigns" class="toc-link toc-link-sub">Queues and campaigns</a>
             <a href="#identity-split-to-remember" class="toc-link">Identity split to remember</a>
             <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
             <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
             <a href="#common-recipes" class="toc-link">Common recipes</a>
             <a href="#first-time-eim-bring-up" class="toc-link toc-link-sub">First-time eIM bring-up</a>
-            <a href="#hotfolder-poll-loop" class="toc-link toc-link-sub">Hotfolder poll loop</a>
-            <a href="#export-a-campaign-audit" class="toc-link toc-link-sub">Export a campaign audit</a>
+            <a href="#hotfolder-fetch-loop" class="toc-link toc-link-sub">Hotfolder fetch loop</a>
+            <a href="#review-response-evidence" class="toc-link toc-link-sub">Review response evidence</a>
             <a href="#pitfalls" class="toc-link">Pitfalls</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
           </nav>
@@ -74,14 +73,11 @@ page assumes the <abbr title="SIM Group Permanent (GSMA permanent reference docu
 <ul>
 <li><code>ADD-INITIAL-EIM</code>, <code>ADD-EIM</code>, <code>GET-EIM-CONFIG</code>, <code>DELETE-EIM</code></li>
 <li><code>LOAD-EIM-PACKAGE</code> direct to <abbr title="Issuer Security Domain - Root">ISD-R</abbr></li>
-<li>localized <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> runs through live or test relay orchestrators</li>
-<li>localized <abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> polling with a plugin-backed path</li>
 <li>hotfolder-driven package campaigns</li>
-<li>poll campaign execution, export, and aggregate reporting</li>
 <li>counter and error-code inspection</li>
 <li>response log capture, filtering, and clear-out</li>
 <li>handover orchestration between Auth, Download, and status verbs</li>
-<li>direct-to-<abbr title="Issuer Security Domain - Root">ISD-R</abbr> package validation without polling</li>
+<li>direct-to-<abbr title="Issuer Security Domain - Root">ISD-R</abbr> package validation without relay transport</li>
 </ul>
 <h2 id="entry-points">Entry points</h2>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Module</label><label for="__tabbed_1_2">Console script</label><label for="__tabbed_1_3">From the launcher</label></div>
@@ -203,7 +199,7 @@ python -m SCP11.eim_local --cmd &quot;STATUS; PATHS; EXIT&quot;
 </tr>
 </tbody>
 </table></div>
-<h3 id="ipad-and-ipae"><abbr title="IoT Profile Assistant, device-side">IPAd</abbr> and <abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr></h3>
+<h3 id="ipad-discovery-and-handover"><abbr title="IoT Profile Assistant, device-side">IPAd</abbr> discovery and handover</h3>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -214,31 +210,11 @@ python -m SCP11.eim_local --cmd &quot;STATUS; PATHS; EXIT&quot;
 <tbody>
 <tr>
 <td><code>IPAD-DISCOVER</code></td>
-<td><abbr title="IoT Profile Assistant, device-side">IPAd</abbr> discovery via orchestrator</td>
+<td><abbr title="IoT Profile Assistant, device-side">IPAd</abbr> discovery against the card, with optional package selection</td>
 </tr>
 <tr>
-<td><code>IPAD-LIVE</code></td>
-<td>localized <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> run through live orchestrator</td>
-</tr>
-<tr>
-<td><code>IPAD-TEST</code></td>
-<td>localized <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> run through test orchestrator</td>
-</tr>
-<tr>
-<td><code>IPAE-AUTHENTICATE</code></td>
-<td>direct <abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> auth against the local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>/SM-DP+</td>
-</tr>
-<tr>
-<td><code>IPAE-DOWNLOAD</code></td>
-<td>direct <abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> download handover</td>
-</tr>
-<tr>
-<td><code>IPAE-LIVE</code></td>
-<td>plugin-backed localized <abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> via live orchestrator</td>
-</tr>
-<tr>
-<td><code>IPAE-TEST</code></td>
-<td>plugin-backed localized <abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> via test orchestrator</td>
+<td><code>HANDOVER-SET</code></td>
+<td>seed the handover context by hand</td>
 </tr>
 <tr>
 <td><code>HANDOVER-STATUS</code></td>
@@ -256,28 +232,12 @@ python -m SCP11.eim_local --cmd &quot;STATUS; PATHS; EXIT&quot;
 </thead>
 <tbody>
 <tr>
-<td><code>POLL-CAMPAIGN</code></td>
-<td>run a poll campaign</td>
-</tr>
-<tr>
-<td><code>POLL-EXPORT</code></td>
-<td>export audit trails</td>
-</tr>
-<tr>
-<td><code>POLL-AGGREGATE</code></td>
-<td>print aggregate stats</td>
-</tr>
-<tr>
 <td><code>HOTFOLDER</code></td>
 <td>manage the hotfolder</td>
 </tr>
 <tr>
 <td><code>HOTFOLDER-LIST</code></td>
 <td>list pending packages</td>
-</tr>
-<tr>
-<td><code>HOTFOLDER-POLL</code></td>
-<td>poll the hotfolder for new packages</td>
 </tr>
 <tr>
 <td><code>HOTFOLDER-FETCH</code></td>
@@ -306,7 +266,6 @@ row. Keep them aligned on purpose.</p>
 <li>local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> certificates for the direct-to-<abbr title="Issuer Security Domain - Root">ISD-R</abbr> flows</li>
 <li>local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> certificates under <code>SCP11/eim_local/certs/</code></li>
 <li>the shared SQLite inventory for per-<code>eim_id</code> state</li>
-<li>optional <code>polling</code> plugin for <code>IPAE-LIVE</code> and <code>IPAE-TEST</code></li>
 </ul>
 <h2 id="state-the-shell-writes">State the shell writes</h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
@@ -341,22 +300,19 @@ row. Keep them aligned on purpose.</p>
 [eSIM eIM] &gt; ADD-INITIAL-EIM
 [eSIM eIM] &gt; GET-EIM-CONFIG
 </code></pre></div>
-<h3 id="hotfolder-poll-loop">Hotfolder poll loop</h3>
-<div class="code-block"><pre><code>python -m SCP11.eim_local --cmd &quot;HOTFOLDER-LIST; HOTFOLDER-POLL; EXIT&quot;
+<h3 id="hotfolder-fetch-loop">Hotfolder fetch loop</h3>
+<div class="code-block"><pre><code>python -m SCP11.eim_local --cmd &quot;HOTFOLDER-LIST; HOTFOLDER-FETCH; RESP-LOG 5; EXIT&quot;
 </code></pre></div>
-<h3 id="export-a-campaign-audit">Export a campaign audit</h3>
-<div class="code-block"><pre><code>[eSIM eIM] &gt; POLL-CAMPAIGN
-[eSIM eIM] &gt; POLL-AGGREGATE
-[eSIM eIM] &gt; POLL-EXPORT
+<h3 id="review-response-evidence">Review response evidence</h3>
+<div class="code-block"><pre><code>[eSIM eIM] &gt; HOTFOLDER-LIST
+[eSIM eIM] &gt; HOTFOLDER-FETCH
+[eSIM eIM] &gt; RESP-LOG
 </code></pre></div>
 <h2 id="pitfalls">Pitfalls</h2>
 <ul>
 <li><code>ADD-INITIAL-EIM</code> can only run when the target BF55 row is empty or the
   card-side configuration explicitly allows overwrite. Check the simulator
   <code>isdr_config.json</code> before retrying.</li>
-<li>The optional <code>polling</code> plugin is mandatory for <code>IPAE-LIVE</code> and
-  <code>IPAE-TEST</code>. Without it, the shell will either hide those verbs or emit a
-  clean runtime error.</li>
 <li>Hotfolder artifacts live under the writable runtime root on frozen builds,
   not under the source tree.</li>
 <li>Counter overrides through <code>COUNTER &lt;eim_id&gt; &lt;value&gt;</code> persist until changed
@@ -366,7 +322,6 @@ row. Keep them aligned on purpose.</p>
 <ul>
 <li><a href="../concepts/rsp-architecture.html"><abbr title="Remote SIM Provisioning">RSP</abbr> Architecture</a></li>
 <li><a href="scp11-local-access.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access</a></li>
-<li><a href="../internals/plugin-contract.html">Write a Plugin</a></li>
 <li><code>SCP11/eim_local/GUIDE.md</code> for the full authored <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-local guide</li>
 </ul>
         </div>
@@ -379,15 +334,15 @@ row. Keep them aligned on purpose.</p>
             <a href="#command-surface-grouped" class="toc-link">Command surface, grouped</a>
             <a href="#diagnostics-and-paths" class="toc-link toc-link-sub">Diagnostics and paths</a>
             <a href="#eim-lifecycle-direct-card" class="toc-link toc-link-sub">eIM lifecycle (direct card)</a>
-            <a href="#ipad-and-ipae" class="toc-link toc-link-sub">IPAd and IPAe</a>
+            <a href="#ipad-discovery-and-handover" class="toc-link toc-link-sub">IPAd discovery and handover</a>
             <a href="#queues-and-campaigns" class="toc-link toc-link-sub">Queues and campaigns</a>
             <a href="#identity-split-to-remember" class="toc-link">Identity split to remember</a>
             <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
             <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
             <a href="#common-recipes" class="toc-link">Common recipes</a>
             <a href="#first-time-eim-bring-up" class="toc-link toc-link-sub">First-time eIM bring-up</a>
-            <a href="#hotfolder-poll-loop" class="toc-link toc-link-sub">Hotfolder poll loop</a>
-            <a href="#export-a-campaign-audit" class="toc-link toc-link-sub">Export a campaign audit</a>
+            <a href="#hotfolder-fetch-loop" class="toc-link toc-link-sub">Hotfolder fetch loop</a>
+            <a href="#review-response-evidence" class="toc-link toc-link-sub">Review response evidence</a>
             <a href="#pitfalls" class="toc-link">Pitfalls</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
         </nav>
@@ -404,13 +359,13 @@ row. Keep them aligned on purpose.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

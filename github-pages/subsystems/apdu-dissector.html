@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>APDU Dissector — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/apdu-dissector.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=3"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">APDU Dissector</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">APDU Dissector</h1>
+        <p class="page-lead mb-8"><code>Tools/ApduDissector/</code> is a Wireshark and tshark dissector that decodes the
+GSMTAP <abbr title="Subscriber Identity Module">SIM</abbr> frames the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge mirrors on UDP <code>4729</code>, all the way down into
+the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> payload.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#what-it-decodes" class="toc-link">What it decodes</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#when-it-loads" class="toc-link">When it loads</a>
+            <a href="#making-it-global" class="toc-link">Making it global</a>
+            <a href="#how-the-tree-reads" class="toc-link">How the tree reads</a>
+            <a href="#display-filters-worth-knowing" class="toc-link">Display filters worth knowing</a>
+            <a href="#how-it-attaches" class="toc-link">How it attaches</a>
+            <a href="#command-and-response-splitting" class="toc-link">Command and response splitting</a>
+            <a href="#secure-messaging" class="toc-link">Secure messaging</a>
+            <a href="#constant-tables-are-generated" class="toc-link">Constant tables are generated</a>
+            <a href="#testing" class="toc-link">Testing</a>
+            <a href="#conformance" class="toc-link">Conformance</a>
+            <a href="#deliberate-divergences" class="toc-link toc-link-sub">Deliberate divergences</a>
+            <a href="#known-limits" class="toc-link">Known limits</a>
+            <a href="#see-also" class="toc-link">See also</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>Wireshark ships a <code>gsm_sim</code> dissector, and it stops at the command header. What
+it leaves behind, measured against a capture written by the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge's own
+writer on TShark 4.2.2:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Frame</th>
+<th>Stock output</th>
+<th>With this dissector</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET RESPONSE</code> returning an <abbr title="File Control Parameters">FCP</abbr> template</td>
+<td><code>[Malformed Packet]</code></td>
+<td>File type, <abbr title="Elementary File">EF</abbr> structure, file identifier resolved to a path, life-cycle status</td>
+</tr>
+<tr>
+<td><code>STORE DATA</code> to the <abbr title="Issuer Security Domain - Root">ISD-R</abbr> carrying an <abbr title="ES10c interface for profile state control">ES10c</abbr> request</td>
+<td><code>ETSI TS 102.221 e2</code></td>
+<td><code>STORE DATA</code>, then the BER-<abbr title="Tag-Length-Value">TLV</abbr> tree naming <code>ProfileInfoList</code> and its contents</td>
+</tr>
+<tr>
+<td><code>READ BINARY</code> of <abbr title="Elementary File">EF</abbr>.<abbr title="Integrated Circuit Card Identifier">ICCID</abbr></td>
+<td><code>Offset=0</code>, bytes undecoded</td>
+<td>The <abbr title="Integrated Circuit Card Identifier">ICCID</abbr></td>
+</tr>
+<tr>
+<td><abbr title="Answer To Reset">ATR</abbr> frame</td>
+<td>Mis-parsed as an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, <code>Unknown status word: 4ba9</code></td>
+<td>Convention, interface bytes, historical bytes, verified check byte</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="what-it-decodes">What it decodes</h2>
+<ul>
+<li><strong>ISO/IEC 7816-4 header</strong> -- the class byte split into logical channel,
+  secure-messaging mode and chaining; the instruction resolved class-first, so
+  <code>80 E2</code> is <code>STORE DATA</code> rather than the <abbr title="European Telecommunications Standards Institute">ETSI</abbr> reading of <code>E2</code>; case
+  classification across all seven forms including extended lengths.</li>
+<li><strong>Status words</strong> -- from the same table the MCP server uses, plus the
+  families whose SW2 is a count rather than a code. <code>61 2B</code> reads as "43 bytes
+  available", <code>63 C2</code> as "2 retries left".</li>
+<li><strong>Risk class</strong> -- from <code>yggdrasim_common/apdu_risk.py</code>, so
+  <code>yapdu.risk == 3</code> is a display filter for every irreversible command in a
+  capture, and each one carries an expert warning saying why.</li>
+<li><strong>BER-<abbr title="Tag-Length-Value">TLV</abbr> and COMPREHENSION-<abbr title="Tag-Length-Value">TLV</abbr></strong> -- recursive, with multi-byte tags,
+  long-form and indefinite lengths, and tag names from the same tables
+  <code>Tools/Asn1TlvDecode</code> uses.</li>
+<li><strong><abbr title="Remote SIM Provisioning">RSP</abbr> structures by ASN.1 field name</strong> -- an ES10 response is walked with
+  the structure it belongs to, so <code>'81'</code> inside a <code>BF22</code> is
+  <code>baseProfilePackageVersion</code> and a profile listing reads
+  <code>profileInfoListOk</code> / <code>ProfileInfo</code> / <code>iccid</code> / <code>isdpAid</code> / <code>profileState</code>.
+  The structure travels with the walk rather than the parent tag alone,
+  which is what lets <code>BF22</code> be <code>EUICCInfo2</code> at the top of a response and
+  <code>serviceSpecificDataStoredInEuicc</code> inside a <code>ProfileInfo</code>.</li>
+<li><strong>File control templates</strong> -- <abbr title="File Control Parameters">FCP</abbr>, FCI and FMD with their TS 102 221
+  clause 11.1.1.3 sub-tags.</li>
+<li><strong>Elementary files</strong> -- <abbr title="Elementary File">EF</abbr>.<abbr title="Integrated Circuit Card Identifier">ICCID</abbr>, <abbr title="Elementary File">EF</abbr>.IMSI, <abbr title="Elementary File">EF</abbr>.UST and <abbr title="Elementary File">EF</abbr>.AD, attributed to
+  the file selected in an earlier frame.</li>
+<li><strong>Command bodies</strong> -- SELECT control bytes and target, the SFI form of
+  READ/UPDATE BINARY, record number and mode, <abbr title="Personal Identification Number">PIN</abbr> key references, MANAGE
+  CHANNEL operations, GET/PUT DATA tags.</li>
+<li><strong><abbr title="Answer To Reset">ATR</abbr> frames</strong>, which the stock dissector reads as APDUs and gets wrong.</li>
+</ul>
+<h2 id="entry-points">Entry points</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Console script</label><label for="__tabbed_1_2">Module</label><label for="__tabbed_1_3">tshark directly</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>yggdrasim-apdu-dissect decode --pcap capture.pcap --verbose
+yggdrasim-apdu-dissect install          # for the Wireshark GUI
+yggdrasim-apdu-dissect path             # print the .lua path
+yggdrasim-apdu-dissect probe --pcap capture.pcap
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python -m Tools.ApduDissector decode --pcap capture.pcap \
+    --fields frame.number,yapdu.command_name,yapdu.sw,yapdu.risk
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>tshark -X lua_script:$(yggdrasim-apdu-dissect path) -r capture.pcap -V
+</code></pre></div>
+</div>
+</div>
+</div>
+<h2 id="when-it-loads">When it loads</h2>
+<p>The dissector is <strong>not</strong> loaded by every tshark or Wireshark invocation by
+default. It is loaded automatically on the YggdraSIM-driven paths, and
+becomes global for your account after a one-time <code>install</code>.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>How you start</th>
+<th>Loaded?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr>-bridge terminal decode view, live or <code>--open-pcap</code></td>
+<td>Yes, automatically</td>
+</tr>
+<tr>
+<td>Wireshark launched from the <abbr title="Hardware-In-The-Loop">HIL</abbr> menu (<code>[B]</code> -&gt; <code>[1]</code> -&gt; start mode <code>[2]</code>)</td>
+<td>Yes, automatically</td>
+</tr>
+<tr>
+<td><code>yggdrasim-apdu-dissect decode</code></td>
+<td>Yes, automatically</td>
+</tr>
+<tr>
+<td><code>yggdrasim-eum-diag</code></td>
+<td>Yes, automatically</td>
+</tr>
+<tr>
+<td>A bare <code>tshark -r capture.pcap</code> you type yourself</td>
+<td>Only after <code>install</code></td>
+</tr>
+<tr>
+<td>Wireshark started from the desktop or app menu</td>
+<td>Only after <code>install</code></td>
+</tr>
+</tbody>
+</table></div>
+<p><code>YGGDRASIM_APDU_DISSECTOR=0</code> opts the automatic paths out.</p>
+<h2 id="making-it-global">Making it global</h2>
+<p>tshark takes the script as a path; the GUI has no equivalent. <code>install</code> copies
+the Lua tree into the personal plugin folder Wireshark reports for itself,
+which <strong>both</strong> Wireshark and tshark read at startup. After this, every
+invocation under your account loads it with no flags at all:</p>
+<div class="code-block"><pre><code>yggdrasim-apdu-dissect install --dry-run   # show what would be copied
+yggdrasim-apdu-dissect install
+yggdrasim-apdu-dissect uninstall           # and back out again
+</code></pre></div>
+<p>In a running Wireshark, pick up the change with <strong>Analyze &gt; Reload Lua
+Plugins</strong> (<span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-l">L</kbd></span>).</p>
+<p>Installing and passing <code>-X lua_script:</code> at the same time is harmless: the
+entry point carries a load guard, because <code>Proto()</code> raises on a duplicate
+name and Wireshark would otherwise refuse the whole plugin.</p>
+<div class="admonition note">
+<p class="admonition-title">Why each module bootstraps its own package.path</p>
+<p>Wireshark's plugin loader executes every <code>.lua</code> file in the plugin
+directory standalone, in alphabetical order, so <code>cat.lua</code> runs before the
+entry point that is supposed to <code>require</code> it. Each module therefore puts
+its own directory on <code>package.path</code> before its first <code>require</code>. Without
+that the whole plugin is refused at startup with
+<code>module 'yggdrasim_apdu.util' not found</code>.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Wireshark refuses Lua scripts when running as root</p>
+<p>It does so <em>silently</em>: no error, no warning, the script simply never loads
+and you get a stock decode that looks like a broken dissector. Run as a
+normal user. The CLI prints a warning when it detects this.</p>
+</div>
+<h2 id="how-the-tree-reads">How the tree reads</h2>
+<p>The layout follows Wireshark's <code>gsm_sim</code>: a byte appears once, and what the
+instruction makes of it is on that byte's own line rather than repeated
+below it as a second field.</p>
+<ul>
+<li><strong>Bit fields are rendered as bit fields.</strong> The class and constructed bits
+  of a BER tag show their masks -- <code>..1. .... = Constructed: True</code> -- the
+  way Wireshark's own BER dissector renders them.</li>
+<li><strong>A reading hangs off the byte it decodes.</strong> <code>P1: 0x91 (last block,
+  BER-TLV format)</code>, not a <code>P1</code> line followed by three more naming the same
+  byte. A COMPREHENSION-<abbr title="Tag-Length-Value">TLV</abbr>'s meaning sits under that <abbr title="Tag-Length-Value">TLV</abbr>, not in a block
+  collected after the run.</li>
+<li><strong>Framing is one collapsed node.</strong> How the payload was cut into a command
+  and a response is dissector bookkeeping, so it lives under <code>Framing</code>
+  rather than above the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>.</li>
+<li><strong>A field that only restates the line above it is filterable but not
+  printed.</strong> <code>yapdu.sw_meaning</code>, <code>yapdu.detail</code>, <code>yapdu.command_name</code>,
+  <code>yapdu.tlv.name</code>, <code>yapdu.tlv.uint</code>, <code>yapdu.frame_kind</code>, <code>yapdu.case</code>,
+  <code>yapdu.command_source</code>, <code>yapdu.split.command_len</code>,
+  <code>yapdu.split.response_len</code>, <code>yapdu.split.method</code>, <code>yapdu.cla.type</code>,
+  <code>yapdu.tlv.comprehension_required</code>, <code>yapdu.cat.type</code>,
+  <code>yapdu.cat.type_name</code>, <code>yapdu.cat.source</code>, <code>yapdu.cat.destination</code> and
+  <code>yapdu.cat.result</code> all still resolve in a display filter, a custom column
+  and <code>-T fields</code>; they no longer each cost a line in every frame of a
+  capture.</li>
+<li><strong>A default value is not a finding.</strong> The class-byte breakdown prints
+  <code>Logical channel</code>, <code>Secure messaging</code> and <code>Command chaining</code> only where
+  one of them departs from channel 0, no secure messaging and no chaining
+  -- which is also where the CLA line itself names it. <code>Split confidence</code>
+  and <code>Cross-frame context available</code> print when they carry a warning and
+  stay filter-only when they do not.</li>
+</ul>
+<p>Those last two points matter when a field seems missing from the detail
+pane: query it rather than looking for it.</p>
+<h2 id="display-filters-worth-knowing">Display filters worth knowing</h2>
+<div class="code-block"><pre><code>yapdu.risk == 3                     every irreversible command in the capture
+yapdu.sw != 0x9000                  every exchange the card did not accept
+yapdu.command_name == &quot;STORE_DATA&quot;  eUICC traffic
+yapdu.split.ambiguous == 1          exchanges the decoder could not resolve
+yapdu.ef.iccid                      frames that revealed an ICCID
+yapdu.cla.secure_messaging &gt; 0      SCP-wrapped traffic
+yapdu.command_source contains &quot;GlobalPlatform&quot;
+                                    commands the GlobalPlatform card
+                                    specification defines
+</code></pre></div>
+<h2 id="how-it-attaches">How it attaches</h2>
+<p>The dissector registers against Wireshark's <code>gsmtap.type</code> dissector table for
+<code>GSMTAP_TYPE_SIM</code> (<code>0x04</code>). That table hands it the payload with the GSMTAP
+header already stripped, and it behaves the same whether or not the caller
+passes <code>-d udp.port==4729,gsmtap</code>, which is what the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge does.</p>
+<p>The stock <code>gsm_sim</code> dissector is <em>chained</em>, not displaced, so its 242 fields
+stay filterable alongside <code>yapdu.*</code>. The exception is <abbr title="Answer To Reset">ATR</abbr> frames, which
+<code>gsm_sim</code> reads as APDUs and invents a status word from; those are withheld
+from it.</p>
+<p>Because the <abbr title="Hardware-In-The-Loop">HIL</abbr>-Bridge decode view renders <code>tshark -V</code> and PDML output, it
+inherits the deeper tree with no change of its own. Set
+<code>YGGDRASIM_APDU_DISSECTOR=0</code> to keep the dissector out of those calls.</p>
+<h2 id="command-and-response-splitting">Command and response splitting</h2>
+<p>A SIMtrace <abbr title="Subscriber Identity Module">SIM</abbr>-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> record puts the command <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> and the response <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> in one
+frame, and ISO 7816-4 does not always say where the boundary is: a body of
+<code>05 AA BB CC DD EE</code> reads equally well as case 3S or case 4S.</p>
+<p>The dissector enumerates every structurally valid split, scores each against
+the status word, the case the instruction normally uses, and the relationship
+between Le and the response length, then reports which evidence decided it
+(<code>yapdu.split.method</code>) and how confident it is (<code>yapdu.split.confidence</code>).
+Where two readings genuinely tie, <code>yapdu.split.ambiguous</code> is set rather than
+the ambiguity being hidden.</p>
+<p>This replaces the instruction allowlist in
+<code>Tools/HilBridge/live_decode_state.py</code>, which returns nothing for an
+instruction it does not recognise -- so an unfamiliar command disappears from
+the trace entirely.</p>
+<h2 id="secure-messaging">Secure messaging</h2>
+<p>An <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> or SCP11c wrapped command is broken out with no keys at all: the
+C-MAC, the ciphertext, and whether the body is merely authenticated or also
+encrypted. <code>yapdu.cla.secure_messaging &gt; 0</code> finds every wrapped exchange.</p>
+<p>Plaintext needs keys, and <strong>Wireshark's Lua binding has no AES, no CMAC and
+no hash</strong>, so no Lua dissector can decrypt anything regardless of what it is
+handed. The recovery therefore happens in Python, using the same engine the
+terminal decode view uses, and the result is written to a sidecar the
+dissector reads:</p>
+<div class="code-block"><pre><code>yggdrasim-apdu-dissect sidecar --pcap live.pcap --keybag live.keys.json
+yggdrasim-apdu-dissect decode  --pcap live.pcap \
+    --sidecar live.pcap.sidecar.json --verbose
+</code></pre></div>
+<p>The keybag is the one you already export with <code>EXPORT-KEYBAG</code> in the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>
+admin shell or <code>SCP11.local_access</code>; a sibling <code>&lt;pcap&gt;*.keys.json</code> is picked
+up automatically. In the Wireshark GUI, set the sidecar path in the
+dissector's preferences instead.</p>
+<p>Recovered plaintext is not merely displayed. The dissector re-runs its whole
+decode over it, so a ciphered <abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr> <code>STORE DATA</code> renders as a complete <abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr>
+tree rather than a blob with a note attached.</p>
+<p><strong>A sidecar is bound to its capture by content, not by frame number.</strong> Each
+entry records the on-wire ciphered command, and an entry is applied only when
+those bytes match the frame in front of it. A sidecar built from a different
+capture therefore contributes nothing and sets
+<code>yapdu.sm.sidecar_mismatch</code>, instead of attributing plaintext to the wrong
+exchange. Corrupt or foreign-format sidecars collapse to one status line.</p>
+<h2 id="constant-tables-are-generated">Constant tables are generated</h2>
+<p><code>Tools/ApduDissector/lua/yggdrasim_apdu/tables.lua</code> is generated from the
+Python modules the rest of the toolkit already treats as authoritative:</p>
+<div class="code-block"><pre><code>python scripts/generate_apdu_dissector_tables.py --write
+python scripts/generate_apdu_dissector_tables.py --check   # CI drift guard
+</code></pre></div>
+<p>Sources are <code>yggdrasim_common/apdu_risk.py</code>, <code>yggdrasim_common/apdu_tables.py</code>,
+<code>yggdrasim_common/stk_tables.py</code>, <code>Tools/Asn1TlvDecode/main.py</code>,
+<code>Tools/YggdraMCP/server.py</code>, <code>Tools/HilBridge/live_decode_state.py</code>,
+<code>SIMCARD/etsi_fs.py</code> and <code>SIMCARD/gp.py</code>. The generated file is committed so
+the Lua tree works standalone with no Python present, and
+<code>tests/test_apdu_dissector_tables.py</code> fails when it drifts.</p>
+<p>The <abbr title="Remote SIM Provisioning">RSP</abbr> member names are read straight from the ASN.1 of the converted
+specifications under <code>docs/tel-docs/converted/</code> -- <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 first, then <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32
+for what <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 does not define. The reader computes each tag from the class
+and number in the declaration and checks it against the <code>-- Tag 'XX'</code> the
+document states beside it; a disagreement fails generation rather than
+producing a name on the wrong tag. Where a body cannot be read unambiguously
+-- two members landing on one tag -- the type contributes no names at all.</p>
+<h2 id="testing">Testing</h2>
+<div class="code-block"><pre><code>python -m pytest tests/test_apdu_dissector_*.py
+YGGDRASIM_REQUIRE_TSHARK=1 python -m pytest tests/test_apdu_dissector_*.py
+</code></pre></div>
+<p>Captures are synthesised at test time from <code>Tools/HilBridge/protocol.py</code>
+helpers, so nothing binary is committed and identifiers stay inside the
+documented test ranges.</p>
+<p>Without <code>YGGDRASIM_REQUIRE_TSHARK=1</code>, the tshark-backed modules skip when
+tshark is missing -- or when the suite runs as root and Wireshark refuses to
+load the Lua. Set it in at least one <abbr title="Certificate Issuer">CI</abbr> job, or the dissector rots without the
+suite noticing.</p>
+<h2 id="conformance">Conformance</h2>
+<p>Every table and bit-field below is read from the clause named, and
+<code>tests/test_apdu_dissector_*.py</code> pins the readings that are easy to get subtly
+wrong. The ones worth knowing about, because they are the ones a plausible
+implementation gets backwards:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Reading</th>
+<th>Clause</th>
+<th>The trap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Life-cycle status integer</td>
+<td>ISO/IEC 7816-4 Table 13</td>
+<td>Bit 1 is the activated flag, so <code>'05'</code>/<code>'07'</code> are activated and <code>'04'</code>/<code>'06'</code> are not. <code>'0C'</code>--<code>'0F'</code> is the <strong>termination state</strong>, not an operational one.</td>
+</tr>
+<tr>
+<td>Status word categories</td>
+<td>ISO/IEC 7816-4 clause 5.1.3</td>
+<td>Four categories, not two. <code>'62'</code> and <code>'63'</code> are warnings: <code>63 CX</code> is a <em>failed</em> verification, so <code>yapdu.sw_success</code> is false for it.</td>
+</tr>
+<tr>
+<td><code>61 00</code>, <code>6C 00</code></td>
+<td>ISO/IEC 7816-4 clause 5.1</td>
+<td>SW2 of zero means 256, following the Le convention.</td>
+</tr>
+<tr>
+<td><code>92 40</code></td>
+<td>GSM 11.11 clause 9.4</td>
+<td><code>'92' '0X'</code> counts internal retries; <code>'92' '40'</code> is a memory problem.</td>
+</tr>
+<tr>
+<td>Class byte</td>
+<td>ISO/IEC 7816-4 clause 5.4.1</td>
+<td><code>'80'</code>--<code>'FE'</code> is proprietary and bits 6--1 mean nothing there. Two blocks are decoded anyway because GlobalPlatform claims them: <code>'8X'</code> (Table 11-1) for logical channels 0--3, and <code>'C0'</code>--<code>'FE'</code> for channels 4--19, which is the further interindustry shape with bit 8 set. <code>'90'</code>--<code>'BF'</code> reports no channel, secure-messaging level or chaining flag.</td>
+</tr>
+<tr>
+<td>Secure messaging</td>
+<td>ISO/IEC 7816-4 Table 3</td>
+<td>Bits 4 <strong>and</strong> 3 in the first interindustry form, so CLA <code>'08'</code> is secure messaging; a single bit in the further form, so CLA <code>'44'</code> is channel 8 and is not.</td>
+</tr>
+<tr>
+<td>Device identities</td>
+<td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 clause 8.7</td>
+<td><code>'81'</code> <abbr title="Universal Integrated Circuit Card">UICC</abbr>, <code>'82'</code> terminal, <code>'21'</code>--<code>'27'</code> channels 1--7, <code>'10'</code>--<code>'17'</code> card readers.</td>
+</tr>
+<tr>
+<td>General result</td>
+<td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 clause 8.12</td>
+<td><code>'04'</code> is the icon result and <code>'06'</code> is limited service. The second byte carries the cause for <code>'3A'</code>, <code>'20'</code> and <code>'26'</code>.</td>
+</tr>
+<tr>
+<td>Bearer type</td>
+<td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 clause 8.52</td>
+<td>The list starts at <code>'01'</code>; <code>'03'</code> is the default packet bearer.</td>
+</tr>
+<tr>
+<td>Channel status</td>
+<td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 clause 8.56</td>
+<td>Bit 8 of byte 1 is link-established; byte 2 <code>'05'</code> is "link dropped".</td>
+</tr>
+<tr>
+<td>Transport level</td>
+<td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 clause 8.59</td>
+<td><code>'01'</code>/<code>'02'</code> are remote, <code>'04'</code>/<code>'05'</code> are local.</td>
+</tr>
+<tr>
+<td>COMPREHENSION-<abbr title="Tag-Length-Value">TLV</abbr></td>
+<td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 101 220 clause 7.1</td>
+<td>Not BER. Two tag forms only, no <code>'1F'</code> escape, no class and no constructed bit.</td>
+</tr>
+<tr>
+<td>ENVELOPE tags</td>
+<td>3GPP TS 31.111 clause 9.1</td>
+<td>The run is not gapless: <code>'D8'</code> is reserved for intra-<abbr title="Universal Integrated Circuit Card">UICC</abbr> communication, so USSD download is <code>'D9'</code>, Geographical Location Reporting <code>'DD'</code> and ProSe Report <code>'DF'</code>. Numbering straight through the gap shifts every tag from <code>'D9'</code> up and loses <code>'DF'</code>.</td>
+</tr>
+<tr>
+<td><code>'DF'</code> ProSe Report</td>
+<td><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 101 220 clause 7.2</td>
+<td>A single-byte tag whose low five bits are all set, which is BER's multi-byte introducer. Read as BER it swallows the length byte and the envelope vanishes, so the wrapper byte is matched directly.</td>
+</tr>
+<tr>
+<td>BoundProfilePackage</td>
+<td><abbr title="GSM Association">GSMA</abbr> <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 Table 4</td>
+<td>Five members: <code>BF23</code> initialiseSecureChannelRequest, then <code>A0</code> firstSequenceOf87, <code>A1</code> sequenceOf88, <code>A2</code> secondSequenceOf87 and <code>A3</code> sequenceOf86. Each sequence holds TLVs of the tag its name ends in.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="deliberate-divergences">Deliberate divergences</h3>
+<ul>
+<li><strong>Indefinite BER lengths are rejected</strong>, not resolved. <abbr title="Distinguished Encoding Rules">DER</abbr> prohibits them,
+  <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 and <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 mandate <abbr title="Distinguished Encoding Rules">DER</abbr>, and no conforming card emits one here.
+  Resolving one means scanning for an end-of-contents marker, and a byte scan
+  cannot tell a real terminator from <code>00 00</code> inside a value.</li>
+<li><strong>A malformed length is clamped and flagged</strong>, where <code>SIMCARD.utils.read_tlv</code>
+  rejects the object outright. A dissector has to show what is on the wire.</li>
+<li><strong><code>'C6'</code> is walked as constructed</strong> although BER calls it primitive, because
+  <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 221 clause 11.1.1.4.10 fills it with TLVs.</li>
+<li><strong>Naming an alert is a TLS 1.2-and-earlier capability.</strong> From the server's
+  first flight onward, TLS 1.3 encrypts every alert and RFC 8446 clause 5.2
+  sets the <em>outer</em> <code>opaque_type</code> of a protected record to <code>23</code>
+  (<code>application_data</code>), so the alert code is inside the ciphertext and the
+  record does not even announce itself as an alert. <code>yapdu.tls.alert_encrypted</code>
+  therefore covers the TLS 1.2 shape -- an <code>alert</code> record whose body is
+  ciphered -- and not the TLS 1.3 one, which is indistinguishable from any
+  other application data without the keys. Under TLS 1.3, read
+  <code>yapdu.tls.content_type == "application_data"</code> as "an alert may be in here",
+  rather than reading the absence of a named alert as "there was none".</li>
+<li><strong>A reserved class byte, and proprietary <code>'90'</code>--<code>'BF'</code>, report no channel.</strong>
+  Saying nothing is the honest answer where the specification assigns no
+  meaning. <code>'8X'</code> and <code>'C0'</code>--<code>'FE'</code> are the exceptions, because
+  GlobalPlatform does assign meaning to both.</li>
+</ul>
+<h2 id="known-limits">Known limits</h2>
+<ul>
+<li>Requires <strong>Wireshark 3.4 or newer</strong>; measured against 4.2.2. Re-run
+  <code>yggdrasim-apdu-dissect probe</code> on a new floor version.</li>
+<li>Wireshark 4.2 exposes no <code>gsmtap.sub_type</code> field, and <code>gsmtap.*</code> field
+  extractors return nothing inside a <code>gsmtap.type</code> subdissector, so <abbr title="Answer To Reset">ATR</abbr> frames
+  are recognised from their own bytes rather than the GSMTAP subtype. Frame
+  direction is not surfaced; a SIMtrace record carries both halves anyway.</li>
+<li><abbr title="Personal Identification Number">PIN</abbr> blocks and key material are reported by length only.</li>
+<li>An exchange whose instruction has no case hint and whose bytes fit two
+  readings is decoded and flagged, not resolved. There is no information in
+  the frame that would resolve it.</li>
+<li><strong>BIP channel data is not reassembled across APDUs.</strong> A TLS record split over
+  several SEND DATA blocks has its header and any plaintext alert reported here,
+  but is not handed to the stock dissector, because half a record produces a
+  malformed-packet complaint rather than a tree. In practice this means a
+  <code>bad_certificate</code> alert is visible while the certificate that caused it is
+  not: an SM-DP+ chain runs to several kilobytes across ~236-byte blocks. A DNS
+  message over TCP is de-framed and handed over only when one block carries the
+  whole message; one split across blocks is left as raw channel data for the
+  same reason.</li>
+<li>The TERMINAL PROFILE body is left as raw bytes. It is a bit field per
+  <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 clause 5.2, not <abbr title="Tag-Length-Value">TLV</abbr>.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a></li>
+<li><a href="eum-diagnostics.html">EUM Diagnostics</a> -- <code>yggdrasim-eum-diag</code> now hands its
+  captures to this dissector. Its own <code>dissector.lua</code> has been retired: it
+  byte-scanned for the <code>BF36</code> tag with no <abbr title="Tag-Length-Value">TLV</abbr> awareness, rendered the value as
+  one opaque blob, loaded session keys it had no way to apply, and built a
+  TvbRange from half the digit count of an <abbr title="Integrated Circuit Card Identifier">ICCID</abbr>, which breaks on any real
+  19-digit one. <code>YGGDRASIM_EUM_SESSION_KEYS</code> is still honoured, and the key
+  bundles are shown for reference with an explicit note that they are not
+  being applied.</li>
+<li><code>Tools/ApduDissector/WIRESHARK_ENVIRONMENT.md</code> -- the measured capability
+  matrix behind the design</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#what-it-decodes" class="toc-link">What it decodes</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#when-it-loads" class="toc-link">When it loads</a>
+            <a href="#making-it-global" class="toc-link">Making it global</a>
+            <a href="#how-the-tree-reads" class="toc-link">How the tree reads</a>
+            <a href="#display-filters-worth-knowing" class="toc-link">Display filters worth knowing</a>
+            <a href="#how-it-attaches" class="toc-link">How it attaches</a>
+            <a href="#command-and-response-splitting" class="toc-link">Command and response splitting</a>
+            <a href="#secure-messaging" class="toc-link">Secure messaging</a>
+            <a href="#constant-tables-are-generated" class="toc-link">Constant tables are generated</a>
+            <a href="#testing" class="toc-link">Testing</a>
+            <a href="#conformance" class="toc-link">Conformance</a>
+            <a href="#deliberate-divergences" class="toc-link toc-link-sub">Deliberate divergences</a>
+            <a href="#known-limits" class="toc-link">Known limits</a>
+            <a href="#see-also" class="toc-link">See also</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=3"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

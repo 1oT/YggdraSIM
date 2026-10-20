@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=2">
-  <link rel="stylesheet" href="../ygg.css?v=2">
+  <link rel="stylesheet" href="../tailwind.css?v=3">
+  <link rel="stylesheet" href="../ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/3gpp-naa.html" data-ygg-open-sections="concepts">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=2"></script>
+  <script src="../ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -87,11 +87,11 @@ the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> template.</p>
     participant NW as Serving network (HLR / HSS)
     participant TE as Terminal / modem
     participant USIM as USIM ADF
-    NW->>TE: AUTN + RAND
-    TE->>USIM: AUTHENTICATE (RAND, AUTN)
-    USIM->>USIM: Milenage / TUAK inside card
-    USIM-->>TE: RES, CK, IK (and AUTS on SQN failure)
-    TE-->>NW: RES (or AUTS for resync)</code></pre>
+    NW-&gt;&gt;TE: AUTN + RAND
+    TE-&gt;&gt;USIM: AUTHENTICATE (RAND, AUTN)
+    USIM-&gt;&gt;USIM: Milenage / TUAK inside card
+    USIM--&gt;&gt;TE: RES, CK, IK (and AUTS on SQN failure)
+    TE--&gt;&gt;NW: RES (or AUTS for resync)</code></pre>
 <p class="fig-caption">Figure: 3GPP AKA authentication — RAND/AUTN challenge to RES, with SQN resync</p>
 <p>The card keeps the long-term key <code>K</code> in tamper-resistant storage and only
 releases derived material. Two algorithm families are standard:</p>
@@ -176,17 +176,18 @@ to the modem.</p>
 <p>The 5G stack adds a few authentication surfaces on top of the classic
 <abbr title="Universal Subscriber Identity Module">USIM</abbr> <code>AUTHENTICATE</code>:</p>
 <ul>
-<li><strong>5G AKA</strong> (3GPP TS 33.501) — <code>AUTHENTICATE</code> on the 5G UE-context
+<li><strong>5G AKA</strong> (3GPP TS 33.501) -- <code>AUTHENTICATE</code> on the 5G UE-context
   produces <code>RES*</code> (a Kausf-bound transformation of <code>RES</code>) instead of
   <code>RES</code> directly.</li>
-<li><strong>EAP-AKA'</strong> (3GPP TS 33.402) — non-3GPP access authentication binding
+<li><strong>EAP-AKA'</strong> (3GPP TS 33.402) -- non-3GPP access authentication binding
   the same long-term key into an EAP exchange.</li>
-<li><strong>AKMA</strong> (3GPP TS 33.535) — application-layer keys derived from
+<li><strong>AKMA</strong> (3GPP TS 33.535) -- application-layer keys derived from
   <code>Kausf</code>, surfaced as <code>K_AKMA</code> and the <code>A-KID</code> identifier.</li>
 </ul>
-<p>The simulated <abbr title="Universal Integrated Circuit Card">UICC</abbr> implements all three. The matching network-side
-AUSF / AAnF surfaces are the operator's responsibility — this release
-ships the <abbr title="Subscriber Identity Module">SIM</abbr>-side primitives only.</p>
+<p>The simulated <abbr title="Universal Integrated Circuit Card">UICC</abbr> implements all three; the in-process YggdraCore stubs
+(<code>Tools/YggdraCore/</code>) close the loop on the network side with AUSF and
+AAnF surfaces so the round-trips can be exercised without an external 5G
+core.</p>
 <h2 id="where-to-look-in-yggdrasim">Where to look in YggdraSIM</h2>
 <ul>
 <li><a href="../subsystems/scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a> for live <abbr title="Universal Subscriber Identity Module">USIM</abbr>/<abbr title="IP Multimedia Services Identity Module">ISIM</abbr> file
@@ -223,13 +224,13 @@ ships the <abbr title="Subscriber Identity Module">SIM</abbr>-side primitives on
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=2"></script>
+<script src="../ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

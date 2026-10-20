@@ -1,3 +1,0 @@
-# List registered AID aliases from Workspace/SCP03/aid.txt.
-AIDS
-EXIT

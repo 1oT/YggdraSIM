@@ -1,3 +1,0 @@
-# Reset and print a parsed ATR breakdown.
-ATR
-EXIT

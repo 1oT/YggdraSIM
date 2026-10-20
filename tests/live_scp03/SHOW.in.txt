@@ -1,3 +1,0 @@
-# Display current SQLite-backed SCP03 configuration.
-SHOW
-EXIT

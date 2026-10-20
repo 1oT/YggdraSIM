@@ -1,4 +1,0 @@
-# BINDS opens the macro/binds manager. Sends EOF immediately after
-# invocation.
-BINDS
-EXIT

@@ -10,8 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="tailwind.css?v=2">
-  <link rel="stylesheet" href="ygg.css?v=2">
+  <link rel="stylesheet" href="tailwind.css?v=3">
+  <link rel="stylesheet" href="ygg.css?v=3">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="" data-ygg-partial-path="partials/sidebar.html" data-ygg-active-link="architecture.html">
@@ -20,7 +20,7 @@
 
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="ygg-layout.js?v=2"></script>
+  <script src="ygg-layout.js?v=3"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -87,43 +87,46 @@ capture without leaving the workspace.</p>
 </ul>
 <h2 id="system-context">System context</h2>
 <pre class="mermaid"><code>flowchart LR
-    Operator(["Operator"]) --> Launcher["main/main.py<br/>launcher"]
+    Operator(["Operator"]) --&gt; Launcher["main/main.py&lt;br/&gt;launcher"]
 
-    Launcher --> SCP03["SCP03<br/>admin shell"]
-    Launcher --> SCP80["SCP80<br/>OTA shell"]
-    Launcher --> Live["SCP11.live"]
-    Launcher --> Test["SCP11.test"]
-    Launcher --> Local["SCP11.local_access"]
-    Launcher --> EimLocal["SCP11.eim_local"]
-    Launcher --> ProfileTool["Tools.ProfilePackage"]
-    Launcher --> HilBridge["Tools.HilBridge"]
-    Launcher --> Suci["Tools.SuciTool"]
-    Launcher --> ApduFuzz["Tools.ApduFuzz"]
-    Launcher --> EumDiag["Tools.EumDiag"]
-    Launcher --> Simulator["SIMCARD<br/>simulator backend"]
+    Launcher --&gt; SCP03["SCP03&lt;br/&gt;admin shell"]
+    Launcher --&gt; SCP80["SCP80&lt;br/&gt;OTA shell"]
+    Launcher --&gt; Live["SCP11.live"]
+    Launcher --&gt; Test["SCP11.test"]
+    Launcher --&gt; Local["SCP11.local_access"]
+    Launcher --&gt; EimLocal["SCP11.eim_local"]
+    Launcher --&gt; ProfileTool["Tools.ProfilePackage"]
+    Launcher --&gt; HilBridge["Tools.HilBridge"]
+    Launcher --&gt; Suci["Tools.SuciTool"]
+    Launcher --&gt; ApduFuzz["Tools.ApduFuzz"]
+    Launcher --&gt; EumDiag["Tools.EumDiag"]
+    Launcher --&gt; YggdraCore["Tools.YggdraCore&lt;br/&gt;(library + HTTP stub)"]
+    Launcher --&gt; Simulator["SIMCARD&lt;br/&gt;simulator backend"]
+    Launcher --&gt; GuiServer["yggdrasim_common.gui_server&lt;br/&gt;(Universal GUI)"]
 
-    SCP03 --> Card[("PC/SC reader or<br/>SIMCARD simulator<br/>UICC / eUICC")]
-    SCP80 --> Card
-    Live --> Card
-    Test --> Card
-    Local --> Card
-    EimLocal --> Card
-    HilBridge --> Card
-    ApduFuzz --> Card
-    EumDiag --> Card
-    Simulator --> Card
+    SCP03 --&gt; Card[("PC/SC reader or&lt;br/&gt;SIMCARD simulator&lt;br/&gt;UICC / eUICC")]
+    SCP80 --&gt; Card
+    Live --&gt; Card
+    Test --&gt; Card
+    Local --&gt; Card
+    EimLocal --&gt; Card
+    HilBridge --&gt; Card
+    ApduFuzz --&gt; Card
+    EumDiag --&gt; Card
+    Simulator --&gt; Card
 
-    Live --> Network[("ES9+ / SM-DP+ endpoints")]
-    Test --> Network
-    EimLocal --> LocalServices[("Localized eIM / SM-DP+ endpoints")]
+    Live --&gt; Network[("ES9+ / SM-DP+ endpoints")]
+    Test --&gt; Network
+    EimLocal --&gt; LocalServices[("Localized eIM / SM-DP+ endpoints")]
+    YggdraCore --&gt; Network
 
-    ProfileTool --> Files[("Profile / JSON / DER files")]
-    Suci --> Files
-    EimLocal --> Files
+    ProfileTool --&gt; Files[("Profile / JSON / DER files")]
+    Suci --&gt; Files
+    EimLocal --&gt; Files
 
-    HilBridge -. GSMTAP mirror .-> Wireshark[("Wireshark<br/>UDP 4729")]
-    HilBridge -. relay side-channel .-> Live
-    HilBridge -. AT+CSIM/CRSM .-> Modem[("DUT modem")]</code></pre>
+    HilBridge -. GSMTAP mirror .-&gt; Wireshark[("Wireshark&lt;br/&gt;UDP 4729")]
+    HilBridge -. relay side-channel .-&gt; Live
+    HilBridge -. AT+CSIM/CRSM .-&gt; Modem[("DUT modem")]</code></pre>
 <p class="fig-caption">Figure: Launcher dispatch to operator surfaces</p>
 <h2 id="repository-structure">Repository structure</h2>
 <div class="mermaid-xl">
@@ -155,46 +158,46 @@ flowchart TB
         TestsDir["tests/"]
     end
 
-    Main --> SCP03
-    Main --> SCP80
-    Main --> SCP11
-    Main --> Tools
-    Main --> SIMCARD
+    Main --&gt; SCP03
+    Main --&gt; SCP80
+    Main --&gt; SCP11
+    Main --&gt; Tools
+    Main --&gt; SIMCARD
 
-    Registry --> SCP03
-    Registry --> SCP80
-    Registry --> SCP11
-    Registry --> Tools
+    Registry --&gt; SCP03
+    Registry --&gt; SCP80
+    Registry --&gt; SCP11
+    Registry --&gt; Tools
 
-    SCP03 --> Inventory
-    SCP80 --> Inventory
-    SCP11 --> Inventory
-    Tools --> Inventory
+    SCP03 --&gt; Inventory
+    SCP80 --&gt; Inventory
+    SCP11 --&gt; Inventory
+    Tools --&gt; Inventory
 
-    Inventory --> Crypto
-    Crypto --> StateDir
+    Inventory --&gt; Crypto
+    Crypto --&gt; StateDir
 
-    SCP11 --> PluginRuntime
-    PluginRuntime --> Plugins
-    PluginRuntime --> RuntimePaths
+    SCP11 --&gt; PluginRuntime
+    PluginRuntime --&gt; Plugins
+    PluginRuntime --&gt; RuntimePaths
 
-    SCP03 --> CardBackend
-    SCP11 --> CardBackend
-    CardBackend --> SIMCARD
+    SCP03 --&gt; CardBackend
+    SCP11 --&gt; CardBackend
+    CardBackend --&gt; SIMCARD
 
-    Tools --> HilRuntime
-    HilRuntime --> RuntimePaths
+    Tools --&gt; HilRuntime
+    HilRuntime --&gt; RuntimePaths
 
-    SCP03 --> PySim
-    SCP11 --> PySim
-    Tools --> PySim
+    SCP03 --&gt; PySim
+    SCP11 --&gt; PySim
+    Tools --&gt; PySim
 
-    TestsDir --> SCP03
-    TestsDir --> SCP80
-    TestsDir --> SCP11
-    TestsDir --> Tools</code></pre>
+    TestsDir --&gt; SCP03
+    TestsDir --&gt; SCP80
+    TestsDir --&gt; SCP11
+    TestsDir --&gt; Tools</code></pre>
+<p class="fig-caption">Figure: Repository structure — entry points, operator modules, and the shared runtime</p>
 </div>
-<p class="fig-caption">Figure: Repository structure and module dependency graph</p>
 <h2 id="interdependency-matrix">Interdependency matrix</h2>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -238,7 +241,7 @@ flowchart TB
 <td>Primary</td>
 <td>Primary</td>
 <td>Primary</td>
-<td>Live relay-oriented shell, plugin-backed <code>POLL</code></td>
+<td>Live relay-oriented shell with optional local extensions</td>
 </tr>
 <tr>
 <td><code>SCP11.test</code></td>
@@ -278,7 +281,7 @@ flowchart TB
 <td>Primary</td>
 <td>Primary</td>
 <td>Primary</td>
-<td><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-local package, polling, handover, <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> standalone</td>
+<td><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-local package authoring, hotfolders, response logging, handover</td>
 </tr>
 <tr>
 <td><code>Tools.ProfilePackage</code></td>
@@ -331,6 +334,16 @@ flowchart TB
 <td>EUM / SM-DP+ session-key staging and Wireshark Lua dissector</td>
 </tr>
 <tr>
+<td><code>Tools.YggdraCore</code></td>
+<td>No (library / HTTP stub)</td>
+<td>No</td>
+<td>Optional</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>In-process AUSF / AAnF stubs and BYO-Open5GS bridge</td>
+</tr>
+<tr>
 <td><code>SIMCARD</code></td>
 <td>Selected via <code>--card-backend sim</code></td>
 <td>No</td>
@@ -344,79 +357,79 @@ flowchart TB
 </table></div>
 <h2 id="complete-dependency-graph">Complete dependency graph</h2>
 <pre class="mermaid"><code>flowchart LR
-    Main["main/main.py"] --> SCP03
-    Main --> SCP80
-    Main --> Live["SCP11.live"]
-    Main --> Test["SCP11.test"]
-    Main --> Relay["SCP11.relay"]
-    Main --> Local["SCP11.local_access"]
-    Main --> EimLocal["SCP11.eim_local"]
-    Main --> Profile["Tools.ProfilePackage"]
-    Main --> Hil["Tools.HilBridge"]
-    Main --> Suci["Tools.SuciTool"]
+    Main["main/main.py"] --&gt; SCP03
+    Main --&gt; SCP80
+    Main --&gt; Live["SCP11.live"]
+    Main --&gt; Test["SCP11.test"]
+    Main --&gt; Relay["SCP11.relay"]
+    Main --&gt; Local["SCP11.local_access"]
+    Main --&gt; EimLocal["SCP11.eim_local"]
+    Main --&gt; Profile["Tools.ProfilePackage"]
+    Main --&gt; Hil["Tools.HilBridge"]
+    Main --&gt; Suci["Tools.SuciTool"]
 
-    Registry["yggdrasim_common/registry.py"] --> SCP03
-    Registry --> SCP80
-    Registry --> Live
-    Registry --> Test
-    Registry --> Relay
-    Registry --> Local
-    Registry --> EimLocal
-    Registry --> Profile
-    Registry --> Hil
-    Registry --> Suci
+    Registry["yggdrasim_common/registry.py"] --&gt; SCP03
+    Registry --&gt; SCP80
+    Registry --&gt; Live
+    Registry --&gt; Test
+    Registry --&gt; Relay
+    Registry --&gt; Local
+    Registry --&gt; EimLocal
+    Registry --&gt; Profile
+    Registry --&gt; Hil
+    Registry --&gt; Suci
 
-    SCP80 -. optional decode helpers .-> SCP03
+    SCP80 -. optional decode helpers .-&gt; SCP03
 
-    Live --> Shared["SCP11/shared"]
-    Test --> Shared
-    Relay --> Shared
-    Local --> Shared
-    EimLocal --> Shared
+    Live --&gt; Shared["SCP11/shared"]
+    Test --&gt; Shared
+    Relay --&gt; Shared
+    Local --&gt; Shared
+    EimLocal --&gt; Shared
 
-    SCP03 --> Inventory["yggdrasim_common/device_inventory.py"]
-    SCP80 --> Inventory
-    Live --> Inventory
-    Test --> Inventory
-    Local --> Inventory
-    EimLocal --> Inventory
+    SCP03 --&gt; Inventory["yggdrasim_common/device_inventory.py"]
+    SCP80 --&gt; Inventory
+    Live --&gt; Inventory
+    Test --&gt; Inventory
+    Local --&gt; Inventory
+    EimLocal --&gt; Inventory
 
-    Inventory --> Crypto["yggdrasim_common/inventory_crypto.py"]
-    Crypto --> Gpg[("gpg binary / agent<br/>optional")]
+    Inventory --&gt; Crypto["yggdrasim_common/inventory_crypto.py"]
+    Crypto --&gt; Gpg[("gpg binary / agent&lt;br/&gt;optional")]
 
-    Live --> PluginRuntime["yggdrasim_common/plugin_runtime.py"]
-    Test --> PluginRuntime
-    EimLocal --> PluginRuntime
-    PluginRuntime --> Plugins[("plugins/ under runtime root")]
-    PluginRuntime --> RuntimePaths["yggdrasim_common/runtime_paths.py"]
+    Live --&gt; PluginRuntime["yggdrasim_common/plugin_runtime.py"]
+    Test --&gt; PluginRuntime
+    EimLocal --&gt; PluginRuntime
+    PluginRuntime --&gt; Plugins[("plugins/ under runtime root")]
+    PluginRuntime --&gt; RuntimePaths["yggdrasim_common/runtime_paths.py"]
 
-    Hil --> HilRuntime["yggdrasim_common/hil_bridge_runtime.py"]
-    HilRuntime --> RuntimePaths
+    Hil --&gt; HilRuntime["yggdrasim_common/hil_bridge_runtime.py"]
+    HilRuntime --&gt; RuntimePaths
 
-    SCP03 --> PySim["pysim/"]
-    Live --> PySim
-    Test --> PySim
-    Local --> PySim
-    EimLocal --> PySim
-    Profile --> PySim</code></pre>
+    SCP03 --&gt; PySim["pysim/"]
+    Live --&gt; PySim
+    Test --&gt; PySim
+    Local --&gt; PySim
+    EimLocal --&gt; PySim
+    Profile --&gt; PySim</code></pre>
 <p class="fig-caption">Figure: Complete dependency graph across all subsystems</p>
 <h2 id="runtime-root-resolution">Runtime-root resolution</h2>
 <p>Every subsystem resolves its writable paths through a shared resolver. The
 resolution order is deterministic:</p>
 <pre class="mermaid"><code>flowchart LR
-    Start(["launch"]) --> Env{"YGGDRASIM_RUNTIME_ROOT<br/>set?"}
-    Env -- yes --> UseEnv["use that directory"]
-    Env -- no --> Frozen{"frozen build?"}
-    Frozen -- no --> Repo["use repository root"]
-    Frozen -- yes --> Next["YggdraSIM-data<br/>next to executable"]
-    Next --> Writable{"writable?"}
-    Writable -- yes --> UseNext["use YggdraSIM-data"]
-    Writable -- no --> Home["fallback to ~/YggdraSIM-data"]
+    Start(["launch"]) --&gt; Env{"YGGDRASIM_RUNTIME_ROOT&lt;br/&gt;set?"}
+    Env -- yes --&gt; UseEnv["use that directory"]
+    Env -- no --&gt; Frozen{"frozen build?"}
+    Frozen -- no --&gt; Repo["use repository root"]
+    Frozen -- yes --&gt; Next["YggdraSIM-data&lt;br/&gt;next to executable"]
+    Next --&gt; Writable{"writable?"}
+    Writable -- yes --&gt; UseNext["use YggdraSIM-data"]
+    Writable -- no --&gt; Home["fallback to ~/YggdraSIM-data"]
 
-    UseEnv --> Final(["resolved runtime root"])
-    Repo --> Final
-    UseNext --> Final
-    Home --> Final</code></pre>
+    UseEnv --&gt; Final(["resolved runtime root"])
+    Repo --&gt; Final
+    UseNext --&gt; Final
+    Home --&gt; Final</code></pre>
 <p class="fig-caption">Figure: Runtime-root resolution order</p>
 <p>See <a href="reference/runtime-root.html">Runtime Root</a> for the full picture.</p>
 <h2 id="shared-state-and-secret-flow">Shared state and secret flow</h2>
@@ -424,18 +437,18 @@ resolution order is deterministic:</p>
 inventory on first launch and then stay on disk as fallback or diff
 material.</p>
 <pre class="mermaid"><code>flowchart LR
-    Legacy[("Legacy files<br/>Workspace/SCP03/keys.ini<br/>SCP80/ota_config.ini<br/>Workspace/LocalEIM/eim_runtime_state.json")] --> Import["import / fallback loaders"]
-    Import --> SQLite[("state/device_inventory.sqlite3")]
+    Legacy[("Legacy files&lt;br/&gt;Workspace/SCP03/keys.ini&lt;br/&gt;SCP80/ota_config.ini&lt;br/&gt;Workspace/LocalEIM/eim_runtime_state.json")] --&gt; Import["import / fallback loaders"]
+    Import --&gt; SQLite[("state/device_inventory.sqlite3")]
 
-    SCP03 --> SQLite
-    SCP80 --> SQLite
-    SCP11["SCP11 modules"] --> SQLite
-    HilBridge["Tools.HilBridge"] --> HilState[("state/hil_bridge_*.json")]
+    SCP03 --&gt; SQLite
+    SCP80 --&gt; SQLite
+    SCP11["SCP11 modules"] --&gt; SQLite
+    HilBridge["Tools.HilBridge"] --&gt; HilState[("state/hil_bridge_*.json")]
 
-    CryptoConfig[("state/inventory_crypto.json")] --> InventoryLayer["yggdrasim_common/device_inventory.py"]
-    InventoryLayer --> SQLite
-    InventoryLayer --> Envelope[("encrypted JSON envelope<br/>optional")]
-    Envelope --> Gpg[("gpg binary / agent")]</code></pre>
+    CryptoConfig[("state/inventory_crypto.json")] --&gt; InventoryLayer["yggdrasim_common/device_inventory.py"]
+    InventoryLayer --&gt; SQLite
+    InventoryLayer --&gt; Envelope[("encrypted JSON envelope&lt;br/&gt;optional")]
+    Envelope --&gt; Gpg[("gpg binary / agent")]</code></pre>
 <p class="fig-caption">Figure: Shared state and secret flow through the inventory layer</p>
 <p>State model:</p>
 <ul>
@@ -462,31 +475,31 @@ identity-key rules.</p>
     participant Card as eUICC (ISD-R)
     participant Net as SM-DP+ / eIM
 
-    Op->>Shell: launch + command
-    Shell->>Reg: resolve orchestrator + capabilities
-    Reg-->>Shell: symbols, optional plugins
-    Shell->>Inv: read per-EID settings
-    Inv->>Env: unwrap payload if enveloped
-    Env-->>Inv: cleartext payload
-    Inv-->>Shell: settings
-    Shell->>Card: ES10 exchanges
-    Card-->>Shell: responses
-    Shell->>Net: ES9+ exchanges
-    Net-->>Shell: responses
-    Shell->>Inv: persist new settings / counters
-    Inv->>Env: envelope on write (if enabled)
-    Shell-->>Op: structured output</code></pre>
+    Op-&gt;&gt;Shell: launch + command
+    Shell-&gt;&gt;Reg: resolve orchestrator + capabilities
+    Reg--&gt;&gt;Shell: symbols, optional plugins
+    Shell-&gt;&gt;Inv: read per-EID settings
+    Inv-&gt;&gt;Env: unwrap payload if enveloped
+    Env--&gt;&gt;Inv: cleartext payload
+    Inv--&gt;&gt;Shell: settings
+    Shell-&gt;&gt;Card: ES10 exchanges
+    Card--&gt;&gt;Shell: responses
+    Shell-&gt;&gt;Net: ES9+ exchanges
+    Net--&gt;&gt;Shell: responses
+    Shell-&gt;&gt;Inv: persist new settings / counters
+    Inv-&gt;&gt;Env: envelope on write (if enabled)
+    Shell--&gt;&gt;Op: structured output</code></pre>
 <p class="fig-caption">Figure: Session lifecycle for DISCOVER / STATUS via SCP11.live</p>
 <h2 id="scp03-internal-shape"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> internal shape</h2>
 <p><code>SCP03</code> keeps a clean separation between the shell surface, domain logic,
 transport, cryptography, and decoders.</p>
 <pre class="mermaid"><code>flowchart LR
-    Shell["interface/<br/>shell, commands, wizards"] --> Logic["logic/<br/>GP, FS, security controllers"]
-    Logic --> Transport["transport/card.py"]
-    Logic --> Session["crypto/<br/>SCP03 or SCP02 session helpers"]
-    Logic --> Core["core/<br/>decoders, CAP, TLV utilities"]
-    Logic --> Inv[("shared SQLite inventory")]
-    Transport --> Card[("PC/SC card transport")]</code></pre>
+    Shell["interface/&lt;br/&gt;shell, commands, wizards"] --&gt; Logic["logic/&lt;br/&gt;GP, FS, security controllers"]
+    Logic --&gt; Transport["transport/card.py"]
+    Logic --&gt; Session["crypto/&lt;br/&gt;SCP03 or SCP02 session helpers"]
+    Logic --&gt; Core["core/&lt;br/&gt;decoders, CAP, TLV utilities"]
+    Logic --&gt; Inv[("shared SQLite inventory")]
+    Transport --&gt; Card[("PC/SC card transport")]</code></pre>
 <p class="fig-caption">Figure: SCP03 internal layering — shell, domain logic, transport, crypto, and decoders</p>
 <p>Responsibilities:</p>
 <ul>
@@ -499,12 +512,12 @@ transport, cryptography, and decoders.</p>
 <h2 id="scp80-internal-shape"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> internal shape</h2>
 <p><code>SCP80</code> is deliberately small and state-driven.</p>
 <pre class="mermaid"><code>flowchart LR
-    Cli["cli.py / OtaShell"] --> Config["config.py / ConfigManager"]
-    Cli --> Builder["builder.py / packet assembly"]
-    Cli --> Transport["transport.py"]
-    Config --> Inv[("shared SQLite inventory")]
-    Builder -. optional decode maps .-> SCP03
-    Transport --> Bearer[("reader path or external transport")]</code></pre>
+    Cli["cli.py / OtaShell"] --&gt; Config["config.py / ConfigManager"]
+    Cli --&gt; Builder["builder.py / packet assembly"]
+    Cli --&gt; Transport["transport.py"]
+    Config --&gt; Inv[("shared SQLite inventory")]
+    Builder -. optional decode maps .-&gt; SCP03
+    Transport --&gt; Bearer[("reader path or external transport")]</code></pre>
 <p class="fig-caption">Figure: SCP80 internal shape — state-driven OTA packet assembly and transport</p>
 <p>Responsibilities:</p>
 <ul>
@@ -536,60 +549,59 @@ shared helper layer.</p>
         Transport["PC/SC / relay transport helpers"]
     end
 
-    RelayFlavours --> Shared
-    LocalFlavours --> Shared
-    Shared --> ASN1
-    Shared --> Payloads
-    Shared --> Crypto
-    Shared --> Transport</code></pre>
+    RelayFlavours --&gt; Shared
+    LocalFlavours --&gt; Shared
+    Shared --&gt; ASN1
+    Shared --&gt; Payloads
+    Shared --&gt; Crypto
+    Shared --&gt; Transport</code></pre>
 <p class="fig-caption">Figure: SCP11 family — relay and local flavours anchored by one shared layer</p>
 <p>Relay flavors:</p>
 <ul>
 <li><code>SCP11.live</code> is the production-oriented relay shell</li>
-<li><code>SCP11.test</code> mirrors <code>live</code> with test-certificate and shaping defaults</li>
+<li><code>SCP11.test</code> is a compatibility alias for the shared relay shell</li>
 <li><code>SCP11.relay</code> is a compatibility namespace</li>
 </ul>
 <p>Local flavors:</p>
 <ul>
 <li><code>SCP11.local_access</code> performs direct local <code>ISD-R</code> flows</li>
-<li><code>SCP11.eim_local</code> layers <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package authoring, localized polling,
-  hotfolder execution, response logging, handover, and a standalone <code>IPAd</code>
-  runner on top of the local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> stack</li>
+<li><code>SCP11.eim_local</code> layers <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package authoring, hotfolder execution,
+  response logging, and handover on top of the local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> stack</li>
 </ul>
 <h2 id="optional-plugin-runtime">Optional plugin runtime</h2>
 <p>Plugins are optional. The core must remain runnable without any plugin
 present. <code>yggdrasim_common/plugin_runtime.py</code> scans the active runtime
 root's <code>plugins/</code> directory at launch.</p>
 <pre class="mermaid"><code>flowchart LR
-    Live["SCP11.live"] --> Manager["PluginManager"]
-    Test["SCP11.test"] --> Manager
-    EimLocal["SCP11.eim_local"] --> Manager
+    Live["SCP11.live"] --&gt; Manager["PluginManager"]
+    Test["SCP11.test"] --&gt; Manager
+    EimLocal["SCP11.eim_local"] --&gt; Manager
 
-    Manager --> Runtime[("plugins/ under runtime root")]
-    Runtime -->|register_plugins| Capability["reserved capability 'polling'"]
+    Manager --&gt; Runtime[("plugins/ under runtime root")]
+    Runtime --&gt;|register_plugins| Capability["private capability contract"]
 
-    Capability --> Live
-    Capability --> Test
-    Capability --> EimLocal
+    Capability --&gt; Live
+    Capability --&gt; Test
+    Capability --&gt; EimLocal
 
-    Manager -. load errors .-> Diag["diagnostics surface"]</code></pre>
+    Manager -. load errors .-&gt; Diag["diagnostics surface"]</code></pre>
 <p class="fig-caption">Figure: Optional plugin runtime — discovery and capability wiring at launch</p>
 <p>See <a href="internals/plugin-contract.html">Plugin Contract</a> for the loader
-contract, reserved capability names, and absent-plugin behavior.</p>
+contract, capability registration, and absent-plugin behavior.</p>
 <h2 id="profile-lifecycle-on-the-euicc">Profile lifecycle on the <abbr title="Embedded UICC">eUICC</abbr></h2>
 <pre class="mermaid"><code>stateDiagram-v2
-    [*] --> ERASED
-    ERASED --> DISABLED: LoadBoundProfilePackage
-    DISABLED --> ENABLED: EnableProfile
-    ENABLED --> DISABLED: DisableProfile
-    DISABLED --> ERASED: DeleteProfile
-    ENABLED --> ERASED: DeleteProfile<br/>(forbidden if active)
+    [*] --&gt; ERASED
+    ERASED --&gt; DISABLED: LoadBoundProfilePackage
+    DISABLED --&gt; ENABLED: EnableProfile
+    ENABLED --&gt; DISABLED: DisableProfile
+    DISABLED --&gt; ERASED: DeleteProfile
+    ENABLED --&gt; ERASED: DeleteProfile&lt;br/&gt;(forbidden if active)
     note right of DISABLED
-        Multiple profiles can coexist<br/>
+        Multiple profiles can coexist&lt;br/&gt;
         in DISABLED at the same time.
     end note
     note right of ENABLED
-        At most one profile is<br/>
+        At most one profile is&lt;br/&gt;
         ENABLED per eUICC slot.
     end note</code></pre>
 <p class="fig-caption">Figure: Profile lifecycle states on the eUICC</p>
@@ -598,38 +610,38 @@ contract, reserved capability names, and absent-plugin behavior.</p>
 <code>Tools/ProfilePackage</code> owns the file-side transforms. <code>SCP11/local_access</code>
 and <code>SCP11/live</code> own the card-side consumption.</p>
 <pre class="mermaid"><code>flowchart LR
-    Template[("Authored template<br/>text / JSON")] --> UPP["UPP<br/>Unprotected Profile Package"]
-    UPP --> PE["PE list<br/>Profile Elements"]
-    UPP --> DER["ASN.1 DER encoding"]
-    UPP --> BindSvc["SM-DP+ binding<br/>session keys + segmentation"]
-    BindSvc --> BPP[("BPP<br/>Bound Profile Package")]
+    Template[("Authored template&lt;br/&gt;text / JSON")] --&gt; UPP["UPP&lt;br/&gt;Unprotected Profile Package"]
+    UPP --&gt; PE["PE list&lt;br/&gt;Profile Elements"]
+    UPP --&gt; DER["ASN.1 DER encoding"]
+    UPP --&gt; BindSvc["SM-DP+ binding&lt;br/&gt;session keys + segmentation"]
+    BindSvc --&gt; BPP[("BPP&lt;br/&gt;Bound Profile Package")]
 
-    ProfileTool["Tools.ProfilePackage"] -. lint + transcode .-> UPP
-    ProfileTool -. sidecars .-> Sidecars[("*.transcode.json<br/>*.transcode.der<br/>*.transcode.txt")]
+    ProfileTool["Tools.ProfilePackage"] -. lint + transcode .-&gt; UPP
+    ProfileTool -. sidecars .-&gt; Sidecars[("*.transcode.json&lt;br/&gt;*.transcode.der&lt;br/&gt;*.transcode.txt")]
 
-    BPP --> ISDR[("eUICC ISD-R")]
-    LocalAccess["SCP11.local_access<br/>LOAD-PROFILE"] --> BPP
-    Live["SCP11.live<br/>DOWNLOAD-PROFILE"] --> BPP</code></pre>
+    BPP --&gt; ISDR[("eUICC ISD-R")]
+    LocalAccess["SCP11.local_access&lt;br/&gt;LOAD-PROFILE"] --&gt; BPP
+    Live["SCP11.live&lt;br/&gt;DOWNLOAD-PROFILE"] --&gt; BPP</code></pre>
 <p class="fig-caption">Figure: SAIP profile pipeline — authored template to Bound Profile Package</p>
 <h2 id="hil-bridge-topology"><abbr title="Hardware-In-The-Loop">HIL</abbr> bridge topology</h2>
 <p>The <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge keeps a live card visible to both a modem and YggdraSIM
 operator shells, and mirrors every <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> to Wireshark.</p>
 <pre class="mermaid"><code>flowchart LR
-    Card[("Physical UICC / eUICC<br/>in PC/SC reader")] --> PCSC["pcscd"]
-    PCSC --> Bridge["Tools.HilBridge<br/>127.0.0.1:9997"]
-    Bridge --> Remsim["osmo-remsim-client-st2"]
-    Remsim --> SIMtrace2["SIMtrace2"]
-    SIMtrace2 --> Modem[("Modem / DUT")]
+    Card[("Physical UICC / eUICC&lt;br/&gt;in PC/SC reader")] --&gt; PCSC["pcscd"]
+    PCSC --&gt; Bridge["Tools.HilBridge&lt;br/&gt;127.0.0.1:9997"]
+    Bridge --&gt; Remsim["osmo-remsim-client-st2"]
+    Remsim --&gt; SIMtrace2["SIMtrace2"]
+    SIMtrace2 --&gt; Modem[("Modem / DUT")]
 
-    Bridge --> GSMTAP[("UDP 4729<br/>GSMTAP mirror")]
-    GSMTAP --> Wireshark[("Wireshark")]
+    Bridge --&gt; GSMTAP[("UDP 4729&lt;br/&gt;GSMTAP mirror")]
+    GSMTAP --&gt; Wireshark[("Wireshark")]
 
-    Bridge --> Relay[("relay side-channel<br/>apduUrl / statusUrl")]
-    Relay --> Shell[("YggdraSIM operator shells")]
+    Bridge --&gt; Relay[("relay side-channel&lt;br/&gt;apduUrl / statusUrl")]
+    Relay --&gt; Shell[("YggdraSIM operator shells")]
 
-    Supervisor["Tools.HilBridge.supervisor"] -. supervises .-> Bridge
-    Supervisor -. supervises .-> Remsim
-    Supervisor --> HilState[("state/hil_bridge_*.json")]</code></pre>
+    Supervisor["Tools.HilBridge.supervisor"] -. supervises .-&gt; Bridge
+    Supervisor -. supervises .-&gt; Remsim
+    Supervisor --&gt; HilState[("state/hil_bridge_*.json")]</code></pre>
 <p class="fig-caption">Figure: HIL bridge topology and GSMTAP mirror path</p>
 <p>See <a href="concepts/hil-model.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Model</a> for the physical plumbing story
 and <a href="subsystems/hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a> for the operator surface.</p>
@@ -637,20 +649,20 @@ and <a href="subsystems/hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL<
 <p><code>yggdrasim_common/card_backend.py</code> abstracts the physical-versus-simulated
 split so subsystem shells can target either backend.</p>
 <pre class="mermaid"><code>flowchart LR
-    Launcher["main/main.py"] -->|--card-backend reader| PCSC[("PC/SC reader")]
-    Launcher -->|--card-backend sim| Sim["SIMCARD simulator"]
+    Launcher["main/main.py"] --&gt;|--card-backend reader| PCSC[("PC/SC reader")]
+    Launcher --&gt;|--card-backend sim| Sim["SIMCARD simulator"]
 
-    Sim --> EuiccStore["euicc_store.py"]
-    Sim --> ProfileStore["profile_store.py"]
-    Sim --> Naa["naa.py"]
-    Sim --> Etsi["etsi_fs.py"]
-    Sim --> Toolkit["toolkit.py"]
+    Sim --&gt; EuiccStore["euicc_store.py"]
+    Sim --&gt; ProfileStore["profile_store.py"]
+    Sim --&gt; Naa["naa.py"]
+    Sim --&gt; Etsi["etsi_fs.py"]
+    Sim --&gt; Toolkit["toolkit.py"]
 
-    PCSC --> CardBackend["yggdrasim_common/card_backend.py"]
-    Sim --> CardBackend
+    PCSC --&gt; CardBackend["yggdrasim_common/card_backend.py"]
+    Sim --&gt; CardBackend
 
-    CardBackend --> SCP03
-    CardBackend --> SCP11</code></pre>
+    CardBackend --&gt; SCP03
+    CardBackend --&gt; SCP11</code></pre>
 <p class="fig-caption">Figure: Card-backend selection — PC/SC reader versus SIMCARD simulator</p>
 <h2 id="operator-consequences">Operator consequences</h2>
 <ul>
@@ -658,7 +670,8 @@ split so subsystem shells can target either backend.</p>
   relay shell</li>
 <li><code>SCP11/live</code> and <code>SCP11/test</code> are the primary relay-facing shells</li>
 <li><code>SCP11/local_access</code> is the direct local <code>ISD-R</code> path</li>
-<li><code>SCP11/eim_local</code> is the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-side package, polling, and handover shell</li>
+<li><code>SCP11/eim_local</code> is the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-side package, hotfolder, response-log, and
+  handover shell</li>
 <li><code>Tools/ProfilePackage</code> is the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> package inspection and transcode
   surface</li>
 <li><code>Tools/HilBridge</code> is the dedicated physical-card-to-modem bridge path
@@ -667,9 +680,13 @@ split so subsystem shells can target either backend.</p>
 <li><code>Tools/ApduFuzz</code> is the opt-in, allow-listed <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> mutation fuzzer</li>
 <li><code>Tools/EumDiag</code> is the EUM / SM-DP+ diagnostics surface (session-key
   injection plus Wireshark / tshark Lua dissector)</li>
+<li><code>Tools/YggdraCore</code> is the in-process 5G core stub (AUSF / AAnF) plus
+  optional BYO-Open5GS provisioning bridge.</li>
 <li><code>SIMCARD</code> is the simulator backend activated by <code>--card-backend sim</code>,
   including <abbr title="European Telecommunications Standards Institute">ETSI</abbr> / <abbr title="GlobalPlatform">GP</abbr> / <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> / Toolkit and the 5G AKA / EAP-AKA' /
   AKMA / <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> / <code>GET IDENTITY</code> stack</li>
+<li><code>yggdrasim_common/gui_server/</code> is the optional Universal GUI Command
+  Center, started with <code>--gui</code> (desktop) or <code>--web-server</code> (FastAPI)</li>
 </ul>
 <h2 id="deep-reference">Deep reference</h2>
 <p>For the full authored architecture narrative, dependency tables, and flow
@@ -712,13 +729,13 @@ diagram-first; the guide is the canonical prose version.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="ygg.js?v=2"></script>
+<script src="ygg.js?v=3"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>
